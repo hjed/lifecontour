@@ -43,10 +43,7 @@ const TYPE_ICON_MAP: Partial<
 interface CalendarAgendaViewProps {
   /** Calendar events to display */
   readonly events: CalendarEvent[];
-  /** Start date of the agenda window (YYYY-MM-DD) */
-  readonly startDate?: string;
-  /** End date of the agenda window (YYYY-MM-DD) */
-  readonly endDate?: string;
+
   /** Loading state */
   readonly isLoading?: boolean;
   readonly className?: string;

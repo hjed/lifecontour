@@ -1,0 +1,309 @@
+🚀 Starting Playwright Global Setup...
+🐳 Using Docker Compose command: docker compose
+🧹 Force-removing any pre-existing containers with test names...
+  ✅ Removed container: pms_test_48-postgres
+  ✅ Removed container: pms_test_48-redis
+  ✅ Removed container: pms_test_48-meilisearch
+  ✅ Removed container: pms_test_48-oauth
+  ✅ Removed container: pms_test_48-oauth-login-consent
+  ✅ Removed container: pms_test_48-oauth-init
+  ✅ Removed container: pms_test_48-oauth-provider-volume-init
+  ✅ Removed container: pms_test_48-backend
+  ✅ Removed container: pms_test_48-google-worker
+🔧 Cleaning up existing containers...
+time="2026-04-11T23:57:01+10:00" level=warning msg="/home/hjed/Projects/personal-management-system/docker-compose.yml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion"
+ Container pms_test_48-oauth-volume-init  Stopping
+ Container pms_test_48-oauth-volume-init  Stopped
+ Container pms_test_48-oauth-volume-init  Removing
+ Container pms_test_48-oauth-volume-init  Removed
+✅ Cleaning up existing containers completed
+🔧 Starting Docker services...
+time="2026-04-11T23:57:01+10:00" level=warning msg="/home/hjed/Projects/personal-management-system/docker-compose.yml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion"
+time="2026-04-11T23:57:01+10:00" level=warning msg="Docker Compose is configured to build using Bake, but buildx isn't installed"
+#0 building with "default" instance using docker driver
+
+#1 [backend internal] load build definition from Dockerfile
+#1 transferring dockerfile: 2.60kB done
+#1 DONE 0.0s
+
+#2 [oauth-login-consent internal] load build definition from Dockerfile
+#2 transferring dockerfile: 458B done
+#2 DONE 0.0s
+
+#3 [google-worker internal] load build definition from Dockerfile
+#3 transferring dockerfile: 920B done
+#3 DONE 0.0s
+
+#4 [oauth-login-consent internal] load metadata for docker.io/library/node:18-alpine
+#4 DONE 0.0s
+
+#5 [google-worker internal] load metadata for docker.io/library/python:3.12-slim
+#5 DONE 0.0s
+
+#6 [oauth-login-consent internal] load .dockerignore
+#6 transferring context: 2B 0.0s done
+#6 DONE 0.0s
+
+#7 [google-worker internal] load .dockerignore
+#7 transferring context: 1.24kB done
+#7 DONE 0.0s
+
+#8 [oauth-login-consent 1/5] FROM docker.io/library/node:18-alpine
+#8 DONE 0.0s
+
+#9 [google-worker 1/9] FROM docker.io/library/python:3.12-slim
+#9 DONE 0.0s
+
+#10 [google-worker internal] load build context
+#10 ...
+
+#11 [oauth-login-consent internal] load build context
+#11 transferring context: 46.30kB 0.0s done
+#11 DONE 0.0s
+
+#12 [oauth-login-consent 4/5] RUN npm install --only=production
+#12 CACHED
+
+#13 [oauth-login-consent 2/5] WORKDIR /app
+#13 CACHED
+
+#14 [oauth-login-consent 3/5] COPY package*.json ./
+#14 CACHED
+
+#15 [oauth-login-consent 5/5] COPY app.js ./
+#15 CACHED
+
+#16 [oauth-login-consent] exporting to image
+#16 exporting layers done
+#16 writing image sha256:767c134370e08a36ff9e19fef463012f8b2b7c85acf9ba385d0ce2586cf202c7 done
+#16 naming to docker.io/library/pms_test_48-oauth-login-consent done
+#16 DONE 0.0s
+
+#17 [oauth-login-consent] resolving provenance for metadata file
+#17 DONE 0.0s
+
+#10 [google-worker internal] load build context
+#10 transferring context: 1.39MB 0.7s done
+#10 DONE 0.8s
+
+#18 [google-worker 2/9] WORKDIR /app
+#18 CACHED
+
+#19 [google-worker 3/9] RUN apt-get update && apt-get install -y     gcc     && rm -rf /var/lib/apt/lists/*
+#19 CACHED
+
+#20 [google-worker 4/9] COPY ./core_shared/ /core_shared/
+#20 CACHED
+
+#21 [google-worker 8/9] COPY ./integration_workers/google/ .
+#21 CACHED
+
+#22 [google-worker 6/9] COPY ./integration_workers/google/pyproject.toml .
+#22 CACHED
+
+#23 [google-worker 5/9] RUN pip install -e /core_shared/
+#23 CACHED
+
+#24 [google-worker 7/9] RUN pip install --no-cache-dir .
+#24 CACHED
+
+#25 [google-worker 9/9] RUN useradd --create-home --shell /bin/bash worker
+#25 CACHED
+
+#26 [google-worker] exporting to image
+#26 exporting layers done
+#26 writing image sha256:db6ff4384b516a607dc10878cec61154d6086b97abaa7f6521e8fd0a7fe0151c done
+#26 naming to docker.io/library/pms_test_48-google-worker done
+#26 DONE 0.0s
+
+#27 [google-worker] resolving provenance for metadata file
+#27 DONE 0.0s
+
+#28 [backend internal] load metadata for docker.io/library/python:3.14.3-slim
+#28 DONE 2.1s
+
+#29 [backend internal] load .dockerignore
+#29 transferring context: 1.24kB done
+#29 DONE 0.0s
+
+#30 [backend  1/17] FROM docker.io/library/python:3.14.3-slim@sha256:5e59aae31ff0e87511226be8e2b94d78c58f05216efda3b07dbbed938ec8583b
+#30 DONE 0.0s
+
+#31 [backend internal] load build context
+#31 transferring context: 5.61MB 0.5s done
+#31 DONE 0.5s
+
+#32 [backend 11/17] COPY backend/alembic.ini ./
+#32 CACHED
+
+#33 [backend  5/17] WORKDIR /app
+#33 CACHED
+
+#34 [backend  3/17] RUN pip install uv
+#34 CACHED
+
+#35 [backend  4/17] RUN groupadd -r appuser && useradd -r -m -g appuser appuser
+#35 CACHED
+
+#36 [backend  7/17] COPY core_shared/ /core_shared/
+#36 CACHED
+
+#37 [backend  9/17] RUN if [ "true" = "true" ]; then         echo "Installing development dependencies..." &&         uv pip install --system -e .[dev] &&         uv pip install --system             watchdog             opentelemetry-exporter-otlp             opentelemetry-exporter-jaeger;     else         echo "Installing production dependencies..." &&         uv pip install --system .;     fi
+#37 CACHED
+
+#38 [backend 10/17] COPY backend/app ./app
+#38 CACHED
+
+#39 [backend 15/17] COPY docker/backend/healthcheck.sh /healthcheck.sh
+#39 CACHED
+
+#40 [backend  8/17] RUN echo "Installing core_shared..." &&     uv pip install --system -e /core_shared
+#40 CACHED
+
+#41 [backend  2/17] RUN apt-get update && apt-get install -y     curl     gcc     g++     libpq-dev     postgresql-client     && rm -rf /var/lib/apt/lists/*
+#41 CACHED
+
+#42 [backend 16/17] RUN sed -i 's/\r$//' /start.sh /start-dev.sh /healthcheck.sh &&     chmod +x /start.sh /start-dev.sh /healthcheck.sh
+#42 CACHED
+
+#43 [backend 12/17] RUN if [ "development" = "development" ]; then         echo "Setting up development environment..." &&         mkdir -p .cache logs;     fi
+#43 CACHED
+
+#44 [backend 13/17] COPY docker/backend/start.sh /start.sh
+#44 CACHED
+
+#45 [backend  6/17] COPY backend/pyproject.toml backend/README.md ./
+#45 CACHED
+
+#46 [backend 14/17] COPY docker/backend/start-dev.sh /start-dev.sh
+#46 CACHED
+
+#47 [backend 17/17] RUN chown -R appuser:appuser /app &&     chmod -R 755 ./app &&     chmod 644 ./alembic.ini &&     chown appuser:appuser /start.sh /start-dev.sh /healthcheck.sh
+#47 CACHED
+
+#48 [backend] exporting to image
+#48 exporting layers done
+#48 writing image sha256:5bbf9510df9058702d77ffa43f020f859c43dbfddd5394438488c6ebfec9be9c 0.0s done
+#48 naming to docker.io/library/pms_test_48-backend done
+#48 DONE 0.0s
+
+#49 [backend] resolving provenance for metadata file
+#49 DONE 0.0s
+ backend  Built
+ google-worker  Built
+ oauth-login-consent  Built
+time="2026-04-11T23:57:04+10:00" level=warning msg="a network with name personal-management exists but was not created for project \"pms_test_48\".\nSet `external: true` to use an existing network"
+ Container pms_test_48-redis  Creating
+ Container pms_test_48-postgres  Creating
+ Container pms_test_48-meilisearch  Creating
+ Container pms_test_48-oauth-volume-init  Creating
+ Container pms_test_48-oauth-volume-init  Created
+ Container pms_test_48-meilisearch  Created
+ Container pms_test_48-redis  Created
+ Container pms_test_48-postgres  Created
+ Container pms_test_48-google-worker  Creating
+ Container pms_test_48-oauth  Creating
+ Container pms_test_48-oauth  Created
+ Container pms_test_48-oauth-login-consent  Creating
+ Container pms_test_48-oauth-init  Creating
+ Container pms_test_48-google-worker  Created
+ Container pms_test_48-oauth-login-consent  Created
+ Container pms_test_48-oauth-init  Created
+ Container pms_test_48-backend  Creating
+ Container pms_test_48-backend  Created
+ Container pms_test_48-meilisearch  Starting
+ Container pms_test_48-postgres  Starting
+ Container pms_test_48-oauth-volume-init  Starting
+ Container pms_test_48-redis  Starting
+ Container pms_test_48-meilisearch  Started
+ Container pms_test_48-oauth-volume-init  Started
+ Container pms_test_48-redis  Started
+ Container pms_test_48-postgres  Started
+ Container pms_test_48-redis  Waiting
+ Container pms_test_48-postgres  Waiting
+ Container pms_test_48-oauth-volume-init  Waiting
+ Container pms_test_48-postgres  Waiting
+ Container pms_test_48-oauth-volume-init  Exited
+ Container pms_test_48-redis  Healthy
+ Container pms_test_48-postgres  Healthy
+ Container pms_test_48-postgres  Healthy
+ Container pms_test_48-oauth  Starting
+ Container pms_test_48-google-worker  Starting
+ Container pms_test_48-oauth  Started
+ Container pms_test_48-oauth-login-consent  Starting
+ Container pms_test_48-oauth  Waiting
+ Container pms_test_48-google-worker  Started
+ Container pms_test_48-oauth-login-consent  Started
+ Container pms_test_48-oauth  Healthy
+ Container pms_test_48-oauth-init  Starting
+ Container pms_test_48-oauth-init  Started
+ Container pms_test_48-postgres  Waiting
+ Container pms_test_48-meilisearch  Waiting
+ Container pms_test_48-redis  Waiting
+ Container pms_test_48-oauth-init  Waiting
+ Container pms_test_48-redis  Healthy
+ Container pms_test_48-postgres  Healthy
+ Container pms_test_48-meilisearch  Healthy
+ Container pms_test_48-oauth-init  Exited
+ Container pms_test_48-backend  Starting
+ Container pms_test_48-backend  Started
+✅ Starting Docker services completed
+🔍 Verifying service health...
+🔍 Checking backend API readiness...
+Waiting for service: http://localhost:8481/api/health/ready
+⏳ Service not ready: http://localhost:8481/api/health/ready (error: fetch failed)
+⏳ Attempt 1/120 - waiting 3000ms...
+⏳ Service not ready: http://localhost:8481/api/health/ready (error: fetch failed)
+⏳ Attempt 2/120 - waiting 3000ms...
+⏳ Service not ready: http://localhost:8481/api/health/ready (error: fetch failed)
+⏳ Attempt 3/120 - waiting 3000ms...
+⏳ Service not ready: http://localhost:8481/api/health/ready (error: fetch failed)
+⏳ Attempt 4/120 - waiting 3000ms...
+⏳ Service not ready: http://localhost:8481/api/health/ready (error: fetch failed)
+⏳ Attempt 5/120 - waiting 3000ms...
+⏳ Service not ready: http://localhost:8481/api/health/ready (error: fetch failed)
+⏳ Attempt 6/120 - waiting 3000ms...
+⏳ Service not ready: http://localhost:8481/api/health/ready (error: fetch failed)
+⏳ Attempt 7/120 - waiting 3000ms...
+⏳ Service not ready: http://localhost:8481/api/health/ready (error: fetch failed)
+⏳ Attempt 8/120 - waiting 3000ms...
+⏳ Service not ready: http://localhost:8481/api/health/ready (error: fetch failed)
+⏳ Attempt 9/120 - waiting 3000ms...
+⏳ Service not ready: http://localhost:8481/api/health/ready (error: fetch failed)
+⏳ Attempt 10/120 - waiting 3000ms...
+⏳ Service not ready: http://localhost:8481/api/health/ready (error: fetch failed)
+⏳ Attempt 11/120 - waiting 3000ms...
+⏳ Service not ready: http://localhost:8481/api/health/ready (error: fetch failed)
+⏳ Attempt 12/120 - waiting 3000ms...
+⏳ Service not ready: http://localhost:8481/api/health/ready (error: fetch failed)
+⏳ Attempt 13/120 - waiting 3000ms...
+⏳ Service not ready: http://localhost:8481/api/health/ready (error: fetch failed)
+⏳ Attempt 14/120 - waiting 3000ms...
+⏳ Service not ready: http://localhost:8481/api/health/ready (error: fetch failed)
+⏳ Attempt 15/120 - waiting 3000ms...
+⏳ Service not ready: http://localhost:8481/api/health/ready (error: fetch failed)
+⏳ Attempt 16/120 - waiting 3000ms...
+⏳ Service not ready: http://localhost:8481/api/health/ready (error: fetch failed)
+⏳ Attempt 17/120 - waiting 3000ms...
+⏳ Service not ready: http://localhost:8481/api/health/ready (error: fetch failed)
+⏳ Attempt 18/120 - waiting 3000ms...
+⏳ Service not ready: http://localhost:8481/api/health/ready (error: fetch failed)
+⏳ Attempt 19/120 - waiting 3000ms...
+⏳ Service not ready: http://localhost:8481/api/health/ready (error: fetch failed)
+⏳ Attempt 20/120 - waiting 3000ms...
+⏳ Service not ready: http://localhost:8481/api/health/ready (error: fetch failed)
+⏳ Attempt 21/120 - waiting 3000ms...
+⏳ Service not ready: http://localhost:8481/api/health/ready (error: fetch failed)
+⏳ Attempt 22/120 - waiting 3000ms...
+⏳ Service not ready: http://localhost:8481/api/health/ready (error: fetch failed)
+⏳ Attempt 23/120 - waiting 3000ms...
+⏳ Service not ready: http://localhost:8481/api/health/ready (error: fetch failed)
+⏳ Attempt 24/120 - waiting 3000ms...
+⏳ Service not ready: http://localhost:8481/api/health/ready (error: fetch failed)
+⏳ Attempt 25/120 - waiting 3000ms...
+⏳ Service not ready: http://localhost:8481/api/health/ready (error: fetch failed)
+⏳ Attempt 26/120 - waiting 3000ms...
+⏳ Service not ready: http://localhost:8481/api/health/ready (error: fetch failed)
+⏳ Attempt 27/120 - waiting 3000ms...
+⏳ Service not ready: http://localhost:8481/api/health/ready (error: fetch failed)
+⏳ Attempt 28/120 - waiting 3000ms...

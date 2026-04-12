@@ -7,7 +7,14 @@
  * journal/event contracts without forking event semantics.
  */
 
-import { format, subDays, addDays, endOfMonth, startOfMonth } from 'date-fns';
+import {
+  format,
+  subDays,
+  addDays,
+  endOfMonth,
+  startOfMonth,
+  parseISO,
+} from 'date-fns';
 import { DisplayJournal } from '@/utils/journalTransformers';
 import { JournalType, EventState, CalendarInfoData } from '@/types/journals';
 
@@ -80,7 +87,7 @@ export function toCalendarEvent(journal: DisplayJournal): CalendarEvent {
 
   // Extract the date portion from the event_date_range start
   const dateStr = journal.event_date_range.start;
-  const localDate = format(new Date(dateStr), 'yyyy-MM-dd');
+  const localDate = format(parseISO(dateStr), 'yyyy-MM-dd');
 
   return {
     id: journal.id,

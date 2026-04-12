@@ -39,6 +39,37 @@ export function CalendarViewToggle({
       role='radiogroup'
       aria-label='View mode'
       className={cn('inline-flex rounded-md border', className)}
+      onKeyDown={e => {
+        const currentIndex = VIEW_OPTIONS.findIndex(o => o.value === value);
+        let nextIndex = currentIndex;
+
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+          nextIndex = (currentIndex + 1) % VIEW_OPTIONS.length;
+        } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+          nextIndex =
+            (currentIndex - 1 + VIEW_OPTIONS.length) % VIEW_OPTIONS.length;
+        } else {
+          return; // unhandled key
+        }
+
+        e.preventDefault();
+        const nextValue = VIEW_OPTIONS[nextIndex].value;
+        onChange(nextValue);
+
+        // Move focus to the newly selected radio button
+        // Wait for render by using setTimeout since onChange might be batched
+        setTimeout(() => {
+          if (e.currentTarget) {
+            const buttons =
+              e.currentTarget.querySelectorAll<HTMLButtonElement>(
+                '[role="radio"]'
+              );
+            if (buttons[nextIndex]) {
+              buttons[nextIndex].focus();
+            }
+          }
+        }, 0);
+      }}
     >
       {VIEW_OPTIONS.map(option => {
         const Icon = option.icon;
@@ -50,6 +81,7 @@ export function CalendarViewToggle({
             role='radio'
             aria-checked={isSelected}
             aria-label={option.label}
+            tabIndex={isSelected ? 0 : -1}
             onClick={() => onChange(option.value)}
             className={cn(
               'inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm font-medium transition-colors',

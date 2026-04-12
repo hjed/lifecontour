@@ -419,7 +419,8 @@ test.describe('Calendar Views', () => {
     const responsePromise = page.waitForResponse(
       response =>
         response.url().includes('/api/journals') &&
-        response.url().includes('types=event') &&
+        response.url().includes('type=event') &&
+        response.request().method() === 'GET' &&
         response.status() === 200
     );
 

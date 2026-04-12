@@ -154,6 +154,14 @@ export function CalendarMonthView({
                       isTodayDate && 'bg-primary/5'
                     )}
                     onClick={() => onDayClick?.(dateKey)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        if (e.target === e.currentTarget) {
+                          e.preventDefault();
+                          onDayClick?.(dateKey);
+                        }
+                      }
+                    }}
                     tabIndex={isCurrentMonth ? 0 : -1}
                     aria-label={`${format(day, 'EEEE, MMMM d, yyyy', { locale: enAU })}${dayEvents.length > 0 ? `, ${dayEvents.length} event${dayEvents.length > 1 ? 's' : ''}` : ''}`}
                   >
