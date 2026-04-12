@@ -5,6 +5,7 @@ Provides AI-optimized Pydantic schemas for journal MCP responses.
 All schemas include contextual summaries to help AI understand the data.
 """
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
@@ -35,6 +36,23 @@ class ContactRelationshipSchema(BaseModel):
     relationship_type: str = Field(
         description="Relationship type (PARTICIPANT, INVITEE, MENTION, ABOUT)"
     )
+    status: str | None = Field(
+        default=None, description="Attendee status (ATTENDING, MAYBE, etc.)"
+    )
+    role: str | None = Field(
+        default=None, description="Event role (ORGANISER, FACILITATOR_HELPER, etc.)"
+    )
+
+
+@dataclass
+class ContactRelationshipSummary:
+    """Internal structure for passing contact relationships to the MCP converter."""
+
+    id: int
+    name: str
+    relationship_type: str
+    status: str | None = None
+    role: str | None = None
 
 
 class CalendarSchema(BaseModel):

@@ -1985,6 +1985,37 @@ async def _process_journal_contact_relationships(
                     attrs["relationship_type"]
                 ]
 
+                # Parse status and role if present
+                from core_shared.models.journals.attendee_status import AttendeeStatus
+                from core_shared.models.journals.contact_event_role import (
+                    ContactEventRole,
+                )
+
+                status, role = None, None
+                status_raw = attrs.get("status")
+                if isinstance(status_raw, str):
+                    try:
+                        status = AttendeeStatus[status_raw.upper()]
+                    except KeyError:
+                        logger.warning(
+                            "Invalid AttendeeStatus",
+                            status=status_raw,
+                            journal_id=journal_id,
+                            contact_id=contact_id,
+                        )
+
+                role_raw = attrs.get("role")
+                if isinstance(role_raw, str):
+                    try:
+                        role = ContactEventRole[role_raw.upper()]
+                    except KeyError:
+                        logger.warning(
+                            "Invalid ContactEventRole",
+                            role=role_raw,
+                            journal_id=journal_id,
+                            contact_id=contact_id,
+                        )
+
                 # Create the relationship using a nested transaction (savepoint)
                 # to prevent aborting the main transaction if
                 # a contact is missing or a unique constraint is violated.
@@ -1992,22 +2023,21 @@ async def _process_journal_contact_relationships(
                     journal_id=journal_id,
                     contact_id=contact_id,
                     relationship_type=relationship_type,
+                    status=status,
+                    role=role,
                 )
                 try:
                     async with connection.begin_nested():
                         await contact_relationship_repo.create(relationship)
                 except IntegrityError:
                     # Log error and ignore, the context manager handles the rollback to the savepoint
-                    import structlog
-
-                    logger = structlog.get_logger()
                     logger.warning(
                         "Invalid journal contact relationship ignored",
                         journal_id=journal_id,
                         contact_id=contact_id,
                     )
 
-        except (ValueError, KeyError, AttributeError):
+        except (ValueError, KeyError, AttributeError, TypeError):
             # Invalid contact relationship payload, skip
             pass
 
@@ -3400,11 +3430,34 @@ async def add_contact_to_journal(
             f"Invalid relationship type: {rel_type}",
         ) from e
 
+    # Parse status and role if present
+    from core_shared.models.journals.attendee_status import AttendeeStatus
+    from core_shared.models.journals.contact_event_role import ContactEventRole
+
+    status, role = None, None
+    status_raw = contact_request.data.attributes.status
+    if isinstance(status_raw, str):
+        try:
+            status = AttendeeStatus[status_raw.upper()]
+        except KeyError as e:
+            raise JournalValidationError(
+                "status", f"Invalid status: {status_raw}"
+            ) from e
+
+    role_raw = contact_request.data.attributes.role
+    if isinstance(role_raw, str):
+        try:
+            role = ContactEventRole[role_raw.upper()]
+        except KeyError as e:
+            raise JournalValidationError("role", f"Invalid role: {role_raw}") from e
+
     # Create the relationship
     relationship = JournalContactRelationship(
         journal_id=journal_id,
         contact_id=contact_id,
         relationship_type=relationship_type,
+        status=status,
+        role=role,
     )
     try:
         await contact_relationship_repo.create(relationship)

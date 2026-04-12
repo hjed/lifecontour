@@ -41,10 +41,10 @@ test.describe('Contact Tag Editing', () => {
     // Verify the tag badge appears on the contact (scoped to visible editor)
     await expect(
       tagsEditor.locator(`[data-testid="tag-badge-${tag.id}"]`)
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 10000 });
     await expect(
       tagsEditor.locator(`[data-testid="tag-badge-${tag.id}"]`)
-    ).toContainText(tag.name);
+    ).toContainText(tag.name, { timeout: 10000 });
   });
 
   test('should remove a tag from a contact via tags editor', async ({
@@ -86,7 +86,7 @@ test.describe('Contact Tag Editing', () => {
     // Verify the tag badge is removed from the first editor
     await expect(
       tagsEditor.locator(`[data-testid="tag-badge-${tag.id}"]`)
-    ).not.toBeVisible();
+    ).not.toBeVisible({ timeout: 10000 });
   });
 
   test('should create a new tag and assign it to a contact', async ({

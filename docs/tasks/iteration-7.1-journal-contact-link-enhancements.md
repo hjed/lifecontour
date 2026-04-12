@@ -93,13 +93,13 @@ Every phase below must meet the same completion bar before merge:
 **PR Size:** ~5-7 files
 
 **Acceptance Criteria:**
-- [ ] `JournalContactRelationshipSchema` (REST API) includes optional `status` and `role` fields.
-- [ ] `JournalContactRelationshipAddAttributes` accepts optional `status` and `role` when adding contacts to journals.
-- [ ] MCP `ContactRelationshipSchema` includes `status` and `role`.
-- [ ] Frontend `JournalContactRelationship` TypeScript interface includes optional `status` and `role` fields.
-- [ ] Frontend `AttendeeStatus` and `ContactEventRole` enums are defined in `types/journals.ts`.
-- [ ] Journal converter populates status/role from domain entity to API response.
-- [ ] Existing journal retrieval and contact-add flows remain backward-compatible (status/role default to null).
+- [x] `JournalContactRelationshipSchema` (REST API) includes optional `status` and `role` fields.
+- [x] `JournalContactRelationshipAddAttributes` accepts optional `status` and `role` when adding contacts to journals.
+- [x] MCP `ContactRelationshipSchema` includes `status` and `role`.
+- [x] Frontend `JournalContactRelationship` TypeScript interface includes optional `status` and `role` fields.
+- [x] Frontend `AttendeeStatus` and `ContactEventRole` enums are defined in `types/journals.ts`.
+- [x] Journal converter populates status/role from domain entity to API response.
+- [x] Existing journal retrieval and contact-add flows remain backward-compatible (status/role default to null).
 
 **Required Test Coverage:**
 - **Unit:** API schema serialization with status/role present and absent, frontend type compilation.

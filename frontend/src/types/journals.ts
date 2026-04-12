@@ -36,6 +36,21 @@ export enum JournalContactRelationshipType {
   ABOUT = 'ABOUT',
 }
 
+// Attendee Status Enum
+export enum AttendeeStatus {
+  ATTENDING = 'ATTENDING',
+  ATTENDED = 'ATTENDED',
+  MAYBE = 'MAYBE',
+  NO_REPLY = 'NO_REPLY',
+  DECLINED = 'DECLINED',
+}
+
+// Contact Event Role Enum
+export enum ContactEventRole {
+  ORGANISER = 'ORGANISER',
+  FACILITATOR_HELPER = 'FACILITATOR_HELPER',
+}
+
 // Event Date Range
 export interface EventDateRange {
   start: string; // ISO datetime string
@@ -210,6 +225,8 @@ export interface JournalContactRelationship {
   id: string; // Contact ID is returned as string from API
   name?: string | null;
   relationship_type: JournalContactRelationshipType;
+  status?: AttendeeStatus | null;
+  role?: ContactEventRole | null;
 }
 
 // Alias for backward compatibility
@@ -433,6 +450,8 @@ export interface JournalContactRelationshipAddData {
   attributes: {
     contact_id: string;
     relationship_type: JournalContactRelationshipType;
+    status?: AttendeeStatus | null;
+    role?: ContactEventRole | null;
   };
 }
 

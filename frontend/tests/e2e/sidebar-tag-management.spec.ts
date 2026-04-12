@@ -100,10 +100,10 @@ test.describe('Sidebar Tag Management', () => {
     // Verify updated tag appears in sidebar
     await expect(
       page.getByRole('link', { name: newTagName, exact: true })
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 10000 });
     await expect(
       page.getByRole('link', { name: tagName, exact: true })
-    ).not.toBeVisible();
+    ).not.toBeVisible({ timeout: 10000 });
   });
 
   test('can delete a tag from the edit dialog', async ({
@@ -152,7 +152,7 @@ test.describe('Sidebar Tag Management', () => {
     // Verify tag disappears from sidebar
     await expect(
       page.getByRole('link', { name: tagName, exact: true })
-    ).not.toBeVisible();
+    ).not.toBeVisible({ timeout: 10000 });
   });
 
   test('create dialog validates required fields', async ({

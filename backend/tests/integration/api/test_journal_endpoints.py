@@ -525,24 +525,55 @@ class TestJournalRelationshipEndpoints:
         )
         journal_id = create_response.json()["data"]["id"]
 
-        # Add contact relationship (using a non-existent contact ID for now)
+        # Create a contact first to avoid foreign key violations
         contact_data = {
             "data": {
-                "type": "journal-contact-relationship",
+                "type": "contacts",
                 "attributes": {
-                    "contact_id": "999",  # Must be string
+                    "first_name": "RelTest",
+                    "last_name": "User",
+                    "contact_methods": [],
+                    "addresses": [],
+                    "notes": [],
+                },
+            }
+        }
+        contact_response = await integration_api_client.post(
+            "/api/contacts", json=contact_data
+        )
+        assert contact_response.status_code == 201
+        contact_id = contact_response.json()["data"]["id"]
+
+        # Add contact relationship
+        contact_rel_data = {
+            "data": {
+                "type": "journal-contact-relationships",
+                "attributes": {
+                    "contact_id": str(contact_id),
                     "relationship_type": "PARTICIPANT",
+                    "status": "ATTENDING",
+                    "role": "ORGANISER",
                 },
             }
         }
 
         response = await integration_api_client.post(
-            f"/api/journals/{journal_id}/relationships/contacts", json=contact_data
+            f"/api/journals/{journal_id}/relationships/contacts", json=contact_rel_data
         )
 
-        # Endpoint should exist and return appropriate status
-        # 500 is acceptable for FK constraint violation (non-existent contact)
-        assert response.status_code in [200, 400, 404, 422, 500]
+        assert response.status_code == 200
+
+        # Verify it was added correctly
+        journal_response = await integration_api_client.get(
+            f"/api/journals/{journal_id}"
+        )
+        assert journal_response.status_code == 200
+        contacts = journal_response.json()["data"]["attributes"]["contacts"]
+        assert len(contacts) == 1
+        assert contacts[0]["id"] == str(contact_id)
+        assert contacts[0]["relationship_type"] == "PARTICIPANT"
+        assert contacts[0]["status"] == "ATTENDING"
+        assert contacts[0]["role"] == "ORGANISER"
 
     async def test_remove_contact_relationship(self, integration_api_client):
         """Test removing a contact relationship from a journal."""

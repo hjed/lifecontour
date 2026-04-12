@@ -332,6 +332,12 @@ class JournalContactRelationshipSchema(BaseModel):
     relationship_type: str = Field(
         ..., description="Relationship type (PARTICIPANT, INVITEE, MENTION, ABOUT)"
     )
+    status: str | None = Field(
+        default=None, description="Attendee status (ATTENDING, MAYBE, etc.)"
+    )
+    role: str | None = Field(
+        default=None, description="Event role (ORGANISER, FACILITATOR_HELPER, etc.)"
+    )
 
 
 # Tag schema
@@ -611,6 +617,12 @@ class JournalContactRelationshipAddAttributes(BaseModel):
     contact_id: str = Field(..., description="Contact ID")
     relationship_type: str = Field(
         ..., description="Relationship type (PARTICIPANT, INVITEE, MENTION, ABOUT)"
+    )
+    status: str | None = Field(
+        default=None, description="Attendee status (ATTENDING, MAYBE, etc.)"
+    )
+    role: str | None = Field(
+        default=None, description="Event role (ORGANISER, FACILITATOR_HELPER, etc.)"
     )
 
 

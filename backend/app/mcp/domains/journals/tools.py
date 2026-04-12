@@ -42,7 +42,6 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
-from app.core.contacts.models.exceptions import ContactNotFoundError
 from app.core.journal.adapters.sql.abseiling_data_repository import (
     SqlAbseilingDataRepository,
 )
@@ -100,6 +99,7 @@ from app.mcp.domains.journals.schemas import (
     ActivityTrendPeriod,
     ActivityTrendsResponse,
     ActivityTypeStats,
+    ContactRelationshipSummary,
     EventDateRangeSchema,
     JournalCreateRequest,
     JournalDateWindowResponse,
@@ -778,7 +778,7 @@ async def _fetch_contact_relationships_with_names(
     journal_id: int,
     contact_relationship_repo: SqlJournalContactRelationshipRepository,
     contact_repo: SqlContactRepository,
-) -> list[tuple[int, str, str]]:
+) -> list[ContactRelationshipSummary]:
     """
     Fetch contact relationships with contact names for a journal.
 
@@ -788,18 +788,27 @@ async def _fetch_contact_relationships_with_names(
         contact_repo: Contact repository
 
     Returns:
-        List of tuples (contact_id, contact_name, relationship_type)
+        List of ContactRelationshipSummary objects
     """
     contact_relationships = await contact_relationship_repo.get_by_journal(journal_id)
 
-    contacts: list[tuple[int, str, str]] = []
+    contacts: list[ContactRelationshipSummary] = []
     for rel in contact_relationships:
         contact = await contact_repo.find_by_id(rel.contact_id)
         if contact:
             contact_name = f"{contact.first_name} {contact.last_name}".strip()
             if not contact_name:
                 contact_name = f"Contact {rel.contact_id}"
-            contacts.append((rel.contact_id, contact_name, rel.relationship_type.value))
+
+            contacts.append(
+                ContactRelationshipSummary(
+                    id=rel.contact_id,
+                    name=contact_name,
+                    relationship_type=rel.relationship_type.value,
+                    status=rel.status.value if rel.status else None,
+                    role=rel.role.value if rel.role else None,
+                )
+            )
 
     return contacts
 
@@ -1527,10 +1536,16 @@ async def _persist_contact_relationships(
         contact_relationships: List of relationship dictionaries with contact_id and relationship_type
         contact_relationship_repo: Repository for contact relationships
     """
-    for rel_dict in contact_relationships:
+    from core_shared.models.journals.attendee_status import AttendeeStatus
+    from core_shared.models.journals.contact_event_role import ContactEventRole
+
+    for rel in contact_relationships:
+        if not isinstance(rel, dict):
+            continue
+
         try:
-            contact_id = rel_dict.get("contact_id")
-            relationship_type_str = rel_dict.get("relationship_type")
+            contact_id = rel.get("contact_id")
+            relationship_type_str = rel.get("relationship_type")
 
             if contact_id and relationship_type_str:
                 # Convert relationship type string to enum
@@ -1538,11 +1553,44 @@ async def _persist_contact_relationships(
                     relationship_type_str.upper()
                 ]
 
+                # Parse status and role if present
+                status, role = None, None
+
+                import structlog
+
+                logger = structlog.get_logger(__name__)
+
+                status_raw = rel.get("status")
+                if isinstance(status_raw, str):
+                    try:
+                        status = AttendeeStatus[status_raw.upper()]
+                    except KeyError:
+                        logger.warning(
+                            "Ignoring invalid contact relationship status",
+                            status=status_raw,
+                            journal_id=journal_id,
+                            contact_id=contact_id,
+                        )
+
+                role_raw = rel.get("role")
+                if isinstance(role_raw, str):
+                    try:
+                        role = ContactEventRole[role_raw.upper()]
+                    except KeyError:
+                        logger.warning(
+                            "Ignoring invalid contact relationship role",
+                            role=role_raw,
+                            journal_id=journal_id,
+                            contact_id=contact_id,
+                        )
+
                 # Create relationship
                 relationship = JournalContactRelationship(
                     journal_id=journal_id,
                     contact_id=contact_id,
                     relationship_type=relationship_type,
+                    status=status,
+                    role=role,
                 )
                 await contact_relationship_repo.create(relationship)
         except (ValueError, KeyError):
@@ -1610,7 +1658,9 @@ async def _fetch_enrichment_data(
     contact_relationship_repo: SqlJournalContactRelationshipRepository,
     contact_repo: SqlContactRepository,
     tag_repo: SqlJournalTagRepository,
-) -> tuple[list[str], dict[str, Any], list[tuple[int, str, str]], list[JournalTag]]:
+) -> tuple[
+    list[str], dict[str, Any], list[ContactRelationshipSummary], list[JournalTag]
+]:
     """
     Fetch all enrichment data for a journal (types, type_data, contacts, tags).
 
@@ -2867,6 +2917,16 @@ async def link_journal_to_contact(
         str,
         Field(description="Relationship type (PARTICIPANT, INVITEE, MENTION, ABOUT)"),
     ],
+    status: Annotated[
+        str | None,
+        Field(
+            description="Attendee status: ATTENDING, ATTENDED, MAYBE, NO_REPLY, DECLINED"
+        ),
+    ] = None,
+    role: Annotated[
+        str | None,
+        Field(description="Event role: ORGANISER, FACILITATOR_HELPER"),
+    ] = None,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
 ) -> str:
     """
@@ -2884,55 +2944,75 @@ async def link_journal_to_contact(
         JSON string containing relationship creation confirmation
 
     Raises:
-        JournalNotFoundError: If the journal with the given ID does not exist
-        ContactNotFoundError: If the contact with the given ID does not exist
-        ValueError: If relationship_type is invalid
+        ValueError: If relationship is invalid, or if journal or contact do not exist.
     """
     # Validate relationship type
     try:
-        rel_type = JournalContactRelationshipType(relationship_type.upper())
-    except ValueError as e:
-        raise ValueError(
-            f"Invalid relationship type: {relationship_type}. "
-            f"Must be one of: PARTICIPANT, INVITEE, MENTION, ABOUT"
-        ) from e
+        relationship_enum = JournalContactRelationshipType[relationship_type.upper()]
+    except KeyError as e:
+        raise ValueError(f"Invalid relationship_type: {relationship_type}") from e
+
+    # Parse status and role if present
+    from core_shared.models.journals.attendee_status import AttendeeStatus
+    from core_shared.models.journals.contact_event_role import ContactEventRole
+
+    status_enum, role_enum = None, None
+    if status is not None:
+        try:
+            status_enum = AttendeeStatus[status.upper()]
+        except KeyError as e:
+            raise ValueError(f"Invalid status: {status}") from e
+
+    if role is not None:
+        try:
+            role_enum = ContactEventRole[role.upper()]
+        except KeyError as e:
+            raise ValueError(f"Invalid role: {role}") from e
 
     # Create repositories
-    contact_rel_repo = SqlJournalContactRelationshipRepository(db_connection)
-    journal_repo = SqlJournalRepository(db_connection)
-    contact_repo = SqlContactRepository(db_connection)
+    repos = _create_journal_tool_repositories(db_connection)
 
-    # Verify journal exists
-    journal = await journal_repo.find_by_id(journal_id)
+    # Check that contact and journal exist
+    journal = await repos.journal_repo.find_by_id(journal_id)
     if not journal:
-        raise JournalNotFoundError(journal_id)
+        raise ValueError(f"Could not find journal with ID {journal_id}")
 
-    # Verify contact exists
-    contact = await contact_repo.find_by_id(contact_id)
+    contact = await repos.contact_repo.find_by_id(contact_id)
     if not contact:
-        raise ContactNotFoundError(contact_id)
+        raise ValueError(f"Could not find contact with ID {contact_id}")
 
-    # Create relationship
-    relationship = JournalContactRelationship(
+    rel = JournalContactRelationship(
         journal_id=journal_id,
         contact_id=contact_id,
-        relationship_type=rel_type,
+        relationship_type=relationship_enum,
+        status=status_enum,
+        role=role_enum,
     )
-    await contact_rel_repo.create(relationship)
+
+    import sqlalchemy.exc
+
+    try:
+        await repos.contact_relationship_repo.create(rel)
+    except sqlalchemy.exc.IntegrityError as e:
+        raise ValueError("Relationship already exists") from e
 
     class LinkResponse(BaseModel):
         journal_id: int
         contact_id: int
         relationship_type: str
+        status: str | None
+        role: str | None
         linked: bool
         summary: str
 
     response = LinkResponse(
         journal_id=journal_id,
         contact_id=contact_id,
-        relationship_type=relationship_type,
+        relationship_type=relationship_enum.value,
+        status=status_enum.value if status_enum is not None else None,
+        role=role_enum.value if role_enum is not None else None,
         linked=True,
-        summary=f"Successfully linked journal {journal_id} to contact {contact_id} as {relationship_type}",
+        summary=f"Successfully linked journal {journal_id} to contact {contact_id} as {relationship_enum.value}",
     )
 
     return MCPResponseBuilder.success_response(response)

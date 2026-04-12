@@ -101,6 +101,8 @@ class JournalConverter:
                 id=str(contact_rel.contact_id),
                 name=None,  # Will be populated by controller
                 relationship_type=contact_rel.relationship_type.value,
+                status=contact_rel.status.value if contact_rel.status else None,
+                role=contact_rel.role.value if contact_rel.role else None,
             )
             for contact_rel in contacts
         ]
