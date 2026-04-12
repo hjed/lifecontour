@@ -42,8 +42,6 @@ const createMockEvent = (
 describe('CalendarAgendaView', () => {
   const defaultProps = {
     events: [] as CalendarEvent[],
-    startDate: '2026-04-13',
-    endDate: '2026-04-17',
     isLoading: false,
   };
 

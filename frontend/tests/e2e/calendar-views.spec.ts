@@ -59,16 +59,9 @@ test.describe('Calendar Views', () => {
 
     // Navigate to journals page
     await page.goto('/journals');
-    try {
-      await expect(page.getByTestId('journals-list-ready')).toBeVisible({
-        timeout: 10000,
-      });
-    } catch (e) {
-      console.error('HTML DUMP START');
-      console.error(await page.content());
-      console.error('HTML DUMP END');
-      throw e;
-    }
+    await expect(page.getByTestId('journals-list-ready')).toBeVisible({
+      timeout: 10000,
+    });
 
     // Click Month view toggle
     await page.getByRole('radio', { name: /month view/i }).click();
