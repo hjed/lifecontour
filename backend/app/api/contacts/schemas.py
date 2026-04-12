@@ -8,7 +8,7 @@ the JSON API specification.
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.api.common.schemas import (
     JsonApiCollectionResponse,
@@ -108,6 +108,24 @@ class ImportantDateAttributes(BaseModel):
     updated_at: datetime | None = Field(
         default=None, description="Last update timestamp"
     )
+
+    @model_validator(mode="after")
+    def validate_precision_components(self) -> "ImportantDateAttributes":
+        """Validate that the given components match the precision requirements."""
+        if self.precision == "full":
+            if self.year is None or self.month is None or self.day is None:
+                raise ValueError("Full precision requires year, month, and day")
+        elif self.precision == "day_month":
+            if self.month is None or self.day is None:
+                raise ValueError("Day/Month precision requires month and day")
+        elif self.precision == "year":
+            if self.year is None:
+                raise ValueError("Year precision requires year")
+
+        if self.date_type == "custom" and self.custom_date_type_id is None:
+            raise ValueError("custom_date_type_id is required for custom date types")
+
+        return self
 
 
 class ImportantDateResource(BaseModel):

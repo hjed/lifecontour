@@ -14,6 +14,7 @@ from app.mcp.domains.contacts.schemas import (
     ContactResponse,
     ContactSearchResult,
     GlobalSearchResponse,
+    ImportantDateInfo,
 )
 
 
@@ -60,6 +61,19 @@ class ContactConverter:
         primary_phone = contact.get_primary_phone()
         tag_names = [str(tag.name) for tag in (contact.tags or [])]
 
+        important_dates = []
+        for d in contact.important_dates or []:
+            important_dates.append(
+                ImportantDateInfo(
+                    date_type=d.date_type.value,
+                    precision=d.precision.value,
+                    year=d.year,
+                    month=d.month,
+                    day=d.day,
+                    custom_type_name=d.custom_date_type_name,
+                )
+            )
+
         # Build AI-friendly summary
         summary = ContactConverter._build_contact_summary(
             full_name=full_name,
@@ -69,6 +83,7 @@ class ContactConverter:
             company=contact.company,
             job_title=contact.job_title,
             notes=contact.notes,
+            important_dates=important_dates,
             additional_context=additional_context,
         )
 
@@ -81,6 +96,7 @@ class ContactConverter:
             job_title=contact.job_title,
             tags=tag_names,
             is_favourite=contact.is_favourite,
+            important_dates=important_dates,
             summary=summary,
         )
 
@@ -156,6 +172,7 @@ class ContactConverter:
         company: str | None = None,
         job_title: str | None = None,
         notes: list[Any] | None = None,
+        important_dates: list[ImportantDateInfo] | None = None,
         additional_context: str = "",
     ) -> str:
         """
@@ -169,6 +186,7 @@ class ContactConverter:
             company: Company or organization name
             job_title: Job title or position
             notes: List of contact notes
+            important_dates: List of important dates
             additional_context: Additional context to include
 
         Returns:
@@ -197,6 +215,16 @@ class ContactConverter:
 
         if phone:
             summary_parts.append(f"Primary phone: {phone}")
+
+        if important_dates:
+            date_contexts = []
+            for d in important_dates:
+                if d.date_type == "birthday":
+                    date_contexts.append("Birthday")
+                elif "anniversary" in d.date_type:
+                    date_contexts.append(d.date_type.replace("_", " ").title())
+            if date_contexts:
+                summary_parts.append(f"Has dates for: {', '.join(set(date_contexts))}")
 
         if additional_context:
             summary_parts.append(additional_context)

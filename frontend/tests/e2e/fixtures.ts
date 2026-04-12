@@ -65,6 +65,13 @@ export interface TestContact {
   phone?: string;
   tags?: string[];
   isFavourite?: boolean;
+  importantDates?: Array<{
+    date_type: string;
+    precision: string;
+    year?: number;
+    month?: number;
+    day?: number;
+  }>;
 }
 
 export interface TestJournal {

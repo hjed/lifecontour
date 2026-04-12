@@ -298,10 +298,10 @@ The sequence reflects both user priority and technical dependency:
 **PR Size:** ~5-7 files
 
 **Acceptance Criteria:**
-- [ ] Contacts can store multiple important dates with explicit type and precision (`full`, `day_month`, `year`).
-- [ ] Built-in date types include birthday, marriage anniversary, work anniversary, and first met.
-- [ ] If needed, introduce the minimal global configuration mechanism for custom date types instead of hardcoding a one-off path.
-- [ ] Persistence and domain rules are centralised and future-proof for MCP and sync use.
+- [x] Contacts can store multiple important dates with explicit type and precision (`full`, `day_month`, `year`).
+- [x] Built-in date types include birthday, marriage anniversary, work anniversary, and first met.
+- [x] If needed, introduce the minimal global configuration mechanism for custom date types instead of hardcoding a one-off path.
+- [x] Persistence and domain rules are centralised and future-proof for MCP and sync use.
 
 **Required Test Coverage:**
 - **Unit:** precision validation, built-in/custom type rules, date ordering/display helpers.
@@ -312,10 +312,10 @@ The sequence reflects both user priority and technical dependency:
 **PR Size:** ~4-6 files
 
 **Acceptance Criteria:**
-- [ ] REST responses and mutations expose important dates consistently.
-- [ ] MCP contact retrieval includes important dates.
-- [ ] Validation errors are explicit for unsupported precision/type combinations.
-- [ ] Existing contact retrieval payloads are not regressed.
+- [x] REST responses and mutations expose important dates consistently.
+- [x] MCP contact retrieval includes important dates.
+- [x] Validation errors are explicit for unsupported precision/type combinations.
+- [x] Existing contact retrieval payloads are not regressed.
 
 **Required Test Coverage:**
 - **Unit:** schema translation and validation helpers.

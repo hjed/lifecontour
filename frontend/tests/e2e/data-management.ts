@@ -23,6 +23,13 @@ export interface ContactCreateRequest {
   phone?: string;
   tags?: string[];
   isFavourite?: boolean;
+  importantDates?: Array<{
+    date_type: string;
+    precision: string;
+    year?: number;
+    month?: number;
+    day?: number;
+  }>;
 }
 
 export interface TagCreateRequest {
@@ -122,6 +129,18 @@ export class TestDataManager {
 
       // Make API request to create contact (JSON API format)
       // Note: Simplified to avoid contact methods for now due to transaction issues
+      const attributes: Record<string, any> = {
+        first_name: uniqueFirstName,
+        last_name: uniqueLastName,
+        is_favourite: contactData.isFavourite || false,
+      };
+
+      if (contactData.importantDates) {
+        attributes.important_dates = contactData.importantDates.map(date => ({
+          attributes: { ...date },
+        }));
+      }
+
       const response = await this.page.request.post('/api/contacts', {
         headers: {
           'Content-Type': 'application/json',
@@ -129,11 +148,7 @@ export class TestDataManager {
         data: JSON.stringify({
           data: {
             type: 'contacts',
-            attributes: {
-              first_name: uniqueFirstName,
-              last_name: uniqueLastName,
-              is_favourite: contactData.isFavourite || false,
-            },
+            attributes: attributes,
           },
         }),
       });
@@ -181,20 +196,21 @@ export class TestDataManager {
         phone: contactData.phone,
         tags: assignedTags,
         isFavourite: contactAttributes.is_favourite || contactData.isFavourite,
+        importantDates: contactData.importantDates,
       };
     } catch (error) {
       console.debug(`❌ [Data Manager] Failed to create contact:`, error);
 
       // Return mock data as fallback for tests that don't require real API
-      const mockId = `mock-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
       return {
-        id: mockId,
+        id: '-1',
         firstName: contactData.firstName,
         lastName: contactData.lastName,
         email: contactData.email,
         phone: contactData.phone,
         tags: contactData.tags,
         isFavourite: contactData.isFavourite,
+        importantDates: contactData.importantDates,
       };
     }
   }
