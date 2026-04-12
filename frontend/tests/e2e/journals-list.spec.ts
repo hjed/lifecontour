@@ -1099,6 +1099,7 @@ test.describe('Journal List Page', () => {
       // Start waiting for API response before selecting calendar
       const responsePromise = page.waitForResponse(
         response =>
+          response.request().method() === 'GET' &&
           response.url().includes('/api/journals') &&
           response.url().includes('calendar_id') &&
           response.status() === 200
@@ -1110,6 +1111,9 @@ test.describe('Journal List Page', () => {
         .first()
         .click();
       await responsePromise;
+
+      // Ensure the loading state has finished and the list is rendered again
+      await expect(page.getByTestId('journals-list-ready')).toBeVisible();
 
       // Verify only Work Event is visible
       await expect(
@@ -1127,6 +1131,7 @@ test.describe('Journal List Page', () => {
       // Change to Personal Calendar
       const personalResponsePromise = page.waitForResponse(
         response =>
+          response.request().method() === 'GET' &&
           response.url().includes('/api/journals') &&
           response.url().includes('calendar_id') &&
           response.status() === 200
@@ -1135,6 +1140,9 @@ test.describe('Journal List Page', () => {
       await calendarSelect.click();
       await page.getByRole('option', { name: /Personal Calendar/i }).click();
       await personalResponsePromise;
+
+      // Ensure the loading state has finished and the list is rendered again
+      await expect(page.getByTestId('journals-list-ready')).toBeVisible();
 
       // Verify only Personal Event is visible
       await expect(
