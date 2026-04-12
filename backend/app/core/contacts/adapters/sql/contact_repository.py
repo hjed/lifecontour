@@ -22,6 +22,8 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
+    CustomDateTypeNotFoundError,
+    DuplicateBirthdayError,
     DuplicateEmailError,
     ImportantDateNotFoundError,
     PrimaryAddressConflictError,
@@ -822,18 +824,27 @@ class SqlContactRepository(ContactRepository):
             RETURNING id, created_at, updated_at
         """
         )
-        result = await self.conn.execute(
-            query,
-            {
-                "contact_id": contact_id,
-                "date_type": date.date_type.value,
-                "precision": date.precision.value,
-                "year": date.year,
-                "month": date.month,
-                "day": date.day,
-                "custom_date_type_id": date.custom_date_type_id,
-            },
-        )
+        try:
+            result = await self.conn.execute(
+                query,
+                {
+                    "contact_id": contact_id,
+                    "date_type": date.date_type.value,
+                    "precision": date.precision.value,
+                    "year": date.year,
+                    "month": date.month,
+                    "day": date.day,
+                    "custom_date_type_id": date.custom_date_type_id,
+                },
+            )
+        except IntegrityError as e:
+            error_msg = str(e).lower()
+            if "uq_contact_birthday" in error_msg:
+                raise DuplicateBirthdayError(contact_id) from e
+            if "fk" in error_msg and "custom_date_types" in error_msg:
+                raise CustomDateTypeNotFoundError(date.custom_date_type_id) from e  # type: ignore
+            raise
+
         row = result.fetchone()
         if row is None:
             raise RuntimeError("Failed to insert contact important date")

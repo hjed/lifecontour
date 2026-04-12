@@ -185,4 +185,59 @@ async def test_custom_date_type_repository_crud(
 
     # Delete
     await custom_date_repo.delete(ctype1.id)
-    assert await custom_date_repo.get_by_id(ctype1.id) is None
+    deleted_type = await custom_date_repo.get_by_id(ctype1.id)
+    assert deleted_type is None
+
+
+@pytest.mark.asyncio
+async def test_duplicate_birthday_raises_error(
+    contact_repo: SqlContactRepository, sample_contact: Contact
+) -> None:
+    """Test inserting duplicate birthday raises DuplicateBirthdayError."""
+    assert sample_contact.id is not None
+    date1 = ImportantDate(
+        contact_id=sample_contact.id,
+        date_type=ImportantDateType.BIRTHDAY,
+        precision=DatePrecision.YEAR,
+        year=1990,
+    )
+    await contact_repo.add_important_date(sample_contact.id, date1)
+
+    date2 = ImportantDate(
+        contact_id=sample_contact.id,
+        date_type=ImportantDateType.BIRTHDAY,
+        precision=DatePrecision.YEAR,
+        year=1995,
+    )
+    from app.core.contacts.models.exceptions import DuplicateBirthdayError
+
+    with pytest.raises(DuplicateBirthdayError, match="already has a birthday"):
+        await contact_repo.add_important_date(sample_contact.id, date2)
+
+
+@pytest.mark.asyncio
+async def test_custom_date_type_in_use_error(
+    custom_date_repo: SqlCustomDateTypeRepository,
+    contact_repo: SqlContactRepository,
+    sample_contact: Contact,
+) -> None:
+    """Test deleting an in-use custom date type raises CustomDateTypeInUseError."""
+    assert sample_contact.id is not None
+    ctype = await custom_date_repo.create(name="Required Date")
+    assert ctype.id is not None
+
+    date = ImportantDate(
+        contact_id=sample_contact.id,
+        date_type=ImportantDateType.CUSTOM,
+        precision=DatePrecision.YEAR,
+        year=2020,
+        custom_date_type_id=ctype.id,
+    )
+    await contact_repo.add_important_date(sample_contact.id, date)
+
+    from app.core.contacts.models.exceptions import CustomDateTypeInUseError
+
+    with pytest.raises(
+        CustomDateTypeInUseError, match="cannot be deleted because it is referenced"
+    ):
+        await custom_date_repo.delete(ctype.id)

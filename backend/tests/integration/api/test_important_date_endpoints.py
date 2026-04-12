@@ -29,7 +29,7 @@ async def test_get_custom_date_types(
     assert response.status_code == 200
     data = response.json()["data"]
 
-    assert len(data) >= 1
+    assert len(data) == 1
     names = [d["attributes"]["name"] for d in data]
     assert "Anniversary" in names
 

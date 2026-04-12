@@ -43,6 +43,27 @@ class DuplicateCustomDateTypeNameError(ContactDomainError):
         self.type_name = type_name
 
 
+class CustomDateTypeInUseError(ContactDomainError):
+    """Custom date type cannot be deleted because it is in use."""
+
+    def __init__(self, type_id: int):
+        super().__init__(
+            f"Custom date type with ID {type_id} cannot be deleted because it is referenced by one or more contacts",
+            409,
+        )
+        self.type_id = type_id
+
+
+class DuplicateBirthdayError(ContactDomainError):
+    """Contact already has a birthday."""
+
+    def __init__(self, contact_id: int):
+        super().__init__(
+            f"Contact {contact_id} already has a birthday date defined", 409
+        )
+        self.contact_id = contact_id
+
+
 class DuplicateEmailError(ContactDomainError):
     """Email address already exists for another contact."""
 

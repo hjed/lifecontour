@@ -49,7 +49,9 @@ from app.api.common.schemas import (
 )
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
+    CustomDateTypeInUseError,
     CustomDateTypeNotFoundError,
+    DuplicateBirthdayError,
     DuplicateCustomDateTypeNameError,
     DuplicateEmailError,
     DuplicateTagNameError,
@@ -131,6 +133,8 @@ def create_domain_error_response(domain_error: DomainError) -> JsonApiErrorRespo
         CustomDateTypeNotFoundError: "CUSTOM_DATE_TYPE_NOT_FOUND",
         ImportantDateNotFoundError: "IMPORTANT_DATE_NOT_FOUND",
         DuplicateCustomDateTypeNameError: "DUPLICATE_CUSTOM_DATE_TYPE_NAME",
+        CustomDateTypeInUseError: "CUSTOM_DATE_TYPE_IN_USE",
+        DuplicateBirthdayError: "DUPLICATE_BIRTHDAY",
         # Journal errors
         JournalNotFoundError: "JOURNAL_NOT_FOUND",
         JournalValidationError: "JOURNAL_VALIDATION_ERROR",

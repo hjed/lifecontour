@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.exceptions import (
+    CustomDateTypeInUseError,
     CustomDateTypeNotFoundError,
     DuplicateCustomDateTypeNameError,
 )
@@ -103,6 +104,14 @@ class SqlCustomDateTypeRepository(CustomDateTypeRepository):
         stmt = delete(custom_date_types_table).where(
             custom_date_types_table.c.id == type_id
         )
-        result = await self.connection.execute(stmt)
-        if result.rowcount == 0:
-            raise CustomDateTypeNotFoundError(type_id)
+        try:
+            result = await self.connection.execute(stmt)
+            if result.rowcount == 0:
+                raise CustomDateTypeNotFoundError(type_id)
+        except IntegrityError as e:
+            if (
+                "fk_contact_important_dates_custom_type" in str(e).lower()
+                or "foreign key" in str(e).lower()
+            ):
+                raise CustomDateTypeInUseError(type_id) from e
+            raise
