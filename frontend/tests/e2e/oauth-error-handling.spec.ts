@@ -230,13 +230,20 @@ test.describe('OAuth Session and State Management Errors', () => {
     await page.route(`**localhost:${OAUTH_PUBLIC_TEST_PORT}/**`, route =>
       route.abort('failed')
     );
+    // Also intercept the login API call itself since the button click
+    // hits this endpoint first before any OAuth provider redirect
+    await page.route('**/api/auth/login', route => route.abort('failed'));
 
     await oauthButton.click();
 
-    // Verify page remains functional
+    // Wait for the page to settle after the failed request
+    await page.waitForLoadState('domcontentloaded');
+
+    // Verify page remains functional — check for interactive elements rather
+    // than body text, which can be empty during mid-navigation states
     await expect(async () => {
-      const bodyText = await page.textContent('body');
-      expect(bodyText).toBeTruthy();
+      const clickableCount = await page.locator('button, a, input').count();
+      expect(clickableCount).toBeGreaterThan(0);
     }).toPass({ timeout: 10000 });
 
     // Note: No cleanup needed - Playwright automatically cleans up routes when the page/context is closed

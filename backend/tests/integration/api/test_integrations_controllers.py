@@ -399,6 +399,71 @@ class TestIntegrationsControllers:
         assert attributes["lastSync"] is None
 
     # OAuth Integration Tests
+    def test_google_oauth_authorize_uses_frontend_url_for_callback(
+        self, client: TestClient, test_settings
+    ):
+        """Test that OAuth authorize uses settings.frontend_url, not request.base_url.
+
+        Behind a reverse proxy, request.base_url reflects the internal HTTP
+        scheme (http://) while settings.frontend_url has the correct external
+        URL (https://). This test verifies the controller passes the correct
+        callback URL to the OAuth service.
+        """
+        with patch(
+            "app.infrastructure.auth.oauth_service.OAuthService.get_google_authorization_url"
+        ) as mock_auth_url:
+            mock_auth_url.return_value = "https://accounts.google.com/oauth/authorize?client_id=test&redirect_uri=test&scope=contacts&state=test_state_123"
+
+            client.post(
+                "/api/integrations/google/contacts/oauth/authorize",
+                json={"redirect_url": "/integrations"},
+            )
+
+            # Verify the callback URL uses settings.frontend_url
+            call_args = mock_auth_url.call_args
+            callback_url = call_args[0][1]  # second positional arg: redirect_uri
+            expected_callback = f"{test_settings.frontend_url}/auth/callback"
+            assert callback_url == expected_callback, (
+                f"Expected callback URL from settings.frontend_url ({expected_callback}), "
+                f"got {callback_url}"
+            )
+
+    def test_google_oauth_callback_uses_frontend_url_for_redirect(
+        self, client: TestClient, test_settings
+    ):
+        """Test that OAuth callback uses settings.frontend_url, not request.base_url."""
+        with (
+            patch(
+                "app.infrastructure.auth.oauth_service.OAuthService.handle_google_callback"
+            ) as mock_callback,
+            patch(
+                "app.infrastructure.auth.oauth_service.OAuthService.get_google_user_email"
+            ) as mock_get_email,
+            patch(
+                "app.infrastructure.auth.google_token_service.GoogleTokenService.store_tokens"
+            ) as _mock_store_tokens,
+        ):
+            mock_callback.return_value = {
+                "access_token": "test_access_token",
+                "refresh_token": "test_refresh_token",
+                "expires_in": 3600,
+            }
+            mock_get_email.return_value = "test@gmail.com"
+
+            client.post(
+                "/api/integrations/google/contacts/oauth/callback",
+                json={"code": "test_auth_code", "state": "test_state"},
+            )
+
+            # Verify the callback URL uses settings.frontend_url
+            call_args = mock_callback.call_args
+            callback_url = call_args[0][3]  # fourth positional arg: redirect_uri
+            expected_callback = f"{test_settings.frontend_url}/auth/callback"
+            assert callback_url == expected_callback, (
+                f"Expected callback URL from settings.frontend_url ({expected_callback}), "
+                f"got {callback_url}"
+            )
+
     def test_google_oauth_authorize_success(self, client: TestClient):
         """Test successful Google Contacts OAuth authorization initiation."""
         with patch(
