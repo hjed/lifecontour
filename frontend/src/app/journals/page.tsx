@@ -173,65 +173,37 @@ export default function JournalsPage() {
 
   return (
     <AuthGuard>
-      <div className='mb-6 flex items-center justify-between'>
-        <div>
-          <h1 className='text-3xl font-bold tracking-tight'>Journals</h1>
-          <p className='text-muted-foreground'>
-            Your journal entries and memories.
-          </p>
-        </div>
-        <div className='flex gap-2'>
-          {reviewQueueCount > 0 && (
-            <Button
-              variant='outline'
-              size='sm'
-              onClick={() => setQueueOpen(true)}
-              className='text-destructive hover:text-destructive hover:bg-destructive/10 gap-2'
-            >
-              <FileText className='h-4 w-4' />
-              Review Queue ({reviewQueueCount})
-            </Button>
-          )}
-          <Button
-            variant='outline'
-            size='sm'
-            onClick={() => setShowFilters(!showFilters)}
-            className='gap-2'
-          >
-            <Filter className='h-4 w-4' />
-            {showFilters ? 'Hide' : 'Show'} Filters
-          </Button>
-          <Button asChild size='sm' className='gap-2'>
-            <Link href={'/journals/new' as Route}>
-              <Plus className='h-4 w-4' />
-              New Journal
-            </Link>
-          </Button>
-        </div>
+      <div className='mb-6'>
+        <h1 className='text-3xl font-bold tracking-tight'>Journals</h1>
+        <p className='text-muted-foreground'>
+          Your journal entries and memories.
+        </p>
       </div>
 
-      {/* Action / Search Bar */}
-      <div className='bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-20 mb-6 py-2 backdrop-blur'>
+      {/* Floating Action / Search Bar */}
+      <div className='bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-14 z-40 mb-6 py-2 backdrop-blur'>
         <Card>
-          <CardContent className='pt-6'>
-            <div className='flex flex-col gap-4 md:flex-row'>
-              <div className='relative flex-1'>
-                <Search className='text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2' />
-                <Input
-                  placeholder='Search journals...'
-                  value={searchQuery}
-                  onChange={e => handleSearchChange(e.target.value)}
-                  className='pl-10'
-                  data-testid='search-input'
-                />
-              </div>
-              <div className='flex items-center gap-2'>
+          <CardContent className='pt-4 pb-4'>
+            <div className='flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between'>
+              <div className='flex flex-1 flex-wrap items-center gap-2'>
+                <div className='relative max-w-sm min-w-[200px] flex-1'>
+                  <Search className='text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2' />
+                  <Input
+                    placeholder='Search journals...'
+                    value={searchQuery}
+                    onChange={e => handleSearchChange(e.target.value)}
+                    className='h-9 pl-10'
+                    data-testid='search-input'
+                  />
+                </div>
+
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button
                       variant='outline'
+                      size='sm'
                       className={cn(
-                        'justify-start text-left font-normal',
+                        'h-9 justify-start text-left font-normal',
                         !anchorDate && 'text-muted-foreground'
                       )}
                       data-testid='jump-date-button'
@@ -244,7 +216,7 @@ export default function JournalsPage() {
                       )}
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className='w-auto p-0' align='end'>
+                  <PopoverContent className='w-auto p-0' align='start'>
                     <Calendar
                       mode='single'
                       selected={anchorDate ? parseISO(anchorDate) : undefined}
@@ -255,11 +227,14 @@ export default function JournalsPage() {
                     />
                   </PopoverContent>
                 </Popover>
+
                 {(searchQuery ||
                   Object.keys(filters).length > 0 ||
                   anchorDate) && (
                   <Button
                     variant='outline'
+                    size='sm'
+                    className='h-9'
                     onClick={() => {
                       clearSearch();
                       setAnchorDate(undefined);
@@ -269,6 +244,41 @@ export default function JournalsPage() {
                     Clear
                   </Button>
                 )}
+              </div>
+
+              <div className='flex flex-wrap items-center gap-2'>
+                {reviewQueueCount > 0 && (
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    onClick={() => setQueueOpen(true)}
+                    className='text-destructive hover:text-destructive hover:bg-destructive/10 h-9 gap-2'
+                  >
+                    <FileText className='h-4 w-4' />
+                    Review Queue ({reviewQueueCount})
+                  </Button>
+                )}
+                <Button
+                  variant='outline'
+                  size='sm'
+                  onClick={() => setShowFilters(!showFilters)}
+                  className='h-9 gap-2'
+                  data-testid='toggle-filters'
+                >
+                  <Filter className='h-4 w-4' />
+                  {showFilters ? 'Hide' : 'Show'} Filters
+                </Button>
+                <Button
+                  asChild
+                  size='sm'
+                  className='h-9 gap-2'
+                  data-testid='new-journal'
+                >
+                  <Link href={'/journals/new' as Route}>
+                    <Plus className='h-4 w-4' />
+                    New Journal
+                  </Link>
+                </Button>
               </div>
             </div>
           </CardContent>
@@ -287,14 +297,16 @@ export default function JournalsPage() {
         {/* Filters Sidebar */}
         {showFilters && (
           <aside className='w-full flex-shrink-0 md:w-64'>
-            <Card>
-              <CardContent className='pt-6'>
-                <JournalFilters
-                  filters={filters}
-                  onFiltersChange={setFilters}
-                />
-              </CardContent>
-            </Card>
+            <div className='sticky top-40'>
+              <Card>
+                <CardContent className='pt-6'>
+                  <JournalFilters
+                    filters={filters}
+                    onFiltersChange={setFilters}
+                  />
+                </CardContent>
+              </Card>
+            </div>
           </aside>
         )}
 
