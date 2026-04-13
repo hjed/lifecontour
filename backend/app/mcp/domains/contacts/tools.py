@@ -14,11 +14,16 @@ from core_shared.models.contacts.entities import (
     ContactMethod,
     ContactNote,
     ContactRelationship,
+    ImportantDate,
     MethodType,
     RelationshipType,
     Tag,
 )
 from core_shared.models.contacts.exceptions import ContactValidationError
+from core_shared.models.contacts.important_date_types import (
+    DatePrecision,
+    ImportantDateType,
+)
 from core_shared.models.contacts.value_objects import TagName
 from fastmcp import FastMCP
 from pydantic import BaseModel, Field
@@ -311,6 +316,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             addresses=[],
             notes=[],
             tags=[],
+            important_dates=[],
         )
 
         # Add contact methods if provided
@@ -342,6 +348,29 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             )
             assert contact.notes is not None
             contact.notes.append(note)
+
+        # Handle important dates if provided
+        if request.important_dates:
+            for date_data in request.important_dates:
+                date_type_val = ImportantDateType(date_data.date_type)
+                if date_type_val == ImportantDateType.CUSTOM:
+                    raise ContactValidationError(
+                        field="important_dates",
+                        message="Custom important date types are not currently supported via MCP. "
+                        "Please use a built-in date_type.",
+                    )
+                important_date = ImportantDate(
+                    contact_id=0,
+                    date_type=date_type_val,
+                    precision=DatePrecision(date_data.precision),
+                    year=date_data.year,
+                    month=date_data.month,
+                    day=date_data.day,
+                    custom_date_type_id=None,  # Not supported directly via basic MCP structure easily without a lookup
+                    custom_date_type_name=date_data.custom_type_name,
+                )
+                assert contact.important_dates is not None
+                contact.important_dates.append(important_date)
 
         # Handle tags if provided - find or create tags by name
         if request.tags:
@@ -492,6 +521,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 addresses=None,
                 notes=None,
                 tags=None,
+                important_dates=None,
             )
 
             # Add contact methods if provided (replacement strategy)
@@ -526,6 +556,30 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                     contact_id=request.contact_id,
                 )
                 updated_contact.notes.append(note)
+
+            # Handle important dates if provided (replacement strategy)
+            if request.important_dates is not None:
+                if updated_contact.important_dates is None:
+                    updated_contact.important_dates = []
+                for date_data in request.important_dates:
+                    date_type_val = ImportantDateType(date_data.date_type)
+                    if date_type_val == ImportantDateType.CUSTOM:
+                        raise ContactValidationError(
+                            field="important_dates",
+                            message="Custom important date types are not currently supported via MCP. "
+                            "Please use a built-in date_type.",
+                        )
+                    important_date = ImportantDate(
+                        contact_id=request.contact_id,
+                        date_type=date_type_val,
+                        precision=DatePrecision(date_data.precision),
+                        year=date_data.year,
+                        month=date_data.month,
+                        day=date_data.day,
+                        custom_date_type_id=None,
+                        custom_date_type_name=date_data.custom_type_name,
+                    )
+                    updated_contact.important_dates.append(important_date)
 
             # Handle tags if provided - find or create tags by name (replacement strategy)
             if request.tags is not None:

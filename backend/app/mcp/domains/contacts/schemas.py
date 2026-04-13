@@ -7,11 +7,58 @@ structured, contextual data for AI analysis and decision making.
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # Constants for field descriptions
 _COMPANY_DESC = "Company or organization name"
 _JOB_TITLE_DESC = "Job title or position"
+
+
+class ImportantDateInfo(BaseModel):
+    """
+    AI-friendly representation of an important date.
+    """
+
+    date_type: str = Field(description="Type of date (e.g., birthday, custom)")
+    precision: str = Field(description="Precision of the date (full, day_month, year)")
+    year: int | None = Field(default=None, description="Year of the date")
+    month: int | None = Field(default=None, description="Month (1-12)")
+    day: int | None = Field(default=None, description="Day (1-31)")
+    custom_type_name: str | None = Field(
+        default=None, description="Name for custom date type"
+    )
+
+    @model_validator(mode="after")
+    def validate_precision_components(self) -> "ImportantDateInfo":
+        """Validate that the given components match the precision requirements."""
+        if self.precision == "full":
+            if self.year is None or self.month is None or self.day is None:
+                raise ValueError("Full precision requires year, month, and day")
+        elif self.precision == "day_month":
+            if self.month is None or self.day is None:
+                raise ValueError("Day/Month precision requires month and day")
+            if self.year is not None:
+                raise ValueError("Day/Month precision requires year to be omitted")
+        elif self.precision == "year":
+            if self.year is None:
+                raise ValueError("Year precision requires year")
+            if self.month is not None or self.day is not None:
+                raise ValueError("Year precision requires month and day to be omitted")
+        else:
+            raise ValueError(
+                "Unsupported precision; expected one of: full, day_month, year"
+            )
+
+        # Relax custom_type_name requirement as domain model only requires custom_date_type_id
+        # if self.date_type == "custom" and self.custom_type_name is None:
+        #     raise ValueError("custom_type_name is required for custom date types")
+
+        if self.month is not None and not (1 <= self.month <= 12):
+            raise ValueError("Month must be between 1 and 12")
+        if self.day is not None and not (1 <= self.day <= 31):
+            raise ValueError("Day must be between 1 and 31")
+
+        return self
 
 
 class ContactResponse(BaseModel):
@@ -49,6 +96,11 @@ class ContactResponse(BaseModel):
         description="Whether the contact is marked as a favourite for quick access",
     )
 
+    important_dates: list[ImportantDateInfo] = Field(
+        default_factory=list,
+        description="List of important dates like birthdays and anniversaries associated with the contact",
+    )
+
     summary: str = Field(
         description="AI-friendly summary of the contact including relationship context and key details"
     )
@@ -64,6 +116,16 @@ class ContactResponse(BaseModel):
                 "job_title": "Software Engineer",
                 "tags": ["friend", "work"],
                 "is_favourite": True,
+                "important_dates": [
+                    {
+                        "date_type": "birthday",
+                        "precision": "full",
+                        "year": 1990,
+                        "month": 5,
+                        "day": 15,
+                        "custom_type_name": None,
+                    }
+                ],
                 "summary": "John is a software engineer and close friend who works at TechCorp. We collaborate on side projects and meet regularly for coffee.",
             }
         }
@@ -167,6 +229,11 @@ class ContactCreateRequest(BaseModel):
         default=None, description="Initial notes about the contact"
     )
 
+    important_dates: list[ImportantDateInfo] | None = Field(
+        default=None,
+        description="List of important dates to associate with the contact",
+    )
+
 
 class ContactUpdateRequest(BaseModel):
     """
@@ -202,6 +269,11 @@ class ContactUpdateRequest(BaseModel):
     )
 
     notes: str | None = Field(default=None, description="Additional notes to add")
+
+    important_dates: list[ImportantDateInfo] | None = Field(
+        default=None,
+        description="Updated list of important dates (replaces existing dates)",
+    )
 
 
 class ContactListResponse(BaseModel):

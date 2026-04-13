@@ -139,3 +139,101 @@ async def test_update_contact_with_important_dates(
     assert len(dates) == 1
     assert dates[0]["attributes"]["date_type"] == "work_anniversary"
     assert dates[0]["attributes"]["year"] == 2020
+
+    # Ensure retrieval works
+    response = await integration_api_client.get(f"/api/contacts/{contact_id}")
+    assert response.status_code == 200
+    dates = response.json()["data"]["attributes"]["important_dates"]
+    assert len(dates) == 1
+    assert dates[0]["attributes"]["date_type"] == "work_anniversary"
+
+
+@pytest.mark.asyncio
+async def test_invalid_precision_combination(
+    integration_api_client: AsyncClient,
+) -> None:
+    """Test validation fails for invalid precision combinations."""
+    payload = {
+        "data": {
+            "type": "contacts",
+            "attributes": {
+                "first_name": "Test",
+                "last_name": "Dates",
+                "important_dates": [
+                    {
+                        "attributes": {
+                            "date_type": "birthday",
+                            "precision": "full",
+                            "year": 1990,
+                            # intentionally missing month and day
+                        }
+                    }
+                ],
+            },
+        }
+    }
+
+    response = await integration_api_client.post("/api/contacts", json=payload)
+
+    assert response.status_code == 400
+    data = response.json()
+    assert "errors" in data
+
+
+@pytest.mark.asyncio
+async def test_get_contacts_list_payload(
+    integration_api_client: AsyncClient,
+) -> None:
+    """Test the list endpoint retains existing payload structure."""
+    # Guarantee a contact exists for deterministic testing
+    contact_payload = {
+        "data": {
+            "type": "contacts",
+            "attributes": {"first_name": "List", "last_name": "Test"},
+        }
+    }
+    await integration_api_client.post("/api/contacts", json=contact_payload)
+
+    response = await integration_api_client.get("/api/contacts")
+    assert response.status_code == 200
+    data = response.json()
+    assert "data" in data
+    assert "meta" in data
+
+    assert len(data["data"]) > 0
+    first = data["data"][0]
+    assert "important_dates" in first["attributes"]
+
+
+@pytest.mark.asyncio
+async def test_create_contact_with_custom_date(
+    integration_api_client: AsyncClient,
+    setup_custom_date_type: int,
+) -> None:
+    """Test creating a contact with a custom date type requires valid config."""
+    payload = {
+        "data": {
+            "type": "contacts",
+            "attributes": {
+                "first_name": "Custom",
+                "last_name": "Dates",
+                "important_dates": [
+                    {
+                        "attributes": {
+                            "date_type": "custom",
+                            "precision": "year",
+                            "year": 2020,
+                            "custom_date_type_id": setup_custom_date_type,
+                        }
+                    }
+                ],
+            },
+        }
+    }
+
+    response = await integration_api_client.post("/api/contacts", json=payload)
+    assert response.status_code == 201
+    dates = response.json()["data"]["attributes"]["important_dates"]
+    assert len(dates) == 1
+    assert dates[0]["attributes"]["date_type"] == "custom"
+    assert dates[0]["attributes"]["custom_date_type_id"] == setup_custom_date_type
