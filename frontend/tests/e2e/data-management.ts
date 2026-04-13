@@ -203,7 +203,7 @@ export class TestDataManager {
 
       // Return mock data as fallback for tests that don't require real API
       return {
-        id: '-1',
+        id: `mock-${uniqueId}`,
         firstName: contactData.firstName,
         lastName: contactData.lastName,
         email: contactData.email,

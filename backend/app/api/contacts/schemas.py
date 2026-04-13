@@ -118,12 +118,24 @@ class ImportantDateAttributes(BaseModel):
         elif self.precision == "day_month":
             if self.month is None or self.day is None:
                 raise ValueError("Day/Month precision requires month and day")
+            if self.year is not None:
+                raise ValueError("Day/Month precision does not allow year")
         elif self.precision == "year":
             if self.year is None:
                 raise ValueError("Year precision requires year")
+            if self.month is not None or self.day is not None:
+                raise ValueError("Year precision does not allow month or day")
+        else:
+            raise ValueError(
+                "Unsupported precision; expected one of: year, day_month, full"
+            )
 
         if self.date_type == "custom" and self.custom_date_type_id is None:
             raise ValueError("custom_date_type_id is required for custom date types")
+        elif self.date_type != "custom" and self.custom_date_type_id is not None:
+            raise ValueError(
+                "custom_date_type_id must not be provided for non-custom date types"
+            )
 
         return self
 

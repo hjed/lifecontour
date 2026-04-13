@@ -217,14 +217,27 @@ class ContactConverter:
             summary_parts.append(f"Primary phone: {phone}")
 
         if important_dates:
+            seen_date_contexts = set()
             date_contexts = []
             for d in important_dates:
+                date_label = None
                 if d.date_type == "birthday":
-                    date_contexts.append("Birthday")
-                elif "anniversary" in d.date_type:
-                    date_contexts.append(d.date_type.replace("_", " ").title())
+                    date_label = "Birthday"
+                elif d.date_type == "first_met":
+                    date_label = "First Met"
+                elif d.date_type == "custom":
+                    custom_type_name = (d.custom_type_name or "").strip()
+                    if custom_type_name:
+                        date_label = custom_type_name
+                else:
+                    date_label = d.date_type.replace("_", " ").title()
+
+                if date_label and date_label not in seen_date_contexts:
+                    seen_date_contexts.add(date_label)
+                    date_contexts.append(date_label)
+
             if date_contexts:
-                summary_parts.append(f"Has dates for: {', '.join(set(date_contexts))}")
+                summary_parts.append(f"Has dates for: {', '.join(date_contexts)}")
 
         if additional_context:
             summary_parts.append(additional_context)

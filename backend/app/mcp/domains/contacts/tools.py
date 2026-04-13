@@ -352,9 +352,16 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         # Handle important dates if provided
         if request.important_dates:
             for date_data in request.important_dates:
+                date_type_val = ImportantDateType(date_data.date_type)
+                if date_type_val == ImportantDateType.CUSTOM:
+                    raise ContactValidationError(
+                        field="important_dates",
+                        message="Custom important date types are not currently supported via MCP. "
+                        "Please use a built-in date_type.",
+                    )
                 important_date = ImportantDate(
                     contact_id=0,
-                    date_type=ImportantDateType(date_data.date_type),
+                    date_type=date_type_val,
                     precision=DatePrecision(date_data.precision),
                     year=date_data.year,
                     month=date_data.month,
@@ -555,9 +562,16 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 if updated_contact.important_dates is None:
                     updated_contact.important_dates = []
                 for date_data in request.important_dates:
+                    date_type_val = ImportantDateType(date_data.date_type)
+                    if date_type_val == ImportantDateType.CUSTOM:
+                        raise ContactValidationError(
+                            field="important_dates",
+                            message="Custom important date types are not currently supported via MCP. "
+                            "Please use a built-in date_type.",
+                        )
                     important_date = ImportantDate(
                         contact_id=request.contact_id,
-                        date_type=ImportantDateType(date_data.date_type),
+                        date_type=date_type_val,
                         precision=DatePrecision(date_data.precision),
                         year=date_data.year,
                         month=date_data.month,

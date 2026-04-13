@@ -37,9 +37,17 @@ class ImportantDateInfo(BaseModel):
         elif self.precision == "day_month":
             if self.month is None or self.day is None:
                 raise ValueError("Day/Month precision requires month and day")
+            if self.year is not None:
+                raise ValueError("Day/Month precision requires year to be omitted")
         elif self.precision == "year":
             if self.year is None:
                 raise ValueError("Year precision requires year")
+            if self.month is not None or self.day is not None:
+                raise ValueError("Year precision requires month and day to be omitted")
+        else:
+            raise ValueError(
+                "Unsupported precision; expected one of: full, day_month, year"
+            )
 
         if self.date_type == "custom" and self.custom_type_name is None:
             raise ValueError("custom_type_name is required for custom date types")
