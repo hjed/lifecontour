@@ -103,7 +103,16 @@ export function CalendarAgendaView({
       data-testid='calendar-agenda-view'
     >
       {sortedDates.map(dateKey => {
-        const dayEvents = eventsByDate[dateKey];
+        const dayEvents = [...eventsByDate[dateKey]].sort((a, b) => {
+          // All day events come first
+          if (a.isAllDay && !b.isAllDay) return -1;
+          if (!a.isAllDay && b.isAllDay) return 1;
+
+          // Otherwise sort chronologically
+          const timeA = a.startTime || '00:00';
+          const timeB = b.startTime || '00:00';
+          return timeA.localeCompare(timeB);
+        });
         const date = parseISO(dateKey);
         const heading = format(date, 'EEEE, MMMM d, yyyy', { locale: enAU });
 

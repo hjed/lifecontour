@@ -8,7 +8,7 @@
 
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import Link from 'next/link';
 import type { Route } from 'next';
 import { AuthGuard } from '@/components/auth/AuthGuard';
@@ -95,15 +95,16 @@ export default function JournalsPage() {
   const [showFilters, setShowFilters] = useState(true);
   const [queueOpen, setQueueOpen] = useState(false);
   const [anchorDate, setAnchorDate] = useState<string | undefined>();
-  const [viewMode, setViewModeState] = useState<CalendarViewMode>(() => {
-    if (typeof window !== 'undefined') {
-      const stored = window.sessionStorage.getItem('pms_view_mode');
-      if (stored === 'month' || stored === 'agenda' || stored === 'list') {
-        return stored as CalendarViewMode;
-      }
+  const [viewMode, setViewModeState] = useState<CalendarViewMode>('list');
+
+  // Load saved view mode on first client render to avoid hydration mismatch
+  useEffect(() => {
+    const stored = window.sessionStorage.getItem('pms_view_mode');
+    if (stored === 'month' || stored === 'agenda' || stored === 'list') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setViewModeState(stored as CalendarViewMode);
     }
-    return 'list';
-  });
+  }, []);
 
   const setViewMode = (mode: CalendarViewMode) => {
     setViewModeState(mode);

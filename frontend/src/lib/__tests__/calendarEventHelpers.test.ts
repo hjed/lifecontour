@@ -199,34 +199,34 @@ describe('calendarEventHelpers', () => {
   });
 
   describe('getMonthDateRange', () => {
-    it('returns correct first/last day for April 2026', () => {
+    it('returns grid boundaries including adjacent months for April 2026', () => {
       const range = getMonthDateRange(2026, 3); // 0-indexed month
-      expect(range.start).toBe('2026-04-01');
-      expect(range.end).toBe('2026-04-30');
+      expect(range.start).toBe('2026-03-30');
+      expect(range.end).toBe('2026-05-03');
     });
 
-    it('returns correct range for January', () => {
+    it('returns grid boundaries including previous year for January', () => {
       const range = getMonthDateRange(2026, 0);
-      expect(range.start).toBe('2026-01-01');
-      expect(range.end).toBe('2026-01-31');
+      expect(range.start).toBe('2025-12-29');
+      expect(range.end).toBe('2026-02-01');
     });
 
     it('handles February in a leap year', () => {
       const range = getMonthDateRange(2028, 1); // 2028 is a leap year
-      expect(range.start).toBe('2028-02-01');
-      expect(range.end).toBe('2028-02-29');
+      expect(range.start).toBe('2028-01-31');
+      expect(range.end).toBe('2028-03-05');
     });
 
     it('handles February in a non-leap year', () => {
       const range = getMonthDateRange(2026, 1);
-      expect(range.start).toBe('2026-02-01');
-      expect(range.end).toBe('2026-02-28');
+      expect(range.start).toBe('2026-01-26');
+      expect(range.end).toBe('2026-03-01');
     });
 
-    it('handles December', () => {
+    it('handles December spilling into next year', () => {
       const range = getMonthDateRange(2026, 11);
-      expect(range.start).toBe('2026-12-01');
-      expect(range.end).toBe('2026-12-31');
+      expect(range.start).toBe('2026-11-30');
+      expect(range.end).toBe('2027-01-03');
     });
   });
 

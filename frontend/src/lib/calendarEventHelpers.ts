@@ -13,6 +13,8 @@ import {
   addDays,
   endOfMonth,
   startOfMonth,
+  startOfWeek,
+  endOfWeek,
   parseISO,
 } from 'date-fns';
 import { DisplayJournal } from '@/utils/journalTransformers';
@@ -143,9 +145,12 @@ export function getMonthDateRange(
   const monthStart = startOfMonth(new Date(year, month, 1));
   const monthEnd = endOfMonth(new Date(year, month, 1));
 
+  const gridStart = startOfWeek(monthStart, { weekStartsOn: 1 });
+  const gridEnd = endOfWeek(monthEnd, { weekStartsOn: 1 });
+
   return {
-    start: format(monthStart, 'yyyy-MM-dd'),
-    end: format(monthEnd, 'yyyy-MM-dd'),
+    start: format(gridStart, 'yyyy-MM-dd'),
+    end: format(gridEnd, 'yyyy-MM-dd'),
   };
 }
 
