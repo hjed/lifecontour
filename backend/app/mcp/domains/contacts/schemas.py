@@ -49,8 +49,14 @@ class ImportantDateInfo(BaseModel):
                 "Unsupported precision; expected one of: full, day_month, year"
             )
 
-        if self.date_type == "custom" and self.custom_type_name is None:
-            raise ValueError("custom_type_name is required for custom date types")
+        # Relax custom_type_name requirement as domain model only requires custom_date_type_id
+        # if self.date_type == "custom" and self.custom_type_name is None:
+        #     raise ValueError("custom_type_name is required for custom date types")
+
+        if self.month is not None and not (1 <= self.month <= 12):
+            raise ValueError("Month must be between 1 and 12")
+        if self.day is not None and not (1 <= self.day <= 31):
+            raise ValueError("Day must be between 1 and 31")
 
         return self
 

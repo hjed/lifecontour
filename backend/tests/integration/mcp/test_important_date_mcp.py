@@ -56,10 +56,7 @@ async def test_important_dates_via_mounted_http_session(
                 )
             },
         )
-        assert (
-            create_payload.get("first_name") == "Jane"
-            or create_payload["name"] == "Jane Doe"
-        )
+        assert create_payload["name"] == "Jane Doe"
         c1_id = create_payload["id"]
 
         # 2. Update contact with an important date
@@ -126,10 +123,7 @@ async def test_important_dates_via_mounted_http_session(
             },
         )
 
-        assert (
-            create_payload2.get("first_name") == "John"
-            or create_payload2["name"] == "John Dates"
-        )
+        assert create_payload2["name"] == "John Dates"
         assert len(create_payload2["important_dates"]) == 1
         date = create_payload2["important_dates"][0]
         assert date["date_type"] == "work_anniversary"

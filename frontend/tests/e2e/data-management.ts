@@ -129,7 +129,20 @@ export class TestDataManager {
 
       // Make API request to create contact (JSON API format)
       // Note: Simplified to avoid contact methods for now due to transaction issues
-      const attributes: Record<string, any> = {
+      const attributes: {
+        first_name: string;
+        last_name: string;
+        is_favourite: boolean;
+        important_dates?: Array<{
+          attributes: {
+            date_type: string;
+            precision: string;
+            year?: number;
+            month?: number;
+            day?: number;
+          };
+        }>;
+      } = {
         first_name: uniqueFirstName,
         last_name: uniqueLastName,
         is_favourite: contactData.isFavourite || false,

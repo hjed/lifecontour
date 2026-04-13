@@ -185,15 +185,24 @@ async def test_get_contacts_list_payload(
     integration_api_client: AsyncClient,
 ) -> None:
     """Test the list endpoint retains existing payload structure."""
+    # Guarantee a contact exists for deterministic testing
+    contact_payload = {
+        "data": {
+            "type": "contacts",
+            "attributes": {"first_name": "List", "last_name": "Test"},
+        }
+    }
+    await integration_api_client.post("/api/contacts", json=contact_payload)
+
     response = await integration_api_client.get("/api/contacts")
     assert response.status_code == 200
     data = response.json()
     assert "data" in data
     assert "meta" in data
-    # Ensure important dates are accessible if any exist
-    if len(data["data"]) > 0:
-        first = data["data"][0]
-        assert "important_dates" in first["attributes"]
+
+    assert len(data["data"]) > 0
+    first = data["data"][0]
+    assert "important_dates" in first["attributes"]
 
 
 @pytest.mark.asyncio

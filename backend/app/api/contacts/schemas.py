@@ -137,6 +137,11 @@ class ImportantDateAttributes(BaseModel):
                 "custom_date_type_id must not be provided for non-custom date types"
             )
 
+        if self.month is not None and not (1 <= self.month <= 12):
+            raise ValueError("Month must be between 1 and 12")
+        if self.day is not None and not (1 <= self.day <= 31):
+            raise ValueError("Day must be between 1 and 31")
+
         return self
 
 
