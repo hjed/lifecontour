@@ -68,6 +68,7 @@ export function ContactForm({
         contact_methods: initialData?.contact_methods || [],
         addresses: initialData?.addresses || [],
         notes: initialData?.notes || [],
+        important_dates: initialData?.important_dates || [],
       };
 
       await onSubmit(contactData);

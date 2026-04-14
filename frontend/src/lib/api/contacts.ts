@@ -25,6 +25,8 @@ import {
   TagListResponse,
   TagCreateAttributes,
   TagResponse,
+  CustomDateTypeListResponse,
+  CustomDateTypeResponse,
 } from '@/types/contacts';
 import { JsonApiErrorResponse, JsonApiMeta } from '@/types/api';
 import {
@@ -1124,6 +1126,79 @@ export function useDeleteTag() {
       queryClient.invalidateQueries({ queryKey: tagKeys.lists() });
       queryClient.invalidateQueries({ queryKey: contactKeys.all });
       toast.success(SUCCESS_MESSAGES.TAG_DELETED);
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+// Custom Date Types Actions
+export const customDateTypeKeys = {
+  all: ['custom-date-types'] as const,
+  lists: () => [...customDateTypeKeys.all, 'list'] as const,
+};
+
+async function fetchCustomDateTypes(): Promise<CustomDateTypeListResponse> {
+  const response = await fetch('/api/custom-date-types', {
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.FETCH_FAILED
+    );
+  }
+
+  return response.json();
+}
+
+async function createCustomDateType(
+  name: string
+): Promise<CustomDateTypeResponse> {
+  const requestData = {
+    type: 'custom_date_types',
+    attributes: { name },
+  };
+
+  const response = await fetch('/api/custom-date-types', {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ data: requestData }),
+  });
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.CREATE_FAILED
+    );
+  }
+
+  return response.json();
+}
+
+export function useCustomDateTypes() {
+  return useQuery({
+    queryKey: customDateTypeKeys.lists(),
+    queryFn: fetchCustomDateTypes,
+    staleTime: 10 * 60 * 1000, // 10 minutes
+  });
+}
+
+export function useCreateCustomDateType() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: createCustomDateType,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: customDateTypeKeys.all });
     },
     onError: (error: Error) => {
       toast.error(error.message);

@@ -70,6 +70,56 @@ export interface ContactNoteResource extends Omit<
   type: 'contact_notes';
 }
 
+// Custom Date Types
+export interface CustomDateTypeAttributes {
+  name: string;
+  created_at?: string;
+  updated_at?: string;
+  [key: string]: unknown;
+}
+
+export interface CustomDateTypeResource extends Omit<
+  JsonApiResource<CustomDateTypeAttributes>,
+  'relationships'
+> {
+  type: 'custom_date_types';
+}
+
+// Important Date Types
+export enum ImportantDatePrecision {
+  FULL = 'full',
+  DAY_MONTH = 'day_month',
+  YEAR = 'year',
+}
+
+export enum ImportantDateTypeEnum {
+  BIRTHDAY = 'birthday',
+  ANNIVERSARY_MARRIAGE = 'marriage_anniversary',
+  ANNIVERSARY_WORK = 'work_anniversary',
+  FIRST_MET = 'first_met',
+  CUSTOM = 'custom',
+}
+
+export interface ImportantDateAttributes {
+  date_type: ImportantDateTypeEnum | string;
+  precision: ImportantDatePrecision | string;
+  year?: number | null;
+  month?: number | null;
+  day?: number | null;
+  custom_date_type_id?: number | null;
+  custom_date_type_name?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  [key: string]: unknown;
+}
+
+export interface ImportantDateResource extends Omit<
+  JsonApiResource<ImportantDateAttributes>,
+  'relationships'
+> {
+  type: 'important_dates';
+}
+
 // Tag Types
 export interface TagAttributes {
   name: string;
@@ -130,6 +180,7 @@ export interface ContactAttributes {
   addresses: ContactAddressResource[];
   notes: ContactNoteResource[];
   relationships: ContactRelationshipResource[];
+  important_dates?: ImportantDateResource[];
 }
 
 export interface ContactRelationships {
@@ -181,6 +232,10 @@ export interface ContactListResponse {
 export type TagResponse = JsonApiResponse<TagResource>;
 export type TagListResponse = JsonApiCollectionResponse<TagResource>;
 
+export type CustomDateTypeResponse = JsonApiResponse<CustomDateTypeResource>;
+export type CustomDateTypeListResponse =
+  JsonApiCollectionResponse<CustomDateTypeResource>;
+
 // Form Data Types (for creating/updating)
 export interface ContactFormData {
   first_name: string;
@@ -190,6 +245,7 @@ export interface ContactFormData {
   contact_methods?: ContactMethodResource[];
   addresses?: ContactAddressResource[];
   notes?: ContactNoteResource[];
+  important_dates?: ImportantDateResource[];
 }
 
 export interface ContactCreateData {

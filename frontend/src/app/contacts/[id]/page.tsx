@@ -24,6 +24,7 @@ import { ContactAvatar } from '@/components/contacts/ContactAvatar';
 import { ContactIdentityInline } from '@/components/contacts/ContactIdentityInline';
 import { ContactMethodsList } from '@/components/contacts/ContactMethodsList';
 import { ContactAddressesList } from '@/components/contacts/ContactAddressesList';
+import { ImportantDatesList } from '@/components/contacts/ImportantDatesList';
 import { RelationshipsList } from '@/components/contacts/RelationshipsList';
 import { ActivityFeed } from '@/components/contacts/ActivityFeed';
 import { ContactJournals } from '@/components/contacts/ContactJournals';
@@ -175,6 +176,12 @@ function ContactDetailPageContent() {
             <ContactAddressesList
               contactId={contact.id}
               addresses={contact.attributes.addresses || []}
+            />
+
+            {/* Important Dates */}
+            <ImportantDatesList
+              contactId={contact.id}
+              contactAttributes={contact.attributes}
             />
           </div>
 
