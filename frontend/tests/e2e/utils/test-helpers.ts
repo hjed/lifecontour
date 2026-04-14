@@ -1066,10 +1066,12 @@ export function createTestHelpers(page: Page) {
 }
 
 /**
- * Wait for page to be fully loaded and interactive.
+ * Wait for page to be fully loaded and interactive by waiting for DOM content
+ * and ensuring the body structure is attached.
  */
 export async function waitForPageReady(page: Page): Promise<void> {
   await page.waitForLoadState('domcontentloaded');
+  await page.locator('body').waitFor({ state: 'attached' });
 }
 
 /**
@@ -1123,7 +1125,7 @@ export class OAuthHelpers {
    */
   async handleOAuthButtons(options?: {
     click?: boolean;
-    waitAfterClick?: number;
+    waitAfterClick?: boolean;
   }): Promise<boolean> {
     const oauthButtons = await this.findOAuthButtons();
     const buttonCount = await oauthButtons.count();
@@ -1159,8 +1161,22 @@ export class AuthHelpers {
    * Returns true if redirected to login, false if stayed on page.
    */
   async checkAuthenticationRedirect(): Promise<boolean> {
-    // Wait a bit for any redirects to complete - wait for URL change or DOM state instead of networkidle
-    await this.page.waitForTimeout(500); // Small debounce for client-side events, explicit timeouts are better than networkidle here
+    // Wait for the expected outcome (redirected to login vs rendered protected content)
+    try {
+      await Promise.race([
+        this.page.waitForURL('**/auth/login**', { timeout: 3000 }),
+        this.page
+          .locator('h1:has-text("Welcome Back")')
+          .waitFor({ state: 'visible', timeout: 3000 }),
+        // If not redirected, the typical page content will load
+        this.page
+          .locator('main, [data-testid="page-container"]')
+          .first()
+          .waitFor({ state: 'attached', timeout: 3000 }),
+      ]);
+    } catch {
+      // If the race times out, fall back to checking the URL and locators below manually
+    }
 
     const currentUrl = this.page.url();
     const hasLoginUrl = currentUrl.includes('/auth/login');
@@ -1186,10 +1202,6 @@ export class AuthHelpers {
    */
   async handleProtectedPageAccess(): Promise<'redirected' | 'accessed'> {
     await waitForPageReady(this.page);
-
-    // Wait a bit longer for any redirects to complete
-    // Use an explicit brief wait since networkidle is unreliable
-    await this.page.waitForTimeout(1000);
 
     if (await this.checkAuthenticationRedirect()) {
       // If redirected to login, verify login page elements
