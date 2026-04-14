@@ -124,6 +124,14 @@ test.describe('Tag Filtering via Main Contacts List', () => {
     const parentData = await parentResp.json();
     const parentId = parentData.data.id;
 
+    // Ensure parent tag is fully committed to DB before using as parent_id to avoid CI race conditions
+    await expect(async () => {
+      const verifyResp = await authenticatedPage.request.get(
+        `/api/tags/${parentId}`
+      );
+      expect(verifyResp.ok()).toBe(true);
+    }).toPass({ timeout: 5000 });
+
     // 2. Create child tag with parent_id
     const childName = 'ChildHier-' + Date.now();
     const childResp = await authenticatedPage.request.post('/api/tags', {
