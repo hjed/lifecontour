@@ -16,6 +16,10 @@ import {
   ImportantDatePrecision,
   ImportantDateTypeEnum,
 } from '@/types/contacts';
+import {
+  useCreateCustomDateType,
+  useCustomDateTypes,
+} from '@/lib/api/contacts';
 
 export interface ImportantDateInlineEditorProps {
   initialData?: ImportantDateAttributes;
@@ -51,7 +55,10 @@ export function ImportantDateInlineEditor({
       : ''
   );
 
-  const handleSave = () => {
+  const { data: customDateTypesData } = useCustomDateTypes();
+  const createCustomMutation = useCreateCustomDateType();
+
+  const handleSave = async () => {
     // Basic validation
     if (precision === ImportantDatePrecision.FULL && (!year || !month || !day))
       return;
@@ -59,18 +66,63 @@ export function ImportantDateInlineEditor({
       return;
     if (precision === ImportantDatePrecision.YEAR && !year) return;
 
-    // In a real app we would want slightly stronger numerical limits on dates (e.g. Month 1-12)
+    if (dateType === ImportantDateTypeEnum.CUSTOM && !customType.trim()) return;
+
+    const parsedYear =
+      precision === ImportantDatePrecision.FULL ||
+      precision === ImportantDatePrecision.YEAR
+        ? year
+          ? parseInt(year, 10)
+          : null
+        : null;
+
+    const parsedMonth =
+      precision === ImportantDatePrecision.FULL ||
+      precision === ImportantDatePrecision.DAY_MONTH
+        ? month
+          ? parseInt(month, 10)
+          : null
+        : null;
+
+    const parsedDay =
+      precision === ImportantDatePrecision.FULL ||
+      precision === ImportantDatePrecision.DAY_MONTH
+        ? day
+          ? parseInt(day, 10)
+          : null
+        : null;
+
+    let customDateTypeId: number | null = null;
+    let customDateTypeName: string | null = null;
+
+    if (dateType === ImportantDateTypeEnum.CUSTOM) {
+      const existingTypes = customDateTypesData?.data || [];
+      const trimmedName = customType.trim();
+      const existing = existingTypes.find(
+        t => t.attributes.name.toLowerCase() === trimmedName.toLowerCase()
+      );
+
+      if (existing) {
+        customDateTypeId = parseInt(existing.id, 10);
+        customDateTypeName = existing.attributes.name;
+      } else {
+        const newType = await createCustomMutation.mutateAsync(trimmedName);
+        customDateTypeId = parseInt(newType.data.id, 10);
+        customDateTypeName = newType.data.attributes.name;
+      }
+    }
+
     const data: ImportantDateAttributes = {
       date_type: dateType,
       precision,
-      year: year ? parseInt(year, 10) : null,
-      month: month ? parseInt(month, 10) : null,
-      day: day ? parseInt(day, 10) : null,
+      year: parsedYear,
+      month: parsedMonth,
+      day: parsedDay,
+      ...(customDateTypeId ? { custom_date_type_id: customDateTypeId } : {}),
+      ...(customDateTypeName
+        ? { custom_date_type_name: customDateTypeName }
+        : {}),
     };
-
-    if (dateType === ImportantDateTypeEnum.CUSTOM) {
-      data.custom_date_type_name = customType;
-    }
 
     onSave(data);
   };

@@ -15,10 +15,11 @@ import {
 import { useUpdateContact } from '@/lib/api/contacts';
 import {
   ContactAttributes,
-  ImportantDateResource,
-  ImportantDatePrecision,
-  ImportantDateTypeEnum,
   ContactFormData,
+  ImportantDateAttributes,
+  ImportantDatePrecision,
+  ImportantDateResource,
+  ImportantDateTypeEnum,
 } from '@/types/contacts';
 import { ImportantDateInlineEditor } from './ImportantDateInlineEditor';
 // uuid not needed anymore
@@ -44,33 +45,25 @@ export function ImportantDatesList({
   const handleCreateOrUpdate = async (
     updatedDates: ImportantDateResource[]
   ) => {
-    try {
-      const data: ContactFormData = {
-        first_name: contactAttributes.first_name,
-        last_name: contactAttributes.last_name,
-        middle_name: contactAttributes.middle_name,
-        nick_name: contactAttributes.nick_name,
-        contact_methods: contactAttributes.contact_methods || [],
-        addresses: contactAttributes.addresses || [],
-        notes: contactAttributes.notes || [],
-        important_dates: updatedDates,
-      };
+    const data: ContactFormData = {
+      first_name: contactAttributes.first_name,
+      last_name: contactAttributes.last_name,
+      middle_name: contactAttributes.middle_name,
+      nick_name: contactAttributes.nick_name,
+      contact_methods: contactAttributes.contact_methods || [],
+      addresses: contactAttributes.addresses || [],
+      notes: contactAttributes.notes || [],
+      important_dates: updatedDates,
+    };
 
-      await updateContactMutation.mutateAsync({ id: contactId, data });
-    } catch (error) {
-      console.error('Failed to update important dates:', error);
-    }
+    return updateContactMutation.mutateAsync({ id: contactId, data });
   };
 
-  const handleAddDate = async (attributes: any) => {
-    // Generate a temporary ID; backend will replace it if needed on read.
-    // Wait, the backend requires a POST for creating resources? No it's a PUT full replace.
-    // So if it has no ID, the backend will treat it as new.
-    // However, TypeScript requires ID for ImportantDateResource.
-    const newResource = {
+  const handleAddDate = async (attributes: ImportantDateAttributes) => {
+    const newResource: ImportantDateResource = {
       type: 'important_dates',
       attributes,
-    } as any;
+    };
 
     await handleCreateOrUpdate([...dates, newResource]);
     setIsAddingDate(false);
@@ -83,7 +76,9 @@ export function ImportantDatesList({
 
   const handleConfirmDelete = async () => {
     if (!dateToDelete) return;
-    const remainingDates = dates.filter(d => d.id !== dateToDelete);
+    const remainingDates = dates.filter(
+      d => d.id?.toString() !== dateToDelete.toString()
+    );
     await handleCreateOrUpdate(remainingDates);
     setDeleteDialogOpen(false);
     setDateToDelete(null);
@@ -174,7 +169,9 @@ export function ImportantDatesList({
                     variant='ghost'
                     size='sm'
                     className='text-destructive hover:bg-destructive/10 hover:text-destructive h-8 w-8 p-0'
-                    onClick={() => date.id && handleDeleteClick(date.id)}
+                    onClick={() =>
+                      date.id && handleDeleteClick(date.id.toString())
+                    }
                     disabled={disabled || updateContactMutation.isPending}
                     aria-label={`Delete ${date.attributes.date_type}`}
                   >

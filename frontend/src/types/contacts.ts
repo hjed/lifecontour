@@ -113,11 +113,10 @@ export interface ImportantDateAttributes {
   [key: string]: unknown;
 }
 
-export interface ImportantDateResource extends Omit<
-  JsonApiResource<ImportantDateAttributes>,
-  'relationships'
-> {
+export interface ImportantDateResource {
+  id?: number | string | null;
   type: 'important_dates';
+  attributes: ImportantDateAttributes;
 }
 
 // Tag Types
