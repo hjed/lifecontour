@@ -389,8 +389,11 @@ test.describe('Journal List Page', () => {
       // Navigate to journals page
       await page.goto('/journals');
       await expect(page.getByTestId('journals-list-ready')).toBeVisible();
-      // Wait for journal data to finish loading (prevents Mobile Chrome flakiness)
-      await page.waitForLoadState('networkidle');
+
+      // Wait for at least one journal to appear to ensure data finishes loading instead of using networkidle
+      await expect(
+        page.getByRole('heading', { name: new RegExp(journals[0].title, 'i') })
+      ).toBeVisible({ timeout: 15000 });
 
       // Verify all journals are initially visible (scrolling into view for mobile viewports)
       for (const journal of journals) {

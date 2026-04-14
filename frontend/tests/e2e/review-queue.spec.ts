@@ -79,7 +79,7 @@ test.describe('Journal Review Queue', () => {
     const resolveBtn = sidebar
       .getByRole('button', { name: /Confirm Match/i })
       .first();
-    await resolveBtn.click({ force: true });
+    await resolveBtn.click();
 
     // 8. Since sourceJournalId is pre-populated, the dialog auto-advances
     //    directly to the conflict resolution step (skipping the "Next" step).
@@ -90,7 +90,7 @@ test.describe('Journal Review Queue', () => {
 
     // 9. Close the resolution dialog via Cancel
     const cancelBtn = resolutionDialog.getByRole('button', { name: 'Cancel' });
-    await cancelBtn.click({ force: true });
+    await cancelBtn.click();
   });
 
   test('should display ReviewSuggestions component on journal detail view', async ({
@@ -159,8 +159,7 @@ test.describe('Journal Review Queue', () => {
     const resolutionButton = suggestionsContainer
       .getByRole('button', { name: /Confirm Match/i })
       .first();
-    await expect(resolutionButton).toBeVisible();
-    await resolutionButton.click({ force: true });
+    await resolutionButton.click();
 
     // 6. Since sourceJournalId is pre-populated from ReviewSuggestions,
     //    the dialog auto-advances directly to Resolve Merge Conflicts.

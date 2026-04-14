@@ -57,7 +57,7 @@ test.describe('Journal Infinite Scroll', () => {
     // 1. Visit page
     await page.goto('/journals');
     await expect(page.getByTestId('journals-list-ready')).toBeVisible();
-    await page.waitForLoadState('networkidle');
+    // Use element-based assertion instead of networkidle
 
     // 2. Initial state: Present should be visible, others shouldn't
     await expect(

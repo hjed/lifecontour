@@ -995,7 +995,8 @@ export class TestDataHelpers {
 
     // Navigate to login page to verify OAuth is configured
     await this.page.goto('/auth/login');
-    await this.page.waitForLoadState('networkidle');
+    // Wait for the page structure to be ready instead of networkidle
+    await this.page.waitForLoadState('domcontentloaded');
 
     // Verify login page loads
     await expect(this.page.locator('h1')).toContainText('Welcome Back');
@@ -1068,7 +1069,6 @@ export function createTestHelpers(page: Page) {
  * Wait for page to be fully loaded and interactive.
  */
 export async function waitForPageReady(page: Page): Promise<void> {
-  await page.waitForLoadState('networkidle');
   await page.waitForLoadState('domcontentloaded');
 }
 
@@ -1136,7 +1136,8 @@ export class OAuthHelpers {
         await oauthButtons.first().click();
 
         if (options.waitAfterClick) {
-          await this.page.waitForLoadState('networkidle');
+          // Wait for DOM to load instead of using networkidle
+          await this.page.waitForLoadState('domcontentloaded');
         }
       }
 
@@ -1158,8 +1159,8 @@ export class AuthHelpers {
    * Returns true if redirected to login, false if stayed on page.
    */
   async checkAuthenticationRedirect(): Promise<boolean> {
-    // Wait a bit for any redirects to complete
-    await this.page.waitForLoadState('networkidle');
+    // Wait a bit for any redirects to complete - wait for URL change or DOM state instead of networkidle
+    await this.page.waitForTimeout(500); // Small debounce for client-side events, explicit timeouts are better than networkidle here
 
     const currentUrl = this.page.url();
     const hasLoginUrl = currentUrl.includes('/auth/login');
@@ -1187,7 +1188,8 @@ export class AuthHelpers {
     await waitForPageReady(this.page);
 
     // Wait a bit longer for any redirects to complete
-    await this.page.waitForLoadState('networkidle');
+    // Use an explicit brief wait since networkidle is unreliable
+    await this.page.waitForTimeout(1000);
 
     if (await this.checkAuthenticationRedirect()) {
       // If redirected to login, verify login page elements
