@@ -41,6 +41,7 @@ class GoogleEventAttendee(BaseModel):
         alias="responseStatus",
         description="The attendee's response status (needsAction, declined, tentative, accepted)",
     )
+    organizer: bool = Field(False, description="Whether the attendee is the organizer")
 
 
 class GoogleEvent(BaseModel):

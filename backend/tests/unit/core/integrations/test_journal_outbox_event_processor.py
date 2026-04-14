@@ -666,6 +666,100 @@ class TestJournalOutboxEventProcessor:
         # 4 calls: calendar, link, resolve, get_rels (no create since email unresolved, no match detection)
         assert mock_connection.execute.call_count == 4
 
+    # ── Invitee sync: handles role and status updates ─────────────────
+
+    @pytest.mark.asyncio
+    async def test_invitee_sync_handles_role_and_status_updates(
+        self,
+        processor: "JournalOutboxEventProcessor",
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Sync should update status and role if they changed from existing."""
+
+        event = _make_outbox_event(
+            event_type="journal_event.updated",
+            sync_action="updated",
+            existing_journal_id=42,
+            contact_relationships=[
+                {
+                    "email": "update_me@example.com",
+                    "relationship_type": "INVITEE",
+                    "status": "ATTENDING",
+                    "role": "ORGANISER",
+                },
+                {
+                    "email": "demote_me@example.com",
+                    "relationship_type": "INVITEE",
+                    "status": "DECLINED",
+                    "role": None,
+                },
+            ],
+        )
+
+        mock_journal_service.update_journal.return_value = _make_journal()
+
+        def _mock_rels() -> MagicMock:
+            result = MagicMock()
+            row1 = MagicMock()
+            row1.journal_id = 42
+            row1.contact_id = 100
+            row1.relationship_type = "INVITEE"
+            row1.created_at = datetime(2026, 3, 1, tzinfo=UTC)
+            row1.status = "NO_REPLY"  # Old status
+            row1.role = None  # Did not have organiser
+
+            row2 = MagicMock()
+            row2.journal_id = 42
+            row2.contact_id = 101
+            row2.relationship_type = "INVITEE"
+            row2.created_at = datetime(2026, 3, 1, tzinfo=UTC)
+            row2.status = "ATTENDING"  # Same status
+            row2.role = "ORGANISER"  # Had organiser, but inbound is None
+
+            result.fetchall.return_value = [row1, row2]
+            return result
+
+        resolve_match = MagicMock()
+        # Contact 100 is update_me, 101 is demote_me
+        resolve_match.fetchone.side_effect = [MagicMock(id=100), MagicMock(id=101)]
+
+        mock_connection.execute.side_effect = [
+            _mock_fetchone(_make_journal_row()),  # find journal
+            _mock_fetchone(_make_link_row()),  # find link
+            _mock_empty_result(),  # save calendar info
+            _mock_empty_result(),  # update etag
+            resolve_match,  # resolve email 1 (update_me)
+            resolve_match,  # resolve email 2 (demote_me)
+            _mock_rels(),  # fetch existing
+            _mock_empty_result(),  # update 1
+            _mock_empty_result(),  # update 2
+        ]
+
+        result = await processor.process_event(event)
+
+        assert result["status"] == "success"
+
+        # Verify 2 updates occurred
+        update_calls = [
+            call
+            for call in mock_connection.execute.call_args_list
+            if "UPDATE journal_contact_relationships" in str(call[0][0].text)
+        ]
+        assert len(update_calls) == 2
+
+        # Verify update 1 (100) set ORGANISER and ATTENDING
+        params1 = update_calls[0][0][1]
+        assert params1["contact_id"] == 100
+        assert params1["status"] == "ATTENDING"
+        assert params1["role"] == "ORGANISER"
+
+        # Verify update 2 (101) demoted ORGANISER to None
+        params2 = update_calls[1][0][1]
+        assert params2["contact_id"] == 101
+        assert params2["status"] == "DECLINED"
+        assert params2["role"] is None
+
     # ── InboundFieldMerger applied during update ─────────────────────
 
     @pytest.mark.asyncio
