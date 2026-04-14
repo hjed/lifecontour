@@ -389,8 +389,11 @@ test.describe('Journal List Page', () => {
       // Navigate to journals page
       await page.goto('/journals');
       await expect(page.getByTestId('journals-list-ready')).toBeVisible();
-      // Wait for journal data to finish loading (prevents Mobile Chrome flakiness)
-      await page.waitForLoadState('networkidle');
+
+      // Wait for at least one journal to appear to ensure data finishes loading instead of using networkidle
+      await expect(
+        page.getByRole('heading', { name: new RegExp(journals[0].title, 'i') })
+      ).toBeVisible({ timeout: 15000 });
 
       // Verify all journals are initially visible (scrolling into view for mobile viewports)
       for (const journal of journals) {
@@ -1458,13 +1461,15 @@ test.describe('Journal List Page', () => {
       await dataManager.clearAllJournals();
 
       const targetDate = new Date();
-      targetDate.setDate(targetDate.getDate() + 15);
+      // Ensure target date is the 15th of next month to absolutely prevent picking an overlapping 'outside day' from adjacent months in Shadcn/Radix calendars
+      targetDate.setMonth(targetDate.getMonth() + 1);
+      targetDate.setDate(15);
       const targetIso = targetDate.toISOString();
 
       const journals = await dataManager.createJournals([
         {
           title: 'Future Journal',
-          content: 'A journal 15 days in the future',
+          content: 'A journal next month',
           event_date_range: { start: targetIso, end: targetIso },
         },
       ]);
@@ -1476,7 +1481,9 @@ test.describe('Journal List Page', () => {
       await page.goto('/journals');
       await expect(page.getByTestId('journals-list-ready')).toBeVisible();
 
-      // The future journal shouldn't be visible initially
+      // Wait for empty state to indicate initial (present) load is complete before jumping
+      const emptyStateText = page.getByText('No journals found');
+      await expect(emptyStateText).toBeVisible();
       await expect(
         page.getByRole('heading', { name: targetJournalTitle })
       ).not.toBeVisible();
