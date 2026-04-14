@@ -1,29 +1,42 @@
 /**
  * Journals page - displays journal entries with filtering
  *
- * Integrates JournalList and JournalFilters components to provide
- * a comprehensive journal browsing experience.
+ * Integrates JournalList, JournalFilters, and calendar view components
+ * to provide a comprehensive journal browsing experience.
+ * Supports List (default), Month, and Agenda view modes.
  */
 
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import Link from 'next/link';
 import type { Route } from 'next';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { DayGroupedJournalList } from '@/components/journals/DayGroupedJournalList';
 import { JournalFilters } from '@/components/journals/JournalFilters';
+import {
+  CalendarViewToggle,
+  CalendarViewMode,
+} from '@/components/journals/CalendarViewToggle';
+import { CalendarMonthView } from '@/components/journals/CalendarMonthView';
+import { CalendarAgendaView } from '@/components/journals/CalendarAgendaView';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import {
   useInfiniteJournals,
+  useJournals,
   useSearchJournals,
   useReviewItems,
 } from '@/lib/api/journals';
 import { useDebounce } from '@/hooks/useDebounce';
 import { useDisplayJournals } from '@/hooks/useDisplayJournals';
 import { JournalFilters as JournalFiltersType } from '@/types/journals';
+import {
+  toCalendarEvents,
+  getMonthDateRange,
+  getAgendaDateRange,
+} from '@/lib/calendarEventHelpers';
 import {
   BookOpen,
   Filter,
@@ -82,6 +95,28 @@ export default function JournalsPage() {
   const [showFilters, setShowFilters] = useState(true);
   const [queueOpen, setQueueOpen] = useState(false);
   const [anchorDate, setAnchorDate] = useState<string | undefined>();
+  const [viewMode, setViewModeState] = useState<CalendarViewMode>('list');
+
+  // Load saved view mode on first client render to avoid hydration mismatch
+  useEffect(() => {
+    const stored = window.sessionStorage.getItem('pms_view_mode');
+    if (stored === 'month' || stored === 'agenda' || stored === 'list') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setViewModeState(stored as CalendarViewMode);
+    }
+  }, []);
+
+  const setViewMode = (mode: CalendarViewMode) => {
+    setViewModeState(mode);
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.setItem('pms_view_mode', mode);
+    }
+  };
+
+  const [calendarMonth, setCalendarMonth] = useState(() => ({
+    year: new Date().getFullYear(),
+    month: new Date().getMonth(),
+  }));
 
   const { data: reviewItemsData } = useReviewItems('pending', 1, 1);
   const reviewQueueCount = (reviewItemsData?.meta?.total_count as number) || 0;
@@ -115,6 +150,55 @@ export default function JournalsPage() {
     debouncedSearchQuery,
     { types: filters.types },
     { enabled: shouldUseSearch }
+  );
+
+  // Calendar view data: fetch journals for the displayed month or agenda window
+  const monthDateRange = useMemo(
+    () => getMonthDateRange(calendarMonth.year, calendarMonth.month),
+    [calendarMonth.year, calendarMonth.month]
+  );
+  const agendaDateRange = useMemo(
+    () =>
+      getAgendaDateRange(
+        anchorDate ? parseISO(anchorDate) : new Date(),
+        30,
+        14
+      ),
+    [anchorDate]
+  );
+
+  const calendarFilters: JournalFiltersType = useMemo(() => {
+    const baseFilters = { ...filters };
+    if (viewMode === 'month') {
+      return {
+        ...baseFilters,
+        date_from: monthDateRange.start,
+        date_to: monthDateRange.end,
+        limit: 100,
+      };
+    }
+    if (viewMode === 'agenda') {
+      return {
+        ...baseFilters,
+        date_from: agendaDateRange.start,
+        date_to: agendaDateRange.end,
+        limit: 100,
+      };
+    }
+    return baseFilters;
+  }, [filters, viewMode, monthDateRange, agendaDateRange]);
+
+  const { data: calendarData, isLoading: isCalendarLoading } = useJournals(
+    calendarFilters,
+    {
+      enabled: !shouldUseSearch && viewMode !== 'list',
+    }
+  );
+
+  const calendarJournals = useDisplayJournals(calendarData?.data, false);
+  const calendarEvents = useMemo(
+    () => toCalendarEvents(calendarJournals),
+    [calendarJournals]
   );
 
   const isLoading = shouldUseSearch ? isLoadingSearch : isInfiniteLoading;
@@ -197,6 +281,7 @@ export default function JournalsPage() {
                   />
                 </div>
 
+                <CalendarViewToggle value={viewMode} onChange={setViewMode} />
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button
@@ -221,7 +306,15 @@ export default function JournalsPage() {
                       mode='single'
                       selected={anchorDate ? parseISO(anchorDate) : undefined}
                       onSelect={d => {
-                        if (d) setAnchorDate(format(d, 'yyyy-MM-dd'));
+                        if (d) {
+                          setAnchorDate(format(d, 'yyyy-MM-dd'));
+                          if (viewMode === 'month') {
+                            setCalendarMonth({
+                              year: d.getFullYear(),
+                              month: d.getMonth(),
+                            });
+                          }
+                        }
                       }}
                       initialFocus
                     />
@@ -312,58 +405,94 @@ export default function JournalsPage() {
 
         {/* Main Content */}
         <main className={cn('flex-1', !showFilters && 'w-full')}>
-          {isLoading && (
-            <div className='flex items-center justify-center py-12'>
-              <div className='text-muted-foreground'>Loading journals...</div>
-            </div>
+          {/* List View (default) */}
+          {viewMode === 'list' && (
+            <>
+              {isLoading && (
+                <div className='flex items-center justify-center py-12'>
+                  <div className='text-muted-foreground'>
+                    Loading journals...
+                  </div>
+                </div>
+              )}
+              {!isLoading && error && (
+                <Card>
+                  <CardContent className='py-12 text-center'>
+                    <p className='text-destructive'>
+                      Failed to load journals. Please try again.
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
+              {!isLoading && !error && (
+                <DayGroupedJournalList
+                  journals={displayJournals}
+                  isLoadingNext={shouldUseSearch ? false : isFetchingNextPage}
+                  isLoadingPrevious={
+                    shouldUseSearch ? false : isFetchingPreviousPage
+                  }
+                  hasNextPage={shouldUseSearch ? false : hasNextPage}
+                  hasPreviousPage={shouldUseSearch ? false : hasPreviousPage}
+                  fetchNextPage={shouldUseSearch ? undefined : fetchNextPage}
+                  fetchPreviousPage={
+                    shouldUseSearch ? undefined : fetchPreviousPage
+                  }
+                  dateBounds={dateBounds}
+                  collapseEmptyDays={
+                    shouldUseSearch || Object.keys(filters).length > 0
+                  }
+                  onJumpToDate={date => setAnchorDate(date)}
+                  focusDate={anchorDate || format(new Date(), 'yyyy-MM-dd')}
+                  emptyState={
+                    <Card>
+                      <CardContent className='py-12 text-center'>
+                        <BookOpen className='text-muted-foreground mx-auto h-12 w-12' />
+                        <h3 className='mt-4 text-lg font-semibold'>
+                          No journals found
+                        </h3>
+                        <p className='text-muted-foreground mt-2 text-sm'>
+                          {getEmptyStateMessage(searchQuery, filters)}
+                        </p>
+                        <Button asChild className='mt-4 gap-2'>
+                          <Link href={'/journals/new' as Route}>
+                            <Plus className='h-4 w-4' />
+                            Create Journal
+                          </Link>
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  }
+                />
+              )}
+            </>
           )}
-          {!isLoading && error && (
+
+          {/* Month View */}
+          {viewMode === 'month' && (
             <Card>
-              <CardContent className='py-12 text-center'>
-                <p className='text-destructive'>
-                  Failed to load journals. Please try again.
-                </p>
+              <CardContent className='pt-6'>
+                <CalendarMonthView
+                  year={calendarMonth.year}
+                  month={calendarMonth.month}
+                  events={calendarEvents}
+                  onMonthChange={(year, month) =>
+                    setCalendarMonth({ year, month })
+                  }
+                  onDayClick={date => {
+                    setAnchorDate(date);
+                    setViewMode('agenda');
+                  }}
+                  isLoading={isCalendarLoading}
+                />
               </CardContent>
             </Card>
           )}
-          {!isLoading && !error && (
-            <DayGroupedJournalList
-              journals={displayJournals}
-              isLoadingNext={shouldUseSearch ? false : isFetchingNextPage}
-              isLoadingPrevious={
-                shouldUseSearch ? false : isFetchingPreviousPage
-              }
-              hasNextPage={shouldUseSearch ? false : hasNextPage}
-              hasPreviousPage={shouldUseSearch ? false : hasPreviousPage}
-              fetchNextPage={shouldUseSearch ? undefined : fetchNextPage}
-              fetchPreviousPage={
-                shouldUseSearch ? undefined : fetchPreviousPage
-              }
-              dateBounds={dateBounds}
-              collapseEmptyDays={
-                shouldUseSearch || Object.keys(filters).length > 0
-              }
-              onJumpToDate={date => setAnchorDate(date)}
-              focusDate={anchorDate || format(new Date(), 'yyyy-MM-dd')}
-              emptyState={
-                <Card>
-                  <CardContent className='py-12 text-center'>
-                    <BookOpen className='text-muted-foreground mx-auto h-12 w-12' />
-                    <h3 className='mt-4 text-lg font-semibold'>
-                      No journals found
-                    </h3>
-                    <p className='text-muted-foreground mt-2 text-sm'>
-                      {getEmptyStateMessage(searchQuery, filters)}
-                    </p>
-                    <Button asChild className='mt-4 gap-2'>
-                      <Link href={'/journals/new' as Route}>
-                        <Plus className='h-4 w-4' />
-                        Create Journal
-                      </Link>
-                    </Button>
-                  </CardContent>
-                </Card>
-              }
+
+          {/* Agenda View */}
+          {viewMode === 'agenda' && (
+            <CalendarAgendaView
+              events={calendarEvents}
+              isLoading={isCalendarLoading}
             />
           )}
         </main>

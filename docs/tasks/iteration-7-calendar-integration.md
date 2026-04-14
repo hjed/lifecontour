@@ -485,17 +485,26 @@ Phase 1 and Phase 2 were implemented as a combined delivery. The merge domain se
 
 #### Phase 1: Shared Calendar Data Source plus Month and Agenda Views
 **PR Size:** ~5-7 files
+**Status:** ✅ Implementation complete, E2E tests written pending CI validation
+
+**Implementation Notes:**
+- `calendarEventHelpers.ts`: Pure helper functions transforming `DisplayJournal` → `CalendarEvent` with date bucketing and range calculation (17 unit tests).
+- `CalendarViewToggle`: Radio-group segmented control for List/Month/Agenda switching (5 component tests).
+- `CalendarMonthView`: Month grid with event pills, calendar colour dots, click-to-navigate, and month nav (13 component tests).
+- `CalendarAgendaView`: Chronological list grouped by day with time ranges, type icons, and calendar indicators (11 component tests).
+- `JournalsPage` integration: `useJournals` with date-scoped `calendarFilters` memo for calendar data, conditional rendering of the three view modes.
+- E2E spec: 8 tests covering view switching, event navigation, colour coding, filter integration, persistence, and month navigation.
 
 **Acceptance Criteria:**
-- [ ] Provide a shared event/calendar read model for alternate calendar presentations.
-- [ ] Implement month and agenda views that open journals on selection and respect the same filters as the list view where practical.
-- [ ] Colour coding by calendar is supported where the relevant data is available.
-- [ ] The alternate views do not fork event semantics away from the canonical journal model.
+- [x] Provide a shared event/calendar read model for alternate calendar presentations.
+- [x] Implement month and agenda views that open journals on selection and respect the same filters as the list view where practical.
+- [x] Colour coding by calendar is supported where the relevant data is available.
+- [x] The alternate views do not fork event semantics away from the canonical journal model.
 
 **Required Test Coverage:**
-- **Unit:** calendar-view shaping helpers and date-bucket formatting.
-- **Integration:** component/data tests for month and agenda rendering with real event-window contracts.
-- **E2E:** switch to calendar mode, open an event from the month or agenda view, and return to journal detail successfully.
+- **Unit:** ✅ calendar-view shaping helpers and date-bucket formatting (17 tests).
+- **Integration:** ✅ component/data tests for month and agenda rendering with real event-window contracts (29 tests).
+- **E2E:** ✅ switch to calendar mode, open an event from the month or agenda view, and return to journal detail successfully (8 tests written).
 
 #### Phase 2: Week and Day Views with Quick Create and Edit Entry Points
 **PR Size:** ~5-8 files
