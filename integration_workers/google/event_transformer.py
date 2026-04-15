@@ -81,17 +81,20 @@ class GoogleEventTransformer:
         except JournalValidationError:
             return None
 
-        if is_all_day:
-            start_time = None
-            end_time = None
-        else:
-            start_time = start_dt.time().replace(tzinfo=None)
-            end_time = end_dt.time().replace(tzinfo=None)
-
         event_state = self._resolve_event_state(google_event, self_email)
 
         # Extract timezone from Google event (prefer start timezone)
         event_timezone = self._extract_timezone(google_event)
+
+        local_start_dt = self._extract_local_datetime(start_dt, event_timezone)
+        local_end_dt = self._extract_local_datetime(end_dt, event_timezone)
+
+        if is_all_day:
+            start_time = None
+            end_time = None
+        else:
+            start_time = local_start_dt.time().replace(tzinfo=None) if local_start_dt else None
+            end_time = local_end_dt.time().replace(tzinfo=None) if local_end_dt else None
 
         calendar_info = CalendarInfo(
             journal_id=None,
@@ -102,11 +105,25 @@ class GoogleEventTransformer:
             location=google_event.location,
             timezone=event_timezone,
             event_state=event_state,
-            event_start_date=start_dt.date(),
-            event_end_date=end_dt.date(),
+            event_start_date=local_start_dt.date() if local_start_dt else None,
+            event_end_date=local_end_dt.date() if local_end_dt else None,
         )
 
         return journal, calendar_info
+
+    def _extract_local_datetime(
+        self, dt_utc: datetime | None, timezone_str: str | None
+    ) -> datetime | None:
+        if not dt_utc:
+            return None
+        if not timezone_str:
+            return dt_utc
+        try:
+            from zoneinfo import ZoneInfo
+            tz = ZoneInfo(timezone_str)
+            return dt_utc.astimezone(tz)
+        except Exception:
+            return dt_utc
 
     def _extract_timezone(self, google_event: GoogleEvent) -> str | None:
         """Extract IANA timezone from Google event start/end.
@@ -227,17 +244,30 @@ class GoogleEventTransformer:
         if calendar_info.is_all_day:
             from datetime import timedelta
 
-            payload["start"] = {"date": start_dt.strftime("%Y-%m-%d")}
-            payload["end"] = {"date": (end_dt + timedelta(days=1)).strftime("%Y-%m-%d")}
+            local_start_dt = self._extract_local_datetime(start_dt, calendar_info.timezone)
+            local_end_dt = self._extract_local_datetime(end_dt, calendar_info.timezone)
+
+            payload["start"] = {"date": local_start_dt.strftime("%Y-%m-%d") if local_start_dt else start_dt.strftime("%Y-%m-%d")}
+            payload["end"] = {"date": ((local_end_dt or end_dt) + timedelta(days=1)).strftime("%Y-%m-%d")}
         else:
+            tz = UTC
+            if calendar_info.timezone:
+                try:
+                    from zoneinfo import ZoneInfo
+                    tz = ZoneInfo(calendar_info.timezone)
+                except Exception:
+                    pass
+
             if calendar_info.start_time is not None:
+                local_start_dt = start_dt.astimezone(tz)
                 start_dt = datetime.combine(
-                    start_dt.date(), calendar_info.start_time, tzinfo=UTC
-                )
+                    local_start_dt.date(), calendar_info.start_time, tzinfo=tz
+                ).astimezone(UTC)
             if calendar_info.end_time is not None:
+                local_end_dt = end_dt.astimezone(tz)
                 end_dt = datetime.combine(
-                    end_dt.date(), calendar_info.end_time, tzinfo=UTC
-                )
+                    local_end_dt.date(), calendar_info.end_time, tzinfo=tz
+                ).astimezone(UTC)
 
             # Format datetime as ISO 8601. Add 'Z' manually if UTC, else Google handles offsets.
             # Our backend expects UTC.
