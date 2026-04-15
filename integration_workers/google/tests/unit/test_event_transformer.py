@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time
 from typing import Any
 
 from core_shared.models.journals import CalendarInfo, EventDateRange, Journal
@@ -552,7 +552,7 @@ class TestGoogleEventTransformerTimezone:
     """Tests for timezone extraction and preservation in Google event sync."""
 
     def test_inbound_event_extracts_start_timezone(self) -> None:
-        """Timezone from start.timeZone is extracted into CalendarInfo."""
+        """Timezone from start.timeZone is extracted into CalendarInfo and correctly transforms UTC times to local Wall Clock times."""
         google_event = GoogleEvent.model_validate(
             {
                 "id": "tz_event_1",
@@ -572,7 +572,16 @@ class TestGoogleEventTransformerTimezone:
         result = transformer.transform_event(google_event, "user1", uuid.uuid4())
         assert result is not None
         _, calendar_info = result
+
         assert calendar_info.timezone == "Australia/Sydney"
+
+        # Verify local date was correctly offset from UTC date (which was 26 Oct 23:00)
+        assert calendar_info.event_start_date == date(2023, 10, 27)
+        assert calendar_info.event_end_date == date(2023, 10, 27)
+
+        # Verify local time was correctly translated from UTC
+        assert calendar_info.start_time == time(10, 0)
+        assert calendar_info.end_time == time(11, 0)
 
     def test_inbound_event_no_timezone_returns_none(self) -> None:
         """When no timeZone is set on start/end, CalendarInfo.timezone is None."""
@@ -680,6 +689,41 @@ class TestGoogleEventTransformerTimezone:
         payload = transformer.transform_to_google_event_payload(journal, calendar_info)
         assert "timeZone" not in payload["start"]
         assert "timeZone" not in payload["end"]
+
+    def test_outbound_payload_translates_local_time_to_utc_with_midnight_crossing(self) -> None:
+        """Outbound Google payload maps a local start_time that crosses UTC midnight back into the correct UTC offset string."""
+        transformer = GoogleEventTransformer()
+
+        # Scenario: Sydney 10:00 AM Thursday, which is UTC 23:00 Wednesday.
+        # This crosses the UTC midnight boundary backwards.
+        start_dt = datetime(2023, 10, 25, 23, 0, tzinfo=UTC)
+        end_dt = datetime(2023, 10, 26, 0, 0, tzinfo=UTC)
+
+        journal = Journal(
+            user_id="user_123",
+            title="Sydney Morning Meeting",
+            content="",
+            event_date_range=EventDateRange(start=start_dt, end=end_dt),
+        )
+
+        # The local times that we expect the UI / Database to be storing
+        calendar_info = CalendarInfo(
+            calendar_id=uuid.uuid4(),
+            start_time=time(10, 0),
+            end_time=time(11, 0),
+            is_all_day=False,
+            timezone="Australia/Sydney",
+            event_start_date=date(2023, 10, 26),
+            event_end_date=date(2023, 10, 26),
+        )
+
+        payload = transformer.transform_to_google_event_payload(journal, calendar_info)
+
+        # It should reconstruct back to the proper UTC string matching our start_dt and end_dt
+        assert payload["start"]["dateTime"] == "2023-10-25T23:00:00Z"
+        assert payload["end"]["dateTime"] == "2023-10-26T00:00:00Z"
+        assert payload["start"]["timeZone"] == "Australia/Sydney"
+        assert payload["end"]["timeZone"] == "Australia/Sydney"
 
     def test_inbound_event_prefers_start_timezone(self) -> None:
         """When start and end have different timezones, start is preferred."""
