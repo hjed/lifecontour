@@ -1,6 +1,6 @@
 """SQL implementation of CalendarInfoRepository."""
 
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
@@ -58,18 +58,44 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
         start_date = event_start_date
         end_date = event_end_date
 
+        tz_str = getattr(row, "timezone", None)
+
+        def _get_local_date(dt: datetime | Any) -> date | None:
+            if not dt:
+                return None
+
+            # Since SQLAlchemy stores it with timezone context in Postgres (or naive UTC context)
+            if not isinstance(dt, datetime):
+                # Fallback if it's not a datetime object somehow
+                return dt.date()  # type: ignore[no-any-return]
+
+            from datetime import UTC
+            from zoneinfo import ZoneInfo
+
+            # Ensure the dt is timezone-aware (assumed UTC if naive from DB)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=UTC)
+
+            if not tz_str:
+                return dt.date()
+            try:
+                tz = ZoneInfo(tz_str)
+                return dt.astimezone(tz).date()
+            except Exception:
+                return dt.date()
+
         if (
             start_date is None
             and hasattr(row, "event_date_range_start")
             and row.event_date_range_start
         ):
-            start_date = row.event_date_range_start.date()
+            start_date = _get_local_date(row.event_date_range_start)
         if (
             end_date is None
             and hasattr(row, "event_date_range_end")
             and row.event_date_range_end
         ):
-            end_date = row.event_date_range_end.date()
+            end_date = _get_local_date(row.event_date_range_end)
 
         return CalendarInfo(
             journal_id=row.journal_id,

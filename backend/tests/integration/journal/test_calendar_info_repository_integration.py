@@ -272,6 +272,50 @@ class TestCalendarInfoRepositoryFindByJournalId:
         assert found.start_time == time(23, 0)
         assert found.end_time == time(1, 0)
 
+    async def test_find_by_journal_id_preserves_local_dates_with_timezone(
+        self,
+        calendar_info_repository: SqlCalendarInfoRepository,
+        journal_repository: SqlJournalRepository,
+        test_calendar: Calendar,
+    ):
+        """Test finding calendar info maps local dates using the timezone correctly across UTC boundaries."""
+        # 23:00 UTC on day 1 = 10:00 Sydney on day 2
+        start_dt = datetime(2023, 10, 25, 23, 0, tzinfo=UTC)
+        end_dt = datetime(2023, 10, 26, 0, 0, tzinfo=UTC)
+
+        journal = await journal_repository.save(
+            Journal(
+                user_id="test-user-123",
+                title="Timezone Bound Event",
+                content="Event content",
+                event_date_range=EventDateRange(
+                    start=start_dt,
+                    end=end_dt,
+                ),
+            )
+        )
+
+        calendar_info = create_test_calendar_info(
+            journal_id=journal.id,  # type: ignore[arg-type]
+            calendar_id=test_calendar.id,
+            start_time=time(10, 0),
+            end_time=time(11, 0),
+            # We seed it directly, but we want to assert the repository finds it correctly parsing local dates
+            event_start_date=date(2023, 10, 26),
+            event_end_date=date(2023, 10, 26),
+        )
+        calendar_info.timezone = "Australia/Sydney"
+
+        await calendar_info_repository.save(calendar_info)
+
+        found = await calendar_info_repository.find_by_journal_id(journal.id)  # type: ignore[arg-type]
+
+        assert found is not None
+        assert found.journal_id == journal.id
+        # The timezone was used to translate the UTC `event_date_range_start` (Oct 25) back to Local Date (Oct 26)
+        assert found.event_start_date == date(2023, 10, 26)
+        assert found.event_end_date == date(2023, 10, 26)
+
 
 @pytest.mark.integration
 class TestCalendarInfoRepositoryDelete:
