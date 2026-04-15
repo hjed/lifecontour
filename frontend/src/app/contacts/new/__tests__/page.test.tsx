@@ -264,6 +264,7 @@ describe('NewContactPage', () => {
         contact_methods: [],
         addresses: [],
         notes: [],
+        important_dates: [],
       });
     });
 
@@ -306,6 +307,7 @@ describe('NewContactPage', () => {
         contact_methods: [],
         addresses: [],
         notes: [],
+        important_dates: [],
       });
     });
 

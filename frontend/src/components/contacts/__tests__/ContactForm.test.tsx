@@ -113,6 +113,7 @@ describe('ContactForm', () => {
         contact_methods: [],
         addresses: [],
         notes: [],
+        important_dates: [],
       });
     });
   });
@@ -272,6 +273,7 @@ describe('ContactForm', () => {
           },
         },
       ],
+      important_dates: [],
     };
 
     render(<ContactForm {...defaultProps} initialData={initialData} />);
@@ -294,6 +296,7 @@ describe('ContactForm', () => {
         contact_methods: initialData.contact_methods,
         addresses: initialData.addresses,
         notes: initialData.notes,
+        important_dates: initialData.important_dates,
       });
     });
   });
@@ -320,6 +323,7 @@ describe('ContactForm', () => {
         contact_methods: [],
         addresses: [],
         notes: [],
+        important_dates: [],
       });
     });
   });
