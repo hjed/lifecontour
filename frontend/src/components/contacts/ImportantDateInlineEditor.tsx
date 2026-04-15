@@ -23,7 +23,7 @@ import {
 
 export interface ImportantDateInlineEditorProps {
   initialData?: ImportantDateAttributes;
-  onSave: (data: ImportantDateAttributes) => void;
+  onSave: (data: ImportantDateAttributes) => Promise<void>;
   onCancel: () => void;
   isLoading?: boolean;
 }
@@ -34,6 +34,7 @@ export function ImportantDateInlineEditor({
   onCancel,
   isLoading = false,
 }: ImportantDateInlineEditorProps) {
+  const [isSaving, setIsSaving] = useState(false);
   const [dateType, setDateType] = useState<ImportantDateTypeEnum | string>(
     initialData?.date_type || ImportantDateTypeEnum.BIRTHDAY
   );
@@ -92,6 +93,11 @@ export function ImportantDateInlineEditor({
           : null
         : null;
 
+    // Validate parsed numbers are not NaN (can happen with non-numeric browser input)
+    if (parsedYear !== null && isNaN(parsedYear)) return;
+    if (parsedMonth !== null && isNaN(parsedMonth)) return;
+    if (parsedDay !== null && isNaN(parsedDay)) return;
+
     let customDateTypeId: number | null = null;
     let customDateTypeName: string | null = null;
 
@@ -124,7 +130,12 @@ export function ImportantDateInlineEditor({
         : {}),
     };
 
-    onSave(data);
+    setIsSaving(true);
+    try {
+      await onSave(data);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -231,7 +242,7 @@ export function ImportantDateInlineEditor({
           size='sm'
           variant='ghost'
           onClick={handleSave}
-          disabled={isLoading}
+          disabled={isLoading || isSaving || createCustomMutation.isPending}
           className='h-8 w-8 p-0 text-green-600 hover:bg-green-50 hover:text-green-700'
           aria-label='Save date'
         >
@@ -242,7 +253,7 @@ export function ImportantDateInlineEditor({
           size='sm'
           variant='ghost'
           onClick={onCancel}
-          disabled={isLoading}
+          disabled={isLoading || isSaving || createCustomMutation.isPending}
           className='h-8 w-8 p-0 text-red-600 hover:bg-red-50 hover:text-red-700'
           aria-label='Cancel edit'
         >

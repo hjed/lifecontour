@@ -84,7 +84,7 @@ export function ImportantDatesList({
     setDateToDelete(null);
   };
 
-  const formatDisplay = (attr: any) => {
+  const formatDisplay = (attr: ImportantDateAttributes) => {
     const parts = [];
     if (
       attr.precision === ImportantDatePrecision.FULL ||
@@ -101,7 +101,7 @@ export function ImportantDatesList({
     return parts.join(' ');
   };
 
-  const getMonthName = (m?: number) => {
+  const getMonthName = (m?: number | null) => {
     if (!m || m < 1 || m > 12) return '???';
     const date = new Date(2000, m - 1, 1);
     return date.toLocaleString('default', { month: 'long' });
