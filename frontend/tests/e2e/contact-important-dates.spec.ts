@@ -68,13 +68,22 @@ test.describe('Important Dates', () => {
     // Enter Year
     await authenticatedPage.getByPlaceholder('YYYY').fill('2010');
 
+    // Wait for the PUT request for the new date
+    const saveResponsePromise = authenticatedPage.waitForResponse(
+      response =>
+        response.url().includes('/api/contacts/') &&
+        response.request().method() === 'PUT' &&
+        response.status() === 200
+    );
+
     // Save
     await authenticatedPage.getByLabel('Save date').click();
+    await saveResponsePromise;
 
     // Verify UI updates
     await expect(
       authenticatedPage.getByText(/marriage anniversary/i)
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 10000 });
     await expect(authenticatedPage.getByText('2010')).toBeVisible();
 
     // --- Delete the birthday ---
@@ -84,11 +93,23 @@ test.describe('Important Dates', () => {
     const deleteDialog = authenticatedPage.getByRole('dialog');
     await expect(deleteDialog).toBeVisible();
 
+    // Wait for the PUT request for the deletion
+    const deleteResponsePromise = authenticatedPage.waitForResponse(
+      response =>
+        response.url().includes('/api/contacts/') &&
+        response.request().method() === 'PUT' &&
+        response.status() === 200
+    );
+
     // Confirm delete
     await deleteDialog.getByRole('button', { name: 'Delete' }).click();
+    await deleteResponsePromise;
 
-    // Verify birthday is removed
-    await expect(authenticatedPage.getByText(/birthday/i)).not.toBeVisible();
+    // Verify dialog is closed and birthday is removed
+    await expect(deleteDialog).not.toBeVisible();
+    await expect(authenticatedPage.getByText(/birthday/i)).not.toBeVisible({
+      timeout: 10000,
+    });
     // But marriage anniversary is still there
     await expect(
       authenticatedPage.getByText(/marriage anniversary/i)
