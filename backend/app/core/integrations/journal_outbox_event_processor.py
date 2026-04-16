@@ -12,6 +12,8 @@ from uuid import UUID
 
 import structlog
 from core_shared.models.journals import (
+    AttendeeStatus,
+    ContactEventRole,
     EventDateRange,
     Journal,
 )
@@ -719,28 +721,28 @@ class JournalOutboxEventProcessor:
 
     @staticmethod
     def _group_relationships_by_type(
-        contact_relationships: list[dict[str, str]],
-    ) -> dict[str, list[str]]:
-        """Group contact relationship entries by type, filtering empty values."""
-        by_type: dict[str, list[str]] = {}
+        contact_relationships: list[dict[str, Any]],
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Group contact relationship entries by type, filtering missing emails."""
+        by_type: dict[str, list[dict[str, Any]]] = {}
         for rel in contact_relationships:
             rel_type = rel.get("relationship_type", "")
             email = rel.get("email", "")
             if rel_type and email:
-                by_type.setdefault(rel_type, []).append(email)
+                by_type.setdefault(rel_type, []).append(rel)
         return by_type
 
     async def _resolve_emails_to_contact_ids(
         self,
         emails: list[str],
         journal_id: int,
-    ) -> set[int]:
+    ) -> dict[str, int]:
         """Resolve a list of emails to contact IDs, skipping unknown emails."""
-        resolved: set[int] = set()
+        resolved: dict[str, int] = {}
         for email in emails:
             contact_id = await self.contact_resolver.resolve_by_email(email)
             if contact_id is not None:
-                resolved.add(contact_id)
+                resolved[email] = contact_id
             else:
                 logger.debug(
                     "Invitee email not matched to contact, skipping",
@@ -752,27 +754,28 @@ class JournalOutboxEventProcessor:
     async def _sync_contact_relationships(
         self,
         journal_id: int,
-        contact_relationships: list[dict[str, str]],
+        contact_relationships: list[dict[str, Any]],
     ) -> None:
         """Sync contact relationships for a journal from inbound data.
 
         For each relationship type in the inbound list, resolves emails to
         contact IDs, then diffs against existing relationships of that type.
-        Creates missing relationships and deletes removed ones. Only mutates
-        the specific relationship_type from the inbound data — other types
-        (e.g. PARTICIPANT) are left intact.
+        Creates missing relationships and deletes removed ones. Also updates
+        status and role fields if they have changed, while respecting manual
+        roles. Only mutates the specific relationship_type from the inbound
+        data — other types (e.g. PARTICIPANT) are left intact.
 
         Args:
             journal_id: ID of the journal to sync relationships for
-            contact_relationships: List of dicts with 'email' and
-                'relationship_type' keys
+            contact_relationships: List of dicts with 'email',
+                'relationship_type', and optional 'status', 'role'
         """
         if contact_relationships is None:
             return
 
         by_type = self._group_relationships_by_type(contact_relationships)
 
-        for rel_type_str, emails in by_type.items():
+        for rel_type_str, payloads in by_type.items():
             try:
                 rel_type = JournalContactRelationshipType(rel_type_str)
             except ValueError:
@@ -783,20 +786,97 @@ class JournalOutboxEventProcessor:
                 )
                 continue
 
+            emails = [p["email"] for p in payloads]
             resolved_contact_ids = await self._resolve_emails_to_contact_ids(
                 emails, journal_id
             )
 
             # Diff against existing relationships of this type
             existing = await self._get_relationships_by_type(journal_id, rel_type)
-            existing_contact_ids = {r.contact_id for r in existing}
+            existing_by_contact_id = {r.contact_id: r for r in existing}
 
-            to_create = resolved_contact_ids - existing_contact_ids
-            to_delete = existing_contact_ids - resolved_contact_ids
+            # Prepare operations
+            to_create: list[tuple[int, str | None, str | None]] = []
+            to_update: list[tuple[int, str | None, str | None]] = []
 
-            for contact_id in to_create:
+            resolved_contact_id_set = set(resolved_contact_ids.values())
+            to_delete = set(existing_by_contact_id.keys()) - resolved_contact_id_set
+
+            for inbound_payload in payloads:
+                email = inbound_payload["email"]
+                if email not in resolved_contact_ids:
+                    continue
+
+                contact_id = resolved_contact_ids[email]
+
+                raw_status = inbound_payload.get("status")
+                valid_inbound_status = None
+                if raw_status:
+                    try:
+                        valid_inbound_status = AttendeeStatus(raw_status).value
+                    except ValueError:
+                        logger.warning(
+                            "Invalid inbound status in sync, treating as None",
+                            status=raw_status,
+                            journal_id=journal_id,
+                        )
+
+                raw_role = inbound_payload.get("role")
+                valid_inbound_role = None
+                if raw_role:
+                    try:
+                        valid_inbound_role = ContactEventRole(raw_role).value
+                    except ValueError:
+                        logger.warning(
+                            "Invalid inbound role in sync, treating as None",
+                            role=raw_role,
+                            journal_id=journal_id,
+                        )
+
+                existing_rel = existing_by_contact_id.get(contact_id)
+                if not existing_rel:
+                    to_create.append(
+                        (contact_id, valid_inbound_status, valid_inbound_role)
+                    )
+                else:
+                    changed = False
+
+                    # Compute new status (ignore inbound if already ATTENDED)
+                    new_status = (
+                        existing_rel.status.value if existing_rel.status else None
+                    )
+                    if new_status != AttendeeStatus.ATTENDED.value:
+                        if valid_inbound_status and new_status != valid_inbound_status:
+                            new_status = valid_inbound_status
+                            changed = True
+
+                    # Compute new role (ignore inbound if already FACILITATOR_HELPER)
+                    new_role = existing_rel.role.value if existing_rel.role else None
+                    if new_role != ContactEventRole.FACILITATOR_HELPER.value:
+                        if valid_inbound_role:
+                            if new_role != valid_inbound_role:
+                                new_role = valid_inbound_role
+                                changed = True
+                        elif (
+                            valid_inbound_role is None
+                            and new_role == ContactEventRole.ORGANISER.value
+                        ):
+                            # If inbound has None, but existing has ORGANISER, we demote.
+                            # This ensures that if the Google user is no longer organizer, it resets.
+                            new_role = None
+                            changed = True
+
+                    if changed:
+                        to_update.append((contact_id, new_status, new_role))
+
+            for contact_id, status, role in to_create:
                 await self._create_contact_relationship(
-                    journal_id, contact_id, rel_type
+                    journal_id, contact_id, rel_type, status, role
+                )
+
+            for contact_id, status, role in to_update:
+                await self._update_contact_relationship(
+                    journal_id, contact_id, rel_type, status, role
                 )
 
             for contact_id in to_delete:
@@ -804,12 +884,13 @@ class JournalOutboxEventProcessor:
                     journal_id, contact_id, rel_type
                 )
 
-            if to_create or to_delete:
+            if to_create or to_update or to_delete:
                 logger.info(
                     "Synced contact relationships",
                     journal_id=journal_id,
                     relationship_type=rel_type_str,
                     created=len(to_create),
+                    updated=len(to_update),
                     deleted=len(to_delete),
                 )
 
@@ -821,7 +902,7 @@ class JournalOutboxEventProcessor:
         """Get all relationships of a specific type for a journal."""
         result = await self.connection.execute(
             text("""
-                SELECT journal_id, contact_id, relationship_type, created_at
+                SELECT journal_id, contact_id, relationship_type, created_at, status, role
                 FROM journal_contact_relationships
                 WHERE journal_id = :journal_id
                   AND relationship_type = :relationship_type
@@ -836,6 +917,8 @@ class JournalOutboxEventProcessor:
                 journal_id=row.journal_id,
                 contact_id=row.contact_id,
                 relationship_type=JournalContactRelationshipType(row.relationship_type),
+                status=AttendeeStatus(row.status) if row.status else None,
+                role=ContactEventRole(row.role) if row.role else None,
                 created_at=row.created_at,
             )
             for row in result.fetchall()
@@ -846,20 +929,51 @@ class JournalOutboxEventProcessor:
         journal_id: int,
         contact_id: int,
         relationship_type: JournalContactRelationshipType,
+        status: str | None = None,
+        role: str | None = None,
     ) -> None:
         """Create a journal-contact relationship."""
         await self.connection.execute(
             text("""
                 INSERT INTO journal_contact_relationships
-                    (journal_id, contact_id, relationship_type)
+                    (journal_id, contact_id, relationship_type, status, role)
                 VALUES
-                    (:journal_id, :contact_id, :relationship_type)
+                    (:journal_id, :contact_id, :relationship_type, :status, :role)
                 ON CONFLICT DO NOTHING
             """),
             {
                 "journal_id": journal_id,
                 "contact_id": contact_id,
                 "relationship_type": relationship_type.value,
+                "status": status,
+                "role": role,
+            },
+        )
+
+    async def _update_contact_relationship(
+        self,
+        journal_id: int,
+        contact_id: int,
+        relationship_type: JournalContactRelationshipType,
+        status: str | None = None,
+        role: str | None = None,
+    ) -> None:
+        """Update an existing journal-contact relationship's status and role."""
+        await self.connection.execute(
+            text("""
+                UPDATE journal_contact_relationships
+                SET status = :status,
+                    role = :role
+                WHERE journal_id = :journal_id
+                  AND contact_id = :contact_id
+                  AND relationship_type = :relationship_type
+            """),
+            {
+                "journal_id": journal_id,
+                "contact_id": contact_id,
+                "relationship_type": relationship_type.value,
+                "status": status,
+                "role": role,
             },
         )
 

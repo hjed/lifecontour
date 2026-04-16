@@ -122,17 +122,17 @@ Every phase below must meet the same completion bar before merge:
 **PR Size:** ~5-7 files
 
 **Acceptance Criteria:**
-- [ ] `GoogleEventTransformer` maps attendee `responseStatus` to `AttendeeStatus`:
+- [x] `GoogleEventTransformer` maps attendee `responseStatus` to `AttendeeStatus`:
   - `accepted` → `ATTENDING`
   - `needsAction` → `NO_REPLY`
   - `tentative` → `MAYBE`
   - `declined` → `DECLINED`
   - absent/null → `NO_REPLY`
-- [ ] `GoogleEventTransformer` maps attendee `organizer: true` to `ContactEventRole.ORGANISER`.
-- [ ] Outbox event payload includes status and role for each resolved attendee contact.
-- [ ] `JournalOutboxEventProcessor` persists status and role when creating/updating INVITEE relationships.
-- [ ] Inbound sync updates existing relationships' status/role when Google attendee state changes (e.g., `needsAction` → `accepted`).
-- [ ] Non-attendee contact relationships (PARTICIPANT from local, MENTION, ABOUT) are not affected by inbound sync.
+- [x] `GoogleEventTransformer` maps attendee `organizer: true` to `ContactEventRole.ORGANISER`.
+- [x] Outbox event payload includes status and role for each resolved attendee contact.
+- [x] `JournalOutboxEventProcessor` persists status and role when creating/updating INVITEE relationships.
+- [x] Inbound sync updates existing relationships' status/role when Google attendee state changes (e.g., `needsAction` → `accepted`).
+- [x] Non-attendee contact relationships (PARTICIPANT from local, MENTION, ABOUT) are not affected by inbound sync.
 
 **Required Test Coverage:**
 - **Unit:** responseStatus-to-AttendeeStatus mapping (all 5 cases), organizer-to-role mapping, payload shaping with mixed attendee states.

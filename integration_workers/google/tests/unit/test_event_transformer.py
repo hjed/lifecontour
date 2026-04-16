@@ -767,3 +767,85 @@ class TestGoogleEventTransformerTimezone:
         assert result is not None
         _, calendar_info = result
         assert calendar_info.timezone == "Asia/Kolkata"
+
+
+class TestGoogleEventTransformerContactRelationships:
+    """Tests for extracting contact relationships from Google events."""
+
+    def test_extract_contact_relationships_maps_status(self) -> None:
+        """Test that responseStatus maps to the correct AttendeeStatus."""
+        from core_shared.models.journals.attendee_status import AttendeeStatus
+
+        google_event = GoogleEvent.model_validate(
+            {
+                "id": "event_status",
+                "summary": "Status mapping",
+                "start": {"dateTime": "2023-10-27T10:00:00Z"},
+                "end": {"dateTime": "2023-10-27T11:00:00Z"},
+                "status": "confirmed",
+                "attendees": [
+                    {"email": "accepted@example.com", "responseStatus": "accepted"},
+                    {"email": "needs@example.com", "responseStatus": "needsAction"},
+                    {"email": "tentative@example.com", "responseStatus": "tentative"},
+                    {"email": "declined@example.com", "responseStatus": "declined"},
+                    {"email": "none@example.com"},  # Assuming no status maps to NO_REPLY
+                ],
+            }
+        )
+        transformer = GoogleEventTransformer()
+        rels = transformer.extract_contact_relationships(google_event)
+
+        rel_by_email = {r["email"]: r for r in rels}
+
+        assert rel_by_email["accepted@example.com"]["status"] == AttendeeStatus.ATTENDING.value
+        assert rel_by_email["needs@example.com"]["status"] == AttendeeStatus.NO_REPLY.value
+        assert rel_by_email["tentative@example.com"]["status"] == AttendeeStatus.MAYBE.value
+        assert rel_by_email["declined@example.com"]["status"] == AttendeeStatus.DECLINED.value
+        assert rel_by_email["none@example.com"]["status"] == AttendeeStatus.NO_REPLY.value
+
+    def test_extract_contact_relationships_maps_organizer(self) -> None:
+        """Test that organizer: true maps to ContactEventRole.ORGANISER."""
+        from core_shared.models.journals.contact_event_role import ContactEventRole
+
+        google_event = GoogleEvent.model_validate(
+            {
+                "id": "event_org",
+                "summary": "Org mapping",
+                "start": {"dateTime": "2023-10-27T10:00:00Z"},
+                "end": {"dateTime": "2023-10-27T11:00:00Z"},
+                "status": "confirmed",
+                "attendees": [
+                    {"email": "org@example.com", "responseStatus": "accepted", "organizer": True},
+                    {"email": "guest@example.com", "responseStatus": "needsAction"},
+                ],
+            }
+        )
+        transformer = GoogleEventTransformer()
+        rels = transformer.extract_contact_relationships(google_event)
+
+        rel_by_email = {r["email"]: r for r in rels}
+
+        assert rel_by_email["org@example.com"]["role"] == ContactEventRole.ORGANISER.value
+        assert "role" not in rel_by_email["guest@example.com"]
+
+    def test_extract_contact_relationships_skips_empty_emails(self) -> None:
+        """Test that attendees without an email are skipped."""
+        google_event = GoogleEvent.model_validate(
+            {
+                "id": "event_empty",
+                "summary": "Empty email",
+                "start": {"dateTime": "2023-10-27T10:00:00Z"},
+                "end": {"dateTime": "2023-10-27T11:00:00Z"},
+                "status": "confirmed",
+                "attendees": [
+                    {"email": "", "responseStatus": "accepted"},
+                    {"email": "valid@example.com", "responseStatus": "accepted"},
+                ],
+            }
+        )
+        transformer = GoogleEventTransformer()
+        rels = transformer.extract_contact_relationships(google_event)
+
+        assert len(rels) == 1
+        assert rels[0]["email"] == "valid@example.com"
+

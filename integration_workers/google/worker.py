@@ -2989,14 +2989,9 @@ async def sync_calendar_events(
                         }
 
                         # Extract attendee emails as contact relationships
-                        contact_relationships = [
-                            {
-                                "email": attendee.email,
-                                "relationship_type": "INVITEE",
-                            }
-                            for attendee in google_event.attendees
-                            if attendee.email
-                        ]
+                        contact_relationships = transformer.extract_contact_relationships(
+                            google_event
+                        )
 
                         # Determine sync action string
                         if action == InboundSyncAction.CREATE_JOURNAL:

@@ -531,7 +531,7 @@ async def test_calendar_sync_flow_runs_through_arq_and_outbox(
             (
                 await async_connection.execute(
                     text("""
-                        SELECT contact_id, relationship_type
+                        SELECT contact_id, relationship_type, status, role
                         FROM journal_contact_relationships
                         WHERE journal_id = :journal_id
                     """),
@@ -545,6 +545,8 @@ async def test_calendar_sync_flow_runs_through_arq_and_outbox(
         )
         assert invitee_rows[0].contact_id == contact_id
         assert invitee_rows[0].relationship_type == "INVITEE"
+        assert invitee_rows[0].status == "ATTENDING"
+        assert invitee_rows[0].role is None
 
     finally:
         await redis_pool.flushdb()

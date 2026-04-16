@@ -290,3 +290,43 @@ class GoogleEventTransformer:
             payload["attendees"] = [{"email": email} for email in invitee_emails]
 
         return payload
+
+    @staticmethod
+    def extract_contact_relationships(google_event: GoogleEvent) -> list[dict[str, str]]:
+        """Extract contact relationships (invitees) from a Google Event with status and role."""
+        from core_shared.models.journals.attendee_status import AttendeeStatus
+        from core_shared.models.journals.contact_event_role import ContactEventRole
+
+        relationships: list[dict[str, str]] = []
+        if not google_event.attendees:
+            return relationships
+
+        for attendee in google_event.attendees:
+            if not attendee.email:
+                continue
+
+            # Default to NO_REPLY
+            status = AttendeeStatus.NO_REPLY
+            if attendee.response_status == "accepted":
+                status = AttendeeStatus.ATTENDING
+            elif attendee.response_status == "needsAction":
+                status = AttendeeStatus.NO_REPLY
+            elif attendee.response_status == "tentative":
+                status = AttendeeStatus.MAYBE
+            elif attendee.response_status == "declined":
+                status = AttendeeStatus.DECLINED
+
+            # Map organizer
+            role = ContactEventRole.ORGANISER if attendee.organizer else None
+
+            rel = {
+                "email": attendee.email,
+                "relationship_type": "INVITEE",
+                "status": status.value,
+            }
+            if role:
+                rel["role"] = role.value
+
+            relationships.append(rel)
+
+        return relationships
