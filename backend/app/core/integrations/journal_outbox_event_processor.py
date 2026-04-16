@@ -808,37 +808,63 @@ class JournalOutboxEventProcessor:
                     continue
 
                 contact_id = resolved_contact_ids[email]
-                inbound_status = inbound_payload.get("status")
-                inbound_role = inbound_payload.get("role")
+
+                raw_status = inbound_payload.get("status")
+                valid_inbound_status = None
+                if raw_status:
+                    try:
+                        valid_inbound_status = AttendeeStatus(raw_status).value
+                    except ValueError:
+                        logger.warning(
+                            "Invalid inbound status in sync, treating as None",
+                            status=raw_status,
+                            journal_id=journal_id,
+                        )
+
+                raw_role = inbound_payload.get("role")
+                valid_inbound_role = None
+                if raw_role:
+                    try:
+                        valid_inbound_role = ContactEventRole(raw_role).value
+                    except ValueError:
+                        logger.warning(
+                            "Invalid inbound role in sync, treating as None",
+                            role=raw_role,
+                            journal_id=journal_id,
+                        )
 
                 existing_rel = existing_by_contact_id.get(contact_id)
                 if not existing_rel:
-                    to_create.append((contact_id, inbound_status, inbound_role))
+                    to_create.append(
+                        (contact_id, valid_inbound_status, valid_inbound_role)
+                    )
                 else:
                     changed = False
 
-                    # Compute new status
+                    # Compute new status (ignore inbound if already ATTENDED)
                     new_status = (
                         existing_rel.status.value if existing_rel.status else None
                     )
-                    if inbound_status and new_status != inbound_status:
-                        new_status = inbound_status
-                        changed = True
-
-                    # Compute new role
-                    new_role = existing_rel.role.value if existing_rel.role else None
-                    if inbound_role:
-                        if new_role != inbound_role:
-                            new_role = inbound_role
+                    if new_status != AttendeeStatus.ATTENDED.value:
+                        if valid_inbound_status and new_status != valid_inbound_status:
+                            new_status = valid_inbound_status
                             changed = True
-                    elif (
-                        inbound_role is None
-                        and new_role == ContactEventRole.ORGANISER.value
-                    ):
-                        # If inbound has None, but existing has ORGANISER, we demote.
-                        # This ensures that if the Google user is no longer organizer, it resets.
-                        new_role = None
-                        changed = True
+
+                    # Compute new role (ignore inbound if already FACILITATOR_HELPER)
+                    new_role = existing_rel.role.value if existing_rel.role else None
+                    if new_role != ContactEventRole.FACILITATOR_HELPER.value:
+                        if valid_inbound_role:
+                            if new_role != valid_inbound_role:
+                                new_role = valid_inbound_role
+                                changed = True
+                        elif (
+                            valid_inbound_role is None
+                            and new_role == ContactEventRole.ORGANISER.value
+                        ):
+                            # If inbound has None, but existing has ORGANISER, we demote.
+                            # This ensures that if the Google user is no longer organizer, it resets.
+                            new_role = None
+                            changed = True
 
                     if changed:
                         to_update.append((contact_id, new_status, new_role))
