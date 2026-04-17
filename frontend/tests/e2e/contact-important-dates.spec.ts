@@ -85,8 +85,10 @@ test.describe('Important Dates', () => {
     await expect(async () => {
       await expect(
         authenticatedPage.getByText(/marriage anniversary/i)
-      ).toBeVisible();
-      await expect(authenticatedPage.getByText('2010')).toBeVisible();
+      ).toBeVisible({ timeout: 1000 });
+      await expect(authenticatedPage.getByText('2010')).toBeVisible({
+        timeout: 1000,
+      });
     }).toPass({ timeout: 15000 });
 
     // --- Delete the birthday ---

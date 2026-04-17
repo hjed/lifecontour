@@ -1109,11 +1109,10 @@ test.describe('Journal List Page', () => {
       );
 
       await calendarSelect.click();
-      // Use .first() — Radix Select renders both a native hidden <option>
-      // and a portal-based [role=option], so getByRole matches both.
-      await page
+      const calendarListbox1 = page.getByRole('listbox');
+      await expect(calendarListbox1).toBeVisible();
+      await calendarListbox1
         .getByRole('option', { name: /Work Calendar/i })
-        .first()
         .click();
       await responsePromise;
 
@@ -1143,11 +1142,10 @@ test.describe('Journal List Page', () => {
       );
 
       await calendarSelect.click();
-      // Use .first() — Radix Select renders both a native hidden <option>
-      // and a portal-based [role=option], so getByRole matches both.
-      await page
+      const calendarListbox2 = page.getByRole('listbox');
+      await expect(calendarListbox2).toBeVisible();
+      await calendarListbox2
         .getByRole('option', { name: /Personal Calendar/i })
-        .first()
         .click();
       await personalResponsePromise;
 
@@ -1169,9 +1167,10 @@ test.describe('Journal List Page', () => {
 
       // Select "All calendars" to clear filter
       await calendarSelect.click();
-      await page
+      const calendarListbox3 = page.getByRole('listbox');
+      await expect(calendarListbox3).toBeVisible();
+      await calendarListbox3
         .getByRole('option', { name: /All calendars/i })
-        .first()
         .click();
 
       // Wait for the filter to be cleared and all journals to be visible
@@ -1529,18 +1528,26 @@ test.describe('Journal List Page', () => {
         }).toPass({ timeout: 5000 });
       }
 
-      // Use getByRole('button') with the full day label (e.g. '15 May 2026')
-      // scoped to the grid to avoid outside-day ambiguity.
-      const dayLabel = `${targetDate.getDate()} ${monthNames[targetDate.getMonth()]} ${targetDate.getFullYear()}`;
-      // Set up the response listener BEFORE clicking to avoid missing the response
-      const jumpResponsePromise = page.waitForResponse(
-        response =>
-          response.url().includes('/api/journals') && response.status() === 200
+      // Broad regex to account for varying browser locales (e.g. "15 May 2026", "May 15th, 2026")
+      const day = targetDate.getDate();
+      const monthPrefix = monthNames[targetDate.getMonth()].substring(0, 3);
+      const year = targetDate.getFullYear();
+      const dayLabelRegex = new RegExp(
+        `(${monthPrefix}.*\\b${day}\\b.*${year}|\\b${day}\\b.*${monthPrefix}.*${year})`,
+        'i'
       );
 
-      await targetGrid
-        .getByRole('button', { name: new RegExp(`\\b${dayLabel}\\b`) })
-        .click();
+      // Set up the response listener BEFORE clicking to avoid missing the response.
+      // Tightened predicate to capture the actual fetch.
+      const jumpResponsePromise = page.waitForResponse(
+        response =>
+          response.request().method() === 'GET' &&
+          response.url().includes('/api/journals') &&
+          response.url().includes('anchor_date=') &&
+          response.status() === 200
+      );
+
+      await targetGrid.getByRole('button', { name: dayLabelRegex }).click();
 
       // Wait for the popover to close (confirms the date selection registered)
       await expect(page.locator('[data-slot="calendar"]')).not.toBeVisible();
