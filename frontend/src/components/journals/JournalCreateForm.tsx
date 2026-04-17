@@ -378,12 +378,18 @@ function buildSubmittedTypeData(
 
 interface JournalCreateFormProps {
   readonly onCancel?: () => void;
+  readonly onSuccess?: (journalId: string) => void;
   readonly defaultParentId?: number;
+  readonly initialDate?: { from: Date; to?: Date };
+  readonly initialTypes?: JournalType[];
 }
 
 export function JournalCreateForm({
   onCancel,
+  onSuccess,
   defaultParentId,
+  initialDate,
+  initialTypes,
 }: JournalCreateFormProps = {}) {
   const router = useRouter();
   const { mutateAsync: createJournal, isPending: isCreatingJournal } =
@@ -407,12 +413,12 @@ export function JournalCreateForm({
     resolver: zodResolver(formSchema),
     defaultValues: {
       title: '',
-      dateRange: {
+      dateRange: initialDate || {
         from: new Date(),
         to: undefined,
       },
       content: '',
-      types: [],
+      types: initialTypes || [],
       parentId: defaultParentId ?? undefined,
     },
   });
@@ -579,7 +585,11 @@ export function JournalCreateForm({
         }
       }
 
-      router.push(`/journals/${result.data.id}` as Route);
+      if (onSuccess) {
+        onSuccess(result.data.id);
+      } else {
+        router.push(`/journals/${result.data.id}` as Route);
+      }
     } catch (error) {
       console.error('Failed to create journal:', error);
       // Log validation errors from hook form if any

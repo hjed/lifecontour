@@ -4,6 +4,8 @@ import {
   groupEventsByDate,
   getMonthDateRange,
   getAgendaDateRange,
+  getWeekDateRange,
+  getDayDateRange,
   CalendarEvent,
 } from '../calendarEventHelpers';
 import { DisplayJournal } from '@/utils/journalTransformers';
@@ -243,6 +245,32 @@ describe('calendarEventHelpers', () => {
       const range = getAgendaDateRange(anchor, 30, 14);
       expect(range.start).toBe('2025-12-22');
       expect(range.end).toBe('2026-02-04');
+    });
+  });
+
+  describe('getWeekDateRange', () => {
+    it('returns Monday to Sunday for a given date', () => {
+      const date = new Date(2026, 3, 15); // April 15, 2026 (Wednesday)
+      const range = getWeekDateRange(date);
+      expect(range.start).toBe('2026-04-13'); // Monday
+      expect(range.end).toBe('2026-04-19'); // Sunday
+    });
+
+    it('handles a date that falls on a Sunday', () => {
+      const date = new Date(2026, 3, 19); // April 19, 2026 (Sunday)
+      const range = getWeekDateRange(date);
+      // It should still return the Monday of that exact week
+      expect(range.start).toBe('2026-04-13'); // Monday
+      expect(range.end).toBe('2026-04-19'); // Sunday
+    });
+  });
+
+  describe('getDayDateRange', () => {
+    it('returns the same start and end day', () => {
+      const date = new Date(2026, 3, 15); // April 15, 2026
+      const range = getDayDateRange(date);
+      expect(range.start).toBe('2026-04-15');
+      expect(range.end).toBe('2026-04-15');
     });
   });
 });

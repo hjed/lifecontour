@@ -11,7 +11,7 @@
 import { List, CalendarDays, CalendarRange } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-export type CalendarViewMode = 'list' | 'month' | 'agenda';
+export type CalendarViewMode = 'list' | 'month' | 'week' | 'day' | 'agenda';
 
 interface CalendarViewToggleProps {
   readonly value: CalendarViewMode;
@@ -26,6 +26,8 @@ const VIEW_OPTIONS: {
 }[] = [
   { value: 'list', label: 'List view', icon: List },
   { value: 'month', label: 'Month view', icon: CalendarDays },
+  { value: 'week', label: 'Week view', icon: CalendarDays },
+  { value: 'day', label: 'Day view', icon: CalendarDays },
   { value: 'agenda', label: 'Agenda view', icon: CalendarRange },
 ];
 
