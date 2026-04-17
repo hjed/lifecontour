@@ -234,62 +234,159 @@ test.describe('Journal Detail Page', () => {
     });
 
     test('should display type-specific editor sections for EVENT type', async ({
-      journalsWithData,
+      authenticatedPage,
+      testCleanup,
     }) => {
-      const { page, journals } = journalsWithData;
-      // Find a journal with EVENT type
-      const eventJournal = journals.find(j => j.types?.includes('event'));
+      const dataManager = new TestDataManager(authenticatedPage);
+      // Register cleanup
+      testCleanup(async () => {
+        await dataManager.cleanup();
+      });
 
-      if (eventJournal) {
-        // Navigate to journal detail page
-        await page.goto(`/journals/${eventJournal.id}`);
-        await expect(page.locator('main, [role="main"]').first()).toBeVisible();
+      // Create a calendar so the journal will properly be recognized as an EVENT
+      const calendars = await dataManager.createCalendars([
+        { name: 'Test Calendar', color: '#10b981' },
+      ]);
+      const calendar = calendars[0];
 
-        // Verify EVENT type section is present
-        const eventSection = page.getByText('Event Details');
-        await expect(eventSection).toBeVisible();
+      const today = new Date();
+      const journals = await dataManager.createJournals([
+        {
+          title: 'Event Journal',
+          content: 'Event Journal Content',
+          types: ['event'],
+          event_date_range: {
+            start: today.toISOString(),
+            end: today.toISOString(),
+          },
+          type_data: {
+            event: {
+              calendar_id: calendar.id,
+              is_all_day: true,
+            },
+          },
+        },
+      ]);
+      const journalData = journals[0];
 
-        // Click to expand the section if it's collapsed
-        await eventSection.click();
+      const page = authenticatedPage;
 
-        // Verify event-specific fields are visible
-        // These should be in the EventTypeEditor component
-        await expect(page.getByText(/calendar/i).first()).toBeVisible();
-      }
+      // Navigate to journal detail page
+      await page.goto(`/journals/${journalData.id}`);
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
+
+      // Wait for the journal to load and display UI
+      await expect(page.getByTestId('journal-detail-view')).toBeVisible();
+
+      // Verify EVENT type section is present
+      const eventSection = page.getByText('Event Details');
+      await expect(eventSection).toBeVisible();
+
+      // Click to expand the section if it's collapsed
+      await eventSection.click();
+
+      // Verify event-specific fields are visible
+      // These should be in the EventTypeEditor component
+      await expect(page.getByText(/calendar/i).first()).toBeVisible();
     });
 
     test('should allow editing EVENT type data', async ({
-      journalsWithData,
+      authenticatedPage,
+      testCleanup,
     }) => {
-      const { page, journals } = journalsWithData;
-      const eventJournal = journals.find(j => j.types?.includes('event'));
+      const dataManager = new TestDataManager(authenticatedPage);
+      testCleanup(async () => {
+        await dataManager.cleanup();
+      });
 
-      if (eventJournal) {
-        // Navigate to journal detail page
-        await page.goto(`/journals/${eventJournal.id}`);
-        await expect(page.locator('main, [role="main"]').first()).toBeVisible();
+      const calendars = await dataManager.createCalendars([
+        { name: 'Edit Event Test Calendar', color: '#8b5cf6' },
+      ]);
+      const calendar = calendars[0];
 
-        // Find and expand the Event Details section
-        const eventSection = page.getByText('Event Details');
-        await expect(eventSection).toBeVisible();
-        await eventSection.click();
+      const today = new Date();
+      const journals = await dataManager.createJournals([
+        {
+          title: 'Event Journal Edit',
+          content: 'Event Journal Edit Content',
+          types: ['event'],
+          event_date_range: {
+            start: today.toISOString(),
+            end: today.toISOString(),
+          },
+          type_data: {
+            event: {
+              calendar_id: calendar.id,
+              is_all_day: false,
+            },
+          },
+        },
+      ]);
+      const journalData = journals[0];
 
-        // Wait for the Edit button to be visible (indicates section is expanded)
-        const editButton = page.getByRole('button', { name: /edit/i }).first();
-        await expect(editButton).toBeVisible();
+      const page = authenticatedPage;
 
-        // Click the edit button
-        await editButton.click();
+      // Navigate to journal detail page
+      await page.goto(`/journals/${journalData.id}`);
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
-        // Verify we're in edit mode - look for Save/Cancel buttons
-        const saveButton = page.getByRole('button', { name: /save/i }).first();
-        const cancelButton = page
-          .getByRole('button', { name: /cancel/i })
-          .first();
+      // Wait for the journal to load and display UI
+      await expect(page.getByTestId('journal-detail-view')).toBeVisible();
 
-        await expect(saveButton).toBeVisible();
-        await expect(cancelButton).toBeVisible();
+      // Find and expand the Event Details section
+      const eventSection = page.getByText('Event Details');
+      await expect(eventSection).toBeVisible();
+      await eventSection.click();
+
+      // Wait for the Event Type Editor to be visible
+      const eventTypeEditor = page.getByTestId('event-type-editor');
+      await expect(eventTypeEditor).toBeVisible();
+
+      // Click the edit button specifically for the event editor
+      const editButton = eventTypeEditor.getByTestId('edit-button');
+      await expect(editButton).toBeVisible();
+      await editButton.click();
+
+      // Verify we're in edit mode using the scoped event editor controls
+      const saveButton = eventTypeEditor.getByTestId('save-button');
+      const cancelButton = eventTypeEditor.getByTestId('cancel-button');
+
+      await expect(saveButton).toBeVisible();
+      await expect(cancelButton).toBeVisible();
+
+      // Actually change a field, let's say Location
+      const locationInput = eventTypeEditor.getByTestId('location-input');
+      await locationInput.fill('New Prod Location');
+
+      // Change time fields to verify backend accepts valid time inputs
+      const startTimeInput = eventTypeEditor.getByTestId('start-time-input');
+      await startTimeInput.fill('12:30');
+
+      const endTimeInput = eventTypeEditor.getByTestId('end-time-input');
+      await endTimeInput.fill('13:30');
+
+      const [response] = await Promise.all([
+        page.waitForResponse(
+          response =>
+            response.url().includes('/api/journals/') &&
+            response.request().method() === 'PUT'
+        ),
+        saveButton.click(),
+      ]);
+
+      const updateStatus = response.status();
+      const responseText = await response.text();
+      if (updateStatus !== 200) {
+        console.log('Update Status:', updateStatus);
+        console.log('Update Text:', responseText);
       }
+      expect(
+        updateStatus,
+        `Expected 200 but got ${updateStatus}. Response: ${responseText}`
+      ).toBe(200);
+
+      // Wait for edit mode to finish
+      await expect(saveButton).not.toBeVisible();
     });
 
     test('should display type-specific editor sections for MOOD_RATING type', async ({
