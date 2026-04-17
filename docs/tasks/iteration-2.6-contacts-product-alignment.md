@@ -326,10 +326,10 @@ The sequence reflects both user priority and technical dependency:
 **PR Size:** ~5-7 files
 
 **Acceptance Criteria:**
-- [ ] The contact detail page presents dates in a richer card/section rather than a raw field list.
-- [ ] Inline editing supports create, update, and delete flows.
-- [ ] Birthday receives stronger presentation by default.
-- [ ] The rest of the detail page remains stable.
+- [x] The contact detail page presents dates in a richer card/section rather than a raw field list.
+- [X] Inline editing supports create, update, and delete flows.
+- [x] Birthday receives stronger presentation by default.
+- [x] The rest of the detail page remains stable.
 
 **Required Test Coverage:**
 - **Unit:** date-form state and formatting helpers.
@@ -340,10 +340,10 @@ The sequence reflects both user priority and technical dependency:
 **PR Size:** ~5-7 files
 
 **Acceptance Criteria:**
-- [ ] Google-supported date types sync bidirectionally.
-- [ ] Unsupported local-only date types remain local-only.
-- [ ] Sync does not duplicate or silently discard supported dates.
-- [ ] Imported dates render correctly in the contact detail UI.
+- [x] Google-supported date types sync bidirectionally.
+- [x] Unsupported local-only date types remain local-only.
+- [x] Sync does not duplicate or silently discard supported dates.
+- [x] Imported dates render correctly in the contact detail UI.
 
 **Required Test Coverage:**
 - **Unit:** Google date field mapping and local-only filtering rules.

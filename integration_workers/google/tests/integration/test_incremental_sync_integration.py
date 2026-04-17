@@ -122,7 +122,7 @@ class TestIncrementalSyncIntegration:
             mock_connections.list.assert_called_with(
                 resourceName="people/me",
                 pageSize=100,
-                personFields="names,emailAddresses,phoneNumbers,addresses,organizations,birthdays,metadata,memberships,biographies",
+                personFields="names,emailAddresses,phoneNumbers,addresses,organizations,birthdays,events,metadata,memberships,biographies",
                 syncToken="valid_incremental_sync_token",
             )
             # Result should show at least some metrics

@@ -93,8 +93,12 @@ class GoogleEventTransformer:
             start_time = None
             end_time = None
         else:
-            start_time = local_start_dt.time().replace(tzinfo=None) if local_start_dt else None
-            end_time = local_end_dt.time().replace(tzinfo=None) if local_end_dt else None
+            start_time = (
+                local_start_dt.time().replace(tzinfo=None) if local_start_dt else None
+            )
+            end_time = (
+                local_end_dt.time().replace(tzinfo=None) if local_end_dt else None
+            )
 
         calendar_info = CalendarInfo(
             journal_id=None,
@@ -120,6 +124,7 @@ class GoogleEventTransformer:
             return dt_utc
         try:
             from zoneinfo import ZoneInfo
+
             tz = ZoneInfo(timezone_str)
             return dt_utc.astimezone(tz)
         except Exception:
@@ -244,16 +249,27 @@ class GoogleEventTransformer:
         if calendar_info.is_all_day:
             from datetime import timedelta
 
-            local_start_dt = self._extract_local_datetime(start_dt, calendar_info.timezone)
+            local_start_dt = self._extract_local_datetime(
+                start_dt, calendar_info.timezone
+            )
             local_end_dt = self._extract_local_datetime(end_dt, calendar_info.timezone)
 
-            payload["start"] = {"date": local_start_dt.strftime("%Y-%m-%d") if local_start_dt else start_dt.strftime("%Y-%m-%d")}
-            payload["end"] = {"date": ((local_end_dt or end_dt) + timedelta(days=1)).strftime("%Y-%m-%d")}
+            payload["start"] = {
+                "date": local_start_dt.strftime("%Y-%m-%d")
+                if local_start_dt
+                else start_dt.strftime("%Y-%m-%d")
+            }
+            payload["end"] = {
+                "date": ((local_end_dt or end_dt) + timedelta(days=1)).strftime(
+                    "%Y-%m-%d"
+                )
+            }
         else:
             tz = UTC
             if calendar_info.timezone:
                 try:
                     from zoneinfo import ZoneInfo
+
                     tz = ZoneInfo(calendar_info.timezone)
                 except Exception:
                     pass

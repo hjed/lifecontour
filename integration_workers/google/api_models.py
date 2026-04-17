@@ -146,6 +146,15 @@ class GoogleBirthday(BaseModel):
     text: str | None = None
 
 
+class GooglePersonEvent(BaseModel):
+    """Google People API event structure (anniversaries, etc.)."""
+
+    metadata: GoogleFieldMetadata = Field(default_factory=GoogleFieldMetadata)
+    date: GoogleDate | None = None
+    type: str | None = None
+    formatted_type: str | None = Field(default=None, alias="formattedType")
+
+
 class GoogleBiography(BaseModel):
     """Google People API biography/note structure."""
 
@@ -182,6 +191,7 @@ class GooglePerson(BaseModel):
     addresses: list[GoogleAddress] = Field(default_factory=list)
     organizations: list[GoogleOrganization] = Field(default_factory=list)
     birthdays: list[GoogleBirthday] = Field(default_factory=list)
+    events: list[GooglePersonEvent] = Field(default_factory=list)
     biographies: list[GoogleBiography] = Field(default_factory=list)
     memberships: list[GoogleMembership] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)

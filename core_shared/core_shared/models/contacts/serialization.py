@@ -12,8 +12,13 @@ from core_shared.models.contacts.entities import (
     ContactAddress,
     ContactMethod,
     ContactNote,
+    ImportantDate,
     MethodType,
     Tag,
+)
+from core_shared.models.contacts.important_date_types import (
+    DatePrecision,
+    ImportantDateType,
 )
 from core_shared.models.contacts.value_objects import TagName
 
@@ -92,6 +97,21 @@ def serialize_contact(contact: Contact) -> dict[str, Any]:
         result["tags"] = serialized_tags
     else:
         result["tags"] = None
+
+    if contact.important_dates is not None:
+        result["important_dates"] = [
+            {
+                "date_type": date.date_type.value,
+                "precision": date.precision.value,
+                "year": date.year,
+                "month": date.month,
+                "day": date.day,
+                "custom_date_type_id": date.custom_date_type_id,
+            }
+            for date in contact.important_dates
+        ]
+    else:
+        result["important_dates"] = None
 
     return result
 
@@ -174,6 +194,24 @@ def deserialize_contact(data: dict[str, Any]) -> Contact:
             else None
         )
 
+        important_dates_data = _get_list("important_dates")
+        important_dates = (
+            [
+                ImportantDate(
+                    contact_id=0,
+                    date_type=ImportantDateType(date_data["date_type"]),
+                    precision=DatePrecision(date_data["precision"]),
+                    year=date_data.get("year"),
+                    month=date_data.get("month"),
+                    day=date_data.get("day"),
+                    custom_date_type_id=date_data.get("custom_date_type_id"),
+                )
+                for date_data in important_dates_data
+            ]
+            if important_dates_data is not None
+            else None
+        )
+
         return Contact(
             first_name=data["first_name"],
             last_name=data.get("last_name"),
@@ -186,6 +224,7 @@ def deserialize_contact(data: dict[str, Any]) -> Contact:
             addresses=addresses,
             notes=notes,
             tags=tags,
+            important_dates=important_dates,
         )
     except KeyError as exc:
         raise ContactDeserializationError(
