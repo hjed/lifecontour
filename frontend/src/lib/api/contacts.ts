@@ -479,8 +479,8 @@ export function useUpdateContact() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: ContactFormData }) =>
       updateContact(id, data),
-    onSuccess: (_, { id }) => {
-      queryClient.invalidateQueries({ queryKey: contactKeys.detail(id) });
+    onSuccess: (data, { id }) => {
+      queryClient.setQueryData(contactKeys.detail(id), data);
       queryClient.invalidateQueries({ queryKey: contactKeys.lists() });
       toast.success(SUCCESS_MESSAGES.CONTACT_UPDATED);
     },
@@ -579,9 +579,7 @@ export function useUpdateContactField() {
     }) => updateContactField(contactId, fieldName, value),
     onSuccess: (data, variables) => {
       const contactId = variables.contactId;
-      queryClient.invalidateQueries({
-        queryKey: contactKeys.detail(contactId),
-      });
+      queryClient.setQueryData(contactKeys.detail(contactId), data);
       queryClient.invalidateQueries({ queryKey: contactKeys.lists() });
     },
     onError: (error: Error) => {
