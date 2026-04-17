@@ -22,7 +22,7 @@ import {
   isToday,
 } from 'date-fns';
 import { enAU } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { CalendarEvent, groupEventsByDate } from '@/lib/calendarEventHelpers';
 import { cn } from '@/lib/utils';
@@ -41,6 +41,8 @@ interface CalendarMonthViewProps {
   readonly onMonthChange: (year: number, month: number) => void;
   /** Callback when a day cell is clicked */
   readonly onDayClick?: (date: string) => void;
+  /** Callback when the empty slot/add button is clicked to create an event */
+  readonly onSlotClick?: (date: string) => void;
   /** Loading state */
   readonly isLoading?: boolean;
   readonly className?: string;
@@ -52,6 +54,7 @@ export function CalendarMonthView({
   events,
   onMonthChange,
   onDayClick,
+  onSlotClick,
   isLoading = false,
   className,
 }: CalendarMonthViewProps) {
@@ -149,8 +152,8 @@ export function CalendarMonthView({
                     data-testid={`day-cell-${dateKey}`}
                     data-today={isTodayDate || undefined}
                     className={cn(
-                      'border-border min-h-24 border-r border-b p-1',
-                      !isCurrentMonth && 'bg-muted/30',
+                      'border-border group focus-visible:bg-muted/30 relative min-h-24 border-r border-b p-1 transition-colors',
+                      !isCurrentMonth ? 'bg-muted/30' : 'hover:bg-muted/10',
                       isTodayDate && 'bg-primary/5'
                     )}
                     onClick={() => onDayClick?.(dateKey)}
@@ -177,8 +180,24 @@ export function CalendarMonthView({
                       {day.getDate()}
                     </div>
 
+                    {/* Add Event Button overlay (visible on hover) */}
+                    {onSlotClick && isCurrentMonth && (
+                      <div className='absolute top-1 left-1 hidden group-hover:block focus-within:block'>
+                        <button
+                          className='bg-secondary text-secondary-foreground rounded p-1 shadow-sm hover:opacity-80'
+                          onClick={e => {
+                            e.stopPropagation();
+                            onSlotClick(dateKey);
+                          }}
+                          aria-label={`Add event on ${format(day, 'MMM d')}`}
+                        >
+                          <Plus className='h-3 w-3' />
+                        </button>
+                      </div>
+                    )}
+
                     {/* Event pills */}
-                    <div className='clear-both space-y-0.5'>
+                    <div className='clear-both mt-4 space-y-0.5'>
                       {dayEvents.slice(0, MAX_VISIBLE_EVENTS).map(event => (
                         <Link
                           key={event.id}

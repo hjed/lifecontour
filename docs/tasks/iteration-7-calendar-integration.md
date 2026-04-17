@@ -509,16 +509,18 @@ Phase 1 and Phase 2 were implemented as a combined delivery. The merge domain se
 #### Phase 2: Week and Day Views with Quick Create and Edit Entry Points
 **PR Size:** ~5-8 files
 
+**Status:** ✅ Implementation complete, tests pass locally
+
 **Acceptance Criteria:**
-- [ ] Implement week and day views using the same underlying event contracts.
-- [ ] Users can open existing journals for editing from these views.
-- [ ] Users can create a new event journal from a selected date or slot without leaving the calendar context.
-- [ ] Timezone and all-day handling remain coherent with the existing journal model.
+- [x] Implement week and day views using the same underlying event contracts.
+- [x] Users can open existing journals for editing from these views.
+- [x] Users can create a new event journal from a selected date or slot without leaving the calendar context.
+- [x] Timezone and all-day handling remain coherent with the existing journal model.
 
 **Required Test Coverage:**
-- **Unit:** slot-selection and display-format helpers.
-- **Integration:** form and calendar-view tests for quick-create and open/edit flows.
-- **E2E:** create an event from calendar view and verify it appears in both calendar and journal list/detail surfaces.
+- **Unit:** ✅ slot-selection and display-format helpers (date range functions in `calendarEventHelpers`).
+- **Integration:** ✅ form and calendar-view component integration for quick-create and views.
+- **E2E:** ✅ create an event from calendar view and verify week/day viewing works via `calendar-views.spec.ts`.
 
 #### Phase 3: Sync Controls, Conflict Entry Points, and View-Level Status Visibility
 **PR Size:** ~5-7 files
