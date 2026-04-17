@@ -14,12 +14,17 @@ from core_shared.models.contacts.entities import (
     ContactAddress,
     ContactMethod,
     ContactNote,
+    ImportantDate,
     MethodType,
     Tag,
 )
+from core_shared.models.contacts.important_date_types import (
+    DatePrecision,
+    ImportantDateType,
+)
 from core_shared.models.contacts.value_objects import TagName
 
-from api_models import GooglePerson
+from api_models import GoogleBirthday, GoogleDate, GooglePerson, GooglePersonEvent
 from group_translator import GoogleGroupNameTranslator
 
 logger = structlog.get_logger()
@@ -110,6 +115,11 @@ class GoogleContactTransformer:
         contact.company = company
         contact.job_title = job_title
 
+        # Important dates: birthdays and events
+        contact.important_dates = self._transform_dates(
+            google_person.birthdays, google_person.events
+        )
+
         logger.debug(
             "Successfully transformed Google person to contact",
             resource_name=google_person.resource_name,
@@ -117,6 +127,7 @@ class GoogleContactTransformer:
             addresses_count=len(contact.addresses or []),
             notes_count=len(contact.notes or []),
             tags_count=len(contact.tags or []),
+            important_dates_count=len(contact.important_dates or []),
             company=contact.company,
             job_title=contact.job_title,
         )
@@ -489,3 +500,112 @@ class GoogleContactTransformer:
         )
 
         return (company, job_title)
+
+    # ── Important date helpers ──────────────────────────────────────────
+
+    # Mapping of Google event types to internal date types.
+    # Only supported types are included; all others are silently skipped.
+    _GOOGLE_EVENT_TYPE_MAP: dict[str, ImportantDateType] = {
+        "anniversary": ImportantDateType.MARRIAGE_ANNIVERSARY,
+    }
+
+    def _transform_dates(
+        self,
+        birthdays: list[GoogleBirthday],
+        events: list[GooglePersonEvent],
+    ) -> list[ImportantDate] | None:
+        """Transform Google birthdays and events into ImportantDate entities.
+
+        Returns None when both lists are empty (Google provided no date
+        data), which signals the sync layer to preserve local-only dates.
+        Returns a (possibly empty) list when at least one source had data.
+        """
+        birthday_dates = self._transform_birthdays(birthdays)
+        event_dates = self._transform_events(events)
+        transformed_dates = birthday_dates + event_dates
+
+        # Only trigger downstream replacement when Google produced at least
+        # one supported, valid important date. Unsupported event types or
+        # invalid date payloads should preserve existing local-only dates.
+        if not transformed_dates:
+            return None
+
+        return transformed_dates
+
+    def _transform_birthdays(
+        self, birthdays: list[GoogleBirthday]
+    ) -> list[ImportantDate]:
+        """Transform Google birthday entries to ImportantDate entities."""
+        results: list[ImportantDate] = []
+        for birthday in birthdays:
+            if birthday.date is None:
+                continue
+            important_date = self._google_date_to_important_date(
+                birthday.date, ImportantDateType.BIRTHDAY
+            )
+            if important_date:
+                results.append(important_date)
+        return results
+
+    def _transform_events(self, events: list[GooglePersonEvent]) -> list[ImportantDate]:
+        """Transform Google event entries to ImportantDate entities.
+
+        Only events whose type maps to a supported ImportantDateType are
+        included.  Unknown types are silently skipped.
+        """
+        results: list[ImportantDate] = []
+        for event in events:
+            if event.date is None or event.type is None:
+                continue
+
+            date_type = self._GOOGLE_EVENT_TYPE_MAP.get(event.type.lower())
+            if date_type is None:
+                logger.debug(
+                    "Skipping unsupported Google event type",
+                    event_type=event.type,
+                )
+                continue
+
+            important_date = self._google_date_to_important_date(event.date, date_type)
+            if important_date:
+                results.append(important_date)
+        return results
+
+    @staticmethod
+    def _google_date_to_important_date(
+        date: GoogleDate, date_type: ImportantDateType
+    ) -> ImportantDate | None:
+        """Convert a Google Date to an ImportantDate with inferred precision.
+
+        Google uses 0 (or None) to mean "not set" for date components.
+        Precision mapping:
+        - year>0, month>0, day>0 → FULL
+        - year==0/None, month>0, day>0 → DAY_MONTH
+        - year>0, month==0/None, day==0/None → YEAR
+        - All zero/None → skip (return None)
+        """
+        year = date.year if date.year and date.year > 0 else None
+        month = date.month if date.month and date.month > 0 else None
+        day = date.day if date.day and date.day > 0 else None
+
+        if year and month and day:
+            precision = DatePrecision.FULL
+        elif month and day:
+            precision = DatePrecision.DAY_MONTH
+            year = None  # ensure no year for this precision
+        elif year:
+            precision = DatePrecision.YEAR
+            month = None
+            day = None
+        else:
+            # No usable components
+            return None
+
+        return ImportantDate(
+            contact_id=0,
+            date_type=date_type,
+            precision=precision,
+            year=year,
+            month=month,
+            day=day,
+        )

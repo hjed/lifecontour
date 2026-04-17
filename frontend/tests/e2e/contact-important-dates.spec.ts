@@ -115,4 +115,73 @@ test.describe('Important Dates', () => {
       authenticatedPage.getByText(/marriage anniversary/i)
     ).toBeVisible();
   });
+
+  test('should render synced dates at different precisions', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const dataManager = new TestDataManager(authenticatedPage);
+
+    // Create contact with dates at different precisions
+    // This simulates what a Google-synced contact would look like
+    const contacts = await dataManager.createContacts([
+      {
+        firstName: 'Synced',
+        lastName: 'Dates',
+        importantDates: [
+          {
+            // Birthday with full precision (year, month, day)
+            date_type: 'birthday',
+            precision: 'full',
+            year: 1990,
+            month: 5,
+            day: 20,
+          },
+          {
+            // Marriage anniversary with day_month precision (no year)
+            date_type: 'marriage_anniversary',
+            precision: 'day_month',
+            month: 6,
+            day: 15,
+          },
+        ],
+      },
+    ]);
+
+    testCleanup(async () => await dataManager.cleanup());
+    const contact = contacts[0];
+
+    // Navigate to the contact detail page
+    await authenticatedPage.goto(`/contacts/${contact.id}`);
+
+    // Wait for page to load
+    await expect(
+      authenticatedPage
+        .locator(`text=${contact.firstName} ${contact.lastName}`)
+        .first()
+    ).toBeVisible();
+
+    // Verify Important Dates section renders
+    await expect(authenticatedPage.getByText('Important Dates')).toBeVisible();
+
+    // Verify birthday with full precision renders
+    await expect(authenticatedPage.getByText(/birthday/i)).toBeVisible();
+    await expect(authenticatedPage.getByText('1990')).toBeVisible();
+
+    // Verify marriage anniversary renders
+    await expect(
+      authenticatedPage.getByText(/marriage anniversary/i)
+    ).toBeVisible();
+
+    // Verify both date types are actually rendered
+    // If test IDs don't exist, fall back to checking both types are visible
+    const birthdayVisible = await authenticatedPage
+      .getByText(/birthday/i)
+      .isVisible();
+    const anniversaryVisible = await authenticatedPage
+      .getByText(/marriage anniversary/i)
+      .isVisible();
+    expect(birthdayVisible).toBe(true);
+    expect(anniversaryVisible).toBe(true);
+  });
 });

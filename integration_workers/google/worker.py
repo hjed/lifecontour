@@ -291,7 +291,35 @@ async def _load_full_contact(session: AsyncSession, contact_id: int) -> dict[str
     # Load contact tags
     tags = await _load_tag_names_for_contact(session, contact_id)
 
-    return {"methods": methods, "addresses": addresses, "notes": notes, "tags": tags}
+    # Load important dates
+    dates_stmt = text("""
+        SELECT id, date_type, precision, year, month, day, custom_date_type_id
+        FROM contact_important_dates
+        WHERE contact_id = :contact_id
+        ORDER BY id ASC
+    """)
+    dates_result = await session.execute(dates_stmt, {"contact_id": contact_id})
+    dates_rows = dates_result.fetchall()
+    important_dates = [
+        {
+            "id": row.id,
+            "date_type": row.date_type,
+            "precision": row.precision,
+            "year": row.year,
+            "month": row.month,
+            "day": row.day,
+            "custom_date_type_id": row.custom_date_type_id,
+        }
+        for row in dates_rows
+    ]
+
+    return {
+        "methods": methods,
+        "addresses": addresses,
+        "notes": notes,
+        "tags": tags,
+        "important_dates": important_dates,
+    }
 
 
 async def _load_tag_names_for_contact(
@@ -602,6 +630,16 @@ def _transform_contact_to_google_person(contact: dict[str, Any]) -> dict[str, An
         )
         person_data["memberships"] = memberships
 
+    # Transform important dates to Google birthdays and events
+    # Always include birthdays/events when important_dates is present on the
+    # contact, even if the transformed supported lists are empty, so removals
+    # propagate through the updatePersonFields mask and clear stale Google data.
+    if "important_dates" in contact:
+        important_dates = contact.get("important_dates") or []
+        birthdays, events = _transform_important_dates_to_google(important_dates)
+        person_data["birthdays"] = birthdays
+        person_data["events"] = events
+
     return person_data
 
 
@@ -659,6 +697,68 @@ def _build_reverse_group_mapping(
             )
         reverse[name] = resource_name
     return reverse
+
+
+def _transform_important_dates_to_google(
+    dates: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Transform internal important date dicts to Google People API format.
+
+    Only Google-supported date types are included:
+    - BIRTHDAY → birthdays field
+    - MARRIAGE_ANNIVERSARY → events field with type="anniversary"
+
+    Local-only types (WORK_ANNIVERSARY, FIRST_MET, CUSTOM) are silently
+    skipped.
+
+    Internal precision is mapped back to Google's zero-means-unset convention:
+    - FULL → {year, month, day}
+    - DAY_MONTH → {year: 0, month, day}
+    - YEAR → {year, month: 0, day: 0}
+
+    Args:
+        dates: List of important date dicts with date_type, precision, year, month, day
+
+    Returns:
+        Tuple of (birthdays_list, events_list) in Google Person format
+    """
+    birthdays: list[dict[str, Any]] = []
+    events: list[dict[str, Any]] = []
+
+    for date in dates:
+        date_type = date.get("date_type")
+        precision = date.get("precision")
+        google_date = _precision_to_google_date(
+            precision=precision,
+            year=date.get("year"),
+            month=date.get("month"),
+            day=date.get("day"),
+        )
+
+        if date_type == "birthday":
+            birthdays.append({"date": google_date})
+        elif date_type == "marriage_anniversary":
+            events.append({"date": google_date, "type": "anniversary"})
+        # All other types are local-only — silently skip
+
+    return birthdays, events
+
+
+def _precision_to_google_date(
+    precision: str | None,
+    year: int | None,
+    month: int | None,
+    day: int | None,
+) -> dict[str, int]:
+    """Map internal date precision to Google Date with zero-means-unset."""
+    if precision == "full":
+        return {"year": year or 0, "month": month or 0, "day": day or 0}
+    elif precision == "day_month":
+        return {"year": 0, "month": month or 0, "day": day or 0}
+    elif precision == "year":
+        return {"year": year or 0, "month": 0, "day": 0}
+    else:
+        return {"year": year or 0, "month": month or 0, "day": day or 0}
 
 
 async def _ensure_google_groups_exist(

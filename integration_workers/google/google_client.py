@@ -122,7 +122,7 @@ class GoogleAPIClient:
             request_params = {
                 "resourceName": "people/me",
                 "pageSize": min(page_size, 2000),  # Google's max limit
-                "personFields": "names,emailAddresses,phoneNumbers,addresses,organizations,birthdays,metadata,memberships,biographies",
+                "personFields": "names,emailAddresses,phoneNumbers,addresses,organizations,birthdays,events,metadata,memberships,biographies",
             }
 
             if page_token:
@@ -250,7 +250,7 @@ class GoogleAPIClient:
                 service.people()
                 .get(
                     resourceName=resource_name,
-                    personFields="names,emailAddresses,phoneNumbers,addresses,organizations,birthdays,metadata,memberships,biographies",
+                    personFields="names,emailAddresses,phoneNumbers,addresses,organizations,birthdays,events,metadata,memberships,biographies",
                 )
                 .execute()
             )

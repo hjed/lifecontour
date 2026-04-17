@@ -690,7 +690,9 @@ class TestGoogleEventTransformerTimezone:
         assert "timeZone" not in payload["start"]
         assert "timeZone" not in payload["end"]
 
-    def test_outbound_payload_translates_local_time_to_utc_with_midnight_crossing(self) -> None:
+    def test_outbound_payload_translates_local_time_to_utc_with_midnight_crossing(
+        self,
+    ) -> None:
         """Outbound Google payload maps a local start_time that crosses UTC midnight back into the correct UTC offset string."""
         transformer = GoogleEventTransformer()
 
