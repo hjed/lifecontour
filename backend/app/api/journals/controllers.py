@@ -211,13 +211,27 @@ def _parse_optional_time(value: Any, field_name: str) -> time | None:
     """Parse an optional time field from request attributes."""
     if value is None:
         return None
+
+    if isinstance(value, str):
+        value = value.strip()
+        if value == "":
+            return None
+
     try:
-        return time.fromisoformat(str(value))
+        parsed_time = time.fromisoformat(str(value))
     except (ValueError, TypeError) as exc:
         raise JournalValidationError(
             field_name,
-            f"Invalid time format for {field_name}. Expected format: HH:MM or HH:MM:SS",
+            f"Invalid time format for {field_name}. Expected format: HH:MM or HH:MM:SS with no timezone",
         ) from exc
+
+    if parsed_time.tzinfo is not None:
+        raise JournalValidationError(
+            field_name,
+            f"Invalid time format for {field_name}. Expected format: HH:MM or HH:MM:SS with no timezone",
+        )
+
+    return parsed_time
 
 
 async def _create_type_specific_data(
@@ -2910,21 +2924,35 @@ async def _update_event_type_data(
             "journal_type", f"Journal does not have type {journal_type}"
         )
 
-    # Update fields from request
+    updates: dict[str, Any] = {}
+    import dataclasses
+
     if "calendar_id" in attrs:
-        calendar_info.calendar_id = UUID(attrs["calendar_id"])
-    if "start_time" in attrs:
-        calendar_info.start_time = _parse_optional_time(
-            attrs["start_time"], "start_time"
-        )
-    if "end_time" in attrs:
-        calendar_info.end_time = _parse_optional_time(attrs["end_time"], "end_time")
+        updates["calendar_id"] = UUID(attrs["calendar_id"])
     if "is_all_day" in attrs:
-        calendar_info.is_all_day = attrs["is_all_day"]
+        is_all_day = attrs["is_all_day"]
+        updates["is_all_day"] = is_all_day
+        if is_all_day:
+            # All-day updates must clear times if they aren't explicitly provided as None
+            if "start_time" not in attrs:
+                updates["start_time"] = None
+            if "end_time" not in attrs:
+                updates["end_time"] = None
+    if "start_time" in attrs:
+        updates["start_time"] = _parse_optional_time(attrs["start_time"], "start_time")
+    if "end_time" in attrs:
+        updates["end_time"] = _parse_optional_time(attrs["end_time"], "end_time")
     if "location" in attrs:
-        calendar_info.location = attrs["location"]
+        updates["location"] = attrs["location"]
     if "sync_invitees" in attrs:
-        calendar_info.sync_invitees = attrs["sync_invitees"]
+        updates["sync_invitees"] = attrs["sync_invitees"]
+
+    try:
+        from core_shared.models.journals.exceptions import CalendarInfoValidationError
+
+        calendar_info = dataclasses.replace(calendar_info, **updates)
+    except CalendarInfoValidationError as e:
+        raise JournalValidationError("event_data", str(e.message)) from e
 
     await calendar_info_repo.save(calendar_info)
 

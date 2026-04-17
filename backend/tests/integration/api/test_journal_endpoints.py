@@ -852,9 +852,22 @@ class TestJournalTypeManagement:
 
     async def test_update_event_type_data(self, integration_api_client):
         """Test updating EVENT type data."""
+        # Create a calendar first for foreign key
+        cal_response = await integration_api_client.post(
+            "/api/calendars",
+            json={
+                "data": {"type": "calendars", "attributes": {"name": "Test Calendar"}}
+            },
+        )
+        assert cal_response.status_code == 201
+        calendar_id = cal_response.json()["data"]["id"]
+
         # Create an EVENT journal
         create_data = create_journal_request_data(
-            title="Event Update Test", content="Test content", types=["EVENT"]
+            title="Event Update Test",
+            content="Test content",
+            types=["EVENT"],
+            type_data={"event": {"calendar_id": calendar_id, "is_all_day": False}},
         )
 
         create_response = await integration_api_client.post(
@@ -879,6 +892,55 @@ class TestJournalTypeManagement:
 
         # Should succeed or return validation error
         assert response.status_code in [200, 400, 422]
+
+    async def test_update_event_type_data_with_times(self, integration_api_client):
+        """Test updating EVENT type data with HH:MM times explicitly."""
+        # Create a calendar first for foreign key
+        cal_response = await integration_api_client.post(
+            "/api/calendars",
+            json={
+                "data": {"type": "calendars", "attributes": {"name": "Test Calendar 2"}}
+            },
+        )
+        assert cal_response.status_code == 201
+        calendar_id = cal_response.json()["data"]["id"]
+
+        # Create an EVENT journal
+        create_data = create_journal_request_data(
+            title="Event Time Update Test",
+            content="Test content",
+            types=["EVENT"],
+            type_data={"event": {"calendar_id": calendar_id, "is_all_day": True}},
+        )
+
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        # Update EVENT type data with HH:MM format
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {
+                    "is_all_day": False,
+                    "start_time": "12:30",
+                    "end_time": "14:00",
+                },
+            }
+        }
+
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/EVENT/data", json=update_data
+        )
+
+        assert response.status_code == 200
+        response_json = response.json()
+        event_data = response_json["data"]["attributes"]["type_data"]["event"]
+        assert event_data["is_all_day"] is False
+        assert event_data["start_time"] == "12:30:00"
+        assert event_data["end_time"] == "14:00:00"
 
     async def test_update_photo_album_type_data(self, integration_api_client):
         """Test updating PHOTO_ALBUM type data."""

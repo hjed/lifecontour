@@ -338,29 +338,32 @@ test.describe('Journal Detail Page', () => {
       await expect(eventSection).toBeVisible();
       await eventSection.click();
 
-      // Wait for the Edit button to be visible (indicates section is expanded)
-      const editButton = page.getByRole('button', { name: /edit/i }).first();
-      await expect(editButton).toBeVisible();
+      // Wait for the Event Type Editor to be visible
+      const eventTypeEditor = page.getByTestId('event-type-editor');
+      await expect(eventTypeEditor).toBeVisible();
 
-      // Click the edit button
+      // Click the edit button specifically for the event editor
+      const editButton = eventTypeEditor.getByTestId('edit-button');
+      await expect(editButton).toBeVisible();
       await editButton.click();
 
-      // Verify we're in edit mode - look for Save/Cancel buttons
-      const saveButton = page.getByRole('button', { name: /save/i }).first();
-      const cancelButton = page
-        .getByRole('button', { name: /cancel/i })
-        .first();
+      // Verify we're in edit mode using the scoped event editor controls
+      const saveButton = eventTypeEditor.getByTestId('save-button');
+      const cancelButton = eventTypeEditor.getByTestId('cancel-button');
 
       await expect(saveButton).toBeVisible();
       await expect(cancelButton).toBeVisible();
 
-      // Actually change a field, let's sayLocation
-      const locationInput = page.getByLabel(/Location/i).first();
+      // Actually change a field, let's say Location
+      const locationInput = eventTypeEditor.getByTestId('location-input');
       await locationInput.fill('New Prod Location');
 
-      // Change start time to reproduce the backend crash
-      const startTimeInput = page.getByLabel(/Start time/i).first();
+      // Change time fields to verify backend accepts valid time inputs
+      const startTimeInput = eventTypeEditor.getByTestId('start-time-input');
       await startTimeInput.fill('12:30');
+
+      const endTimeInput = eventTypeEditor.getByTestId('end-time-input');
+      await endTimeInput.fill('13:30');
 
       const [response] = await Promise.all([
         page.waitForResponse(
@@ -371,9 +374,16 @@ test.describe('Journal Detail Page', () => {
         saveButton.click(),
       ]);
 
-      console.log('Update Status:', response.status());
-      console.log('Update Text:', await response.text());
-      expect(response.status()).toBe(200);
+      const updateStatus = response.status();
+      const responseText = await response.text();
+      if (updateStatus !== 200) {
+        console.log('Update Status:', updateStatus);
+        console.log('Update Text:', responseText);
+      }
+      expect(
+        updateStatus,
+        `Expected 200 but got ${updateStatus}. Response: ${responseText}`
+      ).toBe(200);
 
       // Wait for edit mode to finish
       await expect(saveButton).not.toBeVisible();
