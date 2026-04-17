@@ -1528,26 +1528,23 @@ test.describe('Journal List Page', () => {
         }).toPass({ timeout: 5000 });
       }
 
-      // Broad regex to account for varying browser locales (e.g. "15 May 2026", "May 15th, 2026")
-      const day = targetDate.getDate();
-      const monthPrefix = monthNames[targetDate.getMonth()].substring(0, 3);
-      const year = targetDate.getFullYear();
-      const dayLabelRegex = new RegExp(
-        `(${monthPrefix}.*\\b${day}\\b.*${year}|\\b${day}\\b.*${monthPrefix}.*${year})`,
-        'i'
-      );
+      // 15 is always unique within a calendar grid because outside days can only be up to 6 days
+      // from the start or end of the month (e.g., 25-31 or 1-6).
+      const dayLocator = targetGrid.getByText(String(targetDate.getDate()), {
+        exact: true,
+      });
 
       // Set up the response listener BEFORE clicking to avoid missing the response.
-      // Tightened predicate to capture the actual fetch.
+      // Tightened predicate to capture the actual fetch. Note: backend accepts start_date/end_date.
       const jumpResponsePromise = page.waitForResponse(
         response =>
           response.request().method() === 'GET' &&
           response.url().includes('/api/journals') &&
-          response.url().includes('anchor_date=') &&
+          response.url().includes('start_date=') &&
           response.status() === 200
       );
 
-      await targetGrid.getByRole('button', { name: dayLabelRegex }).click();
+      await dayLocator.click();
 
       // Wait for the popover to close (confirms the date selection registered)
       await expect(page.locator('[data-slot="calendar"]')).not.toBeVisible();
