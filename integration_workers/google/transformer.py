@@ -522,12 +522,15 @@ class GoogleContactTransformer:
         """
         birthday_dates = self._transform_birthdays(birthdays)
         event_dates = self._transform_events(events)
+        transformed_dates = birthday_dates + event_dates
 
-        # Both sources had no entries → treat as "no data from Google"
-        if not birthdays and not events:
+        # Only trigger downstream replacement when Google produced at least
+        # one supported, valid important date. Unsupported event types or
+        # invalid date payloads should preserve existing local-only dates.
+        if not transformed_dates:
             return None
 
-        return birthday_dates + event_dates
+        return transformed_dates
 
     def _transform_birthdays(
         self, birthdays: list[GoogleBirthday]

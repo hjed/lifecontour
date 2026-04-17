@@ -65,17 +65,21 @@ def apply_migrations() -> None:
     # We use the DATABASE_URL environment variable which is already set
     env = os.environ.copy()
     env.pop("VIRTUAL_ENV", None)  # Prevent uv warning about mismatched environment
+    env.pop("UV_RUN_RECURSION_DEPTH", None)  # Prevent nested uv run limitation
     # Ensure alembic gets the correct dynamic database URL
     env["DATABASE_URL"] = get_async_database_url()
 
     # Run alembic upgrade head
-    subprocess.run(
-        ["uv", "run", "alembic", "-c", "alembic.ini", "upgrade", "head"],
-        cwd=backend_dir,
-        check=True,
-        env=env,
-        capture_output=True,
-    )
+    try:
+        subprocess.run(
+            ["uv", "run", "alembic", "-c", "alembic.ini", "upgrade", "head"],
+            cwd=backend_dir,
+            check=True,
+            env=env,
+        )
+    except subprocess.CalledProcessError as e:
+        print(f"Alembic failed. stdout: {e.stdout}, stderr: {e.stderr}")
+        raise
 
 
 @pytest_asyncio.fixture(scope="function")

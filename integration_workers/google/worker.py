@@ -631,13 +631,14 @@ def _transform_contact_to_google_person(contact: dict[str, Any]) -> dict[str, An
         person_data["memberships"] = memberships
 
     # Transform important dates to Google birthdays and events
-    important_dates = contact.get("important_dates")
-    if important_dates:
+    # Always include birthdays/events when important_dates is present on the
+    # contact, even if the transformed supported lists are empty, so removals
+    # propagate through the updatePersonFields mask and clear stale Google data.
+    if "important_dates" in contact:
+        important_dates = contact.get("important_dates") or []
         birthdays, events = _transform_important_dates_to_google(important_dates)
-        if birthdays:
-            person_data["birthdays"] = birthdays
-        if events:
-            person_data["events"] = events
+        person_data["birthdays"] = birthdays
+        person_data["events"] = events
 
     return person_data
 

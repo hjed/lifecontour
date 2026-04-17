@@ -244,8 +244,8 @@ class TestTransformContactToGooglePersonDates:
         assert "birthdays" not in person_data
         assert "events" not in person_data
 
-    def test_empty_dates_omits_keys(self) -> None:
-        """Contact with empty important_dates list does not include keys."""
+    def test_empty_dates_includes_empty_keys(self) -> None:
+        """Contact with empty important_dates list includes empty keys so removals propagate."""
         contact: dict[str, Any] = {
             "first_name": "Test",
             "last_name": "User",
@@ -257,11 +257,11 @@ class TestTransformContactToGooglePersonDates:
 
         person_data = _transform_contact_to_google_person(contact)
 
-        assert "birthdays" not in person_data
-        assert "events" not in person_data
+        assert person_data.get("birthdays") == []
+        assert person_data.get("events") == []
 
-    def test_local_only_dates_omits_keys(self) -> None:
-        """Contact with only local-only date types still omits Google keys."""
+    def test_local_only_dates_includes_empty_keys(self) -> None:
+        """Contact with only local-only date types includes empty Google keys so removals propagate."""
         contact: dict[str, Any] = {
             "first_name": "Test",
             "last_name": "User",
@@ -276,10 +276,15 @@ class TestTransformContactToGooglePersonDates:
                     "month": 1,
                     "day": 1,
                 },
+                {
+                    "date_type": "first_met",
+                    "precision": "year",
+                    "year": 2019,
+                },
             ],
         }
 
         person_data = _transform_contact_to_google_person(contact)
 
-        assert "birthdays" not in person_data
-        assert "events" not in person_data
+        assert person_data.get("birthdays") == []
+        assert person_data.get("events") == []

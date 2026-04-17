@@ -103,19 +103,17 @@ class TestBirthdayTransformation:
         person = GooglePerson(
             resourceName="people/c4",
             names=[GoogleName(givenName="Test")],
-            birthdays=[GoogleBirthday(date=None, text="January 1st")],
+            birthdays=[GoogleBirthday(date=None)],
         )
 
         contact = transformer.transform_person(person)
 
-        # No usable date, but birthdays list was present
-        assert contact.important_dates is not None
-        assert len(contact.important_dates) == 0
+        assert contact.important_dates is None
 
     def test_birthday_all_zeros_skipped(
         self, transformer: GoogleContactTransformer
     ) -> None:
-        """Birthday with all zero components is skipped."""
+        """Birthday where all date components are zero is skipped (returns None if no valid dates)."""
         person = GooglePerson(
             resourceName="people/c5",
             names=[GoogleName(givenName="Test")],
@@ -124,13 +122,12 @@ class TestBirthdayTransformation:
 
         contact = transformer.transform_person(person)
 
-        assert contact.important_dates is not None
-        assert len(contact.important_dates) == 0
+        assert contact.important_dates is None
 
     def test_birthday_none_components_skipped(
         self, transformer: GoogleContactTransformer
     ) -> None:
-        """Birthday where all date components are None is skipped."""
+        """Birthday where all date components are None is skipped (returns None if no valid dates)."""
         person = GooglePerson(
             resourceName="people/c6",
             names=[GoogleName(givenName="Test")],
@@ -141,8 +138,7 @@ class TestBirthdayTransformation:
 
         contact = transformer.transform_person(person)
 
-        assert contact.important_dates is not None
-        assert len(contact.important_dates) == 0
+        assert contact.important_dates is None
 
 
 class TestEventTransformation:
@@ -201,7 +197,7 @@ class TestEventTransformation:
     def test_unknown_event_type_skipped(
         self, transformer: GoogleContactTransformer
     ) -> None:
-        """Events with unsupported types are silently skipped."""
+        """Events with unsupported types are silently skipped (returns None if no valid dates)."""
         person = GooglePerson(
             resourceName="people/c12",
             names=[GoogleName(givenName="Test")],
@@ -219,11 +215,10 @@ class TestEventTransformation:
 
         contact = transformer.transform_person(person)
 
-        assert contact.important_dates is not None
-        assert len(contact.important_dates) == 0
+        assert contact.important_dates is None
 
     def test_event_no_date_skipped(self, transformer: GoogleContactTransformer) -> None:
-        """Event with no date is skipped."""
+        """Event with no date is skipped (returns None if no valid dates)."""
         person = GooglePerson(
             resourceName="people/c13",
             names=[GoogleName(givenName="Test")],
@@ -234,11 +229,10 @@ class TestEventTransformation:
 
         contact = transformer.transform_person(person)
 
-        assert contact.important_dates is not None
-        assert len(contact.important_dates) == 0
+        assert contact.important_dates is None
 
     def test_event_no_type_skipped(self, transformer: GoogleContactTransformer) -> None:
-        """Event with no type is skipped."""
+        """Event with no type is skipped (returns None if no valid dates)."""
         person = GooglePerson(
             resourceName="people/c14",
             names=[GoogleName(givenName="Test")],
@@ -252,8 +246,7 @@ class TestEventTransformation:
 
         contact = transformer.transform_person(person)
 
-        assert contact.important_dates is not None
-        assert len(contact.important_dates) == 0
+        assert contact.important_dates is None
 
 
 class TestCombinedDateTransformation:

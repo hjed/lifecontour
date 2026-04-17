@@ -263,6 +263,6 @@ class TestOutboundDateSync:
 
         person_data = _transform_contact_to_google_person(contact_dict)
 
-        # Local-only types should not appear in Google output
-        assert "birthdays" not in person_data
-        assert "events" not in person_data
+        # Local-only types should result in empty lists in Google output so removals propagate
+        assert person_data.get("birthdays") == []
+        assert person_data.get("events") == []
