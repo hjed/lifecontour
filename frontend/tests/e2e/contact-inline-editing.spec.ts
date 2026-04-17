@@ -10,15 +10,20 @@ async function waitForFieldUpdateRequest(
   fieldName: string,
   expectedValue: string
 ) {
-  const requestPromise = page.waitForRequest(
-    req =>
-      req.url().includes(`/api/contacts/${contactId}/fields/${fieldName}`) &&
-      req.method() === 'PATCH',
-    { timeout: 10000 }
+  // Wait for the response so we know the server finished processing
+  const responsePromise = page.waitForResponse(
+    res =>
+      res
+        .request()
+        .url()
+        .includes(`/api/contacts/${contactId}/fields/${fieldName}`) &&
+      res.request().method() === 'PATCH' &&
+      res.status() === 200,
+    { timeout: 15000 }
   );
 
-  const apiRequest = await requestPromise;
-  const requestBody = apiRequest.postDataJSON();
+  const response = await responsePromise;
+  const requestBody = response.request().postDataJSON();
 
   // Verify request format matches backend expectations
   expect(requestBody).toHaveProperty('data');
