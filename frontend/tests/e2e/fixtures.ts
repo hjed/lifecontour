@@ -785,6 +785,12 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     const yesterday = new Date(today);
     yesterday.setDate(today.getDate() - 1);
 
+    // Create a calendar for the event
+    const calendars = await dataManager.createCalendars([
+      { name: 'Test Calendar', color: '#3b82f6' },
+    ]);
+    const calendarId = calendars[0].id;
+
     // Create test journals via API
     const journals = await dataManager.createJournals([
       {
@@ -804,6 +810,12 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
           end: today.toISOString(),
         },
         types: ['event'],
+        type_data: {
+          event: {
+            calendar_id: calendarId,
+            is_all_day: false,
+          },
+        },
       },
     ]);
 

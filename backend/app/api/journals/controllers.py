@@ -6,7 +6,7 @@ Controllers act as adapters between HTTP and domain services.
 """
 
 import dataclasses
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -205,6 +205,19 @@ def _parse_optional_integer(value: Any, field_name: str) -> int | None:
     if value is None:
         return None
     return _require_integer(value, field_name)
+
+
+def _parse_optional_time(value: Any, field_name: str) -> time | None:
+    """Parse an optional time field from request attributes."""
+    if value is None:
+        return None
+    try:
+        return time.fromisoformat(str(value))
+    except (ValueError, TypeError) as exc:
+        raise JournalValidationError(
+            field_name,
+            f"Invalid time format for {field_name}. Expected format: HH:MM or HH:MM:SS",
+        ) from exc
 
 
 async def _create_type_specific_data(
@@ -2901,9 +2914,11 @@ async def _update_event_type_data(
     if "calendar_id" in attrs:
         calendar_info.calendar_id = UUID(attrs["calendar_id"])
     if "start_time" in attrs:
-        calendar_info.start_time = attrs["start_time"]
+        calendar_info.start_time = _parse_optional_time(
+            attrs["start_time"], "start_time"
+        )
     if "end_time" in attrs:
-        calendar_info.end_time = attrs["end_time"]
+        calendar_info.end_time = _parse_optional_time(attrs["end_time"], "end_time")
     if "is_all_day" in attrs:
         calendar_info.is_all_day = attrs["is_all_day"]
     if "location" in attrs:
