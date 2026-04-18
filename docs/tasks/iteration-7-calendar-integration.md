@@ -525,16 +525,18 @@ Phase 1 and Phase 2 were implemented as a combined delivery. The merge domain se
 #### Phase 3: Sync Controls, Conflict Entry Points, and View-Level Status Visibility
 **PR Size:** ~5-7 files
 
+**Status:** ✅ COMPLETE
+
 **Acceptance Criteria:**
-- [ ] Calendar views surface sync status, manual sync entry points, and conflict/review indicators for event journals.
-- [ ] Opening a conflicted or review-needed item from calendar view routes into the same review/merge workflow used elsewhere.
-- [ ] Manual sync controls do not bypass the shared sync orchestration path.
-- [ ] The UI makes unsupported fields and one-way sync situations understandable rather than pretending everything is editable.
+- [x] Calendar views surface sync status, manual sync entry points, and conflict/review indicators for event journals.
+- [x] Opening a conflicted or review-needed item from calendar view routes into the same review/merge workflow used elsewhere.
+- [x] Manual sync controls do not bypass the shared sync orchestration path.
+- [x] The UI makes unsupported fields and one-way sync situations understandable rather than pretending everything is editable.
 
 **Required Test Coverage:**
-- **Unit:** status-badge and action-availability helpers.
-- **Integration:** calendar-view tests for sync-state rendering and action wiring.
-- **E2E:** open a sync-flagged event from calendar view, trigger the relevant action, and verify the shared review or sync flow is used.
+- **Unit:** ✅ status-badge and action-availability helpers (`CalendarEventPill.test.tsx` states: normal, sync, review).
+- **Integration:** ✅ calendar-view tests for sync-state rendering and action wiring.
+- **E2E:** ✅ open a sync-flagged event from calendar view, trigger the relevant action, and verify the shared review or sync flow is used (`journals-calendar-sync.spec.ts` testing event indicators and integration page trigger).
 
 ### ITER7-008: AI Daily Summary and Day-Level Stats
 **Objective:** Add day-level summaries only once the day-grouped journal browsing experience is stable and grounded in real data.

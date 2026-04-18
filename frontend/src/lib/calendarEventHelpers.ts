@@ -49,6 +49,8 @@ export interface CalendarEvent {
   journalTypes: JournalType[];
   /** Whether the journal has pending reviews */
   hasPendingReviews: boolean;
+  /** Whether the event is synced to Google Calendar */
+  isSyncedToGoogle: boolean;
 }
 
 const DEFAULT_CALENDAR_COLOR = '#6b7280';
@@ -104,6 +106,7 @@ export function toCalendarEvent(journal: DisplayJournal): CalendarEvent {
     isCancelled,
     journalTypes: journal.types,
     hasPendingReviews: journal.has_pending_reviews ?? false,
+    isSyncedToGoogle: journal.calendar?.is_synced_to_google ?? false,
   };
 }
 

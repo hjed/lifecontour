@@ -162,6 +162,7 @@ describe('calendarEventHelpers', () => {
           isCancelled: false,
           journalTypes: [JournalType.EVENT],
           hasPendingReviews: false,
+          isSyncedToGoogle: false,
         },
         {
           id: '2',
@@ -174,6 +175,7 @@ describe('calendarEventHelpers', () => {
           isCancelled: false,
           journalTypes: [JournalType.EVENT],
           hasPendingReviews: false,
+          isSyncedToGoogle: false,
         },
         {
           id: '3',
@@ -186,6 +188,7 @@ describe('calendarEventHelpers', () => {
           isCancelled: false,
           journalTypes: [JournalType.EVENT],
           hasPendingReviews: false,
+          isSyncedToGoogle: false,
         },
       ];
 
