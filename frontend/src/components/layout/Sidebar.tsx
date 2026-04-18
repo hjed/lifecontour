@@ -265,7 +265,7 @@ function TagTreeNavigation({
   }
 
   return (
-    <ScrollArea className='max-h-[50vh]' data-testid='tag-tree-scroll-area'>
+    <div data-testid='tag-tree-scroll-area'>
       <ul className='m-0 space-y-0.5 p-0' aria-label='Tags'>
         {tree.map(node => (
           <TagTreeItem
@@ -279,7 +279,7 @@ function TagTreeNavigation({
           />
         ))}
       </ul>
-    </ScrollArea>
+    </div>
   );
 }
 
@@ -403,9 +403,9 @@ function SidebarContentInner({
   const [showCreateTagDialog, setShowCreateTagDialog] = useState(false);
 
   return (
-    <>
+    <ScrollArea className='h-full flex-1'>
       <nav
-        className='flex h-full flex-col space-y-2 p-4'
+        className='flex flex-col space-y-2 p-4'
         role='navigation'
         aria-label='Main navigation'
       >
@@ -562,7 +562,7 @@ function SidebarContentInner({
         open={showCreateTagDialog}
         onOpenChange={setShowCreateTagDialog}
       />
-    </>
+    </ScrollArea>
   );
 }
 
