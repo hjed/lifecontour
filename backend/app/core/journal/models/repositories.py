@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 if TYPE_CHECKING:
@@ -1031,16 +1031,23 @@ class JournalContactRelationshipRepository(ABC):
 
     @abstractmethod
     async def update(
-        self, relationship: JournalContactRelationship
-    ) -> JournalContactRelationship:
+        self,
+        journal_id: int,
+        contact_id: int,
+        relationship_type: JournalContactRelationshipType,
+        updates: dict[str, Any],
+    ) -> JournalContactRelationship | None:
         """
-        Update an existing relationship's status and role.
+        Update an existing relationship's status and/or role.
 
         Args:
-            relationship: The relationship to update
+            journal_id: The journal ID
+            contact_id: The contact ID
+            relationship_type: The relationship type
+            updates: Dictionary of fields to update ('status', 'role')
 
         Returns:
-            The updated relationship
+            The updated relationship, or None if not found
         """
         pass
 

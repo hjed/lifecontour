@@ -3602,36 +3602,50 @@ async def update_contact_relationship(
             f"Invalid relationship type: {relationship_type}",
         ) from e
 
-    # Parse status and role from request
+    # Parse status and role from request utilizing model_fields_set to check provided fields
+    from typing import Any
+
     from core_shared.models.journals.attendee_status import AttendeeStatus
     from core_shared.models.journals.contact_event_role import ContactEventRole
 
-    status, role = None, None
-    status_raw = contact_update_request.data.attributes.status
-    if isinstance(status_raw, str):
-        try:
-            status = AttendeeStatus[status_raw.upper()]
-        except KeyError as e:
-            raise JournalValidationError(
-                "status", f"Invalid status: {status_raw}"
-            ) from e
+    provided_fields = contact_update_request.data.attributes.model_fields_set & {
+        "status",
+        "role",
+    }
+    updates: dict[str, Any] = {}
 
-    role_raw = contact_update_request.data.attributes.role
-    if isinstance(role_raw, str):
-        try:
-            role = ContactEventRole[role_raw.upper()]
-        except KeyError as e:
-            raise JournalValidationError("role", f"Invalid role: {role_raw}") from e
+    if "status" in provided_fields:
+        status_raw = contact_update_request.data.attributes.status
+        if status_raw is not None:
+            try:
+                updates["status"] = AttendeeStatus[status_raw.upper()]
+            except KeyError as e:
+                raise JournalValidationError(
+                    "status", f"Invalid status: {status_raw}"
+                ) from e
+        else:
+            updates["status"] = None
+
+    if "role" in provided_fields:
+        role_raw = contact_update_request.data.attributes.role
+        if role_raw is not None:
+            try:
+                updates["role"] = ContactEventRole[role_raw.upper()]
+            except KeyError as e:
+                raise JournalValidationError("role", f"Invalid role: {role_raw}") from e
+        else:
+            updates["role"] = None
 
     # Update the relationship using repository
-    relationship = JournalContactRelationship(
-        journal_id=journal_id,
-        contact_id=contact_id_int,
-        relationship_type=relationship_type_enum,
-        status=status,
-        role=role,
-    )
-    await contact_relationship_repo.update(relationship)
+    if updates:
+        updated_rel = await contact_relationship_repo.update(
+            journal_id=journal_id,
+            contact_id=contact_id_int,
+            relationship_type=relationship_type_enum,
+            updates=updates,
+        )
+        if not updated_rel:
+            raise JournalValidationError("contact_id", "Contact relationship not found")
 
     # Get updated journal
     updated_journal = await journal_service.get_journal(journal_id)

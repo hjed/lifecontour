@@ -1,6 +1,7 @@
 """SQL implementation of JournalContactRelationshipRepository."""
 
 from datetime import datetime
+from typing import Any
 
 from core_shared.models.journals import (
     JournalContactRelationship,
@@ -153,30 +154,49 @@ class SqlJournalContactRelationshipRepository(JournalContactRelationshipReposito
         return [self._row_to_entity(row) for row in rows]
 
     async def update(
-        self, relationship: JournalContactRelationship
-    ) -> JournalContactRelationship:
-        """Update an existing relationship's status and role."""
-        query = text(
-            """
+        self,
+        journal_id: int,
+        contact_id: int,
+        relationship_type: JournalContactRelationshipType,
+        updates: dict[str, Any],
+    ) -> JournalContactRelationship | None:
+        """Update an existing relationship's status and/or role."""
+        if not updates:
+            # If nothing to update, just return the current one or fetch it?
+            # But the caller should ensure updates is not empty.
+            raise ValueError("No fields provided for update")
+
+        set_clauses = []
+        params: dict[str, Any] = {
+            "journal_id": journal_id,
+            "contact_id": contact_id,
+            "relationship_type": relationship_type.value,
+        }
+
+        if "status" in updates:
+            set_clauses.append("status = :status")
+            params["status"] = updates["status"].value if updates["status"] else None
+
+        if "role" in updates:
+            set_clauses.append("role = :role")
+            params["role"] = updates["role"].value if updates["role"] else None
+
+        query_str = f"""
             UPDATE journal_contact_relationships
-            SET status = :status,
-                role = :role
+            SET {", ".join(set_clauses)}
             WHERE journal_id = :journal_id
             AND contact_id = :contact_id
             AND relationship_type = :relationship_type
-            """
-        )
-        await self.conn.execute(
-            query,
-            {
-                "journal_id": relationship.journal_id,
-                "contact_id": relationship.contact_id,
-                "relationship_type": relationship.relationship_type.value,
-                "status": relationship.status.value if relationship.status else None,
-                "role": relationship.role.value if relationship.role else None,
-            },
-        )
-        return relationship
+            RETURNING journal_id, contact_id, relationship_type, status, role, created_at
+        """
+
+        result = await self.conn.execute(text(query_str), params)
+        row = result.fetchone()
+
+        if not row:
+            return None
+
+        return self._row_to_entity(row)
 
     async def transition_attending_to_attended(
         self, before: datetime, batch_size: int = 500
