@@ -73,13 +73,15 @@ class AttendanceTransitionService:
 
         transitioned = 0
         for rel in eligible:
-            await self.repo.update_status(
+            updated = await self.repo.update_status(
                 journal_id=rel.journal_id,
                 contact_id=rel.contact_id,
                 relationship_type=rel.relationship_type,
                 status=AttendeeStatus.ATTENDED,
+                expected_current_status=AttendeeStatus.ATTENDING,
             )
-            transitioned += 1
+            if updated is not None:
+                transitioned += 1
 
         logger.info(
             "Attendance transitions completed",

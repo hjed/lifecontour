@@ -158,28 +158,38 @@ class SqlJournalContactRelationshipRepository(JournalContactRelationshipReposito
         contact_id: int,
         relationship_type: JournalContactRelationshipType,
         status: AttendeeStatus,
+        expected_current_status: AttendeeStatus | None = None,
     ) -> JournalContactRelationship | None:
-        """Update the attendee status of a journal-contact relationship."""
+        """Update the attendee status of a journal-contact relationship.
+
+        When expected_current_status is provided, the update is applied
+        only if the current row status still matches that expected value.
+        This provides atomic transitions inside SQL.
+        """
+        status_condition = ""
+        params = {
+            "journal_id": journal_id,
+            "contact_id": contact_id,
+            "relationship_type": relationship_type.value,
+            "status": status.value,
+        }
+
+        if expected_current_status is not None:
+            status_condition = " AND status = :expected_current_status"
+            params["expected_current_status"] = expected_current_status.value
+
         query = text(
-            """
+            f"""
             UPDATE journal_contact_relationships
             SET status = :status
             WHERE journal_id = :journal_id
             AND contact_id = :contact_id
-            AND relationship_type = :relationship_type
+            AND relationship_type = :relationship_type{status_condition}
             RETURNING journal_id, contact_id, relationship_type,
                       created_at, status, role
         """
         )
-        result = await self.conn.execute(
-            query,
-            {
-                "journal_id": journal_id,
-                "contact_id": contact_id,
-                "relationship_type": relationship_type.value,
-                "status": status.value,
-            },
-        )
+        result = await self.conn.execute(query, params)
         row = result.fetchone()
         if row is None:
             return None

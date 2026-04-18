@@ -1037,6 +1037,7 @@ class JournalContactRelationshipRepository(ABC):
         contact_id: int,
         relationship_type: JournalContactRelationshipType,
         status: AttendeeStatus,
+        expected_current_status: AttendeeStatus | None = None,
     ) -> JournalContactRelationship | None:
         """
         Update the attendee status of a journal-contact relationship.
@@ -1046,6 +1047,7 @@ class JournalContactRelationshipRepository(ABC):
             contact_id: The contact ID
             relationship_type: The relationship type
             status: The new attendee status
+            expected_current_status: If provided, only update if the current status matches this.
 
         Returns:
             The updated relationship, or None if not found

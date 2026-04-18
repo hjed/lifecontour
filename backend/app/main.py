@@ -108,7 +108,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         # Start attendance transition background task (hourly)
         attendance_task = asyncio.create_task(
-            run_attendance_transition_loop(interval_seconds=3600)
+            run_attendance_transition_loop(container, interval_seconds=3600)
         )
         logger.info("Attendance transition background task started")
 

@@ -9,6 +9,8 @@ import asyncio
 from datetime import UTC, datetime
 
 import structlog
+from dishka import AsyncContainer
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
     SqlJournalContactRelationshipRepository,
@@ -16,20 +18,21 @@ from app.core.journal.adapters.sql.journal_contact_relationship_repository impor
 from app.core.journal.services.attendance_transition_service import (
     AttendanceTransitionService,
 )
-from app.infrastructure.database import get_async_database_engine
 
 logger = structlog.get_logger()
 
 
 async def run_attendance_transition_loop(
+    container: AsyncContainer,
     interval_seconds: float = 3600,
 ) -> None:
     """Run the attendance transition job in a periodic loop.
 
-    Creates a new database connection per cycle, runs the transition
-    service, then sleeps for the configured interval.
+    Creates a new database connection per cycle from the container's engine,
+    runs the transition service, then sleeps for the configured interval.
 
     Args:
+        container: Application's AsyncContainer for dependency injection.
         interval_seconds: Interval between processing cycles (default: 1 hour).
     """
     logger.info(
@@ -39,19 +42,13 @@ async def run_attendance_transition_loop(
 
     while True:
         try:
-            engine = get_async_database_engine()
+            engine = await container.get(AsyncEngine)
             async with engine.begin() as conn:
                 repo = SqlJournalContactRelationshipRepository(conn)
                 service = AttendanceTransitionService(repo)
 
                 cutoff = datetime.now(UTC)
-                result = await service.transition_past_event_attendees(cutoff)
-
-                if result.transitioned_count > 0:
-                    logger.info(
-                        "Attendance transitions completed",
-                        transitioned_count=result.transitioned_count,
-                    )
+                await service.transition_past_event_attendees(cutoff)
 
             await asyncio.sleep(interval_seconds)
 
