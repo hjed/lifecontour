@@ -409,7 +409,7 @@ test.describe('Sidebar Navigation', () => {
       await expect(page).toHaveTitle(/Personal Management System/);
 
       // Wait for sidebar tag tree to load
-      const tagTreeArea = page.getByTestId('tag-tree-scroll-area');
+      const tagTreeArea = page.getByTestId('tag-tree-container');
       await expect(tagTreeArea).toBeVisible({ timeout: 10000 });
 
       // 4. Parent should be visible with an expand toggle
@@ -471,7 +471,7 @@ test.describe('Sidebar Navigation', () => {
       await expect(page).toHaveTitle(/Personal Management System/);
 
       // Wait for tag tree, expand parent
-      const tagTreeArea = page.getByTestId('tag-tree-scroll-area');
+      const tagTreeArea = page.getByTestId('tag-tree-container');
       await expect(tagTreeArea).toBeVisible({ timeout: 10000 });
 
       const expandToggle = page.getByTestId(`tag-toggle-${parentId}`);
@@ -496,7 +496,7 @@ test.describe('Sidebar Navigation', () => {
       await expect(page).toHaveTitle(/Personal Management System/);
 
       // Wait for tag tree to load
-      const tagTreeArea = page.getByTestId('tag-tree-scroll-area');
+      const tagTreeArea = page.getByTestId('tag-tree-container');
       await expect(tagTreeArea).toBeVisible({ timeout: 10000 });
 
       // Tag links should be present as regular links
