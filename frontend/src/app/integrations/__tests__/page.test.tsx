@@ -18,6 +18,7 @@ import IntegrationsPage from '../page';
 jest.mock('@/lib/api/integrations', () => ({
   useGoogleStatus: jest.fn(),
   useGoogleSync: jest.fn(),
+  useCalendarSync: jest.fn(),
   useIntegrationHealth: jest.fn(),
   useSyncHistory: jest.fn(),
   useGoogleOAuthAuthorize: jest.fn(),
@@ -48,6 +49,7 @@ jest.mock('@/components/auth/AuthGuard', () => ({
 import {
   useGoogleStatus,
   useGoogleSync,
+  useCalendarSync,
   useIntegrationHealth,
   useSyncHistory,
   useGoogleOAuthAuthorize,
@@ -58,6 +60,7 @@ import {
 // Get typed mocked functions
 const mockUseGoogleStatus = jest.mocked(useGoogleStatus);
 const mockUseGoogleSync = jest.mocked(useGoogleSync);
+const mockUseCalendarSync = jest.mocked(useCalendarSync);
 const mockUseIntegrationHealth = jest.mocked(useIntegrationHealth);
 const mockUseSyncHistory = jest.mocked(useSyncHistory);
 const mockUseGoogleOAuthAuthorize = jest.mocked(useGoogleOAuthAuthorize);
@@ -102,6 +105,12 @@ describe('IntegrationsPage', () => {
     } as any);
 
     mockUseGoogleSync.mockReturnValue({
+      mutate: jest.fn(),
+      isPending: false,
+      error: null,
+    } as any);
+
+    mockUseCalendarSync.mockReturnValue({
       mutate: jest.fn(),
       isPending: false,
       error: null,
@@ -177,12 +186,12 @@ describe('IntegrationsPage', () => {
     ).toBeInTheDocument();
   });
 
-  it('should display Google Contacts integration section', () => {
+  it('should display Google integration section', () => {
     const wrapper = createWrapper();
     render(<IntegrationsPage />, { wrapper });
 
     expect(screen.getByTestId('google-integration')).toBeInTheDocument();
-    expect(screen.getByText('Google Contacts')).toBeInTheDocument();
+    expect(screen.getByText('Google Integration')).toBeInTheDocument();
   });
 
   it('should show connected status when integration is connected', () => {
@@ -198,7 +207,9 @@ describe('IntegrationsPage', () => {
     render(<IntegrationsPage />, { wrapper });
 
     expect(screen.getByTestId('trigger-google-sync')).toBeInTheDocument();
-    expect(screen.getByText('Smart Sync')).toBeInTheDocument();
+    expect(screen.getByTestId('trigger-calendar-sync')).toBeInTheDocument();
+    expect(screen.getByText('Sync Contacts')).toBeInTheDocument();
+    expect(screen.getByText('Sync Calendar')).toBeInTheDocument();
   });
 
   it('should trigger sync when sync button is clicked', async () => {
