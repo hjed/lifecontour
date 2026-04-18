@@ -27,6 +27,9 @@ from app.infrastructure.database import get_database_engine
 from app.infrastructure.di.container import create_container
 from app.infrastructure.events.outbox_processor import run_outbox_processor_loop
 from app.infrastructure.logging import setup_logging
+from app.infrastructure.tasks.attendance_transition_task import (
+    run_attendance_transition_loop,
+)
 from app.mcp.server import create_mcp_app
 
 
@@ -95,12 +98,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Start background tasks
     outbox_task = None
+    attendance_task = None
     try:
         # Start outbox processor background task
         outbox_task = asyncio.create_task(
             run_outbox_processor_loop(container, interval_seconds=10)
         )
         logger.info("Outbox processor background task started")
+
+        # Start attendance transition background task (hourly)
+        attendance_task = asyncio.create_task(
+            run_attendance_transition_loop(interval_seconds=3600)
+        )
+        logger.info("Attendance transition background task started")
 
         yield
 
@@ -113,6 +123,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             except asyncio.CancelledError:
                 pass
             logger.info("Outbox processor background task stopped")
+
+        if attendance_task:
+            attendance_task.cancel()
+            try:
+                await attendance_task
+            except asyncio.CancelledError:
+                pass
+            logger.info("Attendance transition background task stopped")
 
         # Close Dishka container
         await container.close()

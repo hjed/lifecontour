@@ -649,6 +649,34 @@ class JournalContactRelationshipAddRequest(
 JournalContactAddRequest = JournalContactRelationshipAddRequest
 
 
+class JournalContactRelationshipUpdateAttributes(BaseModel):
+    """Attributes for updating a journal-contact relationship's status/role."""
+
+    status: str | None = Field(
+        default=None, description="Attendee status (ATTENDING, ATTENDED, MAYBE, etc.)"
+    )
+    role: str | None = Field(
+        default=None, description="Event role (ORGANISER, FACILITATOR_HELPER, etc.)"
+    )
+
+
+class JournalContactRelationshipUpdateData(BaseModel):
+    """Data for updating a journal-contact relationship."""
+
+    type: str = Field(
+        default="journal-contact-relationships", description=RESOURCE_TYPE_DESC
+    )
+    attributes: JournalContactRelationshipUpdateAttributes = Field(
+        ..., description="Relationship attributes to update"
+    )
+
+
+class JournalContactRelationshipUpdateRequest(BaseModel):
+    """Request model for updating a journal-contact relationship."""
+
+    data: JournalContactRelationshipUpdateData = Field(..., description="Update data")
+
+
 # Tag Management Schemas
 class JournalTagAddAttributes(BaseModel):
     """Attributes for adding a tag to a journal."""

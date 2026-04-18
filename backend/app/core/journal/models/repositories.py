@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
 if TYPE_CHECKING:
+    from core_shared.models.journals.attendee_status import AttendeeStatus
     from core_shared.models.journals.review_item import ReviewItem
 
 from core_shared.models.journals import (
@@ -1025,6 +1027,49 @@ class JournalContactRelationshipRepository(ABC):
 
         Returns:
             List of relationships matching the criteria
+        """
+        pass
+
+    @abstractmethod
+    async def update_status(
+        self,
+        journal_id: int,
+        contact_id: int,
+        relationship_type: JournalContactRelationshipType,
+        status: AttendeeStatus,
+    ) -> JournalContactRelationship | None:
+        """
+        Update the attendee status of a journal-contact relationship.
+
+        Args:
+            journal_id: The journal ID
+            contact_id: The contact ID
+            relationship_type: The relationship type
+            status: The new attendee status
+
+        Returns:
+            The updated relationship, or None if not found
+        """
+        pass
+
+    @abstractmethod
+    async def find_attending_for_past_events(
+        self,
+        cutoff_time: datetime,
+        batch_size: int = 100,
+    ) -> list[JournalContactRelationship]:
+        """
+        Find relationships with ATTENDING status on past events.
+
+        Returns relationships where status is ATTENDING and the journal's
+        event_date_range end is before the cutoff_time.
+
+        Args:
+            cutoff_time: Events ending before this time are considered past.
+            batch_size: Maximum number of relationships to return.
+
+        Returns:
+            List of eligible relationships for transition.
         """
         pass
 
