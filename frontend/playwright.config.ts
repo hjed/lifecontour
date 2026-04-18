@@ -89,13 +89,14 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: { ...devices['Desktop Chrome'], timezoneId: 'UTC' },
     },
 
     {
       name: 'firefox',
       use: {
         ...devices['Desktop Firefox'],
+        timezoneId: 'UTC',
         // Firefox-specific settings for better reliability
         launchOptions: {
           firefoxUserPrefs: {
@@ -111,7 +112,7 @@ export default defineConfig({
     /* Test against mobile viewports. */
     {
       name: 'Mobile Chrome',
-      use: { ...devices['Pixel 6'] },
+      use: { ...devices['Pixel 6'], timezoneId: 'UTC' },
     },
 
     /* Test against branded browsers. */

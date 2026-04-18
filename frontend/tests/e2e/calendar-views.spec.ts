@@ -548,4 +548,152 @@ test.describe('Calendar Views', () => {
     const prevHeading = `${monthNames[prevMonth.getMonth()]} ${prevMonth.getFullYear()}`;
     await expect(page.getByText(prevHeading)).toBeVisible();
   });
+
+  test('should switch to week and day views and display events', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const page = authenticatedPage;
+    const dataManager = new (await import('./data-management')).TestDataManager(
+      page
+    );
+
+    await dataManager.clearAllJournals();
+
+    const calendars = await dataManager.createCalendars([
+      { name: 'Week Day Cal', color: '#10B981' },
+    ]);
+
+    await dataManager.createJournals([
+      {
+        title: 'Week View Event',
+        content: 'Testing week and day views',
+        event_date_range: {
+          start: relativeDate(0),
+          end: relativeDate(0),
+        },
+        types: ['event'],
+        type_data: {
+          event: {
+            calendar_id: calendars[0].id,
+            is_all_day: true,
+            sync_invitees: false,
+          },
+        },
+      },
+    ]);
+
+    testCleanup(async () => {
+      await dataManager.cleanup();
+    });
+
+    await page.goto('/journals');
+    await expect(page.getByTestId('journals-list-ready')).toBeVisible();
+
+    // Switch to week view
+    await page.getByLabel('Week view').click();
+    await expect(page.getByTestId('calendar-week-view')).toBeVisible();
+    await expect(
+      page.getByRole('link', { name: /week view event/i })
+    ).toBeVisible();
+
+    // Switch to month view first to set anchor date deterministically
+    await page.getByLabel('Month view').click();
+    await expect(page.getByTestId('calendar-month-view')).toBeVisible();
+
+    const eventLink = page
+      .getByRole('link', { name: /week view event/i })
+      .first();
+    await expect(eventLink).toBeVisible();
+
+    // Click the day header of the cell containing the event to set anchorDate and navigate to Agenda
+    await eventLink
+      .locator('xpath=ancestor::div[starts-with(@data-testid, "day-cell-")]')
+      .locator('div.text-right.text-sm')
+      .first()
+      .click();
+
+    // Wait until agenda view appears (proves anchorDate is set)
+    await expect(page.getByTestId('calendar-agenda-view')).toBeVisible();
+
+    // Switch to day view (anchorDate is now locked)
+    await page.getByLabel('Day view').click();
+    await expect(page.getByTestId('calendar-day-view')).toBeVisible();
+    await expect(
+      page.getByRole('link', { name: /week view event/i })
+    ).toBeVisible();
+  });
+
+  test('should trigger quick create dialog and create a new event', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const page = authenticatedPage;
+    const dataManager = new (await import('./data-management')).TestDataManager(
+      page
+    );
+
+    await dataManager.clearAllJournals();
+
+    const calendars = await dataManager.createCalendars([
+      { name: 'Quick Create Cal', color: '#10B981' },
+    ]);
+
+    testCleanup(async () => {
+      await dataManager.cleanup();
+    });
+
+    await page.goto('/journals');
+    await expect(page.getByTestId('journals-list-ready')).toBeVisible();
+
+    // Switch to Month view to use its grid
+    await page.getByLabel('Month view').click();
+    await expect(page.getByTestId('calendar-month-view')).toBeVisible();
+
+    // Find today's date cell, click it (or the add button) to trigger quick create
+    // Since today is marked with data-today="true", we can locate it easily.
+    const todayCell = page.locator(
+      '[data-testid^="day-cell-"][data-today="true"]'
+    );
+    await expect(todayCell).toBeVisible();
+
+    // Focus to reveal Add button via group-focus-within
+    await todayCell.focus();
+    // Also hover just in case
+    await todayCell.hover();
+
+    // Click Add button (force: true bypasses strict visibility checks that fail during CSS transitions in Firefox)
+    const addButton = todayCell.getByRole('button', { name: /add event on/i });
+    await addButton.click({ force: true });
+
+    // Verify dialog appears
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await expect(
+      dialog.getByRole('heading', { name: 'Quick Create Event' })
+    ).toBeVisible();
+
+    // Fill form
+    await dialog.getByLabel('Title').fill('Quick Created UI Event');
+
+    // Select calendar
+    await dialog.getByTestId('calendar-id-input').click();
+    const calendarOption = page
+      .getByRole('option', { name: calendars[0].name, exact: true })
+      .first();
+    await expect(calendarOption).toBeVisible({ timeout: 10000 });
+    await calendarOption.click();
+
+    // Submit form
+    // The form contains a button "Create Journal"
+    await dialog.getByRole('button', { name: /create journal/i }).click();
+
+    // Wait for the dialog to go away
+    await expect(dialog).toBeHidden({ timeout: 10000 });
+
+    // Verify the new event appears in the month grid
+    await expect(
+      page.getByRole('link', { name: /quick created ui event/i })
+    ).toBeVisible();
+  });
 });

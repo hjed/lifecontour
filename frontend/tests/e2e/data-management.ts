@@ -906,6 +906,20 @@ export class TestDataManager {
           const journalId = responseData.data.id;
           const journalAttributes = responseData.data.attributes;
 
+          // Added: Verify the journal is readable to handle backend transaction commit delay
+          // Dishka FastAPI integrations sometimes commit immediately AFTER the response is sent.
+          for (let verifyAttempt = 1; verifyAttempt <= 5; verifyAttempt++) {
+            const getResponse = await this.page.request.get(
+              `/api/journals/${journalId}`
+            );
+            if (getResponse.ok()) {
+              break;
+            }
+            await new Promise(resolve =>
+              setTimeout(resolve, 50 * verifyAttempt)
+            );
+          }
+
           // Track for cleanup
           this.createdJournalIds.push(journalId);
 
@@ -925,7 +939,7 @@ export class TestDataManager {
         const statusCode = response.status();
         const responseText = await response.text();
 
-        // Only retry on server errors (5xx)
+        // Retry on server errors (5xx)
         if (statusCode >= 500 && attempt < maxRetries) {
           console.debug(
             `⚠️ [Data Manager] Journal creation attempt ${attempt}/${maxRetries} ` +

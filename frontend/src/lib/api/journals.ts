@@ -912,7 +912,9 @@ export function useCreateJournal() {
   return useMutation({
     mutationFn: createJournal,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: journalKeys.all });
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: journalKeys.all });
+      }, 150);
       toast.success(SUCCESS_MESSAGES.JOURNAL_CREATED);
     },
     onError: (error: Error) => {
@@ -933,8 +935,10 @@ export function useUpdateJournal() {
       data: Partial<JournalFormData>;
     }) => updateJournal(id, data),
     onSuccess: (_, { id }) => {
-      queryClient.invalidateQueries({ queryKey: journalKeys.detail(id) });
-      queryClient.invalidateQueries({ queryKey: journalKeys.lists() });
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: journalKeys.detail(id) });
+        queryClient.invalidateQueries({ queryKey: journalKeys.lists() });
+      }, 150);
       toast.success(SUCCESS_MESSAGES.JOURNAL_UPDATED);
     },
     onError: (error: Error) => {
@@ -949,7 +953,9 @@ export function useDeleteJournal() {
   return useMutation({
     mutationFn: deleteJournal,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: journalKeys.all });
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: journalKeys.lists() });
+      }, 150);
       toast.success(SUCCESS_MESSAGES.JOURNAL_DELETED);
     },
     onError: (error: Error) => {

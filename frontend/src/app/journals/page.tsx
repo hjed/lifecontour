@@ -20,6 +20,9 @@ import {
 } from '@/components/journals/CalendarViewToggle';
 import { CalendarMonthView } from '@/components/journals/CalendarMonthView';
 import { CalendarAgendaView } from '@/components/journals/CalendarAgendaView';
+import { CalendarWeekView } from '@/components/journals/CalendarWeekView';
+import { CalendarDayView } from '@/components/journals/CalendarDayView';
+import { CalendarQuickCreateDialog } from '@/components/journals/CalendarQuickCreateDialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -36,6 +39,8 @@ import {
   toCalendarEvents,
   getMonthDateRange,
   getAgendaDateRange,
+  getWeekDateRange,
+  getDayDateRange,
 } from '@/lib/calendarEventHelpers';
 import {
   BookOpen,
@@ -99,10 +104,12 @@ export default function JournalsPage() {
 
   // Load saved view mode on first client render to avoid hydration mismatch
   useEffect(() => {
-    const stored = window.sessionStorage.getItem('pms_view_mode');
-    if (stored === 'month' || stored === 'agenda' || stored === 'list') {
+    const stored = window.sessionStorage.getItem(
+      'pms_view_mode'
+    ) as CalendarViewMode;
+    if (['list', 'month', 'agenda', 'week', 'day'].includes(stored)) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setViewModeState(stored as CalendarViewMode);
+      setViewModeState(stored);
     }
   }, []);
 
@@ -154,10 +161,21 @@ export default function JournalsPage() {
     { enabled: shouldUseSearch }
   );
 
+  const [quickCreateOpen, setQuickCreateOpen] = useState(false);
+  const [quickCreateDate, setQuickCreateDate] = useState<string | undefined>();
+
   // Calendar view data: fetch journals for the displayed month or agenda window
   const monthDateRange = useMemo(
     () => getMonthDateRange(calendarMonth.year, calendarMonth.month),
     [calendarMonth.year, calendarMonth.month]
+  );
+  const weekDateRange = useMemo(
+    () => getWeekDateRange(anchorDate ? parseISO(anchorDate) : new Date()),
+    [anchorDate]
+  );
+  const dayDateRange = useMemo(
+    () => getDayDateRange(anchorDate ? parseISO(anchorDate) : new Date()),
+    [anchorDate]
   );
   const agendaDateRange = useMemo(
     () =>
@@ -179,6 +197,22 @@ export default function JournalsPage() {
         limit: 100,
       };
     }
+    if (viewMode === 'week') {
+      return {
+        ...baseFilters,
+        date_from: weekDateRange.start,
+        date_to: weekDateRange.end,
+        limit: 100,
+      };
+    }
+    if (viewMode === 'day') {
+      return {
+        ...baseFilters,
+        date_from: dayDateRange.start,
+        date_to: dayDateRange.end,
+        limit: 100,
+      };
+    }
     if (viewMode === 'agenda') {
       return {
         ...baseFilters,
@@ -188,7 +222,14 @@ export default function JournalsPage() {
       };
     }
     return baseFilters;
-  }, [filters, viewMode, monthDateRange, agendaDateRange]);
+  }, [
+    filters,
+    viewMode,
+    monthDateRange,
+    weekDateRange,
+    dayDateRange,
+    agendaDateRange,
+  ]);
 
   const { data: calendarData, isLoading: isCalendarLoading } = useJournals(
     calendarFilters,
@@ -485,6 +526,50 @@ export default function JournalsPage() {
                     setAnchorDate(date);
                     setViewMode('agenda');
                   }}
+                  onSlotClick={date => {
+                    setQuickCreateDate(date);
+                    setQuickCreateOpen(true);
+                  }}
+                  isLoading={isCalendarLoading}
+                />
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Week View */}
+          {viewMode === 'week' && (
+            <Card>
+              <CardContent className='pt-6'>
+                <CalendarWeekView
+                  anchorDate={anchorDate ? parseISO(anchorDate) : new Date()}
+                  events={calendarEvents}
+                  onWeekChange={date =>
+                    setAnchorDate(format(date, 'yyyy-MM-dd'))
+                  }
+                  onSlotClick={date => {
+                    setQuickCreateDate(date);
+                    setQuickCreateOpen(true);
+                  }}
+                  isLoading={isCalendarLoading}
+                />
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Day View */}
+          {viewMode === 'day' && (
+            <Card>
+              <CardContent className='pt-6'>
+                <CalendarDayView
+                  anchorDate={anchorDate ? parseISO(anchorDate) : new Date()}
+                  events={calendarEvents}
+                  onDayChange={date =>
+                    setAnchorDate(format(date, 'yyyy-MM-dd'))
+                  }
+                  onSlotClick={date => {
+                    setQuickCreateDate(date);
+                    setQuickCreateOpen(true);
+                  }}
                   isLoading={isCalendarLoading}
                 />
               </CardContent>
@@ -498,6 +583,16 @@ export default function JournalsPage() {
               isLoading={isCalendarLoading}
             />
           )}
+
+          {/* Quick Create Dialog */}
+          <CalendarQuickCreateDialog
+            open={quickCreateOpen}
+            onOpenChange={setQuickCreateOpen}
+            initialDate={quickCreateDate}
+            onSuccess={() => {
+              // Optionally do something on success if needed
+            }}
+          />
         </main>
       </div>
 

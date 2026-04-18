@@ -173,3 +173,29 @@ export function getAgendaDateRange(
     end: format(end, 'yyyy-MM-dd'),
   };
 }
+
+/**
+ * Get the date range for a calendar week view (Mon-Sun).
+ * @param date - Any date within the target week
+ */
+export function getWeekDateRange(date: Date): { start: string; end: string } {
+  const start = startOfWeek(date, { weekStartsOn: 1 });
+  const end = endOfWeek(date, { weekStartsOn: 1 });
+
+  return {
+    start: format(start, 'yyyy-MM-dd'),
+    end: format(end, 'yyyy-MM-dd'),
+  };
+}
+
+/**
+ * Get the date range for a single day view.
+ * @param date - The target date
+ */
+export function getDayDateRange(date: Date): { start: string; end: string } {
+  const dateStr = format(date, 'yyyy-MM-dd');
+  return {
+    start: dateStr,
+    end: dateStr,
+  };
+}
