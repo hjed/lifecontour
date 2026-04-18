@@ -595,6 +595,84 @@ class TestJournalRelationshipEndpoints:
         # Endpoint should exist and return appropriate status
         assert response.status_code in [200, 204, 404, 422]
 
+    async def test_update_contact_relationship(self, integration_api_client):
+        """Test updating a contact relationship for a journal."""
+        # Create a journal
+        create_data = create_journal_request_data(
+            title="Contact Update Test", content="Test content"
+        )
+
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        journal_id = create_response.json()["data"]["id"]
+
+        # Create a contact first
+        contact_data = {
+            "data": {
+                "type": "contacts",
+                "attributes": {
+                    "first_name": "UpdateRel",
+                    "last_name": "User",
+                    "contact_methods": [],
+                    "addresses": [],
+                    "notes": [],
+                },
+            }
+        }
+        contact_response = await integration_api_client.post(
+            "/api/contacts", json=contact_data
+        )
+        assert contact_response.status_code == 201
+        contact_id = contact_response.json()["data"]["id"]
+
+        # Add initial contact relationship
+        contact_rel_data = {
+            "data": {
+                "type": "journal-contact-relationships",
+                "attributes": {
+                    "contact_id": str(contact_id),
+                    "relationship_type": "PARTICIPANT",
+                    "status": "MAYBE",
+                    "role": "ORGANISER",
+                },
+            }
+        }
+
+        response = await integration_api_client.post(
+            f"/api/journals/{journal_id}/relationships/contacts", json=contact_rel_data
+        )
+        assert response.status_code == 200
+
+        # Update contact relationship
+        update_rel_data = {
+            "data": {
+                "type": "journal-contact-relationships",
+                "attributes": {
+                    "status": "ATTENDED",
+                    "role": "FACILITATOR_HELPER",
+                },
+            }
+        }
+
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/relationships/contacts/{contact_id}/PARTICIPANT",
+            json=update_rel_data,
+        )
+        assert response.status_code == 200
+
+        # Verify it was updated correctly
+        journal_response = await integration_api_client.get(
+            f"/api/journals/{journal_id}"
+        )
+        assert journal_response.status_code == 200
+        contacts = journal_response.json()["data"]["attributes"]["contacts"]
+        assert len(contacts) == 1
+        assert contacts[0]["id"] == str(contact_id)
+        assert contacts[0]["relationship_type"] == "PARTICIPANT"
+        assert contacts[0]["status"] == "ATTENDED"
+        assert contacts[0]["role"] == "FACILITATOR_HELPER"
+
 
 @pytest.mark.integration
 class TestJournalFilteringAndPagination:

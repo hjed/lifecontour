@@ -645,6 +645,36 @@ class JournalContactRelationshipAddRequest(
     pass
 
 
+class JournalContactRelationshipUpdateAttributes(BaseModel):
+    """Attributes for updating a contact relationship to a journal."""
+
+    status: str | None = Field(
+        default=None, description="Attendee status (ATTENDING, MAYBE, etc.)"
+    )
+    role: str | None = Field(
+        default=None, description="Event role (ORGANISER, FACILITATOR_HELPER, etc.)"
+    )
+
+
+class JournalContactRelationshipUpdateData(BaseModel):
+    """Data for updating a contact relationship."""
+
+    type: str = Field(
+        default="journal-contact-relationships", description=RESOURCE_TYPE_DESC
+    )
+    attributes: JournalContactRelationshipUpdateAttributes = Field(
+        ..., description="Relationship update attributes"
+    )
+
+
+class JournalContactRelationshipUpdateRequest(
+    JsonApiUpdateRequest[JournalContactRelationshipUpdateData]
+):
+    """Request model for updating a contact relationship."""
+
+    pass
+
+
 # Alias for backward compatibility
 JournalContactAddRequest = JournalContactRelationshipAddRequest
 

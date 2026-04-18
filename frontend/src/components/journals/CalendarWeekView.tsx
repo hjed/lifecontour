@@ -161,17 +161,33 @@ export function CalendarWeekView({
                       'hover:bg-muted/30 focus-visible:bg-muted/30 transition-colors'
                     )}
                     onClick={e => {
-                      if (e.target === e.currentTarget && onSlotClick) {
-                        onSlotClick(dateKey);
+                      if (!onSlotClick) {
+                        return;
                       }
+
+                      const target = e.target as HTMLElement | null;
+                      if (target?.closest('a,button')) {
+                        return;
+                      }
+
+                      onSlotClick(dateKey);
                     }}
                     onKeyDown={e => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        if (e.target === e.currentTarget && onSlotClick) {
-                          e.preventDefault();
-                          onSlotClick(dateKey);
-                        }
+                      if (e.key !== 'Enter' && e.key !== ' ') {
+                        return;
                       }
+
+                      if (!onSlotClick) {
+                        return;
+                      }
+
+                      const target = e.target as HTMLElement | null;
+                      if (target?.closest('a,button')) {
+                        return;
+                      }
+
+                      e.preventDefault();
+                      onSlotClick(dateKey);
                     }}
                     tabIndex={0}
                     aria-label={`${format(day, 'EEEE, MMMM d, yyyy', { locale: enAU })}${dayEvents.length > 0 ? `, ${dayEvents.length} event${dayEvents.length > 1 ? 's' : ''}` : ''}`}
@@ -180,6 +196,7 @@ export function CalendarWeekView({
                     {onSlotClick && (
                       <div className='absolute inset-x-0 top-0 hidden p-1 group-hover:block focus-within:block'>
                         <Button
+                          type='button'
                           variant='secondary'
                           size='sm'
                           className='h-7 w-full text-xs opacity-80 hover:opacity-100'
@@ -187,6 +204,7 @@ export function CalendarWeekView({
                             e.stopPropagation();
                             onSlotClick(dateKey);
                           }}
+                          aria-label={`Add event on ${format(day, 'MMM d')}`}
                         >
                           <Plus className='mr-1 h-3 w-3' /> Add
                         </Button>

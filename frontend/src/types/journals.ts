@@ -459,6 +459,18 @@ export interface JournalContactRelationshipAddRequest {
   data: JournalContactRelationshipAddData;
 }
 
+export interface JournalContactRelationshipUpdateData {
+  type: 'journal-contact-relationships';
+  attributes: {
+    status?: AttendeeStatus | null;
+    role?: ContactEventRole | null;
+  };
+}
+
+export interface JournalContactRelationshipUpdateRequest {
+  data: JournalContactRelationshipUpdateData;
+}
+
 // Tag Management Types
 export interface JournalTagAddData {
   type: 'journal-tags';

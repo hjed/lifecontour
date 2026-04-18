@@ -1,5 +1,7 @@
 """SQL implementation of JournalContactRelationshipRepository."""
 
+from datetime import datetime
+
 from core_shared.models.journals import (
     JournalContactRelationship,
     JournalContactRelationshipType,
@@ -149,3 +151,56 @@ class SqlJournalContactRelationshipRepository(JournalContactRelationshipReposito
         rows = result.fetchall()
 
         return [self._row_to_entity(row) for row in rows]
+
+    async def update(
+        self, relationship: JournalContactRelationship
+    ) -> JournalContactRelationship:
+        """Update an existing relationship's status and role."""
+        query = text(
+            """
+            UPDATE journal_contact_relationships
+            SET status = :status,
+                role = :role
+            WHERE journal_id = :journal_id
+            AND contact_id = :contact_id
+            AND relationship_type = :relationship_type
+            """
+        )
+        await self.conn.execute(
+            query,
+            {
+                "journal_id": relationship.journal_id,
+                "contact_id": relationship.contact_id,
+                "relationship_type": relationship.relationship_type.value,
+                "status": relationship.status.value if relationship.status else None,
+                "role": relationship.role.value if relationship.role else None,
+            },
+        )
+        return relationship
+
+    async def transition_attending_to_attended(
+        self, before: datetime, batch_size: int = 500
+    ) -> int:
+        """Bulk transition ATTENDING status to ATTENDED for past events."""
+        query = text(
+            """
+            WITH to_update AS (
+                SELECT r.journal_id, r.contact_id, r.relationship_type
+                FROM journal_contact_relationships r
+                JOIN journals j on j.id = r.journal_id
+                WHERE r.status = 'ATTENDING'
+                AND j.event_date_range_end < :before
+                LIMIT :batch_size
+            )
+            UPDATE journal_contact_relationships r
+            SET status = 'ATTENDED'
+            FROM to_update t
+            WHERE r.journal_id = t.journal_id
+            AND r.contact_id = t.contact_id
+            AND r.relationship_type = t.relationship_type
+            """
+        )
+        result = await self.conn.execute(
+            query, {"before": before, "batch_size": batch_size}
+        )
+        return result.rowcount

@@ -22,6 +22,9 @@ from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from starlette.middleware.sessions import SessionMiddleware
 
+from app.core.journal.services.attended_transition_loop import (
+    run_attended_transition_loop,
+)
 from app.infrastructure.config import Settings, get_settings
 from app.infrastructure.database import get_database_engine
 from app.infrastructure.di.container import create_container
@@ -95,12 +98,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Start background tasks
     outbox_task = None
+    transition_task = None
     try:
         # Start outbox processor background task
         outbox_task = asyncio.create_task(
             run_outbox_processor_loop(container, interval_seconds=10)
         )
         logger.info("Outbox processor background task started")
+
+        # Start attended transition background task
+        transition_task = asyncio.create_task(
+            run_attended_transition_loop(container, interval_seconds=3600)
+        )
+        logger.info("Attended transition background task started")
 
         yield
 
@@ -113,6 +123,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             except asyncio.CancelledError:
                 pass
             logger.info("Outbox processor background task stopped")
+
+        if transition_task:
+            transition_task.cancel()
+            try:
+                await transition_task
+            except asyncio.CancelledError:
+                pass
+            logger.info("Attended transition background task stopped")
 
         # Close Dishka container
         await container.close()

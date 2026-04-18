@@ -41,6 +41,7 @@ from app.api.journals.schemas import (
     EventDateRangeSchema,
     JournalAttributes,
     JournalContactAddRequest,
+    JournalContactRelationshipUpdateRequest,
     JournalCreateRequest,
     JournalListResponse,
     JournalResource,
@@ -3509,6 +3510,128 @@ async def add_contact_to_journal(
             "contact_id",
             f"Contact not found or relationship already exists: {contact_id}",
         ) from e
+
+    # Get updated journal
+    updated_journal = await journal_service.get_journal(journal_id)
+    if not updated_journal:
+        raise JournalNotFoundError(journal_id)
+
+    # Fetch all enrichment data
+    types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
+        updated_journal,
+        calendar_info_repo,
+        calendar_repo,
+        mood_data_repo,
+        plan_data_repo,
+        travel_data_repo,
+        photo_album_data_repo,
+        fitness_data_repo,
+        contact_relationship_repo,
+        tag_repo,
+        route_repo,
+        outdoor_activity_data_repo,
+        bushwalking_data_repo,
+        jogging_data_repo,
+        abseiling_data_repo,
+        canyoning_data_repo,
+        climbing_data_repo,
+        kayaking_data_repo,
+        skiing_data_repo,
+        include_routes=True,
+    )
+
+    journal_resource = JournalConverter.to_resource(
+        updated_journal, base_url, types, type_data, contacts, tags, calendar
+    )
+
+    return await _build_journal_response(journal_resource, contact_repo)
+
+
+@router.put("/{journal_id}/relationships/contacts/{contact_id}/{relationship_type}")
+@inject
+async def update_contact_relationship(
+    journal_id: int,
+    contact_id: int,
+    relationship_type: str,
+    request: Request,
+    contact_update_request: JournalContactRelationshipUpdateRequest,
+    journal_service: FromDishka[JournalService],
+    calendar_info_repo: FromDishka[CalendarInfoRepository],
+    calendar_repo: FromDishka[CalendarRepository],
+    mood_data_repo: FromDishka[MoodDataRepository],
+    plan_data_repo: FromDishka[PlanDataRepository],
+    travel_data_repo: FromDishka[TravelDataRepository],
+    photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    fitness_data_repo: FromDishka[FitnessDataRepository],
+    outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
+    bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
+    jogging_data_repo: FromDishka[JoggingDataRepository],
+    abseiling_data_repo: FromDishka[AbseilingDataRepository],
+    canyoning_data_repo: FromDishka[CanyoningDataRepository],
+    climbing_data_repo: FromDishka[ClimbingDataRepository],
+    kayaking_data_repo: FromDishka[KayakingDataRepository],
+    skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
+    contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
+    tag_repo: FromDishka[JournalTagRepository],
+    route_repo: FromDishka[RouteRepository],
+    contact_repo: FromDishka[ContactRepository],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> JournalResponse:
+    """
+    Update a contact relationship for a journal.
+    """
+    base_url = get_request_base_url(request)
+
+    # Verify journal exists
+    journal = await journal_service.get_journal(journal_id)
+    if not journal:
+        raise JournalNotFoundError(journal_id)
+
+    # Parse contact_id and relationship type
+    try:
+        contact_id_int = int(contact_id)
+    except ValueError as e:
+        raise JournalValidationError("contact_id", "Invalid contact ID format") from e
+
+    try:
+        relationship_type_enum = JournalContactRelationshipType[relationship_type]
+    except KeyError as e:
+        raise JournalValidationError(
+            "relationship_type",
+            f"Invalid relationship type: {relationship_type}",
+        ) from e
+
+    # Parse status and role from request
+    from core_shared.models.journals.attendee_status import AttendeeStatus
+    from core_shared.models.journals.contact_event_role import ContactEventRole
+
+    status, role = None, None
+    status_raw = contact_update_request.data.attributes.status
+    if isinstance(status_raw, str):
+        try:
+            status = AttendeeStatus[status_raw.upper()]
+        except KeyError as e:
+            raise JournalValidationError(
+                "status", f"Invalid status: {status_raw}"
+            ) from e
+
+    role_raw = contact_update_request.data.attributes.role
+    if isinstance(role_raw, str):
+        try:
+            role = ContactEventRole[role_raw.upper()]
+        except KeyError as e:
+            raise JournalValidationError("role", f"Invalid role: {role_raw}") from e
+
+    # Update the relationship using repository
+    relationship = JournalContactRelationship(
+        journal_id=journal_id,
+        contact_id=contact_id_int,
+        relationship_type=relationship_type_enum,
+        status=status,
+        role=role,
+    )
+    await contact_relationship_repo.update(relationship)
 
     # Get updated journal
     updated_journal = await journal_service.get_journal(journal_id)

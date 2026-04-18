@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -1025,6 +1026,37 @@ class JournalContactRelationshipRepository(ABC):
 
         Returns:
             List of relationships matching the criteria
+        """
+        pass
+
+    @abstractmethod
+    async def update(
+        self, relationship: JournalContactRelationship
+    ) -> JournalContactRelationship:
+        """
+        Update an existing relationship's status and role.
+
+        Args:
+            relationship: The relationship to update
+
+        Returns:
+            The updated relationship
+        """
+        pass
+
+    @abstractmethod
+    async def transition_attending_to_attended(
+        self, before: datetime, batch_size: int = 500
+    ) -> int:
+        """
+        Bulk transition ATTENDING status to ATTENDED for past events.
+
+        Args:
+            before: Transition events ending before this time
+            batch_size: Maximum number of rows to update in this call
+
+        Returns:
+            Total rows updated
         """
         pass
 
