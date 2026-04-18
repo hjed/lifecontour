@@ -194,7 +194,7 @@ export function CalendarWeekView({
                   >
                     {/* Add Event Button overlay (visible on hover/focus) */}
                     {onSlotClick && (
-                      <div className='absolute inset-x-0 top-0 hidden p-1 group-hover:block focus-within:block'>
+                      <div className='absolute inset-x-0 top-0 hidden p-1 group-focus-within:block group-hover:block'>
                         <Button
                           type='button'
                           variant='secondary'

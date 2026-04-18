@@ -138,7 +138,7 @@ export function CalendarDayView({
           >
             {/* Add Event Button overlay (visible on hover/focus inside the empty area) */}
             {onSlotClick && (
-              <div className='absolute top-6 right-6 hidden group-hover:block focus-within:block'>
+              <div className='absolute top-6 right-6 hidden group-focus-within:block group-hover:block'>
                 <Button
                   type='button'
                   variant='secondary'
