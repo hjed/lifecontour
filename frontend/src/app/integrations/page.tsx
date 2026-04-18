@@ -163,6 +163,7 @@ interface SyncControlsProps {
   readonly oauthLoading: boolean;
   readonly disconnectLoading: boolean;
   readonly needsReauth: boolean;
+  readonly needsReconsent: boolean;
   readonly onSync: (syncType: SyncType) => void;
   readonly onCalendarSync: (syncType: SyncType) => void;
   readonly onConnect: () => void;
@@ -185,9 +186,11 @@ function SyncControls({
   syncError,
   calendarSyncLoading,
   calendarSyncError,
+  needsReconsent,
 }: SyncControlsProps) {
   const syncDisabled = syncLoading || needsReauth;
-  const calendarSyncDisabled = calendarSyncLoading || needsReauth;
+  const calendarSyncDisabled =
+    calendarSyncLoading || needsReauth || needsReconsent;
   return (
     <>
       <div className='flex gap-2'>
@@ -610,6 +613,7 @@ function IntegrationsPageContent() {
                     oauthLoading={oauthLoading}
                     disconnectLoading={disconnectLoading}
                     needsReauth={!!status.needsReauth}
+                    needsReconsent={!!status.needsReconsent}
                     onSync={handleSync}
                     onCalendarSync={handleCalendarSync}
                     onConnect={handleConnectGoogle}

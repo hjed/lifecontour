@@ -41,14 +41,17 @@ export function CalendarEventPill({ event, variant }: CalendarEventPillProps) {
               <Cloud
                 className='h-4 w-4 shrink-0 opacity-80'
                 data-testid='sync-indicator'
+                aria-label='Synced to Google Calendar'
               />
             )}
             {event.hasPendingReviews && (
               <div
                 className='flex flex-row items-center gap-1 rounded bg-black/20 px-1.5 py-0.5 text-[10px] font-bold text-red-200 uppercase'
                 data-testid='needs-review-badge'
+                role='img'
+                aria-label='Needs Review'
               >
-                <AlertCircle className='h-3 w-3' />
+                <AlertCircle className='h-3 w-3' aria-hidden='true' />
                 Review
               </div>
             )}
@@ -85,6 +88,7 @@ export function CalendarEventPill({ event, variant }: CalendarEventPillProps) {
             <Cloud
               className='h-3 w-3 shrink-0 opacity-80'
               data-testid='sync-indicator'
+              aria-label='Synced to Google Calendar'
             />
           )}
           <span className='truncate'>{event.title}</span>
@@ -92,6 +96,8 @@ export function CalendarEventPill({ event, variant }: CalendarEventPillProps) {
             <div
               className='h-2 w-2 shrink-0 rounded-full bg-red-400 shadow-sm'
               data-testid='needs-review-badge'
+              role='img'
+              aria-label='Needs Review'
             />
           )}
         </div>
@@ -116,6 +122,7 @@ export function CalendarEventPill({ event, variant }: CalendarEventPillProps) {
           <Cloud
             className='h-3 w-3 shrink-0 opacity-80'
             data-testid='sync-indicator'
+            aria-label='Synced to Google Calendar'
           />
         )}
         <span className='truncate'>{event.title}</span>
@@ -123,6 +130,8 @@ export function CalendarEventPill({ event, variant }: CalendarEventPillProps) {
           <div
             className='h-2 w-2 shrink-0 rounded-full bg-red-400 shadow-sm'
             data-testid='needs-review-badge'
+            role='img'
+            aria-label='Needs Review'
           />
         )}
       </div>
