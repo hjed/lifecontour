@@ -186,6 +186,9 @@ class Settings(BaseSettings):
     disable_auth: bool = Field(
         default=False, description="Disable authentication for development/testing"
     )
+    disable_background_tasks: bool = Field(
+        default=False, description="Disable background tasks for testing/development"
+    )
     otel_resource_attributes: str = Field(
         default="", description="OpenTelemetry resource attributes"
     )

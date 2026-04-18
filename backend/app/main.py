@@ -100,17 +100,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     outbox_task = None
     transition_task = None
     try:
-        # Start outbox processor background task
-        outbox_task = asyncio.create_task(
-            run_outbox_processor_loop(container, interval_seconds=10)
-        )
-        logger.info("Outbox processor background task started")
+        if not settings.disable_background_tasks:
+            # Start outbox processor background task
+            outbox_task = asyncio.create_task(
+                run_outbox_processor_loop(container, interval_seconds=10)
+            )
+            logger.info("Outbox processor background task started")
 
-        # Start attended transition background task
-        transition_task = asyncio.create_task(
-            run_attended_transition_loop(container, interval_seconds=3600)
-        )
-        logger.info("Attended transition background task started")
+            # Start attended transition background task
+            transition_task = asyncio.create_task(
+                run_attended_transition_loop(container, interval_seconds=3600)
+            )
+            logger.info("Attended transition background task started")
 
         yield
 

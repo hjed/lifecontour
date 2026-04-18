@@ -43,7 +43,11 @@ async def run_attended_transition_loop(
             # Re-raise to allow graceful shutdown
             raise
         except Exception as e:
-            logger.error("Error in attended transition loop", exc_info=e)
+            logger.error(
+                "Error in attended transition loop",
+                error=str(e),
+                exc_info=True,
+            )
 
         # Sleep until the next check
         try:

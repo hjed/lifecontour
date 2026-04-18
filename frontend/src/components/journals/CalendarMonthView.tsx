@@ -182,7 +182,7 @@ export function CalendarMonthView({
 
                     {/* Add Event Button overlay (visible on hover) */}
                     {onSlotClick && isCurrentMonth && (
-                      <div className='absolute top-1 left-1 hidden group-hover:block focus-within:block'>
+                      <div className='absolute top-1 left-1 hidden group-focus-within:block group-hover:block'>
                         <button
                           type='button'
                           className='bg-secondary text-secondary-foreground rounded p-1 shadow-sm hover:opacity-80'

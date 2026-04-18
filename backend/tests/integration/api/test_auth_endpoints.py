@@ -17,6 +17,7 @@ from app.main import create_app
 def test_settings(db_config):
     """Create test settings with OAuth providers configured."""
     return Settings(
+        disable_background_tasks=True,
         debug=True,
         database_url=db_config.get_async_url().replace(
             "postgresql+asyncpg://", "postgresql://"
@@ -93,6 +94,7 @@ class TestAuthEndpoints:
         """Test getting available OAuth providers when none are configured."""
         # Create app with no OAuth providers
         settings = Settings(
+            disable_background_tasks=True,
             debug=True,
             session_secret_key="test-secret",
             database_url=db_config.get_async_url().replace(

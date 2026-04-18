@@ -698,6 +698,7 @@ def test_settings():
         meilisearch_api_key=os.getenv("MEILISEARCH_API_KEY", "test_master_key"),
         allowed_hosts=["*"],  # Allow all hosts for testing
         cors_origins=["*"],
+        disable_background_tasks=True,
     )
 
 

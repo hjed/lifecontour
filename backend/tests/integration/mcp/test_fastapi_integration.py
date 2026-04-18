@@ -19,6 +19,7 @@ class TestMCPFastAPIIntegration:
     def test_settings(self, db_config):
         """Create test settings with MCP enabled (no auth)."""
         return Settings(
+            disable_background_tasks=True,
             database_url=db_config.get_async_url().replace(
                 "postgresql+asyncpg://", "postgresql://"
             ),
@@ -80,6 +81,7 @@ class TestMCPFastAPIIntegration:
         """Test that MCP mount path is configurable."""
         # Test with different mount path
         settings = Settings(
+            disable_background_tasks=True,
             database_url=db_config.get_async_url().replace(
                 "postgresql+asyncpg://", "postgresql://"
             ),
@@ -102,6 +104,7 @@ class TestMCPOAuthIntegration:
     def auth_settings(self, db_config):
         """Create test settings with MCP OAuth enabled (GitHub)."""
         return Settings(
+            disable_background_tasks=True,
             database_url=db_config.get_async_url().replace(
                 "postgresql+asyncpg://", "postgresql://"
             ),
@@ -157,6 +160,7 @@ class TestMCPOAuthIntegration:
     def test_no_well_known_when_auth_disabled(self, db_config):
         """Test that .well-known endpoints are NOT present when auth disabled."""
         settings = Settings(
+            disable_background_tasks=True,
             database_url=db_config.get_async_url().replace(
                 "postgresql+asyncpg://", "postgresql://"
             ),
@@ -181,6 +185,7 @@ class TestMCPOAuthIntegration:
     def test_misconfigured_auth_fails_closed(self, db_config):
         """Test that missing webhook_base_url with providers configured fails at startup."""
         settings = Settings(
+            disable_background_tasks=True,
             database_url=db_config.get_async_url().replace(
                 "postgresql+asyncpg://", "postgresql://"
             ),

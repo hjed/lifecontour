@@ -655,6 +655,22 @@ class JournalContactRelationshipUpdateAttributes(BaseModel):
         default=None, description="Event role (ORGANISER, FACILITATOR_HELPER, etc.)"
     )
 
+    @model_validator(mode="after")
+    def validate_update_fields(self) -> "JournalContactRelationshipUpdateAttributes":
+        """Require at least one update field and reject unsupported explicit nulls."""
+        provided_fields = self.model_fields_set & {"status", "role"}
+
+        if not provided_fields:
+            raise ValueError("At least one of 'status' or 'role' must be provided.")
+
+        for field_name in provided_fields:
+            if getattr(self, field_name) is None:
+                raise ValueError(
+                    f"'{field_name}' cannot be null when updating a contact relationship."
+                )
+
+        return self
+
 
 class JournalContactRelationshipUpdateData(BaseModel):
     """Data for updating a contact relationship."""
