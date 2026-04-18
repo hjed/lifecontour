@@ -9,8 +9,6 @@
 
 'use client';
 
-import Link from 'next/link';
-import type { Route } from 'next';
 import {
   format,
   startOfMonth,
@@ -26,6 +24,7 @@ import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { CalendarEvent, groupEventsByDate } from '@/lib/calendarEventHelpers';
 import { cn } from '@/lib/utils';
+import { CalendarEventPill } from './CalendarEventPill';
 
 const MAX_VISIBLE_EVENTS = 3;
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -200,19 +199,11 @@ export function CalendarMonthView({
                     {/* Event pills */}
                     <div className='clear-both mt-4 space-y-0.5'>
                       {dayEvents.slice(0, MAX_VISIBLE_EVENTS).map(event => (
-                        <Link
+                        <CalendarEventPill
                           key={event.id}
-                          href={`/journals/${event.id}` as Route}
-                          className={cn(
-                            'block truncate rounded px-1 py-0.5 text-[11px] leading-tight text-white',
-                            event.isCancelled && 'line-through opacity-60'
-                          )}
-                          style={{ backgroundColor: event.calendarColor }}
-                          title={event.title}
-                          onClick={e => e.stopPropagation()}
-                        >
-                          {event.title}
-                        </Link>
+                          event={event}
+                          variant='month'
+                        />
                       ))}
 
                       {dayEvents.length > MAX_VISIBLE_EVENTS && (

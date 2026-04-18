@@ -6,8 +6,6 @@
 
 'use client';
 
-import Link from 'next/link';
-import type { Route } from 'next';
 import { format, isToday } from 'date-fns';
 import { enAU } from 'date-fns/locale';
 import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
@@ -15,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { CalendarEvent, groupEventsByDate } from '@/lib/calendarEventHelpers';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { CalendarEventPill } from './CalendarEventPill';
 
 interface CalendarDayViewProps {
   /** The anchor date to determine which day to show */
@@ -161,39 +160,11 @@ export function CalendarDayView({
             ) : (
               <div className='relative z-10 flex max-w-4xl flex-col gap-3 pt-12 sm:pt-0'>
                 {dayEvents.map(event => (
-                  <Link
+                  <CalendarEventPill
                     key={event.id}
-                    href={`/journals/${event.id}` as Route}
-                    className={cn(
-                      'flex w-full items-center gap-4 rounded-lg px-4 py-3 text-sm font-medium text-white shadow-sm transition-opacity hover:opacity-90',
-                      event.isCancelled && 'line-through opacity-60'
-                    )}
-                    style={{ backgroundColor: event.calendarColor }}
-                    onClick={e => e.stopPropagation()}
-                  >
-                    <div className='w-20 flex-shrink-0 text-right font-semibold text-white/90'>
-                      {event.isAllDay ||
-                      (!event.startTime && !event.endTime) ? (
-                        'All Day'
-                      ) : (
-                        <span>
-                          {event.startTime || '??:??'}
-                          <br />
-                          <span className='text-xs font-normal opacity-80'>
-                            {event.endTime || ''}
-                          </span>
-                        </span>
-                      )}
-                    </div>
-                    <div className='min-w-0 flex-1 border-l border-white/20 pl-4'>
-                      <div className='truncate text-base'>{event.title}</div>
-                      {event.calendarName && (
-                        <div className='mt-0.5 text-xs text-white/70'>
-                          {event.calendarName}
-                        </div>
-                      )}
-                    </div>
-                  </Link>
+                    event={event}
+                    variant='day'
+                  />
                 ))}
               </div>
             )}

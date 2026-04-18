@@ -6,8 +6,6 @@
 
 'use client';
 
-import Link from 'next/link';
-import type { Route } from 'next';
 import {
   format,
   eachDayOfInterval,
@@ -20,6 +18,7 @@ import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { CalendarEvent, groupEventsByDate } from '@/lib/calendarEventHelpers';
 import { cn } from '@/lib/utils';
+import { CalendarEventPill } from './CalendarEventPill';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 
 const MAX_VISIBLE_EVENTS = 20;
@@ -219,24 +218,11 @@ export function CalendarWeekView({
                       )}
                     >
                       {dayEvents.slice(0, MAX_VISIBLE_EVENTS).map(event => (
-                        <Link
+                        <CalendarEventPill
                           key={event.id}
-                          href={`/journals/${event.id}` as Route}
-                          className={cn(
-                            'block w-full truncate overflow-hidden rounded px-2 py-1.5 text-xs font-medium text-white shadow-sm transition-opacity hover:opacity-90',
-                            event.isCancelled && 'line-through opacity-60'
-                          )}
-                          style={{ backgroundColor: event.calendarColor }}
-                          title={event.title}
-                          onClick={e => e.stopPropagation()}
-                        >
-                          {event.startTime && !event.isAllDay && (
-                            <span className='mr-1 font-semibold opacity-90'>
-                              {event.startTime}
-                            </span>
-                          )}
-                          {event.title}
-                        </Link>
+                          event={event}
+                          variant='week'
+                        />
                       ))}
 
                       {dayEvents.length > MAX_VISIBLE_EVENTS && (
