@@ -103,17 +103,33 @@ export function CalendarDayView({
               onSlotClick && 'hover:bg-muted/10 cursor-pointer'
             )}
             onClick={e => {
-              if (e.target === e.currentTarget && onSlotClick) {
-                onSlotClick(dateKey);
+              if (!onSlotClick) {
+                return;
               }
+
+              const target = e.target as HTMLElement | null;
+              if (target?.closest('a,button')) {
+                return;
+              }
+
+              onSlotClick(dateKey);
             }}
             onKeyDown={e => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                if (e.target === e.currentTarget && onSlotClick) {
-                  e.preventDefault();
-                  onSlotClick(dateKey);
-                }
+              if (e.key !== 'Enter' && e.key !== ' ') {
+                return;
               }
+
+              if (!onSlotClick) {
+                return;
+              }
+
+              const target = e.target as HTMLElement | null;
+              if (target?.closest('a,button')) {
+                return;
+              }
+
+              e.preventDefault();
+              onSlotClick(dateKey);
             }}
             tabIndex={0}
             role='gridcell'
@@ -124,12 +140,14 @@ export function CalendarDayView({
             {onSlotClick && (
               <div className='absolute top-6 right-6 hidden group-hover:block focus-within:block'>
                 <Button
+                  type='button'
                   variant='secondary'
                   className='shadow-sm'
                   onClick={e => {
                     e.stopPropagation();
                     onSlotClick(dateKey);
                   }}
+                  aria-label={`Add event on ${format(anchorDate, 'MMM d')}`}
                 >
                   <Plus className='mr-2 h-4 w-4' /> Add Event
                 </Button>

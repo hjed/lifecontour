@@ -1022,10 +1022,10 @@ async def list_journals(
         str | None, Query(description="Filter by journal type", alias="type")
     ] = None,
     start_date: Annotated[
-        datetime | None, Query(description="Filter by start date (inclusive)")
+        str | None, Query(description="Filter by start date (inclusive)")
     ] = None,
     end_date: Annotated[
-        datetime | None, Query(description="Filter by end date (inclusive)")
+        str | None, Query(description="Filter by end date (inclusive)")
     ] = None,
     contact_id: Annotated[int | None, Query(description="Filter by contact ID")] = None,
     tag_id: Annotated[str | None, Query(description="Filter by tag ID")] = None,
@@ -1049,8 +1049,8 @@ async def list_journals(
         offset=pagination.offset,
         limit=pagination.limit,
         journal_type=journal_type,
-        start_date=start_date.isoformat() if start_date else None,
-        end_date=end_date.isoformat() if end_date else None,
+        start_date=start_date if start_date else None,
+        end_date=end_date if end_date else None,
         contact_id=str(contact_id) if contact_id else None,
         tag_id=tag_id,
         calendar_id=calendar_id,
@@ -1061,8 +1061,8 @@ async def list_journals(
     total_count = await journal_service.get_journals_count(
         user_id=user.id,
         journal_type=journal_type,
-        start_date=start_date.isoformat() if start_date else None,
-        end_date=end_date.isoformat() if end_date else None,
+        start_date=start_date if start_date else None,
+        end_date=end_date if end_date else None,
         contact_id=str(contact_id) if contact_id else None,
         tag_id=tag_id,
         calendar_id=calendar_id,

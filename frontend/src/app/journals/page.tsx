@@ -104,10 +104,12 @@ export default function JournalsPage() {
 
   // Load saved view mode on first client render to avoid hydration mismatch
   useEffect(() => {
-    const stored = window.sessionStorage.getItem('pms_view_mode');
-    if (stored === 'month' || stored === 'agenda' || stored === 'list') {
+    const stored = window.sessionStorage.getItem(
+      'pms_view_mode'
+    ) as CalendarViewMode;
+    if (['list', 'month', 'agenda', 'week', 'day'].includes(stored)) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setViewModeState(stored as CalendarViewMode);
+      setViewModeState(stored);
     }
   }, []);
 

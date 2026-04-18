@@ -576,7 +576,7 @@ test.describe('Calendar Views', () => {
         type_data: {
           event: {
             calendar_id: calendars[0].id,
-            is_all_day: false,
+            is_all_day: true,
             sync_invitees: false,
           },
         },
@@ -591,14 +591,33 @@ test.describe('Calendar Views', () => {
     await expect(page.getByTestId('journals-list-ready')).toBeVisible();
 
     // Switch to week view
-    await page.getByRole('radio', { name: /week view/i }).click();
+    await page.getByLabel('Week view').click();
     await expect(page.getByTestId('calendar-week-view')).toBeVisible();
     await expect(
       page.getByRole('link', { name: /week view event/i })
     ).toBeVisible();
 
-    // Switch to day view
-    await page.getByRole('radio', { name: /day view/i }).click();
+    // Switch to month view first to set anchor date deterministically
+    await page.getByLabel('Month view').click();
+    await expect(page.getByTestId('calendar-month-view')).toBeVisible();
+
+    const eventLink = page
+      .getByRole('link', { name: /week view event/i })
+      .first();
+    await expect(eventLink).toBeVisible();
+
+    // Click the day header of the cell containing the event to set anchorDate and navigate to Agenda
+    await eventLink
+      .locator('xpath=ancestor::div[starts-with(@data-testid, "day-cell-")]')
+      .locator('div.text-right.text-sm')
+      .first()
+      .click();
+
+    // Wait until agenda view appears (proves anchorDate is set)
+    await expect(page.getByTestId('calendar-agenda-view')).toBeVisible();
+
+    // Switch to day view (anchorDate is now locked)
+    await page.getByLabel('Day view').click();
     await expect(page.getByTestId('calendar-day-view')).toBeVisible();
     await expect(
       page.getByRole('link', { name: /week view event/i })
@@ -616,6 +635,10 @@ test.describe('Calendar Views', () => {
 
     await dataManager.clearAllJournals();
 
+    const calendars = await dataManager.createCalendars([
+      { name: 'Quick Create Cal', color: '#10B981' },
+    ]);
+
     testCleanup(async () => {
       await dataManager.cleanup();
     });
@@ -624,7 +647,7 @@ test.describe('Calendar Views', () => {
     await expect(page.getByTestId('journals-list-ready')).toBeVisible();
 
     // Switch to Month view to use its grid
-    await page.getByRole('radio', { name: /month view/i }).click();
+    await page.getByLabel('Month view').click();
     await expect(page.getByTestId('calendar-month-view')).toBeVisible();
 
     // Find today's date cell, click it (or the add button) to trigger quick create
@@ -650,9 +673,17 @@ test.describe('Calendar Views', () => {
     // Fill form
     await dialog.getByLabel('Title').fill('Quick Created UI Event');
 
+    // Select calendar
+    await dialog.getByTestId('calendar-id-input').click();
+    const calendarOption = page
+      .getByRole('option', { name: calendars[0].name, exact: true })
+      .first();
+    await expect(calendarOption).toBeVisible({ timeout: 10000 });
+    await calendarOption.click();
+
     // Submit form
-    // The form contains a button "Create Event Journal"
-    await dialog.getByRole('button', { name: /create event/i }).click();
+    // The form contains a button "Create Journal"
+    await dialog.getByRole('button', { name: /create journal/i }).click();
 
     // Wait for the dialog to go away
     await expect(dialog).toBeHidden({ timeout: 10000 });

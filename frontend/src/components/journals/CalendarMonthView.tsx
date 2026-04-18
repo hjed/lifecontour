@@ -184,6 +184,7 @@ export function CalendarMonthView({
                     {onSlotClick && isCurrentMonth && (
                       <div className='absolute top-1 left-1 hidden group-hover:block focus-within:block'>
                         <button
+                          type='button'
                           className='bg-secondary text-secondary-foreground rounded p-1 shadow-sm hover:opacity-80'
                           onClick={e => {
                             e.stopPropagation();

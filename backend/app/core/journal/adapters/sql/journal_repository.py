@@ -1,6 +1,6 @@
 """SQL implementation of JournalRepository."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
 from typing import Any
 
 from core_shared.models.journals import EventDateRange, Journal, JournalNotFoundError
@@ -250,6 +250,9 @@ class SqlJournalRepository(JournalRepository):
         if end_date is not None:
             where_clauses.append("j.event_date_range_start <= :end_date")
             dt = datetime.fromisoformat(end_date)
+            # If the user only provided a date (no time component), include the entire day up to 23:59:59.999
+            if "T" not in end_date:
+                dt = datetime.combine(dt.date(), time(23, 59, 59, 999999))
             params["end_date"] = dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
     async def find_by_id(self, journal_id: int) -> Journal | None:
