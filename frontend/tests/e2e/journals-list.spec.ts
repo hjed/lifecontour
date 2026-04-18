@@ -1109,9 +1109,10 @@ test.describe('Journal List Page', () => {
       );
 
       await calendarSelect.click();
-      await page
+      const calendarListbox1 = page.getByRole('listbox');
+      await expect(calendarListbox1).toBeVisible();
+      await calendarListbox1
         .getByRole('option', { name: /Work Calendar/i })
-        .first()
         .click();
       await responsePromise;
 
@@ -1141,7 +1142,11 @@ test.describe('Journal List Page', () => {
       );
 
       await calendarSelect.click();
-      await page.getByRole('option', { name: /Personal Calendar/i }).click();
+      const calendarListbox2 = page.getByRole('listbox');
+      await expect(calendarListbox2).toBeVisible();
+      await calendarListbox2
+        .getByRole('option', { name: /Personal Calendar/i })
+        .click();
       await personalResponsePromise;
 
       // Ensure the loading state has finished and the list is rendered again
@@ -1162,7 +1167,11 @@ test.describe('Journal List Page', () => {
 
       // Select "All calendars" to clear filter
       await calendarSelect.click();
-      await page.getByRole('option', { name: /All calendars/i }).click();
+      const calendarListbox3 = page.getByRole('listbox');
+      await expect(calendarListbox3).toBeVisible();
+      await calendarListbox3
+        .getByRole('option', { name: /All calendars/i })
+        .click();
 
       // Wait for the filter to be cleared and all journals to be visible
       await expect(
@@ -1519,10 +1528,29 @@ test.describe('Journal List Page', () => {
         }).toPass({ timeout: 5000 });
       }
 
-      await targetGrid
-        .getByText(String(targetDate.getDate()), { exact: true })
-        .first()
-        .click();
+      // 15 is always unique within a calendar grid because outside days can only be up to 6 days
+      // from the start or end of the month (e.g., 25-31 or 1-6).
+      const dayLocator = targetGrid.getByText(String(targetDate.getDate()), {
+        exact: true,
+      });
+
+      // Set up the response listener BEFORE clicking to avoid missing the response.
+      // Tightened predicate to capture the actual fetch. Note: backend accepts start_date/end_date.
+      const jumpResponsePromise = page.waitForResponse(
+        response =>
+          response.request().method() === 'GET' &&
+          response.url().includes('/api/journals') &&
+          response.url().includes('start_date=') &&
+          response.status() === 200
+      );
+
+      await dayLocator.click();
+
+      // Wait for the popover to close (confirms the date selection registered)
+      await expect(page.locator('[data-slot="calendar"]')).not.toBeVisible();
+
+      // Wait for the API to respond with journals for the new anchor date
+      await jumpResponsePromise;
 
       // Now the future journal should be in view!
       await expect(

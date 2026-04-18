@@ -118,6 +118,8 @@ export default function JournalsPage() {
     month: new Date().getMonth(),
   }));
 
+  const [isJumpDateOpen, setIsJumpDateOpen] = useState(false);
+
   const { data: reviewItemsData } = useReviewItems('pending', 1, 1);
   const reviewQueueCount = (reviewItemsData?.meta?.total_count as number) || 0;
 
@@ -282,7 +284,7 @@ export default function JournalsPage() {
                 </div>
 
                 <CalendarViewToggle value={viewMode} onChange={setViewMode} />
-                <Popover>
+                <Popover open={isJumpDateOpen} onOpenChange={setIsJumpDateOpen}>
                   <PopoverTrigger asChild>
                     <Button
                       variant='outline'
@@ -314,6 +316,7 @@ export default function JournalsPage() {
                               month: d.getMonth(),
                             });
                           }
+                          setIsJumpDateOpen(false);
                         }
                       }}
                       initialFocus

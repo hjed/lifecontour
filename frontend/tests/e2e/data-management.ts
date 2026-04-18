@@ -991,25 +991,46 @@ export class TestDataManager {
       },
     };
 
-    const response = await this.page.request.post(
-      '/api/journals/review-items',
-      {
-        data: payload,
-      }
-    );
+    // Retry loop to handle transient 500 errors (database contention in CI)
+    const maxRetries = 3;
+    let lastError: Error | undefined;
 
-    if (!response.ok()) {
-      const errorText = await response.text();
-      console.error(
-        `Failed to create review item: ${response.status()} ${errorText}`
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      const response = await this.page.request.post(
+        '/api/journals/review-items',
+        {
+          data: payload,
+        }
       );
+
+      if (response.ok()) {
+        const responseData = await response.json();
+        return { id: responseData.data.id };
+      }
+
+      const statusCode = response.status();
+      const errorText = await response.text();
+
+      // Only retry on server errors (5xx)
+      if (statusCode >= 500 && attempt < maxRetries) {
+        console.debug(
+          `⚠️ [Data Manager] Review item creation attempt ${attempt}/${maxRetries} ` +
+            `got ${statusCode}, retrying after delay...`
+        );
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+        lastError = new Error(
+          `Failed to create review item: ${statusCode} ${errorText}`
+        );
+        continue;
+      }
+
+      console.error(`Failed to create review item: ${statusCode} ${errorText}`);
       throw new Error(
-        `Failed to create review item: ${response.status()} ${errorText}`
+        `Failed to create review item: ${statusCode} ${errorText}`
       );
     }
 
-    const responseData = await response.json();
-    return { id: responseData.data.id };
+    throw lastError ?? new Error('Failed to create review item after retries');
   }
 
   /**

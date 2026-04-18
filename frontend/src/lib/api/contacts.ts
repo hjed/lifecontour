@@ -25,8 +25,9 @@ import {
   TagListResponse,
   TagCreateAttributes,
   TagResponse,
-  CustomDateTypeListResponse,
+  ContactFieldResponse,
   CustomDateTypeResponse,
+  CustomDateTypeListResponse,
 } from '@/types/contacts';
 import { JsonApiErrorResponse, JsonApiMeta } from '@/types/api';
 import {
@@ -479,8 +480,8 @@ export function useUpdateContact() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: ContactFormData }) =>
       updateContact(id, data),
-    onSuccess: (_, { id }) => {
-      queryClient.invalidateQueries({ queryKey: contactKeys.detail(id) });
+    onSuccess: (data, { id }) => {
+      queryClient.setQueryData(contactKeys.detail(id), data);
       queryClient.invalidateQueries({ queryKey: contactKeys.lists() });
       toast.success(SUCCESS_MESSAGES.CONTACT_UPDATED);
     },
@@ -534,7 +535,7 @@ export async function updateContactField(
   contactId: string,
   fieldName: string,
   value: string
-): Promise<ContactResponse> {
+): Promise<ContactFieldResponse> {
   const response = await fetch(
     `${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/fields/${fieldName}`,
     {
@@ -577,11 +578,31 @@ export function useUpdateContactField() {
       fieldName: string;
       value: string;
     }) => updateContactField(contactId, fieldName, value),
-    onSuccess: (data, variables) => {
+    onSuccess: (data: ContactFieldResponse, variables) => {
       const contactId = variables.contactId;
-      queryClient.invalidateQueries({
-        queryKey: contactKeys.detail(contactId),
-      });
+
+      // Safely merge the updated field into the cached ContactResponse
+      queryClient.setQueryData<ContactResponse | undefined>(
+        contactKeys.detail(contactId),
+        oldData => {
+          if (!oldData) return oldData;
+
+          const updatedAttributes = {
+            ...oldData.data.attributes,
+            [data.data.attributes.field_name]: data.data.attributes.new_value,
+          };
+
+          return {
+            ...oldData,
+            data: {
+              ...oldData.data,
+              attributes: updatedAttributes,
+            },
+          };
+        }
+      );
+
+      // We still need to invalidate lists so search tables and sidebars reflect the updated field
       queryClient.invalidateQueries({ queryKey: contactKeys.lists() });
     },
     onError: (error: Error) => {
