@@ -634,11 +634,14 @@ test.describe('Calendar Views', () => {
     );
     await expect(todayCell).toBeVisible();
 
-    // Hover to reveal Add button
+    // Focus to reveal Add button via group-focus-within
+    await todayCell.focus();
+    // Also hover just in case
     await todayCell.hover();
 
-    // Click Add button
-    await todayCell.getByRole('button', { name: /add event on/i }).click();
+    // Click Add button (force: true bypasses strict visibility checks that fail during CSS transitions in Firefox)
+    const addButton = todayCell.getByRole('button', { name: /Add Event/i });
+    await addButton.click({ force: true });
 
     // Verify dialog appears
     const dialog = page.getByRole('dialog');

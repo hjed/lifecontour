@@ -663,12 +663,6 @@ class JournalContactRelationshipUpdateAttributes(BaseModel):
         if not provided_fields:
             raise ValueError("At least one of 'status' or 'role' must be provided.")
 
-        for field_name in provided_fields:
-            if getattr(self, field_name) is None:
-                raise ValueError(
-                    f"'{field_name}' cannot be null when updating a contact relationship."
-                )
-
         return self
 
 

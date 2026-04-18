@@ -90,7 +90,13 @@ async function fetchJournals(
   }
   // Backend expects 'start_date' and 'end_date'
   if (filters.date_from) params.append('start_date', filters.date_from);
-  if (filters.date_to) params.append('end_date', filters.date_to);
+  if (filters.date_to) {
+    const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(filters.date_to);
+    params.append(
+      'end_date',
+      isDateOnly ? `${filters.date_to}T23:59:59.999Z` : filters.date_to
+    );
+  }
   if (filters.page) params.append('page', filters.page.toString());
   if (filters.limit) params.append('limit', filters.limit.toString());
 
