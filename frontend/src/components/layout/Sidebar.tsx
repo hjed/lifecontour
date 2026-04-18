@@ -265,7 +265,7 @@ function TagTreeNavigation({
   }
 
   return (
-    <div data-testid='tag-tree-scroll-area'>
+    <div data-testid='tag-tree-container'>
       <ul className='m-0 space-y-0.5 p-0' aria-label='Tags'>
         {tree.map(node => (
           <TagTreeItem

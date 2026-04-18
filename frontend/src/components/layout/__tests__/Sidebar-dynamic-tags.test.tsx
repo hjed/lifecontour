@@ -277,6 +277,6 @@ describe('Sidebar - Dynamic Tags', () => {
 
     renderWithProviders(<Sidebar />);
 
-    expect(screen.getByTestId('tag-tree-scroll-area')).toBeInTheDocument();
+    expect(screen.getByTestId('tag-tree-container')).toBeInTheDocument();
   });
 });
