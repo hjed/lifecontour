@@ -25,8 +25,9 @@ import {
   TagListResponse,
   TagCreateAttributes,
   TagResponse,
-  CustomDateTypeListResponse,
+  ContactFieldResponse,
   CustomDateTypeResponse,
+  CustomDateTypeListResponse,
 } from '@/types/contacts';
 import { JsonApiErrorResponse, JsonApiMeta } from '@/types/api';
 import {
@@ -534,7 +535,7 @@ export async function updateContactField(
   contactId: string,
   fieldName: string,
   value: string
-): Promise<ContactResponse> {
+): Promise<ContactFieldResponse> {
   const response = await fetch(
     `${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/fields/${fieldName}`,
     {
@@ -577,9 +578,31 @@ export function useUpdateContactField() {
       fieldName: string;
       value: string;
     }) => updateContactField(contactId, fieldName, value),
-    onSuccess: (data, variables) => {
+    onSuccess: (data: ContactFieldResponse, variables) => {
       const contactId = variables.contactId;
-      queryClient.setQueryData(contactKeys.detail(contactId), data);
+
+      // Safely merge the updated field into the cached ContactResponse
+      queryClient.setQueryData<ContactResponse | undefined>(
+        contactKeys.detail(contactId),
+        oldData => {
+          if (!oldData) return oldData;
+
+          const updatedAttributes = {
+            ...oldData.data.attributes,
+            [data.data.attributes.field_name]: data.data.attributes.new_value,
+          };
+
+          return {
+            ...oldData,
+            data: {
+              ...oldData.data,
+              attributes: updatedAttributes,
+            },
+          };
+        }
+      );
+
+      // We still need to invalidate lists so search tables and sidebars reflect the updated field
       queryClient.invalidateQueries({ queryKey: contactKeys.lists() });
     },
     onError: (error: Error) => {

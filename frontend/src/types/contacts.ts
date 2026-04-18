@@ -235,6 +235,28 @@ export type CustomDateTypeResponse = JsonApiResponse<CustomDateTypeResource>;
 export type CustomDateTypeListResponse =
   JsonApiCollectionResponse<CustomDateTypeResource>;
 
+export interface ContactFieldAttributes {
+  field_name: string;
+  field_type: string;
+  entity_id?: number | null;
+  old_value?: string | null;
+  new_value?: string | null;
+  updated_at: string;
+  [key: string]: unknown;
+}
+
+export interface ContactFieldResource {
+  id: string;
+  type: 'contact_fields';
+  attributes: ContactFieldAttributes;
+}
+
+export interface ContactFieldResponse {
+  data: ContactFieldResource;
+  links?: JsonApiLinks;
+  meta?: JsonApiMeta;
+}
+
 // Form Data Types (for creating/updating)
 export interface ContactFormData {
   first_name: string;
