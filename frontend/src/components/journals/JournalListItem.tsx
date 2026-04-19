@@ -35,6 +35,7 @@ import { Badge } from '@/components/ui/badge';
 import { JournalType, EventState, CalendarInfoData } from '@/types/journals';
 import { DisplayJournal } from '@/hooks/useDisplayJournals';
 import { SearchHighlight } from '@/components/search/SearchHighlight';
+import { ContactAvatar } from '@/components/contacts/ContactAvatar';
 import { cn } from '@/lib/utils';
 import { formatDateRange } from '@/lib/date-utils';
 import { JournalChildrenList } from './JournalChildrenList';
@@ -222,17 +223,29 @@ export function JournalListItem({
 
         {/* Contact chips */}
         {journal.contacts.length > 0 && (
-          <div className='flex flex-wrap gap-2'>
-            {journal.contacts.map(contact => (
-              <div
-                key={`${contact.id}-${contact.relationship_type}`}
-                className='bg-muted text-muted-foreground flex items-center gap-1 rounded-full px-2 py-1 text-xs'
-                data-testid={`contact-${contact.id}`}
+          <div
+            className='flex items-center gap-1'
+            data-testid='journal-contacts-stack'
+          >
+            <div className='flex -space-x-2 overflow-hidden'>
+              {journal.contacts.slice(0, 3).map(contact => (
+                <ContactAvatar
+                  key={`${contact.id}-${contact.relationship_type}`}
+                  firstName={contact.first_name ?? ''}
+                  lastName={contact.last_name ?? ''}
+                  size='sm'
+                  className='ring-background inline-block rounded-full ring-2'
+                />
+              ))}
+            </div>
+            {journal.contacts.length > 3 && (
+              <span
+                className='text-muted-foreground ml-1 text-xs font-medium'
+                data-testid='journal-contacts-overflow'
               >
-                <span>👤</span>
-                <span>{contact.name || `Contact ${contact.id}`}</span>
-              </div>
-            ))}
+                +{journal.contacts.length - 3}
+              </span>
+            )}
           </div>
         )}
 

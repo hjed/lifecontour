@@ -33,6 +33,8 @@ class TestJournalContactRelationshipSchema:
             "relationship_type": "PARTICIPANT",
             "status": "ATTENDING",
             "role": "ORGANISER",
+            "first_name": "Test",
+            "last_name": "User",
         }
 
         schema = JournalContactRelationshipSchema(**data)
@@ -42,6 +44,8 @@ class TestJournalContactRelationshipSchema:
         assert schema.relationship_type == "PARTICIPANT"
         assert schema.status == "ATTENDING"
         assert schema.role == "ORGANISER"
+        assert schema.first_name == "Test"
+        assert schema.last_name == "User"
 
     def test_schema_without_status_and_role(self):
         """Test schema serialization without status and role (backward compatibility)."""
@@ -58,6 +62,8 @@ class TestJournalContactRelationshipSchema:
         assert schema.relationship_type == "PARTICIPANT"
         assert schema.status is None
         assert schema.role is None
+        assert schema.first_name is None
+        assert schema.last_name is None
 
 
 class TestJournalContactRelationshipAddAttributes:
@@ -115,6 +121,8 @@ class TestJournalConverterContacts:
         assert result_schema.relationship_type == "PARTICIPANT"
         assert result_schema.status == "ATTENDING"
         assert result_schema.role == "ORGANISER"
+        assert result_schema.first_name is None
+        assert result_schema.last_name is None
 
 
 class TestMCPContactRelationshipSchema:

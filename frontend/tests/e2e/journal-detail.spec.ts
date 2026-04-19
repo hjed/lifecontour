@@ -997,5 +997,51 @@ test.describe('Journal Detail Page', () => {
         test.skip();
       }
     });
+
+    test('should navigate to contact detail page when contact badge is clicked', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const page = authenticatedPage;
+      const dataManager = new TestDataManager(page);
+
+      // Create a journal and a contact
+      const contact = await dataManager.createContact({
+        firstName: 'Click',
+        lastName: 'NavigationTest',
+      });
+      const journal = await dataManager.createJournal({
+        title: 'Badge Navigation Test',
+        content: 'Testing badge link navigation.',
+        event_date_range: {
+          start: '2026-01-18T10:00:00Z',
+          end: '2026-01-18T10:30:00Z',
+        },
+        types: ['note'],
+        contacts: [
+          {
+            contact_id: contact.id,
+            relationship_type: 'PARTICIPANT',
+          },
+        ],
+      });
+
+      testCleanup(async () => await dataManager.cleanup());
+
+      await page.goto(`/journals/${journal.id}`);
+      await expect(page.getByTestId('journal-detail-view')).toBeVisible();
+
+      // Click the link inside the contact badge
+      const contactLink = page.getByRole('link', {
+        name: `View ${contact.firstName} ${contact.lastName}`,
+      });
+      await expect(contactLink).toBeVisible();
+
+      await contactLink.click();
+
+      // Wait for navigation and verify url
+      await page.waitForURL(`**/contacts/${contact.id}**`);
+      expect(page.url()).toContain(`/contacts/${contact.id}`);
+    });
   });
 });

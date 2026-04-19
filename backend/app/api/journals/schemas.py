@@ -338,6 +338,8 @@ class JournalContactRelationshipSchema(BaseModel):
     role: str | None = Field(
         default=None, description="Event role (ORGANISER, FACILITATOR_HELPER, etc.)"
     )
+    first_name: str | None = Field(default=None, description="Contact first name")
+    last_name: str | None = Field(default=None, description="Contact last name")
 
 
 # Tag schema

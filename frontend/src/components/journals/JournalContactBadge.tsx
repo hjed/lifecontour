@@ -8,7 +8,8 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { User, X, Plus } from 'lucide-react';
+import Link from 'next/link';
+import { X, Plus } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -24,6 +25,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { ContactAvatar } from '@/components/contacts/ContactAvatar';
 import { ContactSearchCombobox } from '@/components/contacts/ContactSearchCombobox';
 import { cn } from '@/lib/utils';
 import type { ContactResource } from '@/types/contacts';
@@ -243,16 +245,27 @@ function ContactBadge({ contact, onRemove, disabled }: ContactBadgeProps) {
   return (
     <Badge
       variant='secondary'
-      className='gap-1.5 pr-1 text-xs'
+      className='gap-1.5 py-0.5 pr-1 pl-1 text-xs'
       data-testid={`contact-badge-${contact.id}`}
     >
-      <User className='h-3 w-3' />
-      <span>{contact.name}</span>
-      {contact.relationship_type && (
-        <span className='text-muted-foreground text-[10px]'>
-          ({contact.relationship_type})
-        </span>
-      )}
+      <Link
+        href={`/contacts/${contact.id}`}
+        className='decoration-muted-foreground/50 focus-visible:ring-ring flex items-center gap-1.5 rounded-sm underline-offset-2 hover:underline focus-visible:ring-1 focus-visible:outline-none'
+        aria-label={`View ${contact.name}`}
+      >
+        <ContactAvatar
+          firstName={contact.first_name || ''}
+          lastName={contact.last_name || ''}
+          size='sm'
+          className='h-4 w-4'
+        />
+        <span>{contact.name}</span>
+        {contact.relationship_type && (
+          <span className='text-muted-foreground text-[10px]'>
+            ({contact.relationship_type})
+          </span>
+        )}
+      </Link>
       {onRemove && (
         <button
           type='button'

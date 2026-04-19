@@ -108,11 +108,15 @@ describe('JournalListItem', () => {
           {
             id: '1',
             name: 'John Doe',
+            first_name: 'John',
+            last_name: 'Doe',
             relationship_type: JournalContactRelationshipType.PARTICIPANT,
           },
           {
             id: '2',
             name: 'Jane Smith',
+            first_name: 'Jane',
+            last_name: 'Smith',
             relationship_type: JournalContactRelationshipType.INVITEE,
           },
         ],
@@ -122,10 +126,9 @@ describe('JournalListItem', () => {
     const displayJournal = toDisplayJournal(journalWithContacts);
     render(<JournalListItem journal={displayJournal} />);
 
-    expect(screen.getByTestId('contact-1')).toBeInTheDocument();
-    expect(screen.getByText('John Doe')).toBeInTheDocument();
-    expect(screen.getByTestId('contact-2')).toBeInTheDocument();
-    expect(screen.getByText('Jane Smith')).toBeInTheDocument();
+    expect(screen.getByTestId('journal-contacts-stack')).toBeInTheDocument();
+    expect(screen.getByLabelText('John Doe')).toBeInTheDocument();
+    expect(screen.getByLabelText('Jane Smith')).toBeInTheDocument();
   });
 
   it('displays content excerpt', () => {
