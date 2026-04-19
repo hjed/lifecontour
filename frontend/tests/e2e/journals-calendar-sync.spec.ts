@@ -53,17 +53,18 @@ test.describe('Journals Calendar Sync Features', () => {
     };
 
     // Intercept the review queue to return empty so it doesn't crash
-    await page.route('**/api/journals/reviews*', route =>
-      route.fulfill(json({ data: [] }))
+    await page.route(
+      url => url.pathname === '/api/journals/reviews',
+      route => route.fulfill(json({ data: [] }))
     );
 
     // Intercept the journal feed
-    await page.route('**/api/journals*', async route => {
-      if (route.request().url().includes('/reviews')) {
-        return route.fallback();
+    await page.route(
+      url => url.pathname === '/api/journals',
+      async route => {
+        return route.fulfill(json(mockJournals));
       }
-      return route.fulfill(json(mockJournals));
-    });
+    );
 
     // Navigate to journals page
     await page.goto('/journals');

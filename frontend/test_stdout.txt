@@ -1,5 +1,0 @@
-
-> personal-management-frontend@0.1.0 test /home/hjed/Projects/personal-management-system3/frontend
-> jest
-
- ELIFECYCLE  Test failed. See above for more details.
