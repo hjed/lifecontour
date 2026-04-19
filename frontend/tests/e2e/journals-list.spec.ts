@@ -346,11 +346,11 @@ test.describe('Journal List Page', () => {
       // scroll loads them, then apply a date range that includes only one.
       const today = new Date();
       const day1 = new Date(today);
-      day1.setDate(today.getDate() - 2);
+      day1.setUTCDate(today.getUTCDate() - 2);
       const day2 = new Date(today);
       // day2 = today (no offset needed)
       const day3 = new Date(today);
-      day3.setDate(today.getDate() + 2);
+      day3.setUTCDate(today.getUTCDate() + 2);
 
       const journals = await dataManager.createJournals([
         {
@@ -433,12 +433,12 @@ test.describe('Journal List Page', () => {
       // Build the accessible name for the start/end date buttons
       // We want a range that only includes day2 (yesterday) but not day1 or day3
       const rangeStart = new Date(day2);
-      rangeStart.setDate(rangeStart.getDate() - 1);
+      rangeStart.setUTCDate(rangeStart.getUTCDate() - 1);
       const rangeEnd = new Date(day2);
-      rangeEnd.setDate(rangeEnd.getDate() + 1);
+      rangeEnd.setUTCDate(rangeEnd.getUTCDate() + 1);
 
       // Ensure the grid for the range start month is visible
-      const startMonthName = `${monthNames[rangeStart.getMonth()]} ${rangeStart.getFullYear()}`;
+      const startMonthName = `${monthNames[rangeStart.getUTCMonth()]} ${rangeStart.getUTCFullYear()}`;
       const startGrid = page.getByRole('grid', { name: startMonthName });
       // Navigate to the correct month if needed
       while (!(await startGrid.isVisible())) {
@@ -453,7 +453,7 @@ test.describe('Journal List Page', () => {
         }).toPass({ timeout: 5000 });
       }
 
-      const startLabel = `${rangeStart.getDate()} ${monthNames[rangeStart.getMonth()]} ${rangeStart.getFullYear()}`;
+      const startLabel = `${rangeStart.getUTCDate()} ${monthNames[rangeStart.getUTCMonth()]} ${rangeStart.getUTCFullYear()}`;
       await startGrid
         .getByRole('button', { name: new RegExp(`\\b${startLabel}\\b`) })
         .click();
@@ -462,12 +462,12 @@ test.describe('Journal List Page', () => {
       const responsePromise = page.waitForResponse(
         response =>
           response.url().includes('/api/journals') &&
-          response.url().includes('start_date') &&
+          response.url().includes('end_date') &&
           response.status() === 200
       );
 
       // Ensure the grid for the range end month is visible
-      const endMonthName = `${monthNames[rangeEnd.getMonth()]} ${rangeEnd.getFullYear()}`;
+      const endMonthName = `${monthNames[rangeEnd.getUTCMonth()]} ${rangeEnd.getUTCFullYear()}`;
       const endGrid = page.getByRole('grid', { name: endMonthName });
       while (!(await endGrid.isVisible())) {
         const currentGrids = await page.getByRole('grid').allInnerTexts();
@@ -481,7 +481,7 @@ test.describe('Journal List Page', () => {
         }).toPass({ timeout: 5000 });
       }
 
-      const endLabel = `${rangeEnd.getDate()} ${monthNames[rangeEnd.getMonth()]} ${rangeEnd.getFullYear()}`;
+      const endLabel = `${rangeEnd.getUTCDate()} ${monthNames[rangeEnd.getUTCMonth()]} ${rangeEnd.getUTCFullYear()}`;
       await endGrid
         .getByRole('button', { name: new RegExp(`\\b${endLabel}\\b`) })
         .click();
@@ -622,8 +622,15 @@ test.describe('Journal List Page', () => {
 
       // Verify contact name is visible on the journal card
       await expect(
-        page.getByTestId(`contact-${contacts[0].id}`).first()
-      ).toContainText(`${contacts[0].firstName} ${contacts[0].lastName}`);
+        page
+          .getByRole('link', {
+            name: new RegExp(
+              `View ${contacts[0].firstName}.*${contacts[0].lastName}`,
+              'i'
+            ),
+          })
+          .first()
+      ).toBeVisible();
 
       // Verify other journals are not visible
       await expect(
@@ -806,12 +813,12 @@ test.describe('Journal List Page', () => {
       // today-2: Note without contact (wrong contact)
       const today = new Date();
       const day1 = new Date(today);
-      day1.setDate(today.getDate() - 1);
+      day1.setUTCDate(today.getUTCDate() - 1);
       const day2 = new Date(today);
       const day3 = new Date(today);
-      day3.setDate(today.getDate() - 3);
+      day3.setUTCDate(today.getUTCDate() - 3);
       const day4 = new Date(today);
-      day4.setDate(today.getDate() - 2);
+      day4.setUTCDate(today.getUTCDate() - 2);
 
       await dataManager.createJournals([
         {
@@ -909,7 +916,7 @@ test.describe('Journal List Page', () => {
 
       // Build the date range: from day4 (today-2) to today
       // This excludes day3 (today-3) but includes day1 (today-1), day2 (today), day4 (today-2)
-      const rangeStartMonthName = `${monthNames[day4.getMonth()]} ${day4.getFullYear()}`;
+      const rangeStartMonthName = `${monthNames[day4.getUTCMonth()]} ${day4.getUTCFullYear()}`;
       const rangeStartGrid = page.getByRole('grid', {
         name: rangeStartMonthName,
       });
@@ -925,7 +932,7 @@ test.describe('Journal List Page', () => {
         }).toPass({ timeout: 5000 });
       }
 
-      const startLabel = `${day4.getDate()} ${monthNames[day4.getMonth()]} ${day4.getFullYear()}`;
+      const startLabel = `${day4.getUTCDate()} ${monthNames[day4.getUTCMonth()]} ${day4.getUTCFullYear()}`;
       await rangeStartGrid
         .getByRole('button', { name: new RegExp(`\\b${startLabel}\\b`) })
         .click();
@@ -933,10 +940,12 @@ test.describe('Journal List Page', () => {
       // Start waiting for API response before clicking the second date
       const dateResponsePromise = page.waitForResponse(
         response =>
-          response.url().includes('/api/journals') && response.status() === 200
+          response.url().includes('/api/journals') &&
+          response.url().includes('end_date') &&
+          response.status() === 200
       );
 
-      const rangeEndMonthName = `${monthNames[today.getMonth()]} ${today.getFullYear()}`;
+      const rangeEndMonthName = `${monthNames[today.getUTCMonth()]} ${today.getUTCFullYear()}`;
       const rangeEndGrid = page.getByRole('grid', {
         name: rangeEndMonthName,
       });
@@ -952,7 +961,7 @@ test.describe('Journal List Page', () => {
         }).toPass({ timeout: 5000 });
       }
 
-      const endLabel = `${today.getDate()} ${monthNames[today.getMonth()]} ${today.getFullYear()}`;
+      const endLabel = `${today.getUTCDate()} ${monthNames[today.getUTCMonth()]} ${today.getUTCFullYear()}`;
       await rangeEndGrid
         .getByRole('button', { name: new RegExp(`\\b${endLabel}\\b`) })
         .click();
