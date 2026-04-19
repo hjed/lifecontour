@@ -154,15 +154,15 @@ Every phase below must meet the same completion bar before merge:
 **PR Size:** ~5-7 files
 
 **Acceptance Criteria:**
-- [ ] A periodic background task (ARQ job or similar) identifies journal-contact relationships where:
+- [x] A periodic background task (ARQ job or similar) identifies journal-contact relationships where:
   - `status = ATTENDING`
   - The journal's `event_date_range.end` is in the past
   - Transitions them to `ATTENDED`.
-- [ ] The job is idempotent — re-running does not corrupt already-transitioned or manually-overridden statuses.
-- [ ] The job only transitions `ATTENDING` → `ATTENDED`; other statuses (`MAYBE`, `NO_REPLY`, `DECLINED`) are not auto-transitioned.
-- [ ] Users can manually set any valid status on a contact link via the existing add/update contact relationship API (including overriding `ATTENDED` back to another value if the attendance record was wrong).
-- [ ] The job runs at a reasonable interval (e.g., hourly or daily) and processes events in bounded batches.
-- [ ] Job execution is observable through standard logging.
+- [x] The job is idempotent — re-running does not corrupt already-transitioned or manually-overridden statuses.
+- [x] The job only transitions `ATTENDING` → `ATTENDED`; other statuses (`MAYBE`, `NO_REPLY`, `DECLINED`) are not auto-transitioned.
+- [x] Users can manually set any valid status on a contact link via the existing add/update contact relationship API (including overriding `ATTENDED` back to another value if the attendance record was wrong).
+- [x] The job runs at a reasonable interval (e.g., hourly or daily) and processes events in bounded batches.
+- [x] Job execution is observable through standard logging.
 
 **Required Test Coverage:**
 - **Unit:** transition eligibility logic (only ATTENDING on past events), idempotency, batch boundary handling.

@@ -41,6 +41,7 @@ from app.api.journals.schemas import (
     EventDateRangeSchema,
     JournalAttributes,
     JournalContactAddRequest,
+    JournalContactRelationshipUpdateRequest,
     JournalCreateRequest,
     JournalListResponse,
     JournalResource,
@@ -3509,6 +3510,139 @@ async def add_contact_to_journal(
             "contact_id",
             f"Contact not found or relationship already exists: {contact_id}",
         ) from e
+
+    # Get updated journal
+    updated_journal = await journal_service.get_journal(journal_id)
+    if not updated_journal:
+        raise JournalNotFoundError(journal_id)
+
+    # Fetch all enrichment data
+    types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
+        updated_journal,
+        calendar_info_repo,
+        calendar_repo,
+        mood_data_repo,
+        plan_data_repo,
+        travel_data_repo,
+        photo_album_data_repo,
+        fitness_data_repo,
+        contact_relationship_repo,
+        tag_repo,
+        route_repo,
+        outdoor_activity_data_repo,
+        bushwalking_data_repo,
+        jogging_data_repo,
+        abseiling_data_repo,
+        canyoning_data_repo,
+        climbing_data_repo,
+        kayaking_data_repo,
+        skiing_data_repo,
+        include_routes=True,
+    )
+
+    journal_resource = JournalConverter.to_resource(
+        updated_journal, base_url, types, type_data, contacts, tags, calendar
+    )
+
+    return await _build_journal_response(journal_resource, contact_repo)
+
+
+@router.patch("/{journal_id}/relationships/contacts/{contact_id}/{relationship_type}")
+@inject
+async def update_journal_contact_relationship(
+    journal_id: int,
+    contact_id: int,
+    relationship_type: str,
+    request: Request,
+    update_request: JournalContactRelationshipUpdateRequest,
+    journal_service: FromDishka[JournalService],
+    calendar_info_repo: FromDishka[CalendarInfoRepository],
+    calendar_repo: FromDishka[CalendarRepository],
+    mood_data_repo: FromDishka[MoodDataRepository],
+    plan_data_repo: FromDishka[PlanDataRepository],
+    travel_data_repo: FromDishka[TravelDataRepository],
+    photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    fitness_data_repo: FromDishka[FitnessDataRepository],
+    outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
+    bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
+    jogging_data_repo: FromDishka[JoggingDataRepository],
+    abseiling_data_repo: FromDishka[AbseilingDataRepository],
+    canyoning_data_repo: FromDishka[CanyoningDataRepository],
+    climbing_data_repo: FromDishka[ClimbingDataRepository],
+    kayaking_data_repo: FromDishka[KayakingDataRepository],
+    skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
+    contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
+    tag_repo: FromDishka[JournalTagRepository],
+    route_repo: FromDishka[RouteRepository],
+    contact_repo: FromDishka[ContactRepository],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> JournalResponse:
+    """
+    Update a journal-contact relationship's status and/or role.
+
+    Allows manual override of attendee status (e.g. ATTENDED back to ATTENDING)
+    and event role.
+    """
+    from core_shared.models.journals.attendee_status import AttendeeStatus
+
+    base_url = get_request_base_url(request)
+
+    # Verify journal exists
+    journal = await journal_service.get_journal(journal_id)
+    if not journal:
+        raise JournalNotFoundError(journal_id)
+
+    # Parse relationship type
+    try:
+        rel_type_enum = JournalContactRelationshipType[relationship_type]
+    except KeyError as e:
+        raise JournalValidationError(
+            "relationship_type",
+            f"Invalid relationship type: {relationship_type}",
+        ) from e
+
+    if rel_type_enum not in [
+        JournalContactRelationshipType.PARTICIPANT,
+        JournalContactRelationshipType.INVITEE,
+    ]:
+        raise JournalValidationError(
+            "relationship_type",
+            f"Status and role updates are not supported for {relationship_type} relationships",
+        )
+
+    # Parse and validate status
+    attrs = update_request.data.attributes
+    status: AttendeeStatus | None = None
+    if attrs.status is not None:
+        try:
+            status = AttendeeStatus[attrs.status.upper()]
+        except KeyError as e:
+            raise JournalValidationError(
+                "status", f"Invalid status: {attrs.status}"
+            ) from e
+
+    # Parse and validate role (validated but not yet persisted — future enhancement)
+    if attrs.role is not None:
+        raise JournalValidationError(
+            "role",
+            "Updating role is not supported by this endpoint",
+        )
+
+    # Update status if provided
+    if status is not None:
+        updated = await contact_relationship_repo.update_status(
+            journal_id=journal_id,
+            contact_id=contact_id,
+            relationship_type=rel_type_enum,
+            status=status,
+        )
+        if updated is None:
+            raise JournalValidationError(
+                "contact_id",
+                f"Relationship not found for contact {contact_id} "
+                f"with type {relationship_type}",
+            )
 
     # Get updated journal
     updated_journal = await journal_service.get_journal(journal_id)
