@@ -207,6 +207,48 @@ export function useGoogleSync() {
   });
 }
 
+export async function triggerCalendarSync(
+  syncType: SyncType = 'smart'
+): Promise<SyncJobResponse> {
+  const requestData: SyncTriggerRequest = { sync_type: syncType };
+
+  const response = await fetch('/api/integrations/google/calendar/sync', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    credentials: 'include',
+    body: JSON.stringify(requestData),
+  });
+  return handleApiResponse<SyncJobResponse>(response);
+}
+
+export function useCalendarSync() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: triggerCalendarSync,
+    onSuccess: data => {
+      // Invalidate status and sync history queries
+      queryClient.invalidateQueries({
+        queryKey: integrationKeys.googleContactsStatus(),
+      });
+      queryClient.invalidateQueries({ queryKey: integrationKeys.syncJobs() });
+
+      toast.success('Calendar Sync started successfully');
+
+      // Start polling for job status
+      const jobId = data.data.id;
+      queryClient.invalidateQueries({
+        queryKey: integrationKeys.syncJob(jobId),
+      });
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to start calendar sync: ${error.message}`);
+    },
+  });
+}
+
 export function useSyncJobStatus(jobId: string | null) {
   return useQuery({
     queryKey: jobId ? integrationKeys.syncJob(jobId) : [],

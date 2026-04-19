@@ -632,6 +632,7 @@ test.describe('Journal Detail Page', () => {
 
       await page.goto(`/journals/${journal.id}`);
       await expect(page.locator('main, [role="main"]').first()).toBeVisible();
+      await expect(page.getByTestId('journal-detail-view')).toBeVisible();
 
       // Open the add contact popover
       const addContactButton = page.getByTestId('add-contact-button');
@@ -648,8 +649,16 @@ test.describe('Journal Detail Page', () => {
       await page.getByRole('option', { name: contactName }).click();
       await expect(page.getByText(`Selected: ${contactName}`)).toBeVisible();
 
-      // Confirm addition (exact: true avoids matching the 'Add Contact' trigger button)
-      await page.getByRole('button', { name: 'Add', exact: true }).click();
+      // Wait for the update request to finish
+      const [addResponse] = await Promise.all([
+        page.waitForResponse(
+          resp =>
+            resp.url().includes(`/api/journals/${journal.id}`) &&
+            resp.request().method() === 'POST'
+        ),
+        page.getByRole('button', { name: 'Add', exact: true }).click(),
+      ]);
+      expect(addResponse.status()).toBe(200);
 
       // Contact badge should appear
       await expect(
@@ -688,6 +697,7 @@ test.describe('Journal Detail Page', () => {
 
       await page.goto(`/journals/${journal.id}`);
       await expect(page.locator('main, [role="main"]').first()).toBeVisible();
+      await expect(page.getByTestId('journal-detail-view')).toBeVisible();
 
       // Contact badge should be visible before removal
       const contactBadge = page.getByTestId(`contact-badge-${contact.id}`);
@@ -698,7 +708,17 @@ test.describe('Journal Detail Page', () => {
         `remove-contact-${contact.id}`
       );
       await expect(removeContactButton).toBeVisible();
-      await removeContactButton.click();
+
+      // Wait for the API call to complete
+      const [removeResponse] = await Promise.all([
+        page.waitForResponse(
+          resp =>
+            resp.url().includes(`/api/journals/${journal.id}`) &&
+            resp.request().method() === 'DELETE'
+        ),
+        removeContactButton.click(),
+      ]);
+      expect(removeResponse.status()).toBe(200);
 
       // Contact badge should disappear after removal
       await expect(contactBadge).not.toBeVisible();

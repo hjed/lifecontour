@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type { Route } from 'next';
+import { Cloud, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { CalendarEvent } from '@/lib/calendarEventHelpers';
 
@@ -34,7 +35,27 @@ export function CalendarEventPill({ event, variant }: CalendarEventPillProps) {
           )}
         </div>
         <div className='min-w-0 flex-1 border-l border-white/20 pl-4'>
-          <div className='truncate text-base'>{event.title}</div>
+          <div className='flex items-center gap-2'>
+            <div className='truncate text-base'>{event.title}</div>
+            {event.isSyncedToGoogle && (
+              <Cloud
+                className='h-4 w-4 shrink-0 opacity-80'
+                data-testid='sync-indicator'
+                aria-label='Synced to Google Calendar'
+              />
+            )}
+            {event.hasPendingReviews && (
+              <div
+                className='flex flex-row items-center gap-1 rounded bg-black/20 px-1.5 py-0.5 text-[10px] font-bold text-red-200 uppercase'
+                data-testid='needs-review-badge'
+                role='img'
+                aria-label='Needs Review'
+              >
+                <AlertCircle className='h-3 w-3' aria-hidden='true' />
+                Review
+              </div>
+            )}
+          </div>
           {event.calendarName && (
             <div className='mt-0.5 text-xs text-white/70'>
               {event.calendarName}
@@ -57,12 +78,29 @@ export function CalendarEventPill({ event, variant }: CalendarEventPillProps) {
         title={event.title}
         onClick={e => e.stopPropagation()}
       >
-        {event.startTime && !event.isAllDay && (
-          <span className='mr-1 font-semibold opacity-90'>
-            {event.startTime}
-          </span>
-        )}
-        {event.title}
+        <div className='flex items-center gap-1'>
+          {event.startTime && !event.isAllDay && (
+            <span className='truncate font-semibold opacity-90'>
+              {event.startTime}
+            </span>
+          )}
+          {event.isSyncedToGoogle && (
+            <Cloud
+              className='h-3 w-3 shrink-0 opacity-80'
+              data-testid='sync-indicator'
+              aria-label='Synced to Google Calendar'
+            />
+          )}
+          <span className='truncate'>{event.title}</span>
+          {event.hasPendingReviews && (
+            <div
+              className='h-2 w-2 shrink-0 rounded-full bg-red-400 shadow-sm'
+              data-testid='needs-review-badge'
+              role='img'
+              aria-label='Needs Review'
+            />
+          )}
+        </div>
       </Link>
     );
   }
@@ -79,7 +117,24 @@ export function CalendarEventPill({ event, variant }: CalendarEventPillProps) {
       title={event.title}
       onClick={e => e.stopPropagation()}
     >
-      {event.title}
+      <div className='flex items-center gap-1'>
+        {event.isSyncedToGoogle && (
+          <Cloud
+            className='h-3 w-3 shrink-0 opacity-80'
+            data-testid='sync-indicator'
+            aria-label='Synced to Google Calendar'
+          />
+        )}
+        <span className='truncate'>{event.title}</span>
+        {event.hasPendingReviews && (
+          <div
+            className='h-2 w-2 shrink-0 rounded-full bg-red-400 shadow-sm'
+            data-testid='needs-review-badge'
+            role='img'
+            aria-label='Needs Review'
+          />
+        )}
+      </div>
     </Link>
   );
 }

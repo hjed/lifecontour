@@ -37,6 +37,7 @@ const createMockEvent = (
   isCancelled: false,
   journalTypes: [JournalType.EVENT],
   hasPendingReviews: false,
+  isSyncedToGoogle: false,
   ...overrides,
 });
 
@@ -152,8 +153,8 @@ describe('CalendarMonthView', () => {
 
     render(<CalendarMonthView {...defaultProps} events={events} />);
 
-    const eventPill = screen.getByText('Cancelled Event');
-    expect(eventPill).toHaveClass('line-through');
+    const link = screen.getByRole('link', { name: /cancelled event/i });
+    expect(link).toHaveClass('line-through');
   });
 
   it('calls onDayClick when day cell is clicked', async () => {

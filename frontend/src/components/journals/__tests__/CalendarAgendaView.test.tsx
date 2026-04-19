@@ -36,6 +36,7 @@ const createMockEvent = (
   isCancelled: false,
   journalTypes: [JournalType.EVENT],
   hasPendingReviews: false,
+  isSyncedToGoogle: false,
   ...overrides,
 });
 

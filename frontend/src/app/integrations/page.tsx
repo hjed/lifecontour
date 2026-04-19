@@ -26,6 +26,7 @@ import {
   useSyncHistory,
   useGoogleOAuthAuthorize,
   useGoogleOAuthDisconnect,
+  useCalendarSync,
 } from '@/lib/api/integrations';
 import {
   SyncType,
@@ -162,10 +163,14 @@ interface SyncControlsProps {
   readonly oauthLoading: boolean;
   readonly disconnectLoading: boolean;
   readonly needsReauth: boolean;
+  readonly needsReconsent: boolean;
   readonly onSync: (syncType: SyncType) => void;
+  readonly onCalendarSync: (syncType: SyncType) => void;
   readonly onConnect: () => void;
   readonly onDisconnect: () => void;
   readonly syncError: Error | null;
+  readonly calendarSyncLoading: boolean;
+  readonly calendarSyncError: Error | null;
 }
 
 function SyncControls({
@@ -175,11 +180,17 @@ function SyncControls({
   disconnectLoading,
   needsReauth,
   onSync,
+  onCalendarSync,
   onConnect,
   onDisconnect,
   syncError,
+  calendarSyncLoading,
+  calendarSyncError,
+  needsReconsent,
 }: SyncControlsProps) {
   const syncDisabled = syncLoading || needsReauth;
+  const calendarSyncDisabled =
+    calendarSyncLoading || needsReauth || needsReconsent;
   return (
     <>
       <div className='flex gap-2'>
@@ -195,7 +206,20 @@ function SyncControls({
               ) : (
                 <RefreshCw className='mr-2 h-4 w-4' />
               )}
-              Smart Sync
+              Sync Contacts
+            </Button>
+            <Button
+              variant='outline'
+              onClick={() => onCalendarSync('smart')}
+              disabled={calendarSyncDisabled}
+              data-testid='trigger-calendar-sync'
+            >
+              {calendarSyncLoading ? (
+                <RefreshCw className='mr-2 h-4 w-4 animate-spin' />
+              ) : (
+                <RefreshCw className='mr-2 h-4 w-4' />
+              )}
+              Sync Calendar
             </Button>
             <Button
               variant='outline'
@@ -240,10 +264,14 @@ function SyncControls({
         </div>
       )}
 
-      {syncError && (
+      {(syncError || calendarSyncError) && (
         <Alert>
           <AlertCircle className='h-4 w-4' />
-          <AlertDescription>{syncError.message}</AlertDescription>
+          <AlertDescription>
+            {syncError?.message}
+            {syncError && calendarSyncError ? ' | ' : ''}
+            {calendarSyncError?.message}
+          </AlertDescription>
         </Alert>
       )}
     </>
@@ -461,6 +489,12 @@ function IntegrationsPageContent() {
     error: syncError,
   } = useGoogleSync();
 
+  const {
+    mutate: triggerCalendarSync,
+    isPending: calendarSyncLoading,
+    error: calendarSyncError,
+  } = useCalendarSync();
+
   const { mutate: authorizeOAuth, isPending: oauthLoading } =
     useGoogleOAuthAuthorize();
 
@@ -471,6 +505,10 @@ function IntegrationsPageContent() {
 
   const handleSync = (syncType: SyncType) => {
     triggerSync(syncType);
+  };
+
+  const handleCalendarSync = (syncType: SyncType) => {
+    triggerCalendarSync(syncType);
   };
 
   const handleConnectGoogle = () => {
@@ -516,7 +554,7 @@ function IntegrationsPageContent() {
             <CardHeader>
               <CardTitle className='flex items-center gap-2'>
                 <Users className='h-5 w-5 text-blue-500' />
-                Google Contacts
+                Google Integration
               </CardTitle>
             </CardHeader>
             <CardContent className='space-y-4'>
@@ -571,13 +609,17 @@ function IntegrationsPageContent() {
                   <SyncControls
                     connected={status.connected}
                     syncLoading={syncLoading}
+                    calendarSyncLoading={calendarSyncLoading}
                     oauthLoading={oauthLoading}
                     disconnectLoading={disconnectLoading}
                     needsReauth={!!status.needsReauth}
+                    needsReconsent={!!status.needsReconsent}
                     onSync={handleSync}
+                    onCalendarSync={handleCalendarSync}
                     onConnect={handleConnectGoogle}
                     onDisconnect={handleDisconnectGoogle}
                     syncError={syncError}
+                    calendarSyncError={calendarSyncError}
                   />
                 </>
               )}
