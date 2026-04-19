@@ -654,7 +654,7 @@ test.describe('Journal Detail Page', () => {
         page.waitForResponse(
           resp =>
             resp.url().includes(`/api/journals/${journal.id}`) &&
-            resp.request().method() === 'PATCH'
+            resp.request().method() === 'POST'
         ),
         page.getByRole('button', { name: 'Add', exact: true }).click(),
       ]);
@@ -714,7 +714,7 @@ test.describe('Journal Detail Page', () => {
         page.waitForResponse(
           resp =>
             resp.url().includes(`/api/journals/${journal.id}`) &&
-            resp.request().method() === 'PATCH'
+            resp.request().method() === 'DELETE'
         ),
         removeContactButton.click(),
       ]);
