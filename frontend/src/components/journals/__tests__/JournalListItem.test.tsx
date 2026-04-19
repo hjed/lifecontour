@@ -99,36 +99,127 @@ describe('JournalListItem', () => {
     expect(screen.getByTestId('tag-Work')).toBeInTheDocument();
   });
 
-  it('displays contacts', () => {
-    const journalWithContacts: JournalResource = {
-      ...baseJournal,
-      attributes: {
-        ...baseJournal.attributes,
-        contacts: [
-          {
-            id: '1',
-            name: 'John Doe',
-            first_name: 'John',
-            last_name: 'Doe',
-            relationship_type: JournalContactRelationshipType.PARTICIPANT,
-          },
-          {
-            id: '2',
-            name: 'Jane Smith',
-            first_name: 'Jane',
-            last_name: 'Smith',
-            relationship_type: JournalContactRelationshipType.INVITEE,
-          },
-        ],
-      },
-    };
+  describe('Contact Avatar Stack', () => {
+    it('does not render contact stack if 0 contacts', () => {
+      const displayJournal = toDisplayJournal(baseJournal);
+      render(<JournalListItem journal={displayJournal} />);
 
-    const displayJournal = toDisplayJournal(journalWithContacts);
-    render(<JournalListItem journal={displayJournal} />);
+      expect(
+        screen.queryByTestId('journal-contacts-stack')
+      ).not.toBeInTheDocument();
+    });
 
-    expect(screen.getByTestId('journal-contacts-stack')).toBeInTheDocument();
-    expect(screen.getByLabelText('John Doe')).toBeInTheDocument();
-    expect(screen.getByLabelText('Jane Smith')).toBeInTheDocument();
+    it('renders exactly 1 contact avatar with a link', () => {
+      const journalWithContacts: JournalResource = {
+        ...baseJournal,
+        attributes: {
+          ...baseJournal.attributes,
+          contacts: [
+            {
+              id: '1',
+              name: 'John Doe',
+              first_name: 'John',
+              last_name: 'Doe',
+              relationship_type: JournalContactRelationshipType.PARTICIPANT,
+            },
+          ],
+        },
+      };
+
+      const displayJournal = toDisplayJournal(journalWithContacts);
+      render(<JournalListItem journal={displayJournal} />);
+
+      expect(screen.getByTestId('journal-contacts-stack')).toBeInTheDocument();
+
+      const link = screen.getByRole('link', { name: 'View John Doe' });
+      expect(link).toHaveAttribute('href', '/contacts/1');
+      expect(link).toBeInTheDocument();
+      expect(
+        screen.queryByTestId('journal-contacts-overflow')
+      ).not.toBeInTheDocument();
+    });
+
+    it('renders 3 contact avatars without overflow', () => {
+      const generateContact = (id: string, name: string) => ({
+        id,
+        name,
+        relationship_type: JournalContactRelationshipType.PARTICIPANT,
+      });
+
+      const journalWithContacts: JournalResource = {
+        ...baseJournal,
+        attributes: {
+          ...baseJournal.attributes,
+          contacts: [
+            generateContact('1', 'Alpha'),
+            generateContact('2', 'Beta'),
+            generateContact('3', 'Charlie'),
+          ],
+        },
+      };
+
+      const displayJournal = toDisplayJournal(journalWithContacts);
+      render(<JournalListItem journal={displayJournal} />);
+
+      expect(screen.getByTestId('journal-contacts-stack')).toBeInTheDocument();
+      expect(
+        screen.getByRole('link', { name: 'View Alpha' })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('link', { name: 'View Beta' })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('link', { name: 'View Charlie' })
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByTestId('journal-contacts-overflow')
+      ).not.toBeInTheDocument();
+    });
+
+    it('renders 3 contact avatars with +2 overflow text for 5 contacts', () => {
+      const generateContact = (id: string, name: string) => ({
+        id,
+        name,
+        relationship_type: JournalContactRelationshipType.PARTICIPANT,
+      });
+
+      const journalWithContacts: JournalResource = {
+        ...baseJournal,
+        attributes: {
+          ...baseJournal.attributes,
+          contacts: [
+            generateContact('1', 'Alpha'),
+            generateContact('2', 'Beta'),
+            generateContact('3', 'Charlie'),
+            generateContact('4', 'Delta'),
+            generateContact('5', 'Echo'),
+          ],
+        },
+      };
+
+      const displayJournal = toDisplayJournal(journalWithContacts);
+      render(<JournalListItem journal={displayJournal} />);
+
+      expect(screen.getByTestId('journal-contacts-stack')).toBeInTheDocument();
+
+      // Top 3 render
+      expect(
+        screen.getByRole('link', { name: 'View Alpha' })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('link', { name: 'View Charlie' })
+      ).toBeInTheDocument();
+
+      // Overflows don't render native avatars
+      expect(
+        screen.queryByRole('link', { name: 'View Delta' })
+      ).not.toBeInTheDocument();
+
+      // Indicator test
+      const overflow = screen.getByTestId('journal-contacts-overflow');
+      expect(overflow).toBeInTheDocument();
+      expect(overflow).toHaveTextContent('+2');
+    });
   });
 
   it('displays content excerpt', () => {

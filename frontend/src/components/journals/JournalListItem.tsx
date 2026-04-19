@@ -30,6 +30,7 @@ import {
   GitBranch,
 } from 'lucide-react';
 import { differenceInCalendarDays, parseISO } from 'date-fns';
+
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { JournalType, EventState, CalendarInfoData } from '@/types/journals';
@@ -228,15 +229,29 @@ export function JournalListItem({
             data-testid='journal-contacts-stack'
           >
             <div className='flex -space-x-2 overflow-hidden'>
-              {journal.contacts.slice(0, 3).map(contact => (
-                <ContactAvatar
-                  key={`${contact.id}-${contact.relationship_type}`}
-                  firstName={contact.first_name ?? ''}
-                  lastName={contact.last_name ?? ''}
-                  size='sm'
-                  className='ring-background inline-block rounded-full ring-2'
-                />
-              ))}
+              {journal.contacts.slice(0, 3).map(contact => {
+                const fallbackDisplayName =
+                  contact.name?.trim() || `Contact ${contact.id}`;
+                const nameParts = fallbackDisplayName.split(/\s+/);
+                const firstName = contact.first_name ?? nameParts[0] ?? '';
+                const lastName =
+                  contact.last_name ?? nameParts.slice(1).join(' ');
+
+                return (
+                  <Link
+                    key={`${contact.id}-${contact.relationship_type}`}
+                    href={`/contacts/${contact.id}` as Route}
+                    aria-label={`View ${contact.name || `Contact ${contact.id}`}`}
+                    className='ring-background focus-visible:ring-primary inline-block rounded-full ring-2 hover:z-10 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none'
+                  >
+                    <ContactAvatar
+                      firstName={firstName}
+                      lastName={lastName}
+                      size='sm'
+                    />
+                  </Link>
+                );
+              })}
             </div>
             {journal.contacts.length > 3 && (
               <span

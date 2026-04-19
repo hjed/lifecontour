@@ -242,6 +242,11 @@ interface ContactBadgeProps {
 }
 
 function ContactBadge({ contact, onRemove, disabled }: ContactBadgeProps) {
+  const fallbackDisplayName = contact.name?.trim() || `Contact ${contact.id}`;
+  const nameParts = fallbackDisplayName.split(/\s+/);
+  const firstName = contact.first_name ?? nameParts[0] ?? '';
+  const lastName = contact.last_name ?? nameParts.slice(1).join(' ');
+
   return (
     <Badge
       variant='secondary'
@@ -251,15 +256,15 @@ function ContactBadge({ contact, onRemove, disabled }: ContactBadgeProps) {
       <Link
         href={`/contacts/${contact.id}`}
         className='decoration-muted-foreground/50 focus-visible:ring-ring flex items-center gap-1.5 rounded-sm underline-offset-2 hover:underline focus-visible:ring-1 focus-visible:outline-none'
-        aria-label={`View ${contact.name}`}
+        aria-label={`View ${fallbackDisplayName}`}
       >
         <ContactAvatar
-          firstName={contact.first_name || ''}
-          lastName={contact.last_name || ''}
+          firstName={firstName}
+          lastName={lastName}
           size='sm'
           className='h-4 w-4'
         />
-        <span>{contact.name}</span>
+        <span>{fallbackDisplayName}</span>
         {contact.relationship_type && (
           <span className='text-muted-foreground text-[10px]'>
             ({contact.relationship_type})
@@ -272,7 +277,7 @@ function ContactBadge({ contact, onRemove, disabled }: ContactBadgeProps) {
           onClick={onRemove}
           disabled={disabled}
           className='hover:bg-muted ml-1 rounded-sm p-0.5 transition-colors'
-          aria-label={`Remove ${contact.name}`}
+          aria-label={`Remove ${fallbackDisplayName}`}
           data-testid={`remove-contact-${contact.id}`}
         >
           <X className='h-3 w-3' />
