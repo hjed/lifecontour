@@ -236,7 +236,7 @@ describe('ContactJournals', () => {
 
     await waitFor(() => {
       // Get their positions in the DOM
-      const cards = screen.getAllByTestId(/^journal-/);
+      const cards = screen.getAllByTestId(/^journal-\d+$/);
       const positions = cards.map(card => card.getAttribute('data-testid'));
 
       // Should be sorted: Newest (2), Middle (3), Oldest (1)

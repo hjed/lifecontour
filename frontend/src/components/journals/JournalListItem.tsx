@@ -30,11 +30,13 @@ import {
   GitBranch,
 } from 'lucide-react';
 import { differenceInCalendarDays, parseISO } from 'date-fns';
+
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { JournalType, EventState, CalendarInfoData } from '@/types/journals';
 import { DisplayJournal } from '@/hooks/useDisplayJournals';
 import { SearchHighlight } from '@/components/search/SearchHighlight';
+import { ContactAvatar } from '@/components/contacts/ContactAvatar';
 import { cn } from '@/lib/utils';
 import { formatDateRange } from '@/lib/date-utils';
 import { JournalChildrenList } from './JournalChildrenList';
@@ -222,17 +224,43 @@ export function JournalListItem({
 
         {/* Contact chips */}
         {journal.contacts.length > 0 && (
-          <div className='flex flex-wrap gap-2'>
-            {journal.contacts.map(contact => (
-              <div
-                key={`${contact.id}-${contact.relationship_type}`}
-                className='bg-muted text-muted-foreground flex items-center gap-1 rounded-full px-2 py-1 text-xs'
-                data-testid={`contact-${contact.id}`}
+          <div
+            className='flex items-center gap-1'
+            data-testid='journal-contacts-stack'
+          >
+            <div className='flex -space-x-2 overflow-hidden'>
+              {journal.contacts.slice(0, 3).map(contact => {
+                const fallbackDisplayName =
+                  contact.name?.trim() || `Contact ${contact.id}`;
+                const nameParts = fallbackDisplayName.split(/\s+/);
+                const firstName = contact.first_name ?? nameParts[0] ?? '';
+                const lastName =
+                  contact.last_name ?? nameParts.slice(1).join(' ');
+
+                return (
+                  <Link
+                    key={`${contact.id}-${contact.relationship_type}`}
+                    href={`/contacts/${contact.id}` as Route}
+                    aria-label={`View ${contact.name || `Contact ${contact.id}`}`}
+                    className='ring-background focus-visible:ring-primary inline-block rounded-full ring-2 hover:z-10 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none'
+                  >
+                    <ContactAvatar
+                      firstName={firstName}
+                      lastName={lastName}
+                      size='sm'
+                    />
+                  </Link>
+                );
+              })}
+            </div>
+            {journal.contacts.length > 3 && (
+              <span
+                className='text-muted-foreground ml-1 text-xs font-medium'
+                data-testid='journal-contacts-overflow'
               >
-                <span>👤</span>
-                <span>{contact.name || `Contact ${contact.id}`}</span>
-              </div>
-            ))}
+                +{journal.contacts.length - 3}
+              </span>
+            )}
           </div>
         )}
 

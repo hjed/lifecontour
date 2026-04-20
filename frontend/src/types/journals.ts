@@ -227,6 +227,8 @@ export interface JournalContactRelationship {
   relationship_type: JournalContactRelationshipType;
   status?: AttendeeStatus | null;
   role?: ContactEventRole | null;
+  first_name?: string | null;
+  last_name?: string | null;
 }
 
 // Alias for backward compatibility

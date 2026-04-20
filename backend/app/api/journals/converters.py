@@ -103,6 +103,8 @@ class JournalConverter:
                 relationship_type=contact_rel.relationship_type.value,
                 status=contact_rel.status.value if contact_rel.status else None,
                 role=contact_rel.role.value if contact_rel.role else None,
+                first_name=None,
+                last_name=None,
             )
             for contact_rel in contacts
         ]

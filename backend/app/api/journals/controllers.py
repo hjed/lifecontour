@@ -134,9 +134,9 @@ def _parse_journal_type(type_str: str) -> JournalType:
 async def _populate_contact_names(
     resource: JournalResource,
     contact_repo: ContactRepository,
-    contact_cache: dict[int, str],
+    contact_cache: dict[int, dict[str, str | None]],
 ) -> None:
-    """Populate the names of contacts in a JournalResource."""
+    """Populate the names and avatar info of contacts in a JournalResource."""
     if not resource.attributes.contacts:
         return
 
@@ -154,18 +154,29 @@ async def _populate_contact_names(
             # Null-safe formatter: filter out None or empty name parts
             name_parts = [part for part in (first_name, last_name) if part]
             name = " ".join(name_parts)
-            contact_cache[cid] = name if name else f"Contact {cid}"
+            contact_cache[cid] = {
+                "name": name if name else f"Contact {cid}",
+                "first_name": first_name,
+                "last_name": last_name,
+            }
 
         # Mark any IDs not found in the database
         for cid in contact_ids_to_fetch:
             if cid not in contact_cache:
-                contact_cache[cid] = f"Unknown Contact {cid}"
+                contact_cache[cid] = {
+                    "name": f"Unknown Contact {cid}",
+                    "first_name": None,
+                    "last_name": None,
+                }
 
     # Set names from cache
     for contact_schema in resource.attributes.contacts:
         contact_id = int(contact_schema.id)
         if contact_id in contact_cache:
-            contact_schema.name = contact_cache[contact_id]
+            cache_info = contact_cache[contact_id]
+            contact_schema.name = cache_info["name"]
+            contact_schema.first_name = cache_info["first_name"]
+            contact_schema.last_name = cache_info["last_name"]
 
 
 async def _build_journal_response(
@@ -984,7 +995,7 @@ async def _build_journal_list_resources(
         resource.attributes.has_pending_reviews = journal_id_int in review_ids
 
     # Populate contact names
-    contact_cache: dict[int, str] = {}
+    contact_cache: dict[int, dict[str, str | None]] = {}
     for resource in journal_resources:
         await _populate_contact_names(resource, contact_repo, contact_cache)
 

@@ -135,10 +135,17 @@ test.describe('Contact Journals Display', () => {
       // Verify that the contact's name is rendered in the journal's contact badges
       // It should NOT render as "Contact <id>"
       await expect(
-        journalCard.getByText(`${contact.firstName} ${contact.lastName}`)
+        journalCard.getByRole('link', {
+          name: new RegExp(
+            `View ${contact.firstName} ${contact.lastName}`,
+            'i'
+          ),
+        })
       ).toBeVisible();
       await expect(
-        journalCard.getByText(`Contact ${contact.id}`)
+        journalCard.getByRole('link', {
+          name: new RegExp(`View Contact ${contact.id}`, 'i'),
+        })
       ).not.toBeVisible();
     });
 

@@ -87,11 +87,20 @@ describe('JournalContactBadge', () => {
   });
 
   describe('Display Mode', () => {
-    it('renders contact badges', () => {
+    it('renders contact badges with proper links and accessibility labels', () => {
       render(<JournalContactBadge contacts={mockContacts} />);
 
+      // Verify John Doe
       expect(screen.getByText('John Doe')).toBeInTheDocument();
+      const johnLink = screen.getByRole('link', { name: 'View John Doe' });
+      expect(johnLink).toBeInTheDocument();
+      expect(johnLink).toHaveAttribute('href', '/contacts/1');
+
+      // Verify Jane Smith
       expect(screen.getByText('Jane Smith')).toBeInTheDocument();
+      const janeLink = screen.getByRole('link', { name: 'View Jane Smith' });
+      expect(janeLink).toBeInTheDocument();
+      expect(janeLink).toHaveAttribute('href', '/contacts/2');
     });
 
     it('renders relationship type labels', () => {

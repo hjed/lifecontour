@@ -187,15 +187,15 @@ Every phase below must meet the same completion bar before merge:
 **PR Size:** ~5-7 files
 
 **Acceptance Criteria:**
-- [ ] `JournalContactBadge` renders a small `ContactAvatar` (size `sm`) alongside each contact name.
+- [x] `JournalContactBadge` renders a small `ContactAvatar` (size `sm`) alongside each contact name.
   - Avatar data (first name, last name, image URL) should be included in the journal contact relationship API response or fetched efficiently.
-- [ ] Contact names/badges in `JournalDetailView` are clickable links navigating to `/contacts/{id}`.
-- [ ] Journal list view (`JournalList` / day-grouped list items) shows an abbreviated avatar stack:
+- [x] Contact names/badges in `JournalDetailView` are clickable links navigating to `/contacts/{id}`.
+- [x] Journal list view (`JournalList` / day-grouped list items) shows an abbreviated avatar stack:
   - Display the first 3 contact avatars in an overlapping/stacked layout.
   - Show a `+N` overflow indicator when a journal has more than 3 linked contacts.
-- [ ] Avatars use the existing `ContactAvatar` component with initials fallback.
-- [ ] Accessibility: avatar links have appropriate `aria-label` attributes, clickable elements are keyboard-navigable.
-- [ ] The contact detail page link works correctly from both the journal detail view and the journal list view.
+- [x] Avatars use the existing `ContactAvatar` component with initials fallback.
+- [x] Accessibility: avatar links have appropriate `aria-label` attributes, clickable elements are keyboard-navigable.
+- [x] The contact detail page link works correctly from both the journal detail view and the journal list view.
 
 **Required Test Coverage:**
 - **Unit:** avatar stack rendering with 0, 1, 3, and 5+ contacts; overflow indicator logic; link href generation.
