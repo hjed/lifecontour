@@ -132,6 +132,19 @@ async def create_contact_relationship(
             f"must match contact_id in URL ({contact_id})",
         )
 
+    # Validate mutually exclusive target fields
+    attrs = relationship_request.data.attributes
+    if attrs.to_user and attrs.to_contact_id is not None:
+        raise ContactValidationError(
+            "relationship",
+            "to_contact_id must not be provided when to_user is True",
+        )
+    if not attrs.to_user and attrs.to_contact_id is None:
+        raise ContactValidationError(
+            "relationship",
+            "to_contact_id is required when to_user is False",
+        )
+
     relationship = ContactRelationshipRequestConverter.from_create_request(
         relationship_request.data
     )
@@ -140,6 +153,7 @@ async def create_contact_relationship(
         from_contact_id=relationship.from_contact_id,
         to_contact_id=relationship.to_contact_id,
         relationship_type=relationship.relationship_type,
+        to_user=relationship.to_user,
     )
 
     # Handle both single relationship and list of relationships

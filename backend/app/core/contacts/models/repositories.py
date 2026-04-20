@@ -489,7 +489,12 @@ class ContactRelationshipRepository(ABC):
 
     @abstractmethod
     async def relationship_exists(
-        self, from_contact_id: int, to_contact_id: int, relationship_type: str
+        self,
+        from_contact_id: int,
+        to_contact_id: int | None,
+        relationship_type: str,
+        *,
+        to_user: bool = False,
     ) -> bool:
         """Check if a specific relationship already exists."""
         pass

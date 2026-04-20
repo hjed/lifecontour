@@ -26,18 +26,21 @@ class ContactRelationshipService:
     async def create_relationship(
         self,
         from_contact_id: int,
-        to_contact_id: int,
+        to_contact_id: int | None,
         relationship_type: RelationshipType,
         create_bidirectional: bool = False,
+        *,
+        to_user: bool = False,
     ) -> ContactRelationship | list[ContactRelationship]:
         """
-        Create a new relationship between contacts.
+        Create a new relationship between contacts or from a contact to the user.
 
         Args:
             from_contact_id: ID of the contact initiating the relationship
-            to_contact_id: ID of the contact receiving the relationship
+            to_contact_id: ID of the target contact (None when to_user=True)
             relationship_type: Type of relationship
             create_bidirectional: Whether to create the inverse relationship
+            to_user: Whether this relationship targets the user
 
         Returns:
             Single relationship or list of relationships if bidirectional
@@ -46,42 +49,68 @@ class ContactRelationshipService:
             ContactValidationError: If validation fails
             ContactNotFoundError: If either contact doesn't exist
         """
-        # Validate self-relationship
-        if from_contact_id == to_contact_id:
-            raise ContactValidationError(
-                "relationship", "Contact cannot have a relationship with itself"
-            )
-
-        # Validate both contacts exist
+        # Validate the from-contact exists
         from_contact = await self.contact_repo.find_by_id(from_contact_id)
         if not from_contact:
             raise ContactNotFoundError(from_contact_id)
 
-        to_contact = await self.contact_repo.find_by_id(to_contact_id)
-        if not to_contact:
-            raise ContactNotFoundError(to_contact_id)
+        if to_user:
+            # User-targeted relationship: no to_contact_id needed
+            if to_contact_id is not None:
+                raise ContactValidationError(
+                    "relationship",
+                    "to_contact_id must not be provided when to_user is True",
+                )
 
-        # Create the primary relationship
-        relationship = ContactRelationship(
-            from_contact_id=from_contact_id,
-            to_contact_id=to_contact_id,
-            relationship_type=relationship_type,
-        )
+            relationship = ContactRelationship(
+                from_contact_id=from_contact_id,
+                to_contact_id=None,
+                relationship_type=relationship_type,
+                to_user=True,
+            )
+            return await self.relationship_repo.create(relationship)
+        else:
+            # Contact-to-contact relationship
+            if to_contact_id is None:
+                raise ContactValidationError(
+                    "relationship",
+                    "to_contact_id is required when to_user is False",
+                )
 
-        created_relationship = await self.relationship_repo.create(relationship)
+            # Validate self-relationship
+            if from_contact_id == to_contact_id:
+                raise ContactValidationError(
+                    "relationship",
+                    "Contact cannot have a relationship with itself",
+                )
 
-        # Create bidirectional relationship if requested
-        if create_bidirectional:
-            inverse_relationship = ContactRelationship(
-                from_contact_id=to_contact_id,
-                to_contact_id=from_contact_id,
-                relationship_type=relationship_type.get_inverse_type(),
+            to_contact = await self.contact_repo.find_by_id(to_contact_id)
+            if not to_contact:
+                raise ContactNotFoundError(to_contact_id)
+
+            # Create the primary relationship
+            relationship = ContactRelationship(
+                from_contact_id=from_contact_id,
+                to_contact_id=to_contact_id,
+                relationship_type=relationship_type,
             )
 
-            created_inverse = await self.relationship_repo.create(inverse_relationship)
-            return [created_relationship, created_inverse]
+            created_relationship = await self.relationship_repo.create(relationship)
 
-        return created_relationship
+            # Create bidirectional relationship if requested
+            if create_bidirectional:
+                inverse_relationship = ContactRelationship(
+                    from_contact_id=to_contact_id,
+                    to_contact_id=from_contact_id,
+                    relationship_type=relationship_type.get_inverse_type(),
+                )
+
+                created_inverse = await self.relationship_repo.create(
+                    inverse_relationship
+                )
+                return [created_relationship, created_inverse]
+
+            return created_relationship
 
     async def get_relationships_for_contact(
         self, contact_id: int
@@ -156,6 +185,7 @@ class ContactRelationshipService:
             from_contact_id=existing_relationship.from_contact_id,
             to_contact_id=existing_relationship.to_contact_id,
             relationship_type=relationship_type,
+            to_user=existing_relationship.to_user,
             created_at=existing_relationship.created_at,
             updated_at=existing_relationship.updated_at,
         )
@@ -278,8 +308,12 @@ class ContactRelationshipService:
         # Collect unique contact IDs that need resolution
         contact_ids: set[int] = set()
         for rel in relationships:
+            if rel.to_user:
+                # User-targeted: no other contact to resolve
+                continue
             if rel.from_contact_id == viewing_contact_id:
-                contact_ids.add(rel.to_contact_id)
+                if rel.to_contact_id is not None:
+                    contact_ids.add(rel.to_contact_id)
             else:
                 contact_ids.add(rel.from_contact_id)
 
@@ -296,7 +330,10 @@ class ContactRelationshipService:
         # Set to_contact_name on each relationship
         for rel in relationships:
             resolved_rel = copy.copy(rel)
-            if resolved_rel.to_contact_id == viewing_contact_id:
+            if resolved_rel.to_user:
+                # User-targeted relationship: show "You" as the target name
+                resolved_rel.to_contact_name = "You"
+            elif resolved_rel.to_contact_id == viewing_contact_id:
                 # The viewing contact is the target of the relationship.
                 # Invert the relationship so the viewer sees it from their perspective
                 other_id = resolved_rel.from_contact_id
@@ -306,9 +343,14 @@ class ContactRelationshipService:
                 # Swap the IDs so it is clearly directional from the viewing contact
                 resolved_rel.to_contact_id = other_id
                 resolved_rel.from_contact_id = viewing_contact_id
+                resolved_rel.to_contact_name = contact_names.get(other_id)
             else:
-                other_id = resolved_rel.to_contact_id
-            resolved_rel.to_contact_name = contact_names.get(other_id)
+                other_id_or_none = resolved_rel.to_contact_id
+                resolved_rel.to_contact_name = (
+                    contact_names.get(other_id_or_none)
+                    if other_id_or_none is not None
+                    else None
+                )
             resolved_relationships.append(resolved_rel)
 
         return resolved_relationships

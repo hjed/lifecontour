@@ -79,4 +79,119 @@ test.describe('Contact Relationships', () => {
     // Select the first option
     await listbox.getByRole('option', { name: 'Parent', exact: true }).click();
   });
+
+  test('should toggle "Relationship with me" and create a user-targeted relationship', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+    const dataManager = new TestDataManager(page);
+
+    // Create a contact
+    const contact = await dataManager.createContact({
+      firstName: 'UserRel',
+      lastName: 'Test',
+      email: 'userrel@example.com',
+    });
+
+    // Navigate to contact detail page
+    await page.goto(`/contacts/${contact.id}`);
+    await expect(
+      page.getByText(`${contact.firstName} ${contact.lastName}`)
+    ).toBeVisible();
+
+    // Click Add Relationship
+    await page.getByRole('button', { name: 'Add Relationship' }).click();
+
+    // Verify the form appears
+    await expect(
+      page.getByRole('heading', { name: 'Add New Relationship' })
+    ).toBeVisible();
+
+    // Toggle "Relationship with me"
+    const toggle = page.getByRole('switch', {
+      name: 'Toggle relationship target to yourself',
+    });
+    await expect(toggle).toBeVisible();
+    await toggle.click();
+
+    // Contact search should be hidden and "you" indicator should appear
+    await expect(
+      page.getByText('This relationship will be between this contact and')
+    ).toBeVisible();
+    await expect(
+      page.getByPlaceholder('Search for a contact...')
+    ).not.toBeVisible();
+
+    // Select relationship type
+    const formContainer = page
+      .locator('div.bg-card')
+      .filter({
+        has: page.getByRole('heading', { name: 'Add New Relationship' }),
+      })
+      .first();
+    const typeTrigger = formContainer
+      .locator('.space-y-2')
+      .filter({ hasText: 'Relationship Type' })
+      .getByRole('combobox');
+    await typeTrigger.click();
+    await page
+      .getByRole('listbox')
+      .getByRole('option', { name: 'Friend', exact: true })
+      .click();
+
+    // Submit
+    const addButton = formContainer.getByRole('button', {
+      name: 'Add Relationship',
+    });
+    await expect(addButton).toBeEnabled();
+
+    // Wait for the API response
+    const responsePromise = page.waitForResponse(
+      resp =>
+        resp.url().includes('/relationships') &&
+        resp.request().method() === 'POST'
+    );
+    await addButton.click();
+    await responsePromise;
+
+    // Wait for the relationship to appear in the list with "You" label
+    await expect(page.getByTestId('relationship-user-target')).toBeVisible();
+    await expect(page.getByTestId('relationship-user-target')).toHaveText(
+      'You'
+    );
+  });
+
+  test('should display "You" for existing user-targeted relationships', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+    const dataManager = new TestDataManager(page);
+
+    // Create a contact
+    const contact = await dataManager.createContact({
+      firstName: 'DisplayYou',
+      lastName: 'Test',
+      email: 'displayyou@example.com',
+    });
+
+    // Create a user-targeted relationship via the API
+    await dataManager.createUserRelationship(contact.id, 'partner');
+
+    // Navigate to contact detail page
+    await page.goto(`/contacts/${contact.id}`);
+    await expect(
+      page.getByText(`${contact.firstName} ${contact.lastName}`)
+    ).toBeVisible();
+
+    // Verify "You" is displayed in the relationships list
+    await expect(page.getByTestId('relationship-user-target')).toBeVisible();
+    await expect(page.getByTestId('relationship-user-target')).toHaveText(
+      'You'
+    );
+
+    // "You" should NOT be rendered as a link
+    const youElement = page.getByTestId('relationship-user-target');
+    const tagName = await youElement.evaluate(el => el.tagName.toLowerCase());
+    expect(tagName).toBe('span');
+  });
 });

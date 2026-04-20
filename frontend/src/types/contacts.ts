@@ -151,8 +151,9 @@ export enum RelationshipType {
 
 export interface ContactRelationshipAttributes {
   from_contact_id: number;
-  to_contact_id: number;
+  to_contact_id: number | null;
   to_contact_name?: string;
+  to_user: boolean;
   relationship_type: RelationshipType;
   created_at: string;
   updated_at: string;
@@ -310,7 +311,8 @@ export interface TagAssignmentRequest {
 // Contact Relationship API Types
 export interface ContactRelationshipFormData {
   from_contact_id: number;
-  to_contact_id: number;
+  to_contact_id?: number;
+  to_user?: boolean;
   relationship_type: RelationshipType;
 }
 

@@ -330,16 +330,26 @@ class GlobalSearchResponse(BaseModel):
 
 class ContactRelationshipSchema(BaseModel):
     """
-    AI-friendly representation of a contact-to-contact relationship.
+    AI-friendly representation of a contact relationship.
 
     Reflects the relationship from the perspective of the main contact being queried.
+    The relationship can target either another contact or the user.
     """
 
     id: int = Field(description="Unique identifier for the relationship")
-    other_contact_id: int = Field(description="ID of the other contact")
-    other_contact_name: str = Field(description="Full name of the other contact")
+    other_contact_id: int | None = Field(
+        default=None,
+        description="ID of the other contact (None when the target is the user)",
+    )
+    other_contact_name: str = Field(
+        description="Full name of the other contact or 'You' for user-targeted relationships"
+    )
     relationship_type: str = Field(
         description="Type of relationship (e.g., parent, child, friend, colleague)"
+    )
+    to_user: bool = Field(
+        default=False,
+        description="Whether this relationship targets the user",
     )
     summary: str = Field(description="AI-friendly summary of this relationship")
 

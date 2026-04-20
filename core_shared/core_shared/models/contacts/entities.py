@@ -363,13 +363,14 @@ class RelationshipType(Enum):
 
 @dataclass
 class ContactRelationship:
-    """Contact relationship entity representing relationships between contacts."""
+    """Contact relationship entity representing relationships between contacts or to the user."""
 
     from_contact_id: int
-    to_contact_id: int
+    to_contact_id: int | None
     relationship_type: RelationshipType
     id: int | None = None
     to_contact_name: str | None = None
+    to_user: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -377,24 +378,46 @@ class ContactRelationship:
         """Validate contact relationship."""
         from core_shared.models.contacts.exceptions import ContactValidationError
 
-        # Prevent self-relationships
-        if self.from_contact_id == self.to_contact_id:
-            raise ContactValidationError(
-                "relationship", "Contact cannot have a relationship with itself"
-            )
-
-        # Ensure positive contact IDs
-        if self.from_contact_id <= 0 or self.to_contact_id <= 0:
-            raise ContactValidationError("relationship", "Contact IDs must be positive")
+        if self.to_user:
+            # User-targeted relationship: to_contact_id must be None
+            if self.to_contact_id is not None:
+                raise ContactValidationError(
+                    "relationship",
+                    "to_contact_id must be None when to_user is True",
+                )
+            # from_contact_id must still be positive
+            if self.from_contact_id <= 0:
+                raise ContactValidationError(
+                    "relationship", "from_contact_id must be positive"
+                )
+        else:
+            # Contact-to-contact relationship: to_contact_id is required
+            if self.to_contact_id is None:
+                raise ContactValidationError(
+                    "relationship",
+                    "to_contact_id is required when to_user is False",
+                )
+            # Prevent self-relationships
+            if self.from_contact_id == self.to_contact_id:
+                raise ContactValidationError(
+                    "relationship",
+                    "Contact cannot have a relationship with itself",
+                )
+            # Ensure positive contact IDs
+            if self.from_contact_id <= 0 or self.to_contact_id <= 0:
+                raise ContactValidationError(
+                    "relationship", "Contact IDs must be positive"
+                )
 
     def __eq__(self, other: object) -> bool:
-        """Check equality based on contact IDs and relationship type."""
+        """Check equality based on contact IDs, relationship type, and to_user flag."""
         if not isinstance(other, ContactRelationship):
             return False
         return (
             self.from_contact_id == other.from_contact_id
             and self.to_contact_id == other.to_contact_id
             and self.relationship_type == other.relationship_type
+            and self.to_user == other.to_user
         )
 
     def get_inverse_type(self) -> RelationshipType:

@@ -223,7 +223,7 @@ class TestSqlContactRelationshipRepository:
 
         # Get relationships from contact2 (should be empty)
         from_relationships_2 = await relationship_repo.get_relationships_from_contact(
-            contact2.id
+            assert_contact_has_id(contact2)
         )
         assert len(from_relationships_2) == 0
 
@@ -253,7 +253,7 @@ class TestSqlContactRelationshipRepository:
 
         # Get relationships to contact1 (should be empty)
         to_relationships_1 = await relationship_repo.get_relationships_to_contact(
-            contact1.id
+            assert_contact_has_id(contact1)
         )
         assert len(to_relationships_1) == 0
 

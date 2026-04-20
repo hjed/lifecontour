@@ -152,8 +152,12 @@ class TestContactRelationshipService:
         mock_contact_repo,
         mock_relationship_repo,
         mock_transaction,
+        sample_contact_1,
     ):
         """Test that self-relationships are prevented."""
+        # from-contact exists, but self-reference should still be rejected
+        mock_contact_repo.find_by_id.return_value = sample_contact_1
+
         with pytest.raises(ContactValidationError) as exc_info:
             await service.create_relationship(
                 from_contact_id=1,
@@ -162,7 +166,8 @@ class TestContactRelationshipService:
             )
 
         assert "cannot have a relationship with itself" in str(exc_info.value)
-        mock_contact_repo.find_by_id.assert_not_called()
+        # from-contact is validated first, then self-reference is caught
+        mock_contact_repo.find_by_id.assert_called_once_with(1)
         mock_relationship_repo.create.assert_not_called()
 
     @pytest.mark.asyncio

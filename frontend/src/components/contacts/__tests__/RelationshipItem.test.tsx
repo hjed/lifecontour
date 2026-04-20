@@ -34,7 +34,22 @@ const mockRelationship: ContactRelationshipResource = {
     from_contact_id: 1,
     to_contact_id: 2,
     to_contact_name: 'Jane Smith',
+    to_user: false,
     relationship_type: RelationshipType.PARTNER,
+    created_at: '2024-01-01T00:00:00Z',
+    updated_at: '2024-01-01T00:00:00Z',
+  },
+};
+
+const mockUserTargetedRelationship: ContactRelationshipResource = {
+  type: 'contact_relationships',
+  id: '2',
+  attributes: {
+    from_contact_id: 1,
+    to_contact_id: null,
+    to_contact_name: undefined,
+    to_user: true,
+    relationship_type: RelationshipType.FRIEND,
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
   },
@@ -236,6 +251,7 @@ describe('RelationshipItem', () => {
     expect(mockOnUpdate).toHaveBeenCalledWith({
       from_contact_id: 1,
       to_contact_id: 2,
+      to_user: false,
       relationship_type: RelationshipType.PARTNER, // Current value
     });
   });
@@ -355,7 +371,74 @@ describe('RelationshipItem', () => {
     expect(mockOnUpdate).toHaveBeenCalledWith({
       from_contact_id: 1,
       to_contact_id: 2,
+      to_user: false,
       relationship_type: RelationshipType.PARTNER,
+    });
+  });
+
+  // User-targeted relationship tests
+  describe('user-targeted relationships', () => {
+    it('displays "You" as a span instead of a link for user-targeted relationships', () => {
+      const Wrapper = createWrapper();
+      render(
+        <Wrapper>
+          <RelationshipItem
+            relationship={mockUserTargetedRelationship}
+            currentContactId='1'
+            onUpdate={mockOnUpdate}
+            onDelete={mockOnDelete}
+          />
+        </Wrapper>
+      );
+
+      const youText = screen.getByTestId('relationship-user-target');
+      expect(youText).toHaveTextContent('You');
+      // Should NOT be a link
+      expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    });
+
+    it('renders relationship type for user-targeted relationships', () => {
+      const Wrapper = createWrapper();
+      render(
+        <Wrapper>
+          <RelationshipItem
+            relationship={mockUserTargetedRelationship}
+            currentContactId='1'
+            onUpdate={mockOnUpdate}
+            onDelete={mockOnDelete}
+          />
+        </Wrapper>
+      );
+
+      expect(screen.getByText('Friend')).toBeInTheDocument();
+    });
+
+    it('passes to_user flag in update data for user-targeted relationships', async () => {
+      const user = userEvent.setup();
+      const Wrapper = createWrapper();
+      render(
+        <Wrapper>
+          <RelationshipItem
+            relationship={mockUserTargetedRelationship}
+            currentContactId='1'
+            onUpdate={mockOnUpdate}
+            onDelete={mockOnDelete}
+          />
+        </Wrapper>
+      );
+
+      const editButton = screen.getByLabelText('Edit relationship');
+      await user.click(editButton);
+
+      const saveButton = screen.getByText('Save');
+      await user.click(saveButton);
+
+      expect(mockOnUpdate).toHaveBeenCalledWith({
+        from_contact_id: 1,
+        to_contact_id: undefined,
+        to_user: true,
+        relationship_type: RelationshipType.FRIEND,
+      });
     });
   });
 });

@@ -429,6 +429,7 @@ class ContactRelationshipConverter:
             relationship_type=relationship.relationship_type.value,
             from_contact_id=relationship.from_contact_id,
             to_contact_id=relationship.to_contact_id,
+            to_user=relationship.to_user,
             to_contact_name=relationship.to_contact_name,
             created_at=relationship.created_at,
             updated_at=relationship.updated_at,
@@ -467,6 +468,7 @@ class ContactRelationshipRequestConverter:
             from_contact_id=attrs.from_contact_id,
             to_contact_id=attrs.to_contact_id,
             relationship_type=RelationshipType(attrs.relationship_type),
+            to_user=attrs.to_user,
         )
 
     @staticmethod
@@ -483,6 +485,7 @@ class ContactRelationshipRequestConverter:
             from_contact_id=attrs.from_contact_id,
             to_contact_id=attrs.to_contact_id,
             relationship_type=RelationshipType(attrs.relationship_type),
+            to_user=existing_relationship.to_user,
             created_at=existing_relationship.created_at,
             updated_at=existing_relationship.updated_at,
         )

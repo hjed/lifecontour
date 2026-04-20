@@ -2,7 +2,8 @@
  * RelationshipItem component for displaying and editing individual relationships.
  *
  * Provides inline editing functionality for relationship types with
- * proper validation and error handling.
+ * proper validation and error handling. Supports both contact-to-contact
+ * and user-targeted relationships.
  */
 
 'use client';
@@ -57,13 +58,18 @@ export function RelationshipItem({
     return typeData?.display_name || type;
   };
 
+  const isUserTargeted = relationship.attributes.to_user;
+
   // Determine the "other" contact's ID for linking
-  const otherContactId =
-    relationship.attributes.from_contact_id === Number(currentContactId)
+  const otherContactId = isUserTargeted
+    ? null
+    : relationship.attributes.from_contact_id === Number(currentContactId)
       ? relationship.attributes.to_contact_id
       : relationship.attributes.from_contact_id;
 
-  const contactName = relationship.attributes.to_contact_name;
+  const contactName = isUserTargeted
+    ? 'You'
+    : relationship.attributes.to_contact_name;
 
   const handleEdit = () => {
     setIsEditing(true);
@@ -84,7 +90,8 @@ export function RelationshipItem({
 
     const updateData: ContactRelationshipFormData = {
       from_contact_id: relationship.attributes.from_contact_id,
-      to_contact_id: relationship.attributes.to_contact_id,
+      to_contact_id: relationship.attributes.to_contact_id ?? undefined,
+      to_user: relationship.attributes.to_user,
       relationship_type: selectedType,
     };
 
@@ -159,13 +166,22 @@ export function RelationshipItem({
         {contactName && (
           <>
             <span className='text-muted-foreground mx-1'>—</span>
-            <Link
-              href={`/contacts/${otherContactId}`}
-              className='text-primary hover:underline'
-              data-testid={`relationship-contact-link-${otherContactId}`}
-            >
-              {contactName}
-            </Link>
+            {isUserTargeted ? (
+              <span
+                className='text-primary font-medium'
+                data-testid='relationship-user-target'
+              >
+                {contactName}
+              </span>
+            ) : (
+              <Link
+                href={`/contacts/${otherContactId}`}
+                className='text-primary hover:underline'
+                data-testid={`relationship-contact-link-${otherContactId}`}
+              >
+                {contactName}
+              </Link>
+            )}
           </>
         )}
       </div>
