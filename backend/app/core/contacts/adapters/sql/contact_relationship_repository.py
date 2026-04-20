@@ -200,9 +200,19 @@ class SqlContactRelationshipRepository(ContactRelationshipRepository):
                 "uq_contact_relationships_contact_target" in error_str
                 or "uq_contact_relationships_user_target" in error_str
             ):
+                if relationship.to_user:
+                    raise ContactValidationError(
+                        "relationship",
+                        f"User-targeted relationship of type '{relationship.relationship_type.value}' already exists for contact {relationship.from_contact_id}",
+                    ) from e
+                else:
+                    raise ContactValidationError(
+                        "relationship",
+                        f"Relationship already exists between contacts {relationship.from_contact_id} and {relationship.to_contact_id}",
+                    ) from e
+            elif "ck_contact_relationships_no_self_reference" in error_str:
                 raise ContactValidationError(
-                    "relationship",
-                    f"Relationship already exists between contacts {relationship.from_contact_id} and {relationship.to_contact_id}",
+                    "relationship", "Contact cannot have a relationship with itself"
                 ) from e
             else:
                 raise ContactValidationError(

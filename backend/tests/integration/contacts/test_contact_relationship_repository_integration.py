@@ -317,6 +317,76 @@ class TestSqlContactRelationshipRepository:
             await relationship_repo.update(relationship)
 
     @pytest.mark.asyncio
+    async def test_update_duplicate_relationship_fails(
+        self,
+        relationship_repo: SqlContactRelationshipRepository,
+        contact_repo: SqlContactRepository,
+        test_contacts: tuple[Contact, Contact],
+    ):
+        """Test that updating a relationship to a duplicate fails with correct message."""
+        contact1, contact2 = test_contacts
+
+        # Create first relationship (1 -> 2 as FRIEND)
+        relationship1 = ContactRelationship(
+            from_contact_id=assert_contact_has_id(contact1),
+            to_contact_id=assert_contact_has_id(contact2),
+            relationship_type=RelationshipType.FRIEND,
+        )
+        await relationship_repo.create(relationship1)
+
+        # Create second relationship (1 -> 2 as COLLEAGUE)
+        relationship2 = ContactRelationship(
+            from_contact_id=assert_contact_has_id(contact1),
+            to_contact_id=assert_contact_has_id(contact2),
+            relationship_type=RelationshipType.COLLEAGUE,
+        )
+        saved_relationship2 = await relationship_repo.create(relationship2)
+
+        # Now update 1->2 (COLLEAGUE) to 1->2 (FRIEND)
+        saved_relationship2.relationship_type = RelationshipType.FRIEND
+
+        with pytest.raises(
+            ContactValidationError, match="Relationship already exists between contacts"
+        ):
+            await relationship_repo.update(saved_relationship2)
+
+    @pytest.mark.asyncio
+    async def test_update_duplicate_user_targeted_fails(
+        self,
+        relationship_repo: SqlContactRelationshipRepository,
+        test_contacts: tuple[Contact, Contact],
+    ):
+        """Test that updating to a duplicate user-targeted relationship fails with correct message."""
+        contact1, _ = test_contacts
+
+        # Create first user-targeted relationship (1 -> You as FRIEND)
+        relationship1 = ContactRelationship(
+            from_contact_id=assert_contact_has_id(contact1),
+            to_contact_id=None,
+            to_user=True,
+            relationship_type=RelationshipType.FRIEND,
+        )
+        await relationship_repo.create(relationship1)
+
+        # Create second user-targeted relationship (1 -> You as COLLEAGUE)
+        relationship2 = ContactRelationship(
+            from_contact_id=assert_contact_has_id(contact1),
+            to_contact_id=None,
+            to_user=True,
+            relationship_type=RelationshipType.COLLEAGUE,
+        )
+        saved_relationship2 = await relationship_repo.create(relationship2)
+
+        # Now update second one to FRIEND to trigger conflict
+        saved_relationship2.relationship_type = RelationshipType.FRIEND
+
+        with pytest.raises(
+            ContactValidationError,
+            match="User-targeted relationship of type .* already exists for contact",
+        ):
+            await relationship_repo.update(saved_relationship2)
+
+    @pytest.mark.asyncio
     async def test_delete_relationship(
         self,
         relationship_repo: SqlContactRelationshipRepository,
