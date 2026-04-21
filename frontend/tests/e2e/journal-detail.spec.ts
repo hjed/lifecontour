@@ -773,12 +773,16 @@ test.describe('Journal Detail Page', () => {
       await expect(popoverContent).toBeVisible();
 
       // Change Status to ATTENDING
-      const statusSelect = page.locator('button[role="combobox"]').first();
+      const statusSelect = popoverContent
+        .locator('button[role="combobox"]')
+        .first();
       await statusSelect.click();
       await page.getByRole('option', { name: 'ATTENDING' }).click();
 
       // Change Role to ORGANISER
-      const roleSelect = page.locator('button[role="combobox"]').nth(1);
+      const roleSelect = popoverContent
+        .locator('button[role="combobox"]')
+        .nth(1);
       await roleSelect.click();
       await page.getByRole('option', { name: 'ORGANISER' }).click();
 

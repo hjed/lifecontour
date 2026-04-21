@@ -331,8 +331,12 @@ function ContactBadge({
     if (!onUpdate) return;
     const resolvedStatus = editStatus === 'NO_STATUS' ? null : editStatus;
     const resolvedRole = editRole === 'NO_ROLE' ? null : editRole;
-    await onUpdate(resolvedStatus, resolvedRole);
-    setIsEditOpen(false);
+    try {
+      await onUpdate(resolvedStatus, resolvedRole);
+      setIsEditOpen(false);
+    } catch {
+      // Error is logged/handled by onUpdate, keep popover open
+    }
   };
 
   return (
@@ -416,7 +420,9 @@ function ContactBadge({
                 <Label className='text-xs'>Status</Label>
                 <Select
                   value={editStatus}
-                  onValueChange={v => setEditStatus(v as any)}
+                  onValueChange={v =>
+                    setEditStatus(v as AttendeeStatus | 'NO_STATUS')
+                  }
                 >
                   <SelectTrigger className='h-7 text-xs'>
                     <SelectValue />
@@ -436,7 +442,9 @@ function ContactBadge({
                 <Label className='text-xs'>Role</Label>
                 <Select
                   value={editRole}
-                  onValueChange={v => setEditRole(v as any)}
+                  onValueChange={v =>
+                    setEditRole(v as ContactEventRole | 'NO_ROLE')
+                  }
                 >
                   <SelectTrigger className='h-7 text-xs'>
                     <SelectValue />
@@ -456,6 +464,7 @@ function ContactBadge({
                 size='sm'
                 className='h-7 w-full text-xs'
                 onClick={handleSave}
+                disabled={disabled}
               >
                 Save
               </Button>
