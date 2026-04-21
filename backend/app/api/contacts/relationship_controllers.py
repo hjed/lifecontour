@@ -203,19 +203,6 @@ async def update_contact_relationship(
             f"must match relationship_id in URL ({relationship_id})",
         )
 
-    # Validate mutually exclusive target fields
-    attrs = relationship_request.data.attributes
-    if attrs.to_user and attrs.to_contact_id is not None:
-        raise ContactValidationError(
-            "relationship",
-            "to_contact_id must not be provided when to_user is True",
-        )
-    if not attrs.to_user and attrs.to_contact_id is None:
-        raise ContactValidationError(
-            "relationship",
-            "to_contact_id is required when to_user is False",
-        )
-
     # Get existing relationship to verify ownership
     existing_relationship = await relationship_service.get_relationship_by_id(
         relationship_id
@@ -233,6 +220,37 @@ async def update_contact_relationship(
         raise ContactValidationError(
             "relationship",
             f"Relationship {relationship_id} does not belong to contact {contact_id}",
+        )
+
+    # Determine expected target fields based on perspective
+    expected_to: int | None
+    if existing_relationship.to_contact_id == contact_id:
+        expected_from = existing_relationship.to_contact_id
+        expected_to = existing_relationship.from_contact_id
+        expected_user = False
+    else:
+        expected_from = existing_relationship.from_contact_id
+        expected_to = existing_relationship.to_contact_id
+        expected_user = existing_relationship.to_user
+
+    # Validate that if the client provided target fields, they match the expected semantics
+    attrs = relationship_request.data.attributes
+    provided_fields = attrs.model_dump(exclude_unset=True)
+
+    if "from_contact_id" in provided_fields and attrs.from_contact_id != expected_from:
+        raise ContactValidationError(
+            "relationship",
+            "Cannot change from_contact_id of an existing relationship",
+        )
+    if "to_user" in provided_fields and attrs.to_user != expected_user:
+        raise ContactValidationError(
+            "relationship",
+            "Cannot change to_user of an existing relationship",
+        )
+    if "to_contact_id" in provided_fields and attrs.to_contact_id != expected_to:
+        raise ContactValidationError(
+            "relationship",
+            "Cannot change to_contact_id of an existing relationship",
         )
 
     from core_shared.models.contacts.entities import RelationshipType
