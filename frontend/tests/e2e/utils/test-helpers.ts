@@ -1465,21 +1465,28 @@ export async function waitForContactSearchIndexing(
   timeoutMs: number = 30_000
 ): Promise<void> {
   await expect(async () => {
-    const res = await page.request.get(
-      `/api/search/contacts?q=${encodeURIComponent(searchTerm)}&limit=20`
-    );
-    expect(res.ok()).toBe(true);
+    const response = await page.evaluate(async query => {
+      try {
+        const res = await fetch(
+          `/api/search/contacts?q=${encodeURIComponent(query)}&limit=20`
+        );
+        if (!res.ok) return { ok: false, names: [] as string[] };
+        const data = await res.json();
+        const names = (
+          (data.data as Array<{
+            attributes?: { first_name?: string; last_name?: string };
+          }>) ?? []
+        ).map(c =>
+          `${c.attributes?.first_name ?? ''} ${c.attributes?.last_name ?? ''}`.trim()
+        );
+        return { ok: true, names };
+      } catch {
+        return { ok: false, names: [] as string[] };
+      }
+    }, searchTerm);
 
-    const data = await res.json();
-    const names = (
-      (data.data as Array<{
-        attributes?: { first_name?: string; last_name?: string };
-      }>) ?? []
-    ).map(c =>
-      `${c.attributes?.first_name ?? ''} ${c.attributes?.last_name ?? ''}`.trim()
-    );
-
-    const found = names.some((n: string) =>
+    expect(response.ok).toBe(true);
+    const found = response.names.some((n: string) =>
       n.toLowerCase().includes(expectedName.toLowerCase())
     );
     expect(found).toBe(true);

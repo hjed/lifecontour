@@ -203,9 +203,19 @@ test.describe('Example: Fixture-Based Testing', () => {
         expect(response.count).toBeGreaterThan(0);
       }).toPass({ timeout: 15000 });
 
+      // Setup response promise before filling input to avoid race condition
+      const searchResponsePromise = page.waitForResponse(
+        response =>
+          response.url().includes('/api/search/contacts') &&
+          response.status() === 200
+      );
+
       // Use search functionality
       const searchInput = page.locator('[data-testid="search-input"]');
       await searchInput.fill(contacts[0].firstName);
+
+      // Wait for the frontend to fetch and render the search results
+      await searchResponsePromise;
 
       // Wait for search results to update
       await expect(page.locator('main, [role="main"]').first()).toBeVisible();
