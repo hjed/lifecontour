@@ -367,24 +367,16 @@ test.describe('Journal Detail Page', () => {
 
       const [response] = await Promise.all([
         page.waitForResponse(response => {
-          const isPut =
+          return (
             response.url().includes('/api/journals/') &&
-            response.request().method() === 'PUT';
-          if (isPut) {
-            console.log('Intercepted PUT Request:', response.url());
-            console.log('Payload:', response.request().postData());
-          }
-          return isPut;
+            response.request().method() === 'PUT'
+          );
         }),
         saveButton.click(),
       ]);
 
       const updateStatus = response.status();
       const responseText = await response.text();
-      if (updateStatus !== 200) {
-        console.log('Update Status:', updateStatus);
-        console.log('Update Text:', responseText);
-      }
       expect(
         updateStatus,
         `Expected 200 but got ${updateStatus}. Response: ${responseText}`

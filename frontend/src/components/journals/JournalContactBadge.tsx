@@ -151,6 +151,7 @@ export function JournalContactBadge({
       await onRelationshipUpdate(contactId, relationshipType, status, role);
     } catch (error) {
       console.error('Failed to update contact:', error);
+      throw error;
     } finally {
       setIsLoading(false);
     }

@@ -1063,6 +1063,8 @@ class JournalContactRelationshipRepository(ABC):
         relationship_type: JournalContactRelationshipType,
         status: AttendeeStatus | None = None,
         role: ContactEventRole | None = None,
+        update_status: bool = False,
+        update_role: bool = False,
     ) -> JournalContactRelationship | None:
         """
         Update the attributes (status, role) of a journal-contact relationship.
@@ -1073,6 +1075,8 @@ class JournalContactRelationshipRepository(ABC):
             relationship_type: The relationship type
             status: The new attendee status (optional)
             role: The new contact event role (optional)
+            update_status: Whether to update the status field (even if None)
+            update_role: Whether to update the role field (even if None)
 
         Returns:
             The updated relationship, or None if not found

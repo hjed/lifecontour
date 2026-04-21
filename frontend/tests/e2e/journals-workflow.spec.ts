@@ -66,15 +66,9 @@ test.describe('Journal Complete Workflows', () => {
 
       // Step 2: Apply type filter
       const filtersSection = page.locator('[data-testid="journal-filters"]');
-      const typeFilter = filtersSection.getByLabel(/type/i).first();
-
-      // Wait for the API response when filtering
-      const responsePromise = page.waitForResponse(
-        response =>
-          response.url().includes('/api/journals') && response.status() === 200
-      );
-      await typeFilter.selectOption('note');
-      await responsePromise;
+      // Apply type filter and wait for UI to update
+      const noteCheckbox = filtersSection.getByLabel(/note/i).first();
+      await noteCheckbox.check();
 
       // Step 3: Find a note type journal
       const noteJournal = journals.find(j => j.types?.includes('note'));

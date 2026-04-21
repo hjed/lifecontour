@@ -3625,8 +3625,9 @@ async def update_journal_contact_relationship(
 
     # Parse and validate status
     attrs = update_request.data.attributes
+    update_status = "status" in attrs.model_fields_set
     status: AttendeeStatus | None = None
-    if attrs.status is not None:
+    if update_status and attrs.status is not None:
         try:
             status = AttendeeStatus[attrs.status.upper()]
         except KeyError as e:
@@ -3635,28 +3636,35 @@ async def update_journal_contact_relationship(
             ) from e
 
     # Parse and validate role
+    update_role = "role" in attrs.model_fields_set
     role: ContactEventRole | None = None
-    if attrs.role is not None:
+    if update_role and attrs.role is not None:
         try:
             role = ContactEventRole[attrs.role.upper()]
         except KeyError as e:
             raise JournalValidationError("role", f"Invalid role: {attrs.role}") from e
 
     # Update status and role if provided
-    if status is not None or role is not None:
-        updated = await contact_relationship_repo.update_attributes(
-            journal_id=journal_id,
-            contact_id=contact_id,
-            relationship_type=rel_type_enum,
-            status=status,
-            role=role,
+    if not update_status and not update_role:
+        raise JournalValidationError(
+            "attributes", "At least one of status or role must be provided"
         )
-        if updated is None:
-            raise JournalValidationError(
-                "contact_id",
-                f"Relationship not found for contact {contact_id} "
-                f"with type {relationship_type}",
-            )
+
+    updated = await contact_relationship_repo.update_attributes(
+        journal_id=journal_id,
+        contact_id=contact_id,
+        relationship_type=rel_type_enum,
+        status=status,
+        role=role,
+        update_status=update_status,
+        update_role=update_role,
+    )
+    if updated is None:
+        raise JournalValidationError(
+            "contact_id",
+            f"Relationship not found for contact {contact_id} "
+            f"with type {relationship_type}",
+        )
 
     # Get updated journal
     updated_journal = await journal_service.get_journal(journal_id)

@@ -487,7 +487,7 @@ async function updateContactRelationship(
   role?: ContactEventRole | null
 ): Promise<JournalResponse> {
   const requestData = {
-    type: 'journal-contact-relationships-update' as const,
+    type: 'journal-contact-relationships' as const,
     attributes: {
       ...(status !== undefined && { status }),
       ...(role !== undefined && { role }),

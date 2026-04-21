@@ -33,9 +33,7 @@ jest.mock('@/components/ui/select', () => ({
       onClick={() => {
         // Just mock changing value for tests
         if (onValueChange) {
-          onValueChange(
-            value === 'NO_STATUS' ? AttendeeStatus.ATTENDING : 'NO_STATUS'
-          );
+          onValueChange(value === 'NO_STATUS' ? 'ATTENDING' : 'NO_STATUS');
         }
       }}
     >
