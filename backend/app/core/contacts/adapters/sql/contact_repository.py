@@ -186,7 +186,7 @@ class SqlContactRepository(ContactRepository):
         # Load contact relationships
         relationships_query = text(
             """
-            SELECT id, from_contact_id, to_contact_id, relationship_type, created_at, updated_at
+            SELECT id, from_contact_id, to_contact_id, relationship_type, to_user, created_at, updated_at
             FROM contact_relationships
             WHERE from_contact_id = :contact_id OR to_contact_id = :contact_id
             ORDER BY created_at DESC
@@ -201,6 +201,7 @@ class SqlContactRepository(ContactRepository):
                 from_contact_id=rel_row.from_contact_id,
                 to_contact_id=rel_row.to_contact_id,
                 relationship_type=RelationshipType(rel_row.relationship_type),
+                to_user=rel_row.to_user,
                 created_at=rel_row.created_at,
                 updated_at=rel_row.updated_at,
             )

@@ -182,8 +182,13 @@ class ContactRelationshipAttributes(BaseModel):
     from_contact_id: int = Field(
         ..., description="ID of the contact initiating the relationship"
     )
-    to_contact_id: int = Field(
-        ..., description="ID of the contact receiving the relationship"
+    to_contact_id: int | None = Field(
+        default=None,
+        description="ID of the contact receiving the relationship (required when to_user is False)",
+    )
+    to_user: bool = Field(
+        default=False,
+        description="Whether this relationship targets the user (if True, to_contact_id must be None)",
     )
     created_at: datetime | None = Field(
         default=None, description="Relationship creation timestamp"

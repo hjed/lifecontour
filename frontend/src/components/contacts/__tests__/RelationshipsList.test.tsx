@@ -42,6 +42,7 @@ const mockRelationships: ContactRelationshipResource[] = [
     attributes: {
       from_contact_id: 1,
       to_contact_id: 2,
+      to_user: false,
       relationship_type: RelationshipType.PARTNER,
       created_at: '2024-01-01T00:00:00Z',
       updated_at: '2024-01-01T00:00:00Z',
@@ -53,6 +54,7 @@ const mockRelationships: ContactRelationshipResource[] = [
     attributes: {
       from_contact_id: 1,
       to_contact_id: 3,
+      to_user: false,
       relationship_type: RelationshipType.FRIEND,
       created_at: '2024-01-01T00:00:00Z',
       updated_at: '2024-01-01T00:00:00Z',

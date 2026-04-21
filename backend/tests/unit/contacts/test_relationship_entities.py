@@ -176,3 +176,145 @@ class TestContactRelationship:
             relationship_type=RelationshipType.PARENT,
         )
         assert parent_rel.is_bidirectional() is False
+
+
+class TestUserTargetedRelationship:
+    """Test user-targeted relationship validation and semantics."""
+
+    def test_create_user_targeted_relationship(self):
+        """Test creating a valid user-targeted relationship (to_user=True, to_contact_id=None)."""
+        relationship = ContactRelationship(
+            from_contact_id=1,
+            to_contact_id=None,
+            relationship_type=RelationshipType.FRIEND,
+            to_user=True,
+        )
+
+        assert relationship.from_contact_id == 1
+        assert relationship.to_contact_id is None
+        assert relationship.to_user is True
+        assert relationship.relationship_type == RelationshipType.FRIEND
+
+    def test_user_targeted_with_to_contact_id_fails(self):
+        """Test that to_user=True + to_contact_id set raises validation error."""
+        from core_shared.models.contacts.exceptions import ContactValidationError
+
+        with pytest.raises(
+            ContactValidationError,
+            match="to_contact_id must be None when to_user is True",
+        ):
+            ContactRelationship(
+                from_contact_id=1,
+                to_contact_id=5,
+                relationship_type=RelationshipType.FRIEND,
+                to_user=True,
+            )
+
+    def test_contact_targeted_without_to_contact_id_fails(self):
+        """Test that to_user=False + to_contact_id=None raises validation error."""
+        from core_shared.models.contacts.exceptions import ContactValidationError
+
+        with pytest.raises(
+            ContactValidationError,
+            match="to_contact_id is required when to_user is False",
+        ):
+            ContactRelationship(
+                from_contact_id=1,
+                to_contact_id=None,
+                relationship_type=RelationshipType.FRIEND,
+                to_user=False,
+            )
+
+    def test_user_targeted_no_self_reference_check(self):
+        """Test that self-reference check does not apply when to_user=True."""
+        # This should NOT raise, even though from_contact_id=1 and there's no "other" contact
+        relationship = ContactRelationship(
+            from_contact_id=1,
+            to_contact_id=None,
+            relationship_type=RelationshipType.COLLEAGUE,
+            to_user=True,
+        )
+        assert relationship.to_user is True
+
+    def test_user_targeted_from_contact_id_must_be_positive(self):
+        """Test that from_contact_id must still be positive for user-targeted relationships."""
+        from core_shared.models.contacts.exceptions import ContactValidationError
+
+        with pytest.raises(
+            ContactValidationError, match="from_contact_id must be positive"
+        ):
+            ContactRelationship(
+                from_contact_id=0,
+                to_contact_id=None,
+                relationship_type=RelationshipType.FRIEND,
+                to_user=True,
+            )
+
+    def test_user_targeted_equality(self):
+        """Test user-targeted relationship equality (same from_contact_id + type + to_user)."""
+        rel1 = ContactRelationship(
+            from_contact_id=1,
+            to_contact_id=None,
+            relationship_type=RelationshipType.FRIEND,
+            to_user=True,
+        )
+        rel2 = ContactRelationship(
+            from_contact_id=1,
+            to_contact_id=None,
+            relationship_type=RelationshipType.FRIEND,
+            to_user=True,
+        )
+        rel3 = ContactRelationship(
+            from_contact_id=1,
+            to_contact_id=None,
+            relationship_type=RelationshipType.COLLEAGUE,
+            to_user=True,
+        )
+
+        assert rel1 == rel2
+        assert rel1 != rel3
+
+    def test_user_targeted_not_equal_to_contact_targeted(self):
+        """Test that user-targeted and contact-targeted relationships are not equal."""
+        user_rel = ContactRelationship(
+            from_contact_id=1,
+            to_contact_id=None,
+            relationship_type=RelationshipType.FRIEND,
+            to_user=True,
+        )
+        contact_rel = ContactRelationship(
+            from_contact_id=1,
+            to_contact_id=2,
+            relationship_type=RelationshipType.FRIEND,
+        )
+
+        assert user_rel != contact_rel
+
+    def test_user_targeted_inverse_type(self):
+        """Test that get_inverse_type works for user-targeted relationships."""
+        rel = ContactRelationship(
+            from_contact_id=1,
+            to_contact_id=None,
+            relationship_type=RelationshipType.PARENT,
+            to_user=True,
+        )
+        assert rel.get_inverse_type() == RelationshipType.CHILD
+
+    def test_user_targeted_is_bidirectional(self):
+        """Test that is_bidirectional works for user-targeted relationships."""
+        rel = ContactRelationship(
+            from_contact_id=1,
+            to_contact_id=None,
+            relationship_type=RelationshipType.PARTNER,
+            to_user=True,
+        )
+        assert rel.is_bidirectional() is True
+
+    def test_default_to_user_is_false(self):
+        """Test that to_user defaults to False for backward compatibility."""
+        relationship = ContactRelationship(
+            from_contact_id=1,
+            to_contact_id=2,
+            relationship_type=RelationshipType.FRIEND,
+        )
+        assert relationship.to_user is False

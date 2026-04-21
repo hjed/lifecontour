@@ -247,9 +247,10 @@ contact_relationships_table = Table(
         "to_contact_id",
         Integer,
         ForeignKey("contacts.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
     ),
     Column("relationship_type", String(20), nullable=False),
+    Column("to_user", Boolean, server_default=text("false"), nullable=False),
     Column(
         "created_at",
         DateTime(timezone=True),
@@ -267,15 +268,31 @@ contact_relationships_table = Table(
         name="ck_contact_relationships_relationship_type",
     ),
     CheckConstraint(
-        "from_contact_id != to_contact_id",
+        "(to_user = true AND to_contact_id IS NULL) OR (to_user = false AND to_contact_id IS NOT NULL)",
+        name="ck_contact_relationships_target_consistency",
+    ),
+    CheckConstraint(
+        "to_user = true OR from_contact_id != to_contact_id",
         name="ck_contact_relationships_no_self_reference",
     ),
-    UniqueConstraint(
-        "from_contact_id",
-        "to_contact_id",
-        "relationship_type",
-        name="uq_contact_relationships_unique_relationship",
-    ),
+    # Unique constraints are partial indexes defined below
+)
+
+Index(
+    "uq_contact_relationships_contact_target",
+    contact_relationships_table.c.from_contact_id,
+    contact_relationships_table.c.to_contact_id,
+    contact_relationships_table.c.relationship_type,
+    unique=True,
+    postgresql_where=contact_relationships_table.c.to_user.is_(False),
+)
+
+Index(
+    "uq_contact_relationships_user_target",
+    contact_relationships_table.c.from_contact_id,
+    contact_relationships_table.c.relationship_type,
+    unique=True,
+    postgresql_where=contact_relationships_table.c.to_user.is_(True),
 )
 
 # Custom date types table

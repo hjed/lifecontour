@@ -256,25 +256,30 @@ class ContactRelationshipConverter:
         """
         Convert a ContactRelationship entity to an AI-friendly ContactRelationshipSchema.
         """
-        # Determine the other contact based on perspective
-        if relationship.from_contact_id == main_contact_id:
+        if relationship.to_user:
+            # User-targeted relationship
+            other_id = None
+            other_name_str = relationship.to_contact_name or "You"
+            rel_type = relationship.relationship_type.value
+            summary = f"This contact is a {rel_type} of the user."
+        elif relationship.from_contact_id == main_contact_id:
             other_id = relationship.to_contact_id
             other_name_str = relationship.to_contact_name or str(other_id)
             rel_type = relationship.relationship_type.value
+            summary = f"This contact is a {rel_type} of {other_name_str}."
         else:
             other_id = relationship.from_contact_id
             # In inverse perspective, we might not have from_contact_name cached.
             other_name_str = str(other_id)
             rel_type = relationship.relationship_type.get_inverse_type().value
-
-        # Build summary
-        summary = f"This contact is a {rel_type} of {other_name_str}."
+            summary = f"This contact is a {rel_type} of {other_name_str}."
 
         return ContactRelationshipSchema(
             id=relationship.id,  # type: ignore[arg-type]
             other_contact_id=other_id,
             other_contact_name=other_name_str,
             relationship_type=rel_type,
+            to_user=relationship.to_user,
             summary=summary,
         )
 

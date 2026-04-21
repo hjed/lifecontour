@@ -915,7 +915,12 @@ class ContactFactory:
         return response.json()["data"]  # type: ignore[no-any-return]
 
     async def create_relationship(
-        self, from_contact_id: int, to_contact_id: int, relationship_type: Any
+        self,
+        from_contact_id: int,
+        to_contact_id: int | None,
+        relationship_type: Any,
+        *,
+        to_user: bool = False,
     ) -> dict[str, Any]:
         """Create a relationship via API and return the response data."""
         from core_shared.models.contacts.entities import RelationshipType
@@ -926,14 +931,18 @@ class ContactFactory:
         else:
             relationship_type_str = relationship_type
 
+        attributes: dict[str, Any] = {
+            "relationship_type": relationship_type_str,
+            "from_contact_id": from_contact_id,
+            "to_user": to_user,
+        }
+        if to_contact_id is not None:
+            attributes["to_contact_id"] = to_contact_id
+
         request_data = {
             "data": {
                 "type": "contact_relationships",
-                "attributes": {
-                    "relationship_type": relationship_type_str,
-                    "from_contact_id": from_contact_id,
-                    "to_contact_id": to_contact_id,
-                },
+                "attributes": attributes,
             }
         }
 

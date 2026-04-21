@@ -686,6 +686,52 @@ export class TestDataManager {
   }
 
   /**
+   * Create a user-targeted relationship via API.
+   *
+   * Creates a relationship where the target is "You" (the current user)
+   * rather than another contact.
+   */
+  async createUserRelationship(
+    fromContactId: string,
+    relationshipType: string
+  ): Promise<void> {
+    console.debug(
+      `🔗 [Data Manager] Creating user-targeted relationship: ${fromContactId} -> You (${relationshipType})`
+    );
+
+    const response = await this.page.request.post(
+      `/api/contacts/${fromContactId}/relationships`,
+      {
+        headers: {
+          'Content-Type': 'application/vnd.api+json',
+          Accept: 'application/vnd.api+json',
+        },
+        data: {
+          data: {
+            type: 'contact_relationships',
+            attributes: {
+              from_contact_id: Number(fromContactId),
+              to_user: true,
+              relationship_type: relationshipType,
+            },
+          },
+        },
+      }
+    );
+
+    if (!response.ok()) {
+      const errorBody = await response.text();
+      throw new Error(
+        `Failed to create user-targeted relationship: ${response.status()} - ${errorBody}`
+      );
+    }
+
+    console.debug(
+      `✅ [Data Manager] User-targeted relationship created: ${fromContactId} -> You`
+    );
+  }
+
+  /**
    * Create a journal tag via API
    */
   async createJournalTag(
