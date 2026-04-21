@@ -77,6 +77,7 @@ def calculate_contact_version_hash(contact_data: dict[str, Any]) -> str:
         "addresses": contact_data.get("addresses", []),
         "notes": contact_data.get("notes", []),
         "tags": contact_data.get("tags", []),
+        "important_dates": contact_data.get("important_dates", []),
     }
 
     return calculate_version_hash(relevant_fields)
