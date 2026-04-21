@@ -364,31 +364,33 @@ The sequence reflects both user priority and technical dependency:
 
 #### Phase 1: Relationship Target Model and API Semantics
 **PR Size:** ~5-7 files
+**Status:** ✅ COMPLETE
 
 **Acceptance Criteria:**
-- [ ] A contact can hold multiple relationships, including relationships to the user.
-- [ ] Existing contact-to-contact relationships continue to work unchanged.
-- [ ] The API model makes the user target explicit without ambiguous overloading.
-- [ ] Validation prevents invalid or contradictory target combinations.
+- [x] A contact can hold multiple relationships, including relationships to the user.
+- [x] Existing contact-to-contact relationships continue to work unchanged.
+- [x] The API model makes the user target explicit without ambiguous overloading.
+- [x] Validation prevents invalid or contradictory target combinations.
 
 **Required Test Coverage:**
-- **Unit:** relationship target validation and serialization rules.
-- **Integration:** API create/update/delete/list flows covering contact-target and user-target relationships.
-- **E2E:** create and view a user-targeted relationship through the contacts UI.
+- **Unit:** relationship target validation and serialization rules. ✅
+- **Integration:** API create/update/delete/list flows covering contact-target and user-target relationships. ✅
+- **E2E:** create and view a user-targeted relationship through the contacts UI. ✅
 
 #### Phase 2: Relationship Management UX
 **PR Size:** ~4-6 files
+**Status:** ✅ COMPLETE
 
 **Acceptance Criteria:**
-- [ ] Relationship creation/editing flows make the user target understandable.
-- [ ] Existing relationship management for contact-to-contact links is not regressed.
-- [ ] Empty states and edit states read clearly once user-targeted relationships exist.
-- [ ] Relationship lists remain usable when a contact has multiple relationships.
+- [x] Relationship creation/editing flows make the user target understandable.
+- [x] Existing relationship management for contact-to-contact links is not regressed.
+- [x] Empty states and edit states read clearly once user-targeted relationships exist.
+- [x] Relationship lists remain usable when a contact has multiple relationships.
 
 **Required Test Coverage:**
-- **Unit:** form-state helpers and display-label helpers.
-- **Integration:** frontend mutation and rendering tests against the updated relationship contracts.
-- **E2E:** add, edit, and delete a user-targeted relationship from the real contact page.
+- **Unit:** form-state helpers and display-label helpers. ✅
+- **Integration:** frontend mutation and rendering tests against the updated relationship contracts. ✅
+- **E2E:** add, edit, and delete a user-targeted relationship from the real contact page. ✅
 
 #### Phase 3: MCP and Search-Signal Propagation
 **PR Size:** ~4-6 files
