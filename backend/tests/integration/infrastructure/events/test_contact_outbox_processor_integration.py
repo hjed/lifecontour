@@ -1141,7 +1141,8 @@ class TestContactOutboxProcessorIntegration:
                 "year": 1990,
                 "month": 5,
                 "day": 15,
-                "label": None,
+                "custom_date_type_id": None,
+                "custom_date_type_name": None,
             }
         ]
         event_id_2 = await self._insert_contact_sync_event(
