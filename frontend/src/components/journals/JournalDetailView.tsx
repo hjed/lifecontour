@@ -62,8 +62,10 @@ import {
   useUpdateTypeData,
   useAddJournalType,
   useRemoveJournalType,
+  useUpdateContactRelationship,
   journalKeys,
 } from '@/lib/api/journals';
+import { AttendeeStatus, ContactEventRole } from '@/types/journals';
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 
@@ -89,6 +91,7 @@ export function JournalDetailView({
   const deleteJournal = useDeleteJournal();
   const addContact = useAddContactRelationship();
   const removeContact = useRemoveContactRelationship();
+  const updateContact = useUpdateContactRelationship();
   const addTag = useAddJournalTag();
   const removeTag = useRemoveJournalTag();
   const addType = useAddJournalType();
@@ -140,6 +143,21 @@ export function JournalDetailView({
       journalId: journal.id,
       contactId: contactId,
       relationshipType: contact.relationship_type,
+    });
+  };
+
+  const handleContactUpdate = async (
+    contactId: string,
+    relationshipType: JournalContactRelationshipType,
+    status?: AttendeeStatus | null,
+    role?: ContactEventRole | null
+  ) => {
+    await updateContact.mutateAsync({
+      journalId: journal.id,
+      contactId: contactId,
+      relationshipType,
+      status,
+      role,
     });
   };
 
@@ -384,6 +402,7 @@ export function JournalDetailView({
                 contacts={journal.contacts}
                 onContactAdd={handleContactAdd}
                 onContactRemove={handleContactRemove}
+                onRelationshipUpdate={handleContactUpdate}
               />
             </div>
 

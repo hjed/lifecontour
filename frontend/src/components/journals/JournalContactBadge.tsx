@@ -9,7 +9,7 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { X, Plus } from 'lucide-react';
+import { X, Plus, Pencil } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -24,24 +24,38 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { Label } from '@/components/ui/label';
 import { ContactAvatar } from '@/components/contacts/ContactAvatar';
 import { ContactSearchCombobox } from '@/components/contacts/ContactSearchCombobox';
 import { cn } from '@/lib/utils';
 import type { ContactResource } from '@/types/contacts';
 import type { JournalContact } from '@/types/journals';
-import { JournalContactRelationshipType } from '@/types/journals';
+import {
+  JournalContactRelationshipType,
+  AttendeeStatus,
+  ContactEventRole,
+} from '@/types/journals';
 
 interface JournalContactBadgeProps {
   readonly contacts: JournalContact[];
   readonly onContactAdd?: (
     contactId: string,
-    relationshipType: JournalContactRelationshipType
+    relationshipType: JournalContactRelationshipType,
+    status?: AttendeeStatus | null,
+    role?: ContactEventRole | null
   ) => Promise<void>;
   readonly onContactRemove?: (contactId: string) => Promise<void>;
-  readonly onRelationshipChange?: (
+  readonly onRelationshipUpdate?: (
     contactId: string,
-    relationshipType: JournalContactRelationshipType
+    relationshipType: JournalContactRelationshipType,
+    status?: AttendeeStatus | null,
+    role?: ContactEventRole | null
   ) => Promise<void>;
   readonly relationshipTypes?: JournalContactRelationshipType[];
   readonly disabled?: boolean;
@@ -56,7 +70,7 @@ export function JournalContactBadge({
   contacts,
   onContactAdd,
   onContactRemove,
-  onRelationshipChange,
+  onRelationshipUpdate,
   relationshipTypes = [
     JournalContactRelationshipType.PARTICIPANT,
     JournalContactRelationshipType.INVITEE,
@@ -125,8 +139,25 @@ export function JournalContactBadge({
     }
   };
 
+  const handleUpdateContact = async (
+    contactId: string,
+    relationshipType: JournalContactRelationshipType,
+    status?: AttendeeStatus | null,
+    role?: ContactEventRole | null
+  ) => {
+    if (!onRelationshipUpdate) return;
+    setIsLoading(true);
+    try {
+      await onRelationshipUpdate(contactId, relationshipType, status, role);
+    } catch (error) {
+      console.error('Failed to update contact:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const canEdit =
-    !disabled && (onContactAdd || onContactRemove || onRelationshipChange);
+    !disabled && (onContactAdd || onContactRemove || onRelationshipUpdate);
 
   return (
     <div
@@ -140,6 +171,17 @@ export function JournalContactBadge({
           contact={contact}
           onRemove={
             onContactRemove ? () => handleRemoveContact(contact.id) : undefined
+          }
+          onUpdate={
+            onRelationshipUpdate
+              ? (status, role) =>
+                  handleUpdateContact(
+                    contact.id,
+                    contact.relationship_type,
+                    status,
+                    role
+                  )
+              : undefined
           }
           disabled={disabled || isLoading}
         />
@@ -238,24 +280,75 @@ export function JournalContactBadge({
 interface ContactBadgeProps {
   readonly contact: JournalContact;
   readonly onRemove?: () => void;
+  readonly onUpdate?: (
+    status?: AttendeeStatus | null,
+    role?: ContactEventRole | null
+  ) => Promise<void>;
   readonly disabled: boolean;
 }
 
-function ContactBadge({ contact, onRemove, disabled }: ContactBadgeProps) {
+function ContactBadge({
+  contact,
+  onRemove,
+  onUpdate,
+  disabled,
+}: ContactBadgeProps) {
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editStatus, setEditStatus] = useState<AttendeeStatus | 'NO_STATUS'>(
+    contact.status || 'NO_STATUS'
+  );
+  const [editRole, setEditRole] = useState<ContactEventRole | 'NO_ROLE'>(
+    contact.role || 'NO_ROLE'
+  );
+
   const fallbackDisplayName = contact.name?.trim() || `Contact ${contact.id}`;
   const nameParts = fallbackDisplayName.split(/\s+/);
   const firstName = contact.first_name ?? nameParts[0] ?? '';
   const lastName = contact.last_name ?? nameParts.slice(1).join(' ');
 
+  const getStatusColor = (status: AttendeeStatus) => {
+    switch (status) {
+      case AttendeeStatus.ATTENDING:
+      case AttendeeStatus.ATTENDED:
+        return 'bg-green-500';
+      case AttendeeStatus.MAYBE:
+        return 'bg-amber-500';
+      case AttendeeStatus.DECLINED:
+        return 'bg-red-500 line-through';
+      case AttendeeStatus.NO_REPLY:
+        return 'bg-neutral-400';
+      default:
+        return 'bg-neutral-400';
+    }
+  };
+
+  const isParticipantOrInvitee =
+    contact.relationship_type === JournalContactRelationshipType.PARTICIPANT ||
+    contact.relationship_type === JournalContactRelationshipType.INVITEE;
+
+  const handleSave = async () => {
+    if (!onUpdate) return;
+    const resolvedStatus = editStatus === 'NO_STATUS' ? null : editStatus;
+    const resolvedRole = editRole === 'NO_ROLE' ? null : editRole;
+    await onUpdate(resolvedStatus, resolvedRole);
+    setIsEditOpen(false);
+  };
+
   return (
     <Badge
       variant='secondary'
-      className='gap-1.5 py-0.5 pr-1 pl-1 text-xs'
+      className={cn(
+        'gap-1.5 py-0.5 pr-1 pl-1 text-xs',
+        contact.status === AttendeeStatus.DECLINED && 'opacity-60'
+      )}
       data-testid={`contact-badge-${contact.id}`}
     >
       <Link
         href={`/contacts/${contact.id}`}
-        className='decoration-muted-foreground/50 focus-visible:ring-ring flex items-center gap-1.5 rounded-sm underline-offset-2 hover:underline focus-visible:ring-1 focus-visible:outline-none'
+        className={cn(
+          'decoration-muted-foreground/50 focus-visible:ring-ring flex items-center gap-1.5 rounded-sm underline-offset-2 hover:underline focus-visible:ring-1 focus-visible:outline-none',
+          contact.status === AttendeeStatus.DECLINED && 'line-through'
+        )}
         aria-label={`View ${fallbackDisplayName}`}
       >
         <ContactAvatar
@@ -271,12 +364,111 @@ function ContactBadge({ contact, onRemove, disabled }: ContactBadgeProps) {
           </span>
         )}
       </Link>
+
+      {/* Role Badge inside the main Contact Badge */}
+      {contact.role && (
+        <span
+          className='bg-primary/10 text-primary rounded px-1 py-0.5 text-[9px] font-semibold tracking-wider'
+          aria-label={`Role: ${contact.role}`}
+          data-testid={`contact-role-${contact.id}`}
+        >
+          {contact.role === ContactEventRole.ORGANISER ? 'ORG' : 'HELP'}
+        </span>
+      )}
+
+      {contact.status && (
+        <TooltipProvider>
+          <Tooltip delayDuration={300}>
+            <TooltipTrigger asChild>
+              <span
+                className={cn(
+                  'ml-0.5 h-2 w-2 rounded-full',
+                  getStatusColor(contact.status)
+                )}
+                aria-label={`Status: ${contact.status}`}
+                data-testid={`contact-status-${contact.id}`}
+              />
+            </TooltipTrigger>
+            <TooltipContent>
+              <p className='text-xs'>{contact.status}</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )}
+
+      {onUpdate && isParticipantOrInvitee && (
+        <Popover open={isEditOpen} onOpenChange={setIsEditOpen}>
+          <PopoverTrigger asChild>
+            <button
+              type='button'
+              disabled={disabled}
+              className='hover:bg-muted ml-0.5 rounded-sm p-0.5 transition-colors'
+              aria-label={`Edit ${fallbackDisplayName}`}
+              data-testid={`edit-contact-${contact.id}`}
+            >
+              <Pencil className='h-3 w-3' />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent className='w-64 p-3' align='center'>
+            <div className='space-y-3'>
+              <div className='space-y-1.5'>
+                <Label className='text-xs'>Status</Label>
+                <Select
+                  value={editStatus}
+                  onValueChange={v => setEditStatus(v as any)}
+                >
+                  <SelectTrigger className='h-7 text-xs'>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value='NO_STATUS'>None</SelectItem>
+                    {Object.values(AttendeeStatus).map(s => (
+                      <SelectItem key={s} value={s}>
+                        {s}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className='space-y-1.5'>
+                <Label className='text-xs'>Role</Label>
+                <Select
+                  value={editRole}
+                  onValueChange={v => setEditRole(v as any)}
+                >
+                  <SelectTrigger className='h-7 text-xs'>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value='NO_ROLE'>None</SelectItem>
+                    {Object.values(ContactEventRole).map(r => (
+                      <SelectItem key={r} value={r}>
+                        {r}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <Button
+                size='sm'
+                className='h-7 w-full text-xs'
+                onClick={handleSave}
+              >
+                Save
+              </Button>
+            </div>
+          </PopoverContent>
+        </Popover>
+      )}
+
       {onRemove && (
         <button
           type='button'
           onClick={onRemove}
           disabled={disabled}
-          className='hover:bg-muted ml-1 rounded-sm p-0.5 transition-colors'
+          className='hover:bg-muted text-muted-foreground hover:text-destructive ml-0.5 rounded-sm p-0.5 transition-colors'
           aria-label={`Remove ${fallbackDisplayName}`}
           data-testid={`remove-contact-${contact.id}`}
         >

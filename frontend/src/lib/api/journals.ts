@@ -24,6 +24,8 @@ import {
   JournalCalendar,
   MergeOverrides,
   ReviewItemsListResponse,
+  AttendeeStatus,
+  ContactEventRole,
 } from '@/types/journals';
 import { JsonApiErrorResponse, JsonApiMeta } from '@/types/api';
 import {
@@ -418,13 +420,17 @@ async function updateTypeData(
 async function addContactRelationship(
   journalId: string,
   contactId: string,
-  relationshipType: JournalContactRelationshipType
+  relationshipType: JournalContactRelationshipType,
+  status?: AttendeeStatus | null,
+  role?: ContactEventRole | null
 ): Promise<JournalResponse> {
   const requestData = {
     type: 'journal-contact-relationships' as const,
     attributes: {
       contact_id: contactId,
       relationship_type: relationshipType,
+      ...(status !== undefined && { status }),
+      ...(role !== undefined && { role }),
     },
   };
 
@@ -467,6 +473,43 @@ async function removeContactRelationship(
     const errorData: JsonApiErrorResponse = await response.json();
     throw new Error(
       errorData.errors?.[0]?.detail || ERROR_MESSAGES.DELETE_FAILED
+    );
+  }
+
+  return response.json();
+}
+
+async function updateContactRelationship(
+  journalId: string,
+  contactId: string,
+  relationshipType: JournalContactRelationshipType,
+  status?: AttendeeStatus | null,
+  role?: ContactEventRole | null
+): Promise<JournalResponse> {
+  const requestData = {
+    type: 'journal-contact-relationships-update' as const,
+    attributes: {
+      ...(status !== undefined && { status }),
+      ...(role !== undefined && { role }),
+    },
+  };
+
+  const response = await fetch(
+    `${API_ENDPOINTS.JOURNALS.BY_ID(journalId)}/relationships/contacts/${contactId}/${relationshipType}`,
+    {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ data: requestData }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.UPDATE_FAILED
     );
   }
 
@@ -1100,11 +1143,22 @@ export function useAddContactRelationship() {
       journalId,
       contactId,
       relationshipType,
+      status,
+      role,
     }: {
       journalId: string;
       contactId: string;
       relationshipType: JournalContactRelationshipType;
-    }) => addContactRelationship(journalId, contactId, relationshipType),
+      status?: AttendeeStatus | null;
+      role?: ContactEventRole | null;
+    }) =>
+      addContactRelationship(
+        journalId,
+        contactId,
+        relationshipType,
+        status,
+        role
+      ),
     onSuccess: (_, { journalId }) => {
       queryClient.invalidateQueries({
         queryKey: journalKeys.detail(journalId),
@@ -1137,6 +1191,43 @@ export function useRemoveContactRelationship() {
       });
       queryClient.invalidateQueries({ queryKey: journalKeys.lists() });
       toast.success('Contact relationship removed successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+export function useUpdateContactRelationship() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      journalId,
+      contactId,
+      relationshipType,
+      status,
+      role,
+    }: {
+      journalId: string;
+      contactId: string;
+      relationshipType: JournalContactRelationshipType;
+      status?: AttendeeStatus | null;
+      role?: ContactEventRole | null;
+    }) =>
+      updateContactRelationship(
+        journalId,
+        contactId,
+        relationshipType,
+        status,
+        role
+      ),
+    onSuccess: (_, { journalId }) => {
+      queryClient.invalidateQueries({
+        queryKey: journalKeys.detail(journalId),
+      });
+      queryClient.invalidateQueries({ queryKey: journalKeys.lists() });
+      toast.success('Contact relationship updated successfully');
     },
     onError: (error: Error) => {
       toast.error(error.message);

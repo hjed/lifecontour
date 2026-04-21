@@ -3596,6 +3596,7 @@ async def update_journal_contact_relationship(
     and event role.
     """
     from core_shared.models.journals.attendee_status import AttendeeStatus
+    from core_shared.models.journals.contact_event_role import ContactEventRole
 
     base_url = get_request_base_url(request)
 
@@ -3633,20 +3634,22 @@ async def update_journal_contact_relationship(
                 "status", f"Invalid status: {attrs.status}"
             ) from e
 
-    # Parse and validate role (validated but not yet persisted — future enhancement)
+    # Parse and validate role
+    role: ContactEventRole | None = None
     if attrs.role is not None:
-        raise JournalValidationError(
-            "role",
-            "Updating role is not supported by this endpoint",
-        )
+        try:
+            role = ContactEventRole[attrs.role.upper()]
+        except KeyError as e:
+            raise JournalValidationError("role", f"Invalid role: {attrs.role}") from e
 
-    # Update status if provided
-    if status is not None:
-        updated = await contact_relationship_repo.update_status(
+    # Update status and role if provided
+    if status is not None or role is not None:
+        updated = await contact_relationship_repo.update_attributes(
             journal_id=journal_id,
             contact_id=contact_id,
             relationship_type=rel_type_enum,
             status=status,
+            role=role,
         )
         if updated is None:
             raise JournalValidationError(

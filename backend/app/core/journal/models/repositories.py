@@ -9,6 +9,7 @@ from uuid import UUID
 
 if TYPE_CHECKING:
     from core_shared.models.journals.attendee_status import AttendeeStatus
+    from core_shared.models.journals.contact_event_role import ContactEventRole
     from core_shared.models.journals.review_item import ReviewItem
 
 from core_shared.models.journals import (
@@ -1048,6 +1049,30 @@ class JournalContactRelationshipRepository(ABC):
             relationship_type: The relationship type
             status: The new attendee status
             expected_current_status: If provided, only update if the current status matches this.
+
+        Returns:
+            The updated relationship, or None if not found
+        """
+        pass
+
+    @abstractmethod
+    async def update_attributes(
+        self,
+        journal_id: int,
+        contact_id: int,
+        relationship_type: JournalContactRelationshipType,
+        status: AttendeeStatus | None = None,
+        role: ContactEventRole | None = None,
+    ) -> JournalContactRelationship | None:
+        """
+        Update the attributes (status, role) of a journal-contact relationship.
+
+        Args:
+            journal_id: The journal ID
+            contact_id: The contact ID
+            relationship_type: The relationship type
+            status: The new attendee status (optional)
+            role: The new contact event role (optional)
 
         Returns:
             The updated relationship, or None if not found
