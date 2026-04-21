@@ -61,6 +61,11 @@ class ContactRelationshipService:
                     "relationship",
                     "to_contact_id must not be provided when to_user is True",
                 )
+            if create_bidirectional:
+                raise ContactValidationError(
+                    "relationship",
+                    "create_bidirectional must be False when to_user is True",
+                )
 
             relationship = ContactRelationship(
                 from_contact_id=from_contact_id,

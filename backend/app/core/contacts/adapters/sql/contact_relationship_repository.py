@@ -76,6 +76,11 @@ class SqlContactRelationshipRepository(ContactRelationshipRepository):
                 raise ContactValidationError(
                     "relationship", "Contact cannot have a relationship with itself"
                 ) from e
+            elif "ck_contact_relationships_target_consistency" in error_str:
+                raise ContactValidationError(
+                    "relationship",
+                    "Invalid target for relationship: must specify either a contact or set to user target",
+                ) from e
             else:
                 raise ContactValidationError(
                     "relationship", "Failed to create relationship"

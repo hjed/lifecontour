@@ -173,7 +173,7 @@ export function RelationshipItem({
               >
                 {contactName}
               </span>
-            ) : (
+            ) : otherContactId ? (
               <Link
                 href={`/contacts/${otherContactId}`}
                 className='text-primary hover:underline'
@@ -181,6 +181,8 @@ export function RelationshipItem({
               >
                 {contactName}
               </Link>
+            ) : (
+              <span className='font-medium'>{contactName}</span>
             )}
           </>
         )}

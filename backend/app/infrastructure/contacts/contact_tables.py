@@ -275,9 +275,24 @@ contact_relationships_table = Table(
         "to_user = true OR from_contact_id != to_contact_id",
         name="ck_contact_relationships_no_self_reference",
     ),
-    # Unique constraints are partial indexes defined in migration 0046:
-    # - uq_contact_relationships_contact_target (from_contact_id, to_contact_id, relationship_type) WHERE to_user = false
-    # - uq_contact_relationships_user_target (from_contact_id, relationship_type) WHERE to_user = true
+    # Unique constraints are partial indexes defined below
+)
+
+Index(
+    "uq_contact_relationships_contact_target",
+    contact_relationships_table.c.from_contact_id,
+    contact_relationships_table.c.to_contact_id,
+    contact_relationships_table.c.relationship_type,
+    unique=True,
+    postgresql_where=contact_relationships_table.c.to_user.is_(False),
+)
+
+Index(
+    "uq_contact_relationships_user_target",
+    contact_relationships_table.c.from_contact_id,
+    contact_relationships_table.c.relationship_type,
+    unique=True,
+    postgresql_where=contact_relationships_table.c.to_user.is_(True),
 )
 
 # Custom date types table

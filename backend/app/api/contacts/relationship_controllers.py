@@ -203,6 +203,19 @@ async def update_contact_relationship(
             f"must match relationship_id in URL ({relationship_id})",
         )
 
+    # Validate mutually exclusive target fields
+    attrs = relationship_request.data.attributes
+    if attrs.to_user and attrs.to_contact_id is not None:
+        raise ContactValidationError(
+            "relationship",
+            "to_contact_id must not be provided when to_user is True",
+        )
+    if not attrs.to_user and attrs.to_contact_id is None:
+        raise ContactValidationError(
+            "relationship",
+            "to_contact_id is required when to_user is False",
+        )
+
     # Get existing relationship to verify ownership
     existing_relationship = await relationship_service.get_relationship_by_id(
         relationship_id
