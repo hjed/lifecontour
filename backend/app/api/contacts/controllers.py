@@ -39,6 +39,7 @@ from app.api.contacts.schemas import (
     ContactMethodCreateRequest,
     ContactMethodResource,
     ContactResponse,
+    ContactSummaryUpdateRequest,
     ContactUpdateRequest,
     FieldUpdateRequest,
     MethodFieldUpdateRequest,
@@ -51,7 +52,10 @@ from app.api.journals.schemas import JournalListResponse
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
 )
-from app.core.contacts.models.repositories import ContactRepository
+from app.core.contacts.models.repositories import (
+    ContactRepository,
+    ContactSummaryRepository,
+)
 from app.core.contacts.services import ContactService
 from app.core.contacts.services.contact_history_service import ContactHistoryService
 from app.core.journal.models.repositories import (
@@ -913,3 +917,107 @@ async def get_contact_journals(
         meta=meta,
         links=links,
     )
+
+
+# Contact Summary Endpoints
+
+
+@router.post(
+    "/{contact_id}/summary/refresh",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+@inject
+async def refresh_contact_summary(
+    contact_id: int,
+    contact_service: FromDishka[ContactService],
+    summary_repo: FromDishka[ContactSummaryRepository],
+    _user: FromDishka[SessionUser],
+) -> dict[str, str]:
+    """
+    Request a refresh of the AI-generated summary for a contact.
+
+    Creates a pending summary record if none exists, or sets the status
+    to 'pending' to trigger regeneration in Phase 2.
+    Returns 202 Accepted since the actual generation is asynchronous.
+    """
+    contact = await contact_service.get_contact_by_id(contact_id)
+    if not contact:
+        raise ContactNotFoundError(contact_id)
+
+    from core_shared.models.contacts.entities import ContactSummary, SummaryStatus
+
+    existing = await summary_repo.find_by_contact_id(contact_id)
+    if existing and existing.is_disabled:
+        raise ContactValidationError(
+            "summary", "Summary generation is disabled for this contact"
+        )
+
+    if existing:
+        await summary_repo.update_status(contact_id, SummaryStatus.PENDING.value)
+    else:
+        new_summary = ContactSummary(
+            contact_id=contact_id,
+            status=SummaryStatus.PENDING,
+        )
+        await summary_repo.upsert(new_summary)
+
+    return {"status": "accepted"}
+
+
+@router.patch("/{contact_id}/summary")
+@inject
+async def update_contact_summary(
+    contact_id: int,
+    request: Request,
+    summary_request: ContactSummaryUpdateRequest,
+    contact_service: FromDishka[ContactService],
+    summary_repo: FromDishka[ContactSummaryRepository],
+    _user: FromDishka[SessionUser],
+) -> ContactResponse:
+    """
+    Update a contact summary configuration (disable/override).
+
+    Allows disabling AI generation or setting manual override text.
+    Returns the full contact resource with updated summary.
+    """
+    from core_shared.models.contacts.entities import ContactSummary, SummaryStatus
+
+    base_url = get_request_base_url(request)
+
+    contact = await contact_service.get_contact_by_id(contact_id)
+    if not contact:
+        raise ContactNotFoundError(contact_id)
+
+    update_data = summary_request.data
+
+    existing = await summary_repo.find_by_contact_id(contact_id)
+    if existing is None:
+        existing = ContactSummary(
+            contact_id=contact_id,
+            status=SummaryStatus.PENDING,
+        )
+
+    if update_data.is_disabled is not None:
+        existing.is_disabled = update_data.is_disabled
+        if update_data.is_disabled:
+            existing.status = SummaryStatus.DISABLED
+
+    if update_data.user_override_text is not None:
+        existing.is_user_override = True
+        existing.user_override_text = update_data.user_override_text
+        if not existing.is_disabled:
+            existing.status = SummaryStatus.GENERATED
+    elif update_data.user_override_text is None and "user_override_text" in (
+        summary_request.data.model_fields_set or set()
+    ):
+        existing.is_user_override = False
+        existing.user_override_text = None
+
+    await summary_repo.upsert(existing)
+
+    # Re-fetch the contact with updated summary
+    updated_contact = await contact_service.get_contact_by_id(contact_id)
+    if not updated_contact:
+        raise ContactNotFoundError(contact_id)
+
+    return ContactResponse(data=ContactConverter.to_resource(updated_contact, base_url))

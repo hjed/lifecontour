@@ -29,6 +29,7 @@ import { RelationshipsList } from '@/components/contacts/RelationshipsList';
 import { ActivityFeed } from '@/components/contacts/ActivityFeed';
 import { ContactJournals } from '@/components/contacts/ContactJournals';
 import { ContactTagsEditor } from '@/components/contacts/ContactTagsEditor';
+import { ContactSummary } from '@/components/contacts/ContactSummary';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { DATE_FORMATS } from '@/lib/constants';
 
@@ -224,6 +225,12 @@ function ContactDetailPageContent() {
 
         {/* Sidebar */}
         <aside className='space-y-6 lg:col-span-4'>
+          {/* AI Summary */}
+          <ContactSummary
+            summary={contact.attributes.summary}
+            contactId={contact.id}
+          />
+
           {/* Relationships */}
           <RelationshipsList contactId={contact.id} />
 

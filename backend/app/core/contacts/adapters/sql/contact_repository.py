@@ -6,9 +6,11 @@ from core_shared.models.contacts.entities import (
     ContactMethod,
     ContactNote,
     ContactRelationship,
+    ContactSummary,
     ImportantDate,
     MethodType,
     RelationshipType,
+    SummaryStatus,
     Tag,
 )
 from core_shared.models.contacts.important_date_types import (
@@ -260,6 +262,42 @@ class SqlContactRepository(ContactRepository):
             )
             assert contact.important_dates is not None
             contact.important_dates.append(important_date)
+
+        # Load summary (optional one-to-one)
+        summary_query = text(
+            """
+            SELECT id, contact_id, summary_text, follow_up_suggestions, status,
+                   is_disabled, is_user_override, user_override_text,
+                   generated_at, created_at, updated_at
+            FROM contact_summaries
+            WHERE contact_id = :contact_id
+        """
+        )
+        summary_result = await self.conn.execute(
+            summary_query, {"contact_id": contact_id}
+        )
+        summary_row = summary_result.fetchone()
+        if summary_row:
+            suggestions = summary_row.follow_up_suggestions
+            if isinstance(suggestions, str):
+                import json
+
+                suggestions = json.loads(suggestions)
+            if suggestions is None:
+                suggestions = []
+            contact.summary = ContactSummary(
+                id=summary_row.id,
+                contact_id=summary_row.contact_id,
+                summary_text=summary_row.summary_text,
+                follow_up_suggestions=suggestions,
+                status=SummaryStatus(summary_row.status),
+                is_disabled=summary_row.is_disabled,
+                is_user_override=summary_row.is_user_override,
+                user_override_text=summary_row.user_override_text,
+                generated_at=summary_row.generated_at,
+                created_at=summary_row.created_at,
+                updated_at=summary_row.updated_at,
+            )
 
         return contact
 

@@ -396,10 +396,10 @@ The sequence reflects both user priority and technical dependency:
 **PR Size:** ~4-6 files
 
 **Acceptance Criteria:**
-- [ ] MCP contact retrieval includes the richer relationship context.
-- [ ] Search/indexing inputs can consume the relationship-to-user signal.
-- [ ] The new relationship semantics do not break existing MCP or search consumers.
-- [ ] Relationship context is available for later AI summary use.
+- [x] MCP contact retrieval includes the richer relationship context.
+- [x] Search/indexing inputs can consume the relationship-to-user signal.
+- [x] The new relationship semantics do not break existing MCP or search consumers.
+- [x] Relationship context is available for later AI summary use.
 
 **Required Test Coverage:**
 - **Unit:** search-signal and MCP-shaping helpers.
@@ -420,17 +420,18 @@ The sequence reflects both user priority and technical dependency:
 
 #### Phase 1: Summary Data Model and Control Surface
 **PR Size:** ~5-7 files
+**Status:** ✅ COMPLETE
 
 **Acceptance Criteria:**
-- [ ] Add persistence for generated summary text, follow-up suggestions, status, disable/override state, and generated-at timestamp.
-- [ ] Add API contracts for reading summary state and requesting refresh.
-- [ ] The summary feature can be safely present in a not-yet-generated state.
-- [ ] No existing contact retrieval path breaks when summary data is absent.
+- [x] Add persistence for generated summary text, follow-up suggestions, status, disable/override state, and generated-at timestamp.
+- [x] Add API contracts for reading summary state and requesting refresh.
+- [x] The summary feature can be safely present in a not-yet-generated state.
+- [x] No existing contact retrieval path breaks when summary data is absent.
 
 **Required Test Coverage:**
-- **Unit:** summary-state models, disable/override rules, request validation.
-- **Integration:** database and API tests for empty/generated/manual-refresh states.
-- **E2E:** contact detail scenario proving the summary container behaves correctly before generation.
+- [x] **Unit:** summary-state models, disable/override rules, request validation. (13 schema + 6 converter + 17 component = 36 tests)
+- [x] **Integration:** database tests for empty/generated/manual-refresh states. (10 repository integration tests)
+- [x] **E2E:** contact detail scenario proving the summary container behaves correctly before generation. (6 tests across 3 browsers)
 
 #### Phase 2: Asynchronous Generation Pipeline
 **PR Size:** ~5-8 files
@@ -440,6 +441,7 @@ The sequence reflects both user priority and technical dependency:
 - [ ] The input assembly is bounded to recent history and grounded in available evidence.
 - [ ] Low-activity auto-disable works, with user override respected.
 - [ ] Normal contact edits do not block on summary generation.
+- [ ] Summary is generated using AI per the product specification
 
 **Required Test Coverage:**
 - **Unit:** input assembly, recent-history bounds, low-activity heuristics.

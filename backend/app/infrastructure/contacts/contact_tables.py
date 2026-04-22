@@ -19,6 +19,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 
 from app.infrastructure.database_metadata import metadata
 
@@ -392,4 +393,46 @@ Index(
     contact_important_dates_table.c.contact_id,
     unique=True,
     postgresql_where=(contact_important_dates_table.c.date_type == "birthday"),
+)
+
+# Contact summaries table (AI-generated interaction summaries)
+contact_summaries_table = Table(
+    "contact_summaries",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column(
+        "contact_id",
+        Integer,
+        ForeignKey("contacts.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    ),
+    Column("summary_text", Text, nullable=True),
+    Column(
+        "follow_up_suggestions",
+        JSONB,
+        server_default=text("'[]'::jsonb"),
+        nullable=False,
+    ),
+    Column("status", String(30), server_default=text("'pending'"), nullable=False),
+    Column("is_disabled", Boolean, server_default=text("false"), nullable=False),
+    Column("is_user_override", Boolean, server_default=text("false"), nullable=False),
+    Column("user_override_text", Text, nullable=True),
+    Column("generated_at", DateTime(timezone=True), nullable=True),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        server_default=text("now()"),
+        nullable=False,
+    ),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        server_default=text("now()"),
+        nullable=False,
+    ),
+    CheckConstraint(
+        "status IN ('pending', 'generating', 'generated', 'failed', 'disabled')",
+        name="ck_contact_summaries_status",
+    ),
 )

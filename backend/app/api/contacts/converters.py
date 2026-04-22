@@ -28,6 +28,7 @@ from core_shared.models.contacts.entities import (
     ContactMethod,
     ContactNote,
     ContactRelationship,
+    ContactSummary,
     ImportantDate,
     RelationshipType,
     Tag,
@@ -52,6 +53,8 @@ from app.api.contacts.schemas import (
     ContactRelationshipResponseAttributes,
     ContactRelationships,
     ContactResource,
+    ContactSummaryAttributes,
+    ContactSummaryResource,
     CustomDateTypeAttributes,
     CustomDateTypeResource,
     ImportantDateAttributes,
@@ -134,6 +137,26 @@ class ContactConverter:
         )
 
     @staticmethod
+    def to_summary_resource(summary: ContactSummary) -> ContactSummaryResource:
+        """Convert ContactSummary domain entity to API resource."""
+        if summary.id is None:
+            raise ValueError(
+                "Cannot serialize summary without ID - summary must be persisted first"
+            )
+        return ContactSummaryResource(
+            id=str(summary.id),
+            attributes=ContactSummaryAttributes(
+                summary_text=summary.summary_text,
+                follow_up_suggestions=summary.follow_up_suggestions,
+                status=str(summary.status),
+                is_disabled=summary.is_disabled,
+                is_user_override=summary.is_user_override,
+                user_override_text=summary.user_override_text,
+                generated_at=summary.generated_at,
+            ),
+        )
+
+    @staticmethod
     def to_resource(contact: Contact, base_url: str = "") -> ContactResource:
         """Convert Contact domain entity to API resource."""
         # Convert embedded entities
@@ -157,6 +180,11 @@ class ContactConverter:
             for date in (contact.important_dates or [])
         ]
 
+        # Convert summary if present
+        summary_resource = None
+        if contact.summary and contact.summary.id is not None:
+            summary_resource = ContactConverter.to_summary_resource(contact.summary)
+
         # Create attributes
         attributes = ContactAttributes(
             first_name=contact.first_name,
@@ -171,6 +199,7 @@ class ContactConverter:
             notes=notes,
             relationships=relationship_resources,
             important_dates=important_date_resources,
+            summary=summary_resource,
         )
 
         # Create relationships (tags included with full attributes)

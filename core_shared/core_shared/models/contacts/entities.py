@@ -1,6 +1,6 @@
 """Domain entities for the contacts domain."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
@@ -14,6 +14,20 @@ from core_shared.models.contacts.value_objects import (
     PhoneNumber,
     TagName,
 )
+
+
+class SummaryStatus(Enum):
+    """Enumeration for AI-generated summary statuses."""
+
+    PENDING = "pending"
+    GENERATING = "generating"
+    GENERATED = "generated"
+    FAILED = "failed"
+    DISABLED = "disabled"
+
+    def __str__(self) -> str:
+        """Return the string value of the enum."""
+        return self.value
 
 
 class MethodType(Enum):
@@ -204,6 +218,35 @@ class ImportantDate:
 
 
 @dataclass
+class ContactSummary:
+    """AI-generated interaction summary for a contact."""
+
+    contact_id: int
+    id: int | None = None
+    summary_text: str | None = None
+    follow_up_suggestions: list[str] = field(default_factory=list)
+    status: SummaryStatus = SummaryStatus.PENDING
+    is_disabled: bool = False
+    is_user_override: bool = False
+    user_override_text: str | None = None
+    generated_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    def get_display_text(self) -> str | None:
+        """Get the text to display for this summary.
+
+        Returns user override text if set, otherwise AI-generated text.
+        Returns None if summary is not yet generated or is disabled.
+        """
+        if self.is_disabled:
+            return None
+        if self.is_user_override and self.user_override_text:
+            return self.user_override_text
+        return self.summary_text
+
+
+@dataclass
 class Contact:
     """Contact aggregate root entity."""
 
@@ -225,6 +268,7 @@ class Contact:
     tags: list[Tag] | None = None
     relationships: list["ContactRelationship"] | None = None
     important_dates: list[ImportantDate] | None = None
+    summary: ContactSummary | None = None
 
     def __post_init__(self) -> None:
         """Validate contact."""

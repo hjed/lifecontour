@@ -1,0 +1,196 @@
+"""Integration tests for ContactSummaryRepository with real database."""
+
+import pytest
+from core_shared.models.contacts.entities import (
+    Contact,
+    ContactSummary,
+    SummaryStatus,
+)
+from sqlalchemy.ext.asyncio import AsyncConnection
+
+from app.core.contacts.adapters.sql import (
+    SqlContactRepository,
+    SqlContactSummaryRepository,
+)
+
+
+@pytest.mark.integration
+class TestContactSummaryRepositoryIntegration:
+    """Integration tests for ContactSummaryRepository with real database."""
+
+    @pytest.fixture
+    def contact_repo(self, clean_database: AsyncConnection):
+        """Create ContactRepository instance."""
+        return SqlContactRepository(clean_database)
+
+    @pytest.fixture
+    def summary_repo(self, clean_database: AsyncConnection):
+        """Create ContactSummaryRepository instance."""
+        return SqlContactSummaryRepository(clean_database)
+
+    @pytest.fixture
+    async def test_contact(self, contact_repo: SqlContactRepository) -> Contact:
+        """Create and return a test contact."""
+        contact = Contact(first_name="Summary", last_name="Test")
+        saved: Contact = await contact_repo.save(contact)
+        return saved
+
+    @pytest.mark.asyncio
+    async def test_find_by_contact_id_returns_none_when_no_summary(
+        self, summary_repo, test_contact
+    ):
+        """Test finding summary for contact with no summary returns None."""
+        result = await summary_repo.find_by_contact_id(test_contact.id)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_upsert_creates_new_summary(self, summary_repo, test_contact):
+        """Test creating a new summary via upsert."""
+        summary = ContactSummary(
+            contact_id=test_contact.id,
+            summary_text="Test summary text",
+            follow_up_suggestions=["Call them", "Send email"],
+            status=SummaryStatus.GENERATED,
+        )
+
+        result = await summary_repo.upsert(summary)
+
+        assert result.id is not None
+        assert result.contact_id == test_contact.id
+        assert result.summary_text == "Test summary text"
+        assert result.follow_up_suggestions == ["Call them", "Send email"]
+        assert result.status == SummaryStatus.GENERATED
+        assert result.created_at is not None
+        assert result.updated_at is not None
+
+    @pytest.mark.asyncio
+    async def test_upsert_updates_existing_summary(self, summary_repo, test_contact):
+        """Test updating an existing summary via upsert."""
+        # Create initial summary
+        initial = ContactSummary(
+            contact_id=test_contact.id,
+            summary_text="Initial text",
+            status=SummaryStatus.PENDING,
+        )
+        await summary_repo.upsert(initial)
+
+        # Update via upsert
+        updated = ContactSummary(
+            contact_id=test_contact.id,
+            summary_text="Updated text",
+            follow_up_suggestions=["Follow up"],
+            status=SummaryStatus.GENERATED,
+        )
+        result = await summary_repo.upsert(updated)
+
+        assert result.summary_text == "Updated text"
+        assert result.follow_up_suggestions == ["Follow up"]
+        assert result.status == SummaryStatus.GENERATED
+
+    @pytest.mark.asyncio
+    async def test_find_by_contact_id_returns_summary(self, summary_repo, test_contact):
+        """Test finding an existing summary by contact ID."""
+        summary = ContactSummary(
+            contact_id=test_contact.id,
+            summary_text="Findable summary",
+            follow_up_suggestions=["Suggestion 1"],
+            status=SummaryStatus.GENERATED,
+            is_disabled=False,
+            is_user_override=True,
+            user_override_text="User text",
+        )
+        await summary_repo.upsert(summary)
+
+        result = await summary_repo.find_by_contact_id(test_contact.id)
+
+        assert result is not None
+        assert result.summary_text == "Findable summary"
+        assert result.follow_up_suggestions == ["Suggestion 1"]
+        assert result.status == SummaryStatus.GENERATED
+        assert result.is_user_override is True
+        assert result.user_override_text == "User text"
+
+    @pytest.mark.asyncio
+    async def test_update_status(self, summary_repo, test_contact):
+        """Test updating summary status."""
+        summary = ContactSummary(
+            contact_id=test_contact.id,
+            summary_text="Status test",
+            status=SummaryStatus.PENDING,
+        )
+        await summary_repo.upsert(summary)
+
+        result = await summary_repo.update_status(
+            test_contact.id, SummaryStatus.GENERATING.value
+        )
+
+        assert result is not None
+        assert result.status == SummaryStatus.GENERATING
+        assert result.summary_text == "Status test"
+
+    @pytest.mark.asyncio
+    async def test_update_status_nonexistent_returns_none(self, summary_repo):
+        """Test updating status for nonexistent contact returns None."""
+        result = await summary_repo.update_status(99999, SummaryStatus.PENDING.value)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_upsert_disabled_summary(self, summary_repo, test_contact):
+        """Test creating a disabled summary."""
+        summary = ContactSummary(
+            contact_id=test_contact.id,
+            status=SummaryStatus.DISABLED,
+            is_disabled=True,
+        )
+        result = await summary_repo.upsert(summary)
+
+        assert result.is_disabled is True
+        assert result.status == SummaryStatus.DISABLED
+
+    @pytest.mark.asyncio
+    async def test_contact_find_by_id_includes_summary(
+        self, contact_repo, summary_repo, test_contact
+    ):
+        """Test that find_by_id on ContactRepository loads the summary."""
+        summary = ContactSummary(
+            contact_id=test_contact.id,
+            summary_text="Loaded with contact",
+            follow_up_suggestions=["Check in"],
+            status=SummaryStatus.GENERATED,
+        )
+        await summary_repo.upsert(summary)
+
+        contact = await contact_repo.find_by_id(test_contact.id)
+
+        assert contact is not None
+        assert contact.summary is not None
+        assert contact.summary.summary_text == "Loaded with contact"
+        assert contact.summary.follow_up_suggestions == ["Check in"]
+        assert contact.summary.status == SummaryStatus.GENERATED
+
+    @pytest.mark.asyncio
+    async def test_contact_find_by_id_without_summary(self, contact_repo, test_contact):
+        """Test that find_by_id works when no summary exists."""
+        contact = await contact_repo.find_by_id(test_contact.id)
+
+        assert contact is not None
+        assert contact.summary is None
+
+    @pytest.mark.asyncio
+    async def test_summary_deleted_with_contact(
+        self, contact_repo, summary_repo, test_contact
+    ):
+        """Test that summary is cascade-deleted when contact is deleted."""
+        summary = ContactSummary(
+            contact_id=test_contact.id,
+            summary_text="Will be deleted",
+            status=SummaryStatus.GENERATED,
+        )
+        await summary_repo.upsert(summary)
+
+        # Delete the contact
+        await contact_repo.delete(test_contact.id)
+
+        # Summary should also be gone
+        result = await summary_repo.find_by_contact_id(test_contact.id)
+        assert result is None
