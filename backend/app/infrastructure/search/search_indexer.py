@@ -231,30 +231,60 @@ class SearchIndexer:
                 f"{contact_row.first_name} {contact_row.last_name or ''}".strip()
             )
 
-            # Fetch contact relationships
+            # Fetch contact relationships (both outgoing and incoming)
             relationships_query = text("""
                 SELECT
                     cr.relationship_type,
                     cr.to_user,
                     c.first_name,
-                    c.last_name
+                    c.last_name,
+                    'outgoing' as direction
                 FROM contact_relationships cr
                 LEFT JOIN contacts c ON cr.to_contact_id = c.id
                 WHERE cr.from_contact_id = :contact_id
+                UNION ALL
+                SELECT
+                    cr.relationship_type,
+                    cr.to_user,
+                    c.first_name,
+                    c.last_name,
+                    'incoming' as direction
+                FROM contact_relationships cr
+                LEFT JOIN contacts c ON cr.from_contact_id = c.id
+                WHERE cr.to_contact_id = :contact_id
             """)
             relationships_result = await self.db_connection.execute(
                 relationships_query, {"contact_id": contact_id}
             )
             relationships_rows = relationships_result.fetchall()
 
+            # Inverse mapping for incoming relationships
+            inverse_map = {
+                "parent": "child",
+                "child": "parent",
+                "partner": "partner",
+                "sibling": "sibling",
+                "friend": "friend",
+                "colleague": "colleague",
+                "family": "family",
+                "other": "other",
+            }
+
             # Format relationships
             relationships_list = []
             for row in relationships_rows:
-                rel_type = row.relationship_type.replace("_", " ").title()
                 if row.to_user:
+                    rel_type = row.relationship_type.replace("_", " ").title()
                     relationships_list.append(f"{rel_type} of the User")
                 elif row.first_name:
                     name = f"{row.first_name} {row.last_name or ''}".strip()
+                    if row.direction == "incoming":
+                        inv = inverse_map.get(
+                            row.relationship_type, row.relationship_type
+                        )
+                        rel_type = inv.replace("_", " ").title()
+                    else:
+                        rel_type = row.relationship_type.replace("_", " ").title()
                     relationships_list.append(f"{rel_type} of {name}")
 
             return {

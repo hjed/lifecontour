@@ -82,7 +82,8 @@ class ContactConverter:
             elif rel.from_contact_id == contact.id:
                 # the other person is to_contact_id
                 rel_type = str(rel.relationship_type.value).replace("_", " ").title()
-                relationships_list.append(f"{rel_type} of {rel.to_contact_name}")
+                other_name = rel.to_contact_name or "Unknown contact"
+                relationships_list.append(f"{rel_type} of {other_name}")
             else:
                 # the other person is from_contact_id, so the contact is the 'to_contact_id'
                 # we need to invert the relationship
@@ -91,7 +92,8 @@ class ContactConverter:
                     .value.replace("_", " ")
                     .title()
                 )
-                relationships_list.append(f"{inv_type} of {rel.from_contact_name}")
+                other_name = rel.from_contact_name or "Unknown contact"
+                relationships_list.append(f"{inv_type} of {other_name}")
 
         # Build AI-friendly summary
         summary = ContactConverter._build_contact_summary(

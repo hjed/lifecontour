@@ -82,7 +82,11 @@ class ContactRelationshipService:
                 to_user=True,
             )
             created = await self.relationship_repo.create(relationship)
-            assert created.id is not None
+            if created.id is None:
+                raise ContactValidationError(
+                    "relationship",
+                    "created relationship is missing an id",
+                )
             await self.event_publisher.publish(
                 ContactRelationshipCreated(
                     relationship_id=created.id,
@@ -121,7 +125,11 @@ class ContactRelationshipService:
 
             created_relationship = await self.relationship_repo.create(relationship)
 
-            assert created_relationship.id is not None
+            if created_relationship.id is None:
+                raise ContactValidationError(
+                    "relationship",
+                    "created relationship is missing an id",
+                )
             await self.event_publisher.publish(
                 ContactRelationshipCreated(
                     relationship_id=created_relationship.id,
@@ -143,7 +151,11 @@ class ContactRelationshipService:
                 created_inverse = await self.relationship_repo.create(
                     inverse_relationship
                 )
-                assert created_inverse.id is not None
+                if created_inverse.id is None:
+                    raise ContactValidationError(
+                        "relationship",
+                        "created inverse relationship is missing an id",
+                    )
                 await self.event_publisher.publish(
                     ContactRelationshipCreated(
                         relationship_id=created_inverse.id,
@@ -237,7 +249,11 @@ class ContactRelationshipService:
 
         updated = await self.relationship_repo.update(updated_relationship)
 
-        assert updated.id is not None
+        if updated.id is None:
+            raise ContactValidationError(
+                "relationship",
+                "updated relationship is missing an id",
+            )
         await self.event_publisher.publish(
             ContactRelationshipUpdated(
                 relationship_id=updated.id,
@@ -272,7 +288,11 @@ class ContactRelationshipService:
 
         await self.relationship_repo.delete(relationship_id)
 
-        assert existing_relationship.id is not None
+        if existing_relationship.id is None:
+            raise ContactValidationError(
+                "relationship",
+                f"Relationship with ID {relationship_id} has no persisted id; cannot publish delete event",
+            )
         await self.event_publisher.publish(
             ContactRelationshipDeleted(
                 relationship_id=existing_relationship.id,
