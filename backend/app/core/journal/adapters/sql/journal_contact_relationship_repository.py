@@ -195,6 +195,72 @@ class SqlJournalContactRelationshipRepository(JournalContactRelationshipReposito
             return None
         return self._row_to_entity(row)
 
+    async def update_attributes(
+        self,
+        journal_id: int,
+        contact_id: int,
+        relationship_type: JournalContactRelationshipType,
+        status: AttendeeStatus | None = None,
+        role: ContactEventRole | None = None,
+        update_status: bool = False,
+        update_role: bool = False,
+    ) -> JournalContactRelationship | None:
+        """Update the attributes (status, role) of a journal-contact relationship."""
+        set_clauses = []
+        from typing import Any
+
+        params: dict[str, Any] = {
+            "journal_id": journal_id,
+            "contact_id": contact_id,
+            "relationship_type": relationship_type.value,
+        }
+
+        if update_status:
+            set_clauses.append("status = :status")
+            params["status"] = status.value if status is not None else None
+
+        if update_role:
+            set_clauses.append("role = :role")
+            params["role"] = role.value if role is not None else None
+
+        if not set_clauses:
+            # If nothing to update, return the current entity for the exact relationship.
+            query = text(
+                """
+                SELECT journal_id, contact_id, relationship_type,
+                       created_at, status, role
+                FROM journal_contact_relationships
+                WHERE journal_id = :journal_id
+                AND contact_id = :contact_id
+                AND relationship_type = :relationship_type
+            """
+            )
+            result = await self.conn.execute(query, params)
+            row = result.fetchone()
+            if row is None:
+                return None
+            return self._row_to_entity(row)
+
+        set_sql = ", ".join(set_clauses)
+
+        query = text(
+            f"""
+            UPDATE journal_contact_relationships
+            SET {set_sql}
+            WHERE journal_id = :journal_id
+            AND contact_id = :contact_id
+            AND relationship_type = :relationship_type
+            RETURNING journal_id, contact_id, relationship_type,
+                      created_at, status, role
+        """
+        )
+
+        result = await self.conn.execute(query, params)
+        row = result.fetchone()
+        if row is None:
+            return None
+        return self._row_to_entity(row)
+
     async def find_attending_for_past_events(
         self,
         cutoff_time: datetime,

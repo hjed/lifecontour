@@ -27,7 +27,7 @@ services:
       POSTGRES_USER: ${DB_USER:-postgres}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
       - ./docker/database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     ports:
       - "${DB_PORT:-5432}:5432"

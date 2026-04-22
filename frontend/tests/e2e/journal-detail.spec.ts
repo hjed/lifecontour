@@ -366,20 +366,17 @@ test.describe('Journal Detail Page', () => {
       await endTimeInput.fill('13:30');
 
       const [response] = await Promise.all([
-        page.waitForResponse(
-          response =>
+        page.waitForResponse(response => {
+          return (
             response.url().includes('/api/journals/') &&
             response.request().method() === 'PUT'
-        ),
+          );
+        }),
         saveButton.click(),
       ]);
 
       const updateStatus = response.status();
       const responseText = await response.text();
-      if (updateStatus !== 200) {
-        console.log('Update Status:', updateStatus);
-        console.log('Update Text:', responseText);
-      }
       expect(
         updateStatus,
         `Expected 200 but got ${updateStatus}. Response: ${responseText}`
@@ -723,6 +720,96 @@ test.describe('Journal Detail Page', () => {
       // Contact badge should disappear after removal
       await expect(contactBadge).not.toBeVisible();
     });
+
+    test('should edit a contact status and role in a journal', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const page = authenticatedPage;
+      const dataManager = new TestDataManager(page);
+
+      const contact = await dataManager.createContact({
+        firstName: 'Charlie',
+        lastName: 'ContactEditTest',
+      });
+      const journal = await dataManager.createJournal({
+        title: 'Contact Edit Test',
+        content: 'Testing contact editing.',
+        event_date_range: {
+          start: '2026-01-18T10:00:00Z',
+          end: '2026-01-18T10:30:00Z',
+        },
+        types: ['note'],
+        contacts: [
+          {
+            contact_id: contact.id,
+            relationship_type: 'PARTICIPANT',
+            status: 'NO_REPLY',
+          },
+        ],
+      });
+
+      testCleanup(async () => await dataManager.cleanup());
+
+      await page.goto(`/journals/${journal.id}`);
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
+      await expect(page.getByTestId('journal-detail-view')).toBeVisible();
+
+      // Contact badge should be visible
+      const contactBadge = page.getByTestId(`contact-badge-${contact.id}`);
+      await expect(contactBadge).toBeVisible();
+
+      // Verify initial status
+      const neutralStatus = page.getByTestId(`contact-status-${contact.id}`);
+      await expect(neutralStatus).toBeVisible();
+
+      // Click the edit button
+      const editButton = page.getByTestId(`edit-contact-${contact.id}`);
+      await expect(editButton).toBeVisible();
+      await editButton.click();
+
+      // Ensure popover appears
+      const popoverContent = page.locator('[role="dialog"]');
+      await expect(popoverContent).toBeVisible();
+
+      // Change Status to ATTENDING
+      const statusSelect = popoverContent
+        .locator('button[role="combobox"]')
+        .first();
+      await statusSelect.click();
+      await page.getByRole('option', { name: 'ATTENDING' }).click();
+
+      // Change Role to ORGANISER
+      const roleSelect = popoverContent
+        .locator('button[role="combobox"]')
+        .nth(1);
+      await roleSelect.click();
+      await page.getByRole('option', { name: 'ORGANISER' }).click();
+
+      // Wait for the API call to complete
+      const [updateResponse] = await Promise.all([
+        page.waitForResponse(
+          resp =>
+            resp.url().includes(`/relationships/contacts/${contact.id}`) &&
+            resp.request().method() === 'PATCH'
+        ),
+        page.getByRole('button', { name: 'Save' }).click(),
+      ]);
+      expect(updateResponse.status()).toBe(200);
+
+      // Verify the UI updated to new status
+      await expect(popoverContent).not.toBeVisible();
+
+      const updatedStatus = page.getByTestId(`contact-status-${contact.id}`);
+      await expect(updatedStatus).toHaveAttribute(
+        'aria-label',
+        'Status: ATTENDING'
+      );
+
+      const roleBadge = page.getByTestId(`contact-role-${contact.id}`);
+      await expect(roleBadge).toBeVisible();
+      await expect(roleBadge).toContainText('ORG');
+    });
   });
 
   test.describe('Calendar Assignment', () => {
@@ -1003,19 +1090,15 @@ test.describe('Journal Detail Page', () => {
       const backButton = page.getByRole('button', { name: /back/i });
 
       // Only run test if back button is visible
-      if (await backButton.isVisible()) {
-        await backButton.click();
+      await expect(backButton).toBeVisible();
+      await backButton.click();
 
-        // Wait for navigation to complete
-        await page.waitForURL('**/journals');
+      // Wait for navigation to complete
+      await page.waitForURL('**/journals');
 
-        // Verify we're on the list page
-        expect(page.url()).toContain('/journals');
-        expect(page.url()).not.toContain(`/journals/${journal.id}`);
-      } else {
-        // Skip test if back button not available
-        test.skip();
-      }
+      // Verify we're on the list page
+      expect(page.url()).toContain('/journals');
+      expect(page.url()).not.toContain(`/journals/${journal.id}`);
     });
 
     test('should navigate to contact detail page when contact badge is clicked', async ({

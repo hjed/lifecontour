@@ -207,16 +207,16 @@ Every phase below must meet the same completion bar before merge:
 **PR Size:** ~4-6 files
 
 **Acceptance Criteria:**
-- [ ] `JournalContactBadge` displays the contact's status as a compact indicator (e.g., icon or coloured dot) alongside the name:
+- [x] `JournalContactBadge` displays the contact's status as a compact indicator (e.g., icon or coloured dot) alongside the name:
   - `ATTENDING` / `ATTENDED`: green indicator
   - `MAYBE`: amber/yellow indicator
   - `NO_REPLY`: grey/neutral indicator
   - `DECLINED`: red/strikethrough indicator
-- [ ] Status indicator has a tooltip showing the full status label.
-- [ ] Role is displayed as a subtle label or badge when present (e.g., "Organiser" tag on the badge).
-- [ ] Status and role are visible in the journal detail view; the list view shows only avatars (no per-contact status) to keep the list compact.
-- [ ] Users can edit a contact's status and role through the existing contact relationship editing flow (popover or inline controls).
-- [ ] Accessibility: status indicators have screen-reader-accessible labels, role badges are properly labelled.
+- [x] Status indicator has a tooltip showing the full status label.
+- [x] Role is displayed as a subtle label or badge when present (e.g., "Organiser" tag on the badge).
+- [x] Status and role are visible in the journal detail view; the list view shows only avatars (no per-contact status) to keep the list compact.
+- [x] Users can edit a contact's status and role through the existing contact relationship editing flow (popover or inline controls).
+- [x] Accessibility: status indicators have screen-reader-accessible labels, role badges are properly labelled.
 
 **Required Test Coverage:**
 - **Unit:** status indicator rendering for all 5 statuses, role badge rendering, tooltip content.

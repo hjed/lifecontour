@@ -54,7 +54,12 @@ export interface JournalCreateRequest {
   };
   types?: string[];
   type_data?: Record<string, unknown>;
-  contacts?: Array<{ contact_id: string; relationship_type: string }>;
+  contacts?: Array<{
+    contact_id: string;
+    relationship_type: string;
+    status?: string | null;
+    role?: string | null;
+  }>;
   tags?: string[];
   calendar_id?: string;
   // Note: Journal IDs are integers (SERIAL in database), not UUIDs
@@ -923,6 +928,8 @@ export class TestDataManager {
                     attributes: {
                       contact_id: c.contact_id,
                       relationship_type: c.relationship_type,
+                      ...(c.status !== undefined && { status: c.status }),
+                      ...(c.role !== undefined && { role: c.role }),
                     },
                   })),
                 },

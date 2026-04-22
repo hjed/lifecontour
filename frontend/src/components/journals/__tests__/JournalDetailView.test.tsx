@@ -44,6 +44,9 @@ jest.mock('@/lib/api/journals', () => ({
   useRemoveContactRelationship: () => ({
     mutateAsync: mockRemoveContact,
   }),
+  useUpdateContactRelationship: () => ({
+    mutateAsync: jest.fn(),
+  }),
   useAddJournalTag: () => ({
     mutateAsync: mockAddTag,
   }),

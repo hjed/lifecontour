@@ -66,38 +66,28 @@ test.describe('Journal Complete Workflows', () => {
 
       // Step 2: Apply type filter
       const filtersSection = page.locator('[data-testid="journal-filters"]');
-      const typeFilter = filtersSection.getByLabel(/type/i).first();
+      // Apply type filter and wait for UI to update
+      const noteCheckbox = filtersSection.getByLabel(/note/i).first();
+      await noteCheckbox.check();
 
-      if (await typeFilter.isVisible()) {
-        // Wait for the API response when filtering
-        const responsePromise = page.waitForResponse(
-          response =>
-            response.url().includes('/api/journals') &&
-            response.status() === 200
+      // Step 3: Find a note type journal
+      const noteJournal = journals.find(j => j.types?.includes('note'));
+      expect(noteJournal).toBeDefined();
+
+      if (noteJournal) {
+        // Step 4: Click on the journal
+        await page
+          .getByRole('heading', { name: new RegExp(noteJournal.title, 'i') })
+          .click();
+        await expect(page.locator('main, [role="main"]').first()).toBeVisible();
+
+        // Step 5: Verify we're on the detail page
+        await expect(page).toHaveURL(
+          new RegExp(`.*/journals/${noteJournal.id}.*`)
         );
-        await typeFilter.selectOption('note');
-        await responsePromise;
-
-        // Step 3: Find a note type journal
-        const noteJournal = journals.find(j => j.types?.includes('note'));
-        if (noteJournal) {
-          // Step 4: Click on the journal
-          await page
-            .getByRole('heading', { name: new RegExp(noteJournal.title, 'i') })
-            .click();
-          await expect(
-            page.locator('main, [role="main"]').first()
-          ).toBeVisible();
-
-          // Step 5: Verify we're on the detail page
-          expect(page.url()).toContain(`/journals/${noteJournal.id}`);
-          await expect(
-            page.getByRole('heading', { name: noteJournal.title })
-          ).toBeVisible();
-        }
-      } else {
-        // Skip test if type filter not available
-        test.skip();
+        await expect(
+          page.getByRole('heading', { name: noteJournal.title })
+        ).toBeVisible();
       }
     });
   });
@@ -269,25 +259,20 @@ test.describe('Journal Complete Workflows', () => {
       const filterToggle = page.getByRole('button', { name: /filter/i });
       const filtersSection = page.locator('[data-testid="journal-filters"]');
 
-      if (await filterToggle.isVisible()) {
-        // Step 3: Toggle filters off
-        await filterToggle.click();
-        await expect(filtersSection).toBeHidden();
+      // Step 3: Toggle filters off (if they are a toggle)
+      // Note: The UI might have changed to always show filters or show them conditionally
+      // assuming the toggle is meant to be visible and clicked
+      await expect(filterToggle).toBeVisible();
+      await filterToggle.click();
+      await expect(filtersSection).toBeHidden();
 
-        // Step 4: Toggle filters back on
-        await filterToggle.click();
-        await expect(filtersSection).toBeVisible();
+      // Step 4: Toggle filters back on
+      await filterToggle.click();
+      await expect(filtersSection).toBeVisible();
 
-        // Verify filters are visible again - use first() to avoid strict mode violation
-        const dateRangeLabel = filtersSection.getByText(/date range/i).first();
-
-        if (await dateRangeLabel.isVisible()) {
-          await expect(dateRangeLabel).toBeVisible();
-        }
-      } else {
-        // Skip test if filter toggle not available
-        test.skip();
-      }
+      // Verify filters are visible again - use first() to avoid strict mode violation
+      const dateRangeLabel = filtersSection.getByText(/date range/i).first();
+      await expect(dateRangeLabel).toBeVisible();
     });
   });
 });
