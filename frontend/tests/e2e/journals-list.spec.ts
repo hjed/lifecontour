@@ -73,20 +73,22 @@ test.describe('Journal List Page', () => {
       // The outbox processor runs every 10 seconds, so we retry this check
       // with Playwright's toPass polling until journals are indexed or timeout expires
       await expect(async () => {
-        const response = await page.evaluate(async () => {
-          try {
-            const res = await fetch(
-              '/api/journals/search?q=Weekend&limit=20&page=1'
-            );
-            if (!res.ok) return { ok: false, count: 0 };
+        let ok = false;
+        let count = 0;
+        try {
+          const res = await page.request.get(
+            '/api/journals/search?q=Weekend&limit=20&page=1'
+          );
+          ok = res.ok();
+          if (ok) {
             const data = await res.json();
-            return { ok: true, count: data.data?.length || 0 };
-          } catch {
-            return { ok: false, count: 0 };
+            count = data.data?.length || 0;
           }
-        });
-        expect(response.ok).toBe(true);
-        expect(response.count).toBeGreaterThan(0);
+        } catch {
+          ok = false;
+        }
+        expect(ok).toBe(true);
+        expect(count).toBeGreaterThan(0);
       }).toPass({ timeout: 15000 });
 
       // Verify all journals are initially visible
@@ -252,27 +254,27 @@ test.describe('Journal List Page', () => {
       // Wait for journals to be indexed in MeiliSearch
       // Increased timeout to 30 seconds to handle indexing delays when running as part of full test suite
       await expect(async () => {
-        const response = await page.evaluate(async () => {
-          try {
-            const res = await fetch(
-              '/api/journals/search?q=Meeting&limit=20&page=1'
-            );
-            if (!res.ok) return { ok: false, count: 0, titles: [] };
+        let ok = false;
+        let titles: string[] = [];
+        try {
+          const res = await page.request.get(
+            '/api/journals/search?q=Meeting&limit=20&page=1'
+          );
+          ok = res.ok();
+          if (ok) {
             const data = await res.json();
-            const titles = (data.data ?? []).map(
+            titles = (data.data ?? []).map(
               (j: { attributes?: { title?: string } }) =>
                 j.attributes?.title ?? ''
             );
-            return { ok: true, count: titles.length, titles };
-          } catch {
-            return { ok: false, count: 0, titles: [] };
           }
-        });
+        } catch {
+          ok = false;
+        }
 
-        expect(response.ok).toBe(true);
-        expect(response.count).toBeGreaterThanOrEqual(2);
+        expect(ok).toBe(true);
+        expect(titles.length).toBeGreaterThanOrEqual(2);
 
-        const titles: string[] = response.titles ?? [];
         const hasMeetingNotes = titles.some(t =>
           t.toLowerCase().includes('meeting notes')
         );

@@ -7,7 +7,10 @@
 
 import { test, expect } from './fixtures';
 
-import { ReliableWaiter } from './utils/test-helpers';
+import {
+  ReliableWaiter,
+  waitForContactSearchIndexing,
+} from './utils/test-helpers';
 
 test.describe('Example: Fixture-Based Testing', () => {
   test.describe('Authentication Fixtures', () => {
@@ -188,23 +191,12 @@ test.describe('Example: Fixture-Based Testing', () => {
 
       // Wait for contacts to be indexed in MeiliSearch
       // The outbox processor runs every 10 seconds, so we poll until contacts are indexed
-      await expect(async () => {
-        const response = await page.evaluate(async query => {
-          try {
-            const res = await fetch(
-              `/api/search/contacts?q=${encodeURIComponent(query)}&limit=20&page=1`
-            );
-            if (!res.ok) return { ok: false, count: 0 };
-            const data = await res.json();
-            return { ok: true, count: data.data?.length || 0 };
-          } catch {
-            return { ok: false, count: 0 };
-          }
-        }, contacts[0].firstName);
-
-        expect(response.ok).toBe(true);
-        expect(response.count).toBeGreaterThan(0);
-      }).toPass({ timeout: 15000 });
+      await waitForContactSearchIndexing(
+        page,
+        contacts[0].firstName,
+        contacts[0].firstName,
+        15_000
+      );
 
       // Setup response promise before filling input to avoid race condition
       const searchResponsePromise = page.waitForResponse(
