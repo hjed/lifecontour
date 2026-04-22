@@ -79,6 +79,7 @@ CONTACTS_INDEX_SETTINGS = {
         "phone",
         "phones",
         "notes_content",
+        "relationships",
     ],
     "filterableAttributes": [
         "tags",
@@ -103,6 +104,7 @@ CONTACTS_INDEX_SETTINGS = {
         "phones",
         "notes_content",
         "tags",
+        "relationships",
         "entity_type",
         "created_at",
         "updated_at",

@@ -94,6 +94,7 @@ class ContactTestProvider(Provider):
         self, connection: AsyncConnection
     ) -> "ContactRelationshipService":
         from app.core.contacts.adapters.sql import (
+            SqlContactEventPublisher,
             SqlContactRelationshipRepository,
             SqlContactRepository,
         )
@@ -102,6 +103,7 @@ class ContactTestProvider(Provider):
         return ContactRelationshipService(
             contact_repo=SqlContactRepository(connection),
             relationship_repo=SqlContactRelationshipRepository(connection),
+            event_publisher=SqlContactEventPublisher(connection),
         )
 
     @provide(scope=Scope.APP)

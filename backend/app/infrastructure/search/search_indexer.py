@@ -86,6 +86,12 @@ class SearchIndexer:
                 self._index_contact_deleted(contact_index_name, event)
             elif event.event_type in ["TagAssigned", "TagRemoved"]:
                 await self._index_contact_tag_change(contact_index_name, event)
+            elif event.event_type in [
+                "ContactRelationshipCreated",
+                "ContactRelationshipUpdated",
+                "ContactRelationshipDeleted",
+            ]:
+                await self._index_contact_relationship_change(contact_index_name, event)
             else:
                 logger.debug(
                     "Skipping unsupported contact event type",
@@ -225,6 +231,62 @@ class SearchIndexer:
                 f"{contact_row.first_name} {contact_row.last_name or ''}".strip()
             )
 
+            # Fetch contact relationships (both outgoing and incoming)
+            relationships_query = text("""
+                SELECT
+                    cr.relationship_type,
+                    cr.to_user,
+                    c.first_name,
+                    c.last_name,
+                    'outgoing' as direction
+                FROM contact_relationships cr
+                LEFT JOIN contacts c ON cr.to_contact_id = c.id
+                WHERE cr.from_contact_id = :contact_id
+                UNION ALL
+                SELECT
+                    cr.relationship_type,
+                    cr.to_user,
+                    c.first_name,
+                    c.last_name,
+                    'incoming' as direction
+                FROM contact_relationships cr
+                LEFT JOIN contacts c ON cr.from_contact_id = c.id
+                WHERE cr.to_contact_id = :contact_id
+            """)
+            relationships_result = await self.db_connection.execute(
+                relationships_query, {"contact_id": contact_id}
+            )
+            relationships_rows = relationships_result.fetchall()
+
+            # Inverse mapping for incoming relationships
+            inverse_map = {
+                "parent": "child",
+                "child": "parent",
+                "partner": "partner",
+                "sibling": "sibling",
+                "friend": "friend",
+                "colleague": "colleague",
+                "family": "family",
+                "other": "other",
+            }
+
+            # Format relationships
+            relationships_list = []
+            for row in relationships_rows:
+                if row.to_user:
+                    rel_type = row.relationship_type.replace("_", " ").title()
+                    relationships_list.append(f"{rel_type} of the User")
+                elif row.first_name:
+                    name = f"{row.first_name} {row.last_name or ''}".strip()
+                    if row.direction == "incoming":
+                        inv = inverse_map.get(
+                            row.relationship_type, row.relationship_type
+                        )
+                        rel_type = inv.replace("_", " ").title()
+                    else:
+                        rel_type = row.relationship_type.replace("_", " ").title()
+                    relationships_list.append(f"{rel_type} of {name}")
+
             return {
                 "id": contact_row.id,
                 "first_name": contact_row.first_name,
@@ -240,6 +302,7 @@ class SearchIndexer:
                 "phones": phones,
                 "notes_content": notes_content,
                 "tags": tags,
+                "relationships": relationships_list,
                 "entity_type": "contact",
                 "is_favourite": contact_row.is_favourite,
                 "created_at": contact_row.created_at.isoformat()
@@ -296,6 +359,7 @@ class SearchIndexer:
                 "created_at": occurred_at_str,
                 "updated_at": occurred_at_str,
                 "tags": [],
+                "relationships": [],
                 "notes_content": "",
             }
 
@@ -400,3 +464,47 @@ class SearchIndexer:
             index_name=index_name,
             tags=complete_data.get("tags", []),
         )
+
+    async def _index_contact_relationship_change(
+        self, index_name: str, event: OutboxEvent
+    ) -> None:
+        """
+        Update contact relationships in the search index.
+
+        Args:
+            index_name: Name of the search index
+            event: Relationship event
+        """
+        contact_data = event.event_data
+
+        # We need to reindex both contacts involved in the relationship
+        contact_ids = set()
+        if "from_contact_id" in contact_data and contact_data["from_contact_id"]:
+            contact_ids.add(contact_data["from_contact_id"])
+        if "to_contact_id" in contact_data and contact_data["to_contact_id"]:
+            contact_ids.add(contact_data["to_contact_id"])
+
+        for contact_id in contact_ids:
+            # Fetch complete contact data to get updated relationships list
+            complete_data = await self._fetch_complete_contact_data(contact_id)
+
+            if not complete_data:
+                logger.warning(
+                    "Could not fetch complete contact data for relationship update",
+                    contact_id=contact_id,
+                )
+                continue
+
+            # Update the timestamp
+            complete_data["updated_at"] = event.occurred_at.isoformat()
+
+            index = self.client.index(index_name)
+            task = index.update_documents([complete_data])
+            self.client.wait_for_task(task.task_uid)
+
+            logger.debug(
+                "Contact relationships updated in search",
+                contact_id=contact_id,
+                index_name=index_name,
+                relationships=complete_data.get("relationships", []),
+            )

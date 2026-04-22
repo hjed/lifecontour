@@ -361,3 +361,90 @@ class ImportantDateDeleted(DomainEvent):
             },
             transaction=transaction,
         )
+
+
+@dataclass(frozen=True)
+class ContactRelationshipCreated(DomainEvent):
+    """Event raised when a contact relationship is created."""
+
+    def __init__(
+        self,
+        relationship_id: int,
+        from_contact_id: int,
+        to_contact_id: int | None,
+        relationship_type: str,
+        to_user: bool,
+        transaction: AsyncConnection | None = None,
+    ):
+        super().__init__(
+            event_id=f"contact_relationship_created_{relationship_id}_{datetime.now().isoformat()}",
+            occurred_at=datetime.now(),
+            aggregate_id=from_contact_id,
+            event_type="ContactRelationshipCreated",
+            event_data={
+                "relationship_id": relationship_id,
+                "from_contact_id": from_contact_id,
+                "to_contact_id": to_contact_id,
+                "relationship_type": relationship_type,
+                "to_user": to_user,
+            },
+            transaction=transaction,
+        )
+
+
+@dataclass(frozen=True)
+class ContactRelationshipUpdated(DomainEvent):
+    """Event raised when a contact relationship is updated."""
+
+    def __init__(
+        self,
+        relationship_id: int,
+        from_contact_id: int,
+        to_contact_id: int | None,
+        relationship_type: str,
+        to_user: bool,
+        transaction: AsyncConnection | None = None,
+    ):
+        super().__init__(
+            event_id=f"contact_relationship_updated_{relationship_id}_{datetime.now().isoformat()}",
+            occurred_at=datetime.now(),
+            aggregate_id=from_contact_id,
+            event_type="ContactRelationshipUpdated",
+            event_data={
+                "relationship_id": relationship_id,
+                "from_contact_id": from_contact_id,
+                "to_contact_id": to_contact_id,
+                "relationship_type": relationship_type,
+                "to_user": to_user,
+            },
+            transaction=transaction,
+        )
+
+
+@dataclass(frozen=True)
+class ContactRelationshipDeleted(DomainEvent):
+    """Event raised when a contact relationship is deleted."""
+
+    def __init__(
+        self,
+        relationship_id: int,
+        from_contact_id: int,
+        to_contact_id: int | None,
+        relationship_type: str,
+        to_user: bool,
+        transaction: AsyncConnection | None = None,
+    ):
+        super().__init__(
+            event_id=f"contact_relationship_deleted_{relationship_id}_{datetime.now().isoformat()}",
+            occurred_at=datetime.now(),
+            aggregate_id=from_contact_id,
+            event_type="ContactRelationshipDeleted",
+            event_data={
+                "relationship_id": relationship_id,
+                "from_contact_id": from_contact_id,
+                "to_contact_id": to_contact_id,
+                "relationship_type": relationship_type,
+                "to_user": to_user,
+            },
+            transaction=transaction,
+        )

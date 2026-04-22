@@ -37,9 +37,16 @@ class TestContactRelationshipService:
         return AsyncMock()
 
     @pytest.fixture
-    def service(self, mock_contact_repo, mock_relationship_repo):
+    def mock_event_publisher(self):
+        """Create mock event publisher."""
+        return AsyncMock()
+
+    @pytest.fixture
+    def service(self, mock_contact_repo, mock_relationship_repo, mock_event_publisher):
         """Create ContactRelationshipService instance."""
-        return ContactRelationshipService(mock_contact_repo, mock_relationship_repo)
+        return ContactRelationshipService(
+            mock_contact_repo, mock_relationship_repo, mock_event_publisher
+        )
 
     @pytest.fixture
     def sample_contact_1(self):
@@ -76,6 +83,7 @@ class TestContactRelationshipService:
         mock_contact_repo,
         mock_relationship_repo,
         mock_transaction,
+        mock_event_publisher,
         sample_contact_1,
         sample_contact_2,
     ):
@@ -103,6 +111,7 @@ class TestContactRelationshipService:
         mock_contact_repo.find_by_id.assert_any_call(1)
         mock_contact_repo.find_by_id.assert_any_call(2)
         mock_relationship_repo.create.assert_called_once()
+        mock_event_publisher.publish.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_create_relationship_from_contact_not_found(
@@ -177,6 +186,7 @@ class TestContactRelationshipService:
         mock_contact_repo,
         mock_relationship_repo,
         mock_transaction,
+        mock_event_publisher,
         sample_contact_1,
         sample_contact_2,
     ):
@@ -213,6 +223,7 @@ class TestContactRelationshipService:
         assert relationships[1].from_contact_id == 2
         assert relationships[1].to_contact_id == 1
         assert mock_relationship_repo.create.call_count == 2
+        assert mock_event_publisher.publish.call_count == 2
 
     @pytest.mark.asyncio
     async def test_get_relationships_for_contact(
@@ -238,6 +249,7 @@ class TestContactRelationshipService:
         service,
         mock_relationship_repo,
         mock_transaction,
+        mock_event_publisher,
         sample_relationship,
     ):
         """Test successful relationship update."""
@@ -258,6 +270,7 @@ class TestContactRelationshipService:
         assert result.relationship_type == RelationshipType.COLLEAGUE
         mock_relationship_repo.get_by_id.assert_called_once_with(1)
         mock_relationship_repo.update.assert_called_once()
+        mock_event_publisher.publish.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_update_relationship_not_found(
@@ -284,6 +297,7 @@ class TestContactRelationshipService:
         service,
         mock_relationship_repo,
         mock_transaction,
+        mock_event_publisher,
         sample_relationship,
     ):
         """Test successful relationship deletion."""
@@ -295,6 +309,7 @@ class TestContactRelationshipService:
 
         mock_relationship_repo.get_by_id.assert_called_once_with(1)
         mock_relationship_repo.delete.assert_called_once_with(1)
+        mock_event_publisher.publish.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_delete_relationship_not_found(

@@ -369,6 +369,7 @@ class ContactRelationship:
     to_contact_id: int | None
     relationship_type: RelationshipType
     id: int | None = None
+    from_contact_name: str | None = None
     to_contact_name: str | None = None
     to_user: bool = False
     created_at: datetime | None = None
