@@ -82,7 +82,9 @@ test.describe('Journal Complete Workflows', () => {
         await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
         // Step 5: Verify we're on the detail page
-        expect(page.url()).toContain(`/journals/${noteJournal.id}`);
+        await expect(page).toHaveURL(
+          new RegExp(`.*/journals/${noteJournal.id}.*`)
+        );
         await expect(
           page.getByRole('heading', { name: noteJournal.title })
         ).toBeVisible();
