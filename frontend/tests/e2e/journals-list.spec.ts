@@ -1124,6 +1124,7 @@ test.describe('Journal List Page', () => {
       await expect(calendarListbox1).toBeVisible();
       await calendarListbox1
         .getByRole('option', { name: /Work Calendar/i })
+        .first()
         .click();
       await responsePromise;
 
@@ -1157,6 +1158,7 @@ test.describe('Journal List Page', () => {
       await expect(calendarListbox2).toBeVisible();
       await calendarListbox2
         .getByRole('option', { name: /Personal Calendar/i })
+        .first()
         .click();
       await personalResponsePromise;
 
@@ -1182,6 +1184,7 @@ test.describe('Journal List Page', () => {
       await expect(calendarListbox3).toBeVisible();
       await calendarListbox3
         .getByRole('option', { name: /All calendars/i })
+        .first()
         .click();
 
       // Wait for the filter to be cleared and all journals to be visible
