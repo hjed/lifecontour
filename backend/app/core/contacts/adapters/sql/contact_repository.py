@@ -186,22 +186,45 @@ class SqlContactRepository(ContactRepository):
         # Load contact relationships
         relationships_query = text(
             """
-            SELECT id, from_contact_id, to_contact_id, relationship_type, to_user, created_at, updated_at
-            FROM contact_relationships
-            WHERE from_contact_id = :contact_id OR to_contact_id = :contact_id
-            ORDER BY created_at DESC
+            SELECT
+                cr.id,
+                cr.from_contact_id,
+                cr.to_contact_id,
+                cr.relationship_type,
+                cr.to_user,
+                cr.created_at,
+                cr.updated_at,
+                c_from.first_name as from_first,
+                c_from.last_name as from_last,
+                c_to.first_name as to_first,
+                c_to.last_name as to_last
+            FROM contact_relationships cr
+            LEFT JOIN contacts c_from ON cr.from_contact_id = c_from.id
+            LEFT JOIN contacts c_to ON cr.to_contact_id = c_to.id
+            WHERE cr.from_contact_id = :contact_id OR cr.to_contact_id = :contact_id
+            ORDER BY cr.created_at DESC
         """
         )
         relationships_result = await self.conn.execute(
             relationships_query, {"contact_id": contact_id}
         )
         for rel_row in relationships_result.fetchall():
+            from_name = None
+            if rel_row.from_first:
+                from_name = f"{rel_row.from_first} {rel_row.from_last or ''}".strip()
+
+            to_name = None
+            if rel_row.to_first:
+                to_name = f"{rel_row.to_first} {rel_row.to_last or ''}".strip()
+
             relationship = ContactRelationship(
                 id=rel_row.id,
                 from_contact_id=rel_row.from_contact_id,
                 to_contact_id=rel_row.to_contact_id,
                 relationship_type=RelationshipType(rel_row.relationship_type),
                 to_user=rel_row.to_user,
+                from_contact_name=from_name,
+                to_contact_name=to_name,
                 created_at=rel_row.created_at,
                 updated_at=rel_row.updated_at,
             )

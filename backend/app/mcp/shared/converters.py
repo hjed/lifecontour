@@ -74,6 +74,25 @@ class ContactConverter:
                 )
             )
 
+        relationships_list = []
+        for rel in contact.relationships or []:
+            if rel.to_user:
+                rel_type = str(rel.relationship_type.value).replace("_", " ").title()
+                relationships_list.append(f"{rel_type} of the User")
+            elif rel.from_contact_id == contact.id:
+                # the other person is to_contact_id
+                rel_type = str(rel.relationship_type.value).replace("_", " ").title()
+                relationships_list.append(f"{rel_type} of {rel.to_contact_name}")
+            else:
+                # the other person is from_contact_id, so the contact is the 'to_contact_id'
+                # we need to invert the relationship
+                inv_type = (
+                    rel.relationship_type.get_inverse_type()
+                    .value.replace("_", " ")
+                    .title()
+                )
+                relationships_list.append(f"{inv_type} of {rel.from_contact_name}")
+
         # Build AI-friendly summary
         summary = ContactConverter._build_contact_summary(
             full_name=full_name,
@@ -84,6 +103,7 @@ class ContactConverter:
             job_title=contact.job_title,
             notes=contact.notes,
             important_dates=important_dates,
+            relationships=relationships_list,
             additional_context=additional_context,
         )
 
@@ -95,6 +115,7 @@ class ContactConverter:
             company=contact.company,
             job_title=contact.job_title,
             tags=tag_names,
+            relationships=relationships_list,
             is_favourite=contact.is_favourite,
             important_dates=important_dates,
             summary=summary,
@@ -124,6 +145,7 @@ class ContactConverter:
         company = search_hit.get("company")
         job_title = search_hit.get("job_title")
         tags = search_hit.get("tags", [])
+        relationships = search_hit.get("relationships", [])
         highlighted = search_hit.get("_formatted", {})
 
         # Build AI-friendly summary with search context
@@ -131,6 +153,10 @@ class ContactConverter:
         if tags:
             tag_list = ", ".join(tags)
             summary_parts.append(f"tagged as: {tag_list}")
+
+        if relationships:
+            rel_list = ", ".join(relationships)
+            summary_parts.append(f"relationships: {rel_list}")
 
         # Add work information
         work_info = ContactConverter._format_work_info(job_title, company)
@@ -159,6 +185,7 @@ class ContactConverter:
             company=company,
             job_title=job_title,
             tags=tags,
+            relationships=relationships,
             highlighted=highlighted,
             summary=summary,
         )
@@ -173,6 +200,7 @@ class ContactConverter:
         job_title: str | None = None,
         notes: list[Any] | None = None,
         important_dates: list[ImportantDateInfo] | None = None,
+        relationships: list[str] | None = None,
         additional_context: str = "",
     ) -> str:
         """
@@ -187,6 +215,7 @@ class ContactConverter:
             job_title: Job title or position
             notes: List of contact notes
             important_dates: List of important dates
+            relationships: List of relationships
             additional_context: Additional context to include
 
         Returns:
@@ -197,6 +226,10 @@ class ContactConverter:
         if tags:
             tag_list = ", ".join(tags)
             summary_parts.append(f"tagged as: {tag_list}")
+
+        if relationships:
+            rel_list = ", ".join(relationships)
+            summary_parts.append(f"relationships: {rel_list}")
 
         # Add work information
         work_info = ContactConverter._format_work_info(job_title, company)

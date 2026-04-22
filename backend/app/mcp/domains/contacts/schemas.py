@@ -91,6 +91,11 @@ class ContactResponse(BaseModel):
         description="List of tags associated with the contact (e.g., 'friend', 'work', 'family')",
     )
 
+    relationships: list[str] = Field(
+        default_factory=list,
+        description="List of relationships associated with the contact (e.g., 'Friend of the User')",
+    )
+
     is_favourite: bool = Field(
         default=False,
         description="Whether the contact is marked as a favourite for quick access",
@@ -159,6 +164,11 @@ class ContactSearchResult(BaseModel):
     tags: list[str] = Field(
         default_factory=list,
         description="List of tags associated with the contact",
+    )
+
+    relationships: list[str] = Field(
+        default_factory=list,
+        description="List of relationships associated with the contact",
     )
 
     highlighted: dict[str, Any] | None = Field(

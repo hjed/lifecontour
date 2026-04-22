@@ -126,8 +126,11 @@ class ContactProvider(Provider):
         self,
         contact_repo: ContactRepository,
         relationship_repo: ContactRelationshipRepository,
+        event_publisher: ContactEventPublisher,
     ) -> ContactRelationshipService:
-        return ContactRelationshipService(contact_repo, relationship_repo)
+        return ContactRelationshipService(
+            contact_repo, relationship_repo, event_publisher
+        )
 
     # Main contact service
     @provide

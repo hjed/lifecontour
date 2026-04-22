@@ -409,3 +409,59 @@ class TestSearchIndexer:
         assert doc["id"] == 42
         assert doc["is_favourite"] is False
         assert "is_favourite" in doc
+
+    @pytest.mark.asyncio
+    async def test_relationship_change_event(self, indexer, mock_meilisearch_client):
+        """Test processing a ContactRelationshipCreated event."""
+        # Arrange
+        rel_event = OutboxEvent(
+            id=6,
+            event_id="rel-created-123",
+            event_type="ContactRelationshipCreated",
+            aggregate_id=42,
+            event_data={
+                "from_contact_id": 42,
+                "to_contact_id": 43,
+                "relationship_type": "friend",
+            },
+            occurred_at=datetime(2024, 1, 1, 17, 0, 0),
+            processed_at=None,
+            retry_count=0,
+            created_at=datetime(2024, 1, 1, 17, 0, 0),
+        )
+
+        mock_index = MagicMock()
+        mock_meilisearch_client.index.return_value = mock_index
+        mock_index.get_stats.return_value = {"numberOfDocuments": 2}
+
+        mock_task = MagicMock()
+        mock_task.task_uid = "rel-task"
+        mock_index.update_documents.return_value = mock_task
+
+        # Mock the complete contact data fetch
+        complete_contact_data = {
+            "id": 42,
+            "first_name": "John",
+            "last_name": "Doe",
+            "full_name": "John Doe",
+            "email": "john@example.com",
+            "entity_type": "contact",
+            "relationships": ["Friend of Jane Smith"],
+        }
+
+        with (
+            patch(
+                "app.infrastructure.search.search_indexer.get_index_name",
+                return_value="pms_contacts",
+            ),
+            patch.object(
+                indexer,
+                "_fetch_complete_contact_data",
+                return_value=complete_contact_data,
+            ),
+        ):
+            # Act
+            await indexer.process_event(rel_event)
+
+        # Assert - should be called for both contact_id 42 and 43
+        assert mock_index.update_documents.call_count == 2

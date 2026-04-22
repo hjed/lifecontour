@@ -3,10 +3,16 @@
 from core_shared.models.contacts.entities import ContactRelationship, RelationshipType
 from core_shared.models.contacts.exceptions import ContactValidationError
 
+from app.core.contacts.models.events import (
+    ContactRelationshipCreated,
+    ContactRelationshipDeleted,
+    ContactRelationshipUpdated,
+)
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
 )
 from app.core.contacts.models.repositories import (
+    ContactEventPublisher,
     ContactRelationshipRepository,
     ContactRepository,
 )
@@ -19,9 +25,11 @@ class ContactRelationshipService:
         self,
         contact_repo: ContactRepository,
         relationship_repo: ContactRelationshipRepository,
+        event_publisher: ContactEventPublisher,
     ):
         self.contact_repo = contact_repo
         self.relationship_repo = relationship_repo
+        self.event_publisher = event_publisher
 
     async def create_relationship(
         self,
@@ -73,7 +81,18 @@ class ContactRelationshipService:
                 relationship_type=relationship_type,
                 to_user=True,
             )
-            return await self.relationship_repo.create(relationship)
+            created = await self.relationship_repo.create(relationship)
+            assert created.id is not None
+            await self.event_publisher.publish(
+                ContactRelationshipCreated(
+                    relationship_id=created.id,
+                    from_contact_id=created.from_contact_id,
+                    to_contact_id=created.to_contact_id,
+                    relationship_type=created.relationship_type.value,
+                    to_user=created.to_user,
+                )
+            )
+            return created
         else:
             # Contact-to-contact relationship
             if to_contact_id is None:
@@ -102,6 +121,17 @@ class ContactRelationshipService:
 
             created_relationship = await self.relationship_repo.create(relationship)
 
+            assert created_relationship.id is not None
+            await self.event_publisher.publish(
+                ContactRelationshipCreated(
+                    relationship_id=created_relationship.id,
+                    from_contact_id=created_relationship.from_contact_id,
+                    to_contact_id=created_relationship.to_contact_id,
+                    relationship_type=created_relationship.relationship_type.value,
+                    to_user=created_relationship.to_user,
+                )
+            )
+
             # Create bidirectional relationship if requested
             if create_bidirectional:
                 inverse_relationship = ContactRelationship(
@@ -112,6 +142,16 @@ class ContactRelationshipService:
 
                 created_inverse = await self.relationship_repo.create(
                     inverse_relationship
+                )
+                assert created_inverse.id is not None
+                await self.event_publisher.publish(
+                    ContactRelationshipCreated(
+                        relationship_id=created_inverse.id,
+                        from_contact_id=created_inverse.from_contact_id,
+                        to_contact_id=created_inverse.to_contact_id,
+                        relationship_type=created_inverse.relationship_type.value,
+                        to_user=created_inverse.to_user,
+                    )
                 )
                 return [created_relationship, created_inverse]
 
@@ -195,7 +235,20 @@ class ContactRelationshipService:
             updated_at=existing_relationship.updated_at,
         )
 
-        return await self.relationship_repo.update(updated_relationship)
+        updated = await self.relationship_repo.update(updated_relationship)
+
+        assert updated.id is not None
+        await self.event_publisher.publish(
+            ContactRelationshipUpdated(
+                relationship_id=updated.id,
+                from_contact_id=updated.from_contact_id,
+                to_contact_id=updated.to_contact_id,
+                relationship_type=updated.relationship_type.value,
+                to_user=updated.to_user,
+            )
+        )
+
+        return updated
 
     async def delete_relationship(
         self,
@@ -219,6 +272,17 @@ class ContactRelationshipService:
 
         await self.relationship_repo.delete(relationship_id)
 
+        assert existing_relationship.id is not None
+        await self.event_publisher.publish(
+            ContactRelationshipDeleted(
+                relationship_id=existing_relationship.id,
+                from_contact_id=existing_relationship.from_contact_id,
+                to_contact_id=existing_relationship.to_contact_id,
+                relationship_type=existing_relationship.relationship_type.value,
+                to_user=existing_relationship.to_user,
+            )
+        )
+
     async def delete_all_relationships_for_contact(
         self,
         contact_id: int,
@@ -233,6 +297,15 @@ class ContactRelationshipService:
         for relationship in relationships:
             if relationship.id:
                 await self.relationship_repo.delete(relationship.id)
+                await self.event_publisher.publish(
+                    ContactRelationshipDeleted(
+                        relationship_id=relationship.id,
+                        from_contact_id=relationship.from_contact_id,
+                        to_contact_id=relationship.to_contact_id,
+                        relationship_type=relationship.relationship_type.value,
+                        to_user=relationship.to_user,
+                    )
+                )
 
     async def get_relationship_by_id(
         self, relationship_id: int
