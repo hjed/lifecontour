@@ -1077,3 +1077,104 @@ class TestContactOutboxProcessorIntegration:
         assert event_state is not None
         assert event_state[1] is not None, "Event should be marked as processed"
         assert event_state[0] == 0, "Retry count should remain 0"
+
+    @pytest.mark.asyncio
+    async def test_process_contact_updated_event_triggers_on_birthday_change(
+        self,
+        clean_database: AsyncConnection,
+        sample_contact_data: dict[str, Any],
+    ):
+        """A change only to important_dates triggers an update via idempotency checks."""
+        contact_id = 98765
+        external_id = f"people/birthday-update-{uuid4()}"
+
+        await self._insert_existing_contact_reference(
+            clean_database,
+            contact_id=contact_id,
+            external_id=external_id,
+            first_name="Birthday",
+            last_name="Update",
+        )
+        await self._insert_contact_method(
+            clean_database,
+            contact_id=contact_id,
+            method_type="email",
+            value="birthday@example.com",
+            label="personal",
+            is_primary=True,
+        )
+
+        contact_data = copy.deepcopy(sample_contact_data)
+        contact_data["first_name"] = "Birthday"
+        contact_data["last_name"] = "Update"
+        contact_data["methods"] = [
+            {
+                "method_type": "email",
+                "value": "birthday@example.com",
+                "label": "personal",
+                "is_primary": True,
+            }
+        ]
+        # First sync to establish the initial version hash without birthday
+        event_id_1 = await self._insert_contact_sync_event(
+            clean_database,
+            event_type="contact.updated",
+            contact_data=contact_data,
+            external_id=external_id,
+            sync_type="updated",
+        )
+        await self._run_outbox_processor(clean_database)
+
+        # Ensure first event processed successfully
+        event_state_1 = await self._fetch_outbox_event_state(
+            clean_database,
+            event_id=event_id_1,
+        )
+        assert event_state_1 is not None
+        assert event_state_1[1] is not None  # processed_at is set
+
+        # Second sync: ONLY add a birthday
+        contact_data["important_dates"] = [
+            {
+                "date_type": "birthday",
+                "precision": "full",
+                "year": 1990,
+                "month": 5,
+                "day": 15,
+                "custom_date_type_id": None,
+                "custom_date_type_name": None,
+            }
+        ]
+        event_id_2 = await self._insert_contact_sync_event(
+            clean_database,
+            event_type="contact.updated",
+            contact_data=contact_data,
+            external_id=external_id,
+            sync_type="updated",
+        )
+        await self._run_outbox_processor(clean_database)
+
+        # Check if the second event was skipped or processed
+        # The key assertion is that the important date actually updated in the database
+        result = await clean_database.execute(
+            text("""
+                SELECT date_type, year, month, day
+                FROM contact_important_dates
+                WHERE contact_id = :contact_id
+            """),
+            {"contact_id": contact_id},
+        )
+        dates = result.fetchall()
+
+        assert len(dates) == 1, "Birthday should have been persisted"
+        assert dates[0][0] == "birthday"
+        assert dates[0][1] == 1990
+        assert dates[0][2] == 5
+        assert dates[0][3] == 15
+
+        event_state_2 = await self._fetch_outbox_event_state(
+            clean_database,
+            event_id=event_id_2,
+        )
+        assert event_state_2 is not None
+        assert event_state_2[1] is not None
