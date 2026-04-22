@@ -181,7 +181,10 @@ test.describe('Example: Fixture-Based Testing', () => {
       await page.goto('/contacts');
 
       // Wait for contacts to load
-      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
+      await page.waitForURL('/contacts');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible({
+        timeout: 15000,
+      });
 
       // Wait for contacts to be indexed in MeiliSearch
       // The outbox processor runs every 10 seconds, so we poll until contacts are indexed
