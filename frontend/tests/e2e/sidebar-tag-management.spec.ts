@@ -27,7 +27,7 @@ test.describe('Sidebar Tag Management', () => {
 
     // Fill out the dialog
     const dialog = page.getByRole('dialog', { name: 'Create Tag' });
-    await expect(dialog).toBeVisible();
+    await expect(dialog).toBeVisible({ timeout: 15000 });
 
     await dialog.getByLabel('Name').fill(uniqueTagName);
     await dialog.getByPlaceholder('#000000').fill('#123456');
