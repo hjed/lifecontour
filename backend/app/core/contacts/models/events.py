@@ -448,3 +448,25 @@ class ContactRelationshipDeleted(DomainEvent):
             },
             transaction=transaction,
         )
+
+
+@dataclass(frozen=True)
+class ContactSummaryRefreshRequested(DomainEvent):
+    """Event raised when a contact summary regeneration is requested.
+
+    This event triggers asynchronous AI summary generation via the outbox pattern.
+    """
+
+    def __init__(
+        self,
+        contact_id: int,
+        transaction: AsyncConnection | None = None,
+    ):
+        super().__init__(
+            event_id=f"contact_summary_refresh_{contact_id}_{datetime.now().isoformat()}",
+            occurred_at=datetime.now(),
+            aggregate_id=contact_id,
+            event_type="ContactSummaryRefreshRequested",
+            event_data={"contact_id": contact_id},
+            transaction=transaction,
+        )

@@ -126,6 +126,10 @@ class OutboxProcessor:
                 await self._process_journal_sync_event(
                     event, search_indexer.db_connection
                 )
+            elif event.event_type == "ContactSummaryRefreshRequested":
+                await self._process_summary_generation_event(
+                    event, search_indexer.db_connection
+                )
             else:
                 # Process other events with the search indexer
                 await search_indexer.process_event(event)
@@ -324,6 +328,98 @@ class OutboxProcessor:
             event_id=event.event_id,
             event_type=event.event_type,
             result=result,
+        )
+
+    async def _process_summary_generation_event(
+        self, event: Any, connection: Any
+    ) -> None:
+        """
+        Process a ContactSummaryRefreshRequested event to generate an AI summary.
+
+        Constructs the full generation pipeline inline (following the same pattern
+        as _process_contact_event and _process_journal_sync_event) and runs the
+        summary generation for the specified contact.
+
+        Args:
+            event: ContactSummaryRefreshRequested event
+            connection: Database connection for transaction
+        """
+        from app.core.contacts.adapters.sql.contact_field_history_repository import (
+            SqlContactFieldHistoryRepository,
+        )
+        from app.core.contacts.adapters.sql.contact_repository import (
+            SqlContactRepository,
+        )
+        from app.core.contacts.adapters.sql.contact_summary_repository import (
+            SqlContactSummaryRepository,
+        )
+        from app.core.contacts.services.summary_generation_service import (
+            LowActivityChecker,
+            SummaryGenerator,
+            SummaryInputAssembler,
+        )
+        from app.core.contacts.services.summary_prompt_builder import (
+            SummaryPromptBuilder,
+        )
+        from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
+            SqlJournalContactRelationshipRepository,
+        )
+        from app.core.journal.adapters.sql.journal_repository import (
+            SqlJournalRepository,
+        )
+        from app.infrastructure.config import get_settings
+
+        settings = get_settings()
+
+        if not settings.gemini_api_key:
+            logger.info(
+                "Gemini API key not configured, skipping summary generation",
+                event_id=event.event_id,
+            )
+            return
+
+        contact_id = event.event_data.get("contact_id")
+        if not contact_id:
+            logger.error(
+                "ContactSummaryRefreshRequested event missing contact_id",
+                event_id=event.event_id,
+            )
+            return
+
+        # Create repositories
+        contact_repo = SqlContactRepository(connection)
+        history_repo = SqlContactFieldHistoryRepository(connection)
+        journal_rel_repo = SqlJournalContactRelationshipRepository(connection)
+        journal_repo = SqlJournalRepository(connection)
+        summary_repo = SqlContactSummaryRepository(connection)
+
+        # Create services
+        input_assembler = SummaryInputAssembler(
+            contact_repo=contact_repo,
+            history_repo=history_repo,
+            journal_relationship_repo=journal_rel_repo,
+            journal_repo=journal_repo,
+            summary_repo=summary_repo,
+        )
+        activity_checker = LowActivityChecker()
+        prompt_builder = SummaryPromptBuilder()
+
+        generator = SummaryGenerator(
+            input_assembler=input_assembler,
+            activity_checker=activity_checker,
+            prompt_builder=prompt_builder,
+            summary_repo=summary_repo,
+            gemini_api_key=settings.gemini_api_key,
+            gemini_model=settings.gemini_summary_model,
+        )
+
+        result = await generator.generate(contact_id=contact_id)
+
+        logger.info(
+            "Processed summary generation event",
+            event_id=event.event_id,
+            contact_id=contact_id,
+            result_status=result.status.value if result else "skipped",
         )
 
     async def _process_tag_event(self, event: Any) -> None:
