@@ -1006,8 +1006,7 @@ async def update_contact_summary(
             # Re-enabling: reset status so the summary can be refreshed
             existing.status = (
                 SummaryStatus.GENERATED
-                if existing.is_user_override
-                and existing.user_override_text is not None
+                if existing.is_user_override and existing.user_override_text is not None
                 else SummaryStatus.PENDING
             )
 
