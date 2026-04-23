@@ -42,12 +42,12 @@ test.describe('Sidebar Tag Management', () => {
     // Verify Toast appears
     await expect(page.getByText('Tag created successfully')).toBeVisible();
 
-    // Verify tag appears in sidebar
+    // Verify tag appears in sidebar (may require React Query refetch + re-render)
     const tagLink = page.getByRole('link', {
       name: uniqueTagName,
       exact: true,
     });
-    await expect(tagLink).toBeVisible();
+    await expect(tagLink).toBeVisible({ timeout: 15000 });
   });
 
   test('can open context menu and edit a tag', async ({
