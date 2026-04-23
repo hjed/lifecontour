@@ -704,63 +704,35 @@ export class TestDataManager {
       `🔗 [Data Manager] Creating user-targeted relationship: ${fromContactId} -> You (${relationshipType})`
     );
 
-    const maxRetries = 3;
-    let lastError: Error | undefined;
-
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      const response = await this.page.request.post(
-        `/api/contacts/${fromContactId}/relationships`,
-        {
-          headers: {
-            'Content-Type': 'application/vnd.api+json',
-            Accept: 'application/vnd.api+json',
-          },
+    const response = await this.page.request.post(
+      `/api/contacts/${fromContactId}/relationships`,
+      {
+        headers: {
+          'Content-Type': 'application/vnd.api+json',
+          Accept: 'application/vnd.api+json',
+        },
+        data: {
           data: {
-            data: {
-              type: 'contact_relationships',
-              attributes: {
-                from_contact_id: Number(fromContactId),
-                to_user: true,
-                relationship_type: relationshipType,
-              },
+            type: 'contact_relationships',
+            attributes: {
+              from_contact_id: Number(fromContactId),
+              to_user: true,
+              relationship_type: relationshipType,
             },
           },
-        }
-      );
-
-      if (response.ok()) {
-        console.debug(
-          `✅ [Data Manager] User-targeted relationship created: ${fromContactId} -> You`
-        );
-        return;
+        },
       }
+    );
 
-      const statusCode = response.status();
+    if (!response.ok()) {
       const errorBody = await response.text();
-
-      // Retry on transient errors (404 = contact not yet visible, 5xx = server)
-      if ((statusCode === 404 || statusCode >= 500) && attempt < maxRetries) {
-        console.debug(
-          `⚠️ [Data Manager] User relationship creation attempt ${attempt}/${maxRetries} ` +
-            `got ${statusCode}, retrying after delay...`
-        );
-        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-        lastError = new Error(
-          `Failed to create user-targeted relationship: ${statusCode} - ${errorBody}`
-        );
-        continue;
-      }
-
-      // Non-retryable error or final attempt — throw immediately
       throw new Error(
-        `Failed to create user-targeted relationship: ${statusCode} - ${errorBody}`
+        `Failed to create user-targeted relationship: ${response.status()} - ${errorBody}`
       );
     }
 
-    // Should not reach here, but satisfy TypeScript
-    throw (
-      lastError ??
-      new Error('Failed to create user-targeted relationship after retries')
+    console.debug(
+      `✅ [Data Manager] User-targeted relationship created: ${fromContactId} -> You`
     );
   }
 

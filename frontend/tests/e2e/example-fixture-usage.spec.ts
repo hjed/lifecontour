@@ -211,30 +211,31 @@ test.describe('Example: Fixture-Based Testing', () => {
       await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Should filter to show only matching contacts
-      // Use name-based assertion which Playwright auto-retries during re-render
-      await expect(
-        page.getByRole('link', { name: new RegExp(contacts[0].firstName, 'i') })
-      ).toBeVisible({ timeout: 15000 });
+      const contactCard = page.locator(
+        `[data-testid="contact-${contacts[0].id}"]`
+      );
+      await expect(contactCard).toBeVisible({ timeout: 10000 });
 
       // Other contacts should not be visible
       for (let i = 1; i < contacts.length; i++) {
-        await expect(
-          page.getByRole('link', {
-            name: new RegExp(contacts[i].firstName, 'i'),
-          })
-        ).not.toBeVisible();
+        const otherContactCard = page.locator(
+          `[data-testid="contact-${contacts[i].id}"]`
+        );
+        await expect(otherContactCard).not.toBeVisible();
       }
 
       // Clear search
       await searchInput.clear();
 
-      // Wait for all contacts to reappear
+      // Wait for search results to update
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
+
+      // All contacts should be visible again
       for (const contact of contacts) {
-        await expect(
-          page.getByRole('link', {
-            name: new RegExp(contact.firstName, 'i'),
-          })
-        ).toBeVisible({ timeout: 15000 });
+        const contactCard = page.locator(
+          `[data-testid="contact-${contact.id}"]`
+        );
+        await expect(contactCard).toBeVisible({ timeout: 10000 });
       }
     });
 
