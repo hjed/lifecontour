@@ -130,7 +130,7 @@ class SummaryInputAssembler:
                 parts.append(f"day={d.day}")
             if getattr(d, "year", None):
                 parts.append(f"year={d.year}")
-            important_dates.append(": ".join(parts[:2]) if len(parts) > 1 else parts[0])
+            important_dates.append(": ".join(parts))
 
         # Recent field history (bounded)
         history_entries = await self._history_repo.get_contact_history(
@@ -339,16 +339,16 @@ class SummaryGenerator:
             )
             return existing
 
-        # Set status to GENERATING
-        await self._summary_repo.update_status(
-            contact_id, SummaryStatus.GENERATING.value
-        )
-
-        # Assemble input
+        # Assemble input first to verify contact exists
         summary_input = await self._input_assembler.assemble(contact_id)
         if summary_input is None:
             logger.warning("Contact %d not found, cannot generate summary", contact_id)
             return None
+
+        # Set status to GENERATING (only after confirming contact exists)
+        await self._summary_repo.update_status(
+            contact_id, SummaryStatus.GENERATING.value
+        )
 
         # Check low activity
         if self._activity_checker.should_auto_disable(summary_input, existing):
@@ -356,7 +356,8 @@ class SummaryGenerator:
                 "Contact %d has low activity, auto-disabling summary",
                 contact_id,
             )
-            disabled_summary = ContactSummary(
+            disabled_summary = self._merge_with_existing(
+                existing,
                 contact_id=contact_id,
                 status=SummaryStatus.DISABLED,
                 is_disabled=True,
@@ -372,7 +373,8 @@ class SummaryGenerator:
             result = self._parse_response(raw_response)
         except Exception:
             logger.exception("AI generation failed for contact %d", contact_id)
-            failed_summary = ContactSummary(
+            failed_summary = self._merge_with_existing(
+                existing,
                 contact_id=contact_id,
                 status=SummaryStatus.FAILED,
             )
@@ -380,7 +382,8 @@ class SummaryGenerator:
 
         # Persist result
         now = datetime.now(tz=UTC)
-        generated_summary = ContactSummary(
+        generated_summary = self._merge_with_existing(
+            existing,
             contact_id=contact_id,
             summary_text=result["summary_text"],
             follow_up_suggestions=result.get("follow_up_suggestions", []),
@@ -402,6 +405,37 @@ class SummaryGenerator:
         response = await model.generate_content_async(prompt)
         return response.text  # type: ignore[no-any-return]
 
+    @staticmethod
+    def _merge_with_existing(
+        existing: ContactSummary | None,
+        **overrides: Any,
+    ) -> ContactSummary:
+        """Create a ContactSummary preserving existing fields not being overridden.
+
+        Ensures user overrides, disabled flags, and other persisted state are
+        carried forward rather than silently cleared by upsert.
+        """
+        if existing is None:
+            return ContactSummary(**overrides)
+
+        return ContactSummary(
+            contact_id=overrides.get("contact_id", existing.contact_id),
+            summary_text=overrides.get("summary_text", existing.summary_text),
+            follow_up_suggestions=overrides.get(
+                "follow_up_suggestions", existing.follow_up_suggestions
+            ),
+            status=overrides.get("status", existing.status),
+            generated_at=overrides.get("generated_at", existing.generated_at),
+            is_disabled=overrides.get("is_disabled", existing.is_disabled),
+            is_user_override=overrides.get(
+                "is_user_override", existing.is_user_override
+            ),
+            user_override_text=overrides.get(
+                "user_override_text",
+                getattr(existing, "user_override_text", None),
+            ),
+        )
+
     def _parse_response(self, raw: str) -> dict[str, Any]:
         """Parse AI response JSON.
 
@@ -420,7 +454,13 @@ class SummaryGenerator:
         if "summary_text" not in parsed:
             raise ValueError("AI response missing 'summary_text' field")
 
+        # Validate follow_up_suggestions is a list of strings
+        suggestions_raw = parsed.get("follow_up_suggestions", [])
+        if not isinstance(suggestions_raw, list):
+            suggestions_raw = []
+        suggestions = [str(s) for s in suggestions_raw if s is not None]
+
         return {
             "summary_text": parsed["summary_text"],
-            "follow_up_suggestions": parsed.get("follow_up_suggestions", []),
+            "follow_up_suggestions": suggestions,
         }

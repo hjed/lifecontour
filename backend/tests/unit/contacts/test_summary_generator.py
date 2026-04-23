@@ -226,3 +226,64 @@ class TestSummaryGenerator:
         result = await generator.generate(contact_id=1)
 
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_contact_not_found_does_not_set_generating(self):
+        """Test that GENERATING status is NOT set when contact doesn't exist."""
+        generator = _make_generator()
+        generator._input_assembler.assemble = AsyncMock(return_value=None)  # type: ignore[method-assign]
+
+        await generator.generate(contact_id=999)
+
+        # update_status should NOT have been called (no stale GENERATING row)
+        generator._summary_repo.update_status.assert_not_called()  # type: ignore[attr-defined]
+
+    @pytest.mark.asyncio
+    async def test_preserves_user_override_on_generation(self):
+        """Test that user override fields are preserved after successful generation."""
+        existing = ContactSummary(
+            contact_id=1,
+            is_user_override=True,
+            user_override_text="User's custom text",
+            status=SummaryStatus.GENERATED,
+        )
+        generator = _make_generator(existing_summary=existing)
+
+        result = await generator.generate(contact_id=1)
+
+        assert result is not None
+        assert result.status == SummaryStatus.GENERATED
+        # User override flag should be preserved
+        assert result.is_user_override is True
+
+    @pytest.mark.asyncio
+    async def test_non_list_suggestions_coerced_to_empty(self):
+        """Test that non-list follow_up_suggestions from AI is coerced to empty list."""
+        response = json.dumps(
+            {
+                "summary_text": "A summary",
+                "follow_up_suggestions": "not a list",
+            }
+        )
+        generator = _make_generator(gemini_response=response)
+
+        result = await generator.generate(contact_id=1)
+
+        assert result is not None
+        assert result.follow_up_suggestions == []
+
+    @pytest.mark.asyncio
+    async def test_null_suggestions_coerced_to_empty(self):
+        """Test that null follow_up_suggestions is coerced to empty list."""
+        response = json.dumps(
+            {
+                "summary_text": "A summary",
+                "follow_up_suggestions": None,
+            }
+        )
+        generator = _make_generator(gemini_response=response)
+
+        result = await generator.generate(contact_id=1)
+
+        assert result is not None
+        assert result.follow_up_suggestions == []

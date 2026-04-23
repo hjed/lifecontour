@@ -309,7 +309,11 @@ class TestSummaryInputAssembler:
 
         assert result is not None
         assert len(result.important_dates) == 1
-        assert "birthday" in result.important_dates[0].lower()
+        date_str = result.important_dates[0].lower()
+        assert "birthday" in date_str
+        # All date components should be present (not truncated)
+        assert "month=3" in date_str
+        assert "day=15" in date_str
 
     @pytest.mark.asyncio
     async def test_contact_not_found_returns_none(self):
