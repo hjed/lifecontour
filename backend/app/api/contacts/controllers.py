@@ -998,9 +998,18 @@ async def update_contact_summary(
         )
 
     if update_data.is_disabled is not None:
+        was_disabled = existing.is_disabled
         existing.is_disabled = update_data.is_disabled
         if update_data.is_disabled:
             existing.status = SummaryStatus.DISABLED
+        elif was_disabled:
+            # Re-enabling: reset status so the summary can be refreshed
+            existing.status = (
+                SummaryStatus.GENERATED
+                if existing.is_user_override
+                and existing.user_override_text is not None
+                else SummaryStatus.PENDING
+            )
 
     if update_data.user_override_text is not None:
         existing.is_user_override = True

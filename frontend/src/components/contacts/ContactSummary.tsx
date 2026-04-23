@@ -175,7 +175,13 @@ export function ContactSummary({
           >
             {attrs.status === ContactSummaryStatus.DISABLED
               ? 'AI summary generation is disabled for this contact.'
-              : 'Summary is being generated…'}
+              : attrs.status === ContactSummaryStatus.FAILED
+                ? 'AI summary generation failed.'
+                : attrs.status === ContactSummaryStatus.PENDING
+                  ? 'Summary generation is pending…'
+                  : attrs.status === ContactSummaryStatus.GENERATING
+                    ? 'Summary is being generated…'
+                    : 'Summary is unavailable.'}
           </p>
         )}
 

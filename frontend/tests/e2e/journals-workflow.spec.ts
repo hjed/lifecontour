@@ -33,8 +33,10 @@ test.describe('Journal Complete Workflows', () => {
 
       // Step 4: Click on a journal link to view details
       const firstJournal = journals[0];
-      await page.getByRole('link', { name: firstJournal.title }).click();
-      await page.waitForURL(`**/journals/${firstJournal.id}`);
+      await Promise.all([
+        page.waitForURL(new RegExp(`.*/journals/${firstJournal.id}.*`)),
+        page.getByRole('link', { name: firstJournal.title }).click(),
+      ]);
 
       // Step 5: Verify we're on the detail page
       expect(page.url()).toContain(`/journals/${firstJournal.id}`);
@@ -45,8 +47,7 @@ test.describe('Journal Complete Workflows', () => {
 
       // Step 6: Navigate back to list
       const backButton = page.getByRole('button', { name: /back/i });
-      await backButton.click();
-      await page.waitForURL('**/journals');
+      await Promise.all([page.waitForURL('**/journals'), backButton.click()]);
 
       // Step 7: Verify we're back on the list page
       expect(page.url()).toContain('/journals');

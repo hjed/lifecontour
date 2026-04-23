@@ -155,7 +155,7 @@ describe('ContactSummary', () => {
       ).toBeInTheDocument();
     });
 
-    it('shows generating message when no text and not disabled', () => {
+    it('shows pending message when status is pending', () => {
       render(
         <ContactSummary
           summary={makeSummary({
@@ -167,7 +167,39 @@ describe('ContactSummary', () => {
       );
 
       expect(
+        screen.getByText(/summary generation is pending/i)
+      ).toBeInTheDocument();
+    });
+
+    it('shows generating message when status is generating', () => {
+      render(
+        <ContactSummary
+          summary={makeSummary({
+            status: ContactSummaryStatus.GENERATING,
+            summary_text: null,
+          })}
+          contactId='1'
+        />
+      );
+
+      expect(
         screen.getByText(/summary is being generated/i)
+      ).toBeInTheDocument();
+    });
+
+    it('shows failed message when status is failed', () => {
+      render(
+        <ContactSummary
+          summary={makeSummary({
+            status: ContactSummaryStatus.FAILED,
+            summary_text: null,
+          })}
+          contactId='1'
+        />
+      );
+
+      expect(
+        screen.getByText(/ai summary generation failed/i)
       ).toBeInTheDocument();
     });
   });

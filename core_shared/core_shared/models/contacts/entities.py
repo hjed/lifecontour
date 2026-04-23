@@ -236,13 +236,16 @@ class ContactSummary:
     def get_display_text(self) -> str | None:
         """Get the text to display for this summary.
 
-        Returns user override text if set, otherwise AI-generated text.
-        Returns None if summary is not yet generated or is disabled.
+        Returns user override text if set, otherwise AI-generated text
+        only when status is GENERATED.
+        Returns None if summary is not yet generated, is disabled, or failed.
         """
         if self.is_disabled:
             return None
         if self.is_user_override and self.user_override_text:
             return self.user_override_text
+        if self.status != SummaryStatus.GENERATED:
+            return None
         return self.summary_text
 
 

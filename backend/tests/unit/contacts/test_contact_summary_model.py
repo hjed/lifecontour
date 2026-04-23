@@ -139,6 +139,35 @@ class TestContactSummary:
         )
         assert summary.get_display_text() is None
 
+    def test_get_display_text_returns_none_when_generating(self):
+        """Test get_display_text returns None when status is GENERATING."""
+        summary = ContactSummary(
+            contact_id=1,
+            summary_text="Stale text from previous run",
+            status=SummaryStatus.GENERATING,
+        )
+        assert summary.get_display_text() is None
+
+    def test_get_display_text_returns_none_when_failed(self):
+        """Test get_display_text returns None when status is FAILED."""
+        summary = ContactSummary(
+            contact_id=1,
+            summary_text="Stale text from previous run",
+            status=SummaryStatus.FAILED,
+        )
+        assert summary.get_display_text() is None
+
+    def test_get_display_text_returns_override_regardless_of_status(self):
+        """Test get_display_text returns user override even for non-GENERATED status."""
+        summary = ContactSummary(
+            contact_id=1,
+            summary_text="AI text",
+            is_user_override=True,
+            user_override_text="User text",
+            status=SummaryStatus.PENDING,
+        )
+        assert summary.get_display_text() == "User text"
+
 
 @pytest.mark.unit
 class TestContactWithSummary:
