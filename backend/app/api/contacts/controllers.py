@@ -1020,6 +1020,13 @@ async def update_contact_summary(
     ):
         existing.is_user_override = False
         existing.user_override_text = None
+        # Reset status: if no AI text exists, mark as PENDING for regeneration
+        if not existing.is_disabled:
+            existing.status = (
+                SummaryStatus.GENERATED
+                if existing.summary_text
+                else SummaryStatus.PENDING
+            )
 
     await summary_repo.upsert(existing)
 

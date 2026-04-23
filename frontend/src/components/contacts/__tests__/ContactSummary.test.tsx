@@ -202,6 +202,25 @@ describe('ContactSummary', () => {
         screen.getByText(/ai summary generation failed/i)
       ).toBeInTheDocument();
     });
+
+    it('hides stale AI text when status is not GENERATED', () => {
+      render(
+        <ContactSummary
+          summary={makeSummary({
+            status: ContactSummaryStatus.GENERATING,
+            summary_text: 'Stale text from previous generation',
+          })}
+          contactId='1'
+        />
+      );
+
+      expect(
+        screen.queryByText('Stale text from previous generation')
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByText(/summary is being generated/i)
+      ).toBeInTheDocument();
+    });
   });
 
   describe('follow-up suggestions', () => {

@@ -115,11 +115,15 @@ export function ContactSummary({
     attrs.status === ContactSummaryStatus.GENERATING ||
     attrs.status === ContactSummaryStatus.PENDING;
 
-  // Determine display text (user override takes precedence)
+  // Determine display text — mirrors backend get_display_text logic:
+  // User override text always takes precedence.
+  // AI summary_text only shown when status is GENERATED to avoid stale text.
   const displayText =
     attrs.is_user_override && attrs.user_override_text
       ? attrs.user_override_text
-      : attrs.summary_text;
+      : attrs.status === ContactSummaryStatus.GENERATED
+        ? attrs.summary_text
+        : null;
 
   return (
     <Card className={className} data-testid='contact-summary'>
