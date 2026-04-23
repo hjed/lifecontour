@@ -166,6 +166,31 @@ export interface ContactRelationshipResource extends Omit<
   type: 'contact_relationships';
 }
 
+// Contact Summary Types
+export enum ContactSummaryStatus {
+  PENDING = 'pending',
+  GENERATING = 'generating',
+  GENERATED = 'generated',
+  FAILED = 'failed',
+  DISABLED = 'disabled',
+}
+
+export interface ContactSummaryAttributes {
+  summary_text: string | null;
+  follow_up_suggestions: string[];
+  status: ContactSummaryStatus;
+  is_disabled: boolean;
+  is_user_override: boolean;
+  user_override_text: string | null;
+  generated_at: string | null;
+}
+
+export interface ContactSummaryResource {
+  type: 'contact_summaries';
+  id: string;
+  attributes: ContactSummaryAttributes;
+}
+
 // Contact Types
 export interface ContactAttributes {
   first_name: string;
@@ -181,6 +206,7 @@ export interface ContactAttributes {
   notes: ContactNoteResource[];
   relationships: ContactRelationshipResource[];
   important_dates?: ImportantDateResource[];
+  summary?: ContactSummaryResource | null;
 }
 
 export interface ContactRelationships {

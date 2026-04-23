@@ -10,6 +10,7 @@ from core_shared.models.contacts.entities import (
     ContactMethod,
     ContactNote,
     ContactRelationship,
+    ContactSummary,
     ImportantDate,
     Tag,
 )
@@ -497,4 +498,25 @@ class ContactRelationshipRepository(ABC):
         to_user: bool = False,
     ) -> bool:
         """Check if a specific relationship already exists."""
+        pass
+
+
+class ContactSummaryRepository(ABC):
+    """Repository interface for contact summary operations."""
+
+    @abstractmethod
+    async def find_by_contact_id(self, contact_id: int) -> "ContactSummary | None":
+        """Find a summary by contact ID."""
+        pass
+
+    @abstractmethod
+    async def upsert(self, summary: "ContactSummary") -> "ContactSummary":
+        """Create or update a contact summary."""
+        pass
+
+    @abstractmethod
+    async def update_status(
+        self, contact_id: int, status: str
+    ) -> "ContactSummary | None":
+        """Update the status of a contact summary."""
         pass

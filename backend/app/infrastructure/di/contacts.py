@@ -12,6 +12,7 @@ from app.core.contacts.adapters.sql import (
     SqlContactFieldHistoryRepository,
     SqlContactRelationshipRepository,
     SqlContactRepository,
+    SqlContactSummaryRepository,
     SqlCustomDateTypeRepository,
     SqlTagRepository,
 )
@@ -20,6 +21,7 @@ from app.core.contacts.models.repositories import (
     ContactFieldHistoryRepository,
     ContactRelationshipRepository,
     ContactRepository,
+    ContactSummaryRepository,
     CustomDateTypeRepository,
     TagRepository,
 )
@@ -84,6 +86,12 @@ class ContactProvider(Provider):
         self, connection: AsyncConnection
     ) -> SqlContactRelationshipRepository:
         return SqlContactRelationshipRepository(connection)
+
+    @provide(provides=ContactSummaryRepository)
+    def get_contact_summary_repository(
+        self, connection: AsyncConnection
+    ) -> SqlContactSummaryRepository:
+        return SqlContactSummaryRepository(connection)
 
     # Domain services
     @provide

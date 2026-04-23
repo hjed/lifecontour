@@ -223,6 +223,61 @@ class ContactRelationshipResource(BaseModel):
     meta: dict[str, Any] | None = Field(default=None, description="Resource metadata")
 
 
+# Contact Summary Schemas (embedded in contact)
+class ContactSummaryAttributes(BaseModel):
+    """Contact summary attributes for AI-generated interaction summaries."""
+
+    summary_text: str | None = Field(
+        default=None, description="AI-generated summary text"
+    )
+    follow_up_suggestions: list[str] = Field(
+        default_factory=list, description="List of follow-up suggestions"
+    )
+    status: str = Field(
+        ...,
+        description="Summary status (pending, generating, generated, failed, disabled)",
+    )
+    is_disabled: bool = Field(
+        default=False, description="Whether AI generation is disabled for this contact"
+    )
+    is_user_override: bool = Field(
+        default=False, description="Whether user has provided a manual override"
+    )
+    user_override_text: str | None = Field(
+        default=None, description="User-provided override text"
+    )
+    generated_at: datetime | None = Field(
+        default=None, description="When the summary was last generated"
+    )
+
+
+class ContactSummaryResource(BaseModel):
+    """Contact summary resource for embedding in contact."""
+
+    type: str = Field(default="contact_summaries", description="Resource type")
+    id: str = Field(..., description="Summary ID")
+    attributes: ContactSummaryAttributes = Field(..., description="Summary attributes")
+
+
+class ContactSummaryUpdateData(BaseModel):
+    """Data for updating a contact summary (disable/override)."""
+
+    is_disabled: bool | None = Field(
+        default=None, description="Set to disable/enable AI generation"
+    )
+    user_override_text: str | None = Field(
+        default=None,
+        max_length=10000,
+        description="User override text (set to null to clear)",
+    )
+
+
+class ContactSummaryUpdateRequest(BaseModel):
+    """Request model for updating a contact summary."""
+
+    data: ContactSummaryUpdateData = Field(..., description="Summary update data")
+
+
 # Contact Schemas
 class ContactAttributes(BaseModel):
     """Contact attributes."""
@@ -262,6 +317,9 @@ class ContactAttributes(BaseModel):
     )
     important_dates: list[ImportantDateResource] = Field(
         default_factory=list, description="Contact important dates"
+    )
+    summary: ContactSummaryResource | None = Field(
+        default=None, description="AI-generated interaction summary"
     )
 
 

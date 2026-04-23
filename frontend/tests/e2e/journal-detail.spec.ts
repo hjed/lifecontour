@@ -797,13 +797,23 @@ test.describe('Journal Detail Page', () => {
       ]);
       expect(updateResponse.status()).toBe(200);
 
+      // Wait for the React Query invalidation refetch to complete before
+      // asserting UI state — Firefox re-renders can lag behind the PATCH response.
+      await page.waitForResponse(
+        resp =>
+          resp.url().includes(`/api/journals/${journal.id}`) &&
+          resp.request().method() === 'GET' &&
+          resp.status() === 200
+      );
+
       // Verify the UI updated to new status
       await expect(popoverContent).not.toBeVisible();
 
       const updatedStatus = page.getByTestId(`contact-status-${contact.id}`);
       await expect(updatedStatus).toHaveAttribute(
         'aria-label',
-        'Status: ATTENDING'
+        'Status: ATTENDING',
+        { timeout: 15000 }
       );
 
       const roleBadge = page.getByTestId(`contact-role-${contact.id}`);
@@ -1133,6 +1143,11 @@ test.describe('Journal Detail Page', () => {
 
       await page.goto(`/journals/${journal.id}`);
       await expect(page.getByTestId('journal-detail-view')).toBeVisible();
+
+      // Wait for the contact badge to render before looking for the link
+      await expect(
+        page.getByTestId(`contact-badge-${contact.id}`)
+      ).toBeVisible();
 
       // Click the link inside the contact badge
       const contactLink = page.getByRole('link', {
