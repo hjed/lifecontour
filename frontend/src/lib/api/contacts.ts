@@ -1226,3 +1226,42 @@ export function useCreateCustomDateType() {
     },
   });
 }
+
+// Summary Refresh API Functions
+
+async function refreshContactSummary(contactId: string): Promise<void> {
+  const response = await fetch(
+    `${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/summary/refresh`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    }
+  );
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.UPDATE_FAILED
+    );
+  }
+}
+
+export function useRefreshContactSummary(contactId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => refreshContactSummary(contactId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: contactKeys.detail(contactId),
+      });
+      toast.success('Summary refresh requested');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}

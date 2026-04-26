@@ -109,4 +109,106 @@ test.describe('Contact AI Summary', () => {
         .first()
     ).toBeVisible();
   });
+
+  test('should send POST and receive 202 when refresh button is clicked', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const dataManager = new TestDataManager(authenticatedPage);
+    const contact = await dataManager.createContact({
+      firstName: 'RefreshAPI',
+      lastName: 'Verify',
+    });
+
+    testCleanup(async () => {
+      await dataManager.cleanup();
+    });
+
+    // Create a pending summary so the refresh button is visible
+    const seedResponse = await authenticatedPage.request.post(
+      `/api/contacts/${contact.id}/summary/refresh`
+    );
+    expect(seedResponse.status()).toBe(202);
+
+    await authenticatedPage.goto(`/contacts/${contact.id}`);
+
+    // Wait for the summary card
+    await expect(authenticatedPage.getByTestId('contact-summary')).toBeVisible({
+      timeout: 10000,
+    });
+
+    // Intercept the refresh POST and click the button
+    const refreshButton = authenticatedPage.getByTestId(
+      'summary-refresh-button'
+    );
+    await expect(refreshButton).toBeVisible({ timeout: 5000 });
+
+    const [response] = await Promise.all([
+      authenticatedPage.waitForResponse(
+        resp =>
+          resp.url().includes('/summary/refresh') &&
+          resp.request().method() === 'POST',
+        { timeout: 10000 }
+      ),
+      refreshButton.click(),
+    ]);
+
+    // Verify the API returned 202
+    expect(response.status()).toBe(202);
+
+    // Verify status badge still shows Pending after re-queue
+    await expect(
+      authenticatedPage.getByTestId('summary-status-badge')
+    ).toContainText(/pending/i, { timeout: 5000 });
+  });
+
+  test('should not show generated_at timestamp for user override summary', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const dataManager = new TestDataManager(authenticatedPage);
+    const contact = await dataManager.createContact({
+      firstName: 'OverrideTime',
+      lastName: 'NoTimestamp',
+    });
+
+    testCleanup(async () => {
+      await dataManager.cleanup();
+    });
+
+    // Set user override text via PATCH — status becomes GENERATED but generated_at is null
+    const patchResponse = await authenticatedPage.request.patch(
+      `/api/contacts/${contact.id}/summary`,
+      {
+        data: {
+          data: {
+            user_override_text: 'Manual summary written by user',
+          },
+        },
+      }
+    );
+    expect(patchResponse.status()).toBe(200);
+
+    await authenticatedPage.goto(`/contacts/${contact.id}`);
+
+    // Wait for the summary card
+    await expect(authenticatedPage.getByTestId('contact-summary')).toBeVisible({
+      timeout: 10000,
+    });
+
+    // Verify status badge shows Generated
+    await expect(
+      authenticatedPage.getByTestId('summary-status-badge')
+    ).toContainText(/generated/i, { timeout: 5000 });
+
+    // Verify user override text is displayed
+    await expect(
+      authenticatedPage.getByText('Manual summary written by user')
+    ).toBeVisible({ timeout: 5000 });
+
+    // Verify generated_at timestamp is NOT shown (since it's null for user override)
+    await expect(
+      authenticatedPage.getByTestId('summary-generated-at')
+    ).not.toBeVisible({ timeout: 3000 });
+  });
 });

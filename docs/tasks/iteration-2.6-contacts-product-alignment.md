@@ -452,15 +452,15 @@ The sequence reflects both user priority and technical dependency:
 **PR Size:** ~5-7 files
 
 **Acceptance Criteria:**
-- [ ] The contact detail page shows a concise AI-generated summary and follow-up suggestions.
-- [ ] The UI shows when the summary was last generated and supports manual refresh.
-- [ ] MCP contact retrieval returns the summary, follow-up suggestions, relationship context, and important dates.
-- [ ] The summary remains conservative and evidence-grounded rather than speculative.
+- [x] The contact detail page shows a concise AI-generated summary and follow-up suggestions.
+- [x] The UI shows when the summary was last generated and supports manual refresh.
+- [x] MCP contact retrieval returns the summary, follow-up suggestions, relationship context, and important dates.
+- [x] The summary remains conservative and evidence-grounded rather than speculative.
 
 **Required Test Coverage:**
-- **Unit:** summary display/formatting helpers.
-- **Integration:** API and MCP tests for summary retrieval and refresh behaviour.
-- **E2E:** manual refresh and read-back flow from the contact page.
+- [x] **Unit:** summary display/formatting helpers.
+- [x] **Integration:** API and MCP tests for summary retrieval and refresh behaviour.
+- [x] **E2E:** manual refresh and read-back flow from the contact page.
 
 #### Phase 4: Search-Signal Indexing
 **PR Size:** ~5-7 files

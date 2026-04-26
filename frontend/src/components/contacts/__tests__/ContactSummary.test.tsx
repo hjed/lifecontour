@@ -3,8 +3,16 @@
  */
 
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { ContactSummary } from '@/components/contacts/ContactSummary';
 import { ContactSummaryResource, ContactSummaryStatus } from '@/types/contacts';
+
+const mockMutateAsync = jest.fn();
+const mockRefreshHook = jest.fn();
+
+jest.mock('@/lib/api/contacts', () => ({
+  useRefreshContactSummary: (...args: unknown[]) => mockRefreshHook(...args),
+}));
 
 function makeSummary(
   overrides: Partial<ContactSummaryResource['attributes']> = {}
@@ -24,6 +32,14 @@ function makeSummary(
     },
   };
 }
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  mockRefreshHook.mockReturnValue({
+    mutateAsync: mockMutateAsync,
+    isPending: false,
+  });
+});
 
 describe('ContactSummary', () => {
   describe('empty state', () => {
@@ -281,6 +297,80 @@ describe('ContactSummary', () => {
       );
 
       expect(screen.getByTestId('summary-refresh-button')).toBeDisabled();
+    });
+
+    it('calls refresh mutation when clicked', async () => {
+      const user = userEvent.setup();
+      mockMutateAsync.mockResolvedValue({});
+      render(<ContactSummary summary={makeSummary()} contactId='42' />);
+
+      await user.click(screen.getByTestId('summary-refresh-button'));
+
+      expect(mockMutateAsync).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows spinning icon when refresh is pending', () => {
+      mockRefreshHook.mockReturnValue({
+        mutateAsync: mockMutateAsync,
+        isPending: true,
+      });
+      render(<ContactSummary summary={makeSummary()} contactId='1' />);
+
+      const refreshButton = screen.getByTestId('summary-refresh-button');
+      const icon = refreshButton.querySelector('svg');
+      expect(icon).toHaveClass('animate-spin');
+    });
+  });
+
+  describe('generated_at timestamp', () => {
+    it('displays relative timestamp when status is GENERATED and generated_at is set', () => {
+      render(
+        <ContactSummary
+          summary={makeSummary({
+            status: ContactSummaryStatus.GENERATED,
+            generated_at: '2026-01-01T00:00:00Z',
+          })}
+          contactId='1'
+        />
+      );
+
+      expect(screen.getByTestId('summary-generated-at')).toBeInTheDocument();
+      // Should contain "Last generated" text
+      expect(screen.getByTestId('summary-generated-at')).toHaveTextContent(
+        /last generated/i
+      );
+    });
+
+    it('does not show timestamp when generated_at is null', () => {
+      render(
+        <ContactSummary
+          summary={makeSummary({
+            status: ContactSummaryStatus.GENERATED,
+            generated_at: null,
+          })}
+          contactId='1'
+        />
+      );
+
+      expect(
+        screen.queryByTestId('summary-generated-at')
+      ).not.toBeInTheDocument();
+    });
+
+    it('does not show timestamp when status is not GENERATED', () => {
+      render(
+        <ContactSummary
+          summary={makeSummary({
+            status: ContactSummaryStatus.PENDING,
+            generated_at: '2026-01-01T00:00:00Z',
+          })}
+          contactId='1'
+        />
+      );
+
+      expect(
+        screen.queryByTestId('summary-generated-at')
+      ).not.toBeInTheDocument();
     });
   });
 

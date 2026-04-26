@@ -7,6 +7,7 @@
 
 'use client';
 
+import { formatDistanceToNow } from 'date-fns';
 import {
   Bot,
   RefreshCw,
@@ -19,6 +20,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { useRefreshContactSummary } from '@/lib/api/contacts';
 import { ContactSummaryResource, ContactSummaryStatus } from '@/types/contacts';
 
 export interface ContactSummaryProps {
@@ -78,10 +80,13 @@ const STATUS_CONFIG: Record<
  */
 export function ContactSummary({
   summary,
-  contactId: _contactId,
+  contactId,
   disabled = false,
   className,
 }: ContactSummaryProps) {
+  const { mutateAsync: refreshSummary, isPending: isRefreshing } =
+    useRefreshContactSummary(contactId);
+
   // No summary exists yet — show placeholder
   if (!summary) {
     return (
@@ -125,6 +130,14 @@ export function ContactSummary({
         ? attrs.summary_text
         : null;
 
+  // Show generated_at timestamp only when status is GENERATED and timestamp exists
+  const showGeneratedAt =
+    attrs.status === ContactSummaryStatus.GENERATED && attrs.generated_at;
+
+  const handleRefresh = () => {
+    void refreshSummary();
+  };
+
   return (
     <Card className={className} data-testid='contact-summary'>
       <CardHeader className='flex flex-row items-center justify-between space-y-0 pb-2'>
@@ -149,11 +162,14 @@ export function ContactSummary({
             variant='ghost'
             size='icon'
             className='h-7 w-7'
-            disabled={disabled || attrs.is_disabled}
+            disabled={disabled || attrs.is_disabled || isRefreshing}
             aria-label='Refresh AI summary'
             data-testid='summary-refresh-button'
+            onClick={handleRefresh}
           >
-            <RefreshCw className='h-4 w-4' />
+            <RefreshCw
+              className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`}
+            />
           </Button>
         </div>
       </CardHeader>
@@ -186,6 +202,19 @@ export function ContactSummary({
                   : attrs.status === ContactSummaryStatus.GENERATING
                     ? 'Summary is being generated…'
                     : 'Summary is unavailable.'}
+          </p>
+        )}
+
+        {/* Generated At Timestamp */}
+        {showGeneratedAt && (
+          <p
+            className='text-muted-foreground text-xs'
+            data-testid='summary-generated-at'
+          >
+            Last generated{' '}
+            {formatDistanceToNow(new Date(attrs.generated_at!), {
+              addSuffix: true,
+            })}
           </p>
         )}
 

@@ -4,7 +4,14 @@ Unit tests for MCP shared converters.
 Tests the converter utilities for transforming domain entities to AI-friendly formats.
 """
 
-from core_shared.models.contacts.entities import Contact, Tag
+from datetime import datetime
+
+from core_shared.models.contacts.entities import (
+    Contact,
+    ContactSummary,
+    SummaryStatus,
+    Tag,
+)
 from core_shared.models.contacts.value_objects import TagName
 
 from app.mcp.domains.contacts.schemas import ContactResponse, ContactSearchResult
@@ -274,3 +281,95 @@ class TestSearchResultProcessor:
         assert len(results) == 1
         assert "Cross-entity search" in results[0].summary
         assert "Found in contact database" in results[0].summary
+
+
+class TestContactConverterAISummary:
+    """Test ContactConverter AI interaction summary integration."""
+
+    def test_contact_with_generated_summary_populates_ai_fields(self):
+        """When a contact has a GENERATED summary, interaction_summary and follow_up_suggestions are populated."""
+        contact = Contact(
+            id=100,
+            first_name="Alice",
+            last_name="Smith",
+            summary=ContactSummary(
+                contact_id=100,
+                summary_text="Alice is a close colleague who we meet weekly.",
+                follow_up_suggestions=[
+                    "Schedule coffee catch-up",
+                    "Share project update",
+                ],
+                status=SummaryStatus.GENERATED,
+                generated_at=datetime(2026, 4, 20, 10, 0, 0),
+            ),
+        )
+
+        response = ContactConverter.to_contact_response(contact)
+
+        assert (
+            response.interaction_summary
+            == "Alice is a close colleague who we meet weekly."
+        )
+        assert response.follow_up_suggestions == [
+            "Schedule coffee catch-up",
+            "Share project update",
+        ]
+        # The metadata summary should also include the AI interaction text
+        assert "Alice is a close colleague who we meet weekly." in response.summary
+
+    def test_contact_with_pending_summary_has_empty_ai_fields(self):
+        """When a contact has a PENDING summary, AI fields are None/empty."""
+        contact = Contact(
+            id=101,
+            first_name="Bob",
+            last_name="Jones",
+            summary=ContactSummary(
+                contact_id=101,
+                summary_text=None,
+                follow_up_suggestions=[],
+                status=SummaryStatus.PENDING,
+            ),
+        )
+
+        response = ContactConverter.to_contact_response(contact)
+
+        assert response.interaction_summary is None
+        assert response.follow_up_suggestions == []
+
+    def test_contact_without_summary_entity_has_empty_ai_fields(self):
+        """When a contact has no summary entity at all, AI fields default to None/empty."""
+        contact = Contact(
+            id=102,
+            first_name="Charlie",
+            last_name="Brown",
+            summary=None,
+        )
+
+        response = ContactConverter.to_contact_response(contact)
+
+        assert response.interaction_summary is None
+        assert response.follow_up_suggestions == []
+
+    def test_contact_with_user_override_uses_override_text(self):
+        """When the summary has a user override, interaction_summary uses override text."""
+        contact = Contact(
+            id=103,
+            first_name="Diana",
+            last_name="Prince",
+            summary=ContactSummary(
+                contact_id=103,
+                summary_text="AI generated text that should be ignored",
+                user_override_text="Manually written summary about Diana",
+                is_user_override=True,
+                follow_up_suggestions=["Send follow-up email"],
+                status=SummaryStatus.GENERATED,
+                generated_at=datetime(2026, 4, 15, 8, 0, 0),
+            ),
+        )
+
+        response = ContactConverter.to_contact_response(contact)
+
+        assert response.interaction_summary == "Manually written summary about Diana"
+        assert response.follow_up_suggestions == ["Send follow-up email"]
+        # Override text should appear in metadata summary
+        assert "Manually written summary about Diana" in response.summary
