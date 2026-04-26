@@ -437,16 +437,16 @@ The sequence reflects both user priority and technical dependency:
 **PR Size:** ~5-8 files
 
 **Acceptance Criteria:**
-- [ ] Summary regeneration is triggered asynchronously after relevant contact activity.
-- [ ] The input assembly is bounded to recent history and grounded in available evidence.
-- [ ] Low-activity auto-disable works, with user override respected.
-- [ ] Normal contact edits do not block on summary generation.
-- [ ] Summary is generated using AI per the product specification
+- [x] Summary regeneration is triggered asynchronously after relevant contact activity.
+- [x] The input assembly is bounded to recent history and grounded in available evidence.
+- [x] Low-activity auto-disable works, with user override respected.
+- [x] Normal contact edits do not block on summary generation.
+- [x] Summary is generated using AI per the product specification
 
 **Required Test Coverage:**
-- **Unit:** input assembly, recent-history bounds, low-activity heuristics.
-- **Integration:** outbox/background job trigger tests using real persistence.
-- **E2E:** edit a contact or related note and verify summary regeneration is queued/completed without blocking the UI.
+- [x] **Unit:** input assembly, recent-history bounds, low-activity heuristics. (57 tests across 5 files)
+- [x] **Integration:** outbox/background job trigger tests using real persistence. (13 API integration + 10 repo integration tests)
+- [x] **E2E:** edit a contact or related note and verify summary regeneration is queued/completed without blocking the UI. (1 refresh button test)
 
 #### Phase 3: Contact UI and MCP Exposure
 **PR Size:** ~5-7 files

@@ -53,6 +53,7 @@ from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
 )
 from app.core.contacts.models.repositories import (
+    ContactEventPublisher,
     ContactRepository,
     ContactSummaryRepository,
 )
@@ -931,13 +932,15 @@ async def refresh_contact_summary(
     contact_id: int,
     contact_service: FromDishka[ContactService],
     summary_repo: FromDishka[ContactSummaryRepository],
+    event_publisher: FromDishka[ContactEventPublisher],
     _user: FromDishka[SessionUser],
 ) -> dict[str, str]:
     """
     Request a refresh of the AI-generated summary for a contact.
 
     Creates a pending summary record if none exists, or sets the status
-    to 'pending' to trigger regeneration in Phase 2.
+    to 'pending' to trigger regeneration. Publishes a
+    ContactSummaryRefreshRequested event to the outbox for async processing.
     Returns 202 Accepted since the actual generation is asynchronous.
     """
     contact = await contact_service.get_contact_by_id(contact_id)
@@ -945,6 +948,8 @@ async def refresh_contact_summary(
         raise ContactNotFoundError(contact_id)
 
     from core_shared.models.contacts.entities import ContactSummary, SummaryStatus
+
+    from app.core.contacts.models.events import ContactSummaryRefreshRequested
 
     existing = await summary_repo.find_by_contact_id(contact_id)
     if existing and existing.is_disabled:
@@ -960,6 +965,10 @@ async def refresh_contact_summary(
             status=SummaryStatus.PENDING,
         )
         await summary_repo.upsert(new_summary)
+
+    # Publish outbox event to trigger async generation
+    summary_event = ContactSummaryRefreshRequested(contact_id=contact_id)
+    await event_publisher.publish(summary_event)
 
     return {"status": "accepted"}
 

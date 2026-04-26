@@ -24,6 +24,7 @@ from app.core.contacts.models.events import (
     ContactMethodAdded,
     ContactMethodDeleted,
     ContactNoteAdded,
+    ContactSummaryRefreshRequested,
     ContactUpdated,
     ImportantDateAdded,
     ImportantDateDeleted,
@@ -1004,6 +1005,12 @@ class ContactService:
 
         event = ContactUpdated(contact.id, changed_fields, transaction=transaction)
         await self.event_publisher.publish(event)
+
+        # Trigger async summary regeneration via outbox
+        summary_event = ContactSummaryRefreshRequested(
+            contact.id, transaction=transaction
+        )
+        await self.event_publisher.publish(summary_event)
 
     async def _validate_contact_data(
         self,

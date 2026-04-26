@@ -175,6 +175,30 @@ class TestContactSummaryRefreshEndpoint:
         )
         assert response.status_code == 422
 
+    async def test_refresh_publishes_outbox_event(
+        self, integration_api_client, async_connection
+    ):
+        """Test that refresh publishes a ContactSummaryRefreshRequested outbox event."""
+        from sqlalchemy import text
+
+        contact_id = await _create_contact(integration_api_client)
+
+        await integration_api_client.post(f"/api/contacts/{contact_id}/summary/refresh")
+
+        # Verify outbox event was created
+        result = await async_connection.execute(
+            text(
+                "SELECT event_type, event_data "
+                "FROM outbox_events "
+                "WHERE event_type = 'ContactSummaryRefreshRequested' "
+                "AND aggregate_id = :contact_id"
+            ),
+            {"contact_id": int(contact_id)},
+        )
+        rows = result.fetchall()
+        assert len(rows) >= 1
+        assert rows[0].event_type == "ContactSummaryRefreshRequested"
+
 
 @pytest.mark.integration
 class TestContactSummaryPatchEndpoint:
