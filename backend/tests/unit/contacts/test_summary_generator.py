@@ -287,3 +287,35 @@ class TestSummaryGenerator:
 
         assert result is not None
         assert result.follow_up_suggestions == []
+
+    @pytest.mark.asyncio
+    async def test_empty_summary_text_fails(self):
+        """Test that empty summary_text from AI results in FAILED status."""
+        response = json.dumps(
+            {
+                "summary_text": "",
+                "follow_up_suggestions": [],
+            }
+        )
+        generator = _make_generator(gemini_response=response)
+
+        result = await generator.generate(contact_id=1)
+
+        assert result is not None
+        assert result.status == SummaryStatus.FAILED
+
+    @pytest.mark.asyncio
+    async def test_null_summary_text_fails(self):
+        """Test that null summary_text from AI results in FAILED status."""
+        response = json.dumps(
+            {
+                "summary_text": None,
+                "follow_up_suggestions": [],
+            }
+        )
+        generator = _make_generator(gemini_response=response)
+
+        result = await generator.generate(contact_id=1)
+
+        assert result is not None
+        assert result.status == SummaryStatus.FAILED

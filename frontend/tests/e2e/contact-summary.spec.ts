@@ -71,23 +71,31 @@ test.describe('Contact AI Summary', () => {
       await dataManager.cleanup();
     });
 
+    // First, call the refresh API to create a pending summary record.
+    // Without this, the component renders the empty state (no refresh button).
+    const refreshResponse = await authenticatedPage.request.post(
+      `/api/contacts/${contact.id}/summary/refresh`
+    );
+    expect(refreshResponse.status()).toBe(202);
+
+    // Navigate to the contact page — the summary now has a PENDING status
     await authenticatedPage.goto(`/contacts/${contact.id}`);
 
-    // Wait for the summary card to be visible
+    // Wait for the summary card to be visible (with status badge)
     const summaryCard = authenticatedPage.getByTestId('contact-summary');
     await expect(summaryCard).toBeVisible({ timeout: 10000 });
 
-    // Click the refresh button
+    // Verify status badge shows "Pending" — summary record exists
+    const statusBadge = authenticatedPage.getByTestId('summary-status-badge');
+    await expect(statusBadge).toBeVisible({ timeout: 5000 });
+    await expect(statusBadge).toContainText(/pending/i, { timeout: 5000 });
+
+    // Click the refresh button to re-queue
     const refreshButton = authenticatedPage.getByTestId(
       'summary-refresh-button'
     );
     await expect(refreshButton).toBeVisible({ timeout: 5000 });
     await refreshButton.click();
-
-    // Verify status badge shows "Pending" — generation was queued
-    const statusBadge = authenticatedPage.getByTestId('summary-status-badge');
-    await expect(statusBadge).toBeVisible({ timeout: 5000 });
-    await expect(statusBadge).toContainText(/pending/i, { timeout: 5000 });
 
     // Verify the UI remains interactive (not blocked) — can still see the card heading
     await expect(

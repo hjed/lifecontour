@@ -378,11 +378,29 @@ class OutboxProcessor:
             )
             return
 
-        contact_id = event.event_data.get("contact_id")
-        if not contact_id:
+        contact_id_raw = event.event_data.get("contact_id")
+        if not contact_id_raw:
             logger.error(
                 "ContactSummaryRefreshRequested event missing contact_id",
                 event_id=event.event_id,
+            )
+            return
+
+        try:
+            contact_id = int(contact_id_raw)
+        except (TypeError, ValueError):
+            logger.error(
+                "ContactSummaryRefreshRequested event has invalid contact_id",
+                event_id=event.event_id,
+                contact_id_raw=contact_id_raw,
+            )
+            return
+
+        if contact_id <= 0:
+            logger.error(
+                "ContactSummaryRefreshRequested event has non-positive contact_id",
+                event_id=event.event_id,
+                contact_id=contact_id,
             )
             return
 

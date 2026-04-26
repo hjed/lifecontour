@@ -217,11 +217,10 @@ class SummaryInputAssembler:
 
         window_end = now - timedelta(days=self.HISTORY_WINDOW_DAYS)
 
-        # Determine the earliest interaction
-        earliest = min(
-            (getattr(jr, "created_at", window_end) for jr in older_journal_rels),
-            default=window_end,
-        )
+        # Determine the earliest interaction (filter out None created_at)
+        created_dates = [getattr(jr, "created_at", None) for jr in older_journal_rels]
+        valid_dates = [d for d in created_dates if d is not None]
+        earliest = min(valid_dates, default=window_end)
 
         buckets: list[ActivityStatsBucket] = []
         bucket_start = window_end
@@ -453,6 +452,10 @@ class SummaryGenerator:
 
         if "summary_text" not in parsed:
             raise ValueError("AI response missing 'summary_text' field")
+
+        summary_text = parsed["summary_text"]
+        if not isinstance(summary_text, str) or not summary_text.strip():
+            raise ValueError("AI response 'summary_text' must be a non-empty string")
 
         # Validate follow_up_suggestions is a list of strings
         suggestions_raw = parsed.get("follow_up_suggestions", [])
