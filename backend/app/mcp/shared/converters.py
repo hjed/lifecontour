@@ -109,6 +109,29 @@ class ContactConverter:
             additional_context=additional_context,
         )
 
+        # Extract AI interaction summary from the contact summary entity
+        interaction_summary: str | None = None
+        ai_follow_up_suggestions: list[str] = []
+
+        if contact.summary is not None:
+            from core_shared.models.contacts.entities import SummaryStatus
+
+            cs = contact.summary
+            # Mirror the frontend display text logic:
+            # User override text always takes precedence.
+            # AI summary_text only used when status is GENERATED.
+            if cs.is_user_override and cs.user_override_text:
+                interaction_summary = cs.user_override_text
+            elif cs.status == SummaryStatus.GENERATED and cs.summary_text:
+                interaction_summary = cs.summary_text
+
+            if cs.status == SummaryStatus.GENERATED:
+                ai_follow_up_suggestions = cs.follow_up_suggestions or []
+
+            # Append AI interaction summary to the metadata summary for full context
+            if interaction_summary:
+                summary = f"{summary}\n\nAI Interaction Summary: {interaction_summary}"
+
         return ContactResponse(
             id=str(contact.id),
             name=full_name,
@@ -121,6 +144,8 @@ class ContactConverter:
             is_favourite=contact.is_favourite,
             important_dates=important_dates,
             summary=summary,
+            interaction_summary=interaction_summary,
+            follow_up_suggestions=ai_follow_up_suggestions,
         )
 
     @staticmethod

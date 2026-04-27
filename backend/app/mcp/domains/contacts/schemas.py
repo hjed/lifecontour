@@ -110,6 +110,17 @@ class ContactResponse(BaseModel):
         description="AI-friendly summary of the contact including relationship context and key details"
     )
 
+    interaction_summary: str | None = Field(
+        default=None,
+        description="AI-generated interaction summary text for this contact. "
+        "Present when a summary has been generated or user has provided an override.",
+    )
+
+    follow_up_suggestions: list[str] = Field(
+        default_factory=list,
+        description="AI-generated follow-up action suggestions for this contact",
+    )
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -132,6 +143,11 @@ class ContactResponse(BaseModel):
                     }
                 ],
                 "summary": "John is a software engineer and close friend who works at TechCorp. We collaborate on side projects and meet regularly for coffee.",
+                "interaction_summary": "John is a close friend who works at TechCorp. We meet regularly for coffee and collaborate on side projects.",
+                "follow_up_suggestions": [
+                    "Schedule next coffee catch-up",
+                    "Follow up on side project progress",
+                ],
             }
         }
     )

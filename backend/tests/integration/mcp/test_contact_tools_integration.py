@@ -1027,3 +1027,125 @@ class TestMCPTagParity:
         assert len(final.tags) == 1
         assert str(final.tags[0].name) == "rest-b"
         assert final.tags[0].id == rest_tag_b.id
+
+
+class TestContactConverterAISummaryIntegration:
+    """Integration tests verifying ContactConverter populates AI summary fields from real DB data."""
+
+    @pytest_asyncio.fixture
+    async def test_container(self, clean_database: AsyncConnection):
+        """Create test container with mocked dependencies."""
+        container = make_async_container(ContactTestProvider(clean_database))
+        yield container
+        await container.close()
+
+    @pytest_asyncio.fixture
+    async def contact_service(self, test_container):
+        """Get contact service from test container."""
+        async with test_container() as request_container:
+            yield await request_container.get(ContactService)
+
+    @pytest.mark.asyncio
+    async def test_converter_includes_generated_summary(
+        self, contact_service: ContactService, clean_database: AsyncConnection
+    ):
+        """Test that converter populates interaction_summary and follow_up_suggestions for a GENERATED summary."""
+        from datetime import datetime
+
+        from core_shared.models.contacts.entities import ContactSummary, SummaryStatus
+
+        from app.core.contacts.adapters.sql import SqlContactSummaryRepository
+        from app.mcp.shared.converters import ContactConverter
+
+        # Create contact
+        contact = create_basic_contact(first_name="Alice", last_name="Summary")
+        saved = await contact_service.create_contact(contact, clean_database)
+        assert saved.id is not None
+
+        # Insert a GENERATED summary
+        summary_repo = SqlContactSummaryRepository(clean_database)
+        summary = ContactSummary(
+            contact_id=saved.id,
+            summary_text="Alice is a close colleague we meet weekly.",
+            follow_up_suggestions=["Schedule coffee", "Send project update"],
+            status=SummaryStatus.GENERATED,
+            generated_at=datetime(2026, 4, 20, 10, 0, 0),
+        )
+        await summary_repo.upsert(summary)
+
+        # Retrieve the contact with summary loaded
+        retrieved = await contact_service.get_contact_by_id(saved.id)
+        assert retrieved is not None
+        assert retrieved.summary is not None
+
+        # Convert to MCP response
+        response = ContactConverter.to_contact_response(retrieved)
+
+        # Verify AI summary fields
+        assert (
+            response.interaction_summary == "Alice is a close colleague we meet weekly."
+        )
+        assert response.follow_up_suggestions == [
+            "Schedule coffee",
+            "Send project update",
+        ]
+        assert "Alice is a close colleague we meet weekly." in response.summary
+
+    @pytest.mark.asyncio
+    async def test_converter_no_summary_has_empty_ai_fields(
+        self, contact_service: ContactService, clean_database: AsyncConnection
+    ):
+        """Test that converter returns None/empty for contacts without a summary entity."""
+        from app.mcp.shared.converters import ContactConverter
+
+        # Create contact without summary
+        contact = create_basic_contact(first_name="Bob", last_name="NoSummary")
+        saved = await contact_service.create_contact(contact, clean_database)
+        assert saved.id is not None
+
+        retrieved = await contact_service.get_contact_by_id(saved.id)
+        assert retrieved is not None
+
+        response = ContactConverter.to_contact_response(retrieved)
+
+        assert response.interaction_summary is None
+        assert response.follow_up_suggestions == []
+
+    @pytest.mark.asyncio
+    async def test_converter_user_override_takes_precedence(
+        self, contact_service: ContactService, clean_database: AsyncConnection
+    ):
+        """Test that user override text is used instead of AI-generated text."""
+        from datetime import datetime
+
+        from core_shared.models.contacts.entities import ContactSummary, SummaryStatus
+
+        from app.core.contacts.adapters.sql import SqlContactSummaryRepository
+        from app.mcp.shared.converters import ContactConverter
+
+        # Create contact
+        contact = create_basic_contact(first_name="Diana", last_name="Override")
+        saved = await contact_service.create_contact(contact, clean_database)
+        assert saved.id is not None
+
+        # Insert summary with user override
+        summary_repo = SqlContactSummaryRepository(clean_database)
+        summary = ContactSummary(
+            contact_id=saved.id,
+            summary_text="AI generated text",
+            user_override_text="My custom description of Diana",
+            is_user_override=True,
+            follow_up_suggestions=["Follow up soon"],
+            status=SummaryStatus.GENERATED,
+            generated_at=datetime(2026, 4, 15, 8, 0, 0),
+        )
+        await summary_repo.upsert(summary)
+
+        retrieved = await contact_service.get_contact_by_id(saved.id)
+        assert retrieved is not None
+
+        response = ContactConverter.to_contact_response(retrieved)
+
+        assert response.interaction_summary == "My custom description of Diana"
+        assert response.follow_up_suggestions == ["Follow up soon"]
+        assert "My custom description of Diana" in response.summary
