@@ -195,6 +195,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from app.api.health import router as health_router
     from app.api.integrations.controllers import router as integrations_router
     from app.api.journals.controllers import router as journals_router
+    from app.api.journals.daily_summary_controller import (
+        daily_summary_router,
+    )
     from app.api.routes.controllers import router as routes_router
     from app.api.search.controllers import router as search_router
     from app.api.tags.controllers import router as tags_router
@@ -235,6 +238,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(relationships_router, prefix="/api", tags=["relationships"])
     app.include_router(custom_date_types_router, prefix="/api", tags=["contacts"])
     app.include_router(journals_router, prefix="/api", tags=["journals"])
+    app.include_router(daily_summary_router, prefix="/api", tags=["journals"])
     app.include_router(routes_router, prefix="/api")
     app.include_router(calendars_router, prefix="/api", tags=["calendars"])
     app.include_router(tags_router, prefix="/api", tags=["tags"])

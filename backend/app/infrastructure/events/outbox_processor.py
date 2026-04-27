@@ -138,12 +138,16 @@ class OutboxProcessor:
                 await search_indexer.process_event(event)
 
             # Additionally route journal events to integration workers
+            # and invalidate daily summary cache
             if event.event_type in (
                 "JournalCreated",
                 "JournalUpdated",
                 "JournalDeleted",
             ):
                 await self._process_journal_event(event)
+                await self._invalidate_daily_summary_for_journal_event(
+                    event, search_indexer.db_connection
+                )
 
             # Route tag events to integration workers
             if event.event_type in (
@@ -467,6 +471,62 @@ class OutboxProcessor:
             "Broadcasted tag event to workers",
             event_id=event.event_id,
             event_type=event.event_type,
+        )
+
+    async def _invalidate_daily_summary_for_journal_event(
+        self, event: Any, connection: Any
+    ) -> None:
+        """Invalidate daily summary cache when a journal is created/updated/deleted.
+
+        Extracts the journal date and user_id from the event data and calls
+        invalidate_for_date on the daily summary repository.
+
+        Args:
+            event: Journal domain event (JournalCreated, JournalUpdated, JournalDeleted)
+            connection: Database connection for transaction
+        """
+        from datetime import date as date_type
+
+        from app.core.journal.adapters.sql.daily_summary_repository import (
+            SqlJournalDailySummaryRepository,
+        )
+
+        event_data = event.event_data or {}
+        user_id = event_data.get("user_id")
+        event_start = event_data.get("event_start")
+
+        if not user_id or not event_start:
+            logger.debug(
+                "Cannot invalidate daily summary: missing user_id or event_start",
+                event_id=event.event_id,
+                event_type=event.event_type,
+            )
+            return
+
+        # Parse the date from event_start (ISO format string)
+        try:
+            if isinstance(event_start, str):
+                # Handle both datetime and date strings
+                summary_date = date_type.fromisoformat(event_start[:10])
+            else:
+                summary_date = event_start
+        except (ValueError, TypeError):
+            logger.warning(
+                "Cannot parse event_start for daily summary invalidation",
+                event_id=event.event_id,
+                event_start=event_start,
+            )
+            return
+
+        summary_repo = SqlJournalDailySummaryRepository(connection)
+        await summary_repo.invalidate_for_date(user_id, summary_date)
+
+        logger.info(
+            "Invalidated daily summary for journal event",
+            event_id=event.event_id,
+            event_type=event.event_type,
+            user_id=user_id,
+            summary_date=summary_date.isoformat(),
         )
 
     async def _process_journal_event(self, event: Any) -> None:
