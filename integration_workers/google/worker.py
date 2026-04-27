@@ -3042,7 +3042,7 @@ async def sync_calendar_events(
                                         JOIN contacts c ON cm.contact_id = c.id
                                         WHERE cm.method_type = 'email'
                                           AND c.user_id = :user_id
-                                          AND cm.value_string = ANY(:emails)
+                                          AND cm.value = ANY(:emails)
                                           AND NOT EXISTS (
                                               SELECT 1
                                               FROM journal_contacts jc
