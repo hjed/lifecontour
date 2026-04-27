@@ -27,15 +27,7 @@ class TestSyncCalendarEventsIntegration:
         test_contact_id = 9900
         etag = '"etag-abc"'
 
-        # Insert user
-        await db_session.execute(
-            text("""
-                INSERT INTO users (id, email, password_hash, created_at, updated_at)
-                VALUES (:user_id, :email, 'hash', :now, :now)
-                ON CONFLICT (id) DO NOTHING
-            """),
-            {"user_id": test_user, "email": test_email, "now": now},
-        )
+
 
         # Insert synced calendar
         await db_session.execute(
