@@ -10,7 +10,7 @@ license = {text = "AGPL-3.0"}
 requires-python = ">=3.11"
 dependencies = [
     "sqlalchemy>=2.0.0",
-    "psycopg2-binary>=2.9.0",
+    "psycopg2-binary>=2.9.12",
     "asyncpg>=0.31.0",
     "pydantic>=2.13.3",
     "structlog>=23.2.0",
