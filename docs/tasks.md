@@ -34,6 +34,8 @@ Read these first when working on the active product-alignment streams:
 
 - **[Contacts Product Specification](./product-specifications/contacts-product-specification.md)** - target product behaviour for the contacts improvement stream
 - **[Journals Product Specification](./product-specifications/journals-product-specification.md)** - target product behaviour for the journals improvement stream
+- **[Outdoor Logbook Product Specification](./product-specifications/outdoor-logbook-product-specification.md)** - target product behaviour for the outdoor logbook expansion
+- **[Integration Architecture & Strava Product Specification](./product-specifications/integration-architecture-and-strava-product-specification.md)** - event bus migration and Strava integration
 
 ---
 
@@ -163,25 +165,26 @@ Read these first when working on the active product-alignment streams:
 - Activity statistics and analytics
 - Preparation for Strava integration
 
-### [Iteration 5: Strava Integration](./tasks/iteration-5-strava-integration.md)
+### [Iteration 5: Integration Architecture & Strava Integration](./tasks/iteration-5-integration-architecture-and-strava.md)
 **Status:** 🟡 PLANNED
-**Dependencies:** Iteration 4.5 (Fitness & Activity Types)
-**Goal:** Integrate Strava activities with automatic journal entry creation and merge capabilities
+**Dependencies:** Iteration 4.5 (Fitness & Activity Types), Iteration 7 (merge/review — partial), Iteration 9 (outdoor logbook activity types — partial)
+**Goal:** Replace the hard-coded outbox processor with a Redis Streams event bus, make integrations pluggable, and deliver one-way Strava activity import with merge review
 
 **Key Features:**
-- Strava OAuth 2.0 authentication with token refresh
-- Activity data synchronization (incremental sync)
-- Automatic FITNESS journal creation from Strava activities
-- GPX track import and storage
-- Merge logic for duplicate detection and conflict resolution
-- ARQ worker for background sync
-- Integration management UI
+- Redis Streams event bus replacing direct-dispatch outbox processor
+- Pluggable integration dashboard with dynamic panel rendering
+- Strava OAuth 2.0 authentication with webhook-first sync
+- Activity data import with GPX track storage and elevation derivation
+- Merge review queue integration for duplicate/overlap detection
+- Participant detection from Strava athletes with manual mapping
+- External system link display on journal/contact detail pages
 
 **Architecture:**
+- Redis Streams consumer groups for independent event consumption
+- Transactional outbox relay preserving atomicity guarantees
+- Pluggable integration registry with dynamic UI rendering
 - Follows isolated worker architecture pattern
-- Message-based communication via ARQ
-- Idempotent operations for safe redelivery
-- Change event tracking with source attribution
+- See [Integration Architecture & Strava Product Specification](./product-specifications/integration-architecture-and-strava-product-specification.md) for full spec
 
 ### [Iteration 6: Immich Integration](./tasks/iteration-6-immich-integration.md)
 **Status:** 🟡 PLANNED
@@ -232,6 +235,20 @@ Read these first when working on the active product-alignment streams:
 - Performance optimization and scalability improvements
 - Advanced security and privacy features
 - Future protocol support and extensibility
+
+### [Iteration 9: Outdoor Logbook](./tasks/iteration-9-outdoor-logbook.md)
+**Status:** 🟡 PLANNED
+**Dependencies:** Iteration 7 (journal hierarchy, calendar sync, MCP parity), Iteration 4.5 (fitness and activity types)
+**Goal:** Expand outdoor activity journals into a comprehensive outdoor logbook
+
+**Key Features:**
+- Structured abseil pitch tracking with anchor details and auto-calculated totals
+- Reusable activity templates for canyoning, caving, and climbing
+- New activity types: CAVING, CANOEING, SNORKELLING, DIVING, DOWNHILL_SKIING
+- Supporting types: OUTDOOR_TRAINING, OUTDOOR_PLANNING, GEAR_MAINTENANCE
+- Gear items entity with future SnipeIT sync compatibility
+- PDF logbook export with yearly summaries and participant index
+- MCP parity for all new capabilities
 
 ---
 
