@@ -239,7 +239,7 @@ test.describe('Journal Types', () => {
 
       // Verify the specific journal we created is in the list
       const ourJournal = filterData.data.find(
-        (j: any) => j.id === journalIds[1]
+        (j: any) => String(j.id) === String(journalIds[1])
       );
       expect(ourJournal).toBeDefined();
       expect(ourJournal.attributes.title).toBe('Mood Journal');

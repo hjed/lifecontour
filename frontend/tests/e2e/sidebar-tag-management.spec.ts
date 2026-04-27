@@ -2,6 +2,9 @@ import { test, expect } from './fixtures';
 import { TestDataManager } from './data-management';
 
 test.describe('Sidebar Tag Management', () => {
+  // Force desktop viewport — sidebar tag CRUD requires the desktop sidebar.
+  // Mobile sidebar responsive behavior is covered in sidebar.spec.ts.
+  test.use({ viewport: { width: 1024, height: 768 } });
   test('can create a new tag from the sidebar', async ({
     authenticatedPage: page,
     testCleanup,

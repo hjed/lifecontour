@@ -44,7 +44,6 @@ class SearchIndexer:
                 "TagAssigned",
                 "TagRemoved",
                 "ImportantDateAdded",
-                "ImportantDateUpdated",
                 "ImportantDateDeleted",
             ]:
                 await self._process_contact_event(event)
@@ -88,7 +87,6 @@ class SearchIndexer:
                 "ContactUpdated",
                 "ContactSummaryRefreshRequested",
                 "ImportantDateAdded",
-                "ImportantDateUpdated",
                 "ImportantDateDeleted",
             ]:
                 await self._index_contact_updated(contact_index_name, event)
@@ -122,6 +120,10 @@ class SearchIndexer:
         """
         Ensure the contacts index exists with proper settings.
 
+        Settings are always re-applied so that new filterable/sortable/searchable
+        attributes take effect on already-existing indices without requiring
+        recreation.
+
         Args:
             index_name: Name of the contacts index
         """
@@ -129,6 +131,10 @@ class SearchIndexer:
             # Try to get the index
             index = self.client.index(index_name)
             index.get_stats()
+
+            # Index exists — re-apply settings so new attributes are picked up
+            task = index.update_settings(CONTACTS_INDEX_SETTINGS)
+            self.client.wait_for_task(task.task_uid)
 
         except MeilisearchError:
             # Index doesn't exist, create it
@@ -386,10 +392,23 @@ class SearchIndexer:
                         latest_journal_date = row_dt
 
             # Fetch activities (history)
+            # Use the same broad predicate as SqlContactFieldHistoryRepository
+            # to include changes to contact methods, addresses, notes, and tags
             history_query = text("""
                 SELECT created_at
                 FROM contact_field_history
-                WHERE entity_id = :contact_id AND entity_type = 'contact'
+                WHERE
+                    (entity_type = 'contact' AND entity_id = :contact_id)
+                    OR (entity_type IN ('contact_method', 'contact_address', 'contact_note', 'contact_tag')
+                        AND entity_id IN (
+                            SELECT id FROM contact_methods WHERE contact_id = :contact_id
+                            UNION
+                            SELECT id FROM contact_addresses WHERE contact_id = :contact_id
+                            UNION
+                            SELECT id FROM contact_notes WHERE contact_id = :contact_id
+                            UNION
+                            SELECT tag_id FROM contact_tags WHERE contact_id = :contact_id
+                        ))
             """)
             history_result = await self.db_connection.execute(
                 history_query, {"contact_id": contact_id}
