@@ -1,5 +1,28 @@
 import { test, expect } from './fixtures';
+import type { Page } from '@playwright/test';
 import { TestDataManager } from './data-management';
+
+/**
+ * Ensure the sidebar is visible and the Contacts section is expanded.
+ * On mobile viewports, this opens the hamburger Sheet first.
+ */
+async function ensureSidebarOpen(page: Page) {
+  const mobileTrigger = page.getByTestId('mobile-nav-trigger');
+  if (await mobileTrigger.isVisible()) {
+    await mobileTrigger.click();
+    await expect(
+      page.getByRole('heading', { name: 'Navigation' })
+    ).toBeVisible();
+  }
+
+  // Expand Contacts section if collapsed
+  const sectionHeader = page.getByRole('button', { name: 'Contacts' });
+  await expect(sectionHeader).toBeVisible();
+  const isExpanded = await sectionHeader.getAttribute('aria-expanded');
+  if (isExpanded === 'false') {
+    await sectionHeader.click();
+  }
+}
 
 test.describe('Sidebar Tag Management', () => {
   test('can create a new tag from the sidebar', async ({
@@ -14,13 +37,7 @@ test.describe('Sidebar Tag Management', () => {
     );
 
     await page.goto('/contacts');
-
-    // Expand Contacts section if not expanded
-    const sectionHeader = page.getByRole('button', { name: 'Contacts' });
-    const isExpanded = await sectionHeader.getAttribute('aria-expanded');
-    if (isExpanded === 'false') {
-      await sectionHeader.click();
-    }
+    await ensureSidebarOpen(page);
 
     // Click Create Tag button
     await page.getByRole('button', { name: 'Create Tag' }).click();
@@ -42,6 +59,10 @@ test.describe('Sidebar Tag Management', () => {
     // Verify Toast appears
     await expect(page.getByText('Tag created successfully')).toBeVisible();
 
+    // On mobile the Sheet may have closed after the dialog interaction,
+    // so re-open the sidebar before checking for the new tag link.
+    await ensureSidebarOpen(page);
+
     // Verify tag appears in sidebar (may require React Query refetch + re-render)
     const tagLink = page.getByRole('link', {
       name: uniqueTagName,
@@ -62,13 +83,7 @@ test.describe('Sidebar Tag Management', () => {
     testCleanup(async () => await dataManager.cleanup());
 
     await page.goto('/contacts');
-
-    // Ensure section is expanded
-    const sectionHeader = page.getByRole('button', { name: 'Contacts' });
-    const isExpanded = await sectionHeader.getAttribute('aria-expanded');
-    if (isExpanded === 'false') {
-      await sectionHeader.click();
-    }
+    await ensureSidebarOpen(page);
 
     // Wait for the tag to be visible
     const tagLink = page.getByRole('link', { name: tagName, exact: true });
@@ -97,6 +112,9 @@ test.describe('Sidebar Tag Management', () => {
     // Verify toast
     await expect(page.getByText('Tag updated successfully')).toBeVisible();
 
+    // Re-open sidebar on mobile to verify updated tag
+    await ensureSidebarOpen(page);
+
     // Verify updated tag appears in sidebar
     await expect(
       page.getByRole('link', { name: newTagName, exact: true })
@@ -117,13 +135,7 @@ test.describe('Sidebar Tag Management', () => {
     testCleanup(async () => await dataManager.cleanup());
 
     await page.goto('/contacts');
-
-    // Ensure section is expanded
-    const sectionHeader = page.getByRole('button', { name: 'Contacts' });
-    const isExpanded = await sectionHeader.getAttribute('aria-expanded');
-    if (isExpanded === 'false') {
-      await sectionHeader.click();
-    }
+    await ensureSidebarOpen(page);
 
     const tagLink = page.getByRole('link', { name: tagName, exact: true });
     await expect(tagLink).toBeVisible();
@@ -149,6 +161,9 @@ test.describe('Sidebar Tag Management', () => {
     // Verify toast
     await expect(page.getByText('Tag deleted successfully')).toBeVisible();
 
+    // Re-open sidebar on mobile to verify tag removed
+    await ensureSidebarOpen(page);
+
     // Verify tag disappears from sidebar
     await expect(
       page.getByRole('link', { name: tagName, exact: true })
@@ -159,12 +174,7 @@ test.describe('Sidebar Tag Management', () => {
     authenticatedPage: page,
   }) => {
     await page.goto('/contacts');
-
-    const sectionHeader = page.getByRole('button', { name: 'Contacts' });
-    const isExpanded = await sectionHeader.getAttribute('aria-expanded');
-    if (isExpanded === 'false') {
-      await sectionHeader.click();
-    }
+    await ensureSidebarOpen(page);
 
     await page.getByRole('button', { name: 'Create Tag' }).click();
 
@@ -192,12 +202,7 @@ test.describe('Sidebar Tag Management', () => {
     testCleanup(async () => await dataManager.cleanup());
 
     await page.goto('/contacts');
-
-    const sectionHeader = page.getByRole('button', { name: 'Contacts' });
-    const isExpanded = await sectionHeader.getAttribute('aria-expanded');
-    if (isExpanded === 'false') {
-      await sectionHeader.click();
-    }
+    await ensureSidebarOpen(page);
 
     const tagLink = page.getByRole('link', { name: tagName, exact: true });
     await expect(tagLink).toBeVisible();

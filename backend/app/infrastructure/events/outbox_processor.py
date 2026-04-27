@@ -130,6 +130,9 @@ class OutboxProcessor:
                 await self._process_summary_generation_event(
                     event, search_indexer.db_connection
                 )
+                # After summary generation completes, forward the event to search indexer
+                # so the contact index is updated with the new summary text
+                await search_indexer.process_event(event)
             else:
                 # Process other events with the search indexer
                 await search_indexer.process_event(event)

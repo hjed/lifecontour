@@ -546,8 +546,15 @@ test.describe('Journal Detail Page', () => {
       await tagSelect.click();
       await page.getByRole('option', { name: tag.name }).click();
 
-      // Confirm addition (exact: true avoids matching the 'Add Tag' trigger button)
-      await page.getByRole('button', { name: 'Add', exact: true }).click();
+      // Confirm addition — wait for the API response so the UI has time to update
+      await Promise.all([
+        page.waitForResponse(
+          resp =>
+            resp.url().includes(`/api/journals/${journal.id}`) &&
+            resp.request().method() === 'POST'
+        ),
+        page.getByRole('button', { name: 'Add', exact: true }).click(),
+      ]);
 
       // Tag badge should now appear
       await expect(page.getByTestId(`tag-badge-${tag.id}`)).toBeVisible();

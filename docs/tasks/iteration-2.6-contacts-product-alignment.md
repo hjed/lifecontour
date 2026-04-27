@@ -466,15 +466,15 @@ The sequence reflects both user priority and technical dependency:
 **PR Size:** ~5-7 files
 
 **Acceptance Criteria:**
-- [ ] Search indexing receives summary, activity, relationship, tag, journal, and date signals in a controlled way.
-- [ ] Ranking inputs are emitted without requiring the final search UI to land in the same PR.
-- [ ] Indexing remains robust when summary data is disabled or missing.
-- [ ] Existing search indexing is not regressed.
+- [x] Search indexing receives summary, activity, relationship, tag, journal, and date signals in a controlled way.
+- [x] Ranking inputs are emitted without requiring the final search UI to land in the same PR.
+- [x] Indexing remains robust when summary data is disabled or missing.
+- [x] Existing search indexing is not regressed.
 
 **Required Test Coverage:**
-- **Unit:** ranking-signal calculation and fallback rules.
-- **Integration:** indexing pipeline tests proving new signals are emitted and stored safely.
-- **E2E:** search flow demonstrating the index still serves usable results after the signal changes.
+- [x] **Unit:** ranking-signal calculation and fallback rules.
+- [x] **Integration:** indexing pipeline tests proving new signals are emitted and stored safely.
+- [x] **E2E:** search flow demonstrating the index still serves usable results after the signal changes.
 
 ### ITER2.6-008: Global Search UX Completion
 **Objective:** Turn the top search box into a real product feature using the existing backend search foundations.

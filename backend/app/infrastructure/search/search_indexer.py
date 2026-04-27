@@ -5,6 +5,7 @@ Processes domain events from the outbox and updates MeiliSearch indices
 to keep search data synchronized with the database.
 """
 
+from datetime import UTC
 from typing import Any
 
 import structlog
@@ -42,6 +43,8 @@ class SearchIndexer:
             if event.event_type.startswith("Contact") or event.event_type in [
                 "TagAssigned",
                 "TagRemoved",
+                "ImportantDateAdded",
+                "ImportantDateDeleted",
             ]:
                 await self._process_contact_event(event)
             elif event.event_type.startswith("Journal"):
@@ -80,7 +83,12 @@ class SearchIndexer:
 
             if event.event_type == "ContactCreated":
                 await self._index_contact_created(contact_index_name, event)
-            elif event.event_type == "ContactUpdated":
+            elif event.event_type in [
+                "ContactUpdated",
+                "ContactSummaryRefreshRequested",
+                "ImportantDateAdded",
+                "ImportantDateDeleted",
+            ]:
                 await self._index_contact_updated(contact_index_name, event)
             elif event.event_type == "ContactDeleted":
                 self._index_contact_deleted(contact_index_name, event)
@@ -112,6 +120,10 @@ class SearchIndexer:
         """
         Ensure the contacts index exists with proper settings.
 
+        Settings are always re-applied so that new filterable/sortable/searchable
+        attributes take effect on already-existing indices without requiring
+        recreation.
+
         Args:
             index_name: Name of the contacts index
         """
@@ -119,6 +131,10 @@ class SearchIndexer:
             # Try to get the index
             index = self.client.index(index_name)
             index.get_stats()
+
+            # Index exists — re-apply settings so new attributes are picked up
+            task = index.update_settings(CONTACTS_INDEX_SETTINGS)
+            self.client.wait_for_task(task.task_uid)
 
         except MeilisearchError:
             # Index doesn't exist, create it
@@ -152,6 +168,8 @@ class SearchIndexer:
             return None
 
         try:
+            from datetime import datetime, timedelta
+
             # Fetch basic contact info
             contact_query = text("""
                 SELECT id, first_name, last_name, middle_name, nick_name,
@@ -287,6 +305,143 @@ class SearchIndexer:
                         rel_type = row.relationship_type.replace("_", " ").title()
                     relationships_list.append(f"{rel_type} of {name}")
 
+            # Fetch contact summaries
+            summary_query = text("""
+                SELECT summary_text, is_disabled
+                FROM contact_summaries
+                WHERE contact_id = :contact_id
+            """)
+            summary_result = await self.db_connection.execute(
+                summary_query, {"contact_id": contact_id}
+            )
+            summary_row = summary_result.fetchone()
+            summary_text = None
+            has_summary = False
+            if summary_row and not summary_row.is_disabled:
+                summary_text = summary_row.summary_text
+                has_summary = bool(summary_text)
+
+            # Fetch important dates
+            dates_query = text("""
+                SELECT cid.date_type, cid.precision, cid.year, cid.month, cid.day, cdt.name as custom_name
+                FROM contact_important_dates cid
+                LEFT JOIN custom_date_types cdt ON cid.custom_date_type_id = cdt.id
+                WHERE cid.contact_id = :contact_id
+            """)
+            dates_result = await self.db_connection.execute(
+                dates_query, {"contact_id": contact_id}
+            )
+            dates_rows = dates_result.fetchall()
+            important_dates_list = []
+
+            import calendar
+
+            for row in dates_rows:
+                parts = []
+                # Name part
+                if row.date_type == "custom" and row.custom_name:
+                    parts.append(row.custom_name)
+                else:
+                    parts.append(row.date_type.replace("_", " ").title())
+
+                # Date part
+                date_str = ""
+                if row.precision == "full":
+                    month_name = calendar.month_name[row.month] if row.month else ""
+                    date_str = f"{month_name} {row.day}, {row.year}"
+                elif row.precision == "day_month":
+                    month_name = calendar.month_name[row.month] if row.month else ""
+                    date_str = f"{month_name} {row.day}"
+                elif row.precision == "year":
+                    date_str = str(row.year)
+
+                if date_str:
+                    important_dates_list.append(f"{parts[0]} ({date_str})")
+
+            # Fetch journal mentions
+            journals_query = text("""
+                SELECT j.title, j.created_at
+                FROM journals j
+                JOIN journal_contact_relationships jc ON j.id = jc.journal_id
+                WHERE jc.contact_id = :contact_id
+            """)
+            journals_result = await self.db_connection.execute(
+                journals_query, {"contact_id": contact_id}
+            )
+            journals_rows = journals_result.fetchall()
+
+            journal_mentions = []
+            journal_count_30d = 0
+            now = datetime.now(UTC)
+            thirty_days_ago = now - timedelta(days=30)
+
+            latest_journal_date = None
+            for row in journals_rows:
+                if row.title:
+                    journal_mentions.append(row.title)
+
+                # created_at is naive or aware, we handle properly in PG but python needs aware for comparison
+                row_dt = row.created_at
+                if row_dt and row_dt.tzinfo is None:
+                    row_dt = row_dt.replace(tzinfo=UTC)
+
+                if row_dt:
+                    if row_dt >= thirty_days_ago:
+                        journal_count_30d += 1
+                    if not latest_journal_date or row_dt > latest_journal_date:
+                        latest_journal_date = row_dt
+
+            # Fetch activities (history)
+            # Use the same broad predicate as SqlContactFieldHistoryRepository
+            # to include changes to contact methods, addresses, notes, and tags
+            history_query = text("""
+                SELECT created_at
+                FROM contact_field_history
+                WHERE
+                    (entity_type = 'contact' AND entity_id = :contact_id)
+                    OR (entity_type IN ('contact_method', 'contact_address', 'contact_note', 'contact_tag')
+                        AND entity_id IN (
+                            SELECT id FROM contact_methods WHERE contact_id = :contact_id
+                            UNION
+                            SELECT id FROM contact_addresses WHERE contact_id = :contact_id
+                            UNION
+                            SELECT id FROM contact_notes WHERE contact_id = :contact_id
+                            UNION
+                            SELECT tag_id FROM contact_tags WHERE contact_id = :contact_id
+                        ))
+            """)
+            history_result = await self.db_connection.execute(
+                history_query, {"contact_id": contact_id}
+            )
+            history_rows = history_result.fetchall()
+
+            activity_count_30d = 0
+            latest_activity_date = None
+            for row in history_rows:
+                row_dt = row.created_at
+                if row_dt and row_dt.tzinfo is None:
+                    row_dt = row_dt.replace(tzinfo=UTC)
+
+                if row_dt:
+                    if row_dt >= thirty_days_ago:
+                        activity_count_30d += 1
+                    if not latest_activity_date or row_dt > latest_activity_date:
+                        latest_activity_date = row_dt
+
+            # Calculate last activity date
+            last_activity_date = contact_row.updated_at
+            if last_activity_date and last_activity_date.tzinfo is None:
+                last_activity_date = last_activity_date.replace(tzinfo=UTC)
+
+            if latest_journal_date and (
+                not last_activity_date or latest_journal_date > last_activity_date
+            ):
+                last_activity_date = latest_journal_date
+            if latest_activity_date and (
+                not last_activity_date or latest_activity_date > last_activity_date
+            ):
+                last_activity_date = latest_activity_date
+
             return {
                 "id": contact_row.id,
                 "first_name": contact_row.first_name,
@@ -311,6 +466,15 @@ class SearchIndexer:
                 "updated_at": contact_row.updated_at.isoformat()
                 if contact_row.updated_at
                 else None,
+                "summary_text": summary_text,
+                "important_dates": important_dates_list,
+                "journal_mentions": journal_mentions,
+                "has_summary": has_summary,
+                "last_activity_date": last_activity_date.isoformat()
+                if last_activity_date
+                else None,
+                "journal_count_30d": journal_count_30d,
+                "activity_count_30d": activity_count_30d,
             }
 
         except Exception as e:
