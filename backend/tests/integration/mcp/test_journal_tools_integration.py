@@ -33,6 +33,9 @@ from app.core.journal.adapters.sql.fitness_data_repository import (
 from app.core.journal.adapters.sql.jogging_data_repository import (
     SqlJoggingDataRepository,
 )
+from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
+    SqlJournalContactRelationshipRepository,
+)
 from app.core.journal.adapters.sql.outdoor_activity_data_repository import (
     SqlOutdoorActivityDataRepository,
 )
@@ -80,9 +83,11 @@ class JournalTestProvider(Provider):
         journal_repository = SqlJournalRepository(connection)
 
         # Create and return journal service
+        contact_relationship_repo = SqlJournalContactRelationshipRepository(connection)
         return JournalService(
             journal_repo=journal_repository,
             event_publisher=event_publisher,
+            contact_relationship_repo=contact_relationship_repo,
         )
 
 

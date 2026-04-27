@@ -86,11 +86,13 @@ from app.core.journal.models.repositories import (
     TravelDataRepository,
 )
 from app.core.journal.services.hierarchy_service import HierarchyService
+from app.core.journal.services.journal_contact_service import JournalContactService
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_service import JournalService
 from app.core.search.exceptions import SearchServiceUnavailableError
 from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.config import Settings
+from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.search.search_service import SearchService
 
 logger = structlog.get_logger()
@@ -2001,7 +2003,7 @@ async def _process_journal_type_data(
 async def _process_journal_contact_relationships(
     journal_id: int,
     contacts_data: list[dict[str, Any]],
-    contact_relationship_repo: JournalContactRelationshipRepository,
+    journal_contact_service: JournalContactService,
     connection: AsyncConnection,
 ) -> None:
     """
@@ -2010,7 +2012,7 @@ async def _process_journal_contact_relationships(
     Args:
         journal_id: The ID of the journal
         contacts_data: List of contact relationship data
-        contact_relationship_repo: Repository for contact relationships
+        journal_contact_service: Service for managing contact relationships
         connection: Active database connection to manage savepoints
     """
     for contact_data in contacts_data:
@@ -2067,7 +2069,9 @@ async def _process_journal_contact_relationships(
                 )
                 try:
                     async with connection.begin_nested():
-                        await contact_relationship_repo.create(relationship)
+                        await journal_contact_service.add_contact_to_journal(
+                            relationship, transaction=connection
+                        )
                 except IntegrityError:
                     # Log error and ignore, the context manager handles the rollback to the savepoint
                     logger.warning(
@@ -2087,6 +2091,7 @@ async def create_journal(
     request: Request,
     journal_request: JournalCreateRequest,
     journal_service: FromDishka[JournalService],
+    journal_contact_service: FromDishka[JournalContactService],
     calendar_info_repo: FromDishka[CalendarInfoRepository],
     calendar_repo: FromDishka[CalendarRepository],
     mood_data_repo: FromDishka[MoodDataRepository],
@@ -2175,12 +2180,13 @@ async def create_journal(
         relationships = journal_request.data.relationships
         if relationships.contacts:
             contacts_data = relationships.contacts.get("data", [])
-            await _process_journal_contact_relationships(
-                journal_id,
-                contacts_data,
-                contact_relationship_repo,
-                connection,
-            )
+            if contacts_data:
+                await _process_journal_contact_relationships(
+                    journal_id,
+                    contacts_data,
+                    journal_contact_service,
+                    connection,
+                )
 
     # Fetch all enrichment data
     types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
@@ -2259,6 +2265,7 @@ async def update_journal(
     route_repo: FromDishka[RouteRepository],
     contact_repo: FromDishka[ContactRepository],
     connection: FromDishka[AsyncConnection],
+    event_publisher: FromDishka[OutboxEventPublisher],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
     """
@@ -2395,6 +2402,7 @@ async def partial_update_journal(
     route_repo: FromDishka[RouteRepository],
     contact_repo: FromDishka[ContactRepository],
     connection: FromDishka[AsyncConnection],
+    event_publisher: FromDishka[OutboxEventPublisher],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
     """
@@ -3456,6 +3464,7 @@ async def add_contact_to_journal(
     route_repo: FromDishka[RouteRepository],
     contact_repo: FromDishka[ContactRepository],
     connection: FromDishka[AsyncConnection],
+    journal_contact_service: FromDishka[JournalContactService],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
     """
@@ -3515,7 +3524,9 @@ async def add_contact_to_journal(
         role=role,
     )
     try:
-        await contact_relationship_repo.create(relationship)
+        await journal_contact_service.add_contact_to_journal(
+            relationship, transaction=connection
+        )
     except IntegrityError as e:
         raise JournalValidationError(
             "contact_id",
@@ -3587,6 +3598,7 @@ async def update_journal_contact_relationship(
     route_repo: FromDishka[RouteRepository],
     contact_repo: FromDishka[ContactRepository],
     connection: FromDishka[AsyncConnection],
+    journal_contact_service: FromDishka[JournalContactService],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
     """
@@ -3650,10 +3662,11 @@ async def update_journal_contact_relationship(
             "attributes", "At least one of status or role must be provided"
         )
 
-    updated = await contact_relationship_repo.update_attributes(
+    updated = await journal_contact_service.update_attributes(
         journal_id=journal_id,
         contact_id=contact_id,
         relationship_type=rel_type_enum,
+        transaction=connection,
         status=status,
         role=role,
         update_status=update_status,
@@ -3730,6 +3743,7 @@ async def remove_contact_from_journal(
     route_repo: FromDishka[RouteRepository],
     contact_repo: FromDishka[ContactRepository],
     connection: FromDishka[AsyncConnection],
+    journal_contact_service: FromDishka[JournalContactService],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
     """
@@ -3764,9 +3778,12 @@ async def remove_contact_from_journal(
         ) from e
 
     # Delete the relationship
-    await contact_relationship_repo.delete(
-        journal_id, contact_id_int, relationship_type_enum
-    )
+    try:
+        await journal_contact_service.remove_contact_from_journal(
+            journal_id, contact_id_int, relationship_type_enum, transaction=connection
+        )
+    except Exception as e:
+        raise e
 
     # Get updated journal
     updated_journal = await journal_service.get_journal(journal_id)

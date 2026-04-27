@@ -1794,7 +1794,10 @@ async def create_journal_entry(
     journal_repo = repos.journal_repo
 
     # Create journal service
-    journal_service = JournalService(journal_repo, event_publisher)
+    contact_relationship_repo = SqlJournalContactRelationshipRepository(db_connection)
+    journal_service = JournalService(
+        journal_repo, event_publisher, contact_relationship_repo
+    )
 
     # Create journal entity
     journal = Journal(
@@ -1972,7 +1975,10 @@ async def update_journal_entry(
     # Create repositories
     repos = _create_journal_tool_repositories(db_connection)
     journal_repo = repos.journal_repo
-    journal_service = JournalService(journal_repo, event_publisher)
+    contact_relationship_repo = SqlJournalContactRelationshipRepository(db_connection)
+    journal_service = JournalService(
+        journal_repo, event_publisher, contact_relationship_repo
+    )
 
     # Get existing journal
     existing_journal = await journal_repo.find_by_id(journal_id)
@@ -2828,7 +2834,10 @@ async def delete_journal(
 
     # Create repositories
     journal_repo = SqlJournalRepository(db_connection)
-    journal_service = JournalService(journal_repo, event_publisher)
+    contact_relationship_repo = SqlJournalContactRelationshipRepository(db_connection)
+    journal_service = JournalService(
+        journal_repo, event_publisher, contact_relationship_repo
+    )
 
     # Delete journal
     await journal_service.delete_journal(journal_id, db_connection)

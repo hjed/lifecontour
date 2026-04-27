@@ -295,6 +295,80 @@ class TestJournalUpdateEndpoints:
         assert data["data"]["attributes"]["title"] == "Updated Title"
         assert data["data"]["attributes"]["content"] == "Updated content"
 
+    async def test_update_journal_with_contact_triggers_summary_refresh(
+        self, integration_api_client, async_connection
+    ):
+        """Test updating a journal with a contact triggers summary refresh outbox event."""
+        import json
+
+        from sqlalchemy import text
+
+        # Create contact
+        contact_data = {
+            "data": {
+                "type": "contacts",
+                "attributes": {
+                    "first_name": "Update",
+                    "last_name": "User",
+                    "contact_methods": [],
+                    "addresses": [],
+                    "notes": [],
+                },
+            }
+        }
+        contact_response = await integration_api_client.post(
+            "/api/contacts", json=contact_data
+        )
+        contact_id = contact_response.json()["data"]["id"]
+
+        # Clear existing outbox events (from contact creation)
+        await async_connection.execute(text("DELETE FROM outbox_events"))
+
+        # Create journal
+        create_data = create_journal_request_data(title="Init", content="Content")
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        journal_id = create_response.json()["data"]["id"]
+
+        # Add relationship
+        relationship_data = {
+            "data": {
+                "type": "journal-contact-relationships",
+                "attributes": {
+                    "contact_id": str(contact_id),
+                    "relationship_type": "PARTICIPANT",
+                },
+            }
+        }
+        await integration_api_client.post(
+            f"/api/journals/{journal_id}/relationships/contacts", json=relationship_data
+        )
+
+        # Clear outbox events again (from journal/relationship creation)
+        await async_connection.execute(text("DELETE FROM outbox_events"))
+
+        # Update the journal
+        update_data = create_journal_request_data(
+            title="Updated Title", content="Updated content"
+        )
+        update_data["data"]["id"] = str(journal_id)
+        await integration_api_client.put(
+            f"/api/journals/{journal_id}", json=update_data
+        )
+
+        # Verify ContactSummaryRefreshRequested outbox event
+        result = await async_connection.execute(
+            text(
+                "SELECT event_data FROM outbox_events WHERE event_type = 'ContactSummaryRefreshRequested'"
+            )
+        )
+        rows = result.fetchall()
+
+        assert len(rows) > 0
+        event_data = json.loads(rows[0].event_data)
+        assert event_data["contact_id"] == int(contact_id)
+
     async def test_patch_journal_partial(self, integration_api_client):
         """Test partial update of a journal."""
         # Create a journal
@@ -574,6 +648,67 @@ class TestJournalRelationshipEndpoints:
         assert contacts[0]["relationship_type"] == "PARTICIPANT"
         assert contacts[0]["status"] == "ATTENDING"
         assert contacts[0]["role"] == "ORGANISER"
+
+    async def test_add_contact_relationship_triggers_summary_refresh(
+        self, integration_api_client, async_connection
+    ):
+        """Test adding a contact relationship triggers summary refresh outbox event."""
+        import json
+
+        from sqlalchemy import text
+
+        create_data = create_journal_request_data(
+            title="Trigger Test", content="Content"
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        journal_id = create_response.json()["data"]["id"]
+
+        contact_data = {
+            "data": {
+                "type": "contacts",
+                "attributes": {
+                    "first_name": "RelTest",
+                    "last_name": "User",
+                    "contact_methods": [],
+                    "addresses": [],
+                    "notes": [],
+                },
+            }
+        }
+        contact_response = await integration_api_client.post(
+            "/api/contacts", json=contact_data
+        )
+        contact_id = contact_response.json()["data"]["id"]
+
+        # Clear outbox events
+        await async_connection.execute(text("DELETE FROM outbox_events"))
+
+        contact_rel_data = {
+            "data": {
+                "type": "journal-contact-relationships",
+                "attributes": {
+                    "contact_id": str(contact_id),
+                    "relationship_type": "PARTICIPANT",
+                },
+            }
+        }
+        await integration_api_client.post(
+            f"/api/journals/{journal_id}/relationships/contacts", json=contact_rel_data
+        )
+
+        # Verify ContactSummaryRefreshRequested outbox event
+        result = await async_connection.execute(
+            text(
+                "SELECT event_data FROM outbox_events WHERE event_type = 'ContactSummaryRefreshRequested'"
+            )
+        )
+        rows = result.fetchall()
+
+        assert len(rows) > 0
+        event_data = json.loads(rows[0].event_data)
+        assert event_data["contact_id"] == int(contact_id)
 
     async def test_remove_contact_relationship(self, integration_api_client):
         """Test removing a contact relationship from a journal."""

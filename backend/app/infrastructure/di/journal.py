@@ -71,6 +71,7 @@ from app.core.journal.models.repositories import (
     RouteRepository,
     TravelDataRepository,
 )
+from app.core.journal.services.journal_contact_service import JournalContactService
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_service import JournalService
 from app.core.journal.services.route_service import RouteService
@@ -215,11 +216,13 @@ class JournalProvider(Provider):
         self,
         journal_repo: JournalRepository,
         event_publisher: OutboxEventPublisher,
+        contact_relationship_repo: JournalContactRelationshipRepository,
     ) -> JournalService:
         """Provide a JournalService instance."""
         return JournalService(
             journal_repo=journal_repo,
             event_publisher=event_publisher,
+            contact_relationship_repo=contact_relationship_repo,
         )
 
     @provide(scope=Scope.REQUEST)
@@ -243,5 +246,17 @@ class JournalProvider(Provider):
         """Provide a RouteService instance."""
         return RouteService(
             route_repo=route_repo,
+            event_publisher=event_publisher,
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def journal_contact_service(
+        self,
+        contact_relationship_repo: JournalContactRelationshipRepository,
+        event_publisher: OutboxEventPublisher,
+    ) -> JournalContactService:
+        """Provide a JournalContactService instance."""
+        return JournalContactService(
+            contact_relationship_repo=contact_relationship_repo,
             event_publisher=event_publisher,
         )
