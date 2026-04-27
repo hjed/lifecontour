@@ -44,19 +44,12 @@ test.describe('Calendar Management', () => {
     const updatedName = `${calendarName} (Updated)`;
     await page.getByLabel(/name/i).fill(updatedName);
 
-    // Submit and wait for update + React Query refetch
+    // Submit and wait for update
     await Promise.all([
       page.waitForResponse(
         response =>
           response.url().includes('/api/calendars/') &&
           response.request().method() === 'PUT' &&
-          response.ok()
-      ),
-      // Also wait for the React Query invalidation refetch to complete
-      page.waitForResponse(
-        response =>
-          response.url().includes('/api/calendars') &&
-          response.request().method() === 'GET' &&
           response.ok()
       ),
       page.getByRole('button', { name: /save changes/i }).click(),

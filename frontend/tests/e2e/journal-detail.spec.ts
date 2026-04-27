@@ -793,20 +793,12 @@ test.describe('Journal Detail Page', () => {
       await roleSelect.click();
       await page.getByRole('option', { name: 'ORGANISER' }).click();
 
-      // Wait for both the PATCH API call and the React Query invalidation refetch to complete
+      // Wait for the PATCH API call to complete
       const [updateResponse] = await Promise.all([
         page.waitForResponse(
           resp =>
             resp.url().includes(`/relationships/contacts/${contact.id}`) &&
             resp.request().method() === 'PATCH'
-        ),
-        // Wait for the React Query invalidation refetch to complete before
-        // asserting UI state — Firefox re-renders can lag behind the PATCH response.
-        page.waitForResponse(
-          resp =>
-            resp.url().includes(`/api/journals/${journal.id}`) &&
-            resp.request().method() === 'GET' &&
-            resp.status() === 200
         ),
         page.getByRole('button', { name: 'Save' }).click(),
       ]);
