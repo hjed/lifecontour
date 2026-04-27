@@ -122,3 +122,70 @@ class TestCreateContactResourceFromSearchHit:
         assert resource.meta["search_metadata"]["tags"] == []
         assert resource.meta["search_metadata"]["email"] is None
         assert resource.meta["search_metadata"]["phone"] is None
+
+
+class TestContactResourceRankingSignals:
+    """Test that ranking signals are included in meta.search_metadata."""
+
+    def test_ranking_signals_included_in_search_metadata(self):
+        """Test that ranking signal fields are present in meta.search_metadata."""
+        hit = {
+            "id": 100,
+            "first_name": "Alice",
+            "last_name": "Ranking",
+            "is_favourite": True,
+            "has_summary": True,
+            "journal_count_30d": 5,
+            "activity_count_30d": 12,
+            "last_activity_date": "2024-06-15T10:00:00Z",
+            "relationships": ["Parent of Bob", "Friend of Charlie"],
+            "tags": ["VIP"],
+            "email": "alice@example.com",
+            "phone": "+61400000000",
+            "_rankingScore": 0.85,
+        }
+        base_url = "https://api.example.com"
+
+        resource = create_contact_resource_from_search_hit(hit, base_url)
+
+        assert resource.meta is not None
+        metadata = resource.meta["search_metadata"]
+        assert metadata["is_favourite"] is True
+        assert metadata["has_summary"] is True
+        assert metadata["journal_count_30d"] == 5
+        assert metadata["activity_count_30d"] == 12
+        assert metadata["last_activity_date"] == "2024-06-15T10:00:00Z"
+        assert metadata["relationships"] == ["Parent of Bob", "Friend of Charlie"]
+
+    def test_ranking_signals_default_when_absent(self):
+        """Test that ranking signals have sensible defaults when not present in hit."""
+        hit = {
+            "id": 101,
+            "first_name": "Bob",
+        }
+        base_url = "https://api.example.com"
+
+        resource = create_contact_resource_from_search_hit(hit, base_url)
+
+        assert resource.meta is not None
+        metadata = resource.meta["search_metadata"]
+        assert metadata["is_favourite"] is False
+        assert metadata["has_summary"] is False
+        assert metadata["journal_count_30d"] == 0
+        assert metadata["activity_count_30d"] == 0
+        assert metadata["last_activity_date"] is None
+        assert metadata["relationships"] == []
+
+    def test_ranking_score_included_in_meta(self):
+        """Test that _rankingScore from MeiliSearch is passed through as search_score."""
+        hit = {
+            "id": 102,
+            "first_name": "Charlie",
+            "_rankingScore": 0.92,
+        }
+        base_url = "https://api.example.com"
+
+        resource = create_contact_resource_from_search_hit(hit, base_url)
+
+        assert resource.meta is not None
+        assert resource.meta["search_score"] == 0.92

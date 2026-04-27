@@ -132,6 +132,17 @@ CONTACTS_INDEX_SETTINGS = {
         "journal_count_30d",
         "activity_count_30d",
     ],
+    "rankingRules": [
+        "words",
+        "typo",
+        "proximity",
+        "attribute",
+        "sort",
+        "exactness",
+        "is_favourite:desc",
+        "journal_count_30d:desc",
+        "activity_count_30d:desc",
+    ],
 }
 
 # Index configuration for journals

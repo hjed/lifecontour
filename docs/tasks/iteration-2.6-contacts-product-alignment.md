@@ -506,10 +506,11 @@ The sequence reflects both user priority and technical dependency:
 **PR Size:** ~5-7 files
 
 **Acceptance Criteria:**
-- [ ] Pressing Enter navigates to a dedicated search results page.
-- [ ] Results are grouped by Contacts and Journals.
-- [ ] Empty, loading, and error states are explicit.
-- [ ] Recent searches continue to work with the dedicated results flow.
+- [x] Pressing Enter navigates to a dedicated search results page.
+- [x] Results are grouped by Contacts and Journals.
+- [x] Empty, loading, and error states are explicit.
+- [x] Recent searches continue to work with the dedicated results flow.
+- [x] Reuse contact and journal list components as much as possible for the display of results.
 
 **Required Test Coverage:**
 - **Unit:** results-grouping and query-state helpers.
@@ -520,10 +521,10 @@ The sequence reflects both user priority and technical dependency:
 **PR Size:** ~4-6 files
 
 **Acceptance Criteria:**
-- [ ] Contact ranking in the UI reflects favourites, tags, relationships, journal signals, recent activity, and summary relevance.
-- [ ] The search experience works from the header without requiring a custom callback path.
-- [ ] AI-facing global search remains aligned with the same broad behaviour.
-- [ ] Search remains understandable even if explanation UI is deferred.
+- [x] Contact ranking in the UI reflects favourites, tags, relationships, journal signals, recent activity, and summary relevance.
+- [x] The search experience works from the header without requiring a custom callback path.
+- [x] AI-facing global search remains aligned with the same broad behaviour.
+- [x] Search remains understandable even if explanation UI is deferred.
 
 **Required Test Coverage:**
 - **Unit:** ranking-display or result-shaping helpers used by the UI.
