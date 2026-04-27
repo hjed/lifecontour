@@ -57,4 +57,60 @@ test.describe('Global Header Search', () => {
     // Verify it navigates to the contact detail page
     await expect(page).toHaveURL(new RegExp(`/contacts/${contact.id}`));
   });
+
+  test('should navigate to dedicated search results page on Enter', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const page = authenticatedPage;
+    const dataManager = new TestDataManager(page);
+
+    // Create a contact
+    const contact = await dataManager.createContact({
+      firstName: 'SearchResults',
+      lastName: 'Target',
+    });
+
+    testCleanup(async () => await dataManager.cleanup());
+
+    // Wait for the contact to be indexed in MeiliSearch
+    const contactName = `${contact.firstName} ${contact.lastName}`;
+    await waitForContactSearchIndexing(page, contact.firstName, contactName);
+
+    // Go to the dashboard
+    await page.goto('/');
+
+    // Locate the global search input in the header
+    const searchInput = page.getByRole('combobox', { name: /global search/i });
+    await expect(searchInput).toBeVisible();
+
+    // Type the query
+    await searchInput.fill('SearchResults');
+
+    // Wait for the listbox and options to appear
+    const listbox = page.getByRole('listbox', { name: /search suggestions/i });
+    await expect(listbox).toBeVisible({ timeout: 10000 });
+
+    // Press Enter to trigger search
+    await searchInput.press('Enter');
+
+    // Verify it navigates to the search results page
+    await expect(page).toHaveURL(/\/search\?q=SearchResults/);
+
+    // Verify the results page renders the contact correctly
+    const resultsHeading = page.getByRole('heading', {
+      name: /Search Results/i,
+    });
+    await expect(resultsHeading).toBeVisible({ timeout: 10000 });
+
+    const contactsHeading = page.getByRole('heading', {
+      name: /Contacts \(\d+\)/i,
+    });
+    await expect(contactsHeading).toBeVisible();
+
+    const contactCard = page.getByRole('link', {
+      name: new RegExp(contactName, 'i'),
+    });
+    await expect(contactCard).toBeVisible();
+  });
 });

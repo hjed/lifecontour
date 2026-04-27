@@ -26,7 +26,7 @@ test.describe('Contact Tag Editing', () => {
 
     // Wait for the tags editor to be visible
     const tagsEditor = authenticatedPage.locator(
-      '[data-testid="contact-tags-editor"]:visible'
+      '[data-testid="contact-tags-editor"]'
     );
     await expect(tagsEditor).toBeVisible();
 
@@ -72,7 +72,7 @@ test.describe('Contact Tag Editing', () => {
 
     // Scope to the visible editor
     const tagsEditor = authenticatedPage.locator(
-      '[data-testid="contact-tags-editor"]:visible'
+      '[data-testid="contact-tags-editor"]'
     );
 
     // Verify the tag is displayed
@@ -109,7 +109,7 @@ test.describe('Contact Tag Editing', () => {
 
     // Scope to the visible editor
     const tagsEditor = authenticatedPage.locator(
-      '[data-testid="contact-tags-editor"]:visible'
+      '[data-testid="contact-tags-editor"]'
     );
     await expect(tagsEditor).toBeVisible();
 
@@ -149,7 +149,7 @@ test.describe('Contact Tag Editing', () => {
 
     // Verify tags editor is present
     await expect(
-      page.locator('[data-testid="contact-tags-editor"]:visible')
+      page.locator('[data-testid="contact-tags-editor"]')
     ).toBeVisible();
 
     // Verify inline editing still works

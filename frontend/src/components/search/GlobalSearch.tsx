@@ -121,12 +121,10 @@ export function GlobalSearch({
       if (onSearch) {
         onSearch(trimmedQuery);
       } else {
-        // TODO: ITER1.5-001 - Implement navigation to search results page
-        // router.push(`/search?q=${encodeURIComponent(trimmedQuery)}`);
-        console.log('Search query:', trimmedQuery);
+        router.push(`/search?q=${encodeURIComponent(trimmedQuery)}`);
       }
     },
-    [query, onSearch, saveRecentSearch]
+    [query, onSearch, saveRecentSearch, router]
   );
 
   // Handle input changes
