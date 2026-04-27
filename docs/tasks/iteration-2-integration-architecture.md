@@ -608,7 +608,7 @@ The remaining work for Iteration 2 focuses on bringing the implementation in lin
    - Ready for database migration: `cd backend && uv run alembic upgrade head`
 
 6. **Future Iterations (tracked elsewhere, not part of Iteration 2)**
-   - Implement additional integrations (Immich, Strava, Firefly III, etc.) following the patterns established here – see `docs/tasks/iteration-3-extended-integrations.md`, `docs/tasks/iteration-5-strava-integration.md`, and `docs/tasks/iteration-6-immich-integration.md`.
+   - Implement additional integrations (Immich, Strava, Firefly III, etc.) following the patterns established here – see `docs/tasks/iteration-3-extended-integrations.md`, `docs/tasks/iteration-5-integration-architecture-and-strava.md`, and `docs/tasks/iteration-6-immich-integration.md`.
    - Where those iterations introduce new patterns, update the Integration Architecture doc so it remains the single source of truth.
 
 **Production Readiness:** See `ITER2-004-Phase2-Production-Readiness.md` for the historical steel-thread checklist. The items above define the remaining work required for Iteration 2 to fully realise the Integration Architecture patterns in production.

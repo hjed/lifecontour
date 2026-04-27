@@ -1,6 +1,13 @@
 # Iteration 5: Strava Integration
 
-**Status:** 🟡 PLANNED
+**Status:** ⛔ SUPERSEDED
+**Superseded By:** [Iteration 5: Integration Architecture & Strava Integration](./iteration-5-integration-architecture-and-strava.md)
+
+> [!CAUTION]
+> This document has been superseded. The new iteration 5 document expands the scope to include event bus migration (Redis Streams) and pluggable integration UI in addition to Strava. The [Integration Architecture & Strava Product Specification](../product-specifications/integration-architecture-and-strava-product-specification.md) defines the target product behaviour.
+>
+> Non-conflicting detail from this document (OAuth flow steps, API client methods, ARQ worker lifecycle) remains valid as supplementary reference.
+
 **Dependencies:** Iteration 4.5 (Fitness & Activity Types)
 **Goal:** Integrate Strava activities with automatic journal entry creation and merge capabilities
 
