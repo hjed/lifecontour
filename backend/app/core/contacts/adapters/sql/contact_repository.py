@@ -513,7 +513,9 @@ class SqlContactRepository(ContactRepository):
             """
         )
         conn = transaction if transaction else self.conn
-        await conn.execute(query, {"contact_id": contact_id})
+        result = await conn.execute(query, {"contact_id": contact_id})
+        if result.rowcount == 0:
+            raise ContactNotFoundError(contact_id)
 
     async def delete(self, contact_id: int) -> None:
         """Delete a contact and all related data."""
