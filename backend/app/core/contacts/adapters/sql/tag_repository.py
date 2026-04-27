@@ -78,9 +78,9 @@ class SqlTagRepository(TagRepository):
         )
         result = await self.conn.execute(query, {"names": lower_names})
 
-        tags_dict = {}
+        lower_to_tag = {}
         for row in result:
-            tags_dict[row.name] = Tag(
+            lower_to_tag[row.name.lower()] = Tag(
                 id=row.id,
                 name=TagName(row.name),
                 parent_id=row.parent_id,
@@ -89,6 +89,12 @@ class SqlTagRepository(TagRepository):
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
+
+        tags_dict = {}
+        for name in names:
+            lower_name = name.lower()
+            if lower_name in lower_to_tag:
+                tags_dict[name] = lower_to_tag[lower_name]
 
         return tags_dict
 

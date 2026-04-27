@@ -252,7 +252,7 @@ export function TagManagementDialog({
                     variant='destructive'
                     disabled={isDeleting || isMerging}
                   >
-                    {isDeleting ? 'Deleting...' : 'Delete'}
+                    {isDeleting ? 'Deleting...' : 'Delete Tag'}
                   </Button>
                 </AlertDialogTrigger>
                 <AlertDialogContent>

@@ -226,7 +226,7 @@ async def merge_tag(
     This takes all contacts associated with the source tag, associates them with the
     target tag, and deletes the source tag.
     """
-    if merge_request.data.type and merge_request.data.type != "tags":
+    if merge_request.data.type != "tags":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid resource type, expected 'tags'",
