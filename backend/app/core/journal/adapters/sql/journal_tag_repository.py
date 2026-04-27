@@ -46,7 +46,7 @@ class SqlJournalTagRepository(JournalTagRepository):
             """
             SELECT id, name, parent_id, color, created_at, updated_at
             FROM journal_tags
-            WHERE name = :name
+            WHERE LOWER(name) = LOWER(:name)
         """
         )
         result = await self.conn.execute(query, {"name": name})

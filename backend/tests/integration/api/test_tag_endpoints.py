@@ -429,3 +429,60 @@ class TestTagEndpointsHierarchy:
         # Verify not found
         get_response = await tag_api_client.get(f"/api/tags/{tag_id}")
         assert get_response.status_code == 404
+
+    # ---- Test 12: POST /api/tags/{tag_id}/merge ----
+
+    async def test_merge_tags(self, tag_api_client):
+        """Test merging two tags together."""
+        # Create target tag
+        target_tag = await self._create_tag(tag_api_client, "target-tag")
+        target_id = int(target_tag["id"])
+
+        # Create source tag
+        source_tag = await self._create_tag(tag_api_client, "source-tag")
+        source_id = int(source_tag["id"])
+
+        # Create child tag of source tag to ensure reparenting works
+        child_tag = await self._create_tag(
+            tag_api_client, "child-tag", parent_id=source_id
+        )
+        child_id = int(child_tag["id"])
+
+        # Create a contact with the source tag to ensure reassigning works
+        contact = await self._create_contact(tag_api_client, "MergeContact")
+        contact_id = int(contact["id"])
+        await self._assign_tag_to_contact(tag_api_client, contact_id, source_id)
+
+        # Merge source into target
+        request_data = {
+            "data": {
+                "type": "tags",
+                "attributes": {
+                    "target_tag_id": target_id,
+                },
+            }
+        }
+        response = await tag_api_client.post(
+            f"/api/tags/{source_id}/merge", json=request_data
+        )
+        assert response.status_code == 204
+
+        # Verify source tag is deleted
+        get_source_response = await tag_api_client.get(f"/api/tags/{source_id}")
+        assert get_source_response.status_code == 404
+
+        # Verify contact now has target tag
+        contacts_response = await tag_api_client.get(
+            f"/api/contacts?tag_ids={target_id}"
+        )
+        assert contacts_response.status_code == 200
+        returned_ids = [int(c["id"]) for c in contacts_response.json()["data"]]
+        assert contact_id in returned_ids
+
+        # Verify child tag is now reparented to target tag
+        get_child_response = await tag_api_client.get(f"/api/tags/{child_id}")
+        assert get_child_response.status_code == 200
+        assert (
+            int(get_child_response.json()["data"]["attributes"]["parent_id"])
+            == target_id
+        )

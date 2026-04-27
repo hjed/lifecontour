@@ -2,17 +2,25 @@ import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TagManagementDialog } from '../TagManagementDialog';
-import { useUpdateTag, useDeleteTag } from '@/lib/api/contacts';
+import {
+  useUpdateTag,
+  useDeleteTag,
+  useMergeTag,
+  useTags,
+} from '@/lib/api/contacts';
 import { TagResource } from '@/types/contacts';
 
 // Mock the hooks
 jest.mock('@/lib/api/contacts', () => ({
   useUpdateTag: jest.fn(),
   useDeleteTag: jest.fn(),
+  useMergeTag: jest.fn(),
+  useTags: jest.fn(),
 }));
 
 const mockUpdateTag = jest.fn();
 const mockDeleteTag = jest.fn();
+const mockMergeTag = jest.fn();
 
 const mockTag: TagResource = {
   type: 'tags',
@@ -36,6 +44,14 @@ describe('TagManagementDialog', () => {
     (useDeleteTag as jest.Mock).mockReturnValue({
       mutateAsync: mockDeleteTag,
       isPending: false,
+    });
+    (useMergeTag as jest.Mock).mockReturnValue({
+      mutateAsync: mockMergeTag,
+      isPending: false,
+    });
+    (useTags as jest.Mock).mockReturnValue({
+      data: { data: [] },
+      isLoading: false,
     });
   });
 
@@ -78,6 +94,7 @@ describe('TagManagementDialog', () => {
           name: 'Best Friend',
           color: '#ff0000',
           description: 'A close friend',
+          parent_id: null,
         },
       });
     });

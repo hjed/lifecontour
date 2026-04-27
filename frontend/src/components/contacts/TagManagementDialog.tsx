@@ -5,7 +5,12 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { TagResource } from '@/types/contacts';
-import { useUpdateTag, useDeleteTag } from '@/lib/api/contacts';
+import {
+  useUpdateTag,
+  useDeleteTag,
+  useTags,
+  useMergeTag,
+} from '@/lib/api/contacts';
 import {
   Dialog,
   DialogContent,
@@ -33,14 +38,23 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { Separator } from '@/components/ui/separator';
 
 const formSchema = z.object({
   name: z.string().min(1, 'Name is required').max(50),
   color: z.string().optional(),
   description: z.string().max(255).optional(),
+  parent_id: z.string().optional(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -58,7 +72,15 @@ export function TagManagementDialog({
 }: TagManagementDialogProps) {
   const { mutateAsync: updateTag, isPending: isUpdating } = useUpdateTag();
   const { mutateAsync: deleteTag, isPending: isDeleting } = useDeleteTag();
+  const { mutateAsync: mergeTag, isPending: isMerging } = useMergeTag();
+  const { data: allTagsData } = useTags();
+
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showMergeConfirm, setShowMergeConfirm] = useState(false);
+  const [mergeTargetId, setMergeTargetId] = useState<string>('');
+
+  const allTags = allTagsData?.data ?? [];
+  const validParentTags = allTags.filter(t => t.id !== tag.id); // Prevent self-parenting
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -66,6 +88,9 @@ export function TagManagementDialog({
       name: tag.attributes.name,
       color: tag.attributes.color || '',
       description: tag.attributes.description || '',
+      parent_id: tag.attributes.parent_id
+        ? String(tag.attributes.parent_id)
+        : 'none',
     },
   });
 
@@ -76,7 +101,13 @@ export function TagManagementDialog({
         name: tag.attributes.name,
         color: tag.attributes.color || '',
         description: tag.attributes.description || '',
+        parent_id: tag.attributes.parent_id
+          ? String(tag.attributes.parent_id)
+          : 'none',
       });
+      setMergeTargetId('');
+      setShowMergeConfirm(false);
+      setShowDeleteConfirm(false);
     }
   }, [tag, open, form]);
 
@@ -88,6 +119,10 @@ export function TagManagementDialog({
           name: values.name,
           color: values.color || '',
           description: values.description || '',
+          parent_id:
+            values.parent_id !== 'none'
+              ? Number.parseInt(values.parent_id || '', 10)
+              : null,
         },
       });
       onOpenChange(false);
@@ -106,9 +141,20 @@ export function TagManagementDialog({
     }
   };
 
+  const handleMerge = async () => {
+    if (!mergeTargetId) return;
+    try {
+      await mergeTag({ sourceId: tag.id, targetId: mergeTargetId });
+      setShowMergeConfirm(false);
+      onOpenChange(false);
+    } catch {
+      // Error handled by mutation
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className='sm:max-w-[425px]'>
+      <DialogContent className='max-h-[90vh] overflow-y-auto sm:max-w-[425px]'>
         <DialogHeader>
           <DialogTitle>Edit Tag</DialogTitle>
           <DialogDescription>
@@ -127,6 +173,32 @@ export function TagManagementDialog({
                   <FormControl>
                     <Input placeholder='Tag name' {...field} />
                   </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='parent_id'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Parent Tag</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder='Select a parent tag' />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value='none'>None (Root Level)</SelectItem>
+                      {validParentTags.map(t => (
+                        <SelectItem key={t.id} value={t.id}>
+                          {t.attributes.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <FormMessage />
                 </FormItem>
               )}
@@ -178,7 +250,7 @@ export function TagManagementDialog({
                   <Button
                     type='button'
                     variant='destructive'
-                    disabled={isDeleting}
+                    disabled={isDeleting || isMerging}
                   >
                     {isDeleting ? 'Deleting...' : 'Delete Tag'}
                   </Button>
@@ -207,12 +279,71 @@ export function TagManagementDialog({
                 </AlertDialogContent>
               </AlertDialog>
 
-              <Button type='submit' disabled={isUpdating}>
+              <Button type='submit' disabled={isUpdating || isMerging}>
                 {isUpdating ? 'Saving...' : 'Save Changes'}
               </Button>
             </DialogFooter>
           </form>
         </Form>
+
+        <Separator className='my-4' />
+
+        <div className='space-y-4'>
+          <div>
+            <h4 className='text-sm font-medium'>Merge Tag</h4>
+            <p className='text-muted-foreground mt-1 text-sm'>
+              Merge this tag into another one. All contacts and child tags will
+              be moved to the target tag, and this tag will be deleted.
+            </p>
+          </div>
+
+          <div className='flex gap-2'>
+            <Select onValueChange={setMergeTargetId} value={mergeTargetId}>
+              <SelectTrigger className='flex-1'>
+                <SelectValue placeholder='Select target tag to merge into' />
+              </SelectTrigger>
+              <SelectContent>
+                {validParentTags.map(t => (
+                  <SelectItem key={t.id} value={t.id}>
+                    {t.attributes.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <AlertDialog
+              open={showMergeConfirm}
+              onOpenChange={setShowMergeConfirm}
+            >
+              <AlertDialogTrigger asChild>
+                <Button
+                  type='button'
+                  variant='secondary'
+                  disabled={!mergeTargetId || isMerging}
+                >
+                  {isMerging ? 'Merging...' : 'Merge'}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Confirm Merge</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Are you sure you want to merge &quot;{tag.attributes.name}
+                    &quot; into the selected tag? This action cannot be undone.
+                    All contacts will be reassigned and this tag will be
+                    deleted.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleMerge} disabled={isMerging}>
+                    {isMerging ? 'Merging...' : 'Confirm Merge'}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );

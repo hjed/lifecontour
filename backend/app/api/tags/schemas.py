@@ -76,6 +76,26 @@ class TagUpdateRequest(BaseModel):
     data: TagUpdateData = Field(..., description="Tag update data")
 
 
+# Tag Merge Schemas
+class TagMergeAttributes(BaseModel):
+    """Attributes for merging a tag."""
+
+    target_tag_id: int = Field(..., description="ID of the target tag to merge into")
+
+
+class TagMergeData(BaseModel):
+    """Data for merging a tag."""
+
+    type: str = Field(default="tags", description="Resource type")
+    attributes: TagMergeAttributes = Field(..., description="Merge attributes")
+
+
+class TagMergeRequest(BaseModel):
+    """Request model for merging a tag."""
+
+    data: TagMergeData = Field(..., description="Tag merge data")
+
+
 class TagResponse(JsonApiResponse[TagResource]):
     """Response model for a single tag."""
 

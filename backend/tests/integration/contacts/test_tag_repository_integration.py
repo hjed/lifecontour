@@ -150,6 +150,23 @@ class TestTagRepositoryIntegration:
         assert str(results["tag_c"].name) == "tag_c"
 
     @pytest.mark.asyncio
+    async def test_find_by_names_case_insensitive(self, tag_repo):
+        """Test finding tags by name is case insensitive and returns original casing keys."""
+        # Arrange
+        tag1 = Tag(name=TagName("TestTagCase"))
+        await tag_repo.save(tag1)
+
+        # Act
+        results = await tag_repo.find_by_names(["testtagcase", "TESTTAGCASE"])
+
+        # Assert
+        assert len(results) == 2
+        assert "testtagcase" in results
+        assert "TESTTAGCASE" in results
+        assert str(results["testtagcase"].name) == "TestTagCase"
+        assert str(results["TESTTAGCASE"].name) == "TestTagCase"
+
+    @pytest.mark.asyncio
     async def test_find_by_names_empty_list(self, tag_repo):
         """Test finding tags with an empty list of names."""
         # Act
