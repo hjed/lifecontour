@@ -41,8 +41,8 @@ class TestSyncCalendarEventsIntegration:
         # Insert journal
         await db_session.execute(
             text("""
-                INSERT INTO journals (id, user_id, type_id, title, created_at, updated_at, status)
-                VALUES (:journal_id, :user_id, 1, 'Event Journal', :now, :now, 'draft')
+                INSERT INTO journals (id, user_id, title, content, event_date_range_start, event_date_range_end, created_at, updated_at)
+                VALUES (:journal_id, :user_id, 'Event Journal', 'Test Content', :now, :now, :now, :now)
             """),
             {"journal_id": test_journal_id, "user_id": test_user, "now": now},
         )
