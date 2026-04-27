@@ -24,7 +24,7 @@ dev = [
     "pytest-cov>=4.1.0",
     "ruff>=0.15.12",
     "mypy>=1.20.2",
-    "types-psycopg2>=2.9.21.20260408",
+    "types-psycopg2>=2.9.21.20260422",
 ]
 
 [build-system]
