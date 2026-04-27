@@ -20,7 +20,8 @@ import React, {
   useMemo,
   useId,
 } from 'react';
-import { Search, X, Clock, Filter } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Search, X, Clock, User, Book, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -28,6 +29,9 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import { useDebounce } from '@/hooks/useDebounce';
+import { useGlobalSearch } from '@/lib/api/search';
+import { ContactResource } from '@/types/contacts';
+import { SearchResultResource } from '@/types/search';
 
 interface GlobalSearchProps {
   /** Additional CSS classes */
@@ -43,29 +47,10 @@ interface GlobalSearchProps {
 interface SearchSuggestion {
   id: string;
   text: string;
-  type: 'contact' | 'recent' | 'filter';
+  type: 'contact' | 'recent' | 'filter' | 'journal';
   icon?: React.ReactNode;
   url?: string;
 }
-
-// Mock data for suggestions - will be replaced with real API calls
-const mockSuggestions: SearchSuggestion[] = [
-  { id: '1', text: 'John Smith', type: 'contact', url: '/contacts/1' },
-  { id: '2', text: 'Jane Doe', type: 'contact', url: '/contacts/2' },
-  {
-    id: '3',
-    text: 'meeting notes',
-    type: 'recent',
-    icon: <Clock className='h-3 w-3' />,
-  },
-  {
-    id: '4',
-    text: 'favourites',
-    type: 'filter',
-    icon: <Filter className='h-3 w-3' />,
-    url: '/contacts/favourites',
-  },
-];
 
 export function GlobalSearch({
   className,
@@ -73,6 +58,7 @@ export function GlobalSearch({
   showSuggestions = true,
   onSearch,
 }: GlobalSearchProps) {
+  const router = useRouter();
   const [query, setQuery] = useState('');
   const [isOpen, setIsOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
@@ -100,6 +86,11 @@ export function GlobalSearch({
 
   // Debounce search query for API calls
   const debouncedQuery = useDebounce(query, 300);
+
+  const { data: searchResults, isFetching } = useGlobalSearch(
+    { q: debouncedQuery, limit: 5 },
+    { enabled: debouncedQuery.trim().length > 0 }
+  );
 
   // Save recent searches to localStorage
   const saveRecentSearch = useCallback(
@@ -152,7 +143,7 @@ export function GlobalSearch({
   };
 
   // Memoize suggestions to prevent unnecessary recalculations
-  const suggestions = useMemo(() => {
+  const suggestions = useMemo<SearchSuggestion[]>(() => {
     if (!debouncedQuery.trim()) {
       // Show recent searches when no query
       return recentSearches.map((search, index) => ({
@@ -164,11 +155,33 @@ export function GlobalSearch({
       }));
     }
 
-    // Filter mock suggestions based on query
-    return mockSuggestions.filter(suggestion =>
-      suggestion.text.toLowerCase().includes(debouncedQuery.toLowerCase())
-    );
-  }, [debouncedQuery, recentSearches]);
+    if (!searchResults?.data) return [];
+
+    return searchResults.data.map(item => {
+      if (item.type === 'contacts') {
+        const contact = item as ContactResource;
+        return {
+          id: `contact-${contact.id}`,
+          text: `${contact.attributes.first_name} ${contact.attributes.last_name}`.trim(),
+          type: 'contact' as const,
+          icon: <User className='h-3 w-3' />,
+          url: `/contacts/${contact.id}`,
+        };
+      } else {
+        const result = item as SearchResultResource;
+        const isJournal = result.attributes.entity_type === 'journal';
+        return {
+          id: result.id,
+          text: result.attributes.title || result.attributes.content || '',
+          type: isJournal ? 'journal' : ('contact' as const),
+          icon: isJournal ? <Book className='h-3 w-3' /> : undefined,
+          url: isJournal
+            ? `/journals/${result.meta?.original_id || ''}`
+            : undefined,
+        };
+      }
+    });
+  }, [debouncedQuery, recentSearches, searchResults]);
 
   // Handle keyboard navigation
   const handleKeyDown = useCallback(
@@ -196,9 +209,7 @@ export function GlobalSearch({
           if (selectedIndex >= 0 && selectedIndex < suggestions.length) {
             const suggestion = suggestions[selectedIndex];
             if (suggestion.url) {
-              // TODO: ITER1.5-001 - Implement proper navigation to suggestion URLs
-              // router.push(suggestion.url);
-              console.log('Navigate to:', suggestion.url);
+              router.push(suggestion.url as any);
               setIsOpen(false);
               setQuery('');
             } else {
@@ -215,7 +226,7 @@ export function GlobalSearch({
           break;
       }
     },
-    [isOpen, handleSearch, suggestions, selectedIndex]
+    [isOpen, handleSearch, suggestions, selectedIndex, router]
   );
 
   // Handle clicking outside to close dropdown
@@ -295,41 +306,47 @@ export function GlobalSearch({
                 </>
               )}
 
-              {suggestions.map((suggestion, index) => (
-                <button
-                  key={suggestion.id}
-                  id={getOptionId(index)}
-                  className={cn(
-                    'hover:bg-accent flex w-full items-center gap-2 px-3 py-2 text-left text-sm',
-                    selectedIndex === index && 'bg-accent'
-                  )}
-                  onClick={() => {
-                    if (suggestion.url) {
-                      // TODO: ITER1.5-001 - Implement proper navigation to suggestion URLs
-                      // router.push(suggestion.url);
-                      console.log('Navigate to:', suggestion.url);
-                      setIsOpen(false);
-                      setQuery('');
-                    } else {
-                      handleSearch(suggestion.text);
-                    }
-                  }}
-                  role='option'
-                  aria-selected={selectedIndex === index}
-                >
-                  {suggestion.icon && (
-                    <span className='text-muted-foreground'>
-                      {suggestion.icon}
-                    </span>
-                  )}
-                  <span className='flex-1'>{suggestion.text}</span>
-                  {suggestion.type === 'filter' && (
-                    <Badge variant='secondary' className='text-xs'>
-                      Filter
-                    </Badge>
-                  )}
-                </button>
-              ))}
+              {isFetching && debouncedQuery.trim() && (
+                <div className='text-muted-foreground flex items-center justify-center p-4 text-sm'>
+                  <Loader2 className='mr-2 h-4 w-4 animate-spin' />
+                  Searching...
+                </div>
+              )}
+
+              {!isFetching &&
+                suggestions.map((suggestion, index) => (
+                  <button
+                    key={suggestion.id}
+                    id={getOptionId(index)}
+                    className={cn(
+                      'hover:bg-accent flex w-full items-center gap-2 px-3 py-2 text-left text-sm',
+                      selectedIndex === index && 'bg-accent'
+                    )}
+                    onClick={() => {
+                      if (suggestion.url) {
+                        router.push(suggestion.url as any);
+                        setIsOpen(false);
+                        setQuery('');
+                      } else {
+                        handleSearch(suggestion.text);
+                      }
+                    }}
+                    role='option'
+                    aria-selected={selectedIndex === index}
+                  >
+                    {suggestion.icon && (
+                      <span className='text-muted-foreground'>
+                        {suggestion.icon}
+                      </span>
+                    )}
+                    <span className='flex-1'>{suggestion.text}</span>
+                    {suggestion.type === 'filter' && (
+                      <Badge variant='secondary' className='text-xs'>
+                        Filter
+                      </Badge>
+                    )}
+                  </button>
+                ))}
             </div>
           </CardContent>
         </Card>

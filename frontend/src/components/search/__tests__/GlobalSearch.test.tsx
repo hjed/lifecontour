@@ -5,6 +5,16 @@
 import { render, screen, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { GlobalSearch } from '../GlobalSearch';
+import { useGlobalSearch } from '@/lib/api/search';
+
+const mockPush = jest.fn();
+jest.mock('next/navigation', () => ({
+  useRouter: () => ({ push: mockPush }),
+}));
+
+jest.mock('@/lib/api/search', () => ({
+  useGlobalSearch: jest.fn(),
+}));
 
 // Mock localStorage
 const localStorageMock = {
@@ -21,6 +31,33 @@ describe('GlobalSearch', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     localStorageMock.getItem.mockReturnValue(null);
+    (useGlobalSearch as jest.Mock).mockReturnValue({
+      data: {
+        data: [
+          {
+            type: 'contacts',
+            id: '1',
+            attributes: {
+              first_name: 'John',
+              last_name: 'Smith',
+              full_name: 'John Smith',
+            },
+          },
+          {
+            type: 'search-results',
+            id: 'journal-3',
+            attributes: {
+              entity_type: 'journal',
+              title: 'meeting notes',
+            },
+            meta: {
+              original_id: '3',
+            },
+          },
+        ],
+      },
+      isFetching: false,
+    });
   });
 
   it('renders search input with correct placeholder', () => {
@@ -160,6 +197,11 @@ describe('GlobalSearch', () => {
 
     await user.type(searchInput, 'test');
 
+    // Wait for debounced query and rerender
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 350));
+    });
+
     // Should show suggestions dropdown
     expect(searchInput).toHaveAttribute('aria-expanded', 'true');
   });
@@ -173,6 +215,11 @@ describe('GlobalSearch', () => {
     });
 
     await user.type(searchInput, 'test');
+
+    // Wait for debounced query and rerender
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 350));
+    });
 
     // Should not show suggestions dropdown
     expect(searchInput).toHaveAttribute('aria-expanded', 'false');
@@ -251,7 +298,7 @@ describe('GlobalSearch', () => {
     expect(searchInput).not.toHaveAttribute('aria-controls');
     expect(searchInput).not.toHaveAttribute('aria-activedescendant');
 
-    // Type to open suggestions (use 'john' to match mock data)
+    // Type to open suggestions
     await user.type(searchInput, 'john');
 
     // Wait for debounced query to update (300ms delay)

@@ -492,10 +492,10 @@ The sequence reflects both user priority and technical dependency:
 **PR Size:** ~4-6 files
 
 **Acceptance Criteria:**
-- [ ] Typing in the top search shows live suggestions plus recent searches.
-- [ ] Keyboard navigation behaves predictably.
-- [ ] The header component no longer relies on mock/placeholder suggestion behaviour.
-- [ ] Existing header navigation is not regressed.
+- [x] Typing in the top search shows live suggestions plus recent searches.
+- [x] Keyboard navigation behaves predictably.
+- [x] The header component no longer relies on mock/placeholder suggestion behaviour.
+- [x] Existing header navigation is not regressed.
 
 **Required Test Coverage:**
 - **Unit:** suggestion-state and keyboard-navigation helpers.

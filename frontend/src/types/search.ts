@@ -5,12 +5,7 @@
  * including MeiliSearch responses and global search.
  */
 
-import {
-  JsonApiResource,
-  JsonApiCollectionResponse,
-  PaginationMeta,
-  JsonApiLinks,
-} from './api';
+import { JsonApiResource, PaginationMeta, JsonApiLinks } from './api';
 import { ContactResource } from './contacts';
 
 // Search Result Types
@@ -28,7 +23,7 @@ export interface SearchResultAttributes {
 }
 
 export interface SearchResultResource extends JsonApiResource<SearchResultAttributes> {
-  type: 'search_results';
+  type: 'search-results';
 }
 
 // Search Meta Types
@@ -57,7 +52,10 @@ export interface ContactSearchResponse {
   meta: ContactSearchMeta;
 }
 
-export interface GlobalSearchResponse extends JsonApiCollectionResponse<SearchResultResource> {
+export interface GlobalSearchResponse {
+  data: (SearchResultResource | ContactResource)[];
+  included?: JsonApiResource[];
+  links?: JsonApiLinks;
   meta: GlobalSearchMeta;
 }
 
