@@ -22,6 +22,9 @@ from app.core.journal.adapters.sql.climbing_data_repository import (
 from app.core.journal.adapters.sql.cross_country_skiing_data_repository import (
     SqlCrossCountrySkiingDataRepository,
 )
+from app.core.journal.adapters.sql.daily_summary_repository import (
+    SqlJournalDailySummaryRepository,
+)
 from app.core.journal.adapters.sql.fitness_data_repository import (
     SqlFitnessDataRepository,
 )
@@ -71,10 +74,24 @@ from app.core.journal.models.repositories import (
     RouteRepository,
     TravelDataRepository,
 )
+from app.core.journal.services.daily_summary_eligibility import (
+    DailySummaryEligibilityChecker,
+)
+from app.core.journal.services.daily_summary_input_assembler import (
+    DailySummaryInputAssembler,
+)
+from app.core.journal.services.daily_summary_prompt_builder import (
+    DailySummaryPromptBuilder,
+)
+from app.core.journal.services.daily_summary_repository import (
+    JournalDailySummaryRepository,
+)
+from app.core.journal.services.daily_summary_service import DailySummaryService
 from app.core.journal.services.journal_contact_service import JournalContactService
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_service import JournalService
 from app.core.journal.services.route_service import RouteService
+from app.infrastructure.config import Settings
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 
 
@@ -259,4 +276,56 @@ class JournalProvider(Provider):
         return JournalContactService(
             contact_relationship_repo=contact_relationship_repo,
             event_publisher=event_publisher,
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def daily_summary_repository(
+        self, connection: AsyncConnection
+    ) -> JournalDailySummaryRepository:
+        """Provide a JournalDailySummaryRepository instance."""
+        return SqlJournalDailySummaryRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def daily_summary_eligibility_checker(self) -> DailySummaryEligibilityChecker:
+        """Provide a DailySummaryEligibilityChecker instance."""
+        return DailySummaryEligibilityChecker()
+
+    @provide(scope=Scope.REQUEST)
+    def daily_summary_prompt_builder(self) -> DailySummaryPromptBuilder:
+        """Provide a DailySummaryPromptBuilder instance."""
+        return DailySummaryPromptBuilder()
+
+    @provide(scope=Scope.REQUEST)
+    def daily_summary_input_assembler(
+        self,
+        journal_repo: JournalRepository,
+        mood_repo: MoodDataRepository,
+        contact_relationship_repo: JournalContactRelationshipRepository,
+        summary_repo: JournalDailySummaryRepository,
+    ) -> DailySummaryInputAssembler:
+        """Provide a DailySummaryInputAssembler instance."""
+        return DailySummaryInputAssembler(
+            journal_repo=journal_repo,
+            mood_repo=mood_repo,
+            contact_relationship_repo=contact_relationship_repo,
+            summary_repo=summary_repo,
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def daily_summary_service(
+        self,
+        input_assembler: DailySummaryInputAssembler,
+        eligibility_checker: DailySummaryEligibilityChecker,
+        prompt_builder: DailySummaryPromptBuilder,
+        summary_repo: JournalDailySummaryRepository,
+        settings: Settings,
+    ) -> DailySummaryService:
+        """Provide a DailySummaryService instance."""
+        return DailySummaryService(
+            input_assembler=input_assembler,
+            eligibility_checker=eligibility_checker,
+            prompt_builder=prompt_builder,
+            summary_repo=summary_repo,
+            gemini_api_key=settings.gemini_api_key,
+            gemini_model=settings.gemini_summary_model,
         )

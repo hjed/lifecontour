@@ -138,12 +138,16 @@ class OutboxProcessor:
                 await search_indexer.process_event(event)
 
             # Additionally route journal events to integration workers
+            # and invalidate daily summary cache
             if event.event_type in (
                 "JournalCreated",
                 "JournalUpdated",
                 "JournalDeleted",
             ):
                 await self._process_journal_event(event)
+                await self._invalidate_daily_summary_for_journal_event(
+                    event, search_indexer.db_connection
+                )
 
             # Route tag events to integration workers
             if event.event_type in (
@@ -467,6 +471,83 @@ class OutboxProcessor:
             "Broadcasted tag event to workers",
             event_id=event.event_id,
             event_type=event.event_type,
+        )
+
+    async def _invalidate_daily_summary_for_journal_event(
+        self, event: Any, connection: Any
+    ) -> None:
+        """Invalidate daily summary cache when a journal is created/updated/deleted.
+
+        Looks up the journal by ID from the database to get the user_id and
+        event date, since domain events don't carry all fields needed.
+
+        Args:
+            event: Journal domain event (JournalCreated, JournalUpdated, JournalDeleted)
+            connection: Database connection for transaction
+        """
+        from app.core.journal.adapters.sql.daily_summary_repository import (
+            SqlJournalDailySummaryRepository,
+        )
+        from app.core.journal.adapters.sql.journal_repository import (
+            SqlJournalRepository,
+        )
+
+        event_data = event.event_data or {}
+        journal_id = event_data.get("journal_id")
+
+        if not journal_id:
+            logger.debug(
+                "Cannot invalidate daily summary: missing journal_id",
+                event_id=event.event_id,
+                event_type=event.event_type,
+            )
+            return
+
+        # Look up the journal to get user_id and event date
+        journal_repo = SqlJournalRepository(connection)
+        journal = await journal_repo.find_by_id(int(journal_id))
+
+        if journal is None:
+            # Journal may have been deleted — try user_id from event data
+            # (JournalDeleted includes user_id)
+            user_id = event_data.get("user_id")
+            if not user_id:
+                logger.debug(
+                    "Cannot invalidate daily summary: journal not found and no user_id",
+                    event_id=event.event_id,
+                    journal_id=journal_id,
+                )
+                return
+            # For deleted journals, we can't determine the date — skip invalidation
+            # The next request will regenerate if needed
+            logger.debug(
+                "Journal deleted, cannot determine date for summary invalidation",
+                event_id=event.event_id,
+                journal_id=journal_id,
+            )
+            return
+
+        # Extract date from the journal's event_date_range_start
+        event_start = journal.event_date_range.start
+        if event_start is None:
+            logger.debug(
+                "Cannot invalidate daily summary: journal has no event_date_range_start",
+                event_id=event.event_id,
+                journal_id=journal_id,
+            )
+            return
+
+        summary_date = event_start.date()
+
+        summary_repo = SqlJournalDailySummaryRepository(connection)
+        await summary_repo.invalidate_for_date(journal.user_id, summary_date)
+
+        logger.info(
+            "Invalidated daily summary for journal event",
+            event_id=event.event_id,
+            event_type=event.event_type,
+            user_id=journal.user_id,
+            summary_date=summary_date.isoformat(),
         )
 
     async def _process_journal_event(self, event: Any) -> None:

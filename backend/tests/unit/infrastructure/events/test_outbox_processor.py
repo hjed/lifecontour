@@ -697,6 +697,11 @@ class TestOutboxProcessor:
                 "app.infrastructure.events.outbox_processor.SearchIndexer",
                 return_value=mock_search_indexer,
             ),
+            patch.object(
+                processor,
+                "_invalidate_daily_summary_for_journal_event",
+                new_callable=AsyncMock,
+            ),
         ):
             # Act
             await processor.process_events()

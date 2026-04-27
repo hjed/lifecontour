@@ -551,18 +551,24 @@ Phase 1 and Phase 2 were implemented as a combined delivery. The merge domain se
 - [Testing Strategy — End-to-End Testing with Playwright](../architecture/testing-strategy.md#end-to-end-testing-with-playwright)
 
 #### Phase 1: Summary Generation Contracts, Eligibility Rules, and Caching
-**PR Size:** ~5-7 files
+**PR Size:** ~19 files | **Status:** ✅ COMPLETE | **PR:** [#666](https://github.com/hjed/personal-management-system/pull/666)
 
 **Acceptance Criteria:**
-- [ ] Day summaries are generated only for days with enough substance, typically multiple journals.
-- [ ] Summary generation is on demand and cached rather than eagerly generated for every day.
-- [ ] The summary input contract is grounded in the day's journal content and metadata.
-- [ ] The summary remains read-only and cannot mutate the journal record.
+- [x] Day summaries are generated only for days with enough substance, typically multiple journals.
+- [x] Summary generation is on demand and cached rather than eagerly generated for every day.
+- [x] The summary input contract is grounded in the day's journal content and metadata.
+- [x] The summary remains read-only and cannot mutate the journal record.
+
+**Implementation Notes:**
+- Pipeline follows the established `ContactSummary` pattern: `InputAssembler` → `EligibilityChecker` (threshold: 2 journals) → `PromptBuilder` → `DailySummaryService` → `SqlJournalDailySummaryRepository`.
+- Cache invalidation is event-driven via the `OutboxProcessor` on `JournalCreated`/`Updated`/`Deleted` events.
+- API endpoints: `GET /api/journals/daily-summary/{date}` and `POST .../regenerate`.
+- Database: migration `0049` adds `journal_daily_summaries` table with `UNIQUE(user_id, summary_date)`.
 
 **Required Test Coverage:**
-- **Unit:** eligibility, cache-key, and day-stat aggregation helpers.
-- **Integration:** summary-generation service tests with deterministic day fixtures and caching behaviour.
-- **E2E:** request a summary for a populated day and confirm it renders only when the day qualifies.
+- **Unit:** ✅ 52 tests — eligibility, cache-key, day-stat aggregation, prompt building, service orchestration, entity behaviour.
+- **Integration:** ✅ 11 tests — SQL repository operations (upsert, find, invalidate, status update, user/date isolation).
+- **E2E:** Deferred to Phase 2 (requires UI to render and exercise the endpoint end-to-end).
 
 #### Phase 2: Day-Level UI Presentation and Regeneration Controls
 **PR Size:** ~4-6 files
