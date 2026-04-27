@@ -210,15 +210,17 @@ Confidence score (0.0-1.0):"""
             Exception: Transport/API errors are re-raised so the outbox
                        retry mechanism can handle transient outages.
         """
-        import google.generativeai as genai
+        from google import genai
 
-        genai.configure(api_key=self._api_key)
-        model = genai.GenerativeModel(self._model)
+        client = genai.Client(api_key=self._api_key)
 
         # Let transport / API / auth errors propagate for outbox retry.
         # Only swallow response-shape / parse errors below.
         response = await asyncio.wait_for(
-            asyncio.to_thread(model.generate_content, prompt),
+            client.aio.models.generate_content(
+                model=self._model,
+                contents=prompt,
+            ),
             timeout=self.TIMEOUT_SECONDS,
         )
 

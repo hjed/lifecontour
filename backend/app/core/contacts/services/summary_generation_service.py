@@ -397,12 +397,14 @@ class SummaryGenerator:
             return self._gemini_response_override
 
         # Real Gemini call (same pattern as GeminiTitleSimilarityAssessor)
-        import google.generativeai as genai
+        from google import genai
 
-        genai.configure(api_key=self._gemini_api_key)
-        model = genai.GenerativeModel(self._gemini_model)
-        response = await model.generate_content_async(prompt)
-        return response.text  # type: ignore[no-any-return]
+        client = genai.Client(api_key=self._gemini_api_key)
+        response = await client.aio.models.generate_content(
+            model=self._gemini_model,
+            contents=prompt,
+        )
+        return response.text or ""
 
     @staticmethod
     def _merge_with_existing(

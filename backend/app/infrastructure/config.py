@@ -171,7 +171,7 @@ class Settings(BaseSettings):
         description="Gemini model to use for similarity assessment",
     )
     gemini_summary_model: str = Field(
-        default="gemini-2.5-flash",
+        default="gemini-2.5-pro",
         description="Gemini model for contact summary generation (more capable)",
     )
 
