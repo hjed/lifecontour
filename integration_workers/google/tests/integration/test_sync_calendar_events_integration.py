@@ -32,8 +32,8 @@ class TestSyncCalendarEventsIntegration:
         # Insert synced calendar
         await db_session.execute(
             text("""
-                INSERT INTO calendars (id, user_id, name, type, created_at, updated_at, google_calendar_id, is_synced_to_google)
-                VALUES (:cal_id, :user_id, 'Test Cal', 'personal', :now, :now, 'primary', true)
+                INSERT INTO calendars (id, user_id, name, color, created_at, updated_at, google_calendar_id, is_synced_to_google)
+                VALUES (:cal_id, :user_id, 'Test Cal', '#FF0000', :now, :now, 'primary', true)
             """),
             {"cal_id": test_calendar_uuid, "user_id": test_user, "now": now},
         )
@@ -51,10 +51,10 @@ class TestSyncCalendarEventsIntegration:
         await db_session.execute(
             text("""
                 INSERT INTO journal_external_event_links
-                (journal_id, external_id, external_version, sync_capability, created_at, updated_at, provider)
-                VALUES (:journal_id, 'google-event-1', :etag, 'bidirectional', :now, :now, 'google')
+                (journal_id, calendar_id, external_event_id, external_version, sync_capability, sync_status, created_at, updated_at)
+                VALUES (:journal_id, :cal_id, 'google-event-1', :etag, 'bidirectional', 'synced', :now, :now)
             """),
-            {"journal_id": test_journal_id, "etag": etag, "now": now},
+            {"journal_id": test_journal_id, "cal_id": test_calendar_uuid, "etag": etag, "now": now},
         )
 
         # Insert new contact matching the attendee email
