@@ -510,6 +510,7 @@ The sequence reflects both user priority and technical dependency:
 - [ ] Results are grouped by Contacts and Journals.
 - [ ] Empty, loading, and error states are explicit.
 - [ ] Recent searches continue to work with the dedicated results flow.
+- [ ] Reuse contact and journal list components as much as possible for the display of results.
 
 **Required Test Coverage:**
 - **Unit:** results-grouping and query-state helpers.
