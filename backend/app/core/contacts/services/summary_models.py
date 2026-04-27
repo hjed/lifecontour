@@ -5,6 +5,7 @@ prompt builder, and generator services.
 """
 
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -24,8 +25,8 @@ class SummaryInput:
     company: str | None
     job_title: str | None
     recent_notes: list[str]
-    recent_journals: list[dict[str, str]]
-    future_journals: list[dict[str, str]]
+    recent_journals: list[dict[str, Any]]
+    future_journals: list[dict[str, Any]]
     relationships: list[str]
     recent_history: list[str]
     important_dates: list[str]

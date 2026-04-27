@@ -114,6 +114,8 @@ def _make_assembler(
     else:
         journal_repo.find_by_id = AsyncMock(return_value=None)
 
+    journal_repo.get_types = AsyncMock(return_value=["NOTE"])
+
     summary_repo = AsyncMock()
     summary_repo.find_by_contact_id = AsyncMock(return_value=summary)
 

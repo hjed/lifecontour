@@ -160,8 +160,8 @@ class SummaryInputAssembler:
                 older_j_rels.append(jr)
 
         # Fetch recent and future journals (bounded)
-        recent_journals: list[dict[str, str]] = []
-        future_journals: list[dict[str, str]] = []
+        recent_journals: list[dict[str, Any]] = []
+        future_journals: list[dict[str, Any]] = []
 
         # We check all relationships to find future ones, but prioritize recent ones for past events
         for jr in all_j_rels:
@@ -189,10 +189,31 @@ class SummaryInputAssembler:
                     else:
                         is_future = start > now.date()
 
+            if hasattr(self._journal_repo, "get_types"):
+                journal_types = await self._journal_repo.get_types(jr.journal_id)
+            else:
+                journal_types = ["NOTE"]
+
+            # Extract relationship type and status
+            rel_type = (
+                jr.relationship_type.value
+                if hasattr(jr.relationship_type, "value")
+                else str(jr.relationship_type)
+            )
+
+            status = None
+            if hasattr(jr, "status") and jr.status is not None:
+                status = (
+                    jr.status.value if hasattr(jr.status, "value") else str(jr.status)
+                )
+
             journal_dict = {
                 "title": getattr(journal, "title", ""),
                 "content": getattr(journal, "content", ""),
                 "date": journal_date_str,
+                "relationship_type": rel_type,
+                "status": status,
+                "journal_types": journal_types,
             }
 
             if is_future:
