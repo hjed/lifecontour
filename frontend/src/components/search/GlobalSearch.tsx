@@ -196,13 +196,17 @@ export function GlobalSearch({
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault();
-          setSelectedIndex(prev => (prev + 1) % suggestions.length);
+          if (suggestions.length > 0) {
+            setSelectedIndex(prev => (prev + 1) % suggestions.length);
+          }
           break;
         case 'ArrowUp':
           e.preventDefault();
-          setSelectedIndex(prev =>
-            prev <= 0 ? suggestions.length - 1 : prev - 1
-          );
+          if (suggestions.length > 0) {
+            setSelectedIndex(prev =>
+              prev <= 0 ? suggestions.length - 1 : prev - 1
+            );
+          }
           break;
         case 'Enter':
           e.preventDefault();
@@ -290,7 +294,7 @@ export function GlobalSearch({
       </div>
 
       {/* Suggestions Dropdown */}
-      {isOpen && showSuggestions && suggestions.length > 0 && (
+      {isOpen && showSuggestions && (suggestions.length > 0 || isFetching) && (
         <Card
           ref={dropdownRef}
           className='absolute top-full right-0 left-0 z-50 mt-1 max-h-80 overflow-auto'

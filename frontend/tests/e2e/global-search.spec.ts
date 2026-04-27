@@ -45,7 +45,7 @@ test.describe('Global Header Search', () => {
 
     // Debug: print all options
     const options = await page.getByRole('option').allTextContents();
-    console.log('Available options:', options);
+    console.debug('Available options:', options);
 
     const option = page.getByRole('option', { name: contactName });
     await expect(option).toBeVisible({ timeout: 10000 });
