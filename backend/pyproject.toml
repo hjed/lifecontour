@@ -55,10 +55,10 @@ dev = [
     "pytest-cov>=4.1.0",
     "httpx>=0.25.0",  # for testing
     "asyncpg>=0.29.0",  # for async PostgreSQL testing
-    "ruff>=0.15.10",
-    "mypy>=1.20.1",
+    "ruff>=0.15.12",
+    "mypy>=1.20.2",
     "pre-commit>=3.5.0",
-    "types-authlib>=1.6.9.20260408",  # type stubs for authlib
+    "types-authlib>=1.6.11.20260418",  # type stubs for authlib
     "respx>=0.23.1",  # for mocking httpx requests in tests
 ]
 
@@ -195,12 +195,12 @@ exclude_lines = [
 
 [dependency-groups]
 dev = [
-    "mypy>=1.20.1",
+    "mypy>=1.20.2",
     "pytest>=9.0.3",
     "pytest-asyncio>=1.0.0",
     "respx>=0.23.1",
-    "ruff>=0.15.10",
-    "types-authlib>=1.6.9.20260408",
+    "ruff>=0.15.12",
+    "types-authlib>=1.6.11.20260418",
 ]
 
 [tool.alembic]
