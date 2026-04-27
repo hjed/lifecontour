@@ -105,14 +105,19 @@ class DailySummaryService:
             )
             return await self._summary_repo.upsert(disabled_summary)
 
-        # 4. Set status GENERATING
-        await self._summary_repo.upsert(
-            JournalDailySummary(
-                user_id=user_id,
-                summary_date=summary_date,
-                status=SummaryStatus.GENERATING,
-            )
+        # 4. Set status GENERATING (use update_status to preserve existing fields;
+        #    fall back to upsert if no row exists yet)
+        updated = await self._summary_repo.update_status(
+            user_id, summary_date, SummaryStatus.GENERATING.value
         )
+        if updated is None:
+            await self._summary_repo.upsert(
+                JournalDailySummary(
+                    user_id=user_id,
+                    summary_date=summary_date,
+                    status=SummaryStatus.GENERATING,
+                )
+            )
 
         # 5. Build prompt and call Gemini
         try:
@@ -125,12 +130,23 @@ class DailySummaryService:
                 user_id,
                 summary_date,
             )
-            failed_summary = JournalDailySummary(
-                user_id=user_id,
-                summary_date=summary_date,
-                status=SummaryStatus.FAILED,
+            # Use update_status to preserve existing text/counts;
+            # fall back to upsert if no row exists yet
+            updated = await self._summary_repo.update_status(
+                user_id, summary_date, SummaryStatus.FAILED.value
             )
-            return await self._summary_repo.upsert(failed_summary)
+            if updated is None:
+                await self._summary_repo.upsert(
+                    JournalDailySummary(
+                        user_id=user_id,
+                        summary_date=summary_date,
+                        status=SummaryStatus.FAILED,
+                    )
+                )
+                updated = await self._summary_repo.find_by_user_and_date(
+                    user_id, summary_date
+                )
+            return updated
 
         # 6. Persist result
         now = datetime.now(tz=UTC)

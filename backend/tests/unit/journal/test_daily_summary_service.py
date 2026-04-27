@@ -46,6 +46,7 @@ def mock_summary_repo() -> AsyncMock:
     repo = AsyncMock()
     repo.find_by_user_and_date.return_value = None
     repo.upsert.side_effect = lambda s: s  # Return what's passed in
+    repo.update_status.return_value = None  # No existing row by default
     repo.invalidate_for_date.return_value = None
     return repo
 
@@ -152,6 +153,12 @@ class TestDailySummaryServiceGeneration:
             status=SummaryStatus.PENDING,
         )
         mock_summary_repo.find_by_user_and_date.return_value = pending
+        # update_status returns the updated entity when the row exists
+        mock_summary_repo.update_status.return_value = JournalDailySummary(
+            user_id="user123",
+            summary_date=date(2026, 4, 27),
+            status=SummaryStatus.GENERATING,
+        )
 
         result = await service.get_or_generate("user123", date(2026, 4, 27))
 
@@ -173,6 +180,12 @@ class TestDailySummaryServiceGeneration:
             status=SummaryStatus.FAILED,
         )
         mock_summary_repo.find_by_user_and_date.return_value = failed
+        # update_status returns the updated entity when the row exists
+        mock_summary_repo.update_status.return_value = JournalDailySummary(
+            user_id="user123",
+            summary_date=date(2026, 4, 27),
+            status=SummaryStatus.GENERATING,
+        )
 
         result = await service.get_or_generate("user123", date(2026, 4, 27))
 
@@ -213,6 +226,15 @@ class TestDailySummaryServiceFailure:
         mock_summary_repo: AsyncMock,
     ) -> None:
         """When Gemini returns invalid JSON, the summary is set to FAILED."""
+        # After upsert fallback, find_by_user_and_date is called to return the entity
+        failed_entity = JournalDailySummary(
+            user_id="user123",
+            summary_date=date(2026, 4, 27),
+            status=SummaryStatus.FAILED,
+        )
+        # First call: cache check returns None; second call: returns the upserted entity
+        mock_summary_repo.find_by_user_and_date.side_effect = [None, failed_entity]
+
         service = DailySummaryService(
             input_assembler=mock_input_assembler,
             eligibility_checker=mock_eligibility_checker,
@@ -225,6 +247,10 @@ class TestDailySummaryServiceFailure:
 
         result = await service.get_or_generate("user123", date(2026, 4, 27))
 
+        # update_status returns None (no existing row), so upsert is used as fallback
+        mock_summary_repo.update_status.assert_any_call(
+            "user123", date(2026, 4, 27), "failed"
+        )
         assert result is not None
         assert result.status == SummaryStatus.FAILED
 
