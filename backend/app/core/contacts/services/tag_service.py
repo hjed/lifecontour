@@ -181,3 +181,66 @@ class TagService:
             transaction=transaction,
         )
         await self.event_publisher.publish(event)
+
+    async def merge_tags(
+        self, source_id: int, target_id: int, transaction: AsyncConnection
+    ) -> None:
+        """
+        Merge source tag into target tag.
+
+        This will:
+        1. Reassign all contacts from source to target (handling uniqueness conflicts).
+        2. Delete the source tag.
+        3. Publish TagDeleted event for the source tag.
+        """
+        if source_id == target_id:
+            raise ValueError("Source and target tags must be different")
+
+        source_tag = await self.tag_repo.find_by_id(source_id)
+        target_tag = await self.tag_repo.find_by_id(target_id)
+
+        if not source_tag:
+            raise TagNotFoundError(source_id)
+        if not target_tag:
+            raise TagNotFoundError(target_id)
+
+        from sqlalchemy import text
+
+        # 1. First, delete contact_tags for source_id if the contact already has target_id
+        delete_duplicates_query = text(
+            """
+            DELETE FROM contact_tags ct
+            WHERE ct.tag_id = :source_id
+            AND EXISTS (
+                SELECT 1 FROM contact_tags ct2
+                WHERE ct2.contact_id = ct.contact_id
+                AND ct2.tag_id = :target_id
+            )
+            """
+        )
+        await transaction.execute(
+            delete_duplicates_query, {"source_id": source_id, "target_id": target_id}
+        )
+
+        # 2. Update remaining contact_tags to point to target_id instead of source_id
+        update_query = text(
+            """
+            UPDATE contact_tags
+            SET tag_id = :target_id
+            WHERE tag_id = :source_id
+            """
+        )
+        await transaction.execute(
+            update_query, {"source_id": source_id, "target_id": target_id}
+        )
+
+        # 3. Re-parent any child tags of source_id to target_id
+        reparent_query = text(
+            "UPDATE tags SET parent_id = :target_id WHERE parent_id = :source_id"
+        )
+        await transaction.execute(
+            reparent_query, {"source_id": source_id, "target_id": target_id}
+        )
+
+        # 4. Delete the source tag itself (this will publish the event)
+        await self.delete_tag(source_id, transaction)

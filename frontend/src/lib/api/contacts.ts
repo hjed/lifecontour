@@ -1154,6 +1154,51 @@ export function useDeleteTag() {
   });
 }
 
+async function mergeTag(sourceId: string, targetId: string): Promise<void> {
+  const response = await fetch(`/api/tags/${sourceId}/merge`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      data: {
+        type: 'tags',
+        attributes: {
+          target_tag_id: Number.parseInt(targetId, 10),
+        },
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(errorData.errors?.[0]?.detail || 'Failed to merge tag');
+  }
+}
+
+export function useMergeTag() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      sourceId,
+      targetId,
+    }: {
+      sourceId: string;
+      targetId: string;
+    }) => mergeTag(sourceId, targetId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: tagKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: contactKeys.all });
+      toast.success('Tag successfully merged');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
 // Custom Date Types Actions
 export const customDateTypeKeys = {
   all: ['custom-date-types'] as const,

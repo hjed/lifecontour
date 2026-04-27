@@ -15,7 +15,12 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.api.common.schemas import get_request_base_url
 from app.api.contacts.converters import TagConverter
 from app.api.contacts.schemas import TagListResponse
-from app.api.tags.schemas import TagCreateRequest, TagResponse, TagUpdateRequest
+from app.api.tags.schemas import (
+    TagCreateRequest,
+    TagMergeRequest,
+    TagResponse,
+    TagUpdateRequest,
+)
 from app.core.contacts.models.repositories import TagRepository
 from app.core.contacts.services.tag_service import TagService
 from app.infrastructure.auth.models import SessionUser
@@ -204,3 +209,37 @@ async def delete_tag(
     that were associated with it.
     """
     await tag_service.delete_tag(tag_id=tag_id, transaction=connection)
+
+
+@router.post("/{tag_id}/merge", status_code=status.HTTP_204_NO_CONTENT)
+@inject
+async def merge_tag(
+    tag_id: int,
+    merge_request: TagMergeRequest,
+    tag_service: FromDishka[TagService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> None:
+    """
+    Merge a tag into another tag.
+
+    This takes all contacts associated with the source tag, associates them with the
+    target tag, and deletes the source tag.
+    """
+    if merge_request.data.type and merge_request.data.type != "tags":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid resource type, expected 'tags'",
+        )
+
+    target_tag_id = merge_request.data.attributes.target_tag_id
+
+    try:
+        await tag_service.merge_tags(
+            source_id=tag_id, target_id=target_tag_id, transaction=connection
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e

@@ -33,7 +33,11 @@ from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
 )
 from app.core.contacts.models.repositories import TagRepository
-from app.core.contacts.services import ContactRelationshipService, ContactService
+from app.core.contacts.services import (
+    ContactRelationshipService,
+    ContactService,
+    TagService,
+)
 from app.infrastructure.search.search_service import SearchService
 from app.mcp.domains.contacts.schemas import (
     AddContactRelationshipRequest,
@@ -58,6 +62,7 @@ from app.mcp.shared.dependencies import (
     get_contact_service,
     get_search_service,
     get_tag_repository,
+    get_tag_service,
     mcp_depends,
 )
 from app.mcp.shared.response_builders import MCPResponseBuilder
@@ -1161,5 +1166,52 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 "MCP: Failed to list tags",
                 error=str(e),
                 limit=limit,
+            )
+            raise
+
+    @mcp.tool
+    @mcp_unified_error_handler("merge_tags", "tag")
+    async def merge_tags(
+        source_id: Annotated[
+            int, Field(description="ID of the source tag to merge and delete")
+        ],
+        target_id: Annotated[
+            int, Field(description="ID of the target tag to merge into")
+        ],
+        tag_service: TagService = mcp_depends(get_tag_service),
+        connection: AsyncConnection = mcp_depends(get_async_connection),
+    ) -> str:
+        """
+        Merge a source tag into a target tag.
+
+        This will reassign all contacts associated with the source tag to the target tag,
+        re-parent any child tags to the target tag, and then permanently delete the source tag.
+
+        Args:
+            source_id: The ID of the tag to merge and delete
+            target_id: The ID of the tag to merge into
+
+        Returns:
+            Success message matching MCP conventions
+        """
+        logger.info("MCP: Merging tags", source_id=source_id, target_id=target_id)
+
+        try:
+            await tag_service.merge_tags(
+                source_id=source_id, target_id=target_id, transaction=connection
+            )
+
+            response = ContactActionResponse(
+                status="success",
+                message=f"Tag {source_id} successfully merged into tag {target_id}",
+            )
+            return MCPResponseBuilder.success_response(response)
+
+        except Exception as e:
+            logger.error(
+                "MCP: Failed to merge tags",
+                error=str(e),
+                source_id=source_id,
+                target_id=target_id,
             )
             raise
