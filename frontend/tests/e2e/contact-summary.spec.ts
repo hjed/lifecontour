@@ -180,6 +180,8 @@ test.describe('Contact AI Summary', () => {
     const patchResponse = await authenticatedPage.request.patch(
       `/api/contacts/${contact.id}/summary`,
       {
+        // Note: The outer `data` is Playwright's request option property.
+        // The inner `data` matches the backend JSON:API schema requirement.
         data: {
           data: {
             user_override_text: 'Manual summary written by user',

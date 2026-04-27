@@ -1043,7 +1043,7 @@ class TestContactConverterAISummaryIntegration:
     async def contact_service(self, test_container):
         """Get contact service from test container."""
         async with test_container() as request_container:
-            return await request_container.get(ContactService)
+            yield await request_container.get(ContactService)
 
     @pytest.mark.asyncio
     async def test_converter_includes_generated_summary(

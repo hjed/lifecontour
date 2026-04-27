@@ -125,7 +125,8 @@ class ContactConverter:
             elif cs.status == SummaryStatus.GENERATED and cs.summary_text:
                 interaction_summary = cs.summary_text
 
-            ai_follow_up_suggestions = cs.follow_up_suggestions or []
+            if cs.status == SummaryStatus.GENERATED:
+                ai_follow_up_suggestions = cs.follow_up_suggestions or []
 
             # Append AI interaction summary to the metadata summary for full context
             if interaction_summary:

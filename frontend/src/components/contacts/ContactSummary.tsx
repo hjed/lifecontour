@@ -84,7 +84,7 @@ export function ContactSummary({
   disabled = false,
   className,
 }: ContactSummaryProps) {
-  const { mutateAsync: refreshSummary, isPending: isRefreshing } =
+  const { mutate: refreshSummary, isPending: isRefreshing } =
     useRefreshContactSummary(contactId);
 
   // No summary exists yet — show placeholder
@@ -135,7 +135,7 @@ export function ContactSummary({
     attrs.status === ContactSummaryStatus.GENERATED && attrs.generated_at;
 
   const handleRefresh = () => {
-    void refreshSummary();
+    refreshSummary();
   };
 
   return (

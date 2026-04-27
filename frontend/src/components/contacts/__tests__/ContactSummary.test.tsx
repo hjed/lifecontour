@@ -7,7 +7,7 @@ import userEvent from '@testing-library/user-event';
 import { ContactSummary } from '@/components/contacts/ContactSummary';
 import { ContactSummaryResource, ContactSummaryStatus } from '@/types/contacts';
 
-const mockMutateAsync = jest.fn();
+const mockMutate = jest.fn();
 const mockRefreshHook = jest.fn();
 
 jest.mock('@/lib/api/contacts', () => ({
@@ -36,7 +36,7 @@ function makeSummary(
 beforeEach(() => {
   jest.clearAllMocks();
   mockRefreshHook.mockReturnValue({
-    mutateAsync: mockMutateAsync,
+    mutate: mockMutate,
     isPending: false,
   });
 });
@@ -301,17 +301,16 @@ describe('ContactSummary', () => {
 
     it('calls refresh mutation when clicked', async () => {
       const user = userEvent.setup();
-      mockMutateAsync.mockResolvedValue({});
       render(<ContactSummary summary={makeSummary()} contactId='42' />);
 
       await user.click(screen.getByTestId('summary-refresh-button'));
 
-      expect(mockMutateAsync).toHaveBeenCalledTimes(1);
+      expect(mockMutate).toHaveBeenCalledTimes(1);
     });
 
     it('shows spinning icon when refresh is pending', () => {
       mockRefreshHook.mockReturnValue({
-        mutateAsync: mockMutateAsync,
+        mutate: mockMutate,
         isPending: true,
       });
       render(<ContactSummary summary={makeSummary()} contactId='1' />);
