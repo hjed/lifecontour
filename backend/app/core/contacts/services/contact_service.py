@@ -536,6 +536,7 @@ class ContactService:
                 transaction=transaction,
             )
             await self.event_publisher.publish(event)
+            await self.contact_repo.touch(contact_id, transaction)
 
             return (
                 str(old_value) if old_value is not None else None,
@@ -622,6 +623,7 @@ class ContactService:
                 transaction=transaction,
             )
             await self.event_publisher.publish(event)
+            await self.contact_repo.touch(contact_id, transaction)
 
             return (
                 str(old_value) if old_value is not None else None,
@@ -708,6 +710,7 @@ class ContactService:
                 transaction=transaction,
             )
             await self.event_publisher.publish(event)
+            await self.contact_repo.touch(contact_id, transaction)
 
             return (
                 str(old_value) if old_value is not None else None,
@@ -1295,6 +1298,7 @@ class ContactService:
                 contact_id, tag_id, str(tag.name), transaction=transaction
             )
             await self.event_publisher.publish(event)
+            await self.contact_repo.touch(contact_id, transaction)
 
         return cast(
             None, await self._execute_with_retry(_assign_operation, transaction)
@@ -1331,6 +1335,7 @@ class ContactService:
                 contact_id, tag_id, str(tag.name), transaction=transaction
             )
             await self.event_publisher.publish(event)
+            await self.contact_repo.touch(contact_id, transaction)
 
         return cast(
             None, await self._execute_with_retry(_remove_operation, transaction)
@@ -1397,6 +1402,7 @@ class ContactService:
                 transaction=transaction,
             )
             await self.event_publisher.publish(event)
+            await self.contact_repo.touch(contact_id, transaction)
 
             return saved_method
 
@@ -1464,6 +1470,7 @@ class ContactService:
                 transaction=transaction,
             )
             await self.event_publisher.publish(event)
+            await self.contact_repo.touch(contact_id, transaction)
 
             return saved_address
 
@@ -1515,6 +1522,7 @@ class ContactService:
                 contact_id, saved_note.id, note.content, transaction=transaction
             )
             await self.event_publisher.publish(event)
+            await self.contact_repo.touch(contact_id, transaction)
 
             return saved_note
 
@@ -1551,6 +1559,7 @@ class ContactService:
                 contact_id, saved_date.id, date.date_type.value, transaction=transaction
             )
             await self.event_publisher.publish(event)
+            await self.contact_repo.touch(contact_id, transaction)
 
             return saved_date
 
@@ -1597,6 +1606,7 @@ class ContactService:
                 transaction=transaction,
             )
             await self.event_publisher.publish(event)
+            await self.contact_repo.touch(contact_id, transaction)
 
         return cast(
             None, await self._execute_with_retry(_delete_method_operation, transaction)
@@ -1636,6 +1646,7 @@ class ContactService:
                 contact_id, address_id, address.street_line_1, transaction=transaction
             )
             await self.event_publisher.publish(event)
+            await self.contact_repo.touch(contact_id, transaction)
 
         return cast(
             None, await self._execute_with_retry(_delete_address_operation, transaction)
@@ -1668,6 +1679,7 @@ class ContactService:
                 contact_id, date_id, date.date_type.value, transaction=transaction
             )
             await self.event_publisher.publish(event)
+            await self.contact_repo.touch(contact_id, transaction)
 
         return cast(
             None, await self._execute_with_retry(_delete_date_operation, transaction)
