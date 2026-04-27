@@ -357,15 +357,18 @@ class TestJournalUpdateEndpoints:
             f"/api/journals/{journal_id}", json=update_data
         )
 
-        # Verify ContactSummaryRefreshRequested outbox event
+        # Verify exactly one ContactSummaryRefreshRequested outbox event for this contact
         result = await async_connection.execute(
             text(
-                "SELECT event_data FROM outbox_events WHERE event_type = 'ContactSummaryRefreshRequested'"
-            )
+                "SELECT event_data FROM outbox_events"
+                " WHERE event_type = 'ContactSummaryRefreshRequested'"
+                " AND aggregate_id = :contact_id"
+            ),
+            {"contact_id": int(contact_id)},
         )
         rows = result.fetchall()
 
-        assert len(rows) > 0
+        assert len(rows) == 1
         event_data = json.loads(rows[0].event_data)
         assert event_data["contact_id"] == int(contact_id)
 
@@ -698,15 +701,18 @@ class TestJournalRelationshipEndpoints:
             f"/api/journals/{journal_id}/relationships/contacts", json=contact_rel_data
         )
 
-        # Verify ContactSummaryRefreshRequested outbox event
+        # Verify exactly one ContactSummaryRefreshRequested outbox event for this contact
         result = await async_connection.execute(
             text(
-                "SELECT event_data FROM outbox_events WHERE event_type = 'ContactSummaryRefreshRequested'"
-            )
+                "SELECT event_data FROM outbox_events"
+                " WHERE event_type = 'ContactSummaryRefreshRequested'"
+                " AND aggregate_id = :contact_id"
+            ),
+            {"contact_id": int(contact_id)},
         )
         rows = result.fetchall()
 
-        assert len(rows) > 0
+        assert len(rows) == 1
         event_data = json.loads(rows[0].event_data)
         assert event_data["contact_id"] == int(contact_id)
 
