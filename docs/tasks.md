@@ -34,6 +34,7 @@ Read these first when working on the active product-alignment streams:
 
 - **[Contacts Product Specification](./product-specifications/contacts-product-specification.md)** - target product behaviour for the contacts improvement stream
 - **[Journals Product Specification](./product-specifications/journals-product-specification.md)** - target product behaviour for the journals improvement stream
+- **[Outdoor Logbook Product Specification](./product-specifications/outdoor-logbook-product-specification.md)** - target product behaviour for the outdoor logbook expansion
 
 ---
 
@@ -232,6 +233,20 @@ Read these first when working on the active product-alignment streams:
 - Performance optimization and scalability improvements
 - Advanced security and privacy features
 - Future protocol support and extensibility
+
+### [Iteration 9: Outdoor Logbook](./tasks/iteration-9-outdoor-logbook.md)
+**Status:** 🟡 PLANNED
+**Dependencies:** Iteration 7 (journal hierarchy, calendar sync, MCP parity), Iteration 4.5 (fitness and activity types)
+**Goal:** Expand outdoor activity journals into a comprehensive outdoor logbook
+
+**Key Features:**
+- Structured abseil pitch tracking with anchor details and auto-calculated totals
+- Reusable activity templates for canyoning, caving, and climbing
+- New activity types: CAVING, CANOEING, SNORKELLING, DIVING, DOWNHILL_SKIING
+- Supporting types: OUTDOOR_TRAINING, OUTDOOR_PLANNING, GEAR_MAINTENANCE
+- Gear items entity with future SnipeIT sync compatibility
+- PDF logbook export with yearly summaries and participant index
+- MCP parity for all new capabilities
 
 ---
 
