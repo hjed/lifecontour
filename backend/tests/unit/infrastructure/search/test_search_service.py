@@ -378,3 +378,93 @@ class TestSearchService:
             # Act & Assert
             with pytest.raises(Exception, match="Unexpected error"):
                 search_service.search_contacts("John")
+
+    def test_search_params_include_show_ranking_score(
+        self, search_service, mock_meilisearch_client, mock_search_results
+    ):
+        """Test that search params include showRankingScore for relevance sorting."""
+        # Arrange
+        mock_index = MagicMock()
+        mock_meilisearch_client.index.return_value = mock_index
+        mock_index.search.return_value = mock_search_results
+
+        with patch(
+            "app.infrastructure.search.search_service.get_index_name",
+            return_value="pms_contacts",
+        ):
+            # Act
+            search_service.search_contacts("John")
+
+        # Assert
+        call_args = mock_index.search.call_args
+        search_params = call_args[0][1]
+        assert search_params.get("showRankingScore") is True
+
+    def test_search_contacts_retrieves_ranking_signal_attributes(
+        self, search_service, mock_meilisearch_client, mock_search_results
+    ):
+        """Test that search_contacts requests ranking signal attributes for UI consumption."""
+        # Arrange
+        mock_index = MagicMock()
+        mock_meilisearch_client.index.return_value = mock_index
+        mock_index.search.return_value = mock_search_results
+
+        with patch(
+            "app.infrastructure.search.search_service.get_index_name",
+            return_value="pms_contacts",
+        ):
+            # Act
+            search_service.search_contacts("John")
+
+        # Assert
+        call_args = mock_index.search.call_args
+        search_params = call_args[0][1]
+        attributes = search_params["attributesToRetrieve"]
+
+        expected_ranking_attributes = [
+            "is_favourite",
+            "has_summary",
+            "relationships",
+            "last_activity_date",
+            "journal_count_30d",
+            "activity_count_30d",
+        ]
+        for attr in expected_ranking_attributes:
+            assert attr in attributes, (
+                f"Ranking signal attribute '{attr}' missing from attributesToRetrieve"
+            )
+
+    def test_global_search_sorts_by_ranking_score_descending(
+        self, search_service, mock_meilisearch_client
+    ):
+        """Test that global search sorts hits by _rankingScore in descending order."""
+        # Arrange
+        mock_index = MagicMock()
+        mock_meilisearch_client.index.return_value = mock_index
+
+        # Create hits with different ranking scores
+        mock_results = {
+            "hits": [
+                {"id": 1, "entity_type": "contact", "_rankingScore": 0.5},
+                {"id": 2, "entity_type": "contact", "_rankingScore": 0.9},
+                {"id": 3, "entity_type": "contact", "_rankingScore": 0.7},
+            ],
+            "processingTimeMs": 10,
+            "estimatedTotalHits": 3,
+            "facetDistribution": {},
+            "facetStats": {},
+        }
+        mock_index.search.return_value = mock_results
+
+        with patch(
+            "app.infrastructure.search.search_service.get_index_name",
+            return_value="pms_contacts",
+        ):
+            # Act
+            results = search_service.global_search("test", entity_types=["contact"])
+
+        # Assert - hits should be sorted by _rankingScore descending
+        hit_ids = [h["id"] for h in results["hits"]]
+        assert hit_ids == [2, 3, 1], (
+            f"Expected hits sorted by _rankingScore desc [2, 3, 1], got {hit_ids}"
+        )

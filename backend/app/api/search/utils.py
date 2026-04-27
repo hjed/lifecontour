@@ -50,12 +50,18 @@ def create_contact_resource_from_search_hit(
         attributes=attributes,
         links=links,
         meta={
-            "search_score": None,
+            "search_score": hit.get("_rankingScore"),
             "highlighted": hit.get("_formatted"),
             "search_metadata": {
                 "tags": hit.get("tags", []),
                 "email": hit.get("email"),
                 "phone": hit.get("phone"),
+                "is_favourite": hit.get("is_favourite", False),
+                "has_summary": hit.get("has_summary", False),
+                "journal_count_30d": hit.get("journal_count_30d", 0),
+                "activity_count_30d": hit.get("activity_count_30d", 0),
+                "last_activity_date": hit.get("last_activity_date"),
+                "relationships": hit.get("relationships", []),
             },
         },
     )

@@ -14,6 +14,40 @@ export interface GroupedSearchResults {
 }
 
 /**
+ * Ranking signals extracted from a contact's search metadata.
+ * These signals are populated by the backend from MeiliSearch index data.
+ */
+export interface ContactRankingSignals {
+  isFavourite: boolean;
+  hasSummary: boolean;
+  journalCount30d: number;
+  activityCount30d: number;
+  lastActivityDate: string | null;
+  relationships: string[];
+}
+
+/**
+ * Extracts ranking signals from a ContactResource's meta.search_metadata.
+ * Returns sensible defaults when metadata is absent or incomplete.
+ * @param contact ContactResource with optional meta.search_metadata
+ * @returns Extracted ranking signals
+ */
+export function extractContactRankingSignals(
+  contact: ContactResource
+): ContactRankingSignals {
+  const meta = (contact.meta?.search_metadata ?? {}) as Record<string, unknown>;
+
+  return {
+    isFavourite: (meta.is_favourite as boolean) ?? false,
+    hasSummary: (meta.has_summary as boolean) ?? false,
+    journalCount30d: (meta.journal_count_30d as number) ?? 0,
+    activityCount30d: (meta.activity_count_30d as number) ?? 0,
+    lastActivityDate: (meta.last_activity_date as string) ?? null,
+    relationships: (meta.relationships as string[]) ?? [],
+  };
+}
+
+/**
  * Groups a mixed array of search results into categories based on their type and entity_type.
  * @param results Mixed search results array
  * @returns Grouped results with contacts and journals arrays

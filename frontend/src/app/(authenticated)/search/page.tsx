@@ -7,9 +7,10 @@ import { useGlobalSearch } from '@/lib/api/search';
 import {
   groupSearchResults,
   transformSearchResultToDisplayJournal,
+  extractContactRankingSignals,
 } from '@/utils/searchUtils';
 import { useDisplayContacts } from '@/hooks/useDisplayContacts';
-import { ContactList } from '@/components/contacts/ContactList';
+import { SearchContactCard } from '@/components/search/SearchContactCard';
 import { JournalList } from '@/components/journals/JournalList';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -147,7 +148,15 @@ function SearchResultsContent() {
                   Contacts ({displayContacts.length})
                 </h2>
               </div>
-              <ContactList contacts={displayContacts} />
+              <div className='grid gap-4 md:grid-cols-2 lg:grid-cols-3'>
+                {displayContacts.map((displayContact, index) => (
+                  <SearchContactCard
+                    key={displayContact.id}
+                    contact={displayContact}
+                    signals={extractContactRankingSignals(contacts[index])}
+                  />
+                ))}
+              </div>
             </section>
           )}
 

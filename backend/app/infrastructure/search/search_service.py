@@ -55,6 +55,7 @@ class SearchService:
             "highlightPreTag": "<mark>",
             "highlightPostTag": "</mark>",
             "attributesToRetrieve": attributes_to_retrieve,
+            "showRankingScore": True,
         }
 
         # Add filters if provided
@@ -180,6 +181,8 @@ class SearchService:
                 "id",
                 "first_name",
                 "last_name",
+                "middle_name",
+                "nick_name",
                 "full_name",
                 "company",
                 "job_title",
@@ -189,6 +192,12 @@ class SearchService:
                 "entity_type",
                 "created_at",
                 "updated_at",
+                "is_favourite",
+                "has_summary",
+                "relationships",
+                "last_activity_date",
+                "journal_count_30d",
+                "activity_count_30d",
             ],
             filters=filters,
             sort=sort,

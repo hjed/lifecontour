@@ -3,6 +3,7 @@ import { ContactResource } from '@/types/contacts';
 import {
   groupSearchResults,
   transformSearchResultToDisplayJournal,
+  extractContactRankingSignals,
 } from '../searchUtils';
 
 describe('searchUtils', () => {
@@ -177,6 +178,102 @@ describe('searchUtils', () => {
         start: '2024-01-01T00:00:00Z',
         end: '2024-01-01T00:00:00Z',
       });
+    });
+  });
+
+  describe('extractContactRankingSignals', () => {
+    it('extracts ranking signals from contact with full metadata', () => {
+      const contact: ContactResource = {
+        type: 'contacts',
+        id: 'contact-1',
+        attributes: {
+          first_name: 'Alice',
+          last_name: 'Ranking',
+          created_at: '2024-01-01',
+          updated_at: '2024-01-01',
+          contact_methods: [],
+          addresses: [],
+          notes: [],
+          relationships: [],
+        },
+        meta: {
+          search_metadata: {
+            is_favourite: true,
+            has_summary: true,
+            journal_count_30d: 5,
+            activity_count_30d: 12,
+            last_activity_date: '2024-06-15T10:00:00Z',
+            relationships: ['Parent of Bob', 'Friend of Charlie'],
+          },
+        },
+      };
+
+      const signals = extractContactRankingSignals(contact);
+
+      expect(signals.isFavourite).toBe(true);
+      expect(signals.hasSummary).toBe(true);
+      expect(signals.journalCount30d).toBe(5);
+      expect(signals.activityCount30d).toBe(12);
+      expect(signals.lastActivityDate).toBe('2024-06-15T10:00:00Z');
+      expect(signals.relationships).toEqual([
+        'Parent of Bob',
+        'Friend of Charlie',
+      ]);
+    });
+
+    it('returns sensible defaults when metadata is missing', () => {
+      const contact: ContactResource = {
+        type: 'contacts',
+        id: 'contact-2',
+        attributes: {
+          first_name: 'Bob',
+          last_name: 'NoMeta',
+          created_at: '2024-01-01',
+          updated_at: '2024-01-01',
+          contact_methods: [],
+          addresses: [],
+          notes: [],
+          relationships: [],
+        },
+      };
+
+      const signals = extractContactRankingSignals(contact);
+
+      expect(signals.isFavourite).toBe(false);
+      expect(signals.hasSummary).toBe(false);
+      expect(signals.journalCount30d).toBe(0);
+      expect(signals.activityCount30d).toBe(0);
+      expect(signals.lastActivityDate).toBeNull();
+      expect(signals.relationships).toEqual([]);
+    });
+
+    it('returns sensible defaults when search_metadata is empty object', () => {
+      const contact: ContactResource = {
+        type: 'contacts',
+        id: 'contact-3',
+        attributes: {
+          first_name: 'Charlie',
+          last_name: 'EmptyMeta',
+          created_at: '2024-01-01',
+          updated_at: '2024-01-01',
+          contact_methods: [],
+          addresses: [],
+          notes: [],
+          relationships: [],
+        },
+        meta: {
+          search_metadata: {},
+        },
+      };
+
+      const signals = extractContactRankingSignals(contact);
+
+      expect(signals.isFavourite).toBe(false);
+      expect(signals.hasSummary).toBe(false);
+      expect(signals.journalCount30d).toBe(0);
+      expect(signals.activityCount30d).toBe(0);
+      expect(signals.lastActivityDate).toBeNull();
+      expect(signals.relationships).toEqual([]);
     });
   });
 });
