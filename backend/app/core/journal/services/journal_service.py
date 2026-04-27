@@ -16,6 +16,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.contacts.models.events import ContactSummaryRefreshRequested
 from app.core.journal.models.events import (
     JournalCreated,
     JournalDeleted,
@@ -23,7 +24,10 @@ from app.core.journal.models.events import (
     JournalTypeRemoved,
     JournalUpdated,
 )
-from app.core.journal.models.repositories import JournalRepository
+from app.core.journal.models.repositories import (
+    JournalContactRelationshipRepository,
+    JournalRepository,
+)
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 
 logger = structlog.get_logger()
@@ -44,6 +48,7 @@ class JournalService:
         self,
         journal_repo: JournalRepository,
         event_publisher: OutboxEventPublisher,
+        contact_relationship_repo: JournalContactRelationshipRepository | None = None,
     ):
         """
         Initialize the journal service.
@@ -51,9 +56,11 @@ class JournalService:
         Args:
             journal_repo: Repository for journal persistence
             event_publisher: Publisher for domain events (outbox pattern)
+            contact_relationship_repo: Repository for contact relationships
         """
         self.journal_repo = journal_repo
         self.event_publisher = event_publisher
+        self.contact_relationship_repo = contact_relationship_repo
 
     async def create_journal(
         self, journal: Journal, transaction: AsyncConnection
@@ -163,6 +170,18 @@ class JournalService:
             transaction=transaction,
         )
         await self.event_publisher.publish(event)
+
+        # Trigger summary refresh for any associated contacts
+        if self.contact_relationship_repo is not None:
+            relationships = await self.contact_relationship_repo.get_by_journal(
+                saved_journal.id
+            )
+            for rel in relationships:
+                await self.event_publisher.publish(
+                    ContactSummaryRefreshRequested(
+                        rel.contact_id, transaction=transaction
+                    )
+                )
 
         logger.info(
             "Journal updated",

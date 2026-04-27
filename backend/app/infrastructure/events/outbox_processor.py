@@ -257,6 +257,9 @@ class OutboxProcessor:
         from app.core.integrations.match_detection_event_processor import (
             MatchDetectionEventProcessor,
         )
+        from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
+            SqlJournalContactRelationshipRepository,
+        )
         from app.core.journal.adapters.sql.journal_repository import (
             SqlJournalRepository,
         )
@@ -300,9 +303,13 @@ class OutboxProcessor:
             # Phase 1: journal sync events
             journal_repo = SqlJournalRepository(connection)
             event_publisher = OutboxEventPublisher(connection)
+            contact_relationship_repo = SqlJournalContactRelationshipRepository(
+                connection
+            )
             journal_service = JournalService(
                 journal_repo=journal_repo,
                 event_publisher=event_publisher,
+                contact_relationship_repo=contact_relationship_repo,
             )
 
             # Need optional detector for gating Phase 2 emission
