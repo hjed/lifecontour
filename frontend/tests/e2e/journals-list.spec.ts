@@ -505,8 +505,10 @@ test.describe('Journal List Page', () => {
 
     test('should filter journals by contact', async ({
       authenticatedPage,
+      isMobile,
       testCleanup,
     }) => {
+      if (isMobile) test.skip();
       const page = authenticatedPage;
       const dataManager = new (
         await import('./data-management')

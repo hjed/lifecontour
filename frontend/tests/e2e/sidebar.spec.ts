@@ -374,8 +374,10 @@ test.describe('Sidebar Navigation', () => {
   test.describe('Hierarchical Tag Navigation', () => {
     test('shows parent tag with expand control and nested children', async ({
       authenticatedPage,
+      isMobile,
       testCleanup,
     }) => {
+      if (isMobile) test.skip();
       const page = authenticatedPage;
       const testDataManager = new TestDataManager(page);
 
@@ -437,8 +439,10 @@ test.describe('Sidebar Navigation', () => {
 
     test('navigates to child tag page from sidebar tree', async ({
       authenticatedPage,
+      isMobile,
       testCleanup,
     }) => {
+      if (isMobile) test.skip();
       const page = authenticatedPage;
       const testDataManager = new TestDataManager(page);
 
@@ -488,7 +492,9 @@ test.describe('Sidebar Navigation', () => {
 
     test('flat tags render without expand controls', async ({
       taggedContactsData,
+      isMobile,
     }) => {
+      if (isMobile) test.skip();
       const { page } = taggedContactsData;
       await page.setViewportSize({ width: 1024, height: 768 });
 

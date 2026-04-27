@@ -312,11 +312,13 @@ class SqlJournalRepository(JournalRepository):
         result = await self.conn.execute(query, {"journal_id": journal_id})
         row = result.fetchone()
 
+        if not row:
+            return []
+
         types = ["NOTE"]
-        if row:
-            for type_value in row:
-                if type_value:
-                    types.append(type_value)
+        for type_value in row:
+            if type_value:
+                types.append(type_value)
 
         return types
 
