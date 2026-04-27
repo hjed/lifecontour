@@ -521,3 +521,48 @@ class TestContactServiceIntegration:
         # Verify domain events were recorded
         events = await event_repo.get_events_for_contact(saved_contact.id)
         assert len(events) >= 6  # create, add method x2, add address, add note, update
+
+    @pytest.mark.asyncio
+    async def test_touch_updates_timestamp_on_tag_assignment(
+        self, contact_service, tag_repo, clean_database: AsyncConnection
+    ):
+        """Test that assigning a tag updates the contact's updated_at timestamp."""
+        from sqlalchemy import text
+
+        # Create contact
+        contact = Contact(first_name="Timestamp", last_name="Test")
+        saved_contact = await contact_service.create_contact(contact, clean_database)
+
+        # Manually backdate updated_at so NOW() will definitely be greater
+        # (Postgres NOW() evaluates to transaction start time, so sleep() isn't enough)
+        await clean_database.execute(
+            text(
+                "UPDATE contacts SET updated_at = updated_at - INTERVAL '1 day' WHERE id = :id"
+            ),
+            {"id": saved_contact.id},
+        )
+
+        # Get the explicitly backdated timestamp
+        result = await clean_database.execute(
+            text("SELECT updated_at FROM contacts WHERE id = :id"),
+            {"id": saved_contact.id},
+        )
+        row = result.fetchone()
+        assert row is not None
+        initial_updated_at = row[0]
+
+        # Create tag
+        tag = Tag(name=TagName("test-tag"))
+        saved_tag = await tag_repo.save(tag)
+
+        # Assign tag
+        await contact_service.assign_tag_to_contact(
+            saved_contact.id, saved_tag.id, clean_database
+        )
+
+        # Fetch contact again
+        updated_contact = await contact_service.get_contact_by_id(saved_contact.id)
+
+        # Verify timestamp increased
+        assert updated_contact is not None
+        assert updated_contact.updated_at > initial_updated_at

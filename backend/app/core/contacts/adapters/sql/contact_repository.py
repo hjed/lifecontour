@@ -501,6 +501,22 @@ class SqlContactRepository(ContactRepository):
                 ) from e  # Will be handled by service
             raise
 
+    async def touch(
+        self, contact_id: int, transaction: AsyncConnection | None = None
+    ) -> None:
+        """Update the updated_at timestamp of a contact."""
+        query = text(
+            """
+            UPDATE contacts
+            SET updated_at = NOW()
+            WHERE id = :contact_id
+            """
+        )
+        conn = transaction if transaction else self.conn
+        result = await conn.execute(query, {"contact_id": contact_id})
+        if result.rowcount == 0:
+            raise ContactNotFoundError(contact_id)
+
     async def delete(self, contact_id: int) -> None:
         """Delete a contact and all related data."""
         query = text("DELETE FROM contacts WHERE id = :contact_id")

@@ -92,6 +92,11 @@ class ContactRepository(ABC):
         pass
 
     @abstractmethod
+    async def touch(self, contact_id: int, transaction: Any = None) -> None:
+        """Update the updated_at timestamp of a contact."""
+        pass
+
+    @abstractmethod
     async def delete(self, contact_id: int) -> None:
         """Delete a contact and all related data."""
         pass
