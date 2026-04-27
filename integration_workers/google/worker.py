@@ -2814,6 +2814,10 @@ async def _fetch_all_calendar_events(
         if not page_token:
             break
 
+        import asyncio
+
+        await asyncio.sleep(0.2)
+
     return all_raw_events, new_sync_token
 
 
@@ -2982,8 +2986,8 @@ async def sync_calendar_events(
                 if use_sync_token:
                     list_kwargs["sync_token"] = existing_sync_token
                 else:
-                    # Full sync: fetch events from 90 days ago
-                    time_min = (datetime.now(UTC) - timedelta(days=90)).isoformat()
+                    # Full sync: fetch events from 10 years ago
+                    time_min = (datetime.now(UTC) - timedelta(days=3650)).isoformat()
                     list_kwargs["time_min"] = time_min
 
                 # Fetch all events with pagination
@@ -3019,6 +3023,44 @@ async def sync_calendar_events(
                             google_event=google_event,
                             existing_link=existing_link,
                         )
+
+                        if action == InboundSyncAction.SKIP_UNCHANGED:
+                            contact_relationships = (
+                                transformer.extract_contact_relationships(google_event)
+                            )
+                            attendee_emails = [
+                                r["email"] for r in contact_relationships
+                            ]
+                            if attendee_emails:
+                                existing_journal_id = (
+                                    existing_link.journal_id if existing_link else None
+                                )
+                                if existing_journal_id:
+                                    check_stmt = text("""
+                                        SELECT 1
+                                        FROM contact_methods cm
+                                        JOIN contacts c ON cm.contact_id = c.id
+                                        WHERE cm.method_type = 'email'
+                                          AND c.user_id = :user_id
+                                          AND cm.value_string = ANY(:emails)
+                                          AND NOT EXISTS (
+                                              SELECT 1
+                                              FROM journal_contacts jc
+                                              WHERE jc.contact_id = cm.contact_id
+                                                AND jc.journal_id = :journal_id
+                                          )
+                                        LIMIT 1
+                                    """)
+                                    check_result = await session.execute(
+                                        check_stmt,
+                                        {
+                                            "user_id": str(user_id),
+                                            "emails": attendee_emails,
+                                            "journal_id": existing_journal_id,
+                                        },
+                                    )
+                                    if check_result.fetchone():
+                                        action = InboundSyncAction.UPDATE_JOURNAL
 
                         if action in (
                             InboundSyncAction.SKIP_UNCHANGED,
@@ -3089,8 +3131,8 @@ async def sync_calendar_events(
                         }
 
                         # Extract attendee emails as contact relationships
-                        contact_relationships = transformer.extract_contact_relationships(
-                            google_event
+                        contact_relationships = (
+                            transformer.extract_contact_relationships(google_event)
                         )
 
                         # Determine sync action string

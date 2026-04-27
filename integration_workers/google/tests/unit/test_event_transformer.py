@@ -790,7 +790,9 @@ class TestGoogleEventTransformerContactRelationships:
                     {"email": "needs@example.com", "responseStatus": "needsAction"},
                     {"email": "tentative@example.com", "responseStatus": "tentative"},
                     {"email": "declined@example.com", "responseStatus": "declined"},
-                    {"email": "none@example.com"},  # Assuming no status maps to NO_REPLY
+                    {
+                        "email": "none@example.com"
+                    },  # Assuming no status maps to NO_REPLY
                 ],
             }
         )
@@ -799,11 +801,24 @@ class TestGoogleEventTransformerContactRelationships:
 
         rel_by_email = {r["email"]: r for r in rels}
 
-        assert rel_by_email["accepted@example.com"]["status"] == AttendeeStatus.ATTENDING.value
-        assert rel_by_email["needs@example.com"]["status"] == AttendeeStatus.NO_REPLY.value
-        assert rel_by_email["tentative@example.com"]["status"] == AttendeeStatus.MAYBE.value
-        assert rel_by_email["declined@example.com"]["status"] == AttendeeStatus.DECLINED.value
-        assert rel_by_email["none@example.com"]["status"] == AttendeeStatus.NO_REPLY.value
+        assert (
+            rel_by_email["accepted@example.com"]["status"]
+            == AttendeeStatus.ATTENDING.value
+        )
+        assert (
+            rel_by_email["needs@example.com"]["status"] == AttendeeStatus.NO_REPLY.value
+        )
+        assert (
+            rel_by_email["tentative@example.com"]["status"]
+            == AttendeeStatus.MAYBE.value
+        )
+        assert (
+            rel_by_email["declined@example.com"]["status"]
+            == AttendeeStatus.DECLINED.value
+        )
+        assert (
+            rel_by_email["none@example.com"]["status"] == AttendeeStatus.NO_REPLY.value
+        )
 
     def test_extract_contact_relationships_maps_organizer(self) -> None:
         """Test that organizer: true maps to ContactEventRole.ORGANISER."""
@@ -817,7 +832,11 @@ class TestGoogleEventTransformerContactRelationships:
                 "end": {"dateTime": "2023-10-27T11:00:00Z"},
                 "status": "confirmed",
                 "attendees": [
-                    {"email": "org@example.com", "responseStatus": "accepted", "organizer": True},
+                    {
+                        "email": "org@example.com",
+                        "responseStatus": "accepted",
+                        "organizer": True,
+                    },
                     {"email": "guest@example.com", "responseStatus": "needsAction"},
                 ],
             }
@@ -827,7 +846,9 @@ class TestGoogleEventTransformerContactRelationships:
 
         rel_by_email = {r["email"]: r for r in rels}
 
-        assert rel_by_email["org@example.com"]["role"] == ContactEventRole.ORGANISER.value
+        assert (
+            rel_by_email["org@example.com"]["role"] == ContactEventRole.ORGANISER.value
+        )
         assert "role" not in rel_by_email["guest@example.com"]
 
     def test_extract_contact_relationships_skips_empty_emails(self) -> None:
@@ -850,4 +871,3 @@ class TestGoogleEventTransformerContactRelationships:
 
         assert len(rels) == 1
         assert rels[0]["email"] == "valid@example.com"
-
