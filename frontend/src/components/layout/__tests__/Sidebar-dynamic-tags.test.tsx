@@ -15,6 +15,7 @@ jest.mock('@/lib/api/contacts', () => ({
   useUpdateTag: jest.fn(() => ({ mutateAsync: jest.fn(), isPending: false })),
   useDeleteTag: jest.fn(() => ({ mutateAsync: jest.fn(), isPending: false })),
   useCreateTag: jest.fn(() => ({ mutateAsync: jest.fn(), isPending: false })),
+  useMergeTag: jest.fn(() => ({ mutateAsync: jest.fn(), isPending: false })),
 }));
 
 // Mock Next.js router
