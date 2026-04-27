@@ -24,6 +24,7 @@ def _make_input(**overrides: Any) -> SummaryInput:
         "recent_journals": [
             {"title": "Lunch", "content": "Discussed work", "date": "2026-04-01"}
         ],
+        "future_journals": [],
         "relationships": ["Friend: Jane"],
         "recent_history": ["Changed company"],
         "important_dates": ["Birthday: March 15"],

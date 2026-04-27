@@ -45,6 +45,12 @@ class SummaryPromptBuilder:
         if summary_input.recent_journals:
             sections.append(self._journals_section(summary_input.recent_journals))
 
+        # Future journals
+        if summary_input.future_journals:
+            sections.append(
+                self._future_journals_section(summary_input.future_journals)
+            )
+
         # Relationships
         if summary_input.relationships:
             sections.append(self._relationships_section(summary_input.relationships))
@@ -118,6 +124,19 @@ class SummaryPromptBuilder:
 
     def _journals_section(self, journals: list[dict[str, str]]) -> str:
         lines = ["## Recent Linked Journals"]
+        for j in journals:
+            title = str(j.get("title", ""))[:200]
+            content = str(j.get("content", ""))[: self._MAX_JOURNAL_CONTENT_CHARS]
+            date = j.get("date", "")
+            entry = f"- **{title}**"
+            if date:
+                entry += f" ({date})"
+            entry += f": {content}"
+            lines.append(entry)
+        return "\n".join(lines)
+
+    def _future_journals_section(self, journals: list[dict[str, str]]) -> str:
+        lines = ["## Upcoming Scheduled Events"]
         for j in journals:
             title = str(j.get("title", ""))[:200]
             content = str(j.get("content", ""))[: self._MAX_JOURNAL_CONTENT_CHARS]

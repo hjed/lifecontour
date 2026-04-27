@@ -25,6 +25,7 @@ class SummaryInput:
     job_title: str | None
     recent_notes: list[str]
     recent_journals: list[dict[str, str]]
+    future_journals: list[dict[str, str]]
     relationships: list[str]
     recent_history: list[str]
     important_dates: list[str]

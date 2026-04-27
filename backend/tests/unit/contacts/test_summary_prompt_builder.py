@@ -31,6 +31,7 @@ def _make_input(**overrides: Any) -> SummaryInput:
                 "date": "2026-03-15",
             },
         ],
+        "future_journals": [],
         "relationships": ["Friend: Jane Smith", "Colleague: Bob Wilson"],
         "recent_history": [
             "Changed company from OldCo to Acme Corp",

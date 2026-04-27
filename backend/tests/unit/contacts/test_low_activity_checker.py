@@ -25,6 +25,7 @@ def _make_input(
             {"title": f"Journal {i}", "content": f"Content {i}"}
             for i in range(num_journals)
         ],
+        future_journals=[],
         relationships=[],
         recent_history=[f"Changed field_{i}" for i in range(num_history)],
         important_dates=[],
