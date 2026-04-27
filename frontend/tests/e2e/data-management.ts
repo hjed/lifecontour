@@ -523,30 +523,49 @@ export class TestDataManager {
           continue;
         }
 
-        // Use the correct API endpoint: POST /api/contacts/{contact_id}/tags
-        // with tag data in the request body
-        const response = await this.page.request.post(
-          `/api/contacts/${contactId}/tags`,
-          {
-            data: {
-              data: {
-                type: 'tags',
-                id: tagId,
-              },
-            },
-          }
-        );
+        const maxRetries = 3;
 
-        if (response.ok()) {
-          console.debug(
-            `✅ [Data Manager] Tag ${tagId} assigned to contact ${contactId}`
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+          // Use the correct API endpoint: POST /api/contacts/{contact_id}/tags
+          // with tag data in the request body
+          const response = await this.page.request.post(
+            `/api/contacts/${contactId}/tags`,
+            {
+              data: {
+                data: {
+                  type: 'tags',
+                  id: tagId,
+                },
+              },
+            }
           );
-        } else {
+
+          if (response.ok()) {
+            console.debug(
+              `✅ [Data Manager] Tag ${tagId} assigned to contact ${contactId}`
+            );
+            break;
+          }
+
+          const statusCode = response.status();
           const errorText = await response.text();
+
+          if (
+            (statusCode === 404 || statusCode >= 500) &&
+            attempt < maxRetries
+          ) {
+            console.debug(
+              `⚠️ [Data Manager] Tag assignment attempt ${attempt}/${maxRetries} got ${statusCode}, retrying...`
+            );
+            await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+            continue;
+          }
+
           console.debug(
-            `⚠️ [Data Manager] Failed to assign tag ${tagId} to contact ${contactId}: ${response.status()}`
+            `⚠️ [Data Manager] Failed to assign tag ${tagId} to contact ${contactId}: ${statusCode}`
           );
           console.debug(`⚠️ [Data Manager] Error response:`, errorText);
+          break;
         }
       }
 
@@ -695,6 +714,7 @@ export class TestDataManager {
    *
    * Creates a relationship where the target is "You" (the current user)
    * rather than another contact.
+   * Retries on transient 404/5xx errors to handle database consistency delays.
    */
   async createUserRelationship(
     fromContactId: string,
@@ -704,35 +724,63 @@ export class TestDataManager {
       `🔗 [Data Manager] Creating user-targeted relationship: ${fromContactId} -> You (${relationshipType})`
     );
 
-    const response = await this.page.request.post(
-      `/api/contacts/${fromContactId}/relationships`,
-      {
-        headers: {
-          'Content-Type': 'application/vnd.api+json',
-          Accept: 'application/vnd.api+json',
-        },
-        data: {
+    const maxRetries = 3;
+    let lastError: Error | undefined;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      const response = await this.page.request.post(
+        `/api/contacts/${fromContactId}/relationships`,
+        {
+          headers: {
+            'Content-Type': 'application/vnd.api+json',
+            Accept: 'application/vnd.api+json',
+          },
           data: {
-            type: 'contact_relationships',
-            attributes: {
-              from_contact_id: Number(fromContactId),
-              to_user: true,
-              relationship_type: relationshipType,
+            data: {
+              type: 'contact_relationships',
+              attributes: {
+                from_contact_id: Number(fromContactId),
+                to_user: true,
+                relationship_type: relationshipType,
+              },
             },
           },
-        },
-      }
-    );
+        }
+      );
 
-    if (!response.ok()) {
+      if (response.ok()) {
+        console.debug(
+          `✅ [Data Manager] User-targeted relationship created: ${fromContactId} -> You`
+        );
+        return;
+      }
+
+      const statusCode = response.status();
       const errorBody = await response.text();
+
+      // Retry on transient errors (404 = contact not yet visible, 5xx = server)
+      if ((statusCode === 404 || statusCode >= 500) && attempt < maxRetries) {
+        console.debug(
+          `⚠️ [Data Manager] User relationship creation attempt ${attempt}/${maxRetries} ` +
+            `got ${statusCode}, retrying after delay...`
+        );
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+        lastError = new Error(
+          `Failed to create user-targeted relationship: ${statusCode} - ${errorBody}`
+        );
+        continue;
+      }
+
+      // Non-retryable error or final attempt — throw immediately
       throw new Error(
-        `Failed to create user-targeted relationship: ${response.status()} - ${errorBody}`
+        `Failed to create user-targeted relationship: ${statusCode} - ${errorBody}`
       );
     }
 
-    console.debug(
-      `✅ [Data Manager] User-targeted relationship created: ${fromContactId} -> You`
+    // Should not reach here, but satisfy TypeScript
+    throw (
+      lastError ??
+      new Error('Failed to create user-targeted relationship after retries')
     );
   }
 
@@ -842,33 +890,55 @@ export class TestDataManager {
     const failedAssignments: { tagId: string; status: number }[] = [];
 
     for (const tagId of tagIds) {
-      const response = await this.page.request.post(
-        `/api/journals/${journalId}/relationships/tags`,
-        {
-          headers: {
-            'Content-Type': 'application/vnd.api+json',
-          },
-          data: JSON.stringify({
-            data: {
-              type: 'journal-tag',
-              attributes: {
-                tag_id: tagId,
-              },
-            },
-          }),
-        }
-      );
+      const maxRetries = 3;
+      let success = false;
+      let lastStatus = 0;
 
-      if (response.ok()) {
-        console.debug(
-          `✅ [Data Manager] Assigned tag ${tagId} to journal ${journalId}`
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        const response = await this.page.request.post(
+          `/api/journals/${journalId}/relationships/tags`,
+          {
+            headers: {
+              'Content-Type': 'application/vnd.api+json',
+            },
+            data: JSON.stringify({
+              data: {
+                type: 'journal-tag',
+                attributes: {
+                  tag_id: tagId,
+                },
+              },
+            }),
+          }
         );
-      } else {
+
+        if (response.ok()) {
+          console.debug(
+            `✅ [Data Manager] Assigned tag ${tagId} to journal ${journalId}`
+          );
+          success = true;
+          break;
+        }
+
         const status = response.status();
+        lastStatus = status;
+
+        if ((status === 404 || status >= 500) && attempt < maxRetries) {
+          console.debug(
+            `⚠️ [Data Manager] Journal tag assignment attempt ${attempt}/${maxRetries} got ${status}, retrying...`
+          );
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+          continue;
+        }
+
         console.debug(
           `⚠️ [Data Manager] Failed to assign tag ${tagId} to journal ${journalId}: ${status}`
         );
-        failedAssignments.push({ tagId, status });
+        break;
+      }
+
+      if (!success) {
+        failedAssignments.push({ tagId, status: lastStatus });
       }
     }
 
@@ -1631,22 +1701,25 @@ export class TagFactory {
   }
 
   static createWithPrefix(prefix: string, count: number): TagCreateRequest[] {
+    const randomStr = Math.random().toString(36).substring(2, 7);
     return Array.from({ length: count }, (_, index) =>
       this.create({
-        name: `${prefix}-${index + 1}-${Date.now()}`,
+        name: `${prefix}-${index + 1}-${Date.now()}-${randomStr}`,
       })
     );
   }
 
   static createHierarchy(): TagCreateRequest[] {
     const timestamp = Date.now();
+    const randomStr = Math.random().toString(36).substring(2, 7);
+    const suffix = `${timestamp}-${randomStr}`;
     return [
-      this.create({ name: `Work-Parent-${timestamp}`, color: '#FF6B6B' }),
-      this.create({ name: `Work-Team-${timestamp}`, color: '#FF8E8E' }),
-      this.create({ name: `Work-Client-${timestamp}`, color: '#FFB1B1' }),
-      this.create({ name: `Personal-Parent-${timestamp}`, color: '#4ECDC4' }),
-      this.create({ name: `Personal-Family-${timestamp}`, color: '#71D4D4' }),
-      this.create({ name: `Personal-Friends-${timestamp}`, color: '#94DCDC' }),
+      this.create({ name: `Work-Parent-${suffix}`, color: '#FF6B6B' }),
+      this.create({ name: `Work-Team-${suffix}`, color: '#FF8E8E' }),
+      this.create({ name: `Work-Client-${suffix}`, color: '#FFB1B1' }),
+      this.create({ name: `Personal-Parent-${suffix}`, color: '#4ECDC4' }),
+      this.create({ name: `Personal-Family-${suffix}`, color: '#71D4D4' }),
+      this.create({ name: `Personal-Friends-${suffix}`, color: '#94DCDC' }),
     ];
   }
 }
