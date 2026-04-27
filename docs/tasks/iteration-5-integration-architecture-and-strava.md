@@ -53,7 +53,7 @@ These rules apply to every task:
 | ITER7-004 (Journal Merge Execution) | Task 4 Phase 3 (merge Strava + existing journals) | ✅ Phases 1–3 COMPLETE |
 | ITER9-003 (New Outdoor Activity Types) | Task 4 (Strava type mapping for CANOEING, DOWNHILL_SKIING, etc.) | ❌ NOT STARTED |
 | ITER9-002 (Modified Types — CLIMBING, KAYAKING) | Task 4 (Strava type mapping for kayaking rapids) | ❌ NOT STARTED |
-| ITER7-008 (AI Daily Summary) | None — not a dependency | ❌ NOT STARTED |
+| ITER7-008 (AI Daily Summary) | None — not a dependency | ✅ Phase 1 COMPLETE ([#666](https://github.com/hjed/personal-management-system/pull/666)) |
 
 ---
 
