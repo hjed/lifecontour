@@ -92,7 +92,6 @@ from app.core.journal.services.journal_service import JournalService
 from app.core.search.exceptions import SearchServiceUnavailableError
 from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.config import Settings
-from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.search.search_service import SearchService
 
 logger = structlog.get_logger()
@@ -2265,7 +2264,6 @@ async def update_journal(
     route_repo: FromDishka[RouteRepository],
     contact_repo: FromDishka[ContactRepository],
     connection: FromDishka[AsyncConnection],
-    event_publisher: FromDishka[OutboxEventPublisher],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
     """
@@ -2402,7 +2400,6 @@ async def partial_update_journal(
     route_repo: FromDishka[RouteRepository],
     contact_repo: FromDishka[ContactRepository],
     connection: FromDishka[AsyncConnection],
-    event_publisher: FromDishka[OutboxEventPublisher],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
     """
@@ -3778,12 +3775,9 @@ async def remove_contact_from_journal(
         ) from e
 
     # Delete the relationship
-    try:
-        await journal_contact_service.remove_contact_from_journal(
-            journal_id, contact_id_int, relationship_type_enum, transaction=connection
-        )
-    except Exception as e:
-        raise e
+    await journal_contact_service.remove_contact_from_journal(
+        journal_id, contact_id_int, relationship_type_enum, transaction=connection
+    )
 
     # Get updated journal
     updated_journal = await journal_service.get_journal(journal_id)

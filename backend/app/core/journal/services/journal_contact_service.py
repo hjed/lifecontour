@@ -74,23 +74,6 @@ class JournalContactService:
             ContactSummaryRefreshRequested(contact_id, transaction=transaction)
         )
 
-    async def update_contact_relationship(
-        self, relationship: JournalContactRelationship, transaction: AsyncConnection
-    ) -> JournalContactRelationship:
-        """
-        Update an existing contact relationship (used by API).
-
-        Wait, there is no direct update method in the repository for the full object.
-        But controllers use create to upsert or update_attributes/update_status.
-        """
-        # The API currently does this by creating a new relationship, which effectively upserts
-        # However, for true updates we might use update_attributes or just delegate to create
-        updated = await self.contact_relationship_repo.create(relationship)
-        await self.event_publisher.publish(
-            ContactSummaryRefreshRequested(updated.contact_id, transaction=transaction)
-        )
-        return updated
-
     async def update_attributes(
         self,
         journal_id: int,
