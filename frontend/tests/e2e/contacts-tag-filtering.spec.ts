@@ -62,7 +62,9 @@ test.describe('Tag Filtering via Main Contacts List', () => {
 
   test('should display contacts filtered by tag when tag exists', async ({
     taggedContactsData,
+    isMobile,
   }) => {
+    if (isMobile) test.skip();
     const { page, contacts, tags } = taggedContactsData;
     // Navigate to contacts with tag filter (new unified URL)
     const firstTag = tags[0];

@@ -60,6 +60,7 @@ class SummaryInputAssembler:
 
     HISTORY_WINDOW_DAYS = 90
     MAX_JOURNALS = 10
+    MAX_FUTURE_JOURNALS = 6
     MAX_NOTES = 10
     MAX_HISTORY_ENTRIES = 20
 
@@ -158,27 +159,75 @@ class SummaryInputAssembler:
             else:
                 older_j_rels.append(jr)
 
-        # Fetch recent journals (bounded)
-        recent_journals: list[dict[str, str]] = []
-        for jr in recent_j_rels[: self.MAX_JOURNALS]:
+        # Fetch recent and future journals (bounded)
+        recent_journals: list[dict[str, Any]] = []
+        future_journals: list[dict[str, Any]] = []
+
+        # We check all relationships to find future ones, but prioritize recent ones for past events
+        for jr in all_j_rels:
+            if (
+                len(recent_journals) >= self.MAX_JOURNALS
+                and len(future_journals) >= self.MAX_FUTURE_JOURNALS
+            ):
+                break
+
             journal = await self._journal_repo.find_by_id(jr.journal_id)
-            if journal:
-                journal_date = ""
-                if hasattr(journal, "event_date_range") and journal.event_date_range:
-                    start = getattr(journal.event_date_range, "start", None)
-                    if start:
-                        journal_date = (
-                            start.isoformat()
-                            if hasattr(start, "isoformat")
-                            else str(start)
-                        )
-                recent_journals.append(
-                    {
-                        "title": getattr(journal, "title", ""),
-                        "content": getattr(journal, "content", ""),
-                        "date": journal_date,
-                    }
+            if not journal:
+                continue
+
+            journal_date_str = ""
+            is_future = False
+
+            if hasattr(journal, "event_date_range") and journal.event_date_range:
+                start = getattr(journal.event_date_range, "start", None)
+                if start:
+                    journal_date_str = (
+                        start.isoformat() if hasattr(start, "isoformat") else str(start)
+                    )
+                    if isinstance(start, datetime):
+                        is_future = start > now
+                    else:
+                        is_future = start > now.date()
+
+            if hasattr(self._journal_repo, "get_types"):
+                journal_types = await self._journal_repo.get_types(jr.journal_id)
+            else:
+                journal_types = ["NOTE"]
+
+            # Extract relationship type and status
+            rel_type = (
+                jr.relationship_type.value
+                if hasattr(jr.relationship_type, "value")
+                else str(jr.relationship_type)
+            )
+
+            status = None
+            if hasattr(jr, "status") and jr.status is not None:
+                status = (
+                    jr.status.value if hasattr(jr.status, "value") else str(jr.status)
                 )
+
+            journal_dict = {
+                "title": getattr(journal, "title", ""),
+                "content": getattr(journal, "content", ""),
+                "date": journal_date_str,
+                "relationship_type": rel_type,
+                "status": status,
+                "journal_types": journal_types,
+            }
+
+            if is_future:
+                if len(future_journals) < self.MAX_FUTURE_JOURNALS:
+                    future_journals.append(journal_dict)
+            else:
+                # Only include past events if they are in the recent window,
+                # or if we want to fill up the recent_journals?
+                # The previous logic only took from recent_j_rels.
+                # Let's check if jr is in recent_j_rels
+                created = getattr(jr, "created_at", None)
+                if created and created >= window_start:
+                    if len(recent_journals) < self.MAX_JOURNALS:
+                        recent_journals.append(journal_dict)
 
         # Compute long-term activity statistics
         activity_stats = self._compute_activity_stats(older_j_rels, now)
@@ -196,6 +245,7 @@ class SummaryInputAssembler:
             job_title=job_title,
             recent_notes=recent_notes,
             recent_journals=recent_journals,
+            future_journals=future_journals,
             relationships=relationships,
             recent_history=recent_history,
             important_dates=important_dates,

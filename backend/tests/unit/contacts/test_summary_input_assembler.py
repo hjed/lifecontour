@@ -114,6 +114,8 @@ def _make_assembler(
     else:
         journal_repo.find_by_id = AsyncMock(return_value=None)
 
+    journal_repo.get_types = AsyncMock(return_value=["NOTE"])
+
     summary_repo = AsyncMock()
     summary_repo.find_by_contact_id = AsyncMock(return_value=summary)
 
@@ -252,6 +254,34 @@ class TestSummaryInputAssembler:
 
         assert result is not None
         assert len(result.recent_journals) <= assembler.MAX_JOURNALS
+
+    @pytest.mark.asyncio
+    async def test_splits_future_and_recent_journals(self):
+        """Test that journals are correctly split into recent and future based on date."""
+        from datetime import timedelta
+
+        now = datetime.now(tz=UTC)
+        past_date = now - timedelta(days=2)
+        future_date = now + timedelta(days=2)
+
+        j_rels = [
+            _make_journal_relationship(journal_id=10),
+            _make_journal_relationship(journal_id=20),
+        ]
+        journals = [
+            _make_journal(10, "Past Event", "Happened already", start=past_date),
+            _make_journal(20, "Future Event", "Will happen soon", start=future_date),
+        ]
+
+        assembler = _make_assembler(journal_relationships=j_rels, journals=journals)
+        result = await assembler.assemble(contact_id=1)
+
+        assert result is not None
+        assert len(result.recent_journals) == 1
+        assert len(result.future_journals) == 1
+
+        assert result.recent_journals[0]["title"] == "Past Event"
+        assert result.future_journals[0]["title"] == "Future Event"
 
     @pytest.mark.asyncio
     async def test_includes_previous_summary_when_available(self):

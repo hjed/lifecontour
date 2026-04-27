@@ -5,6 +5,8 @@ incremental context (prior summary), long-term activity statistics,
 and tone/safety guardrails per the product specification.
 """
 
+from typing import Any
+
 from app.core.contacts.services.summary_models import (
     SummaryInput,
 )
@@ -43,7 +45,19 @@ class SummaryPromptBuilder:
 
         # Recent journals
         if summary_input.recent_journals:
-            sections.append(self._journals_section(summary_input.recent_journals))
+            sections.append(
+                self._format_journals_section(
+                    "Recent Linked Journals", summary_input.recent_journals
+                )
+            )
+
+        # Future journals
+        if summary_input.future_journals:
+            sections.append(
+                self._format_journals_section(
+                    "Upcoming Scheduled Events", summary_input.future_journals
+                )
+            )
 
         # Relationships
         if summary_input.relationships:
@@ -116,16 +130,34 @@ class SummaryPromptBuilder:
             lines.append(f"- {truncated}")
         return "\n".join(lines)
 
-    def _journals_section(self, journals: list[dict[str, str]]) -> str:
-        lines = ["## Recent Linked Journals"]
+    def _format_journals_section(
+        self, heading: str, journals: list[dict[str, Any]]
+    ) -> str:
+        lines = [f"## {heading}"]
         for j in journals:
             title = str(j.get("title", ""))[:200]
             content = str(j.get("content", ""))[: self._MAX_JOURNAL_CONTENT_CHARS]
             date = j.get("date", "")
-            entry = f"- **{title}**"
+
+            meta_parts = []
             if date:
-                entry += f" ({date})"
-            entry += f": {content}"
+                meta_parts.append(date)
+
+            types = j.get("journal_types", [])
+            if types:
+                meta_parts.append(f"types: {', '.join(types)}")
+
+            rel = j.get("relationship_type")
+            if rel:
+                rel_str = f"role: {rel}"
+                status = j.get("status")
+                if status:
+                    rel_str += f" ({status})"
+                meta_parts.append(rel_str)
+
+            meta_str = f" ({'; '.join(meta_parts)})" if meta_parts else ""
+
+            entry = f"- **{title}**{meta_str}: {content}"
             lines.append(entry)
         return "\n".join(lines)
 

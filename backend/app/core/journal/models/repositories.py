@@ -63,6 +63,19 @@ class JournalRepository(ABC):
         pass
 
     @abstractmethod
+    async def get_types(self, journal_id: int) -> list[str]:
+        """
+        Get the types of a journal.
+
+        Args:
+            journal_id: The journal ID to look up
+
+        Returns:
+            A list of type strings for the journal, including 'NOTE' as the base type.
+        """
+        pass
+
+    @abstractmethod
     async def find_by_ids_for_user(
         self, user_id: str, journal_ids: list[int]
     ) -> list[Journal]:

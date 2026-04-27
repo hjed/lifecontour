@@ -274,6 +274,54 @@ class SqlJournalRepository(JournalRepository):
 
         return self._row_to_journal(row)
 
+    async def get_types(self, journal_id: int) -> list[str]:
+        """Get the types of a journal."""
+        query = text("""
+            SELECT
+                CASE WHEN jci.journal_id IS NOT NULL THEN 'EVENT' END as event_type,
+                CASE WHEN jmd.journal_id IS NOT NULL THEN 'MOOD_RATING' END as mood_type,
+                CASE WHEN jpd.journal_id IS NOT NULL THEN 'PLAN' END as plan_type,
+                CASE WHEN jtd.journal_id IS NOT NULL THEN 'TRAVEL' END as travel_type,
+                CASE WHEN jpad.journal_id IS NOT NULL THEN 'PHOTO_ALBUM' END as photo_type,
+                CASE WHEN jfd.journal_id IS NOT NULL THEN 'FITNESS' END as fitness_type,
+                CASE WHEN joad.journal_id IS NOT NULL THEN 'OUTDOOR_ACTIVITY' END as outdoor_activity_type,
+                CASE WHEN jbwd.journal_id IS NOT NULL THEN 'BUSHWALKING' END as bushwalking_type,
+                CASE WHEN jjd.journal_id IS NOT NULL THEN 'JOGGING' END as jogging_type,
+                CASE WHEN jabd.journal_id IS NOT NULL THEN 'ABSEILING_TRIP' END as abseiling_type,
+                CASE WHEN jcyd.journal_id IS NOT NULL THEN 'CANYONING' END as canyoning_type,
+                CASE WHEN jcld.journal_id IS NOT NULL THEN 'CLIMBING' END as climbing_type,
+                CASE WHEN jkyd.journal_id IS NOT NULL THEN 'KAYAKING' END as kayaking_type,
+                CASE WHEN jskid.journal_id IS NOT NULL THEN 'CROSS_COUNTRY_SKIING' END as skiing_type
+            FROM journals j
+            LEFT JOIN journal_calendar_info jci ON j.id = jci.journal_id
+            LEFT JOIN journal_mood_data jmd ON j.id = jmd.journal_id
+            LEFT JOIN journal_plan_data jpd ON j.id = jpd.journal_id
+            LEFT JOIN journal_travel_data jtd ON j.id = jtd.journal_id
+            LEFT JOIN journal_photo_album_data jpad ON j.id = jpad.journal_id
+            LEFT JOIN journal_fitness_data jfd ON j.id = jfd.journal_id
+            LEFT JOIN journal_outdoor_activity_data joad ON j.id = joad.journal_id
+            LEFT JOIN journal_bushwalking_data jbwd ON j.id = jbwd.journal_id
+            LEFT JOIN journal_jogging_data jjd ON j.id = jjd.journal_id
+            LEFT JOIN journal_abseiling_data jabd ON j.id = jabd.journal_id
+            LEFT JOIN journal_canyoning_data jcyd ON j.id = jcyd.journal_id
+            LEFT JOIN journal_climbing_data jcld ON j.id = jcld.journal_id
+            LEFT JOIN journal_kayaking_data jkyd ON j.id = jkyd.journal_id
+            LEFT JOIN journal_skiing_data jskid ON j.id = jskid.journal_id
+            WHERE j.id = :journal_id
+        """)
+        result = await self.conn.execute(query, {"journal_id": journal_id})
+        row = result.fetchone()
+
+        if not row:
+            return []
+
+        types = ["NOTE"]
+        for type_value in row:
+            if type_value:
+                types.append(type_value)
+
+        return types
+
     async def find_by_ids_for_user(
         self, user_id: str, journal_ids: list[int]
     ) -> list[Journal]:

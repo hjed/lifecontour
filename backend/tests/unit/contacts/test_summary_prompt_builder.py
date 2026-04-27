@@ -31,6 +31,7 @@ def _make_input(**overrides: Any) -> SummaryInput:
                 "date": "2026-03-15",
             },
         ],
+        "future_journals": [],
         "relationships": ["Friend: Jane Smith", "Colleague: Bob Wilson"],
         "recent_history": [
             "Changed company from OldCo to Acme Corp",
@@ -76,8 +77,47 @@ class TestSummaryPromptBuilder:
         builder = SummaryPromptBuilder()
         prompt = builder.build(_make_input())
 
+        assert "## Recent Linked Journals" in prompt
         assert "Lunch with John" in prompt
         assert "Team meeting" in prompt
+
+    def test_prompt_includes_future_journals(self):
+        """Test prompt includes future scheduled journals under correct section."""
+        builder = SummaryPromptBuilder()
+        input_data = _make_input(
+            future_journals=[
+                {
+                    "title": "Future Planning",
+                    "content": "Discuss Q4",
+                    "date": "2026-10-01",
+                }
+            ]
+        )
+        prompt = builder.build(input_data)
+
+        assert "## Upcoming Scheduled Events" in prompt
+        assert "Future Planning" in prompt
+
+    def test_prompt_includes_journal_metadata(self):
+        """Test prompt includes journal types and relationship metadata."""
+        builder = SummaryPromptBuilder()
+        input_data = _make_input(
+            recent_journals=[
+                {
+                    "title": "Running session",
+                    "content": "5k run",
+                    "date": "2026-04-01",
+                    "journal_types": ["EVENT", "FITNESS"],
+                    "relationship_type": "participant",
+                    "status": "attending",
+                }
+            ]
+        )
+        prompt = builder.build(input_data)
+
+        assert "Running session" in prompt
+        assert "types: EVENT, FITNESS" in prompt
+        assert "role: participant (attending)" in prompt
 
     def test_prompt_includes_relationships(self):
         """Test prompt includes relationship context."""
