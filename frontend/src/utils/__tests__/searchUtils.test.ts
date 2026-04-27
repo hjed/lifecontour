@@ -92,7 +92,7 @@ describe('searchUtils', () => {
           entity_id: '123',
           title: 'My Test Journal',
           content: 'This is the journal content',
-          highlighted_content: 'This is the <em>journal</em> content',
+          highlighted_content: 'This is the <mark>journal</mark> content',
           score: 1.0,
           matched_terms: ['journal'],
           created_at: '2024-01-01T00:00:00Z',
@@ -117,8 +117,8 @@ describe('searchUtils', () => {
             created_at: '2024-01-01T00:00:00Z',
             updated_at: '2024-01-01T00:00:00Z',
             _formatted: {
-              title: 'My <em>Test</em> Journal',
-              content: 'This is the <em>journal</em> content',
+              title: 'My <mark>Test</mark> Journal',
+              content: 'This is the <mark>journal</mark> content',
             },
           },
         },
@@ -139,9 +139,11 @@ describe('searchUtils', () => {
       expect(displayJournal.tags.length).toBe(1);
       expect(displayJournal.tags[0].id).toBe('t1');
       expect(displayJournal.isSearchResult).toBe(true);
-      expect(displayJournal.highlightedTitle).toBe('My <em>Test</em> Journal');
+      expect(displayJournal.highlightedTitle).toBe(
+        'My <mark>Test</mark> Journal'
+      );
       expect(displayJournal.highlightedContent).toBe(
-        'This is the <em>journal</em> content'
+        'This is the <mark>journal</mark> content'
       );
     });
 
