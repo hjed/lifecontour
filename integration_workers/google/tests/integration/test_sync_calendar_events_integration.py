@@ -68,8 +68,8 @@ class TestSyncCalendarEventsIntegration:
         # Insert new contact matching the attendee email
         await db_session.execute(
             text("""
-                INSERT INTO contacts (id, user_id, created_at, updated_at)
-                VALUES (:contact_id, :user_id, :now, :now)
+                INSERT INTO contacts (id, user_id, first_name, created_at, updated_at)
+                VALUES (:contact_id, :user_id, 'Test', :now, :now)
             """),
             {"contact_id": test_contact_id, "user_id": test_user, "now": now},
         )
