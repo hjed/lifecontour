@@ -76,7 +76,7 @@ def upgrade() -> None:
             JOIN duplicates d ON lower(t.name) = d.lname AND t.id != d.keep_id
         )
         UPDATE tags t
-        SET parent_id = tm.keep_id
+        SET parent_id = CASE WHEN t.id = tm.keep_id THEN NULL ELSE tm.keep_id END
         FROM to_merge tm
         WHERE t.parent_id = tm.drop_id;
     """)
@@ -152,7 +152,7 @@ def upgrade() -> None:
             JOIN duplicates d ON lower(t.name) = d.lname AND t.id != d.keep_id
         )
         UPDATE journal_tags t
-        SET parent_id = tm.keep_id
+        SET parent_id = CASE WHEN t.id = tm.keep_id THEN NULL ELSE tm.keep_id END
         FROM to_merge tm
         WHERE t.parent_id = tm.drop_id;
     """)

@@ -204,6 +204,13 @@ class TagService:
         if not target_tag:
             raise TagNotFoundError(target_id)
 
+        # Prevent merging into descendant to avoid cycle
+        current: Tag | None = target_tag
+        while current and current.parent_id:
+            if current.parent_id == source_id:
+                raise ValueError("Cannot merge a tag into its own descendant")
+            current = await self.tag_repo.find_by_id(current.parent_id)
+
         from sqlalchemy import text
 
         # 1. First, delete contact_tags for source_id if the contact already has target_id
