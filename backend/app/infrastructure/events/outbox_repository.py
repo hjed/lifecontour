@@ -7,7 +7,7 @@ for the background processor.
 
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -283,7 +283,7 @@ class OutboxRepository:
             )
 
             await self.conn.execute(
-                query, {"event_id": event_id, "relayed_at": datetime.utcnow()}
+                query, {"event_id": event_id, "relayed_at": datetime.now(UTC)}
             )
 
             logger.debug("Event marked as relayed", event_id=event_id)

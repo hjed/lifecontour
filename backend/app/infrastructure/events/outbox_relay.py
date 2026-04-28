@@ -11,6 +11,7 @@ import asyncio
 
 import structlog
 from core_shared.stream_client import StreamClient
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.infrastructure.database import get_async_database_engine
 from app.infrastructure.events.outbox_repository import OutboxEvent, OutboxRepository
@@ -45,7 +46,7 @@ class OutboxRelay:
 
     async def relay_batch(
         self,
-        connection: object,
+        connection: AsyncConnection,
     ) -> int:
         """Relay a batch of unrelayed events to the Redis Stream.
 
@@ -59,7 +60,7 @@ class OutboxRelay:
         Returns:
             Number of successfully relayed events
         """
-        repository = OutboxRepository(connection)  # type: ignore[arg-type]
+        repository = OutboxRepository(connection)
         events = await repository.get_unrelayed_events(limit=self._batch_size)
 
         if not events:
