@@ -83,6 +83,23 @@ class Settings(BaseSettings):
         default=24, description="Hours to keep user-job associations in Redis"
     )
 
+    # Redis Streams event bus settings
+    use_stream_consumers: bool = Field(
+        default=False,
+        description="Enable Redis Streams event bus relay alongside legacy OutboxProcessor. "
+        "When true, the OutboxRelay publishes events to the stream in parallel.",
+    )
+    stream_name: str = Field(
+        default="pms:domain-events",
+        description="Redis Stream name for domain events",
+    )
+    stream_relay_batch_size: int = Field(
+        default=50, description="Number of events to relay per batch"
+    )
+    stream_relay_poll_interval: float = Field(
+        default=5.0, description="Relay poll interval in seconds"
+    )
+
     # MCP settings
     mcp_enabled: bool = Field(default=True, description="Enable MCP server")
     mcp_mount_path: str = Field(

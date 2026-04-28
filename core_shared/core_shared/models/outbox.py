@@ -74,6 +74,12 @@ class OutboxEvent(Base):
         comment="When the event was successfully processed",
     )
 
+    relayed_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When the event was published to the Redis Stream by the OutboxRelay",
+    )
+
     retry_count = Column(
         Integer,
         server_default=text("0"),
