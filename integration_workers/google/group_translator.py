@@ -78,4 +78,9 @@ class GoogleGroupNameTranslator:
             if mapped_name:
                 return mapped_name
 
+            # Prevent raw contact group IDs (typically 15+ hex chars) from being used as tag names
+            import re
+            if re.fullmatch(r"[0-9a-fA-F]{15,}", fallback_name):
+                return None
+
         return fallback_name
