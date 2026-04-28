@@ -278,7 +278,7 @@ class OutboxRepository:
                 """
                 UPDATE outbox_events
                 SET relayed_at = :relayed_at
-                WHERE event_id = :event_id
+                WHERE event_id = :event_id AND relayed_at IS NULL
                 """
             )
 

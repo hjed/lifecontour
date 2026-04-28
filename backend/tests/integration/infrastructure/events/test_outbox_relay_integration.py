@@ -56,14 +56,11 @@ async def redis_client():
     """Create a real Redis client for testing."""
     url = _get_redis_test_url()
     client = Redis.from_url(url, decode_responses=False)
-    try:
-        await client.ping()
-    except Exception:
-        pytest.skip(f"Redis not available at {url}")
+    await client.ping()
     yield client
     # Cleanup: delete the test stream
     await client.delete(TEST_STREAM)
-    await client.aclose()
+    await client.close()
 
 
 @pytest.fixture

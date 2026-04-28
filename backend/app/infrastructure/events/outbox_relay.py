@@ -78,8 +78,6 @@ class OutboxRelay:
 
             try:
                 await self._publish_event(event)
-                await repository.mark_as_relayed(event.event_id)
-                relayed_count += 1
             except Exception:
                 logger.error(
                     "Failed to relay event to stream",
@@ -87,7 +85,18 @@ class OutboxRelay:
                     event_type=event.event_type,
                     exc_info=True,
                 )
-                # Continue with next event — don't let one failure block the batch
+                continue  # Continue with next event if publish fails
+
+            try:
+                await repository.mark_as_relayed(event.event_id)
+                relayed_count += 1
+            except Exception:
+                logger.error(
+                    "Failed to mark event as relayed. Halting batch to prevent transaction corruption.",
+                    event_id=event.event_id,
+                    exc_info=True,
+                )
+                break  # Break the batch if DB transaction fails
 
         if relayed_count > 0:
             logger.info(

@@ -62,4 +62,4 @@ class InfrastructureProvider(Provider):
         try:
             yield StreamClient(redis)
         finally:
-            await redis.aclose()
+            await redis.close()
