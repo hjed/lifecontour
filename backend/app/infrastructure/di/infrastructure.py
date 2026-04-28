@@ -4,7 +4,9 @@ Infrastructure providers for Dishka dependency injection.
 Provides general infrastructure services like settings, search, and event publishing.
 """
 
+from core_shared.stream_client import StreamClient
 from dishka import AsyncContainer, Provider, Scope, provide
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.infrastructure.config import Settings, get_settings
@@ -43,3 +45,14 @@ class InfrastructureProvider(Provider):
     def provide_outbox_processor(self, container: AsyncContainer) -> OutboxProcessor:
         """Get outbox processor for app scope."""
         return OutboxProcessor(container)
+
+    @provide(scope=Scope.APP)
+    def provide_stream_client(self, settings: Settings) -> StreamClient:
+        """Get Redis Streams client for app scope.
+
+        Creates an async Redis connection from the configured redis_url
+        and wraps it in a StreamClient for use by the OutboxRelay and
+        StreamConsumer instances.
+        """
+        redis = Redis.from_url(settings.redis_url, decode_responses=False)
+        return StreamClient(redis)

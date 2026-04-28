@@ -82,12 +82,12 @@ These rules apply to every task:
 Introduce the relay process, the base `StreamConsumer` class, consumer group management, and the migration for tracking relay state. No existing consumers are migrated yet — this phase is pure infrastructure.
 
 **Acceptance Criteria:**
-- [ ] Migration adds `relayed_at` column to outbox table
-- [ ] `OutboxRelay` reads unprocessed outbox events, publishes to `domain-events` Redis Stream, marks `relayed_at`
-- [ ] Relay is idempotent — re-publishing an already-relayed event is a no-op
-- [ ] Base `StreamConsumer` class with: consumer group creation, event reading (`XREADGROUP`), acknowledgement (`XACK`), event filtering by `event_type` pattern, retry via pending entries list
-- [ ] Configuration for stream name, consumer group names, batch size, poll interval
-- [ ] Feature flag (`USE_STREAM_CONSUMERS`) to run relay alongside existing `OutboxProcessor` — both paths active during migration
+- [x] Migration adds `relayed_at` column to outbox table
+- [x] `OutboxRelay` reads unprocessed outbox events, publishes to `pms:domain-events` Redis Stream, marks `relayed_at`
+- [x] Relay is idempotent — re-publishing an already-relayed event is a no-op
+- [x] Base `StreamConsumer` class with: consumer group creation, event reading (`XREADGROUP`), acknowledgement (`XACK`), event filtering by `event_type` pattern, retry via pending entries list
+- [x] Configuration for stream name, consumer group names, batch size, poll interval
+- [x] Feature flag (`USE_STREAM_CONSUMERS`) to run relay alongside existing `OutboxProcessor` — both paths active during migration
 
 **Required Test Coverage:**
 - **Unit:** relay batch processing, idempotency detection, `StreamConsumer` base class event filtering and ack logic.
@@ -138,6 +138,7 @@ Remove the old `OutboxProcessor._process_single_event` monolithic dispatch, the 
 - [ ] `OutboxProcessor._process_single_event` and all private `_process_*` methods removed
 - [ ] `TaskQueueService.broadcast_journal_event` / `broadcast_tag_event` methods removed (replaced by stream consumers)
 - [ ] Feature flag `USE_STREAM_CONSUMERS` removed — stream path is the only path
+- [ ] `processed_at` column removed from `outbox_events` table (migration) — relay path (`relayed_at`) is the sole dispatch mechanism
 - [ ] Dead-letter handling: events exceeding max retry count are moved to a dead-letter stream
 - [ ] Consumer lag monitoring endpoint: pending entry count per consumer group (for health checks)
 - [ ] `integration-architecture.md` updated: replace OutboxProcessor direct-dispatch and ARQ broadcast sections with Redis Streams consumer group architecture. Remove the "Planned Migration" banner added in this iteration

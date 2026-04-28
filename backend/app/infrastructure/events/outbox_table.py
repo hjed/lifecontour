@@ -22,6 +22,7 @@ outbox_events_table = Table(
     Column("event_data", Text, nullable=False),  # JSON as text
     Column("occurred_at", DateTime, nullable=False, default=datetime.utcnow),
     Column("processed_at", DateTime, nullable=True, index=True),
+    Column("relayed_at", DateTime, nullable=True, index=True),
     Column("retry_count", Integer, nullable=False, default=0),
     Column("created_at", DateTime, nullable=False, default=datetime.utcnow),
 )
