@@ -1,77 +1,74 @@
 ---
 name: running-worker-integration-tests
-description: How to configure and run Python backend integration tests locally against the correct Docker containers and ports.
+description: How to configure and run integration worker (e.g. Google) integration tests locally against the correct Docker containers and ports.
 ---
 
-# Running Python Worker Integration Tests Locally
+# Running Integration Worker Integration Tests Locally
 
-When working on integration workers (e.g., `integration_workers/google`), you must run integration tests against a real PostgreSQL database and Redis instance to guarantee correctness.
+When working on integration workers (e.g., `integration_workers/google`), integration tests run against a real PostgreSQL database. The `conftest.py` in each worker already calls `scripts/workspace_env.py` to derive workspace-specific ports, so **no manual port discovery is needed**.
 
-However, default configurations in test files like `tests/conftest.py` often override connection strings to default ports (e.g., `5432` for Postgres, `6379` for Redis), which may not match your local Docker environment's dynamic port mappings (e.g., due to different profiles running simultaneously).
+## How Port Resolution Works
 
-Follow these exact steps to run integration tests successfully without `OperationalError` or `ConnectionError`.
+Each worker's `tests/integration/conftest.py` calls `scripts/workspace_env.py` at import time to get workspace-specific ports (e.g. `DB_TEST_PORT`). The conftest builds a database URL from these values and falls back to environment variable overrides (`DATABASE_URL`) if set.
 
-## 1. Identify Running Containers and Ports
+## 1. Start Docker Services (if not already running)
 
-First, find the ports mapped for your active test backend profile using Docker.
-
-```bash
-docker ps | grep pms_test
-```
-
-Look for containers like:
-- `pms_test_XX-postgres` (Identify the host port mapped to `5432/tcp`)
-- `pms_test_XX-redis` (Identify the host port mapped to `6379/tcp`)
-
-*Example Output:*
-```text
-32e33ee9e6c2   postgres:18-alpine   ...   0.0.0.0:5913->5432/tcp   pms_test_48-postgres
-122494b3d906   redis:8-alpine       ...   0.0.0.0:6860->6379/tcp   pms_test_48-redis
-```
-*In this example, Postgres is on port `5913` and Redis is on port `6860`.*
-
-## 2. Ensure the Test Database Exists
-
-The tests typically run against the `personal_management_test` database. If it is corrupted or missing, create (or drop and recreate) it inside your specific Postgres container.
+The worker integration tests need only PostgreSQL and Redis. Use the `test-backend` profile with workspace-derived environment variables:
 
 ```bash
-# Drop the database if recreating from a corrupted state (optional)
-docker exec pms_test_XX-postgres dropdb -U postgres personal_management_test || true
-
-# Create the test database
-docker exec pms_test_XX-postgres createdb -U postgres personal_management_test
+# From the project root
+eval "$(python3 scripts/workspace_env.py export)"
+docker compose --profile test-backend --env-file .env.test up -d
 ```
 
-*Note: If you want to use a totally fresh database without conflicting with existing test states, you can create a custom database name like `personal_management_test2` and use it in Step 3.*
+This starts containers with workspace-specific port bindings (e.g. `pms_test_48-postgres` on port `5913`) that won't conflict with other workspace checkouts.
 
-## 3. Export Environment Variables
-
-Because some `conftest.py` files use `os.environ.setdefault(...)`, you **MUST** export the variables in your shell *before* invoking `pytest` so they are not overwritten by the defaults.
-
-Using the ports discovered in Step 1:
+If the containers are already running from a previous test run or from running backend integration tests, you can skip this step. Verify with:
 
 ```bash
-# Replace <PG_PORT> with your Postgres port and <REDIS_PORT> with your Redis port
-# Replace the database name if using a custom one (e.g. personal_management_test2)
-
-export DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:<PG_PORT>/personal_management_test"
-export DB_TEST_PORT="<PG_PORT>"
-
-export REDIS_URL="redis://localhost:<REDIS_PORT>"
-export REDIS_PORT="<REDIS_PORT>"
+docker ps --filter "name=$(python3 scripts/workspace_env.py CONTAINER_PREFIX)-postgres" --format "{{.Names}}"
 ```
 
-## 4. Run the Tests
+## 2. Run the Tests
 
-Execute the tests from the worker directory using `uv run pytest`.
+Execute the tests from the worker directory using `uv run pytest`:
 
 ```bash
-cd integration_workers/<worker-name>
-uv run pytest tests/integration/
+# From the project root
+cd integration_workers/google
+uv run pytest tests/integration/ -v
 ```
 
-### Common Troubleshooting
+The `conftest.py` will:
+1. Resolve the correct DB port via `workspace_env.py`
+2. Run Alembic migrations against the test database automatically
+3. Use savepoint-based isolation so each test rolls back its changes
 
-- **`InFailedSQLTransactionError`**: Ensure your test database schema is cleanly generated. If you encounter missing tables/columns, your database migrations might be out of sync. Drop the DB and run Alembic `upgrade head`, or let the tests handle migrations on a fresh test DB.
-- **`UndefinedColumnError`**: An SQL query manually referencing a column that doesn't exist (or no longer exists) in the schema migrations. Review the query and the migrations to ensure alignment.
-- **`redis connection error localhost:6379`**: You did not correctly export `REDIS_URL` and `REDIS_PORT`. Ensure both are exported before running the tests.
+### Running a Single Test
+
+```bash
+cd integration_workers/google
+uv run pytest tests/integration/test_sync_calendar_events_integration.py -v -k "test_name"
+```
+
+## 3. Stopping Docker Services
+
+If you started the containers specifically for these tests and want to clean up:
+
+```bash
+# From the project root
+eval "$(python3 scripts/workspace_env.py export)"
+docker compose --profile test-backend --env-file .env.test down -v
+```
+
+> **Note:** If the `test` or `test-backend` profile containers were started by another test suite (e.g. backend integration tests), they share the same Docker containers. Only stop them when you're finished with all testing.
+
+## Common Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `OperationalError: could not connect to server` | Docker containers not running | Run step 1 |
+| `InFailedSQLTransactionError` | Stale/partially-migrated test DB | Drop and recreate: `docker exec <container> dropdb -U postgres personal_management_test && docker exec <container> createdb -U postgres personal_management_test` |
+| `UndefinedColumnError` | Migration/schema mismatch | Run `uv run alembic upgrade head` from `backend/` with correct `DATABASE_URL` |
+| Port conflict with another workspace | Two checkouts using same ports | This shouldn't happen — `workspace_env.py` hashes the workspace path to derive unique ports. If it does, check both workspaces' `python3 scripts/workspace_env.py json` output. |
+
