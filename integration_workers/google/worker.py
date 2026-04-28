@@ -3041,11 +3041,10 @@ async def sync_calendar_events(
                                         FROM contact_methods cm
                                         JOIN contacts c ON cm.contact_id = c.id
                                         WHERE cm.method_type = 'email'
-                                          AND c.user_id = :user_id
                                           AND cm.value = ANY(:emails)
                                           AND NOT EXISTS (
                                               SELECT 1
-                                              FROM journal_contacts jc
+                                              FROM journal_contact_relationships jc
                                               WHERE jc.contact_id = cm.contact_id
                                                 AND jc.journal_id = :journal_id
                                           )
@@ -3054,7 +3053,6 @@ async def sync_calendar_events(
                                     check_result = await session.execute(
                                         check_stmt,
                                         {
-                                            "user_id": str(user_id),
                                             "emails": attendee_emails,
                                             "journal_id": existing_journal_id,
                                         },
