@@ -70,6 +70,5 @@ docker compose --profile test-backend --env-file .env.test down -v
 | `OperationalError: could not connect to server` | Docker containers not running | Run step 1 |
 | `InFailedSQLTransactionError` | Stale/partially-migrated test DB | Drop and recreate: `docker exec <container> dropdb -U postgres personal_management_test && docker exec <container> createdb -U postgres personal_management_test` |
 | `UndefinedColumnError` | Migration/schema mismatch | Run `uv run alembic upgrade head` from `backend/` with correct `DATABASE_URL` |
-| `redis connection error localhost:6379` | Tests hardcode default Redis port | Known issue — see above. Ignore these specific test failures. |
 | Port conflict with another workspace | Two checkouts using same ports | This shouldn't happen — `workspace_env.py` hashes the workspace path to derive unique ports. If it does, check both workspaces' `python3 scripts/workspace_env.py json` output. |
 
