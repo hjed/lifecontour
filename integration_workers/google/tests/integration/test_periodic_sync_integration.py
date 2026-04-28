@@ -20,7 +20,7 @@ from worker import periodic_sync_all_accounts
 @pytest_asyncio.fixture
 async def redis_pool():
     """Create Redis pool for tests."""
-    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+    redis_url = os.environ["REDIS_URL"]
     redis_settings = RedisSettings.from_dsn(redis_url)
     pool = await create_pool(redis_settings)
     yield pool

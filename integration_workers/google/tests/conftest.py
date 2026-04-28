@@ -4,13 +4,36 @@ Pytest configuration for Google Contacts worker tests.
 Sets up environment variables and fixtures needed for testing.
 """
 
+import json
 import os
+import subprocess
+from pathlib import Path
 
-# Set up environment variables immediately during import to allow safe module collection
+
+def _get_workspace_ports() -> dict[str, str]:
+    """Load workspace-specific ports from workspace_env.py for test isolation."""
+    project_root = Path(__file__).parent.parent.parent.parent
+    script = project_root / "scripts" / "workspace_env.py"
+    try:
+        result = subprocess.run(
+            ["python3", str(script), "json"], check=True, capture_output=True, text=True
+        )
+        return json.loads(result.stdout)
+    except Exception:
+        return {}
+
+
+_ws = _get_workspace_ports()
+
+# Set up environment variables immediately during import to allow safe module collection.
+# Uses workspace-derived ports to avoid conflicts with other workspaces.
+_db_port = _ws.get("DB_TEST_PORT", "5433")
+_redis_port = _ws.get("REDIS_TEST_PORT", "6380")
 os.environ.setdefault(
-    "DATABASE_URL", "postgresql+asyncpg://test:test@localhost:5432/test"
+    "DATABASE_URL",
+    f"postgresql+asyncpg://postgres:postgres@localhost:{_db_port}/personal_management_test",
 )
-os.environ.setdefault("REDIS_URL", "redis://localhost:6379")
+os.environ.setdefault("REDIS_URL", f"redis://localhost:{_redis_port}")
 os.environ.setdefault("GOOGLE_CLIENT_ID", "test_client_id")
 os.environ.setdefault("GOOGLE_CLIENT_SECRET", "test_client_secret")
 os.environ.setdefault("ENCRYPTION_KEY", "test_encryption_key_32_characters!")

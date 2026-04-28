@@ -75,10 +75,14 @@ def apply_migrations() -> None:
             ["uv", "run", "alembic", "-c", "alembic.ini", "upgrade", "head"],
             cwd=backend_dir,
             check=True,
+            capture_output=True,
+            text=True,
             env=env,
         )
     except subprocess.CalledProcessError as e:
-        print(f"Alembic failed. stdout: {e.stdout}, stderr: {e.stderr}")
+        print(f"Alembic failed (exit code {e.returncode}).")
+        print(f"stdout: {e.stdout}")
+        print(f"stderr: {e.stderr}")
         raise
 
 
