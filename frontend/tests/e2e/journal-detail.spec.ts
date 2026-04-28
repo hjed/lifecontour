@@ -211,7 +211,7 @@ test.describe('Journal Detail Page', () => {
       await expect(saveButton).not.toBeVisible();
 
       // Verify the date range was updated (should be different from original)
-      await expect(dateField).not.toContainText(originalDateRange || '');
+      await expect(dateField).not.toHaveText(originalDateRange || '');
       await expect(dateField).toBeVisible();
     });
   });

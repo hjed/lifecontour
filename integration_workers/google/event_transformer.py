@@ -308,7 +308,9 @@ class GoogleEventTransformer:
         return payload
 
     @staticmethod
-    def extract_contact_relationships(google_event: GoogleEvent) -> list[dict[str, str]]:
+    def extract_contact_relationships(
+        google_event: GoogleEvent,
+    ) -> list[dict[str, str]]:
         """Extract contact relationships (invitees) from a Google Event with status and role."""
         from core_shared.models.journals.attendee_status import AttendeeStatus
         from core_shared.models.journals.contact_event_role import ContactEventRole

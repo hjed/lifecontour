@@ -207,6 +207,64 @@ class TestSyncCalendarEvents:
         mock_session.add.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_sync_updates_unchanged_events_if_new_contacts(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        """Events with same ETag should STILL be updated if a new contact match is found."""
+        from worker import sync_calendar_events
+
+        synced_cal = _make_calendar_row(is_synced_to_google=True)
+        cal_result = MagicMock()
+        cal_result.fetchall.return_value = [synced_cal]
+
+        token_result = MagicMock()
+        token_result.scalar.return_value = None
+
+        # Existing link with same ETag
+        existing_link = MagicMock()
+        existing_link.external_version = '"etag-abc"'
+        existing_link.sync_capability = "bidirectional"
+        existing_link.journal_id = 42
+        link_result = MagicMock()
+        link_result.fetchone.return_value = existing_link
+
+        # Check result indicating a new contact matched
+        check_result = MagicMock()
+        check_result.fetchone.return_value = (
+            1,
+        )  # returning a row means new match found
+
+        mock_session.execute.side_effect = [
+            cal_result,
+            token_result,
+            link_result,
+            check_result,
+            MagicMock(),  # sync token save
+        ]
+
+        google_event_dict = _make_google_event(etag='"etag-abc"')
+        google_event_dict["attendees"] = [{"email": "new.contact@example.com"}]
+        google_events = {
+            "items": [google_event_dict],
+            "nextSyncToken": "new-sync-token",
+        }
+
+        mock_client = MagicMock()
+        mock_client.list_events = AsyncMock(return_value=google_events)
+
+        with patch(
+            "worker._create_google_client",
+            return_value=mock_client,
+        ):
+            result = await sync_calendar_events(
+                mock_ctx, "test@example.com", "user-1", "full"
+            )
+
+        assert result["status"] == "success"
+        # Outbox event should be created for the unchanged event because check_result found a new contact
+        mock_session.add.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_sync_saves_calendar_sync_token(
         self, mock_ctx: dict[str, Any], mock_session: AsyncMock
     ) -> None:
