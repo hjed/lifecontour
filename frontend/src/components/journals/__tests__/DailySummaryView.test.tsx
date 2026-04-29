@@ -192,6 +192,11 @@ describe('DailySummaryView', () => {
     fireEvent.click(screen.getByTestId(`generate-summary-btn-${mockDate}`));
 
     expect(screen.getByText('Generating...')).toBeInTheDocument();
+    // Stale summary text should not be shown during generation
+    expect(screen.queryByText('Still generating...')).not.toBeInTheDocument();
+    expect(screen.getByTestId(`summary-text-${mockDate}`)).toHaveTextContent(
+      'Summary is being generated...'
+    );
     // Refresh button should be disabled
     expect(
       screen.getByTestId(`refresh-summary-btn-${mockDate}`)

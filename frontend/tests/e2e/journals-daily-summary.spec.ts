@@ -258,8 +258,10 @@ test.describe('Journals AI Daily Summary', () => {
     );
     await refreshBtn.click();
 
-    // Verify it called the POST route and updated the UI (should show regenerating badge or text)
-    expect(regenerateCalled).toBe(true);
+    // Verify the UI updated (Playwright will auto-retry until the badge appears, which
+    // proves the POST completed and the response was rendered)
     await expect(authenticatedPage.getByText('Generating...')).toBeVisible();
+    // Now safe to check the synchronous side-effect flag
+    expect(regenerateCalled).toBe(true);
   });
 });

@@ -184,7 +184,9 @@ export function DailySummaryView({ date }: DailySummaryViewProps) {
           className='text-sm leading-relaxed'
           data-testid={`summary-text-${date}`}
         >
-          {attrs?.summary_text || 'No summary available.'}
+          {isGenerating
+            ? 'Summary is being generated...'
+            : attrs?.summary_text || 'No summary available.'}
         </p>
 
         {/* Lightweight Stats */}

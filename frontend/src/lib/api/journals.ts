@@ -793,7 +793,7 @@ export function useDailySummary(
       return response.json();
     },
     staleTime: 5 * 60 * 1000, // 5 minutes
-    enabled: options.enabled && Boolean(date),
+    enabled: (options.enabled ?? true) && Boolean(date),
   });
 }
 
@@ -822,7 +822,13 @@ export function useRegenerateDailySummary() {
         [...journalKeys.all, 'daily-summary', date],
         data
       );
-      toast.success('Daily summary regenerated successfully');
+      if (data.data) {
+        toast.success('Daily summary regenerated successfully');
+      } else {
+        toast.info(
+          'Summary generation is not available. Check AI configuration.'
+        );
+      }
     },
     onError: error => {
       toast.error(error.message || 'Failed to regenerate daily summary');
