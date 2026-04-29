@@ -812,6 +812,60 @@ async def publish_outbox_events():
         await asyncio.sleep(10)  # Poll every 10 seconds
 ```
 
+### Redis Stream Consumer Architecture (Phase 2)
+
+> [!NOTE]
+> This architecture was introduced in ITER5-001 Phase 2. When `USE_STREAM_CONSUMERS=true`, the
+> `OutboxRelay` publishes events to a Redis Stream (`pms:domain-events`) and independent consumers
+> handle search indexing and summary generation. The `OutboxProcessor` still runs for contact sync
+> and ARQ broadcast, but skips search/summary work to avoid duplicate processing.
+
+#### Consumer Architecture
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│ OutboxRelay (FastAPI lifespan task)                                │
+│   - Polls outbox_events WHERE relayed_at IS NULL                  │
+│   - XADD to pms:domain-events stream                             │
+│   - Marks rows as relayed                                         │
+└──────────────────────────┬─────────────────────────────────────────┘
+                           │ Redis Stream (pms:domain-events)
+                           │
+      ┌────────────────────┼────────────────────┐
+      │                    │                    │
+      ▼                    ▼                    ▼
+┌──────────────┐  ┌────────────────┐  ┌────────────────────┐
+│ search-      │  │ summary-       │  │ (future Phase 3)   │
+│ indexer      │  │ generator      │  │ integration-worker │
+│ consumer     │  │ consumer       │  │ consumer           │
+│ group        │  │ group          │  │ group              │
+│              │  │                │  │                    │
+│ Handles:     │  │ Handles:       │  │ Handles:           │
+│ • Contact*   │  │ • Contact      │  │ • contact.*        │
+│ • Journal*   │  │   Summary      │  │ • journal_event.*  │
+│ • Tag*       │  │   Refresh      │  │ • Tag*             │
+│ • Important  │  │   Requested    │  │                    │
+│   Date*      │  │                │  │                    │
+└──────────────┘  └────────────────┘  └────────────────────┘
+```
+
+#### Key Components
+
+| Component | Module | Consumer Group | Responsibility |
+|-----------|--------|----------------|----------------|
+| `SearchIndexerConsumer` | `app.infrastructure.events.search_indexer_consumer` | `search-indexer` | MeiliSearch indexing + daily summary invalidation |
+| `SummaryConsumer` | `app.infrastructure.events.summary_consumer` | `summary-generator` | AI contact summary generation + post-generation index update |
+| `StreamConsumer` (base) | `app.infrastructure.events.stream_consumer` | — | XREADGROUP loop, event filtering, XACK |
+| `stream_event_to_outbox_event` | `app.infrastructure.events.stream_event_adapter` | — | Converts `StreamEvent` → `OutboxEvent` for reuse of existing processors |
+
+#### Feature Flag Gating
+
+When `USE_STREAM_CONSUMERS=true`:
+
+- **OutboxProcessor** skips: `SearchIndexer.process_event()`, `_process_summary_generation_event()`, `_invalidate_daily_summary_for_journal_event()`
+- **OutboxProcessor** still runs: `_process_contact_event()`, `_process_journal_event()` (ARQ broadcast), `_process_tag_event()`
+- **Stream consumers** handle the skipped responsibilities via their own consumer groups
+
 ### Inbound Sync Flow (Pulling Data from External Systems)
 
 **Critical Architecture Pattern**: The outbox pattern is used for BOTH outbound events (local → external) AND inbound sync processing (external → local).

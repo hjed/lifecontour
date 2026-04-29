@@ -101,6 +101,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     outbox_task = None
     attendance_task = None
     relay_task = None
+    search_consumer_task = None
+    summary_consumer_task = None
     try:
         # Start outbox processor background task
         outbox_task = asyncio.create_task(
@@ -132,18 +134,52 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 stream=settings.stream_name,
             )
 
+            # Start stream consumers for search indexing and summary generation
+            from app.infrastructure.events.search_indexer_consumer import (
+                SearchIndexerConsumer,
+            )
+            from app.infrastructure.events.summary_consumer import SummaryConsumer
+
+            search_consumer = SearchIndexerConsumer(
+                stream_client=stream_client,
+                stream_name=settings.stream_name,
+            )
+            search_consumer_task = asyncio.create_task(search_consumer.start())
+            logger.info(
+                "Search indexer consumer started",
+                group="search-indexer",
+                stream=settings.stream_name,
+            )
+
+            summary_consumer = SummaryConsumer(
+                stream_client=stream_client,
+                stream_name=settings.stream_name,
+            )
+            summary_consumer_task = asyncio.create_task(summary_consumer.start())
+            logger.info(
+                "Summary generator consumer started",
+                group="summary-generator",
+                stream=settings.stream_name,
+            )
+
         yield
 
     finally:
-        # Cleanup background tasks
-        if relay_task:
-            relay_task.cancel()
-            try:
-                await relay_task
-            except asyncio.CancelledError:
-                pass
-            logger.info("Outbox relay background task stopped")
+        # Cleanup stream consumer tasks
+        for task, name in [
+            (summary_consumer_task, "Summary generator consumer"),
+            (search_consumer_task, "Search indexer consumer"),
+            (relay_task, "Outbox relay"),
+        ]:
+            if task:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                logger.info(f"{name} background task stopped")
 
+        # Cleanup background tasks
         if outbox_task:
             outbox_task.cancel()
             try:

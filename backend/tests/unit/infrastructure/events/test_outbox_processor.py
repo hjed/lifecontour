@@ -797,3 +797,248 @@ class TestOutboxProcessor:
         mock_repository.mark_as_processed.assert_called_once_with(
             "journal-review-event"
         )
+
+
+class TestOutboxProcessorStreamConsumerGating:
+    """Tests for feature flag gating when USE_STREAM_CONSUMERS is enabled."""
+
+    @pytest.fixture
+    def mock_search_indexer(self):
+        """Create a mock search indexer."""
+        indexer = MagicMock()
+        indexer.process_event = AsyncMock()
+        indexer.db_connection = MagicMock()
+        return indexer
+
+    @pytest.fixture
+    def mock_task_queue_service(self):
+        """Create a mock TaskQueueService."""
+        service = AsyncMock()
+        return service
+
+    @pytest.fixture
+    def mock_container(self, mock_task_queue_service):
+        """Create a mock dishka container."""
+        container = MagicMock()
+
+        class MockContext:
+            async def __aenter__(self):
+                return container
+
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                pass
+
+        container.return_value = MockContext()
+        container.get = AsyncMock(return_value=mock_task_queue_service)
+        return container
+
+    @pytest.fixture
+    def processor(self, mock_search_indexer, mock_container):
+        """Create an OutboxProcessor instance with mock dependencies."""
+        with patch(
+            "app.infrastructure.events.outbox_processor.SearchIndexer",
+            return_value=mock_search_indexer,
+        ):
+            return OutboxProcessor(mock_container)
+
+    @pytest.mark.asyncio
+    async def test_skips_search_indexing_when_stream_consumers_enabled(
+        self, processor, mock_search_indexer
+    ):
+        """With USE_STREAM_CONSUMERS=true, SearchIndexer.process_event should NOT be called."""
+        contact_event = OutboxEvent(
+            id=1,
+            event_id="event-1",
+            event_type="ContactCreated",
+            aggregate_id=42,
+            event_data={"contact_id": 42, "name": "John"},
+            occurred_at=datetime(2024, 1, 1, 12, 0, 0),
+            processed_at=None,
+            retry_count=0,
+            created_at=datetime(2024, 1, 1, 12, 0, 0),
+        )
+        mock_repository = MagicMock()
+        mock_repository.mark_as_processed = AsyncMock()
+
+        mock_settings = MagicMock()
+        mock_settings.use_stream_consumers = True
+
+        with patch(
+            "app.infrastructure.events.outbox_processor.get_settings",
+            return_value=mock_settings,
+        ):
+            await processor._process_single_event(
+                contact_event, mock_repository, mock_search_indexer
+            )
+
+        # Search indexer should NOT be called — stream consumer handles it
+        mock_search_indexer.process_event.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_skips_summary_generation_when_stream_consumers_enabled(
+        self, processor, mock_search_indexer
+    ):
+        """With USE_STREAM_CONSUMERS=true, _process_summary_generation_event should NOT be called."""
+        summary_event = OutboxEvent(
+            id=1,
+            event_id="event-summary-1",
+            event_type="ContactSummaryRefreshRequested",
+            aggregate_id=42,
+            event_data={"contact_id": 42},
+            occurred_at=datetime(2024, 1, 1, 12, 0, 0),
+            processed_at=None,
+            retry_count=0,
+            created_at=datetime(2024, 1, 1, 12, 0, 0),
+        )
+        mock_repository = MagicMock()
+        mock_repository.mark_as_processed = AsyncMock()
+
+        mock_settings = MagicMock()
+        mock_settings.use_stream_consumers = True
+
+        with (
+            patch(
+                "app.infrastructure.events.outbox_processor.get_settings",
+                return_value=mock_settings,
+            ),
+            patch.object(
+                processor,
+                "_process_summary_generation_event",
+                new_callable=AsyncMock,
+            ) as mock_summary,
+        ):
+            await processor._process_single_event(
+                summary_event, mock_repository, mock_search_indexer
+            )
+
+        # Summary generation and search indexer should NOT be called
+        mock_summary.assert_not_called()
+        mock_search_indexer.process_event.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_skips_daily_summary_invalidation_when_stream_consumers_enabled(
+        self, processor, mock_search_indexer, mock_task_queue_service
+    ):
+        """With USE_STREAM_CONSUMERS=true, daily summary invalidation should be skipped."""
+        journal_event = OutboxEvent(
+            id=1,
+            event_id="event-journal-1",
+            event_type="JournalCreated",
+            aggregate_id=42,
+            event_data={"journal_id": 42},
+            occurred_at=datetime(2024, 1, 1, 12, 0, 0),
+            processed_at=None,
+            retry_count=0,
+            created_at=datetime(2024, 1, 1, 12, 0, 0),
+        )
+        mock_repository = MagicMock()
+        mock_repository.mark_as_processed = AsyncMock()
+
+        mock_settings = MagicMock()
+        mock_settings.use_stream_consumers = True
+
+        with (
+            patch(
+                "app.infrastructure.events.outbox_processor.get_settings",
+                return_value=mock_settings,
+            ),
+            patch.object(
+                processor,
+                "_invalidate_daily_summary_for_journal_event",
+                new_callable=AsyncMock,
+            ) as mock_invalidate,
+        ):
+            await processor._process_single_event(
+                journal_event, mock_repository, mock_search_indexer
+            )
+
+        # Daily summary invalidation should NOT be called
+        mock_invalidate.assert_not_called()
+        # Search indexer should NOT be called
+        mock_search_indexer.process_event.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_still_processes_contact_sync_when_stream_consumers_enabled(
+        self, processor, mock_search_indexer
+    ):
+        """With USE_STREAM_CONSUMERS=true, contact.* sync events should still be processed."""
+        contact_sync_event = OutboxEvent(
+            id=1,
+            event_id="contact-sync-1",
+            event_type="contact.created",
+            aggregate_id=42,
+            event_data={
+                "integration_source": "google",
+                "external_id": "people/c123",
+                "contact_data": {"first_name": "Test"},
+                "sync_timestamp": "2024-01-01T10:00:00Z",
+                "sync_type": "created",
+            },
+            occurred_at=datetime(2024, 1, 1, 10, 0, 0),
+            processed_at=None,
+            retry_count=0,
+            created_at=datetime(2024, 1, 1, 10, 0, 0),
+        )
+        mock_repository = MagicMock()
+        mock_repository.mark_as_processed = AsyncMock()
+
+        mock_settings = MagicMock()
+        mock_settings.use_stream_consumers = True
+
+        with (
+            patch(
+                "app.infrastructure.events.outbox_processor.get_settings",
+                return_value=mock_settings,
+            ),
+            patch.object(
+                processor,
+                "_process_contact_event",
+                new_callable=AsyncMock,
+            ) as mock_contact,
+        ):
+            await processor._process_single_event(
+                contact_sync_event, mock_repository, mock_search_indexer
+            )
+
+        # Contact sync should still run — Phase 3 migration
+        mock_contact.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_still_broadcasts_journal_events_when_stream_consumers_enabled(
+        self, processor, mock_search_indexer, mock_task_queue_service
+    ):
+        """With USE_STREAM_CONSUMERS=true, ARQ journal broadcast should still run."""
+        journal_event = OutboxEvent(
+            id=1,
+            event_id="journal-broadcast-1",
+            event_type="JournalUpdated",
+            aggregate_id=42,
+            event_data={"journal_id": 42, "changed_fields": {}},
+            occurred_at=datetime(2024, 1, 1, 12, 0, 0),
+            processed_at=None,
+            retry_count=0,
+            created_at=datetime(2024, 1, 1, 12, 0, 0),
+        )
+        mock_repository = MagicMock()
+        mock_repository.mark_as_processed = AsyncMock()
+
+        mock_settings = MagicMock()
+        mock_settings.use_stream_consumers = True
+
+        with (
+            patch(
+                "app.infrastructure.events.outbox_processor.get_settings",
+                return_value=mock_settings,
+            ),
+            patch.object(
+                processor,
+                "_process_journal_event",
+                new_callable=AsyncMock,
+            ) as mock_broadcast,
+        ):
+            await processor._process_single_event(
+                journal_event, mock_repository, mock_search_indexer
+            )
+
+        # ARQ broadcast should still run — Phase 3 migration
+        mock_broadcast.assert_called_once()

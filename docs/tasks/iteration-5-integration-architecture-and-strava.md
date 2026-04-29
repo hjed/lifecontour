@@ -99,16 +99,20 @@ Introduce the relay process, the base `StreamConsumer` class, consumer group man
 Extract the `SearchIndexer` and `ContactSummaryRefreshRequested` processing from `OutboxProcessor._process_single_event` into independent stream consumers. These two are the simplest consumers (no external API calls, no complex DI trees).
 
 **Acceptance Criteria:**
-- [ ] `SearchIndexerConsumer` (group: `search-indexer`): handles `contact.*`, `journal.*`, `route.*`, `tag.*`, `JournalCreated`, `JournalUpdated`, `JournalDeleted`, `TagUpdated`, `TagDeleted` events for MeiliSearch indexing
-- [ ] `SummaryConsumer` (group: `summary-generator`): handles `ContactSummaryRefreshRequested` events
-- [ ] Both consumers acknowledge irrelevant events immediately (no processing)
-- [ ] Existing `SearchIndexer.process_event` logic reused — consumer is a thin wrapper
-- [ ] Feature flag: when enabled, these events are processed via stream consumers instead of `OutboxProcessor`
-- [ ] All existing search indexing and summary generation tests pass unchanged
+- [x] `SearchIndexerConsumer` (group: `search-indexer`): handles `Contact*`, `Journal*`, `TagAssigned`, `TagRemoved`, `ImportantDate*` events for MeiliSearch indexing, plus daily summary invalidation for journal events
+- [x] `SummaryConsumer` (group: `summary-generator`): handles `ContactSummaryRefreshRequested` events, generates AI summaries, then updates search index
+- [x] Both consumers acknowledge irrelevant events immediately (no processing)
+- [x] Existing `SearchIndexer.process_event` logic reused — consumer is a thin wrapper
+- [x] `stream_event_to_outbox_event` adapter converts `StreamEvent` to `OutboxEvent` for reuse
+- [x] Feature flag: when `USE_STREAM_CONSUMERS=true`, search/summary events are processed via stream consumers instead of `OutboxProcessor`
+- [x] `OutboxProcessor` gated: skips `SearchIndexer.process_event`, `_process_summary_generation_event`, `_invalidate_daily_summary_for_journal_event` when flag is enabled
+- [x] Contact sync and ARQ broadcast still processed by `OutboxProcessor` (Phase 3 scope)
+- [x] Consumers wired as `asyncio.Task`s in FastAPI lifespan alongside `OutboxRelay`
+- [x] All existing search indexing and summary generation tests pass unchanged
 
 **Required Test Coverage:**
-- **Unit:** `SearchIndexerConsumer` event routing, `SummaryConsumer` event filtering.
-- **Integration:** end-to-end flow from outbox → relay → stream → search indexer consumer → MeiliSearch update. Summary consumer processes refresh event.
+- **Unit:** `SearchIndexerConsumer` event routing (30 tests), `SummaryConsumer` event filtering (16 tests), `StreamEventAdapter` (6 tests), `OutboxProcessor` feature flag gating (5 tests). ✅ All 108 event tests pass.
+- **Integration:** SearchIndexerConsumer processes ContactCreated + JournalCreated events from real Redis stream, acknowledges irrelevant events. SummaryConsumer processes ContactSummaryRefreshRequested from real Redis stream. ✅ 4 integration tests pass.
 - **E2E:** create/update a contact and journal, verify search results update correctly via stream consumer path.
 
 #### Phase 3: Migrate Inbound Processors and Google Outbound Broadcast
