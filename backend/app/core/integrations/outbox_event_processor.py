@@ -25,7 +25,10 @@ from core_shared.models.outbox import OutboxEvent
 from core_shared.models.sync_metadata import SyncStatus
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.contacts.models.exceptions import DuplicateTagNameError
+from app.core.contacts.models.exceptions import (
+    DuplicateEmailError,
+    DuplicateTagNameError,
+)
 from app.core.contacts.services.contact_service import ContactService
 from app.core.integrations.adapters.sql.sync_metadata_repository import (
     SyncMetadataRepository,
@@ -639,6 +642,21 @@ class OutboxEventProcessor:
                     integration_source=integration_source,
                     external_id=external_id,
                 )
+        except DuplicateEmailError as e:
+            logger.warning(
+                "Contact creation has duplicate email conflict - recording as conflict",
+                integration_source=integration_source,
+                external_id=external_id,
+                error=str(e),
+            )
+            return {
+                "status": "conflict",
+                "reason": "duplicate_email",
+                "event_type": EVENT_TYPE_CONTACT_CREATED,
+                "integration_source": integration_source,
+                "external_id": external_id,
+                "error": str(e),
+            }
         except Exception as e:
             raise OutboxEventProcessingError(
                 f"Failed to {contact_action} contact: {str(e)}"
@@ -841,6 +859,30 @@ class OutboxEventProcessor:
                 self.connection,
                 changed_by=sync_changed_by,
             )
+        except DuplicateEmailError as e:
+            logger.warning(
+                "Contact update has duplicate email conflict - recording as conflict",
+                integration_source=integration_source,
+                external_id=external_id,
+                error=str(e),
+            )
+            # Record conflict in sync_metadata so it's visible for resolution
+            await self.sync_metadata_repo.upsert(
+                internal_id=existing_contact.id,
+                integration_source=integration_source,
+                external_id=external_id,
+                version_hash=new_version_hash,
+                sync_status=SyncStatus.CONFLICT,
+                error_message=str(e),
+            )
+            return {
+                "status": "conflict",
+                "reason": "duplicate_email",
+                "event_type": EVENT_TYPE_CONTACT_UPDATED,
+                "integration_source": integration_source,
+                "external_id": external_id,
+                "error": str(e),
+            }
         except Exception as e:
             raise OutboxEventProcessingError(
                 f"Failed to update contact: {str(e)}"

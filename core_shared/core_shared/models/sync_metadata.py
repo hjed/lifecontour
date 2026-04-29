@@ -21,6 +21,7 @@ class SyncStatus(Enum):
     FAILED = "failed"
     IN_PROGRESS = "in_progress"
     PENDING = "pending"
+    CONFLICT = "conflict"
 
 
 class SyncMetadata(Base):
