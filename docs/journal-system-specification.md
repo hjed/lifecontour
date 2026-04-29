@@ -442,18 +442,19 @@ abseil_pitches table:
 - id (integer, auto-increment, primary key)
 - journal_id (FK to journal_abseiling_data)
 - pitch_number (integer, required, positive)
-- height (float, nullable, meters)
-- anchor_location (string, nullable, constrained to: top, bottom)
-- anchor_type (string, nullable, constrained to: natural, bolts, tree, thread, piton, ice_screw, stake, other)
-- did_rescue (boolean, default false)
-- did_setup (boolean, default false)
+- height (integer, nullable, metres)
+- anchor_location (string, nullable, constrained to: TR, TL, Centre)
+- anchor_type (string, nullable, constrained to: chains, double bolt, single bolt, sling on tree, sling on log, sling on boulder, sling on bollard, artificial removable)
+- did_rescue (boolean, nullable)
+- did_setup (boolean, nullable)
 - created_at
 - updated_at
 ```
 
 **Notes:**
 - Pitches belong to a specific abseiling journal entry
-- Anchor location and type are constrained to valid values
+- Anchor location represents the position of the anchor relative to the abseil line: TR (top right), TL (top left), Centre
+- Anchor type values are constrained to common outdoor anchoring methods
 - `did_rescue` and `did_setup` flags support aggregate counting for logbook statistics
 
 ### Canyoning Data (CANYONING type)
