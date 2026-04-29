@@ -1,3 +1,4 @@
+import { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
 import { TestDataManager } from './data-management';
 
@@ -24,6 +25,74 @@ function getFormattedDateId(dayOffset: number): string {
   const month = String(d.getUTCMonth() + 1).padStart(2, '0');
   const day = String(d.getUTCDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+/** Create two journals on the same day so the day qualifies for a summary. */
+async function createTwoJournalsForDay(
+  dataManager: TestDataManager,
+  dayOffset: number,
+  options?: { titles?: [string, string]; contents?: [string, string] }
+): Promise<void> {
+  const titles = options?.titles ?? ['Journal 1', 'Journal 2'];
+  const contents = options?.contents ?? ['Content 1', 'Content 2'];
+
+  await dataManager.createJournal({
+    title: titles[0],
+    content: contents[0],
+    event_date_range: {
+      start: relativeDate(dayOffset, 1),
+      end: relativeDate(dayOffset, 2),
+    },
+  });
+  await dataManager.createJournal({
+    title: titles[1],
+    content: contents[1],
+    event_date_range: {
+      start: relativeDate(dayOffset, 3),
+      end: relativeDate(dayOffset, 4),
+    },
+  });
+}
+
+/** Build a JSON:API daily-summary response body. */
+function buildSummaryResponse(
+  dateId: string,
+  overrides: Record<string, unknown> = {}
+): string {
+  return JSON.stringify({
+    data: {
+      type: 'journal-daily-summaries',
+      id: dateId,
+      attributes: {
+        summary_date: dateId,
+        summary_text: 'Mocked summary',
+        journal_count: 2,
+        event_count: 0,
+        contact_count: 0,
+        status: 'GENERATED',
+        ...overrides,
+      },
+    },
+  });
+}
+
+/** Mock the GET daily-summary endpoint for a given date. */
+async function mockDailySummaryRoute(
+  page: Page,
+  dateId: string,
+  overrides: Record<string, unknown> = {},
+  delayMs = 0
+): Promise<void> {
+  await page.route(`**/api/journals/daily-summary/${dateId}`, async route => {
+    if (delayMs > 0) {
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: buildSummaryResponse(dateId, overrides),
+    });
+  });
 }
 
 test.describe('Journals AI Daily Summary', () => {
@@ -71,23 +140,9 @@ test.describe('Journals AI Daily Summary', () => {
     const dayOffset = -2;
     const journalDateId = getFormattedDateId(dayOffset);
 
-    // Create 2 journals to make the day eligible
-    await dataManager.createJournal({
-      title: 'Morning run',
-      content: 'Felt great',
-      event_date_range: {
-        start: relativeDate(dayOffset, 1),
-        end: relativeDate(dayOffset, 2),
-      },
-    });
-
-    await dataManager.createJournal({
-      title: 'Evening reflections',
-      content: 'Good day overall',
-      event_date_range: {
-        start: relativeDate(dayOffset, 3),
-        end: relativeDate(dayOffset, 4),
-      },
+    await createTwoJournalsForDay(dataManager, dayOffset, {
+      titles: ['Morning run', 'Evening reflections'],
+      contents: ['Felt great', 'Good day overall'],
     });
 
     testCleanup(async () => {
@@ -95,33 +150,15 @@ test.describe('Journals AI Daily Summary', () => {
     });
 
     // Mock the daily summary generation API to avoid hitting Gemini in E2E
-    await authenticatedPage.route(
-      `**/api/journals/daily-summary/${journalDateId}`,
-      async route => {
-        // Simulate delay
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({
-            data: {
-              type: 'journal-daily-summaries',
-              id: journalDateId,
-              attributes: {
-                summary_date: journalDateId,
-                summary_text:
-                  'This is a mocked AI summary for the day. A very productive day.',
-                journal_count: 2,
-                event_count: 0,
-                contact_count: 0,
-                mood_average: 8.0,
-                status: 'GENERATED',
-              },
-            },
-          }),
-        });
-      }
+    await mockDailySummaryRoute(
+      authenticatedPage,
+      journalDateId,
+      {
+        summary_text:
+          'This is a mocked AI summary for the day. A very productive day.',
+        mood_average: 8,
+      },
+      500
     );
 
     await authenticatedPage.goto('/journals');
@@ -156,7 +193,7 @@ test.describe('Journals AI Daily Summary', () => {
       authenticatedPage.getByTestId(`summary-text-${journalDateId}`)
     ).toContainText('This is a mocked AI summary');
     await expect(summaryCard.getByText('2')).toBeVisible(); // journal count
-    await expect(summaryCard.getByText('8.0/10')).toBeVisible(); // mood
+    await expect(summaryCard.getByText('8.0/10')).toBeVisible(); // mood (.toFixed(1) renders 8 → 8.0)
 
     // Verify it is read-only (no inputs or textareas)
     const inputs = summaryCard.locator('input, textarea');
@@ -171,51 +208,16 @@ test.describe('Journals AI Daily Summary', () => {
     const dayOffset = -3;
     const journalDateId = getFormattedDateId(dayOffset);
 
-    await dataManager.createJournal({
-      title: 'Journal 1',
-      content: 'Content 1',
-      event_date_range: {
-        start: relativeDate(dayOffset, 1),
-        end: relativeDate(dayOffset, 2),
-      },
-    });
-    await dataManager.createJournal({
-      title: 'Journal 2',
-      content: 'Content 2',
-      event_date_range: {
-        start: relativeDate(dayOffset, 3),
-        end: relativeDate(dayOffset, 4),
-      },
-    });
+    await createTwoJournalsForDay(dataManager, dayOffset);
 
     testCleanup(async () => {
       await dataManager.cleanup();
     });
 
     // Mock the initial fetch
-    await authenticatedPage.route(
-      `**/api/journals/daily-summary/${journalDateId}`,
-      async route => {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({
-            data: {
-              type: 'journal-daily-summaries',
-              id: journalDateId,
-              attributes: {
-                summary_date: journalDateId,
-                summary_text: 'Initial summary',
-                journal_count: 2,
-                event_count: 0,
-                contact_count: 0,
-                status: 'GENERATED',
-              },
-            },
-          }),
-        });
-      }
-    );
+    await mockDailySummaryRoute(authenticatedPage, journalDateId, {
+      summary_text: 'Initial summary',
+    });
 
     // Mock the regenerate POST
     let regenerateCalled = false;
@@ -227,19 +229,9 @@ test.describe('Journals AI Daily Summary', () => {
           await route.fulfill({
             status: 200,
             contentType: 'application/json',
-            body: JSON.stringify({
-              data: {
-                type: 'journal-daily-summaries',
-                id: journalDateId,
-                attributes: {
-                  summary_date: journalDateId,
-                  summary_text: 'Regenerated summary text',
-                  journal_count: 2,
-                  event_count: 0,
-                  contact_count: 0,
-                  status: 'GENERATING', // It returns generating immediately
-                },
-              },
+            body: buildSummaryResponse(journalDateId, {
+              summary_text: 'Regenerated summary text',
+              status: 'GENERATING',
             }),
           });
         } else {
