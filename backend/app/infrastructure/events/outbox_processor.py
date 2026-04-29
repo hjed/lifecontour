@@ -14,6 +14,7 @@ from dishka import AsyncContainer
 from app.core.integrations.outbox_event_processor import (
     PermanentOutboxEventProcessingError,
 )
+from app.infrastructure.config import get_settings
 from app.infrastructure.database import get_async_database_engine
 from app.infrastructure.events.outbox_repository import OutboxRepository
 from app.infrastructure.search.search_indexer import SearchIndexer
@@ -117,6 +118,10 @@ class OutboxProcessor:
             search_indexer: Search indexer with database connection
         """
         try:
+            # Check if stream consumers handle search/summary processing
+            settings = get_settings()
+            stream_consumers_active = settings.use_stream_consumers
+
             # Route contact sync events to OutboxEventProcessor
             if event.event_type.startswith("contact."):
                 await self._process_contact_event(event, search_indexer.db_connection)
@@ -127,15 +132,17 @@ class OutboxProcessor:
                     event, search_indexer.db_connection
                 )
             elif event.event_type == "ContactSummaryRefreshRequested":
-                await self._process_summary_generation_event(
-                    event, search_indexer.db_connection
-                )
-                # After summary generation completes, forward the event to search indexer
-                # so the contact index is updated with the new summary text
-                await search_indexer.process_event(event)
+                if not stream_consumers_active:
+                    await self._process_summary_generation_event(
+                        event, search_indexer.db_connection
+                    )
+                    # After summary generation completes, forward the event to search indexer
+                    # so the contact index is updated with the new summary text
+                    await search_indexer.process_event(event)
             else:
                 # Process other events with the search indexer
-                await search_indexer.process_event(event)
+                if not stream_consumers_active:
+                    await search_indexer.process_event(event)
 
             # Additionally route journal events to integration workers
             # and invalidate daily summary cache
@@ -145,9 +152,10 @@ class OutboxProcessor:
                 "JournalDeleted",
             ):
                 await self._process_journal_event(event)
-                await self._invalidate_daily_summary_for_journal_event(
-                    event, search_indexer.db_connection
-                )
+                if not stream_consumers_active:
+                    await self._invalidate_daily_summary_for_journal_event(
+                        event, search_indexer.db_connection
+                    )
 
             # Route tag events to integration workers
             if event.event_type in (
@@ -163,6 +171,7 @@ class OutboxProcessor:
                 "Successfully processed outbox event",
                 event_id=event.event_id,
                 event_type=event.event_type,
+                stream_consumers_active=stream_consumers_active,
             )
 
         except PermanentOutboxEventProcessingError:
