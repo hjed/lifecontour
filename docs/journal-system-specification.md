@@ -384,7 +384,6 @@ journal_fitness_data table:
 ```
 journal_outdoor_activity_data table:
 - journal_id (FK to journals, primary key)
-- activity_type (string, e.g., "hiking", "climbing", "kayaking")
 - weather_conditions (text, nullable)
 - role (string, nullable, e.g., "leader", "participant", "spectator")
 - in_leadership_role (boolean, nullable)
@@ -396,6 +395,7 @@ journal_outdoor_activity_data table:
 **Notes:**
 - Extends FITNESS (requires journal_fitness_data row)
 - Generic outdoor activity fields shared by all outdoor activity types
+- Activity type is determined by the presence of subtype-specific data tables (e.g., bushwalking, abseiling, canyoning)
 - in_leadership_role indicates if user was leading/guiding the group
 - participant_notes for recording notes about participants (such as names of participants that are not contacts)
 - Specific activity types add their own tables with activity-specific fields
@@ -424,14 +424,38 @@ journal_abseiling_data table:
 - journal_id (FK to journals, primary key)
 - number_of_abseils (integer, nullable)
 - total_length (integer, meters, nullable)
+- number_of_setups (integer, nullable)
+- number_of_rescues (integer, nullable)
 - created_at
 - updated_at
 ```
 
 **Notes:**
-- Individual abseils are child journals with their own abseiling data
-- Child abseil fields: drop_length, anchor_location, anchor_type, did_rescue (boolean), did_setup (boolean)
+- Individual abseil pitches are stored as structured rows in the `abseil_pitches` table (see below)
+- Aggregate fields (`number_of_abseils`, `total_length`, `number_of_setups`, `number_of_rescues`) can be auto-calculated from pitches or set manually
 - Extends OUTDOOR_ACTIVITY and FITNESS
+
+### Abseil Pitches (child of ABSEILING_TRIP)
+
+```
+abseil_pitches table:
+- id (integer, auto-increment, primary key)
+- journal_id (FK to journal_abseiling_data)
+- pitch_number (integer, required, positive)
+- height (integer, nullable, metres)
+- anchor_location (string, nullable, constrained to: TR, TL, Centre)
+- anchor_type (string, nullable, constrained to: chains, double bolt, single bolt, sling on tree, sling on log, sling on boulder, sling on bollard, artificial removable)
+- did_rescue (boolean, nullable)
+- did_setup (boolean, nullable)
+- created_at
+- updated_at
+```
+
+**Notes:**
+- Pitches belong to a specific abseiling journal entry
+- Anchor location represents the position of the anchor relative to the abseil line: TR (top right), TL (top left), Centre
+- Anchor type values are constrained to common outdoor anchoring methods
+- `did_rescue` and `did_setup` flags support aggregate counting for logbook statistics
 
 ### Canyoning Data (CANYONING type)
 

@@ -49,7 +49,6 @@ MAX_TRANSPORTATION_TYPE_LENGTH: int = 50
 MAX_STRAVA_ACTIVITY_ID_LENGTH: int = 255
 
 # OutdoorActivityData constants (OUTDOOR_ACTIVITY type)
-MAX_ACTIVITY_TYPE_LENGTH: int = 100
 MAX_WEATHER_CONDITIONS_LENGTH: int = 200
 MAX_ROLE_LENGTH: int = 100
 MAX_PARTICIPANT_NOTES_LENGTH: int = 2000
@@ -74,4 +73,22 @@ VALID_CLIMBING_TYPES: list[str] = [
     "sport",
     "trad",
     "bouldering",
+]
+
+# AbseilPitch constants (abseil_pitches table)
+VALID_ANCHOR_LOCATIONS: list[str] = [
+    "TR",
+    "TL",
+    "Centre",
+]
+
+VALID_ANCHOR_TYPES: list[str] = [
+    "chains",
+    "double bolt",
+    "single bolt",
+    "sling on tree",
+    "sling on log",
+    "sling on boulder",
+    "sling on bollard",
+    "artificial removable",
 ]

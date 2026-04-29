@@ -224,6 +224,14 @@ class AbseilingDataValidationError(JournalDomainError):
         self.field = field
 
 
+class AbseilPitchValidationError(JournalDomainError):
+    """Exception raised when abseil pitch validation fails."""
+
+    def __init__(self, field: str, message: str):
+        super().__init__(f"{field}: {message}", 400)
+        self.field = field
+
+
 class CanyoningDataValidationError(JournalDomainError):
     """Exception raised when canyoning data (CANYONING type) validation fails."""
 

@@ -1900,8 +1900,6 @@ async def _process_journal_type_data(
         if outdoor_data is None:
             outdoor_data = OutdoorActivityData(journal_id=journal_id)
 
-        if "activity_type" in outdoor_payload:
-            outdoor_data.activity_type = outdoor_payload["activity_type"]
         if "weather_conditions" in outdoor_payload:
             outdoor_data.weather_conditions = outdoor_payload["weather_conditions"]
         if "role" in outdoor_payload:
@@ -3070,8 +3068,6 @@ async def _update_outdoor_activity_type_data(
     # Build update kwargs and use dataclasses.replace() to trigger __post_init__ validation.
     # This ensures domain validation (e.g. no empty/whitespace strings) is enforced.
     updates: dict[str, Any] = {}
-    if "activity_type" in attrs:
-        updates["activity_type"] = attrs["activity_type"]
     if "weather_conditions" in attrs:
         updates["weather_conditions"] = attrs["weather_conditions"]
     if "role" in attrs:
@@ -3157,6 +3153,14 @@ async def _update_abseiling_type_data(
     if "total_length" in attrs:
         updates["total_length"] = _parse_optional_integer(
             attrs["total_length"], "total_length"
+        )
+    if "number_of_setups" in attrs:
+        updates["number_of_setups"] = _parse_optional_integer(
+            attrs["number_of_setups"], "number_of_setups"
+        )
+    if "number_of_rescues" in attrs:
+        updates["number_of_rescues"] = _parse_optional_integer(
+            attrs["number_of_rescues"], "number_of_rescues"
         )
 
     validated_data = dataclasses.replace(abseiling_data, **updates)

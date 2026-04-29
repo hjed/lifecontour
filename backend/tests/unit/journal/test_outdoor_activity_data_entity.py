@@ -16,19 +16,12 @@ class TestOutdoorActivityData:
         data = OutdoorActivityData(journal_id=1)
 
         assert data.journal_id == 1
-        assert data.activity_type is None
         assert data.weather_conditions is None
         assert data.role is None
         assert data.in_leadership_role is None
         assert data.participant_notes is None
         assert data.created_at is None
         assert data.updated_at is None
-
-    def test_create_outdoor_activity_data_with_activity_type(self):
-        """Test creating outdoor activity data with an activity type."""
-        data = OutdoorActivityData(journal_id=1, activity_type="Hiking")
-
-        assert data.activity_type == "Hiking"
 
     def test_create_outdoor_activity_data_with_weather(self):
         """Test creating outdoor activity data with weather conditions."""
@@ -58,7 +51,6 @@ class TestOutdoorActivityData:
         """Test creating outdoor activity data with all fields populated."""
         data = OutdoorActivityData(
             journal_id=5,
-            activity_type="Bushwalking",
             weather_conditions="Overcast, mild",
             role="Leader",
             in_leadership_role=True,
@@ -66,7 +58,6 @@ class TestOutdoorActivityData:
         )
 
         assert data.journal_id == 5
-        assert data.activity_type == "Bushwalking"
         assert data.weather_conditions == "Overcast, mild"
         assert data.role == "Leader"
         assert data.in_leadership_role is True
@@ -85,20 +76,6 @@ class TestOutdoorActivityData:
             OutdoorActivityData(journal_id=-1)
 
         assert "journal_id" in str(exc_info.value)
-
-    def test_invalid_activity_type_empty(self):
-        """Test that empty activity_type raises validation error."""
-        with pytest.raises(OutdoorActivityDataValidationError) as exc_info:
-            OutdoorActivityData(journal_id=1, activity_type="")
-
-        assert "activity_type" in str(exc_info.value)
-
-    def test_invalid_activity_type_too_long(self):
-        """Test that activity_type exceeding max length raises validation error."""
-        with pytest.raises(OutdoorActivityDataValidationError) as exc_info:
-            OutdoorActivityData(journal_id=1, activity_type="A" * 101)
-
-        assert "activity_type" in str(exc_info.value)
 
     def test_invalid_weather_conditions_empty(self):
         """Test that empty weather_conditions raises validation error."""
@@ -141,10 +118,3 @@ class TestOutdoorActivityData:
             OutdoorActivityData(journal_id=1, participant_notes="A" * 2001)
 
         assert "participant_notes" in str(exc_info.value)
-
-    def test_activity_type_whitespace_only_invalid(self):
-        """Test that whitespace-only activity_type raises validation error."""
-        with pytest.raises(OutdoorActivityDataValidationError) as exc_info:
-            OutdoorActivityData(journal_id=1, activity_type="   ")
-
-        assert "activity_type" in str(exc_info.value)

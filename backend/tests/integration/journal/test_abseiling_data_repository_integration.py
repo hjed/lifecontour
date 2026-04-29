@@ -191,3 +191,83 @@ class TestAbseilingDataRepositoryDelete:
     ):
         """Test deleting non-existent data does not raise error."""
         await abseiling_repository.delete(99999)
+
+
+@pytest.mark.integration
+class TestAbseilingDataRepositoryAggregateFields:
+    """Test abseiling data aggregate fields (number_of_setups, number_of_rescues)."""
+
+    async def test_save_with_aggregate_fields(
+        self,
+        abseiling_repository: SqlAbseilingDataRepository,
+        test_journal: Journal,
+    ):
+        """Test creating abseiling data with new aggregate fields."""
+        data = AbseilingData(
+            journal_id=test_journal.id,  # type: ignore[arg-type]
+            number_of_abseils=5,
+            total_length=120,
+            number_of_setups=3,
+            number_of_rescues=1,
+        )
+
+        saved = await abseiling_repository.save(data)
+
+        assert saved.number_of_setups == 3
+        assert saved.number_of_rescues == 1
+
+    async def test_find_preserves_aggregate_fields(
+        self,
+        abseiling_repository: SqlAbseilingDataRepository,
+        test_journal: Journal,
+    ):
+        """Test that aggregate fields are correctly persisted and retrieved."""
+        data = AbseilingData(
+            journal_id=test_journal.id,  # type: ignore[arg-type]
+            number_of_setups=2,
+            number_of_rescues=0,
+        )
+        await abseiling_repository.save(data)
+
+        found = await abseiling_repository.find_by_journal_id(test_journal.id)  # type: ignore[arg-type]
+
+        assert found is not None
+        assert found.number_of_setups == 2
+        assert found.number_of_rescues == 0
+
+    async def test_update_aggregate_fields(
+        self,
+        abseiling_repository: SqlAbseilingDataRepository,
+        test_journal: Journal,
+    ):
+        """Test updating aggregate fields via upsert."""
+        data = AbseilingData(
+            journal_id=test_journal.id,  # type: ignore[arg-type]
+            number_of_setups=1,
+            number_of_rescues=0,
+        )
+        await abseiling_repository.save(data)
+
+        updated = AbseilingData(
+            journal_id=test_journal.id,  # type: ignore[arg-type]
+            number_of_setups=4,
+            number_of_rescues=2,
+        )
+        saved = await abseiling_repository.save(updated)
+
+        assert saved.number_of_setups == 4
+        assert saved.number_of_rescues == 2
+
+    async def test_null_aggregate_fields(
+        self,
+        abseiling_repository: SqlAbseilingDataRepository,
+        test_journal: Journal,
+    ):
+        """Test that aggregate fields default to None when not provided."""
+        data = AbseilingData(
+            journal_id=test_journal.id,  # type: ignore[arg-type]
+        )
+        saved = await abseiling_repository.save(data)
+
+        assert saved.number_of_setups is None
+        assert saved.number_of_rescues is None

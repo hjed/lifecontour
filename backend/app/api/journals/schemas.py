@@ -197,11 +197,6 @@ class FitnessDataSchema(BaseModel):
 class OutdoorActivityDataSchema(BaseModel):
     """Outdoor activity data for OUTDOOR_ACTIVITY type journals."""
 
-    activity_type: str | None = Field(
-        default=None,
-        description="Type of outdoor activity (e.g. Hiking, Camping)",
-        max_length=100,
-    )
     weather_conditions: str | None = Field(
         default=None,
         description="Description of weather conditions during the activity",
@@ -253,6 +248,16 @@ class AbseilingDataSchema(BaseModel):
     total_length: int | None = Field(
         default=None,
         description="Total length in metres (non-negative)",
+        ge=0,
+    )
+    number_of_setups: int | None = Field(
+        default=None,
+        description="Number of pitches the user set up (non-negative)",
+        ge=0,
+    )
+    number_of_rescues: int | None = Field(
+        default=None,
+        description="Number of pitches where the user performed a rescue (non-negative)",
         ge=0,
     )
 

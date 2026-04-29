@@ -1,6 +1,6 @@
 # Iteration 9: Outdoor Logbook
 
-**Status:** 🟡 PLANNED
+**Status:** 🟡 IN PROGRESS
 **Dependencies:** Iteration 7 (complete — journal hierarchy, calendar sync, merge, MCP parity), Iteration 4.5 (complete — fitness and activity types foundation)
 **Goal:** Expand the outdoor activity journal system into a comprehensive outdoor logbook with structured abseil pitches, activity templates, new activity and supporting types, gear maintenance tracking, and PDF logbook export.
 
@@ -90,18 +90,18 @@ The sequence reflects both product priority and technical dependency:
 Remove the `activity_type` column and establish the abseil pitch domain layer without API or UI changes.
 
 **Acceptance Criteria:**
-- [ ] Migration drops `activity_type` from `journal_outdoor_activity_data`
-- [ ] `OutdoorActivityData` entity and API schema no longer reference `activity_type`
-- [ ] Frontend `OutdoorActivityTypeEditor` no longer renders the activity type field
-- [ ] Migration creates `abseil_pitches` table (journal_id FK, pitch_number, height, anchor_location, anchor_type, did_rescue, did_setup, timestamps)
-- [ ] Migration adds `number_of_setups` and `number_of_rescues` to `journal_abseiling_data`
-- [ ] `AbseilPitch` domain entity with validation (pitch_number required and positive, anchor_location/anchor_type constrained to valid values)
-- [ ] `AbseilingData` entity updated with new aggregate fields
-- [ ] `AbseilPitchRepository` interface and `SqlAbseilPitchRepository` implementation (save, find_by_journal_id, delete_by_journal_id)
+- [x] Migration drops `activity_type` from `journal_outdoor_activity_data`
+- [x] `OutdoorActivityData` entity and API schema no longer reference `activity_type`
+- [x] Frontend `OutdoorActivityTypeEditor` no longer renders the activity type field
+- [x] Migration creates `abseil_pitches` table (journal_id FK, pitch_number, height, anchor_location, anchor_type, did_rescue, did_setup, timestamps)
+- [x] Migration adds `number_of_setups` and `number_of_rescues` to `journal_abseiling_data`
+- [x] `AbseilPitch` domain entity with validation (pitch_number required and positive, anchor_location/anchor_type constrained to valid values)
+- [x] `AbseilingData` entity updated with new aggregate fields
+- [x] `AbseilPitchRepository` interface and `SqlAbseilPitchRepository` implementation (save, find_by_journal_id, delete_by_journal_id)
 
 **Required Test Coverage:**
-- **Unit:** AbseilPitch entity validation (valid/invalid anchor types, location values, pitch_number constraints). AbseilingData entity with new fields.
-- **Integration:** AbseilPitchRepository CRUD with real database. OutdoorActivityData without activity_type.
+- **Unit:** ✅ AbseilPitch entity validation (valid/invalid anchor types, location values, pitch_number constraints). AbseilingData entity with new fields. 1326 tests passing.
+- **Integration:** ✅ AbseilPitchRepository CRUD with real database. OutdoorActivityData without activity_type. 791 integration tests passing.
 
 #### Phase 2: Abseil Pitch API and Auto-Calculation Logic
 **PR Size:** ~5–7 files

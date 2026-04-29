@@ -423,7 +423,6 @@ class TypeDataConverter:
     ) -> dict[str, Any]:
         """Convert OutdoorActivityData domain entity to API schema."""
         return OutdoorActivityDataSchema(
-            activity_type=data.activity_type,
             weather_conditions=data.weather_conditions,
             role=data.role,
             in_leadership_role=data.in_leadership_role,
@@ -450,6 +449,8 @@ class TypeDataConverter:
         return AbseilingDataSchema(
             number_of_abseils=data.number_of_abseils,
             total_length=data.total_length,
+            number_of_setups=data.number_of_setups,
+            number_of_rescues=data.number_of_rescues,
         ).model_dump(exclude_none=True)
 
     @staticmethod

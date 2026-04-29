@@ -160,7 +160,6 @@ export interface FitnessData {
 }
 
 export interface OutdoorActivityData {
-  activity_type?: string | null;
   weather_conditions?: string | null;
   role?: string | null;
   in_leadership_role?: boolean | null;
@@ -178,6 +177,8 @@ export interface JoggingData {
 export interface AbseilingData {
   number_of_abseils?: number | null;
   total_length?: number | null; // total length in metres
+  number_of_setups?: number | null;
+  number_of_rescues?: number | null;
 }
 
 export interface CanyoningData {
