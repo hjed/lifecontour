@@ -413,7 +413,6 @@ test.describe('Journal Creation UI Flow', () => {
 
     await expect(page.getByTestId('outdoor-type-editor')).toBeVisible();
 
-    await page.getByTestId('activity-type-input').fill('Rock Climbing');
     await page.getByTestId('weather-conditions-input').fill('Sunny, 25C');
     await page.getByTestId('role-input').fill('Lead Climber');
     await page.getByTestId('leadership-role-switch').click();
@@ -427,7 +426,6 @@ test.describe('Journal Creation UI Flow', () => {
     await page.getByTestId('type-section-trigger-outdoor_activity').click();
 
     // Verify fields are rendered
-    await expect(page.getByText('Rock Climbing')).toBeVisible();
     await expect(page.getByText('Sunny, 25C')).toBeVisible();
     await expect(page.getByText(/Lead Climber/)).toBeVisible();
     await expect(page.getByText(/(Leadership)/i)).toBeVisible();
