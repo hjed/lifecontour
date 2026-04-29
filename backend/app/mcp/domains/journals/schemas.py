@@ -382,3 +382,26 @@ class MergeCandidatesResponse(BaseModel):
     summary: str = Field(
         description="AI-friendly summary of merge candidates and recommendations"
     )
+
+
+class DailySummaryMCPResponse(BaseModel):
+    """AI-friendly daily summary response format."""
+
+    summary_date: str = Field(description="Date of the summary in ISO format")
+    summary_text: str | None = Field(
+        default=None, description="The AI-generated daily summary text, if available"
+    )
+    journal_count: int = Field(description="Number of journals on this day")
+    event_count: int = Field(description="Number of events on this day")
+    contact_count: int = Field(
+        description="Number of contacts mentioned or met on this day"
+    )
+    mood_average: float | None = Field(
+        default=None, description="Average mood score for the day (0.0 to 1.0)"
+    )
+    status: str = Field(
+        description="Status of the summary (e.g. GENERATED, PENDING, FAILED, DISABLED, INELIGIBLE)"
+    )
+    summary: str = Field(
+        description="AI-friendly summary of the daily summary results and context"
+    )

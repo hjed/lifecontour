@@ -15,6 +15,7 @@ from app.core.contacts.services import (
     ContactService,
     TagService,
 )
+from app.core.journal.services.daily_summary_service import DailySummaryService
 from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.search.search_service import SearchService
@@ -137,3 +138,8 @@ async def get_contact_relationship_service() -> ContactRelationshipService:
         ContactRelationshipService,
         await _resolve_dependency(ContactRelationshipService),
     )
+
+
+async def get_daily_summary_service() -> DailySummaryService:
+    """Resolve the daily summary service for the current MCP request."""
+    return cast(DailySummaryService, await _resolve_dependency(DailySummaryService))

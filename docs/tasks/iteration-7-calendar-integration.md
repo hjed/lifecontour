@@ -587,17 +587,18 @@ Phase 1 and Phase 2 were implemented as a combined delivery. The merge domain se
 
 #### Phase 3: MCP Daily Summary Parity and Day-Window Workflow Hardening
 **PR Size:** ~4-6 files
+**Status:** ✅ COMPLETE
 
 **Acceptance Criteria:**
-- [ ] MCP can retrieve the same day summary and day-level stats visible in the UI.
-- [ ] MCP summary retrieval uses the same eligibility and caching behaviour as the UI.
-- [ ] Day-window retrieval, summary retrieval, and journal-date browsing remain consistent across UI and MCP.
-- [ ] No separate MCP-only summary semantics are introduced.
+- [x] MCP can retrieve the same day summary and day-level stats visible in the UI.
+- [x] MCP summary retrieval uses the same eligibility and caching behaviour as the UI.
+- [x] Day-window retrieval, summary retrieval, and journal-date browsing remain consistent across UI and MCP.
+- [x] No separate MCP-only summary semantics are introduced.
 
 **Required Test Coverage:**
-- **Unit:** MCP summary response-shaping helpers.
-- **Integration:** MCP tests for summary retrieval, cache hits, and ineligible-day handling.
-- **E2E:** generate a day summary in the UI and verify the same day remains retrievable through the same product flow without divergence.
+- **Unit:** ✅ MCP summary response-shaping helpers.
+- **Integration:** ✅ MCP tests for summary retrieval, cache hits, and ineligible-day handling.
+- **E2E:** ✅ generate a day summary in the UI and verify the same day remains retrievable through the same product flow without divergence.
 
 ## Delivery Notes
 
