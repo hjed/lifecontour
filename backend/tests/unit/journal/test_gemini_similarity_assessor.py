@@ -19,7 +19,7 @@ class TestGeminiTitleSimilarityAssessor:
     def assessor(self) -> GeminiTitleSimilarityAssessor:
         """Create an assessor with a test API key."""
         return GeminiTitleSimilarityAssessor(
-            api_key="test-api-key", model="gemini-2.0-flash"
+            api_key="test-api-key", model="gemini-2.5-flash"
         )
 
     @pytest.fixture

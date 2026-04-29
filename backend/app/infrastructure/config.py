@@ -184,7 +184,7 @@ class Settings(BaseSettings):
         description="Google Gemini API key for AI-assisted features",
     )
     gemini_model: str = Field(
-        default="gemini-2.0-flash",
+        default="gemini-2.5-flash",
         description="Gemini model to use for similarity assessment",
     )
     gemini_summary_model: str = Field(
