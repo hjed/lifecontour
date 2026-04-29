@@ -483,6 +483,70 @@ class TestOutboxEventProcessor:
         assert "Database error" in str(exc_info.value)
 
     @pytest.mark.asyncio
+    async def test_process_contact_created_duplicate_email_returns_conflict(
+        self,
+        processor: OutboxEventProcessor,
+        contact_created_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+    ):
+        """Test that DuplicateEmailError during creation returns conflict instead of raising."""
+        from app.core.contacts.models.exceptions import DuplicateEmailError
+
+        mock_contact_service.get_contact_by_email.return_value = None
+        mock_contact_service.create_contact.side_effect = DuplicateEmailError(
+            "john.doe@example.com", 999
+        )
+
+        # Should NOT raise - should return conflict result
+        result = await processor.process_event(contact_created_event)
+
+        assert result["status"] == "conflict"
+        assert result["reason"] == "duplicate_email"
+        assert result["event_type"] == "contact.created"
+        assert "john.doe@example.com" in result["error"]
+        mock_contact_service.create_contact.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_process_contact_updated_duplicate_email_returns_conflict(
+        self,
+        processor: OutboxEventProcessor,
+        contact_updated_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+        mock_connection: AsyncConnection,
+        mock_external_ref_service: AsyncMock,
+        mock_sync_metadata_repo: AsyncMock,
+    ):
+        """Test that DuplicateEmailError during update returns conflict and records in sync_metadata."""
+        from app.core.contacts.models.exceptions import DuplicateEmailError
+
+        existing_contact = Contact(id=123, first_name="John", last_name="Doe", tags=[])
+        mock_contact_service.find_contact_by_external_reference.return_value = (
+            existing_contact
+        )
+        mock_contact_service.get_contact_by_id.return_value = existing_contact
+        mock_contact_service.update_contact.side_effect = DuplicateEmailError(
+            "john.doe@example.com", 456
+        )
+
+        # Should NOT raise - should return conflict result
+        result = await processor.process_event(contact_updated_event)
+
+        assert result["status"] == "conflict"
+        assert result["reason"] == "duplicate_email"
+        assert result["event_type"] == "contact.updated"
+        assert "john.doe@example.com" in result["error"]
+
+        # Verify conflict was recorded in sync_metadata
+        mock_sync_metadata_repo.upsert.assert_called_once()
+        upsert_kwargs = mock_sync_metadata_repo.upsert.call_args[1]
+        assert upsert_kwargs["internal_id"] == 123
+        assert upsert_kwargs["integration_source"] == "google"
+        from core_shared.models.sync_metadata import SyncStatus
+
+        assert upsert_kwargs["sync_status"] == SyncStatus.CONFLICT
+        assert "john.doe@example.com" in upsert_kwargs["error_message"]
+
+    @pytest.mark.asyncio
     async def test_process_contact_updated_contact_not_found(
         self,
         processor: OutboxEventProcessor,
