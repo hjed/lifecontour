@@ -1171,7 +1171,6 @@ class TestJournalTypeManagement:
             "data": {
                 "type": "journal-type-data",
                 "attributes": {
-                    "activity_type": "Hiking",
                     "weather_conditions": "Sunny, 22°C",
                     "role": "leader",
                     "in_leadership_role": True,
@@ -1190,7 +1189,6 @@ class TestJournalTypeManagement:
         outdoor_data = response_json["data"]["attributes"]["type_data"][
             "outdoor_activity"
         ]
-        assert outdoor_data["activity_type"] == "Hiking"
         assert outdoor_data["weather_conditions"] == "Sunny, 22°C"
         assert outdoor_data["role"] == "leader"
         assert outdoor_data["in_leadership_role"] is True
@@ -2140,10 +2138,10 @@ class TestJournalTypeDataValidation:
         """Setup method to ensure clean database for each test."""
         pass
 
-    async def test_update_outdoor_activity_with_empty_activity_type_returns_400(
+    async def test_update_outdoor_activity_with_empty_weather_returns_400(
         self, integration_api_client
     ):
-        """Updating OUTDOOR_ACTIVITY with empty activity_type should return 400."""
+        """Updating OUTDOOR_ACTIVITY with empty weather_conditions should return 400."""
         create_data = create_journal_request_data(
             title="Validation Test",
             content="Test content",
@@ -2158,7 +2156,7 @@ class TestJournalTypeDataValidation:
         update_data = {
             "data": {
                 "type": "journal-type-data",
-                "attributes": {"activity_type": "   "},  # whitespace-only
+                "attributes": {"weather_conditions": "   "},  # whitespace-only
             }
         }
         response = await integration_api_client.put(
@@ -2167,7 +2165,7 @@ class TestJournalTypeDataValidation:
         )
 
         assert response.status_code == 400, (
-            "Empty/whitespace activity_type should return 400 not 500"
+            "Empty/whitespace weather_conditions should return 400 not 500"
         )
 
     async def test_update_bushwalking_with_invalid_track_grading_returns_400(

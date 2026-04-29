@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 from core_shared.models.journals import (
     AbseilingData,
+    AbseilPitch,
     BushwalkingData,
     Calendar,
     CalendarInfo,
@@ -1386,6 +1387,64 @@ class AbseilingDataRepository(ABC):
 
         Args:
             journal_id: The journal ID to delete abseiling data for
+        """
+        pass
+
+
+class AbseilPitchRepository(ABC):
+    """
+    Repository interface for abseil pitch operations.
+
+    Manages individual abseil pitches within an ABSEILING_TRIP journal.
+    Pitches are stored in the abseil_pitches table with a FK to journal_abseiling_data.
+    """
+
+    @abstractmethod
+    async def save(self, pitch: AbseilPitch) -> AbseilPitch:
+        """
+        Save an abseil pitch (insert or update).
+
+        Uses UPSERT on (journal_id, pitch_number) to handle both creation
+        and update in a single operation.
+
+        Args:
+            pitch: The abseil pitch to save
+
+        Returns:
+            The saved pitch with updated fields (id, timestamps)
+        """
+        pass
+
+    @abstractmethod
+    async def find_by_journal_id(self, journal_id: int) -> list[AbseilPitch]:
+        """
+        Find all pitches for a journal, ordered by pitch_number.
+
+        Args:
+            journal_id: The journal ID to look up
+
+        Returns:
+            List of AbseilPitch entities ordered by pitch_number
+        """
+        pass
+
+    @abstractmethod
+    async def delete_by_journal_id(self, journal_id: int) -> None:
+        """
+        Delete all pitches for a journal.
+
+        Args:
+            journal_id: The journal ID to delete pitches for
+        """
+        pass
+
+    @abstractmethod
+    async def delete(self, pitch_id: int) -> None:
+        """
+        Delete a single pitch by ID.
+
+        Args:
+            pitch_id: The pitch ID to delete
         """
         pass
 

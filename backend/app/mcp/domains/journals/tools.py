@@ -932,7 +932,6 @@ def _build_fitness_data(fitness_data: Any) -> dict[str, Any]:
 def _build_outdoor_activity_data(outdoor_activity_data: Any) -> dict[str, Any]:
     """Build outdoor activity data dictionary."""
     return {
-        "activity_type": outdoor_activity_data.activity_type,
         "weather_conditions": outdoor_activity_data.weather_conditions,
         "role": outdoor_activity_data.role,
         "in_leadership_role": outdoor_activity_data.in_leadership_role,
@@ -959,6 +958,8 @@ def _build_abseiling_data(abseiling_data: Any) -> dict[str, Any]:
     return {
         "number_of_abseils": abseiling_data.number_of_abseils,
         "total_length": abseiling_data.total_length,
+        "number_of_setups": abseiling_data.number_of_setups,
+        "number_of_rescues": abseiling_data.number_of_rescues,
     }
 
 
@@ -1324,7 +1325,6 @@ async def _update_outdoor_activity_data(
     if existing_outdoor:
         updates: dict[str, Any] = {}
         for field in [
-            "activity_type",
             "weather_conditions",
             "role",
             "in_leadership_role",
@@ -1376,6 +1376,10 @@ async def _update_abseiling_data(
             abs_updates["number_of_abseils"] = type_data_dict["number_of_abseils"]
         if "total_length" in type_data_dict:
             abs_updates["total_length"] = type_data_dict["total_length"]
+        if "number_of_setups" in type_data_dict:
+            abs_updates["number_of_setups"] = type_data_dict["number_of_setups"]
+        if "number_of_rescues" in type_data_dict:
+            abs_updates["number_of_rescues"] = type_data_dict["number_of_rescues"]
         validated_abseiling = dataclasses.replace(existing_abseiling, **abs_updates)
         await abseiling_data_repo.save(validated_abseiling)
 

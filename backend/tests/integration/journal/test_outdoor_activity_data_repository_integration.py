@@ -49,7 +49,6 @@ async def test_journal(
 
 def create_test_outdoor_activity_data(
     journal_id: int,
-    activity_type: str | None = "Hiking",
     weather_conditions: str | None = "Sunny, 22°C",
     role: str | None = "leader",
     in_leadership_role: bool | None = True,
@@ -58,7 +57,6 @@ def create_test_outdoor_activity_data(
     """Helper to create test outdoor activity data."""
     return OutdoorActivityData(
         journal_id=journal_id,
-        activity_type=activity_type,
         weather_conditions=weather_conditions,
         role=role,
         in_leadership_role=in_leadership_role,
@@ -81,7 +79,6 @@ class TestOutdoorActivityDataRepositorySave:
         saved = await outdoor_activity_repository.save(data)
 
         assert saved.journal_id == test_journal.id
-        assert saved.activity_type == "Hiking"
         assert saved.weather_conditions == "Sunny, 22°C"
         assert saved.role == "leader"
         assert saved.in_leadership_role is True
@@ -100,7 +97,6 @@ class TestOutdoorActivityDataRepositorySave:
         saved = await outdoor_activity_repository.save(data)
 
         assert saved.journal_id == test_journal.id
-        assert saved.activity_type is None
         assert saved.weather_conditions is None
         assert saved.role is None
         assert saved.in_leadership_role is None
@@ -119,7 +115,6 @@ class TestOutdoorActivityDataRepositorySave:
 
         updated_data = OutdoorActivityData(
             journal_id=test_journal.id,  # type: ignore[arg-type]
-            activity_type="Camping",
             weather_conditions="Cloudy, 15°C",
             role="participant",
             in_leadership_role=False,
@@ -127,7 +122,6 @@ class TestOutdoorActivityDataRepositorySave:
         )
         saved = await outdoor_activity_repository.save(updated_data)
 
-        assert saved.activity_type == "Camping"
         assert saved.weather_conditions == "Cloudy, 15°C"
         assert saved.role == "participant"
         assert saved.in_leadership_role is False
@@ -151,7 +145,6 @@ class TestOutdoorActivityDataRepositoryFind:
 
         assert found is not None
         assert found.journal_id == test_journal.id
-        assert found.activity_type == "Hiking"
         assert found.in_leadership_role is True
 
     async def test_find_by_journal_id_returns_none_when_not_found(

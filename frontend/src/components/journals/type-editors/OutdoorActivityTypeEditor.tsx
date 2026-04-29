@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import { Cloud, Target, Users, Type } from 'lucide-react';
+import { Cloud, Target, Users } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -52,7 +52,6 @@ export function OutdoorActivityTypeEditor({
     // Rely on ActivityStats to show most data, but we can show
     // text/descriptions here if we want to augment what ActivityStats shows.
     const hasData =
-      initialData.activity_type ||
       initialData.weather_conditions ||
       initialData.role ||
       initialData.participant_notes ||
@@ -80,14 +79,6 @@ export function OutdoorActivityTypeEditor({
         data-testid={testId || 'outdoor-type-editor'}
       >
         <div className='grid grid-cols-2 gap-4'>
-          {initialData.activity_type && (
-            <div>
-              <span className='text-muted-foreground font-medium'>
-                Activity Type:{' '}
-              </span>
-              {initialData.activity_type}
-            </div>
-          )}
           {initialData.weather_conditions && (
             <div>
               <span className='text-muted-foreground font-medium'>
@@ -136,30 +127,6 @@ export function OutdoorActivityTypeEditor({
       data-testid={testId || 'outdoor-type-editor'}
     >
       <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
-        {/* Activity Type */}
-        <div className='space-y-2'>
-          <Label htmlFor='activity-type' className='flex items-center gap-2'>
-            <Type
-              className='text-muted-foreground h-4 w-4'
-              aria-hidden='true'
-            />
-            Activity Type
-          </Label>
-          <Input
-            id='activity-type'
-            type='text'
-            value={editData.activity_type ?? ''}
-            onChange={e =>
-              setEditData(previous => ({
-                ...previous,
-                activity_type: e.target.value || null,
-              }))
-            }
-            placeholder='e.g., Hiking, Snowshoeing'
-            data-testid='activity-type-input'
-          />
-        </div>
-
         {/* Weather Conditions */}
         <div className='space-y-2'>
           <Label

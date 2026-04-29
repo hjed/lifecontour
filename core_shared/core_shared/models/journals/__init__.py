@@ -1,5 +1,6 @@
 """Journal domain models."""
 
+from .abseil_pitch import AbseilPitch
 from .abseiling_data import AbseilingData
 from .attendee_status import AttendeeStatus
 from .bushwalking_data import BushwalkingData
@@ -10,7 +11,6 @@ from .climbing_data import ClimbingData
 from .constants import (
     FRENCH_CANYON_GRADE_PATTERN,
     MAX_ACCOMMODATION_NAME_LENGTH,
-    MAX_ACTIVITY_TYPE_LENGTH,
     MAX_AIRLINE_LENGTH,
     MAX_AIRPORT_CODE_LENGTH,
     MAX_BOOKING_REFERENCE_LENGTH,
@@ -38,6 +38,8 @@ from .constants import (
     MAX_WEATHER_CONDITIONS_LENGTH,
     MIN_ENERGY_LEVEL,
     MIN_MOOD_VALUE,
+    VALID_ANCHOR_LOCATIONS,
+    VALID_ANCHOR_TYPES,
     VALID_CLIMBING_TYPES,
     VALID_TRACK_GRADES,
 )
@@ -47,6 +49,7 @@ from .entities import Journal
 from .event_state import EventState
 from .exceptions import (
     AbseilingDataValidationError,
+    AbseilPitchValidationError,
     BushwalkingDataValidationError,
     CalendarInfoValidationError,
     CalendarNotFoundError,
@@ -125,13 +128,14 @@ __all__ = [
     "MAX_ACCOMMODATION_NAME_LENGTH",
     "MAX_TRANSPORTATION_TYPE_LENGTH",
     "MAX_STRAVA_ACTIVITY_ID_LENGTH",
-    "MAX_ACTIVITY_TYPE_LENGTH",
     "MAX_WEATHER_CONDITIONS_LENGTH",
     "MAX_ROLE_LENGTH",
     "MAX_PARTICIPANT_NOTES_LENGTH",
     "VALID_TRACK_GRADES",
     "FRENCH_CANYON_GRADE_PATTERN",
     "VALID_CLIMBING_TYPES",
+    "VALID_ANCHOR_LOCATIONS",
+    "VALID_ANCHOR_TYPES",
     # Entities
     "Journal",
     "Calendar",
@@ -148,6 +152,7 @@ __all__ = [
     "JournalContactRelationship",
     "OutdoorActivityData",
     "BushwalkingData",
+    "AbseilPitch",
     "AbseilingData",
     "CanyoningData",
     "ClimbingData",
@@ -190,6 +195,7 @@ __all__ = [
     "OutdoorActivityDataValidationError",
     "BushwalkingDataValidationError",
     "JoggingDataValidationError",
+    "AbseilPitchValidationError",
     "AbseilingDataValidationError",
     "CanyoningDataValidationError",
     "ClimbingDataValidationError",

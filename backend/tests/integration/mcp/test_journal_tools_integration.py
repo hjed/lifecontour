@@ -748,8 +748,8 @@ class TestFetchJournalTypesAndDataNewActivityTypes:
         await clean_database.execute(
             text("""
                 INSERT INTO journal_outdoor_activity_data
-                    (journal_id, activity_type, weather_conditions, role, in_leadership_role)
-                VALUES (:journal_id, 'Hiking', 'Sunny, 22°C', 'leader', true)
+                    (journal_id, weather_conditions, role, in_leadership_role)
+                VALUES (:journal_id, 'Sunny, 22°C', 'leader', true)
             """),
             {"journal_id": journal_id},
         )
@@ -758,7 +758,6 @@ class TestFetchJournalTypesAndDataNewActivityTypes:
 
         assert "outdoor_activity" in types
         outdoor = type_data["outdoor_activity"]
-        assert outdoor["activity_type"] == "Hiking"
         assert outdoor["weather_conditions"] == "Sunny, 22°C"
         assert outdoor["role"] == "leader"
         assert outdoor["in_leadership_role"] is True
@@ -1025,20 +1024,19 @@ class TestActivityMcpToolsMountedIntegration:
         conn: AsyncConnection,
         *,
         journal_id: int,
-        activity_type: str,
     ) -> None:
         await conn.execute(
             text("""
                 INSERT INTO journal_outdoor_activity_data (
-                    journal_id, activity_type, weather_conditions, role,
+                    journal_id, weather_conditions, role,
                     in_leadership_role, participant_notes
                 )
                 VALUES (
-                    :journal_id, :activity_type, 'Clear', 'participant',
+                    :journal_id, 'Clear', 'participant',
                     false, 'Test activity'
                 )
             """),
-            {"journal_id": journal_id, "activity_type": activity_type},
+            {"journal_id": journal_id},
         )
 
     async def _insert_kayaking_data(
@@ -1144,7 +1142,6 @@ class TestActivityMcpToolsMountedIntegration:
         await self._insert_outdoor_activity_data(
             clean_database,
             journal_id=kayaking_journal_id,
-            activity_type="Kayaking",
         )
         await self._insert_kayaking_data(
             clean_database,
@@ -1204,7 +1201,6 @@ class TestActivityMcpToolsMountedIntegration:
         await self._insert_outdoor_activity_data(
             clean_database,
             journal_id=kayaking_journal_id,
-            activity_type="Kayaking",
         )
         await self._insert_kayaking_data(clean_database, journal_id=kayaking_journal_id)
 
@@ -1401,7 +1397,6 @@ class TestActivityMcpToolsMountedIntegration:
         await self._insert_outdoor_activity_data(
             clean_database,
             journal_id=paddle_id,
-            activity_type="Kayaking",
         )
         await self._insert_kayaking_data(clean_database, journal_id=paddle_id)
 
@@ -1531,7 +1526,6 @@ class TestActivityMcpToolsMountedIntegration:
         await self._insert_outdoor_activity_data(
             clean_database,
             journal_id=february_paddle_id,
-            activity_type="Kayaking",
         )
         await self._insert_kayaking_data(clean_database, journal_id=february_paddle_id)
 
@@ -1552,7 +1546,6 @@ class TestActivityMcpToolsMountedIntegration:
         await self._insert_outdoor_activity_data(
             clean_database,
             journal_id=february_ski_id,
-            activity_type="Cross-country skiing",
         )
         await self._insert_bushwalking_data(clean_database, journal_id=february_ski_id)
         await self._insert_cross_country_skiing_data(
@@ -1600,7 +1593,6 @@ class TestActivityMcpToolsMountedIntegration:
         await self._insert_outdoor_activity_data(
             clean_database,
             journal_id=kayaking_journal_id,
-            activity_type="Kayaking",
         )
         await self._insert_kayaking_data(
             clean_database,

@@ -75,3 +75,21 @@ VALID_CLIMBING_TYPES: list[str] = [
     "trad",
     "bouldering",
 ]
+
+# AbseilPitch constants (abseil_pitches table)
+VALID_ANCHOR_LOCATIONS: list[str] = [
+    "TR",
+    "TL",
+    "Centre",
+]
+
+VALID_ANCHOR_TYPES: list[str] = [
+    "chains",
+    "double bolt",
+    "single bolt",
+    "sling on tree",
+    "sling on log",
+    "sling on boulder",
+    "sling on bollard",
+    "artificial removable",
+]

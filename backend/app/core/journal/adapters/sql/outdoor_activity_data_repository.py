@@ -20,7 +20,6 @@ class SqlOutdoorActivityDataRepository(OutdoorActivityDataRepository):
         """Convert a database row to an OutdoorActivityData entity."""
         return OutdoorActivityData(
             journal_id=row.journal_id,
-            activity_type=row.activity_type,
             weather_conditions=row.weather_conditions,
             role=row.role,
             in_leadership_role=row.in_leadership_role,
@@ -33,7 +32,7 @@ class SqlOutdoorActivityDataRepository(OutdoorActivityDataRepository):
         """Find outdoor activity data by journal ID."""
         query = text(
             """
-            SELECT journal_id, activity_type, weather_conditions, role,
+            SELECT journal_id, weather_conditions, role,
                    in_leadership_role, participant_notes, created_at, updated_at
             FROM journal_outdoor_activity_data
             WHERE journal_id = :journal_id
@@ -60,21 +59,20 @@ class SqlOutdoorActivityDataRepository(OutdoorActivityDataRepository):
         query = text(
             """
             INSERT INTO journal_outdoor_activity_data (
-                journal_id, activity_type, weather_conditions, role,
+                journal_id, weather_conditions, role,
                 in_leadership_role, participant_notes
             )
             VALUES (
-                :journal_id, :activity_type, :weather_conditions, :role,
+                :journal_id, :weather_conditions, :role,
                 :in_leadership_role, :participant_notes
             )
             ON CONFLICT (journal_id) DO UPDATE SET
-                activity_type = EXCLUDED.activity_type,
                 weather_conditions = EXCLUDED.weather_conditions,
                 role = EXCLUDED.role,
                 in_leadership_role = EXCLUDED.in_leadership_role,
                 participant_notes = EXCLUDED.participant_notes,
                 updated_at = now()
-            RETURNING journal_id, activity_type, weather_conditions, role,
+            RETURNING journal_id, weather_conditions, role,
                       in_leadership_role, participant_notes, created_at, updated_at
             """
         )
@@ -82,7 +80,6 @@ class SqlOutdoorActivityDataRepository(OutdoorActivityDataRepository):
             query,
             {
                 "journal_id": data.journal_id,
-                "activity_type": data.activity_type,
                 "weather_conditions": data.weather_conditions,
                 "role": data.role,
                 "in_leadership_role": data.in_leadership_role,

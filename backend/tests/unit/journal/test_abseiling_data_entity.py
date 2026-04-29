@@ -81,3 +81,54 @@ class TestAbseilingData:
         data = AbseilingData(journal_id=1, total_length=None)
 
         assert data.total_length is None
+
+    def test_create_abseiling_data_with_aggregate_fields(self):
+        """Test creating abseiling data with number_of_setups and number_of_rescues."""
+        data = AbseilingData(
+            journal_id=1,
+            number_of_abseils=5,
+            total_length=200,
+            number_of_setups=3,
+            number_of_rescues=1,
+        )
+
+        assert data.number_of_setups == 3
+        assert data.number_of_rescues == 1
+
+    def test_invalid_number_of_setups_negative(self):
+        """Test that negative number_of_setups raises validation error."""
+        with pytest.raises(AbseilingDataValidationError) as exc_info:
+            AbseilingData(journal_id=1, number_of_setups=-1)
+
+        assert "number_of_setups" in str(exc_info.value)
+
+    def test_invalid_number_of_rescues_negative(self):
+        """Test that negative number_of_rescues raises validation error."""
+        with pytest.raises(AbseilingDataValidationError) as exc_info:
+            AbseilingData(journal_id=1, number_of_rescues=-2)
+
+        assert "number_of_rescues" in str(exc_info.value)
+
+    def test_none_number_of_setups_is_valid(self):
+        """Test that None number_of_setups is valid (field is optional)."""
+        data = AbseilingData(journal_id=1, number_of_setups=None)
+
+        assert data.number_of_setups is None
+
+    def test_none_number_of_rescues_is_valid(self):
+        """Test that None number_of_rescues is valid (field is optional)."""
+        data = AbseilingData(journal_id=1, number_of_rescues=None)
+
+        assert data.number_of_rescues is None
+
+    def test_zero_number_of_setups_is_valid(self):
+        """Test that zero number_of_setups is valid."""
+        data = AbseilingData(journal_id=1, number_of_setups=0)
+
+        assert data.number_of_setups == 0
+
+    def test_zero_number_of_rescues_is_valid(self):
+        """Test that zero number_of_rescues is valid."""
+        data = AbseilingData(journal_id=1, number_of_rescues=0)
+
+        assert data.number_of_rescues == 0
