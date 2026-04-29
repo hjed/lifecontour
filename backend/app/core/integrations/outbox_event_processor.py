@@ -866,15 +866,19 @@ class OutboxEventProcessor:
                 external_id=external_id,
                 error=str(e),
             )
-            # Record conflict in sync_metadata so it's visible for resolution
-            await self.sync_metadata_repo.upsert(
-                internal_id=existing_contact.id,
-                integration_source=integration_source,
-                external_id=external_id,
-                version_hash=new_version_hash,
-                sync_status=SyncStatus.CONFLICT,
-                error_message=str(e),
-            )
+            # Record conflict in sync_metadata so it's visible for resolution.
+            # Use a nested transaction (savepoint) because the DuplicateEmailError
+            # may have originated from an IntegrityError that aborted the current
+            # savepoint — a fresh savepoint ensures the upsert can succeed.
+            async with self.connection.begin_nested():
+                await self.sync_metadata_repo.upsert(
+                    internal_id=existing_contact.id,
+                    integration_source=integration_source,
+                    external_id=external_id,
+                    version_hash=new_version_hash,
+                    sync_status=SyncStatus.CONFLICT,
+                    error_message=str(e),
+                )
             return {
                 "status": "conflict",
                 "reason": "duplicate_email",
