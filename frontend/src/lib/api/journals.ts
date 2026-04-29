@@ -26,6 +26,7 @@ import {
   ReviewItemsListResponse,
   AttendeeStatus,
   ContactEventRole,
+  DailySummaryResponse,
 } from '@/types/journals';
 import { JsonApiErrorResponse, JsonApiMeta } from '@/types/api';
 import {
@@ -770,6 +771,68 @@ export function useJournals(
     queryFn: () => fetchJournals(filters),
     staleTime: 5 * 60 * 1000, // 5 minutes
     enabled: options.enabled,
+  });
+}
+
+export function useDailySummary(
+  date: string,
+  options: { enabled?: boolean } = {}
+) {
+  return useQuery({
+    queryKey: [...journalKeys.all, 'daily-summary', date],
+    queryFn: async (): Promise<DailySummaryResponse> => {
+      const response = await fetch(`/api/journals/daily-summary/${date}`, {
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        const errorData: JsonApiErrorResponse = await response.json();
+        throw new Error(
+          errorData.errors?.[0]?.detail || 'Failed to load daily summary'
+        );
+      }
+      return response.json();
+    },
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    enabled: (options.enabled ?? true) && Boolean(date),
+  });
+}
+
+export function useRegenerateDailySummary() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (date: string): Promise<DailySummaryResponse> => {
+      const response = await fetch(
+        `/api/journals/daily-summary/${date}/regenerate`,
+        {
+          method: 'POST',
+          credentials: 'include',
+        }
+      );
+      if (!response.ok) {
+        const errorData: JsonApiErrorResponse = await response.json();
+        throw new Error(
+          errorData.errors?.[0]?.detail || 'Failed to regenerate daily summary'
+        );
+      }
+      return response.json();
+    },
+    onSuccess: (data, date) => {
+      queryClient.setQueryData(
+        [...journalKeys.all, 'daily-summary', date],
+        data
+      );
+      if (data.data) {
+        toast.success('Daily summary regenerated successfully');
+      } else {
+        toast.info(
+          'Summary generation is not available. Check AI configuration.'
+        );
+      }
+    },
+    onError: error => {
+      toast.error(error.message || 'Failed to regenerate daily summary');
+    },
   });
 }
 
