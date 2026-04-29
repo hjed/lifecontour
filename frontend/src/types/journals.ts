@@ -472,3 +472,33 @@ export interface JournalTagAddData {
 export interface JournalTagAddRequest {
   data: JournalTagAddData;
 }
+
+// Daily Summary Types
+export enum DailySummaryStatus {
+  PENDING = 'PENDING',
+  GENERATING = 'GENERATING',
+  GENERATED = 'GENERATED',
+  FAILED = 'FAILED',
+  DISABLED = 'DISABLED',
+  OUTDATED = 'OUTDATED',
+}
+
+export interface DailySummaryAttributes {
+  summary_date: string;
+  summary_text?: string | null;
+  journal_count: number;
+  event_count: number;
+  contact_count: number;
+  mood_average?: number | null;
+  status: DailySummaryStatus;
+}
+
+export interface DailySummaryResource {
+  type: 'journal-daily-summaries';
+  id: string;
+  attributes: DailySummaryAttributes;
+}
+
+export interface DailySummaryResponse {
+  data: DailySummaryResource | null;
+}

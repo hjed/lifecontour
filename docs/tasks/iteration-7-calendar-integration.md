@@ -572,17 +572,18 @@ Phase 1 and Phase 2 were implemented as a combined delivery. The merge domain se
 
 #### Phase 2: Day-Level UI Presentation and Regeneration Controls
 **PR Size:** ~4-6 files
+**Status:** ✅ COMPLETE
 
 **Acceptance Criteria:**
-- [ ] Day summaries render naturally within the day-grouped journal list.
-- [ ] Lightweight day-level stats are shown alongside the summary where useful.
-- [ ] The user can request generation or refresh without the summary becoming editable content.
-- [ ] Empty or low-signal days do not show noisy summary placeholders.
+- [x] Day summaries render naturally within the day-grouped journal list.
+- [x] Lightweight day-level stats are shown alongside the summary where useful.
+- [x] The user can request generation or refresh without the summary becoming editable content.
+- [x] Empty or low-signal days do not show noisy summary placeholders.
 
 **Required Test Coverage:**
-- **Unit:** summary display/formatting helpers.
-- **Integration:** component tests for populated-day, low-signal-day, and cached-summary UI states.
-- **E2E:** view a day with multiple journals, generate or refresh the summary, and verify the summary plus stats remain read-only.
+- **Unit:** ✅ summary display/formatting helpers.
+- **Integration:** ✅ component tests for populated-day, low-signal-day, and cached-summary UI states.
+- **E2E:** ✅ view a day with multiple journals, generate or refresh the summary, and verify the summary plus stats remain read-only.
 
 #### Phase 3: MCP Daily Summary Parity and Day-Window Workflow Hardening
 **PR Size:** ~4-6 files

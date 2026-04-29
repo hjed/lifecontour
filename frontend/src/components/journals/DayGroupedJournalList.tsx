@@ -8,6 +8,7 @@ import { DisplayJournal } from '@/hooks/useDisplayJournals';
 import { groupJournalsByDay } from '@/lib/journal-grouping';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
+import { DailySummaryView } from '@/components/journals/DailySummaryView';
 
 export interface DayGroupedJournalListProps {
   readonly journals: DisplayJournal[];
@@ -307,6 +308,10 @@ export function DayGroupedJournalList({
             <h3 className='bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-10 border-b py-2 text-lg font-semibold backdrop-blur'>
               {displayDate}
             </h3>
+
+            {!group.isEmpty && group.journals.length >= 2 && (
+              <DailySummaryView date={group.date} />
+            )}
 
             {group.isEmpty ? (
               <div className='text-muted-foreground border-l-2 border-transparent py-2 pl-4 text-sm italic'>
