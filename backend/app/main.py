@@ -165,36 +165,35 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         yield
 
     finally:
-        # Cleanup stream consumer tasks
+        # Collect all active background tasks for cleanup
+        active_tasks: list[tuple[asyncio.Task[None], str]] = []
         for task, name in [
             (summary_consumer_task, "Summary generator consumer"),
             (search_consumer_task, "Search indexer consumer"),
             (relay_task, "Outbox relay"),
+            (outbox_task, "Outbox processor"),
+            (attendance_task, "Attendance transition"),
         ]:
             if task:
                 task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-                logger.info(f"{name} background task stopped")
+                active_tasks.append((task, name))
 
-        # Cleanup background tasks
-        if outbox_task:
-            outbox_task.cancel()
-            try:
-                await outbox_task
-            except asyncio.CancelledError:
-                pass
-            logger.info("Outbox processor background task stopped")
-
-        if attendance_task:
-            attendance_task.cancel()
-            try:
-                await attendance_task
-            except asyncio.CancelledError:
-                pass
-            logger.info("Attendance transition background task stopped")
+        # Await all cancelled tasks concurrently; return_exceptions=True
+        # ensures we don't abort mid-cleanup if one raises.
+        if active_tasks:
+            results = await asyncio.gather(
+                *(t for t, _ in active_tasks), return_exceptions=True
+            )
+            for (_, name), result in zip(active_tasks, results, strict=True):
+                if isinstance(result, asyncio.CancelledError):
+                    logger.info(f"{name} background task stopped")
+                elif isinstance(result, BaseException):
+                    logger.error(
+                        f"{name} background task raised during shutdown",
+                        error=str(result),
+                    )
+                else:
+                    logger.info(f"{name} background task stopped")
 
         # Close Dishka container
         await container.close()

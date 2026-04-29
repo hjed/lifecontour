@@ -826,6 +826,7 @@ class TestOutboxProcessorStreamConsumerGating:
                 return container
 
             async def __aexit__(self, exc_type, exc_val, exc_tb):
+                # Intentionally empty: mock context manager requires no cleanup
                 pass
 
         container.return_value = MockContext()

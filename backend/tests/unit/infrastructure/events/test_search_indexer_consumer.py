@@ -120,13 +120,28 @@ class TestSearchIndexerConsumerEventMatching:
         assert consumer._matches_event_type(event_type) is False
 
 
-class TestSearchIndexerConsumerHandleEvent:
-    """Test the _handle_event implementation."""
+def _make_stream_event(
+    event_type: str = "ContactCreated",
+    event_data: dict[str, Any] | None = None,
+    aggregate_id: int = 42,
+) -> StreamEvent:
+    """Create a StreamEvent for testing."""
+    return StreamEvent(
+        message_id="1234567890-0",
+        event_id="evt-test-123",
+        event_type=event_type,
+        aggregate_id=aggregate_id,
+        event_data=event_data or {"contact_id": 42},
+        occurred_at="2024-06-15T10:30:00+00:00",
+    )
 
-    @pytest.fixture
-    def mock_stream_client(self) -> MagicMock:
-        """Create a mock stream client."""
-        return MagicMock(spec=StreamClient)
+
+class TestSearchIndexerConsumerHandleEvent:
+    """Test the _handle_event implementation.
+
+    Uses shared fixtures from conftest.py for mock_db_engine,
+    mock_db_connection, and mock_search_indexer.
+    """
 
     @pytest.fixture
     def consumer(self, mock_stream_client: MagicMock) -> SearchIndexerConsumer:
@@ -136,42 +151,20 @@ class TestSearchIndexerConsumerHandleEvent:
             stream_name="pms:domain-events",
         )
 
-    def _make_stream_event(
-        self,
-        event_type: str = "ContactCreated",
-        event_data: dict[str, Any] | None = None,
-        aggregate_id: int = 42,
-    ) -> StreamEvent:
-        """Create a StreamEvent for testing."""
-        return StreamEvent(
-            message_id="1234567890-0",
-            event_id="evt-test-123",
-            event_type=event_type,
-            aggregate_id=aggregate_id,
-            event_data=event_data or {"contact_id": 42},
-            occurred_at="2024-06-15T10:30:00+00:00",
-        )
-
     @pytest.mark.asyncio
     async def test_handle_event_calls_search_indexer(
-        self, consumer: SearchIndexerConsumer
+        self,
+        consumer: SearchIndexerConsumer,
+        mock_db_engine: MagicMock,
+        mock_search_indexer: MagicMock,
     ) -> None:
         """Verify _handle_event creates a SearchIndexer and calls process_event."""
-        event = self._make_stream_event()
-
-        mock_search_indexer = MagicMock()
-        mock_search_indexer.process_event = AsyncMock()
-
-        mock_conn = AsyncMock()
-        mock_engine = MagicMock()
-        mock_engine.begin = MagicMock(return_value=AsyncMock())
-        mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=None)
+        event = _make_stream_event()
 
         with (
             patch(
                 "app.infrastructure.events.search_indexer_consumer.get_async_database_engine",
-                return_value=mock_engine,
+                return_value=mock_db_engine,
             ),
             patch(
                 "app.infrastructure.events.search_indexer_consumer.SearchIndexer",
@@ -188,28 +181,22 @@ class TestSearchIndexerConsumerHandleEvent:
 
     @pytest.mark.asyncio
     async def test_handle_event_invalidates_daily_summary_for_journal_events(
-        self, consumer: SearchIndexerConsumer
+        self,
+        consumer: SearchIndexerConsumer,
+        mock_db_engine: MagicMock,
+        mock_search_indexer: MagicMock,
     ) -> None:
         """Verify daily summary invalidation runs for journal events."""
-        event = self._make_stream_event(
+        event = _make_stream_event(
             event_type="JournalUpdated",
             event_data={"journal_id": 99},
             aggregate_id=99,
         )
 
-        mock_search_indexer = MagicMock()
-        mock_search_indexer.process_event = AsyncMock()
-
-        mock_conn = AsyncMock()
-        mock_engine = MagicMock()
-        mock_engine.begin = MagicMock(return_value=AsyncMock())
-        mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=None)
-
         with (
             patch(
                 "app.infrastructure.events.search_indexer_consumer.get_async_database_engine",
-                return_value=mock_engine,
+                return_value=mock_db_engine,
             ),
             patch(
                 "app.infrastructure.events.search_indexer_consumer.SearchIndexer",
@@ -231,27 +218,21 @@ class TestSearchIndexerConsumerHandleEvent:
 
     @pytest.mark.asyncio
     async def test_handle_event_does_not_invalidate_for_non_journal_events(
-        self, consumer: SearchIndexerConsumer
+        self,
+        consumer: SearchIndexerConsumer,
+        mock_db_engine: MagicMock,
+        mock_search_indexer: MagicMock,
     ) -> None:
         """Verify daily summary invalidation does NOT run for contact events."""
-        event = self._make_stream_event(
+        event = _make_stream_event(
             event_type="ContactCreated",
             event_data={"contact_id": 42},
         )
 
-        mock_search_indexer = MagicMock()
-        mock_search_indexer.process_event = AsyncMock()
-
-        mock_conn = AsyncMock()
-        mock_engine = MagicMock()
-        mock_engine.begin = MagicMock(return_value=AsyncMock())
-        mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=None)
-
         with (
             patch(
                 "app.infrastructure.events.search_indexer_consumer.get_async_database_engine",
-                return_value=mock_engine,
+                return_value=mock_db_engine,
             ),
             patch(
                 "app.infrastructure.events.search_indexer_consumer.SearchIndexer",
@@ -274,28 +255,23 @@ class TestSearchIndexerConsumerHandleEvent:
         ["JournalCreated", "JournalUpdated", "JournalDeleted"],
     )
     async def test_invalidation_triggered_for_all_journal_crud_events(
-        self, consumer: SearchIndexerConsumer, event_type: str
+        self,
+        consumer: SearchIndexerConsumer,
+        mock_db_engine: MagicMock,
+        mock_search_indexer: MagicMock,
+        event_type: str,
     ) -> None:
         """Verify all three journal CRUD event types trigger invalidation."""
-        event = self._make_stream_event(
+        event = _make_stream_event(
             event_type=event_type,
             event_data={"journal_id": 1},
             aggregate_id=1,
         )
 
-        mock_search_indexer = MagicMock()
-        mock_search_indexer.process_event = AsyncMock()
-
-        mock_conn = AsyncMock()
-        mock_engine = MagicMock()
-        mock_engine.begin = MagicMock(return_value=AsyncMock())
-        mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=None)
-
         with (
             patch(
                 "app.infrastructure.events.search_indexer_consumer.get_async_database_engine",
-                return_value=mock_engine,
+                return_value=mock_db_engine,
             ),
             patch(
                 "app.infrastructure.events.search_indexer_consumer.SearchIndexer",
