@@ -475,12 +475,12 @@ export interface JournalTagAddRequest {
 
 // Daily Summary Types
 export enum DailySummaryStatus {
-  PENDING = 'PENDING',
-  GENERATING = 'GENERATING',
-  GENERATED = 'GENERATED',
-  FAILED = 'FAILED',
-  DISABLED = 'DISABLED',
-  OUTDATED = 'OUTDATED',
+  PENDING = 'pending',
+  GENERATING = 'generating',
+  GENERATED = 'generated',
+  FAILED = 'failed',
+  DISABLED = 'disabled',
+  OUTDATED = 'outdated',
 }
 
 export interface DailySummaryAttributes {

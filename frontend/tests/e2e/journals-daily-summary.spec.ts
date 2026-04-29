@@ -69,7 +69,7 @@ function buildSummaryResponse(
         journal_count: 2,
         event_count: 0,
         contact_count: 0,
-        status: 'GENERATED',
+        status: 'generated',
         ...overrides,
       },
     },
@@ -231,7 +231,7 @@ test.describe('Journals AI Daily Summary', () => {
             contentType: 'application/json',
             body: buildSummaryResponse(journalDateId, {
               summary_text: 'Regenerated summary text',
-              status: 'GENERATING',
+              status: 'generating',
             }),
           });
         } else {

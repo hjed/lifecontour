@@ -16,7 +16,7 @@ export interface DailySummaryViewProps {
 export function DailySummaryView({ date }: DailySummaryViewProps) {
   const [isRequested, setIsRequested] = useState(false);
 
-  const { data, isLoading, isError, error } = useDailySummary(date, {
+  const { data, isLoading, isError, error, refetch } = useDailySummary(date, {
     enabled: isRequested,
   });
 
@@ -29,6 +29,10 @@ export function DailySummaryView({ date }: DailySummaryViewProps) {
 
   const handleRefreshClick = () => {
     regenerateSummary(date);
+  };
+
+  const handleRetryClick = () => {
+    refetch();
   };
 
   // State 1: Not requested yet
@@ -66,7 +70,7 @@ export function DailySummaryView({ date }: DailySummaryViewProps) {
     );
   }
 
-  // State 3: Error
+  // State 3: Network/fetch error
   if (isError) {
     return (
       <Card
@@ -86,13 +90,10 @@ export function DailySummaryView({ date }: DailySummaryViewProps) {
           <Button
             variant='outline'
             size='sm'
-            onClick={handleRefreshClick}
-            disabled={isRegenerating}
+            onClick={handleRetryClick}
             className='mt-2 w-fit gap-2'
           >
-            <RefreshCw
-              className={`h-4 w-4 ${isRegenerating ? 'animate-spin' : ''}`}
-            />
+            <RefreshCw className='h-4 w-4' />
             Try Again
           </Button>
         </CardContent>
@@ -107,7 +108,42 @@ export function DailySummaryView({ date }: DailySummaryViewProps) {
     return null;
   }
 
-  // State 5: Generated (or Generating fallback if returned as generating)
+  // State 5: AI generation failed — show explicit failure with regenerate action
+  if (attrs?.status === DailySummaryStatus.FAILED) {
+    return (
+      <Card
+        className='border-destructive/20 bg-destructive/5 mb-4'
+        data-testid={`summary-failed-${date}`}
+      >
+        <CardContent className='flex flex-col gap-2 p-4'>
+          <div className='text-destructive flex items-center gap-2'>
+            <AlertTriangle className='h-4 w-4' />
+            <span className='text-sm font-medium'>
+              Summary generation failed
+            </span>
+          </div>
+          <p className='text-muted-foreground text-sm'>
+            The AI was unable to generate a summary for this day.
+          </p>
+          <Button
+            variant='outline'
+            size='sm'
+            onClick={handleRefreshClick}
+            disabled={isRegenerating}
+            className='mt-2 w-fit gap-2'
+            data-testid={`retry-summary-btn-${date}`}
+          >
+            <RefreshCw
+              className={`h-4 w-4 ${isRegenerating ? 'animate-spin' : ''}`}
+            />
+            Retry Generation
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // State 6: Generated (or Generating fallback if returned as generating)
   const isGenerating =
     attrs?.status === DailySummaryStatus.GENERATING ||
     attrs?.status === DailySummaryStatus.PENDING ||

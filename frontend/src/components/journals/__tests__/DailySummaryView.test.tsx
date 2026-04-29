@@ -12,6 +12,7 @@ jest.mock('@/lib/api/journals', () => ({
 describe('DailySummaryView', () => {
   const mockDate = '2026-04-29';
   const mockRegenerate = jest.fn();
+  const mockRefetch = jest.fn();
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -26,6 +27,7 @@ describe('DailySummaryView', () => {
       data: null,
       isLoading: false,
       isError: false,
+      refetch: mockRefetch,
     });
 
     render(<DailySummaryView date={mockDate} />);
@@ -41,6 +43,7 @@ describe('DailySummaryView', () => {
       data: null,
       isLoading: true,
       isError: false,
+      refetch: mockRefetch,
     });
 
     render(<DailySummaryView date={mockDate} />);
@@ -56,12 +59,13 @@ describe('DailySummaryView', () => {
     expect(screen.getByText('Generating daily summary...')).toBeInTheDocument();
   });
 
-  it('shows error state when fetch fails', () => {
+  it('shows error state when fetch fails and retries with refetch', () => {
     (useDailySummary as jest.Mock).mockReturnValue({
       data: null,
       isLoading: false,
       isError: true,
       error: new Error('Network error'),
+      refetch: mockRefetch,
     });
 
     render(<DailySummaryView date={mockDate} />);
@@ -70,6 +74,11 @@ describe('DailySummaryView', () => {
     expect(screen.getByTestId(`summary-error-${mockDate}`)).toBeInTheDocument();
     expect(screen.getByText('Failed to load summary')).toBeInTheDocument();
     expect(screen.getByText('Network error')).toBeInTheDocument();
+
+    // Click "Try Again" should call refetch, not regenerate
+    fireEvent.click(screen.getByText('Try Again'));
+    expect(mockRefetch).toHaveBeenCalled();
+    expect(mockRegenerate).not.toHaveBeenCalled();
   });
 
   it('returns null if status is DISABLED', () => {
@@ -83,12 +92,48 @@ describe('DailySummaryView', () => {
       },
       isLoading: false,
       isError: false,
+      refetch: mockRefetch,
     });
 
     const { container } = render(<DailySummaryView date={mockDate} />);
     fireEvent.click(screen.getByTestId(`generate-summary-btn-${mockDate}`));
 
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it('shows dedicated FAILED state with retry action', () => {
+    (useDailySummary as jest.Mock).mockReturnValue({
+      data: {
+        data: {
+          attributes: {
+            summary_date: mockDate,
+            summary_text: null,
+            journal_count: 3,
+            event_count: 0,
+            contact_count: 0,
+            status: DailySummaryStatus.FAILED,
+          },
+        },
+      },
+      isLoading: false,
+      isError: false,
+      refetch: mockRefetch,
+    });
+
+    render(<DailySummaryView date={mockDate} />);
+    fireEvent.click(screen.getByTestId(`generate-summary-btn-${mockDate}`));
+
+    expect(
+      screen.getByTestId(`summary-failed-${mockDate}`)
+    ).toBeInTheDocument();
+    expect(screen.getByText('Summary generation failed')).toBeInTheDocument();
+    expect(
+      screen.getByText('The AI was unable to generate a summary for this day.')
+    ).toBeInTheDocument();
+
+    // Click "Retry Generation" should call regenerate (force re-generation)
+    fireEvent.click(screen.getByText('Retry Generation'));
+    expect(mockRegenerate).toHaveBeenCalledWith(mockDate);
   });
 
   it('renders generated summary and stats correctly', () => {
@@ -108,6 +153,7 @@ describe('DailySummaryView', () => {
       },
       isLoading: false,
       isError: false,
+      refetch: mockRefetch,
     });
 
     render(<DailySummaryView date={mockDate} />);
@@ -139,6 +185,7 @@ describe('DailySummaryView', () => {
       },
       isLoading: false,
       isError: false,
+      refetch: mockRefetch,
     });
 
     render(<DailySummaryView date={mockDate} />);
@@ -167,6 +214,7 @@ describe('DailySummaryView', () => {
       },
       isLoading: false,
       isError: false,
+      refetch: mockRefetch,
     });
 
     render(<DailySummaryView date={mockDate} />);
