@@ -430,7 +430,8 @@ class OutboxEventProcessor:
 
                 new_tag = Tag(name=TagName(tag_name))
                 try:
-                    saved_tag = await self.tag_repo.save(new_tag)
+                    async with self.connection.begin_nested():
+                        saved_tag = await self.tag_repo.save(new_tag)
                 except DuplicateTagNameError:
                     # Race condition: another worker created the same tag
                     found_tag = await self.tag_repo.find_by_name(tag_name)
