@@ -8,6 +8,7 @@ import dataclasses
 
 from core_shared.models.journals.abseil_pitch import AbseilPitch
 from core_shared.models.journals.abseiling_data import AbseilingData
+from core_shared.models.journals.exceptions import JournalValidationError
 
 from app.core.journal.models.repositories import (
     AbseilingDataRepository,
@@ -94,6 +95,14 @@ class AbseilingService:
         """
         # If pitches are provided (even empty list), perform calculation
         if pitches is not None:
+            seen_pitch_numbers = set()
+            for pitch in pitches:
+                if pitch.pitch_number in seen_pitch_numbers:
+                    raise JournalValidationError(
+                        "pitches", f"Duplicate pitch number found: {pitch.pitch_number}"
+                    )
+                seen_pitch_numbers.add(pitch.pitch_number)
+
             abseiling_data = self.calculate_abseiling_totals(abseiling_data, pitches)
 
         # Save AbseilingData

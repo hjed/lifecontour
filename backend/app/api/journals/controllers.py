@@ -3208,27 +3208,33 @@ async def _update_abseiling_type_data(
     from app.api.journals.schemas import AbseilPitchSchema
     from app.core.journal.services.abseiling_service import AbseilingService
 
-    pitches = None
+    pitches: list[AbseilPitch] | None = None
     if "pitches" in attrs:
-        pitches = []
-        for i, pitch_data in enumerate(attrs["pitches"]):
-            try:
-                parsed_pitch = AbseilPitchSchema.model_validate(pitch_data)
-                pitches.append(
-                    AbseilPitch(
-                        journal_id=journal_id,
-                        pitch_number=parsed_pitch.pitch_number,
-                        height=parsed_pitch.height,
-                        anchor_location=parsed_pitch.anchor_location,
-                        anchor_type=parsed_pitch.anchor_type,
-                        did_rescue=parsed_pitch.did_rescue,
-                        did_setup=parsed_pitch.did_setup,
+        raw_pitches = attrs["pitches"]
+        if raw_pitches is None:
+            pitches = []
+        elif not isinstance(raw_pitches, list):
+            raise JournalValidationError("pitches", "pitches must be an array")
+        else:
+            pitches = []
+            for i, pitch_data in enumerate(raw_pitches):
+                try:
+                    parsed_pitch = AbseilPitchSchema.model_validate(pitch_data)
+                    pitches.append(
+                        AbseilPitch(
+                            journal_id=journal_id,
+                            pitch_number=parsed_pitch.pitch_number,
+                            height=parsed_pitch.height,
+                            anchor_location=parsed_pitch.anchor_location,
+                            anchor_type=parsed_pitch.anchor_type,
+                            did_rescue=parsed_pitch.did_rescue,
+                            did_setup=parsed_pitch.did_setup,
+                        )
                     )
-                )
-            except ValidationError as e:
-                raise JournalValidationError(
-                    f"pitches[{i}]", f"Invalid pitch data: {str(e)}"
-                ) from e
+                except ValidationError as e:
+                    raise JournalValidationError(
+                        f"pitches[{i}]", f"Invalid pitch data: {str(e)}"
+                    ) from e
 
     service = AbseilingService()
     await service.update_abseiling_data(
