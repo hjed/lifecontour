@@ -125,14 +125,14 @@ test.describe('Journals AI Daily Summary', () => {
       authenticatedPage.getByText('Only one journal today')
     ).toBeVisible({ timeout: 10000 });
 
-    // The Generate AI Summary button should NOT be visible
-    const generateBtn = authenticatedPage.getByTestId(
-      `generate-summary-btn-${journalDateId}`
+    // The summary card should NOT be visible
+    const summaryCard = authenticatedPage.getByTestId(
+      `summary-card-${journalDateId}`
     );
-    await expect(generateBtn).not.toBeVisible();
+    await expect(summaryCard).not.toBeVisible();
   });
 
-  test('should generate and display read-only daily summary for populated days', async ({
+  test('should auto-generate and display read-only daily summary for populated days', async ({
     authenticatedPage,
     testCleanup,
   }) => {
@@ -168,16 +168,7 @@ test.describe('Journals AI Daily Summary', () => {
       timeout: 10000,
     });
 
-    // The Generate AI Summary button SHOULD be visible
-    const generateBtn = authenticatedPage.getByTestId(
-      `generate-summary-btn-${journalDateId}`
-    );
-    await expect(generateBtn).toBeVisible();
-
-    // Click it
-    await generateBtn.click();
-
-    // Should show loading state
+    // Should show loading state automatically
     await expect(
       authenticatedPage.getByTestId(`summary-loading-${journalDateId}`)
     ).toBeVisible();
@@ -242,12 +233,7 @@ test.describe('Journals AI Daily Summary', () => {
 
     await authenticatedPage.goto('/journals');
 
-    const generateBtn = authenticatedPage.getByTestId(
-      `generate-summary-btn-${journalDateId}`
-    );
-    await generateBtn.click();
-
-    // Wait for initial summary
+    // Wait for initial summary (auto-generated)
     await expect(
       authenticatedPage.getByTestId(`summary-text-${journalDateId}`)
     ).toContainText('Initial summary');

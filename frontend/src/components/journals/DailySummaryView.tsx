@@ -1,7 +1,6 @@
 'use client';
 
-import { useState } from 'react';
-import { Sparkles, RefreshCw, Loader2, Bot, AlertTriangle } from 'lucide-react';
+import { Sparkles, RefreshCw, Loader2, AlertTriangle } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -14,18 +13,10 @@ export interface DailySummaryViewProps {
 }
 
 export function DailySummaryView({ date }: DailySummaryViewProps) {
-  const [isRequested, setIsRequested] = useState(false);
-
-  const { data, isLoading, isError, error, refetch } = useDailySummary(date, {
-    enabled: isRequested,
-  });
+  const { data, isLoading, isError, error, refetch } = useDailySummary(date);
 
   const { mutate: regenerateSummary, isPending: isRegenerating } =
     useRegenerateDailySummary();
-
-  const handleGenerateClick = () => {
-    setIsRequested(true);
-  };
 
   const handleRefreshClick = () => {
     regenerateSummary(date);
@@ -34,24 +25,6 @@ export function DailySummaryView({ date }: DailySummaryViewProps) {
   const handleRetryClick = () => {
     refetch();
   };
-
-  // State 1: Not requested yet
-  if (!isRequested) {
-    return (
-      <div className='mb-4'>
-        <Button
-          variant='outline'
-          size='sm'
-          onClick={handleGenerateClick}
-          className='text-muted-foreground hover:text-primary gap-2'
-          data-testid={`generate-summary-btn-${date}`}
-        >
-          <Bot className='h-4 w-4' />
-          Generate AI Summary
-        </Button>
-      </div>
-    );
-  }
 
   // State 2: Loading (first time or from cache)
   if (isLoading) {
