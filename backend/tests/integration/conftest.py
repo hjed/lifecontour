@@ -644,8 +644,8 @@ def integration_test_client():
     # Set environment variables for test database and allowed hosts
     os.environ["DATABASE_URL"] = _db_config.get_sync_url()
     os.environ["ALLOWED_HOSTS"] = '["*"]'
-    os.environ["REDIS_URL"] = "redis://localhost:" + workspace_env.get(
-        "REDIS_TEST_PORT", "6380"
+    os.environ["REDIS_URL"] = os.environ.get("REDIS_URL") or (
+        "redis://localhost:" + workspace_env.get("REDIS_TEST_PORT", "6380")
     )
 
     # Clear the cached settings and database engine
