@@ -61,6 +61,7 @@ from app.core.contacts.services import ContactService
 from app.core.contacts.services.contact_history_service import ContactHistoryService
 from app.core.journal.models.repositories import (
     AbseilingDataRepository,
+    AbseilPitchRepository,
     BushwalkingDataRepository,
     CalendarInfoRepository,
     CalendarRepository,
@@ -797,6 +798,7 @@ async def get_contact_journals(
     bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
     jogging_data_repo: FromDishka[JoggingDataRepository],
     abseiling_data_repo: FromDishka[AbseilingDataRepository],
+    abseil_pitch_repo: FromDishka[AbseilPitchRepository],
     canyoning_data_repo: FromDishka[CanyoningDataRepository],
     climbing_data_repo: FromDishka[ClimbingDataRepository],
     kayaking_data_repo: FromDishka[KayakingDataRepository],
@@ -898,6 +900,7 @@ async def get_contact_journals(
         bushwalking_data_repo=bushwalking_data_repo,
         jogging_data_repo=jogging_data_repo,
         abseiling_data_repo=abseiling_data_repo,
+        abseil_pitch_repo=abseil_pitch_repo,
         canyoning_data_repo=canyoning_data_repo,
         climbing_data_repo=climbing_data_repo,
         kayaking_data_repo=kayaking_data_repo,

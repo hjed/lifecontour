@@ -109,16 +109,16 @@ Remove the `activity_type` column and establish the abseil pitch domain layer wi
 Expose pitches through the REST API as nested data within abseiling responses, and implement auto-calculation.
 
 **Acceptance Criteria:**
-- [ ] `AbseilPitchSchema` added to API schemas (nested within `AbseilingDataSchema`)
-- [ ] Pitch CRUD handled as part of journal abseiling data create/update endpoints
-- [ ] Auto-calculation: when pitches present, `number_of_abseils` defaults to pitch count, `total_length` to sum of heights, `number_of_setups` / `number_of_rescues` to filtered counts
-- [ ] Manual override: user-provided totals take precedence over auto-calculated values
-- [ ] MCP `create_journal_entry` / `update_journal_entry` handles pitch data within abseiling type data
-- [ ] API converters handle pitch domain ↔ schema translation
+- [x] `AbseilPitchSchema` added to API schemas (nested within `AbseilingDataSchema`)
+- [x] Pitch CRUD handled as part of journal abseiling data create/update endpoints
+- [x] Auto-calculation: when pitches present, `number_of_abseils` defaults to pitch count, `total_length` to sum of heights, `number_of_setups` / `number_of_rescues` to filtered counts
+- [x] Manual override: user-provided totals take precedence over auto-calculated values
+- [x] MCP `create_journal_entry` / `update_journal_entry` handles pitch data within abseiling type data
+- [x] API converters handle pitch domain ↔ schema translation
 
 **Required Test Coverage:**
-- **Unit:** auto-calculation logic for all four aggregate fields, manual override precedence.
-- **Integration:** API tests for creating/updating abseiling journals with and without pitches, verifying calculated totals.
+- **Unit:** ✅ auto-calculation logic for all four aggregate fields, manual override precedence.
+- **Integration:** ✅ API tests for creating/updating abseiling journals with and without pitches, verifying calculated totals.
 
 #### Phase 3: Abseil Pitch Editor UI
 **PR Size:** ~4–6 files
