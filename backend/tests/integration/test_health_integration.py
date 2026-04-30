@@ -64,3 +64,25 @@ def test_detailed_health_check_integration(integration_test_client: TestClient) 
     assert "database" in data["services"]
     assert data["services"]["database"]["type"] == "postgresql"
     assert data["services"]["database"]["status"] in ["healthy", "unhealthy"]
+
+
+@pytest.mark.integration
+def test_consumer_lag_check_integration(integration_test_client: TestClient) -> None:
+    """Test consumer lag health check endpoint."""
+    response = integration_test_client.get("/api/health/consumer-lag")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, list)
+
+
+@pytest.mark.integration
+def test_dead_letters_check_integration(integration_test_client: TestClient) -> None:
+    """Test dead letters health check endpoint."""
+    response = integration_test_client.get("/api/health/dead-letters")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "items" in data
+    assert "total" in data
+    assert isinstance(data["items"], list)

@@ -638,11 +638,15 @@ def integration_test_client():
     original_values = {
         "DATABASE_URL": os.environ.get("DATABASE_URL"),
         "ALLOWED_HOSTS": os.environ.get("ALLOWED_HOSTS"),
+        "REDIS_URL": os.environ.get("REDIS_URL"),
     }
 
     # Set environment variables for test database and allowed hosts
     os.environ["DATABASE_URL"] = _db_config.get_sync_url()
     os.environ["ALLOWED_HOSTS"] = '["*"]'
+    os.environ["REDIS_URL"] = "redis://localhost:" + workspace_env.get(
+        "REDIS_TEST_PORT", "6380"
+    )
 
     # Clear the cached settings and database engine
     clear_caches()

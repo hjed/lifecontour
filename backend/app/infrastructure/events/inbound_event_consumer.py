@@ -20,6 +20,7 @@ from dishka import AsyncContainer
 
 from app.infrastructure.config import Settings
 from app.infrastructure.database import get_async_database_engine
+from app.infrastructure.events.dead_letter_consumer_mixin import DeadLetterConsumerMixin
 from app.infrastructure.events.stream_consumer import StreamConsumer
 from app.infrastructure.events.stream_event_adapter import stream_event_to_outbox_event
 
@@ -38,7 +39,7 @@ _INBOUND_EVENT_PATTERNS: list[str] = [
 ]
 
 
-class InboundEventConsumer(StreamConsumer):
+class InboundEventConsumer(DeadLetterConsumerMixin, StreamConsumer):
     """Stream consumer for inbound integration sync events.
 
     Listens to ``contact.*``, ``journal_event.*``, and ``journal_review.*``

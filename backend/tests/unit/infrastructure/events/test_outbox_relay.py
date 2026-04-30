@@ -46,7 +46,6 @@ class TestOutboxRelay:
                 aggregate_id=42,
                 event_data={"contact_id": 42, "name": "John"},
                 occurred_at=datetime(2024, 1, 1, 12, 0, 0),
-                processed_at=None,
                 retry_count=0,
                 created_at=datetime(2024, 1, 1, 12, 0, 0),
                 relayed_at=None,
@@ -58,7 +57,6 @@ class TestOutboxRelay:
                 aggregate_id=43,
                 event_data={"contact_id": 43, "name": "Jane"},
                 occurred_at=datetime(2024, 1, 1, 12, 5, 0),
-                processed_at=None,
                 retry_count=0,
                 created_at=datetime(2024, 1, 1, 12, 5, 0),
                 relayed_at=None,
@@ -161,7 +159,6 @@ class TestOutboxRelay:
             aggregate_id=42,
             event_data={"contact_id": 42},
             occurred_at=datetime(2024, 1, 1, 12, 0, 0),
-            processed_at=None,
             retry_count=0,
             created_at=datetime(2024, 1, 1, 12, 0, 0),
             relayed_at=datetime(2024, 1, 1, 12, 1, 0),  # Already relayed

@@ -118,7 +118,6 @@ async def test_enhanced_contact_indexing() -> bool:
                 aggregate_id=42,
                 event_data={"contact_id": 42, "first_name": "John", "last_name": "Doe"},
                 occurred_at=datetime(2024, 1, 1, 12, 0, 0),
-                processed_at=None,
                 retry_count=0,
                 created_at=datetime(2024, 1, 1, 12, 0, 0),
             )

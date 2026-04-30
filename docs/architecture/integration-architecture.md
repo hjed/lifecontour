@@ -2,8 +2,6 @@
 
 This document defines the architecture for external service integrations including Google Contacts, Immich, Strava, Firefly III, and communication platforms.
 
-> [!IMPORTANT]
-> **Planned Migration:** The event dispatch system described in this document (direct-dispatch `OutboxProcessor` with ARQ broadcast) is being replaced with a **Redis Streams event bus** using consumer groups. The new architecture is specified in the [Integration Architecture & Strava Product Specification](../product-specifications/integration-architecture-and-strava-product-specification.md) and implemented via [Iteration 5](../tasks/iteration-5-integration-architecture-and-strava.md). The core outbox pattern and isolated worker architecture remain unchanged — only the event fan-out mechanism changes. This document will be updated as each migration phase completes.
 
 ## Overview
 

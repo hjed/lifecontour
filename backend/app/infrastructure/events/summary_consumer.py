@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.infrastructure.config import get_settings
 from app.infrastructure.database import get_async_database_engine
+from app.infrastructure.events.dead_letter_consumer_mixin import DeadLetterConsumerMixin
 from app.infrastructure.events.stream_consumer import StreamConsumer
 from app.infrastructure.events.stream_event_adapter import stream_event_to_outbox_event
 from app.infrastructure.search.search_indexer import SearchIndexer
@@ -19,7 +20,7 @@ from app.infrastructure.search.search_indexer import SearchIndexer
 logger = structlog.get_logger()
 
 
-class SummaryConsumer(StreamConsumer):
+class SummaryConsumer(DeadLetterConsumerMixin, StreamConsumer):
     """Stream consumer for AI contact summary generation.
 
     Listens for ``ContactSummaryRefreshRequested`` events on the

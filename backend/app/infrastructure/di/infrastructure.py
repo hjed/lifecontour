@@ -7,13 +7,12 @@ Provides general infrastructure services like settings, search, and event publis
 from collections.abc import AsyncIterator
 
 from core_shared.stream_client import StreamClient
-from dishka import AsyncContainer, Provider, Scope, provide
+from dishka import Provider, Scope, provide
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.infrastructure.config import Settings, get_settings
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
-from app.infrastructure.events.outbox_processor import OutboxProcessor
 from app.infrastructure.search.reindex_service import ReindexService
 from app.infrastructure.search.search_service import SearchService
 
@@ -42,11 +41,6 @@ class InfrastructureProvider(Provider):
     ) -> OutboxEventPublisher:
         """Get outbox event publisher for request scope."""
         return OutboxEventPublisher(connection)
-
-    @provide(scope=Scope.APP)
-    def provide_outbox_processor(self, container: AsyncContainer) -> OutboxProcessor:
-        """Get outbox processor for app scope."""
-        return OutboxProcessor(container)
 
     @provide(scope=Scope.APP)
     async def provide_stream_client(

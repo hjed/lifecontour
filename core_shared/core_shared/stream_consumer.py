@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 
 import structlog
 
-from core_shared.stream_client import StreamClient, StreamEvent
+from core_shared.stream_client import PendingEntry, StreamClient, StreamEvent
 
 logger = structlog.get_logger()
 
@@ -39,6 +39,7 @@ class StreamConsumer(ABC):
         block_ms: int = 5000,
         retry_min_idle_ms: int = 60000,
         retry_batch_size: int = 10,
+        max_delivery_count: int = 5,
     ) -> None:
         """Initialize the consumer.
 
@@ -52,6 +53,7 @@ class StreamConsumer(ABC):
             block_ms: Milliseconds to block waiting for new events
             retry_min_idle_ms: Minimum idle time (ms) before retrying pending entries
             retry_batch_size: Maximum pending entries to claim per retry cycle
+            max_delivery_count: Maximum times an event can be delivered before dead-lettering
         """
         self._stream_client = stream_client
         self._stream_name = stream_name
@@ -62,6 +64,7 @@ class StreamConsumer(ABC):
         self._block_ms = block_ms
         self._retry_min_idle_ms = retry_min_idle_ms
         self._retry_batch_size = retry_batch_size
+        self._max_delivery_count = max_delivery_count
         self._running = True
 
     async def start(self) -> None:
@@ -117,6 +120,26 @@ class StreamConsumer(ABC):
         Args:
             event: The stream event to process
         """
+
+    async def _handle_dead_letter(
+        self, event: StreamEvent, pending_entry: PendingEntry
+    ) -> None:
+        """Handle a dead-letter event that has exceeded max retries.
+
+        Default implementation ACKs the message and logs an error.
+        Subclasses can override to persist to a DLQ database.
+        """
+        logger.error(
+            "Event exceeded max delivery count, dead-lettering",
+            event_id=event.event_id,
+            event_type=event.event_type,
+            message_id=event.message_id,
+            group=self._group_name,
+            delivery_count=pending_entry.delivery_count,
+        )
+        await self._stream_client.acknowledge(
+            self._stream_name, self._group_name, event.message_id
+        )
 
     async def _process_batch(self) -> int:
         """Read a batch of events, filter by type patterns, process or ack-skip.
@@ -180,7 +203,9 @@ class StreamConsumer(ABC):
         if not pending:
             return 0
 
-        message_ids = [entry.message_id for entry in pending]
+        pending_by_id = {entry.message_id: entry for entry in pending}
+        message_ids = list(pending_by_id.keys())
+
         claimed_events = await self._stream_client.claim_pending(
             stream_name=self._stream_name,
             group_name=self._group_name,
@@ -191,6 +216,15 @@ class StreamConsumer(ABC):
 
         retried = 0
         for event in claimed_events:
+            pending_entry = pending_by_id.get(event.message_id)
+
+            if (
+                pending_entry
+                and pending_entry.delivery_count >= self._max_delivery_count
+            ):
+                await self._handle_dead_letter(event, pending_entry)
+                continue
+
             if self._matches_event_type(event.event_type):
                 try:
                     await self._handle_event(event)

@@ -25,7 +25,6 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.infrastructure.config import Settings, get_settings
 from app.infrastructure.database import get_database_engine
 from app.infrastructure.di.container import create_container
-from app.infrastructure.events.outbox_processor import run_outbox_processor_loop
 from app.infrastructure.events.outbox_relay import run_outbox_relay_loop
 from app.infrastructure.logging import setup_logging
 from app.infrastructure.tasks.attendance_transition_task import (
@@ -98,88 +97,80 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
 
     # Start background tasks
-    outbox_task = None
     attendance_task = None
     relay_task = None
     search_consumer_task = None
     summary_consumer_task = None
     inbound_consumer_task = None
     try:
-        # Start outbox processor background task
-        outbox_task = asyncio.create_task(
-            run_outbox_processor_loop(container, interval_seconds=10)
-        )
-        logger.info("Outbox processor background task started")
-
         # Start attendance transition background task (hourly)
         attendance_task = asyncio.create_task(
             run_attendance_transition_loop(container, interval_seconds=3600)
         )
         logger.info("Attendance transition background task started")
 
-        # Conditionally start the Redis Streams outbox relay
-        if settings.use_stream_consumers:
-            from core_shared.stream_client import StreamClient
+        # Start the Redis Streams outbox relay
+        from core_shared.stream_client import StreamClient
 
-            stream_client = await container.get(StreamClient)
-            relay_task = asyncio.create_task(
-                run_outbox_relay_loop(
-                    stream_client,
-                    stream_name=settings.stream_name,
-                    batch_size=settings.stream_relay_batch_size,
-                    interval_seconds=settings.stream_relay_poll_interval,
-                )
-            )
-            logger.info(
-                "Outbox relay background task started",
-                stream=settings.stream_name,
-            )
-
-            # Start stream consumers for search indexing and summary generation
-            from app.infrastructure.events.search_indexer_consumer import (
-                SearchIndexerConsumer,
-            )
-            from app.infrastructure.events.summary_consumer import SummaryConsumer
-
-            search_consumer = SearchIndexerConsumer(
-                stream_client=stream_client,
+        stream_client = await container.get(StreamClient)
+        relay_task = asyncio.create_task(
+            run_outbox_relay_loop(
+                stream_client,
                 stream_name=settings.stream_name,
+                batch_size=settings.stream_relay_batch_size,
+                interval_seconds=settings.stream_relay_poll_interval,
             )
-            search_consumer_task = asyncio.create_task(search_consumer.start())
-            logger.info(
-                "Search indexer consumer started",
-                group="search-indexer",
-                stream=settings.stream_name,
-            )
+        )
+        logger.info(
+            "Outbox relay background task started",
+            stream=settings.stream_name,
+        )
 
-            summary_consumer = SummaryConsumer(
-                stream_client=stream_client,
-                stream_name=settings.stream_name,
-            )
-            summary_consumer_task = asyncio.create_task(summary_consumer.start())
-            logger.info(
-                "Summary generator consumer started",
-                group="summary-generator",
-                stream=settings.stream_name,
-            )
+        # Start stream consumers for search indexing and summary generation
+        from app.infrastructure.events.search_indexer_consumer import (
+            SearchIndexerConsumer,
+        )
+        from app.infrastructure.events.summary_consumer import SummaryConsumer
 
-            # Start stream consumer for inbound sync events
-            from app.infrastructure.events.inbound_event_consumer import (
-                InboundEventConsumer,
-            )
+        search_consumer = SearchIndexerConsumer(
+            stream_client=stream_client,
+            stream_name=settings.stream_name,
+        )
+        search_consumer_task = asyncio.create_task(search_consumer.start())
+        logger.info(
+            "Search indexer consumer started",
+            group="search-indexer",
+            stream=settings.stream_name,
+        )
 
-            inbound_consumer = InboundEventConsumer(
-                stream_client=stream_client,
-                container=container,
-                settings=settings,
-                stream_name=settings.stream_name,
-            )
-            inbound_consumer_task = asyncio.create_task(inbound_consumer.start())
-            logger.info(
-                "Inbound event consumer started",
-                group="inbound-processor",
-                stream=settings.stream_name,
-            )
+        summary_consumer = SummaryConsumer(
+            stream_client=stream_client,
+            stream_name=settings.stream_name,
+        )
+        summary_consumer_task = asyncio.create_task(summary_consumer.start())
+        logger.info(
+            "Summary generator consumer started",
+            group="summary-generator",
+            stream=settings.stream_name,
+        )
+
+        # Start stream consumer for inbound sync events
+        from app.infrastructure.events.inbound_event_consumer import (
+            InboundEventConsumer,
+        )
+
+        inbound_consumer = InboundEventConsumer(
+            stream_client=stream_client,
+            container=container,
+            settings=settings,
+            stream_name=settings.stream_name,
+        )
+        inbound_consumer_task = asyncio.create_task(inbound_consumer.start())
+        logger.info(
+            "Inbound event consumer started",
+            group="inbound-processor",
+            stream=settings.stream_name,
+        )
 
         yield
 
@@ -191,7 +182,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             (summary_consumer_task, "Summary generator consumer"),
             (search_consumer_task, "Search indexer consumer"),
             (relay_task, "Outbox relay"),
-            (outbox_task, "Outbox processor"),
             (attendance_task, "Attendance transition"),
         ]:
             if task:
