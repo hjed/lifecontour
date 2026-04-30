@@ -400,7 +400,7 @@ class DailySummaryMCPResponse(BaseModel):
         default=None, description="Average mood score for the day (0.0 to 1.0)"
     )
     status: str = Field(
-        description="Status of the summary (e.g. GENERATED, PENDING, FAILED, DISABLED, INELIGIBLE)"
+        description="Status of the summary (e.g. generated, pending, failed, disabled)"
     )
     summary: str = Field(
         description="AI-friendly summary of the daily summary results and context"

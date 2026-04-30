@@ -3714,7 +3714,14 @@ async def dismiss_review_item(
     if not item:
         return json.dumps({"error": f"Review item {item_id} not found."})
 
-    return json.dumps({"success": True, "status": "dismissed"})
+    return json.dumps(
+        {
+            "success": True,
+            "message": f"Successfully dismissed review item {item_id}.",
+            "status": item.status,
+        },
+        indent=2,
+    )
 
 
 @mcp_unified_error_handler("get_daily_summary", "journal")
@@ -3739,7 +3746,7 @@ async def get_daily_summary(
     result = await daily_summary_service.get_or_generate(user_id, parsed_date)
 
     if result is None:
-        raise ValueError("Failed to generate or retrieve daily summary")
+        return json.dumps({"data": None})
 
     response = DailySummaryMCPResponse(
         summary_date=parsed_date.isoformat(),

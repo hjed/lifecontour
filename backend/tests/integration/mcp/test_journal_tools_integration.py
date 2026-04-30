@@ -680,9 +680,7 @@ class TestJournalToolsIntegration:
 
             assert "error" not in payload
             assert payload["summary_date"] == summary_date
-            # The exact status might be PENDING or GENERATED depending on whether the test
-            # uses the real service that triggers the mock AI, but it should not error.
-            assert "status" in payload
+            assert payload["status"] == "generated"
             assert payload["journal_count"] == 2
 
 
