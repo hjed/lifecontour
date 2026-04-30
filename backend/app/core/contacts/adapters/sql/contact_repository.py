@@ -868,17 +868,14 @@ class SqlContactRepository(ContactRepository):
 
     async def assign_tag(self, contact_id: int, tag_id: int) -> None:
         """Assign a tag to a contact."""
-        try:
-            query = text(
-                """
-                INSERT INTO contact_tags (contact_id, tag_id)
-                VALUES (:contact_id, :tag_id)
+        query = text(
             """
-            )
-            await self.conn.execute(query, {"contact_id": contact_id, "tag_id": tag_id})
-        except IntegrityError:
-            # Tag already assigned - ignore
-            pass
+            INSERT INTO contact_tags (contact_id, tag_id)
+            VALUES (:contact_id, :tag_id)
+            ON CONFLICT (contact_id, tag_id) DO NOTHING
+        """
+        )
+        await self.conn.execute(query, {"contact_id": contact_id, "tag_id": tag_id})
 
     async def remove_tag(self, contact_id: int, tag_id: int) -> None:
         """Remove a tag from a contact."""
