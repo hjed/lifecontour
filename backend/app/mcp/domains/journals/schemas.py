@@ -308,7 +308,7 @@ class JournalCreateRequest(BaseModel):
     types: list[str] = Field(default_factory=list, description="Journal types to add")
     type_data: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
-        description="Type-specific data (e.g., EVENT: {calendar_id: uuid})",
+        description="Type-specific data (e.g., EVENT: {calendar_id: uuid}, ABSEILING_TRIP: {pitches: [{pitch_number: int, height: int}]})",
     )
     contact_relationships: list[dict[str, Any]] = Field(
         default_factory=list,
@@ -328,7 +328,8 @@ class JournalUpdateRequest(BaseModel):
     )
     types: list[str] | None = Field(default=None, description="Replace all types")
     type_data: dict[str, dict[str, Any]] | None = Field(
-        default=None, description="Update type-specific data"
+        default=None,
+        description="Update type-specific data (e.g., ABSEILING_TRIP: {pitches: [{pitch_number: int}]})",
     )
     contact_relationships: list[dict[str, Any]] | None = Field(
         default=None, description="Replace all contact relationships"

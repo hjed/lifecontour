@@ -237,6 +237,26 @@ class JoggingDataSchema(BaseModel):
     )
 
 
+class AbseilPitchSchema(BaseModel):
+    """Abseil pitch data schema."""
+
+    id: int | None = Field(default=None, description="Pitch ID")
+    pitch_number: int = Field(..., description="Sequence/problem number for ordering")
+    height: int | None = Field(
+        default=None, description="Drop height of this pitch in metres"
+    )
+    anchor_location: str | None = Field(
+        default=None, description="TR (top right), TL (top left), Centre"
+    )
+    anchor_type: str | None = Field(default=None, description="Type of anchor used")
+    did_rescue: bool | None = Field(
+        default=None, description="Whether a rescue was performed"
+    )
+    did_setup: bool | None = Field(
+        default=None, description="Whether the user set up the anchor"
+    )
+
+
 class AbseilingDataSchema(BaseModel):
     """Abseiling data for ABSEILING_TRIP type journals."""
 
@@ -259,6 +279,9 @@ class AbseilingDataSchema(BaseModel):
         default=None,
         description="Number of pitches where the user performed a rescue (non-negative)",
         ge=0,
+    )
+    pitches: list[AbseilPitchSchema] = Field(
+        default_factory=list, description="Abseil pitches"
     )
 
 

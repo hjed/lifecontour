@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from core_shared.models.journals import (
     AbseilingData,
+    AbseilPitch,
     BushwalkingData,
     Calendar,
     CalendarInfo,
@@ -33,6 +34,7 @@ from core_shared.models.route import Route
 from app.api.common.schemas import JsonApiLinks
 from app.api.journals.schemas import (
     AbseilingDataSchema,
+    AbseilPitchSchema,
     BushwalkingDataSchema,
     CalendarInfoDataSchema,
     CalendarSchema,
@@ -444,13 +446,31 @@ class TypeDataConverter:
         ).model_dump(exclude_none=True)
 
     @staticmethod
-    def abseiling_data_to_schema(data: AbseilingData) -> dict[str, Any]:
+    def abseiling_data_to_schema(
+        data: AbseilingData, pitches: list[AbseilPitch] | None = None
+    ) -> dict[str, Any]:
         """Convert AbseilingData domain entity to API schema."""
+        pitch_schemas = []
+        if pitches:
+            pitch_schemas = [
+                AbseilPitchSchema(
+                    id=pitch.id,
+                    pitch_number=pitch.pitch_number,
+                    height=pitch.height,
+                    anchor_location=pitch.anchor_location,
+                    anchor_type=pitch.anchor_type,
+                    did_rescue=pitch.did_rescue,
+                    did_setup=pitch.did_setup,
+                )
+                for pitch in pitches
+            ]
+
         return AbseilingDataSchema(
             number_of_abseils=data.number_of_abseils,
             total_length=data.total_length,
             number_of_setups=data.number_of_setups,
             number_of_rescues=data.number_of_rescues,
+            pitches=pitch_schemas,
         ).model_dump(exclude_none=True)
 
     @staticmethod

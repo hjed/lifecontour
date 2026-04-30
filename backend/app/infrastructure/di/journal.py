@@ -3,6 +3,9 @@
 from dishka import Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.journal.adapters.sql.abseil_pitch_repository import (
+    SqlAbseilPitchRepository,
+)
 from app.core.journal.adapters.sql.abseiling_data_repository import (
     SqlAbseilingDataRepository,
 )
@@ -54,6 +57,7 @@ from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRepository
 from app.core.journal.models.repositories import (
     AbseilingDataRepository,
+    AbseilPitchRepository,
     BushwalkingDataRepository,
     CalendarInfoRepository,
     CalendarRepository,
@@ -180,6 +184,13 @@ class JournalProvider(Provider):
     ) -> JoggingDataRepository:
         """Provide a JoggingDataRepository instance."""
         return SqlJoggingDataRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def abseil_pitch_repository(
+        self, connection: AsyncConnection
+    ) -> AbseilPitchRepository:
+        """Provide an AbseilPitchRepository instance."""
+        return SqlAbseilPitchRepository(connection)
 
     @provide(scope=Scope.REQUEST)
     def abseiling_data_repository(
