@@ -87,6 +87,7 @@ from app.core.journal.adapters.sql.review_item_repository import SqlReviewItemRe
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRepository
 from app.core.journal.models.journal_tag import JournalTag
+from app.core.journal.services.daily_summary_service import DailySummaryService
 from app.core.journal.services.hierarchy_service import HierarchyNode, HierarchyService
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_service import JournalService
@@ -100,6 +101,7 @@ from app.mcp.domains.journals.schemas import (
     ActivityTrendsResponse,
     ActivityTypeStats,
     ContactRelationshipSummary,
+    DailySummaryMCPResponse,
     EventDateRangeSchema,
     JournalCreateRequest,
     JournalDateWindowResponse,
@@ -119,6 +121,7 @@ from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
     get_async_connection,
     get_current_user_id,
+    get_daily_summary_service,
     get_outbox_event_publisher,
     mcp_depends,
 )
@@ -3721,6 +3724,46 @@ async def dismiss_review_item(
     )
 
 
+@mcp_unified_error_handler("get_daily_summary", "journal")
+async def get_daily_summary(
+    summary_date: str,
+    daily_summary_service: DailySummaryService = mcp_depends(get_daily_summary_service),
+) -> str:
+    """Get the AI-generated daily summary for a specific date.
+
+    Args:
+        summary_date: The date to get the summary for (YYYY-MM-DD format)
+    """
+    try:
+        parsed_date = date.fromisoformat(summary_date)
+    except ValueError as e:
+        raise ValueError(
+            f"Invalid date format. Expected YYYY-MM-DD, got {summary_date}"
+        ) from e
+
+    user_id = await get_current_user_id()
+
+    result = await daily_summary_service.get_or_generate(user_id, parsed_date)
+
+    if result is None:
+        return json.dumps({"data": None})
+
+    response = DailySummaryMCPResponse(
+        summary_date=parsed_date.isoformat(),
+        summary_text=result.get_display_text(),
+        journal_count=result.journal_count,
+        event_count=result.event_count,
+        contact_count=result.contact_count,
+        mood_average=result.mood_average,
+        status=str(result.status.value)
+        if hasattr(result.status, "value")
+        else str(result.status),
+        summary=f"Daily summary for {parsed_date.isoformat()}: {result.status}. {result.journal_count} journals, {result.event_count} events.",
+    )
+
+    return MCPResponseBuilder.success_response(response)
+
+
 def register_journal_tools(mcp: FastMCP[None]) -> None:
     """
     Register journal-related MCP tools with the FastMCP server.
@@ -3746,3 +3789,4 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
     mcp.add_tool(browse_journals_by_date_window)
     mcp.add_tool(list_review_items)
     mcp.add_tool(dismiss_review_item)
+    mcp.add_tool(get_daily_summary)

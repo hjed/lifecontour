@@ -67,6 +67,7 @@ class TestJournalTools:
                 "link_journal_to_contact",
                 "merge_journals",
                 "get_merge_candidates",
+                "get_daily_summary",
             ]
 
             for expected_tool in expected_tools:
@@ -162,6 +163,29 @@ class TestJournalTools:
             properties = get_tool.inputSchema.get("properties", {})
             assert "journal_id" in properties
             assert "include_children" in properties
+
+    @pytest.mark.asyncio
+    async def test_get_daily_summary_tool_registration(self, mcp_server):
+        """Test that get_daily_summary tool is properly registered with correct schema."""
+        async with Client(mcp_server) as client:
+            tools_response = await client.list_tools()
+            tools = (
+                tools_response.tools
+                if hasattr(tools_response, "tools")
+                else tools_response
+            )
+
+            summary_tool = next(
+                (t for t in tools if t.name == "get_daily_summary"), None
+            )
+
+            assert summary_tool is not None, "get_daily_summary tool not found"
+            assert summary_tool.description is not None
+            assert summary_tool.inputSchema is not None
+
+            # Verify the tool has the expected parameters
+            properties = summary_tool.inputSchema.get("properties", {})
+            assert "summary_date" in properties
 
 
 class TestDatetimeFilterParsing:

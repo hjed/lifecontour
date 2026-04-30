@@ -615,6 +615,74 @@ class TestJournalToolsIntegration:
             assert payload["error"] == "Journal error"
             assert "would create a cycle" in payload["message"]
 
+    @pytest.mark.asyncio
+    async def test_get_daily_summary_integration(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ) -> None:
+        """Test retrieving a daily summary via MCP tool."""
+        # Create a few journals for the day to make it eligible
+        from sqlalchemy import text
+
+        now = datetime.now(UTC)
+        summary_date = now.date().isoformat()
+
+        await clean_database.execute(
+            text("""
+                INSERT INTO journals (user_id, title, content, event_date_range_start, event_date_range_end)
+                VALUES
+                ('current_user', 'Journal 1', 'Content 1', :now, :now),
+                ('current_user', 'Journal 2', 'Content 2', :now, :now)
+            """),
+            {"now": now},
+        )
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            from unittest.mock import AsyncMock, patch
+
+            from core_shared.models.journals.daily_summary import (
+                JournalDailySummary,
+                SummaryStatus,
+            )
+
+            mock_summary = JournalDailySummary(
+                user_id="current_user",
+                summary_date=now.date(),
+                summary_text="Mocked summary",
+                journal_count=2,
+                event_count=0,
+                contact_count=0,
+                status=SummaryStatus.GENERATED,
+            )
+
+            with patch(
+                "app.core.journal.services.daily_summary_service.DailySummaryService.get_or_generate",
+                new_callable=AsyncMock,
+            ) as mock_get:
+                mock_get.return_value = mock_summary
+                session_id = await initialize_mcp_session(authenticated_client)
+
+                response = await authenticated_client.post(
+                    "/mcp-server/mcp",
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "get_daily_summary",
+                            "arguments": {"summary_date": summary_date},
+                        },
+                    },
+                    headers=mcp_headers(session_id),
+                )
+
+            assert response.status_code == 200
+            payload = extract_mcp_json_payload(response.text)
+
+            assert "error" not in payload
+            assert payload["summary_date"] == summary_date
+            assert payload["status"] == "generated"
+            assert payload["journal_count"] == 2
+
 
 class TestFetchJournalTypesAndDataNewActivityTypes:
     """
