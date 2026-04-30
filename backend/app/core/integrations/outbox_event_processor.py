@@ -854,11 +854,15 @@ class OutboxEventProcessor:
         # Update the contact using the contact service
         sync_changed_by = f"{integration_source}_sync"
         try:
-            updated_contact = await self.contact_service.update_contact(
-                updated_contact_data,
-                self.connection,
-                changed_by=sync_changed_by,
-            )
+            # Wrap in a nested transaction (savepoint) so that if update_contact
+            # fails with an IntegrityError (e.g. converted to DuplicateEmailError),
+            # the transaction state is cleanly rolled back and unpoisoned.
+            async with self.connection.begin_nested():
+                updated_contact = await self.contact_service.update_contact(
+                    updated_contact_data,
+                    self.connection,
+                    changed_by=sync_changed_by,
+                )
         except DuplicateEmailError as e:
             logger.warning(
                 "Contact update has duplicate email conflict - recording as conflict",
@@ -867,18 +871,16 @@ class OutboxEventProcessor:
                 error=str(e),
             )
             # Record conflict in sync_metadata so it's visible for resolution.
-            # Use a nested transaction (savepoint) because the DuplicateEmailError
-            # may have originated from an IntegrityError that aborted the current
-            # savepoint — a fresh savepoint ensures the upsert can succeed.
-            async with self.connection.begin_nested():
-                await self.sync_metadata_repo.upsert(
-                    internal_id=existing_contact.id,
-                    integration_source=integration_source,
-                    external_id=external_id,
-                    version_hash=new_version_hash,
-                    sync_status=SyncStatus.CONFLICT,
-                    error_message=str(e),
-                )
+            # The failed update_contact savepoint has been rolled back, so the
+            # transaction is healthy again and we can safely proceed.
+            await self.sync_metadata_repo.upsert(
+                internal_id=existing_contact.id,
+                integration_source=integration_source,
+                external_id=external_id,
+                version_hash=new_version_hash,
+                sync_status=SyncStatus.CONFLICT,
+                error_message=str(e),
+            )
             return {
                 "status": "conflict",
                 "reason": "duplicate_email",
