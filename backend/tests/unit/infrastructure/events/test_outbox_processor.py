@@ -959,10 +959,10 @@ class TestOutboxProcessorStreamConsumerGating:
         mock_search_indexer.process_event.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_still_processes_contact_sync_when_stream_consumers_enabled(
+    async def test_skips_contact_sync_when_stream_consumers_enabled(
         self, processor, mock_search_indexer
     ):
-        """With USE_STREAM_CONSUMERS=true, contact.* sync events should still be processed."""
+        """With USE_STREAM_CONSUMERS=true, contact.* sync events should be skipped."""
         contact_sync_event = OutboxEvent(
             id=1,
             event_id="contact-sync-1",
@@ -1001,14 +1001,61 @@ class TestOutboxProcessorStreamConsumerGating:
                 contact_sync_event, mock_repository, mock_search_indexer
             )
 
-        # Contact sync should still run — Phase 3 migration
-        mock_contact.assert_called_once()
+        # Contact sync should NOT run — stream consumer handles it
+        mock_contact.assert_not_called()
+        # Event should still be marked as processed
+        mock_repository.mark_as_processed.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_still_broadcasts_journal_events_when_stream_consumers_enabled(
+    async def test_skips_journal_sync_when_stream_consumers_enabled(
+        self, processor, mock_search_indexer
+    ):
+        """With USE_STREAM_CONSUMERS=true, journal_event.* sync events should be skipped."""
+        journal_sync_event = OutboxEvent(
+            id=1,
+            event_id="journal-sync-1",
+            event_type="journal_event.created",
+            aggregate_id=42,
+            event_data={
+                "journal_id": 1,
+                "user_id": "user123",
+                "title": "Test Journal",
+            },
+            occurred_at=datetime(2024, 1, 1, 10, 0, 0),
+            processed_at=None,
+            retry_count=0,
+            created_at=datetime(2024, 1, 1, 10, 0, 0),
+        )
+        mock_repository = MagicMock()
+        mock_repository.mark_as_processed = AsyncMock()
+
+        mock_settings = MagicMock()
+        mock_settings.use_stream_consumers = True
+
+        with (
+            patch(
+                "app.infrastructure.events.outbox_processor.get_settings",
+                return_value=mock_settings,
+            ),
+            patch.object(
+                processor,
+                "_process_journal_sync_event",
+                new_callable=AsyncMock,
+            ) as mock_journal_sync,
+        ):
+            await processor._process_single_event(
+                journal_sync_event, mock_repository, mock_search_indexer
+            )
+
+        # Journal sync should NOT run — stream consumer handles it
+        mock_journal_sync.assert_not_called()
+        mock_repository.mark_as_processed.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_skips_journal_broadcast_when_stream_consumers_enabled(
         self, processor, mock_search_indexer, mock_task_queue_service
     ):
-        """With USE_STREAM_CONSUMERS=true, ARQ journal broadcast should still run."""
+        """With USE_STREAM_CONSUMERS=true, ARQ journal broadcast should be skipped."""
         journal_event = OutboxEvent(
             id=1,
             event_id="journal-broadcast-1",
@@ -1041,5 +1088,93 @@ class TestOutboxProcessorStreamConsumerGating:
                 journal_event, mock_repository, mock_search_indexer
             )
 
-        # ARQ broadcast should still run — Phase 3 migration
-        mock_broadcast.assert_called_once()
+        # ARQ broadcast should NOT run — stream consumer handles it
+        mock_broadcast.assert_not_called()
+        mock_repository.mark_as_processed.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_skips_tag_broadcast_when_stream_consumers_enabled(
+        self, processor, mock_search_indexer, mock_task_queue_service
+    ):
+        """With USE_STREAM_CONSUMERS=true, ARQ tag broadcast should be skipped."""
+        tag_event = OutboxEvent(
+            id=1,
+            event_id="tag-broadcast-1",
+            event_type="TagUpdated",
+            aggregate_id=10,
+            event_data={"tag_id": 10, "name": "Updated Tag"},
+            occurred_at=datetime(2024, 1, 1, 12, 0, 0),
+            processed_at=None,
+            retry_count=0,
+            created_at=datetime(2024, 1, 1, 12, 0, 0),
+        )
+        mock_repository = MagicMock()
+        mock_repository.mark_as_processed = AsyncMock()
+
+        mock_settings = MagicMock()
+        mock_settings.use_stream_consumers = True
+
+        with (
+            patch(
+                "app.infrastructure.events.outbox_processor.get_settings",
+                return_value=mock_settings,
+            ),
+            patch.object(
+                processor,
+                "_process_tag_event",
+                new_callable=AsyncMock,
+            ) as mock_tag_broadcast,
+        ):
+            await processor._process_single_event(
+                tag_event, mock_repository, mock_search_indexer
+            )
+
+        # Tag broadcast should NOT run — stream consumer handles it
+        mock_tag_broadcast.assert_not_called()
+        mock_repository.mark_as_processed.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_still_processes_all_events_when_stream_consumers_disabled(
+        self, processor, mock_search_indexer, mock_task_queue_service
+    ):
+        """With USE_STREAM_CONSUMERS=false, all processing should run normally (regression)."""
+        contact_event = OutboxEvent(
+            id=1,
+            event_id="contact-sync-1",
+            event_type="contact.created",
+            aggregate_id=42,
+            event_data={
+                "integration_source": "google",
+                "external_id": "people/c123",
+                "contact_data": {"first_name": "Test"},
+                "sync_timestamp": "2024-01-01T10:00:00Z",
+                "sync_type": "created",
+            },
+            occurred_at=datetime(2024, 1, 1, 10, 0, 0),
+            processed_at=None,
+            retry_count=0,
+            created_at=datetime(2024, 1, 1, 10, 0, 0),
+        )
+        mock_repository = MagicMock()
+        mock_repository.mark_as_processed = AsyncMock()
+
+        mock_settings = MagicMock()
+        mock_settings.use_stream_consumers = False
+
+        with (
+            patch(
+                "app.infrastructure.events.outbox_processor.get_settings",
+                return_value=mock_settings,
+            ),
+            patch.object(
+                processor,
+                "_process_contact_event",
+                new_callable=AsyncMock,
+            ) as mock_contact,
+        ):
+            await processor._process_single_event(
+                contact_event, mock_repository, mock_search_indexer
+            )
+
+        # Contact sync should still run when flag is off
+        mock_contact.assert_called_once()

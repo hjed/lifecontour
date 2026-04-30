@@ -103,6 +103,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     relay_task = None
     search_consumer_task = None
     summary_consumer_task = None
+    inbound_consumer_task = None
+    google_outbound_consumer_task = None
     try:
         # Start outbox processor background task
         outbox_task = asyncio.create_task(
@@ -162,12 +164,49 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 stream=settings.stream_name,
             )
 
+            # Start stream consumers for inbound sync and Google outbound broadcast
+            from app.infrastructure.events.google_outbound_consumer import (
+                GoogleOutboundConsumer,
+            )
+            from app.infrastructure.events.inbound_event_consumer import (
+                InboundEventConsumer,
+            )
+
+            inbound_consumer = InboundEventConsumer(
+                stream_client=stream_client,
+                container=container,
+                settings=settings,
+                stream_name=settings.stream_name,
+            )
+            inbound_consumer_task = asyncio.create_task(inbound_consumer.start())
+            logger.info(
+                "Inbound event consumer started",
+                group="inbound-processor",
+                stream=settings.stream_name,
+            )
+
+            google_outbound_consumer = GoogleOutboundConsumer(
+                stream_client=stream_client,
+                container=container,
+                stream_name=settings.stream_name,
+            )
+            google_outbound_consumer_task = asyncio.create_task(
+                google_outbound_consumer.start()
+            )
+            logger.info(
+                "Google outbound consumer started",
+                group="google-worker",
+                stream=settings.stream_name,
+            )
+
         yield
 
     finally:
         # Collect all active background tasks for cleanup
         active_tasks: list[tuple[asyncio.Task[None], str]] = []
         for task, name in [
+            (google_outbound_consumer_task, "Google outbound consumer"),
+            (inbound_consumer_task, "Inbound event consumer"),
             (summary_consumer_task, "Summary generator consumer"),
             (search_consumer_task, "Search indexer consumer"),
             (relay_task, "Outbox relay"),

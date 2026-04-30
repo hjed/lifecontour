@@ -124,13 +124,17 @@ class OutboxProcessor:
 
             # Route contact sync events to OutboxEventProcessor
             if event.event_type.startswith("contact."):
-                await self._process_contact_event(event, search_indexer.db_connection)
+                if not stream_consumers_active:
+                    await self._process_contact_event(
+                        event, search_indexer.db_connection
+                    )
             elif event.event_type.startswith(
                 "journal_event."
             ) or event.event_type.startswith("journal_review."):
-                await self._process_journal_sync_event(
-                    event, search_indexer.db_connection
-                )
+                if not stream_consumers_active:
+                    await self._process_journal_sync_event(
+                        event, search_indexer.db_connection
+                    )
             elif event.event_type == "ContactSummaryRefreshRequested":
                 if not stream_consumers_active:
                     await self._process_summary_generation_event(
@@ -151,8 +155,8 @@ class OutboxProcessor:
                 "JournalUpdated",
                 "JournalDeleted",
             ):
-                await self._process_journal_event(event)
                 if not stream_consumers_active:
+                    await self._process_journal_event(event)
                     await self._invalidate_daily_summary_for_journal_event(
                         event, search_indexer.db_connection
                     )
@@ -162,7 +166,8 @@ class OutboxProcessor:
                 "TagUpdated",
                 "TagDeleted",
             ):
-                await self._process_tag_event(event)
+                if not stream_consumers_active:
+                    await self._process_tag_event(event)
 
             # Mark as processed
             await repository.mark_as_processed(event.event_id)
