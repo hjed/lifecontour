@@ -102,7 +102,7 @@ export function PitchEditor({
             >
               <div className='font-medium'>#{pitch.pitch_number}</div>
               <div className='text-muted-foreground'>
-                {pitch.height ? `${pitch.height}m` : '-'}
+                {pitch.height != null ? `${pitch.height}m` : '-'}
               </div>
               <div className='truncate'>{pitch.anchor_location || '-'}</div>
               <div className='col-span-2 truncate'>
@@ -171,7 +171,9 @@ export function PitchEditor({
                       handleUpdatePitch(
                         index,
                         'pitch_number',
-                        e.target.value === '' ? '' : Number(e.target.value)
+                        e.target.value === ''
+                          ? 0
+                          : Number.parseInt(e.target.value, 10)
                       )
                     }
                     className='h-8 px-2'
@@ -186,7 +188,9 @@ export function PitchEditor({
                       handleUpdatePitch(
                         index,
                         'height',
-                        e.target.value === '' ? null : Number(e.target.value)
+                        e.target.value === ''
+                          ? null
+                          : Number.parseInt(e.target.value, 10)
                       )
                     }
                     className='h-8 px-2'

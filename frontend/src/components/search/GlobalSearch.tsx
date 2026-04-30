@@ -21,6 +21,7 @@ import React, {
   useId,
 } from 'react';
 import { useRouter } from 'next/navigation';
+import type { Route } from 'next';
 import { Search, X, Clock, User, Book, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -211,8 +212,7 @@ export function GlobalSearch({
           if (selectedIndex >= 0 && selectedIndex < suggestions.length) {
             const suggestion = suggestions[selectedIndex];
             if (suggestion.url) {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              router.push(suggestion.url as any);
+              router.push(suggestion.url as Route);
               setIsOpen(false);
               setQuery('');
             } else {
@@ -327,8 +327,7 @@ export function GlobalSearch({
                     )}
                     onClick={() => {
                       if (suggestion.url) {
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        router.push(suggestion.url as any);
+                        router.push(suggestion.url as Route);
                         setIsOpen(false);
                         setQuery('');
                       } else {

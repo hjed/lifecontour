@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useMemo } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { Hash, Ruler } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -53,6 +53,23 @@ export function AbseilingTripTypeEditor({
     createMode,
     onChange,
   });
+
+  const initialCalcAbseils = (initialData.pitches || []).length;
+  const initialCalcLength = (initialData.pitches || []).reduce(
+    (sum, p) => sum + (p.height || 0),
+    0
+  );
+
+  const [isManualAbseils, setIsManualAbseils] = useState<boolean>(
+    initialData.number_of_abseils != null &&
+      initialCalcAbseils > 0 &&
+      initialData.number_of_abseils !== initialCalcAbseils
+  );
+  const [isManualLength, setIsManualLength] = useState<boolean>(
+    initialData.total_length != null &&
+      initialCalcLength > 0 &&
+      initialData.total_length !== initialCalcLength
+  );
 
   if (!isEditing && !createMode) {
     const hasData =
@@ -121,18 +138,6 @@ export function AbseilingTripTypeEditor({
 
   const handlePitchesChange = (newPitches: AbseilPitch[]) => {
     setEditData(prev => {
-      // Auto-calculate totals if there are pitches, and we haven't manually overridden (or if we want to constantly update them unless they have value? The spec says: "Pitch totals auto-calculate from pitches when pitches exist, with manual override")
-      // Actually, if we just update the pitches here, the backend might handle auto-calculation.
-      // The spec for Phase 2: "Auto-calculation: when pitches present, number_of_abseils defaults to pitch count, total_length to sum of heights, number_of_setups / number_of_rescues to filtered counts. Manual override: user-provided totals take precedence over auto-calculated values."
-      // BUT for UI responsiveness, it's nice to auto-update the UI fields if they match the previous auto-calculated values, or if we just let the backend do it?
-      // "totals auto-calculate, edit a pitch and verify totals update." -> implies frontend auto-calculation is needed to show the user.
-
-      const previousCalcAbseils = (prev.pitches || []).length;
-      const previousCalcLength = (prev.pitches || []).reduce(
-        (sum, p) => sum + (p.height || 0),
-        0
-      );
-
       const newCalcAbseils = newPitches.length;
       const newCalcLength = newPitches.reduce(
         (sum, p) => sum + (p.height || 0),
@@ -140,13 +145,12 @@ export function AbseilingTripTypeEditor({
       );
 
       let nextAbseils = prev.number_of_abseils;
-      // If the current value was null, or it matched the old calculation, update it.
-      if (nextAbseils == null || nextAbseils === previousCalcAbseils) {
+      if (!isManualAbseils || nextAbseils == null) {
         nextAbseils = newCalcAbseils > 0 ? newCalcAbseils : null;
       }
 
       let nextLength = prev.total_length;
-      if (nextLength == null || nextLength === previousCalcLength) {
+      if (!isManualLength || nextLength == null) {
         nextLength = newCalcLength > 0 ? newCalcLength : null;
       }
 
@@ -178,15 +182,14 @@ export function AbseilingTripTypeEditor({
             type='number'
             min={0}
             value={editData.number_of_abseils ?? ''}
-            onChange={e =>
+            onChange={e => {
+              const val = e.target.value;
+              setIsManualAbseils(val !== '');
               setEditData(previous => ({
                 ...previous,
-                number_of_abseils:
-                  e.target.value === ''
-                    ? null
-                    : Number.parseInt(e.target.value, 10),
-              }))
-            }
+                number_of_abseils: val === '' ? null : Number.parseInt(val, 10),
+              }));
+            }}
             data-testid='number-of-abseils-input'
           />
         </div>
@@ -207,15 +210,14 @@ export function AbseilingTripTypeEditor({
             type='number'
             min={0}
             value={editData.total_length ?? ''}
-            onChange={e =>
+            onChange={e => {
+              const val = e.target.value;
+              setIsManualLength(val !== '');
               setEditData(previous => ({
                 ...previous,
-                total_length:
-                  e.target.value === ''
-                    ? null
-                    : Number.parseInt(e.target.value, 10),
-              }))
-            }
+                total_length: val === '' ? null : Number.parseInt(val, 10),
+              }));
+            }}
             data-testid='total-length-input'
           />
         </div>
