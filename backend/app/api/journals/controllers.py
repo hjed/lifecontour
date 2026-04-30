@@ -3203,24 +3203,32 @@ async def _update_abseiling_type_data(
     validated_data = dataclasses.replace(abseiling_data, **updates)
 
     from core_shared.models.journals.abseil_pitch import AbseilPitch
+    from pydantic import ValidationError
 
+    from app.api.journals.schemas import AbseilPitchSchema
     from app.core.journal.services.abseiling_service import AbseilingService
 
     pitches = None
     if "pitches" in attrs:
         pitches = []
-        for pitch_data in attrs["pitches"]:
-            pitches.append(
-                AbseilPitch(
-                    journal_id=journal_id,
-                    pitch_number=pitch_data.get("pitch_number", 1),
-                    height=pitch_data.get("height"),
-                    anchor_location=pitch_data.get("anchor_location"),
-                    anchor_type=pitch_data.get("anchor_type"),
-                    did_rescue=pitch_data.get("did_rescue"),
-                    did_setup=pitch_data.get("did_setup"),
+        for i, pitch_data in enumerate(attrs["pitches"]):
+            try:
+                parsed_pitch = AbseilPitchSchema.model_validate(pitch_data)
+                pitches.append(
+                    AbseilPitch(
+                        journal_id=journal_id,
+                        pitch_number=parsed_pitch.pitch_number,
+                        height=parsed_pitch.height,
+                        anchor_location=parsed_pitch.anchor_location,
+                        anchor_type=parsed_pitch.anchor_type,
+                        did_rescue=parsed_pitch.did_rescue,
+                        did_setup=parsed_pitch.did_setup,
+                    )
                 )
-            )
+            except ValidationError as e:
+                raise JournalValidationError(
+                    f"pitches[{i}]", f"Invalid pitch data: {str(e)}"
+                ) from e
 
     service = AbseilingService()
     await service.update_abseiling_data(

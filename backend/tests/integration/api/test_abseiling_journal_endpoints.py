@@ -57,7 +57,6 @@ async def test_create_abseiling_journal_with_pitches(
     }
 
     response = await authenticated_client.post("/api/journals", json=payload)
-    print(f"DEBUG test_create: {response.json()}")
     assert response.status_code == 201
 
     data = response.json()["data"]
@@ -126,7 +125,6 @@ async def test_update_abseiling_journal_with_pitches(
 
     data = update_resp.json()["data"]
     type_data = data["attributes"]["type_data"][JournalType.ABSEILING_TRIP.value]
-    print(f"DEBUG: type_data={type_data}")
 
     # Manual overrides should persist for number_of_abseils and total_length
     assert type_data["number_of_abseils"] == 5

@@ -37,9 +37,6 @@ class AbseilingService:
         Returns:
             A new AbseilingData instance with updated calculations.
         """
-        if not pitches:
-            return abseiling_data
-
         # Calculate totals from pitches
         calculated_abseils = len(pitches)
         calculated_length = sum((p.height for p in pitches if p.height is not None), 0)
