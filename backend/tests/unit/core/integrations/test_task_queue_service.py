@@ -421,50 +421,6 @@ class TestTaskQueueService:
         assert "not authorized" in str(exc_info.value).lower()
 
     @pytest.mark.asyncio
-    async def test_broadcast_journal_event_success(
-        self, service: TaskQueueService, mock_redis_pool: AsyncMock
-    ):
-        """Test broadcasting a journal event to the task queue."""
-        event_type = "JournalCreated"
-        event_data = {"journal_id": 1, "test": "data"}
-
-        # Mock ARQ job
-        mock_job = AsyncMock()
-        mock_job.job_id = "test-job-id"
-        mock_redis_pool.enqueue_job.return_value = mock_job
-
-        job_id = await service.broadcast_journal_event(event_type, event_data)
-
-        assert job_id == "test-job-id"
-        mock_redis_pool.enqueue_job.assert_called_once_with(
-            "process_journal_event",
-            event_type,
-            event_data,
-            _defer_until=None,
-            _queue_name=ARQ_QUEUE_NAME,
-        )
-
-    @pytest.mark.asyncio
-    async def test_broadcast_journal_event_none_job(
-        self, service: TaskQueueService, mock_redis_pool: AsyncMock
-    ):
-        """Test broadcasting when enqueue_job returns None."""
-        from app.core.integrations.exceptions import JobEnqueueError
-
-        event_type = "JournalCreated"
-        event_data = {"journal_id": 1}
-
-        # Mock ARQ pool to return None
-        mock_redis_pool.enqueue_job.return_value = None
-
-        with pytest.raises(JobEnqueueError) as exc_info:
-            await service.broadcast_journal_event(event_type, event_data)
-
-        assert "Failed to broadcast event to any integration queue" in str(
-            exc_info.value
-        )
-
-    @pytest.mark.asyncio
     async def test_enqueue_calendar_sync_success(
         self, service: TaskQueueService, mock_redis_pool: AsyncMock
     ):

@@ -133,25 +133,45 @@ Migrate the remaining consumers: the inbound event processors (`_process_contact
 - **Integration:** inbound contact sync event flows through stream consumer → `OutboxEventProcessor`. Inbound journal event flows through → `JournalOutboxEventProcessor`. Google outbound event triggers ARQ broadcast. ✅ 6 integration tests pass.
 - **E2E:** existing Google sync and journal import workflows produce identical results via stream consumers.
 
+#### Phase 3.5: Migrate Google Worker to Direct Stream Consumer
+**PR Size:** ~5–7 files
+
+Migrate the Google integration worker from receiving journal/tag events via ARQ enqueue to reading directly from the Redis Stream. The product specification states "ARQ remains for long-running tasks (sync jobs, webhook processing) but is no longer used for event fan-out." Phase 3's `GoogleOutboundConsumer` in the backend was a transitional pattern — it reads stream events but still enqueues ARQ jobs. This phase completes the migration by making the Google worker itself a stream consumer.
+
+**Acceptance Criteria:**
+- [x] `StreamConsumer` base class moved from `backend/app/infrastructure/events/` to `core_shared/` so it can be used by both backend and integration workers
+- [x] Backend `stream_consumer.py` re-exports from `core_shared` for backward compatibility
+- [x] `GoogleWorkerStreamConsumer` in `integration_workers/google/`: consumer group `google-worker`, handles `JournalCreated`, `JournalUpdated`, `JournalDeleted`, `TagUpdated`, `TagDeleted`
+- [x] Google worker `_handle_event` calls `process_journal_event` / `process_tag_event` directly (no ARQ enqueue)
+- [x] Google worker startup launches `GoogleWorkerStreamConsumer` as an `asyncio.Task` alongside existing ARQ worker
+- [x] `process_journal_event` and `process_tag_event` removed from ARQ `functions` list (consumed via stream, not ARQ)
+- [x] `GoogleOutboundConsumer` removed from backend (replaced by worker's own consumer)
+- [x] `TaskQueueService.broadcast_journal_event` / `broadcast_tag_event` methods removed
+- [x] Backend `main.py` no longer starts `GoogleOutboundConsumer` task
+
+**Required Test Coverage:**
+- **Unit:** `GoogleWorkerStreamConsumer` routes journal events to `process_journal_event`, tag events to `process_tag_event`, irrelevant events ACKed immediately. Backend `StreamConsumer` re-export verified. `TaskQueueService` broadcast methods removed from test coverage. ✅ 29 new unit tests + 1411 backend unit tests pass.
+- **Integration:** full broadcast flow — publish domain event to Redis Stream → Google worker stream consumer reads → `process_journal_event`/`process_tag_event` called directly. Verified with real Redis. ✅ 4 integration tests pass.
+- **E2E:** existing Google sync and journal import workflows produce identical results with direct stream consumption. ✅ 48 E2E tests pass.
+
 #### Phase 4: Legacy Cleanup, Dead-Letter Handling, and Observability
 **PR Size:** ~4–6 files
 
 Remove the old `OutboxProcessor._process_single_event` monolithic dispatch, the feature flag, and add operational tooling.
 
 **Acceptance Criteria:**
-- [ ] `OutboxProcessor._process_single_event` and all private `_process_*` methods removed
-- [ ] `TaskQueueService.broadcast_journal_event` / `broadcast_tag_event` methods removed (replaced by stream consumers)
+- [ ] `OutboxProcessor` class and `run_outbox_processor_loop` removed entirely — relay is sole background task
 - [ ] Feature flag `USE_STREAM_CONSUMERS` removed — stream path is the only path
 - [ ] `processed_at` column removed from `outbox_events` table (migration) — relay path (`relayed_at`) is the sole dispatch mechanism
-- [ ] Dead-letter handling: events exceeding max retry count are moved to a dead-letter stream
+- [ ] Dead-letter handling: events exceeding max retry count are moved to a dead-letter stream and persisted to `dead_letter_events` database table (displayable on integration dashboard, replayable)
 - [ ] Consumer lag monitoring endpoint: pending entry count per consumer group (for health checks)
-- [ ] `integration-architecture.md` updated: replace OutboxProcessor direct-dispatch and ARQ broadcast sections with Redis Streams consumer group architecture. Remove the "Planned Migration" banner added in this iteration
-- [ ] `architecture.md` updated if it references ARQ-based event fan-out
+- [ ] `integration-architecture.md` updated: replace OutboxProcessor direct-dispatch sections with Redis Streams consumer group architecture. Remove the "Planned Migration" banner added in this iteration
+- [ ] `architecture.md` updated if it references ARQ-based event fan-out or OutboxProcessor direct dispatch
 - [ ] Old iteration 5 doc (`iteration-5-strava-integration.md`) — verify superseded banner is still accurate
 
 **Required Test Coverage:**
-- **Unit:** dead-letter classification, lag calculation helpers.
-- **Integration:** verify dead-letter behaviour for permanently failing events. Verify lag monitoring returns accurate counts.
+- **Unit:** dead-letter classification, lag calculation helpers, dead-letter repository CRUD.
+- **Integration:** verify dead-letter behaviour for permanently failing events (stream + DB persistence). Verify lag monitoring returns accurate counts.
 - **E2E:** full regression — contact CRUD, journal CRUD, Google sync, search all working end-to-end.
 
 ---
@@ -560,11 +580,11 @@ The infrastructure tasks (1–2) are high-value standalone deliverables that ben
 
 | Task | Phases | Total est. PRs |
 |---|---|---|
-| ITER5-001: Redis Streams Event Bus | 4 | 4 |
+| ITER5-001: Redis Streams Event Bus | 5 | 5 |
 | ITER5-002: Pluggable Integration Dashboard | 3 | 3 |
 | ITER5-003: Strava OAuth & API Client | 3 | 3 |
 | ITER5-004: Activity Import & Merge Review | 4 | 4 |
 | ITER5-005: Participants & External Links | 3 | 3 |
 | ITER5-006: MCP Parity | 2 | 2 |
-| **Total** | **19** | **19** |
+| **Total** | **20** | **20** |
 
