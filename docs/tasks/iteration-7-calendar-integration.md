@@ -1,6 +1,6 @@
 # Iteration 7: Journals Product Alignment, Calendar Sync & Time Navigation
 
-**Status:** 🟡 PLANNED
+**Status:** ✅ COMPLETE
 **Dependencies:** Iteration 4 (journal domain, EVENT type, hierarchy and calendar foundations), Iteration 2 (Google integration and worker architecture foundations), existing journal search/indexing infrastructure
 **Goal:** Deliver the approved journals product specification in clean, reviewable slices that complete multi-calendar event sync, review and merge workflows, hierarchy authoring, time-oriented journal navigation, calendar views, daily summaries, and MCP parity.
 
@@ -140,6 +140,7 @@ The sequence reflects both product priority and technical dependency:
 
 #### Phase 3: Event Transformation and Per-Link Payload Rules
 **PR Size:** ~5-7 files
+**Status:** ✅ COMPLETE
 
 **Acceptance Criteria:**
 - [x] Map journal event fields to Google event fields and back using a dedicated translation layer.
@@ -166,6 +167,7 @@ The sequence reflects both product priority and technical dependency:
 
 #### Phase 1: Outbound Journal → Google Sync and Link-State Tracking
 **PR Size:** ~5-8 files
+**Status:** ✅ COMPLETE
 
 **Acceptance Criteria:**
 - [x] Creating or updating an EVENT journal fans out changes to all eligible linked calendars.
@@ -180,6 +182,7 @@ The sequence reflects both product priority and technical dependency:
 
 #### Phase 2: Inbound Google → Journal Sync, ETag Conflicts, and One-Way Guardrails
 **PR Size:** ~6-8 files
+**Status:** ✅ COMPLETE
 
 **Acceptance Criteria:**
 - [x] Inbound Google changes update the journal when the sync capability allows it.
@@ -195,6 +198,7 @@ The sequence reflects both product priority and technical dependency:
 
 #### Phase 3: External Deletes, Local Deletes, and Cancellation-First Behaviour
 **PR Size:** ~5-7 files
+**Status:** ✅ COMPLETE
 
 **Acceptance Criteria:**
 - [x] When an external event is deleted, the linked journal is marked cancelled and the external link is removed.
@@ -213,6 +217,7 @@ The sequence reflects both product priority and technical dependency:
 #### Phase 3b: Calendar-Google Selection UI and Scope Upgrade (Gap Fill)
 **PR:** #478
 **PR Size:** ~10 files
+**Status:** ✅ COMPLETE
 
 This phase fills two product-specification gaps discovered during Phase 3 completion: (a) selecting which local calendar syncs with which Google Calendar, and (b) a UI to upgrade Google OAuth tokens with calendar scopes when they are missing.
 
@@ -232,6 +237,7 @@ This phase fills two product-specification gaps discovered during Phase 3 comple
 
 #### Phase 4: Worker Scheduling, Webhooks, and Observability
 **PR Size:** ~5-7 files
+**Status:** ✅ COMPLETE
 
 **Acceptance Criteria:**
 - [x] Manual scheduling, event-driven scheduling, and webhook-triggered sync all use the same idempotent sync path.
@@ -264,7 +270,7 @@ This phase fills two product-specification gaps discovered during Phase 3 comple
 **Acceptance Criteria:**
 - [x] Detect likely matches using title similarity, same start date, and similar end time or duration.
 - [x] Preserve uncertain matches as review items rather than silently auto-merging.
-- [ ] The review item model will distinguish between likely external-link matches, likely duplicate journals, and general “needs review” cases.
+- [x] The review item model will distinguish between likely external-link matches, likely duplicate journals, and general “needs review” cases.
 - [x] Keep the candidate-generation rules centralized rather than duplicated across sync and merge code.
 
 **Required Test Coverage:**
@@ -274,6 +280,7 @@ This phase fills two product-specification gaps discovered during Phase 3 comple
 
 #### Phase 2: Review Queue API, List Indicators, and Detail Surfaces
 **PR Size:** ~5-7 files
+**Status:** ✅ COMPLETE
 
 **Acceptance Criteria:**
 - [x] Provide a dedicated review queue in the journaling experience.
@@ -288,6 +295,7 @@ This phase fills two product-specification gaps discovered during Phase 3 comple
 
 #### Phase 3: Review Actions for Link, Ignore, and Merge Escalation
 **PR Size:** ~5-7 files
+**Status:** ✅ COMPLETE
 
 **Acceptance Criteria:**
 - [x] The user can confirm an external match/link, dismiss a suggestion, or escalate the case into the merge flow.
@@ -375,6 +383,7 @@ Phase 1 and Phase 2 were implemented as a combined delivery. The merge domain se
 
 #### Phase 1: Parent-Child Contracts, Validation, and Create-With-Parent Support
 **PR Size:** ~5-7 files
+**Status:** ✅ COMPLETE
 
 **Acceptance Criteria:**
 - [x] Journals can be created with an explicit parent through validated API/domain contracts.
@@ -389,6 +398,7 @@ Phase 1 and Phase 2 were implemented as a combined delivery. The merge domain se
 
 #### Phase 2: Detail-View Child Creation, Breadcrumbs, and Context Menu Flow
 **PR Size:** ~5-7 files
+**Status:** ✅ COMPLETE
 
 **Acceptance Criteria:**
 - [x] Users can create a child journal from the parent detail page.
@@ -403,6 +413,7 @@ Phase 1 and Phase 2 were implemented as a combined delivery. The merge domain se
 
 #### Phase 3: Shared Hierarchy Read Model for Nested Day-Based Displays
 **PR Size:** ~4-6 files
+**Status:** ✅ COMPLETE
 
 **Acceptance Criteria:**
 - [x] Provide a centralized hierarchy read model that supports nested display without duplicating tree logic in multiple UI surfaces.
@@ -429,6 +440,7 @@ Phase 1 and Phase 2 were implemented as a combined delivery. The merge domain se
 
 #### Phase 1: Date-Window Query Model and Infinite-Journal Hooks
 **PR Size:** ~5-7 files
+**Status:** ✅ COMPLETE
 
 **Acceptance Criteria:**
 - [x] Introduce a date-anchored journal window API/query contract rather than plain page-number list pagination for the main journals view.
@@ -443,6 +455,7 @@ Phase 1 and Phase 2 were implemented as a combined delivery. The merge domain se
 
 #### Phase 2: Day Groups, Bi-Directional Infinite Scroll, and Lightweight Empty Days
 **PR Size:** ~5-8 files
+**Status:** ✅ COMPLETE
 
 **Acceptance Criteria:**
 - [x] The main journals page is centred on today rather than a generic card grid.
@@ -485,7 +498,7 @@ Phase 1 and Phase 2 were implemented as a combined delivery. The merge domain se
 
 #### Phase 1: Shared Calendar Data Source plus Month and Agenda Views
 **PR Size:** ~5-7 files
-**Status:** ✅ Implementation complete, E2E tests written pending CI validation
+**Status:** ✅ COMPLETE
 
 **Implementation Notes:**
 - `calendarEventHelpers.ts`: Pure helper functions transforming `DisplayJournal` → `CalendarEvent` with date bucketing and range calculation (17 unit tests).
@@ -509,7 +522,7 @@ Phase 1 and Phase 2 were implemented as a combined delivery. The merge domain se
 #### Phase 2: Week and Day Views with Quick Create and Edit Entry Points
 **PR Size:** ~5-8 files
 
-**Status:** ✅ Implementation complete, tests pass locally
+**Status:** ✅ COMPLETE
 
 **Acceptance Criteria:**
 - [x] Implement week and day views using the same underlying event contracts.

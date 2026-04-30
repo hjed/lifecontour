@@ -27,15 +27,15 @@ interface MergeResolutionDialogProps {
 interface Conflict {
   fieldId: string;
   label: string;
-  targetValue: any;
-  sourceValue: any;
+  targetValue: unknown;
+  sourceValue: unknown;
   isText: boolean;
 }
 
 export type ResolutionChoice = 'target' | 'source' | 'custom';
 export interface FieldResolution {
   choice: ResolutionChoice;
-  customValue?: any;
+  customValue?: string;
 }
 
 export function MergeResolutionDialog({
@@ -178,7 +178,7 @@ export function MergeResolutionDialog({
       const res = resolutions[conflict.fieldId];
       if (!res) return;
 
-      let chosenValue: any = undefined;
+      let chosenValue: unknown = undefined;
       if (res.choice === 'target') {
         chosenValue = conflict.targetValue;
       } else if (res.choice === 'source') {
@@ -205,11 +205,12 @@ export function MergeResolutionDialog({
     onResolve(overrides);
   };
 
-  const renderConflictValue = (val: any) => {
+  const renderConflictValue = (val: unknown) => {
     if (val === null || val === undefined) return 'None';
     if (typeof val === 'object') {
-      if (val.start && val.end) {
-        return `${new Date(val.start).toLocaleString()} - ${new Date(val.end).toLocaleString()}`;
+      const v = val as { start?: string; end?: string };
+      if (v.start && v.end) {
+        return `${new Date(v.start).toLocaleString()} - ${new Date(v.end).toLocaleString()}`;
       }
       return JSON.stringify(val);
     }
@@ -288,7 +289,10 @@ export function MergeResolutionDialog({
                   <RadioGroup
                     value={res?.choice}
                     onValueChange={(val: string) =>
-                      handleResolutionChange(conflict.fieldId, val as any)
+                      handleResolutionChange(
+                        conflict.fieldId,
+                        val as ResolutionChoice
+                      )
                     }
                     className='space-y-2 text-sm'
                   >
