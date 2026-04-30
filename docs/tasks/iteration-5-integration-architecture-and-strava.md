@@ -106,7 +106,7 @@ Extract the `SearchIndexer` and `ContactSummaryRefreshRequested` processing from
 - [x] `stream_event_to_outbox_event` adapter converts `StreamEvent` to `OutboxEvent` for reuse
 - [x] Feature flag: when `USE_STREAM_CONSUMERS=true`, search/summary events are processed via stream consumers instead of `OutboxProcessor`
 - [x] `OutboxProcessor` gated: skips `SearchIndexer.process_event`, `_process_summary_generation_event`, `_invalidate_daily_summary_for_journal_event` when flag is enabled
-- [x] Contact sync and ARQ broadcast still processed by `OutboxProcessor` (Phase 3 scope)
+- [x] Contact sync and ARQ broadcast now processed by Phase 3 stream consumers (`InboundEventConsumer`, `GoogleOutboundConsumer`)
 - [x] Consumers wired as `asyncio.Task`s in FastAPI lifespan alongside `OutboxRelay`
 - [x] All existing search indexing and summary generation tests pass unchanged
 
@@ -121,16 +121,16 @@ Extract the `SearchIndexer` and `ContactSummaryRefreshRequested` processing from
 Migrate the remaining consumers: the inbound event processors (`_process_contact_event`, `_process_journal_sync_event`) and the Google outbound broadcast (`_process_tag_event`, `_process_journal_event`). These are more complex due to deep DI trees and external API integration.
 
 **Acceptance Criteria:**
-- [ ] `InboundEventConsumer` (group: `inbound-processor`): handles `contact.*` (contact sync from Google), `journal_event.*` (journal sync from Google Calendar), `journal_review.*` (match detection)
-- [ ] `GoogleOutboundConsumer` (group: `google-worker`): handles `JournalCreated`, `JournalUpdated`, `JournalDeleted`, `TagUpdated`, `TagDeleted` events for broadcasting to Google integration worker via ARQ
-- [ ] Inbound consumer reuses existing `OutboxEventProcessor` and `JournalOutboxEventProcessor` logic
-- [ ] Google outbound consumer reuses existing `TaskQueueService.broadcast_*` methods
-- [ ] Consumer failure isolation: inbound processor failure does not block Google outbound or search indexing
-- [ ] All `OutboxProcessor._process_single_event` routing now fully replaced by stream consumers
+- [x] `InboundEventConsumer` (group: `inbound-processor`): handles `contact.*` (contact sync from Google), `journal_event.*` (journal sync from Google Calendar), `journal_review.*` (match detection)
+- [x] `GoogleOutboundConsumer` (group: `google-worker`): handles `JournalCreated`, `JournalUpdated`, `JournalDeleted`, `TagUpdated`, `TagDeleted` events for broadcasting to Google integration worker via ARQ
+- [x] Inbound consumer reuses existing `OutboxEventProcessor` and `JournalOutboxEventProcessor` logic
+- [x] Google outbound consumer reuses existing `TaskQueueService.broadcast_*` methods
+- [x] Consumer failure isolation: inbound processor failure does not block Google outbound or search indexing
+- [x] All `OutboxProcessor._process_single_event` routing now fully replaced by stream consumers
 
 **Required Test Coverage:**
-- **Unit:** `InboundEventConsumer` routing for contact/journal/review events, `GoogleOutboundConsumer` event filtering.
-- **Integration:** inbound contact sync event flows through stream consumer → `OutboxEventProcessor`. Inbound journal event flows through → `JournalOutboxEventProcessor`. Google outbound event triggers ARQ broadcast.
+- **Unit:** `InboundEventConsumer` routing for contact/journal/review events (26 tests), `GoogleOutboundConsumer` event filtering (28 tests), `OutboxProcessor` Phase 3 gating (8 tests). ✅ All 165 event tests pass.
+- **Integration:** inbound contact sync event flows through stream consumer → `OutboxEventProcessor`. Inbound journal event flows through → `JournalOutboxEventProcessor`. Google outbound event triggers ARQ broadcast. ✅ 6 integration tests pass.
 - **E2E:** existing Google sync and journal import workflows produce identical results via stream consumers.
 
 #### Phase 4: Legacy Cleanup, Dead-Letter Handling, and Observability
