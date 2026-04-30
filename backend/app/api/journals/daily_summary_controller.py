@@ -46,7 +46,10 @@ class DailySummaryResponse(BaseModel):
     data: DailySummaryResource | None = None
 
 
-@daily_summary_router.get("/{summary_date}")
+DailySummaryResponse.model_rebuild()
+
+
+@daily_summary_router.get("/{summary_date}", response_model=DailySummaryResponse)
 @inject
 async def get_daily_summary(
     summary_date: date,
@@ -90,7 +93,9 @@ async def get_daily_summary(
     return DailySummaryResponse(data=resource)
 
 
-@daily_summary_router.post("/{summary_date}/regenerate")
+@daily_summary_router.post(
+    "/{summary_date}/regenerate", response_model=DailySummaryResponse
+)
 @inject
 async def regenerate_daily_summary(
     summary_date: date,

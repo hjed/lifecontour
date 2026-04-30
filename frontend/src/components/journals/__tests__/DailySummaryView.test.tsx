@@ -22,23 +22,7 @@ describe('DailySummaryView', () => {
     });
   });
 
-  it('renders "Generate AI Summary" button initially', () => {
-    (useDailySummary as jest.Mock).mockReturnValue({
-      data: null,
-      isLoading: false,
-      isError: false,
-      refetch: mockRefetch,
-    });
-
-    render(<DailySummaryView date={mockDate} />);
-
-    expect(
-      screen.getByTestId(`generate-summary-btn-${mockDate}`)
-    ).toBeInTheDocument();
-    expect(screen.getByText('Generate AI Summary')).toBeInTheDocument();
-  });
-
-  it('shows loading state when fetch is requested and loading', () => {
+  it('shows loading state on mount when fetch is loading', () => {
     (useDailySummary as jest.Mock).mockReturnValue({
       data: null,
       isLoading: true,
@@ -48,11 +32,8 @@ describe('DailySummaryView', () => {
 
     render(<DailySummaryView date={mockDate} />);
 
-    // Click generate button
-    fireEvent.click(screen.getByTestId(`generate-summary-btn-${mockDate}`));
-
-    // Should enable the hook and show loading
-    expect(useDailySummary).toHaveBeenCalledWith(mockDate, { enabled: true });
+    // Should fetch immediately
+    expect(useDailySummary).toHaveBeenCalledWith(mockDate);
     expect(
       screen.getByTestId(`summary-loading-${mockDate}`)
     ).toBeInTheDocument();
@@ -69,7 +50,6 @@ describe('DailySummaryView', () => {
     });
 
     render(<DailySummaryView date={mockDate} />);
-    fireEvent.click(screen.getByTestId(`generate-summary-btn-${mockDate}`));
 
     expect(screen.getByTestId(`summary-error-${mockDate}`)).toBeInTheDocument();
     expect(screen.getByText('Failed to load summary')).toBeInTheDocument();
@@ -96,7 +76,6 @@ describe('DailySummaryView', () => {
     });
 
     const { container } = render(<DailySummaryView date={mockDate} />);
-    fireEvent.click(screen.getByTestId(`generate-summary-btn-${mockDate}`));
 
     expect(container).toBeEmptyDOMElement();
   });
@@ -121,7 +100,6 @@ describe('DailySummaryView', () => {
     });
 
     render(<DailySummaryView date={mockDate} />);
-    fireEvent.click(screen.getByTestId(`generate-summary-btn-${mockDate}`));
 
     expect(
       screen.getByTestId(`summary-failed-${mockDate}`)
@@ -157,7 +135,6 @@ describe('DailySummaryView', () => {
     });
 
     render(<DailySummaryView date={mockDate} />);
-    fireEvent.click(screen.getByTestId(`generate-summary-btn-${mockDate}`));
 
     expect(screen.getByTestId(`summary-card-${mockDate}`)).toBeInTheDocument();
     expect(screen.getByTestId(`summary-text-${mockDate}`)).toHaveTextContent(
@@ -189,7 +166,6 @@ describe('DailySummaryView', () => {
     });
 
     render(<DailySummaryView date={mockDate} />);
-    fireEvent.click(screen.getByTestId(`generate-summary-btn-${mockDate}`));
 
     expect(screen.getByText('Generating...')).toBeInTheDocument();
     // Stale summary text should not be shown during generation
@@ -223,7 +199,6 @@ describe('DailySummaryView', () => {
     });
 
     render(<DailySummaryView date={mockDate} />);
-    fireEvent.click(screen.getByTestId(`generate-summary-btn-${mockDate}`));
 
     const refreshBtn = screen.getByTestId(`refresh-summary-btn-${mockDate}`);
     fireEvent.click(refreshBtn);
