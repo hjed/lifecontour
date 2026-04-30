@@ -147,6 +147,8 @@ async def shutdown(ctx: dict[str, Any]) -> None:
             await consumer_task
         except asyncio.CancelledError:
             logger.info("Stream consumer task stopped")
+        except Exception:
+            logger.exception("Stream consumer task failed during shutdown")
 
     # Close database connections if needed
     session_factory = ctx.get("session_factory")
