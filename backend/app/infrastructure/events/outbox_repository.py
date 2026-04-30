@@ -44,8 +44,6 @@ class OutboxRepository:
         """
         self.conn = connection
 
-        self.conn = connection
-
     async def get_unrelayed_events(
         self, limit: int = 100, max_retry_count: int | None = None
     ) -> list[OutboxEvent]:

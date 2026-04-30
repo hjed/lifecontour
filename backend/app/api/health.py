@@ -338,7 +338,14 @@ async def get_dead_letters(
     limit: int = 50,
     offset: int = 0,
 ) -> dict[str, Any]:
-    """Get dead letter events from the repository."""
+    """Get dead letter events from the repository.
+
+    Returns event metadata without raw event_data to avoid
+    leaking potentially sensitive payloads.
+    """
+    # Clamp pagination parameters to safe bounds
+    limit = max(1, min(limit, 100))
+    offset = max(0, offset)
     try:
         repo = DeadLetterRepository(connection)
         events = await repo.list_events(limit=limit, offset=offset)
@@ -350,7 +357,6 @@ async def get_dead_letters(
                     "event_id": event.event_id,
                     "event_type": event.event_type,
                     "aggregate_id": event.aggregate_id,
-                    "event_data": event.event_data,
                     "consumer_group": event.consumer_group,
                     "delivery_count": event.delivery_count,
                     "last_error": event.last_error,

@@ -26,7 +26,7 @@ def upgrade() -> None:
         sa.Column("event_id", sa.String(length=100), nullable=False),
         sa.Column("event_type", sa.String(length=100), nullable=False),
         sa.Column("aggregate_id", sa.Integer(), nullable=False),
-        sa.Column("event_data", sa.JSON(), nullable=False),
+        sa.Column("event_data", sa.dialects.postgresql.JSONB(), nullable=False),
         sa.Column("consumer_group", sa.String(length=100), nullable=False),
         sa.Column("delivery_count", sa.Integer(), nullable=False),
         sa.Column("last_error", sa.Text(), nullable=True),

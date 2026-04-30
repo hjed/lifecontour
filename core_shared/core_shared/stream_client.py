@@ -264,9 +264,18 @@ class StreamClient:
             List of dictionaries containing consumer group info
         """
         try:
-            # redis-py's xinfo_groups returns a list of dicts
-            result: list[dict[str, Any]] = await self._redis.xinfo_groups(stream_name)
-            return result
+            # redis-py's xinfo_groups returns bytes keys/values when
+            # decode_responses=False, so decode them for JSON safety.
+            raw: list[dict[Any, Any]] = await self._redis.xinfo_groups(stream_name)
+            return [
+                {
+                    (k.decode() if isinstance(k, bytes) else k): (
+                        v.decode() if isinstance(v, bytes) else v
+                    )
+                    for k, v in group.items()
+                }
+                for group in raw
+            ]
         except ResponseError as e:
             if "no such key" in str(e).lower():
                 return []
