@@ -6,6 +6,7 @@ This worker processes Google Contacts synchronization tasks using ARQ.
 It runs as a separate process from the main FastAPI application.
 """
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -107,7 +108,7 @@ async def startup(ctx: dict[str, Any]) -> None:  # NOSONAR
     """
     Worker startup function.
 
-    Initializes database session factory and other resources.
+    Initializes database session factory, stream consumer, and other resources.
     """
     logger.info("Google Contacts worker starting up", worker_id=settings.worker_id)
 
@@ -115,6 +116,17 @@ async def startup(ctx: dict[str, Any]) -> None:  # NOSONAR
     session_factory = create_session_factory(settings.database_url.get_secret_value())
     ctx["session_factory"] = session_factory
     ctx["settings"] = settings
+
+    # Launch stream consumer for journal/tag event fan-out
+    from stream_consumer_tasks import run_google_stream_consumer
+
+    consumer_task = asyncio.create_task(
+        run_google_stream_consumer(
+            session_factory=session_factory,
+            redis_url=settings.redis_url,
+        )
+    )
+    ctx["stream_consumer_task"] = consumer_task
 
     logger.info("Google Contacts worker startup complete")
 
@@ -126,6 +138,17 @@ async def shutdown(ctx: dict[str, Any]) -> None:
     Cleans up resources when the worker shuts down.
     """
     logger.info("Google Contacts worker shutting down", worker_id=settings.worker_id)
+
+    # Cancel stream consumer task
+    consumer_task = ctx.get("stream_consumer_task")
+    if consumer_task:
+        consumer_task.cancel()
+        try:
+            await consumer_task
+        except asyncio.CancelledError:
+            logger.info("Stream consumer task stopped")
+        except Exception:
+            logger.exception("Stream consumer task failed during shutdown")
 
     # Close database connections if needed
     session_factory = ctx.get("session_factory")
@@ -3425,11 +3448,12 @@ class GoogleWorkerSettings(WorkerSettingsBase):
     """ARQ worker configuration."""
 
     # Task functions
+    # Task functions — process_journal_event and process_tag_event are now
+    # consumed directly from the Redis Stream via GoogleWorkerStreamConsumer
+    # and are no longer registered as ARQ tasks.
     functions = [
         sync_google_contacts,
         push_local_contacts_to_google,
-        process_journal_event,
-        process_tag_event,
         sync_calendar_events,
         setup_calendar_webhook,
         periodic_sync_all_accounts,  # Wrapper for periodic cron syncs

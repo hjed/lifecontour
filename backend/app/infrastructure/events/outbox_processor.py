@@ -148,26 +148,16 @@ class OutboxProcessor:
                 if not stream_consumers_active:
                     await search_indexer.process_event(event)
 
-            # Additionally route journal events to integration workers
-            # and invalidate daily summary cache
+            # Invalidate daily summary cache for journal events
             if event.event_type in (
                 "JournalCreated",
                 "JournalUpdated",
                 "JournalDeleted",
             ):
                 if not stream_consumers_active:
-                    await self._process_journal_event(event)
                     await self._invalidate_daily_summary_for_journal_event(
                         event, search_indexer.db_connection
                     )
-
-            # Route tag events to integration workers
-            if event.event_type in (
-                "TagUpdated",
-                "TagDeleted",
-            ):
-                if not stream_consumers_active:
-                    await self._process_tag_event(event)
 
             # Mark as processed
             await repository.mark_as_processed(event.event_id)
@@ -468,25 +458,6 @@ class OutboxProcessor:
             result_status=result.status.value if result else "skipped",
         )
 
-    async def _process_tag_event(self, event: Any) -> None:
-        """
-        Broadcast tag events to all integrations.
-
-        Args:
-            event: Tag domain event (TagUpdated, TagDeleted)
-        """
-        from app.core.integrations.task_queue_service import TaskQueueService
-
-        async with self.container() as request_container:
-            task_queue = await request_container.get(TaskQueueService)
-            await task_queue.broadcast_tag_event(event.event_type, event.event_data)
-
-        logger.info(
-            "Broadcasted tag event to workers",
-            event_id=event.event_id,
-            event_type=event.event_type,
-        )
-
     async def _invalidate_daily_summary_for_journal_event(
         self, event: Any, connection: Any
     ) -> None:
@@ -562,24 +533,6 @@ class OutboxProcessor:
             event_type=event.event_type,
             user_id=journal.user_id,
             summary_date=summary_date.isoformat(),
-        )
-
-    async def _process_journal_event(self, event: Any) -> None:
-        """
-        Broadcast journal events to all integrations.
-
-        Args:
-            event: Journal sync event (JournalCreated, JournalUpdated, JournalDeleted)
-        """
-        from app.core.integrations.task_queue_service import TaskQueueService
-
-        async with self.container() as request_container:
-            task_queue = await request_container.get(TaskQueueService)
-            await task_queue.broadcast_journal_event(event.event_type, event.event_data)
-        logger.info(
-            "Broadcasted journal sync event to workers",
-            event_id=event.event_id,
-            event_type=event.event_type,
         )
 
     async def get_failed_events_summary(self) -> dict[str, Any]:

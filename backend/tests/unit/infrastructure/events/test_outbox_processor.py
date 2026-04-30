@@ -643,10 +643,10 @@ class TestOutboxProcessor:
         mock_repository.mark_as_processed.assert_any_call("search-event")
 
     @pytest.mark.asyncio
-    async def test_process_journal_events(
+    async def test_process_journal_events_search_and_summary_invalidation(
         self, processor, mock_search_indexer, mock_task_queue_service
     ):
-        """Test processing journal events routes to TaskQueueService."""
+        """Test processing journal events routes to SearchIndexer and daily summary invalidation."""
         # Arrange
         events = [
             OutboxEvent(
@@ -706,12 +706,7 @@ class TestOutboxProcessor:
             # Act
             await processor.process_events()
 
-        # Assert
-        # Journal event should go to TaskQueueService AND SearchIndexer
-        mock_task_queue_service.broadcast_journal_event.assert_called_once_with(
-            "JournalUpdated",
-            {"journal_id": 1, "changed_fields": {"title": ("Old", "New")}},
-        )
+        # Assert — journal events go to SearchIndexer (no longer to broadcast)
         mock_search_indexer.process_event.assert_called_once_with(events[0])
 
         assert mock_repository.mark_as_processed.call_count == 1
@@ -1049,88 +1044,6 @@ class TestOutboxProcessorStreamConsumerGating:
 
         # Journal sync should NOT run — stream consumer handles it
         mock_journal_sync.assert_not_called()
-        mock_repository.mark_as_processed.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_skips_journal_broadcast_when_stream_consumers_enabled(
-        self, processor, mock_search_indexer, mock_task_queue_service
-    ):
-        """With USE_STREAM_CONSUMERS=true, ARQ journal broadcast should be skipped."""
-        journal_event = OutboxEvent(
-            id=1,
-            event_id="journal-broadcast-1",
-            event_type="JournalUpdated",
-            aggregate_id=42,
-            event_data={"journal_id": 42, "changed_fields": {}},
-            occurred_at=datetime(2024, 1, 1, 12, 0, 0),
-            processed_at=None,
-            retry_count=0,
-            created_at=datetime(2024, 1, 1, 12, 0, 0),
-        )
-        mock_repository = MagicMock()
-        mock_repository.mark_as_processed = AsyncMock()
-
-        mock_settings = MagicMock()
-        mock_settings.use_stream_consumers = True
-
-        with (
-            patch(
-                "app.infrastructure.events.outbox_processor.get_settings",
-                return_value=mock_settings,
-            ),
-            patch.object(
-                processor,
-                "_process_journal_event",
-                new_callable=AsyncMock,
-            ) as mock_broadcast,
-        ):
-            await processor._process_single_event(
-                journal_event, mock_repository, mock_search_indexer
-            )
-
-        # ARQ broadcast should NOT run — stream consumer handles it
-        mock_broadcast.assert_not_called()
-        mock_repository.mark_as_processed.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_skips_tag_broadcast_when_stream_consumers_enabled(
-        self, processor, mock_search_indexer, mock_task_queue_service
-    ):
-        """With USE_STREAM_CONSUMERS=true, ARQ tag broadcast should be skipped."""
-        tag_event = OutboxEvent(
-            id=1,
-            event_id="tag-broadcast-1",
-            event_type="TagUpdated",
-            aggregate_id=10,
-            event_data={"tag_id": 10, "name": "Updated Tag"},
-            occurred_at=datetime(2024, 1, 1, 12, 0, 0),
-            processed_at=None,
-            retry_count=0,
-            created_at=datetime(2024, 1, 1, 12, 0, 0),
-        )
-        mock_repository = MagicMock()
-        mock_repository.mark_as_processed = AsyncMock()
-
-        mock_settings = MagicMock()
-        mock_settings.use_stream_consumers = True
-
-        with (
-            patch(
-                "app.infrastructure.events.outbox_processor.get_settings",
-                return_value=mock_settings,
-            ),
-            patch.object(
-                processor,
-                "_process_tag_event",
-                new_callable=AsyncMock,
-            ) as mock_tag_broadcast,
-        ):
-            await processor._process_single_event(
-                tag_event, mock_repository, mock_search_indexer
-            )
-
-        # Tag broadcast should NOT run — stream consumer handles it
-        mock_tag_broadcast.assert_not_called()
         mock_repository.mark_as_processed.assert_called_once()
 
     @pytest.mark.asyncio
