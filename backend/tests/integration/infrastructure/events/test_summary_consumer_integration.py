@@ -4,13 +4,11 @@ Integration tests for SummaryConsumer.
 Tests the end-to-end flow: Redis stream -> consumer -> Summary Generation -> Search Index.
 """
 
-import os
 import uuid
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-import pytest_asyncio
 from core_shared.stream_client import StreamClient
 from redis.asyncio import Redis
 from sqlalchemy import text
@@ -18,37 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.infrastructure.events.summary_consumer import SummaryConsumer
 
-
-def _get_redis_test_url() -> str:
-    """Get Redis URL for integration tests."""
-    if os.getenv("CI") or os.getenv("GITHUB_ACTIONS"):
-        return os.getenv("REDIS_URL", "redis://localhost:6379")
-
-    from tests.integration.conftest import workspace_env
-
-    port = workspace_env.get("REDIS_TEST_PORT", "6380")
-    return f"redis://localhost:{port}"
-
-
-TEST_STREAM = f"pms:test-summary-events-{uuid.uuid4().hex[:8]}"
 GROUP_NAME = "summary-generator"
-
-
-@pytest_asyncio.fixture
-async def redis_client():
-    """Create a real Redis client for testing."""
-    url = _get_redis_test_url()
-    client = Redis.from_url(url, decode_responses=False)
-    await client.ping()
-    yield client
-    await client.delete(TEST_STREAM)
-    await client.close()
-
-
-@pytest.fixture
-def stream_client(redis_client: Redis) -> StreamClient:
-    """Create a StreamClient wrapping the real Redis connection."""
-    return StreamClient(redis_client)
 
 
 class TestSummaryConsumerIntegration:
@@ -57,6 +25,7 @@ class TestSummaryConsumerIntegration:
     @pytest.mark.asyncio
     async def test_summary_consumer_processes_refresh_event(
         self,
+        test_stream_name: str,
         async_connection: AsyncConnection,
         stream_client: StreamClient,
         redis_client: Redis,
@@ -76,7 +45,7 @@ class TestSummaryConsumerIntegration:
 
         # Publish the event to the stream
         await stream_client.publish(
-            stream_name=TEST_STREAM,
+            stream_name=test_stream_name,
             event_id=f"evt-{uuid.uuid4().hex[:8]}",
             event_type="ContactSummaryRefreshRequested",
             aggregate_id=contact_id,
@@ -87,11 +56,11 @@ class TestSummaryConsumerIntegration:
         # 2. Setup the consumer
         consumer = SummaryConsumer(
             stream_client=stream_client,
-            stream_name=TEST_STREAM,
+            stream_name=test_stream_name,
             consumer_name="test-summary-1",
             block_ms=100,
         )
-        await stream_client.ensure_consumer_group(TEST_STREAM, GROUP_NAME)
+        await stream_client.ensure_consumer_group(test_stream_name, GROUP_NAME)
 
         # Mock the engine so the consumer uses our test transaction connection
         mock_engine = MagicMock()
@@ -142,7 +111,7 @@ class TestSummaryConsumerIntegration:
             assert count == 1
 
             # Verify pending entries are 0 (acknowledged)
-            pending_info = await redis_client.xpending(TEST_STREAM, GROUP_NAME)
+            pending_info = await redis_client.xpending(test_stream_name, GROUP_NAME)
             assert pending_info["pending"] == 0
 
             # Verify generate was called with our contact

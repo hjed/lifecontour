@@ -390,6 +390,7 @@ class TestContactOutboxProcessorIntegration:
     @pytest.mark.asyncio
     async def test_process_contact_created_event_creates_contact(
         self,
+        test_stream_name: str,
         clean_database: AsyncConnection,
         sample_contact_data: dict[str, Any],
     ):
@@ -440,6 +441,7 @@ class TestContactOutboxProcessorIntegration:
     @pytest.mark.asyncio
     async def test_process_contact_created_event_deduplicates_duplicate_email_methods(
         self,
+        test_stream_name: str,
         clean_database: AsyncConnection,
         sample_contact_data: dict[str, Any],
     ):
@@ -509,6 +511,7 @@ class TestContactOutboxProcessorIntegration:
     @pytest.mark.asyncio
     async def test_process_contact_created_event_matches_existing_local_contact_by_email(
         self,
+        test_stream_name: str,
         clean_database: AsyncConnection,
         sample_contact_data: dict[str, Any],
     ):
@@ -584,6 +587,7 @@ class TestContactOutboxProcessorIntegration:
     @pytest.mark.asyncio
     async def test_process_contact_created_event_retries_when_multiple_local_contacts_match_inbound_emails(
         self,
+        test_stream_name: str,
         clean_database: AsyncConnection,
         sample_contact_data: dict[str, Any],
     ):
@@ -685,6 +689,7 @@ class TestContactOutboxProcessorIntegration:
     @pytest.mark.asyncio
     async def test_process_contact_updated_event_deduplicates_duplicate_email_methods(
         self,
+        test_stream_name: str,
         clean_database: AsyncConnection,
         sample_contact_data: dict[str, Any],
     ):
@@ -775,6 +780,7 @@ class TestContactOutboxProcessorIntegration:
     @pytest.mark.asyncio
     async def test_process_events_persists_retry_count_after_db_error_and_continues_batch(
         self,
+        test_stream_name: str,
         clean_database: AsyncConnection,
         sample_contact_data: dict[str, Any],
     ):
@@ -851,6 +857,7 @@ class TestContactOutboxProcessorIntegration:
     @pytest.mark.asyncio
     async def test_process_events_marks_invalid_contact_created_event_as_failed(
         self,
+        test_stream_name: str,
         clean_database: AsyncConnection,
     ):
         """Invalid contact.created payloads should be terminally failed and skipped."""
@@ -874,6 +881,7 @@ class TestContactOutboxProcessorIntegration:
     @pytest.mark.asyncio
     async def test_process_events_marks_contact_created_with_non_list_methods_as_failed(
         self,
+        test_stream_name: str,
         clean_database: AsyncConnection,
     ):
         """Malformed contact.created methods should stay invalid and fail terminally."""
@@ -904,6 +912,7 @@ class TestContactOutboxProcessorIntegration:
     @pytest.mark.asyncio
     async def test_process_events_marks_invalid_contact_updated_event_as_failed(
         self,
+        test_stream_name: str,
         clean_database: AsyncConnection,
     ):
         """Invalid contact.updated payloads should fail permanently without mutating contacts."""
@@ -940,6 +949,7 @@ class TestContactOutboxProcessorIntegration:
     @pytest.mark.asyncio
     async def test_process_events_marks_contact_updated_with_non_list_methods_as_failed(
         self,
+        test_stream_name: str,
         clean_database: AsyncConnection,
     ):
         """Malformed contact.updated methods should stay invalid and fail terminally."""
@@ -983,6 +993,7 @@ class TestContactOutboxProcessorIntegration:
     @pytest.mark.asyncio
     async def test_process_legacy_google_contacts_event_normalizes_to_google(
         self,
+        test_stream_name: str,
         clean_database: AsyncConnection,
         sample_contact_data: dict[str, Any],
     ):
@@ -1081,6 +1092,7 @@ class TestContactOutboxProcessorIntegration:
     @pytest.mark.asyncio
     async def test_process_contact_updated_event_triggers_on_birthday_change(
         self,
+        test_stream_name: str,
         clean_database: AsyncConnection,
         sample_contact_data: dict[str, Any],
     ):
