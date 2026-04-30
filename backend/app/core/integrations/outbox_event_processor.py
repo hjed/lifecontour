@@ -20,6 +20,7 @@ from core_shared.models.contacts.serialization import (
     ContactDeserializationError,
     deserialize_contact,
 )
+from core_shared.models.contacts.value_objects import Provenance
 from core_shared.models.external_reference import ExternalReference
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.sync_metadata import SyncStatus
@@ -54,6 +55,16 @@ _INTEGRATION_SOURCE_ALIASES: dict[str, str] = {
 def _normalize_integration_source(raw: str) -> str:
     """Map legacy integration source names to their canonical equivalents."""
     return _INTEGRATION_SOURCE_ALIASES.get(raw, raw)
+
+
+def _map_provenance(integration_source: str) -> Provenance:
+    """Map integration source to Provenance enum."""
+    source_map = {
+        "google": Provenance.GOOGLE_CONTACTS,
+        "google_contacts": Provenance.GOOGLE_CONTACTS,
+        "strava": Provenance.STRAVA,
+    }
+    return source_map.get(integration_source, Provenance.SYSTEM)
 
 
 def _normalize_email_dedup_key(value: str) -> str:
@@ -657,6 +668,7 @@ class OutboxEventProcessor:
 
         # Derive provenance from integration source
         sync_changed_by = f"{integration_source}_sync"
+        provenance_source = _map_provenance(integration_source)
 
         # Create or update the contact using the contact service.
         try:
@@ -665,6 +677,7 @@ class OutboxEventProcessor:
                     contact,
                     self.connection,
                     changed_by=sync_changed_by,
+                    source=provenance_source,
                 )
             else:
                 contact.id = matched_contact.id
@@ -672,6 +685,7 @@ class OutboxEventProcessor:
                     contact,
                     self.connection,
                     changed_by=sync_changed_by,
+                    source=provenance_source,
                 )
                 contact_action = "reconciled"
                 logger.info(
@@ -891,6 +905,7 @@ class OutboxEventProcessor:
 
         # Update the contact using the contact service
         sync_changed_by = f"{integration_source}_sync"
+        provenance_source = _map_provenance(integration_source)
         try:
             # Wrap in a nested transaction (savepoint) so that if update_contact
             # fails with an IntegrityError (e.g. converted to DuplicateEmailError),
@@ -900,6 +915,7 @@ class OutboxEventProcessor:
                     updated_contact_data,
                     self.connection,
                     changed_by=sync_changed_by,
+                    source=provenance_source,
                 )
         except DuplicateEmailError as e:
             logger.warning(

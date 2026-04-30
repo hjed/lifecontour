@@ -13,6 +13,7 @@ from core_shared.models.contacts.entities import (
     Tag,
 )
 from core_shared.models.contacts.exceptions import ContactValidationError
+from core_shared.models.contacts.value_objects import Provenance
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -218,6 +219,7 @@ class ContactService:
         contact: Contact,
         transaction: AsyncConnection,
         changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> Contact:
         """
         Create a new contact with transaction management.
@@ -279,7 +281,7 @@ class ContactService:
 
             # Publish creation event
             await self._publish_contact_created_event(
-                complete_contact, transaction, changed_by=changed_by
+                complete_contact, transaction, changed_by=changed_by, source=source
             )
 
             return complete_contact
@@ -293,6 +295,7 @@ class ContactService:
         contact: Contact,
         transaction: AsyncConnection,
         changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> Contact:
         """
         Update an existing contact with transaction management.
@@ -358,6 +361,7 @@ class ContactService:
                     changed_fields,
                     transaction,
                     changed_by=changed_by,
+                    source=source,
                 )
 
             return complete_contact
@@ -372,6 +376,8 @@ class ContactService:
         field_name: str,
         field_value: Any,
         transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> tuple[str | None, str | None]:
         """
         Update a single contact field with transaction management.
@@ -439,7 +445,11 @@ class ContactService:
             # Record field history
             changed_fields = {field_name: (old_value, new_value)}
             await self.history_service.record_contact_change(
-                contact_id, changed_fields, _transaction=transaction
+                contact_id,
+                changed_fields,
+                changed_by=changed_by,
+                source=source,
+                _transaction=transaction,
             )
 
             # Publish update event
@@ -463,6 +473,8 @@ class ContactService:
         field_name: str,
         field_value: Any,
         transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> tuple[str | None, str | None]:
         """
         Update a single contact method field.
@@ -523,10 +535,14 @@ class ContactService:
             # Save the updated method
             await self.contact_repo.update_method(method_to_update)
 
-            # Record field history
+            # Record history
             changed_fields = {field_name: (old_value, new_value)}
             await self.history_service.record_method_change(
-                method_id, changed_fields, _transaction=transaction
+                method_id,
+                changed_fields,
+                changed_by=changed_by,
+                source=source,
+                _transaction=transaction,
             )
 
             # Publish update event (method-specific event could be added)
@@ -555,6 +571,8 @@ class ContactService:
         field_name: str,
         field_value: Any,
         transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> tuple[str | None, str | None]:
         """
         Update a single contact address field.
@@ -610,10 +628,14 @@ class ContactService:
             # Save the updated address
             await self.contact_repo.update_address(address_to_update)
 
-            # Record field history
+            # Record history
             changed_fields = {field_name: (old_value, new_value)}
             await self.history_service.record_address_change(
-                address_id, changed_fields, _transaction=transaction
+                address_id,
+                changed_fields,
+                changed_by=changed_by,
+                source=source,
+                _transaction=transaction,
             )
 
             # Publish update event
@@ -644,6 +666,8 @@ class ContactService:
         field_name: str,
         field_value: Any,
         transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> tuple[str | None, str | None]:
         """
         Update a single contact note field.
@@ -697,10 +721,14 @@ class ContactService:
             # Save the updated note
             await self.contact_repo.update_note(note_to_update)
 
-            # Record field history
+            # Record history
             changed_fields = {field_name: (old_value, new_value)}
             await self.history_service.record_note_change(
-                note_id, changed_fields, _transaction=transaction
+                note_id,
+                changed_fields,
+                changed_by=changed_by,
+                source=source,
+                _transaction=transaction,
             )
 
             # Publish update event
@@ -878,6 +906,7 @@ class ContactService:
         contact: Contact,
         transaction: AsyncConnection,
         changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> None:
         """Publish contact created event.
 
@@ -887,7 +916,59 @@ class ContactService:
             changed_by: Provenance identifier (e.g. "google_sync").
                 Threaded for future use when creation history recording
                 is implemented with proper frontend rendering support.
+            source: Strongly typed provenance.
         """
+        if contact.id is None:
+            raise ContactValidationError(
+                "id", "Contact ID is required for event publishing"
+            )
+        # TODO: Record creation in field history once the frontend
+        # ActivityItem can render creation events distinctly from
+        # field-change entries (currently would display as
+        # "Added Created: ...").
+        await self.history_service.record_contact_change(
+            contact.id,
+            {"status": (None, "created")},
+            changed_by=changed_by,
+            source=source,
+            _transaction=transaction,
+        )
+        for method in contact.methods or []:
+            if method.id is not None:
+                await self.history_service.record_method_change(
+                    method.id,
+                    {"status": (None, "created")},
+                    changed_by=changed_by,
+                    source=source,
+                    _transaction=transaction,
+                )
+        for address in contact.addresses or []:
+            if address.id is not None:
+                await self.history_service.record_address_change(
+                    address.id,
+                    {"status": (None, "created")},
+                    changed_by=changed_by,
+                    source=source,
+                    _transaction=transaction,
+                )
+        for note in contact.notes or []:
+            if note.id is not None:
+                await self.history_service.record_note_change(
+                    note.id,
+                    {"status": (None, "created")},
+                    changed_by=changed_by,
+                    source=source,
+                    _transaction=transaction,
+                )
+        for date in contact.important_dates or []:
+            if date.id is not None:
+                await self.history_service.record_important_date_change(
+                    date.id,
+                    {"status": (None, "created")},
+                    changed_by=changed_by,
+                    source=source,
+                    _transaction=transaction,
+                )
         if contact.id is None:
             raise ContactValidationError(
                 "id", "Contact ID is required for event publishing"
@@ -993,6 +1074,7 @@ class ContactService:
         changed_fields: dict[str, Any],
         transaction: AsyncConnection,
         changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> None:
         """Publish contact updated events and record history."""
         if contact.id is None:
@@ -1003,6 +1085,7 @@ class ContactService:
             contact.id,
             changed_fields,
             changed_by=changed_by,
+            source=source,
             _transaction=transaction,
         )
 
@@ -1225,7 +1308,11 @@ class ContactService:
             await self.contact_repo.delete_all_important_dates(contact_id)
 
     async def delete_contact(
-        self, contact_id: int, transaction: AsyncConnection
+        self,
+        contact_id: int,
+        transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> None:
         """Delete a contact with transaction management."""
 
@@ -1239,6 +1326,13 @@ class ContactService:
             await self.contact_repo.delete(contact_id)
 
             # Record field history (deletion doesn't have field changes)
+            await self.history_service.record_contact_change(
+                contact_id,
+                {"status": ("active", "deleted")},
+                changed_by=changed_by,
+                source=source,
+                _transaction=transaction,
+            )
             # Domain event will capture the deletion action
 
             # Publish event
@@ -1263,7 +1357,12 @@ class ContactService:
         await self.contact_repo.bulk_delete_all(transaction)
 
     async def assign_tag_to_contact(
-        self, contact_id: int, tag_id: int, transaction: AsyncConnection
+        self,
+        contact_id: int,
+        tag_id: int,
+        transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> None:
         """Assign a tag to a contact with transaction management."""
 
@@ -1290,7 +1389,12 @@ class ContactService:
 
             # Record field history
             await self.history_service.record_tag_change(
-                contact_id, tag_id, "assigned", _transaction=transaction
+                contact_id,
+                tag_id,
+                "assigned",
+                changed_by=changed_by,
+                source=source,
+                _transaction=transaction,
             )
 
             # Publish event
@@ -1305,7 +1409,12 @@ class ContactService:
         )
 
     async def remove_tag_from_contact(
-        self, contact_id: int, tag_id: int, transaction: AsyncConnection
+        self,
+        contact_id: int,
+        tag_id: int,
+        transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> None:
         """Remove a tag from a contact with transaction management."""
 
@@ -1327,7 +1436,12 @@ class ContactService:
 
             # Record field history
             await self.history_service.record_tag_change(
-                contact_id, tag_id, "removed", _transaction=transaction
+                contact_id,
+                tag_id,
+                "removed",
+                changed_by=changed_by,
+                source=source,
+                _transaction=transaction,
             )
 
             # Publish event
@@ -1342,7 +1456,12 @@ class ContactService:
         )
 
     async def add_contact_method(
-        self, contact_id: int, method: ContactMethod, transaction: AsyncConnection
+        self,
+        contact_id: int,
+        method: ContactMethod,
+        transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> ContactMethod:
         """
         Add a contact method to an EXISTING contact with transaction management.
@@ -1390,8 +1509,14 @@ class ContactService:
             if saved_method.id is None:
                 raise ContactValidationError("id", "Method ID is required after save")
 
-            # Record field history (creation doesn't have field changes)
-            # Domain event will capture the addition action
+            # Record field history
+            await self.history_service.record_method_change(
+                saved_method.id,
+                {"status": (None, "created")},
+                changed_by=changed_by,
+                source=source,
+                _transaction=transaction,
+            )
 
             # Publish event
             event = ContactMethodAdded(
@@ -1412,7 +1537,12 @@ class ContactService:
         )
 
     async def add_contact_address(
-        self, contact_id: int, address: ContactAddress, transaction: AsyncConnection
+        self,
+        contact_id: int,
+        address: ContactAddress,
+        transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> ContactAddress:
         """
         Add a contact address to an EXISTING contact with transaction management.
@@ -1458,8 +1588,14 @@ class ContactService:
             if saved_address.id is None:
                 raise ContactValidationError("id", "Address ID is required after save")
 
-            # Record field history (creation doesn't have field changes)
-            # Domain event will capture the addition action
+            # Record field history
+            await self.history_service.record_address_change(
+                saved_address.id,
+                {"status": (None, "created")},
+                changed_by=changed_by,
+                source=source,
+                _transaction=transaction,
+            )
 
             # Publish event
             event = ContactAddressAdded(
@@ -1480,7 +1616,12 @@ class ContactService:
         )
 
     async def add_contact_note(
-        self, contact_id: int, note: ContactNote, transaction: AsyncConnection
+        self,
+        contact_id: int,
+        note: ContactNote,
+        transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> ContactNote:
         """
         Add a contact note to an EXISTING contact with transaction management.
@@ -1514,8 +1655,14 @@ class ContactService:
             if saved_note.id is None:
                 raise ContactValidationError("id", "Note ID is required after save")
 
-            # Record field history (creation doesn't have field changes)
-            # Domain event will capture the addition action
+            # Record field history
+            await self.history_service.record_note_change(
+                saved_note.id,
+                {"status": (None, "created")},
+                changed_by=changed_by,
+                source=source,
+                _transaction=transaction,
+            )
 
             # Publish event
             event = ContactNoteAdded(
@@ -1532,7 +1679,12 @@ class ContactService:
         )
 
     async def add_contact_important_date(
-        self, contact_id: int, date: ImportantDate, transaction: AsyncConnection
+        self,
+        contact_id: int,
+        date: ImportantDate,
+        transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> ImportantDate:
         """
         Add an important date to an EXISTING contact with transaction management.
@@ -1554,6 +1706,15 @@ class ContactService:
             if saved_date.id is None:
                 raise ContactValidationError("id", "Date ID required after save")
 
+            # Record field history
+            await self.history_service.record_important_date_change(
+                saved_date.id,
+                {"status": (None, "created")},
+                changed_by=changed_by,
+                source=source,
+                _transaction=transaction,
+            )
+
             # Publish event
             event = ImportantDateAdded(
                 contact_id, saved_date.id, date.date_type.value, transaction=transaction
@@ -1569,7 +1730,12 @@ class ContactService:
         )
 
     async def delete_contact_method(
-        self, contact_id: int, method_id: int, transaction: AsyncConnection
+        self,
+        contact_id: int,
+        method_id: int,
+        transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> None:
         """
         Delete a contact method with transaction management.
@@ -1597,6 +1763,15 @@ class ContactService:
             # Delete method
             await self.contact_repo.delete_method(method_id)
 
+            # Record history
+            await self.history_service.record_method_change(
+                method_id,
+                {"status": ("active", "deleted")},
+                changed_by=changed_by,
+                source=source,
+                _transaction=transaction,
+            )
+
             # Publish event
             event = ContactMethodDeleted(
                 contact_id,
@@ -1613,7 +1788,12 @@ class ContactService:
         )
 
     async def delete_contact_address(
-        self, contact_id: int, address_id: int, transaction: AsyncConnection
+        self,
+        contact_id: int,
+        address_id: int,
+        transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> None:
         """
         Delete a contact address with transaction management.
@@ -1641,6 +1821,15 @@ class ContactService:
             # Delete address
             await self.contact_repo.delete_address(address_id)
 
+            # Record history
+            await self.history_service.record_address_change(
+                address_id,
+                {"status": ("active", "deleted")},
+                changed_by=changed_by,
+                source=source,
+                _transaction=transaction,
+            )
+
             # Publish event
             event = ContactAddressDeleted(
                 contact_id, address_id, address.street_line_1, transaction=transaction
@@ -1653,7 +1842,12 @@ class ContactService:
         )
 
     async def delete_contact_important_date(
-        self, contact_id: int, date_id: int, transaction: AsyncConnection
+        self,
+        contact_id: int,
+        date_id: int,
+        transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> None:
         """
         Delete an important date with transaction management.
@@ -1673,6 +1867,15 @@ class ContactService:
 
             # Delete date
             await self.contact_repo.delete_important_date(date_id)
+
+            # Record history
+            await self.history_service.record_important_date_change(
+                date_id,
+                {"status": ("active", "deleted")},
+                changed_by=changed_by,
+                source=source,
+                _transaction=transaction,
+            )
 
             # Publish event
             event = ImportantDateDeleted(
@@ -1824,7 +2027,11 @@ class ContactService:
         return await self.history_service.get_contact_history(contact_id, limit)
 
     async def toggle_contact_favourite(
-        self, contact_id: int, transaction: AsyncConnection
+        self,
+        contact_id: int,
+        transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> Contact:
         """
         Toggle the favourite status of a contact.
@@ -1856,7 +2063,11 @@ class ContactService:
             # Record history and publish event
             changed_fields = {"is_favourite": (old_favourite, contact.is_favourite)}
             await self._publish_contact_updated_events(
-                updated_contact, changed_fields, transaction
+                updated_contact,
+                changed_fields,
+                transaction,
+                changed_by=changed_by,
+                source=source,
             )
 
             return updated_contact

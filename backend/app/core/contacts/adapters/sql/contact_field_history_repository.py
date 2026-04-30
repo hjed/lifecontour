@@ -38,7 +38,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
         query = text(
             f"""
             SELECT id, entity_type, entity_id, field_name, old_value, new_value,
-                   changed_by, created_at
+                   changed_by, source, created_at
             FROM contact_field_history
             WHERE {self._CONTACT_HISTORY_WHERE_CLAUSE}
             ORDER BY created_at DESC
@@ -58,6 +58,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
                 old_value=row.old_value,
                 new_value=row.new_value,
                 changed_by=row.changed_by,
+                source=row.source,
                 id=row.id,
                 created_at=row.created_at.isoformat() if row.created_at else None,
             )
@@ -85,7 +86,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
         query = text(
             """
             SELECT id, entity_type, entity_id, field_name, old_value, new_value,
-                   changed_by, created_at
+                   changed_by, source, created_at
             FROM contact_field_history
             WHERE entity_type = :entity_type AND entity_id = :entity_id
             ORDER BY created_at DESC
@@ -104,6 +105,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
                 old_value=row.old_value,
                 new_value=row.new_value,
                 changed_by=row.changed_by,
+                source=row.source,
                 id=row.id,
                 created_at=row.created_at.isoformat() if row.created_at else None,
             )
@@ -118,8 +120,8 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
         query = text(
             """
             INSERT INTO contact_field_history
-            (entity_type, entity_id, field_name, old_value, new_value, changed_by)
-            VALUES (:entity_type, :entity_id, :field_name, :old_value, :new_value, :changed_by)
+            (entity_type, entity_id, field_name, old_value, new_value, changed_by, source)
+            VALUES (:entity_type, :entity_id, :field_name, :old_value, :new_value, :changed_by, :source)
             RETURNING id, created_at
         """
         )
@@ -132,6 +134,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
                 "old_value": entry.old_value,
                 "new_value": entry.new_value,
                 "changed_by": entry.changed_by,
+                "source": entry.source.value,
             },
         )
         row = result.fetchone()
@@ -159,7 +162,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
         query = text(
             """
             SELECT id, entity_type, entity_id, field_name, old_value, new_value,
-                   changed_by, created_at
+                   changed_by, source, created_at
             FROM contact_field_history
             WHERE entity_type = :entity_type AND entity_id = :entity_id AND field_name = :field_name
             ORDER BY created_at DESC
@@ -183,6 +186,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
                 old_value=row.old_value,
                 new_value=row.new_value,
                 changed_by=row.changed_by,
+                source=row.source,
                 id=row.id,
                 created_at=row.created_at.isoformat() if row.created_at else None,
             )
@@ -197,7 +201,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
         query = text(
             """
             SELECT id, entity_type, entity_id, field_name, old_value, new_value,
-                   changed_by, created_at
+                   changed_by, source, created_at
             FROM contact_field_history
             WHERE changed_by = :changed_by
             ORDER BY created_at DESC
@@ -217,6 +221,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
                 old_value=row.old_value,
                 new_value=row.new_value,
                 changed_by=row.changed_by,
+                source=row.source,
                 id=row.id,
                 created_at=row.created_at.isoformat() if row.created_at else None,
             )

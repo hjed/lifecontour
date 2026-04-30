@@ -7,6 +7,7 @@ Controllers act as adapters between HTTP and domain services.
 
 import structlog
 from core_shared.models.contacts.exceptions import ContactValidationError
+from core_shared.models.contacts.value_objects import Provenance
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Request, status
 
@@ -154,6 +155,8 @@ async def create_contact_relationship(
         to_contact_id=relationship.to_contact_id,
         relationship_type=relationship.relationship_type,
         to_user=relationship.to_user,
+        changed_by="ui",
+        source=Provenance.UI,
     )
 
     # Handle both single relationship and list of relationships
@@ -266,6 +269,8 @@ async def update_contact_relationship(
     updated_relationship = await relationship_service.update_relationship(
         relationship_id=relationship_id,
         relationship_type=rel_type,
+        changed_by="ui",
+        source=Provenance.UI,
     )
 
     # Resolve contact name for display consistency
@@ -316,4 +321,6 @@ async def delete_contact_relationship(
 
     await relationship_service.delete_relationship(
         relationship_id=relationship_id,
+        changed_by="ui",
+        source=Provenance.UI,
     )

@@ -42,10 +42,24 @@ class TestContactRelationshipService:
         return AsyncMock()
 
     @pytest.fixture
-    def service(self, mock_contact_repo, mock_relationship_repo, mock_event_publisher):
+    def mock_history_service(self):
+        """Create mock history service."""
+        return AsyncMock()
+
+    @pytest.fixture
+    def service(
+        self,
+        mock_contact_repo,
+        mock_relationship_repo,
+        mock_event_publisher,
+        mock_history_service,
+    ):
         """Create ContactRelationshipService instance."""
         return ContactRelationshipService(
-            mock_contact_repo, mock_relationship_repo, mock_event_publisher
+            mock_contact_repo,
+            mock_relationship_repo,
+            mock_event_publisher,
+            mock_history_service,
         )
 
     @pytest.fixture

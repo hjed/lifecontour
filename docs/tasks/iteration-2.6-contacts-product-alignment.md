@@ -547,10 +547,12 @@ The sequence reflects both user priority and technical dependency:
 **PR Size:** ~5-7 files
 
 **Acceptance Criteria:**
-- [ ] Activity/history data distinguishes UI, MCP, sync, and summary-regeneration sources reliably.
-- [ ] Provenance capture is added centrally rather than scattered through ad hoc string values.
-- [ ] No-op exports do not create activity entries.
-- [ ] Existing history retrieval remains backwards-compatible enough for staged UI rollout.
+- [x] Activity/history data distinguishes UI, MCP, sync, and summary-regeneration sources reliably.
+- [x] Provenance capture is added centrally rather than scattered through ad hoc string values.
+- [x] No-op exports do not create activity entries.
+- [x] Existing history retrieval remains backwards-compatible enough for staged UI rollout.
+- [x] Changes align with iter-5 event system.
+- [x] Provenance is captured transactionally with changes to the the data.
 
 **Required Test Coverage:**
 - **Unit:** provenance classification, no-op suppression, summary-event shaping helpers.

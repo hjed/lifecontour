@@ -15,6 +15,7 @@ from core_shared.models.contacts.entities import (
     Tag,
 )
 from core_shared.models.contacts.important_date_types import CustomDateType
+from core_shared.models.contacts.value_objects import Provenance
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 
@@ -341,6 +342,7 @@ class ContactFieldHistoryEntry:
         old_value: str | None = None,
         new_value: str | None = None,
         changed_by: str | None = None,
+        source: Provenance = Provenance.SYSTEM,
         id: int | None = None,
         created_at: str | None = None,
     ):
@@ -351,6 +353,7 @@ class ContactFieldHistoryEntry:
         self.old_value = old_value
         self.new_value = new_value
         self.changed_by = changed_by
+        self.source = source
         self.created_at = created_at
 
 

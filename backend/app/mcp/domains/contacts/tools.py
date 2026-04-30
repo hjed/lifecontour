@@ -24,7 +24,7 @@ from core_shared.models.contacts.important_date_types import (
     DatePrecision,
     ImportantDateType,
 )
-from core_shared.models.contacts.value_objects import TagName
+from core_shared.models.contacts.value_objects import Provenance, TagName
 from fastmcp import FastMCP
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -393,7 +393,9 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                     contact.add_tag(saved_tag)
 
         # Create the contact with all methods, notes, and tags in a single transaction
-        final_contact = await contact_service.create_contact(contact, connection)
+        final_contact = await contact_service.create_contact(
+            contact, connection, changed_by="mcp", source=Provenance.MCP
+        )
 
         # Ensure contact was created with an ID
         if final_contact.id is None:
@@ -501,7 +503,12 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             # Convert field_value to appropriate type based on field_name
             converted_value = _convert_field_value(field_name, field_value)
             await contact_service.update_contact_field(
-                request.contact_id, field_name, converted_value, connection
+                request.contact_id,
+                field_name,
+                converted_value,
+                connection,
+                changed_by="mcp",
+                source=Provenance.MCP,
             )
             # Fetch updated contact for response
             final_contact = await contact_service.get_contact_by_id(request.contact_id)
@@ -605,7 +612,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
             # Update the contact with all methods, notes, and tags in a single transaction
             final_contact = await contact_service.update_contact(
-                updated_contact, connection
+                updated_contact, connection, changed_by="mcp", source=Provenance.MCP
             )
 
         # Create AI-friendly response using shared converter

@@ -9,6 +9,7 @@ from datetime import datetime
 
 import structlog
 from core_shared.models.contacts.exceptions import ContactValidationError
+from core_shared.models.contacts.value_objects import Provenance
 from core_shared.models.journals import Journal
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Query, Request, status
@@ -202,7 +203,9 @@ async def create_contact(
 
     contact = ContactRequestConverter.from_create_request(contact_request.data)
 
-    created_contact = await contact_service.create_contact(contact, connection)
+    created_contact = await contact_service.create_contact(
+        contact, connection, changed_by="ui", source=Provenance.UI
+    )
 
     contact_resource = ContactConverter.to_resource(created_contact, base_url)
 
@@ -234,7 +237,9 @@ async def update_contact(
         contact_request.data, existing_contact
     )
 
-    saved_contact = await contact_service.update_contact(updated_contact, connection)
+    saved_contact = await contact_service.update_contact(
+        updated_contact, connection, changed_by="ui", source=Provenance.UI
+    )
 
     contact_resource = ContactConverter.to_resource(saved_contact, base_url)
 
@@ -258,7 +263,9 @@ async def delete_contact(
     # Use a fresh transaction for the delete operation to avoid
     # issues with aborted transactions from previous operations
     async with engine.begin() as fresh_connection:
-        await contact_service.delete_contact(contact_id, fresh_connection)
+        await contact_service.delete_contact(
+            contact_id, fresh_connection, changed_by="ui", source=Provenance.UI
+        )
 
 
 @router.delete("/test/cleanup", status_code=status.HTTP_204_NO_CONTENT)
@@ -302,7 +309,9 @@ async def assign_tag_to_contact(
     if not existing_contact:
         raise ContactNotFoundError(contact_id)
 
-    await contact_service.assign_tag_to_contact(contact_id, tag_id, connection)
+    await contact_service.assign_tag_to_contact(
+        contact_id, tag_id, connection, changed_by="ui", source=Provenance.UI
+    )
 
 
 @router.delete("/{contact_id}/tags/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -323,7 +332,9 @@ async def remove_tag_from_contact(
     if not existing_contact:
         raise ContactNotFoundError(contact_id)
 
-    await contact_service.remove_tag_from_contact(contact_id, tag_id, connection)
+    await contact_service.remove_tag_from_contact(
+        contact_id, tag_id, connection, changed_by="ui", source=Provenance.UI
+    )
 
 
 @router.get("/{contact_id}/tags")
@@ -371,7 +382,7 @@ async def toggle_contact_favourite(
 
     try:
         updated_contact = await contact_service.toggle_contact_favourite(
-            contact_id, connection
+            contact_id, connection, changed_by="ui", source=Provenance.UI
         )
 
         return ContactResponse(
@@ -409,7 +420,12 @@ async def update_contact_field(
 
     try:
         old_value, new_value = await contact_service.update_contact_field(
-            contact_id, field_name, field_value, connection
+            contact_id,
+            field_name,
+            field_value,
+            connection,
+            changed_by="ui",
+            source=Provenance.UI,
         )
 
         # Create response
@@ -458,7 +474,13 @@ async def update_contact_method_field(
 
     try:
         old_value, new_value = await contact_service.update_contact_method_field(
-            contact_id, method_id, field_name, field_value, connection
+            contact_id,
+            method_id,
+            field_name,
+            field_value,
+            connection,
+            changed_by="ui",
+            source=Provenance.UI,
         )
 
         # Create response
@@ -508,7 +530,13 @@ async def update_contact_address_field(
 
     try:
         old_value, new_value = await contact_service.update_contact_address_field(
-            contact_id, address_id, field_name, field_value, connection
+            contact_id,
+            address_id,
+            field_name,
+            field_value,
+            connection,
+            changed_by="ui",
+            source=Provenance.UI,
         )
 
         # Create response
@@ -558,7 +586,13 @@ async def update_contact_note_field(
 
     try:
         old_value, new_value = await contact_service.update_contact_note_field(
-            contact_id, note_id, field_name, field_value, connection
+            contact_id,
+            note_id,
+            field_name,
+            field_value,
+            connection,
+            changed_by="ui",
+            source=Provenance.UI,
         )
 
         # Create response
@@ -675,7 +709,9 @@ async def add_contact_method(
         )
 
         # Add the method using the service
-        await contact_service.add_contact_method(contact_id, method, connection)
+        await contact_service.add_contact_method(
+            contact_id, method, connection, changed_by="ui", source=Provenance.UI
+        )
 
         # Get updated contact
         updated_contact = await contact_service.get_contact_by_id(contact_id)
@@ -707,7 +743,9 @@ async def delete_contact_method(
 
     Removes the specified contact method from the contact.
     """
-    await contact_service.delete_contact_method(contact_id, method_id, connection)
+    await contact_service.delete_contact_method(
+        contact_id, method_id, connection, changed_by="ui", source=Provenance.UI
+    )
 
 
 # Contact Addresses Management Endpoints
@@ -744,7 +782,9 @@ async def add_contact_address(
         )
 
         # Add the address using the service
-        await contact_service.add_contact_address(contact_id, address, connection)
+        await contact_service.add_contact_address(
+            contact_id, address, connection, changed_by="ui", source=Provenance.UI
+        )
 
         # Get updated contact
         updated_contact = await contact_service.get_contact_by_id(contact_id)
@@ -776,7 +816,9 @@ async def delete_contact_address(
 
     Removes the specified contact address from the contact.
     """
-    await contact_service.delete_contact_address(contact_id, address_id, connection)
+    await contact_service.delete_contact_address(
+        contact_id, address_id, connection, changed_by="ui", source=Provenance.UI
+    )
 
 
 @router.get("/{contact_id}/journals")
