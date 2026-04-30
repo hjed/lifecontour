@@ -120,22 +120,20 @@ Expose pitches through the REST API as nested data within abseiling responses, a
 - **Unit:** ✅ auto-calculation logic for all four aggregate fields, manual override precedence.
 - **Integration:** ✅ API tests for creating/updating abseiling journals with and without pitches, verifying calculated totals.
 
-#### Phase 3: Abseil Pitch Editor UI
-**PR Size:** ~4–6 files
+### Phase 3: Frontend Editor & Integration [COMPLETED]
 
-Build the pitch editor component and integrate it into the existing `AbseilingTripTypeEditor`.
+**Objective:** Build the UI for pitch editing and integrate it into the abseiling type editor.
 
-**Acceptance Criteria:**
-- [ ] `PitchEditor` component: inline table with add/remove rows, editable fields for each pitch column
-- [ ] Pitch number auto-increments but is editable
-- [ ] Anchor location and anchor type use dropdown selects with constrained values
-- [ ] Auto-calculated totals display below the pitch table, editable for manual override
-- [ ] Integration into `AbseilingTripTypeEditor` — pitches appear when editing abseiling data
-- [ ] Frontend types updated for pitch data
-
-**Required Test Coverage:**
-- **Unit:** PitchEditor component rendering, add/remove rows, field validation.
-- **E2E:** create an abseiling journal with pitches, verify totals auto-calculate, edit a pitch and verify totals update.
+- [x] Create `frontend/src/types/journals.ts` interfaces for `AbseilPitch`.
+- [x] Build `PitchEditor` React component:
+  - [x] Grid-based editing interface for adding/removing pitches.
+  - [x] Dropdowns for anchor location and type (using constants).
+  - [x] Checkboxes for setup and rescue flags.
+- [x] Integrate `PitchEditor` into `AbseilingTripTypeEditor`:
+  - [x] Add auto-calculation logic for abseil counts and lengths when pitch data changes.
+  - [x] Allow manual override of calculated totals.
+- [x] Add unit tests for `PitchEditor` component rendering and state updates.
+- [x] Add/update E2E test to include pitch creation and auto-calculation verification.
 
 #### Phase 4: Activity Template Domain Model and Repository
 **PR Size:** ~5–7 files

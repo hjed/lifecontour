@@ -211,6 +211,7 @@ export function GlobalSearch({
           if (selectedIndex >= 0 && selectedIndex < suggestions.length) {
             const suggestion = suggestions[selectedIndex];
             if (suggestion.url) {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               router.push(suggestion.url as any);
               setIsOpen(false);
               setQuery('');
@@ -326,6 +327,7 @@ export function GlobalSearch({
                     )}
                     onClick={() => {
                       if (suggestion.url) {
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         router.push(suggestion.url as any);
                         setIsOpen(false);
                         setQuery('');

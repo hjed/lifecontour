@@ -5,13 +5,14 @@ import { Hash, Ruler } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
-import type { AbseilingData } from '@/types/journals';
+import type { AbseilingData, AbseilPitch } from '@/types/journals';
 import {
   ReadOnlyTypeSummary,
   type ReadOnlyTypeSummaryItem,
 } from './ReadOnlyTypeSummary';
 import { useTypeEditorState } from './useTypeEditorState';
 import { TypeEditorActions } from './TypeEditorActions';
+import { PitchEditor } from './PitchEditor';
 
 interface AbseilingTripTypeEditorProps {
   readonly journalId?: string;
@@ -56,7 +57,8 @@ export function AbseilingTripTypeEditor({
   if (!isEditing && !createMode) {
     const hasData =
       (initialData.number_of_abseils ?? 0) > 0 ||
-      (initialData.total_length ?? 0) > 0;
+      (initialData.total_length ?? 0) > 0 ||
+      (initialData.pitches && initialData.pitches.length > 0);
 
     if (!hasData) {
       return (
@@ -102,6 +104,11 @@ export function AbseilingTripTypeEditor({
           items={summaryItems}
           testId='abseiling-trip-summary'
         />
+        <PitchEditor
+          pitches={initialData.pitches}
+          isEditing={false}
+          onChange={() => {}}
+        />
         <TypeEditorActions
           isEditing={false}
           onEdit={handleEdit}
@@ -111,6 +118,46 @@ export function AbseilingTripTypeEditor({
       </div>
     );
   }
+
+  const handlePitchesChange = (newPitches: AbseilPitch[]) => {
+    setEditData(prev => {
+      // Auto-calculate totals if there are pitches, and we haven't manually overridden (or if we want to constantly update them unless they have value? The spec says: "Pitch totals auto-calculate from pitches when pitches exist, with manual override")
+      // Actually, if we just update the pitches here, the backend might handle auto-calculation.
+      // The spec for Phase 2: "Auto-calculation: when pitches present, number_of_abseils defaults to pitch count, total_length to sum of heights, number_of_setups / number_of_rescues to filtered counts. Manual override: user-provided totals take precedence over auto-calculated values."
+      // BUT for UI responsiveness, it's nice to auto-update the UI fields if they match the previous auto-calculated values, or if we just let the backend do it?
+      // "totals auto-calculate, edit a pitch and verify totals update." -> implies frontend auto-calculation is needed to show the user.
+
+      const previousCalcAbseils = (prev.pitches || []).length;
+      const previousCalcLength = (prev.pitches || []).reduce(
+        (sum, p) => sum + (p.height || 0),
+        0
+      );
+
+      const newCalcAbseils = newPitches.length;
+      const newCalcLength = newPitches.reduce(
+        (sum, p) => sum + (p.height || 0),
+        0
+      );
+
+      let nextAbseils = prev.number_of_abseils;
+      // If the current value was null, or it matched the old calculation, update it.
+      if (nextAbseils == null || nextAbseils === previousCalcAbseils) {
+        nextAbseils = newCalcAbseils > 0 ? newCalcAbseils : null;
+      }
+
+      let nextLength = prev.total_length;
+      if (nextLength == null || nextLength === previousCalcLength) {
+        nextLength = newCalcLength > 0 ? newCalcLength : null;
+      }
+
+      return {
+        ...prev,
+        pitches: newPitches,
+        number_of_abseils: nextAbseils,
+        total_length: nextLength,
+      };
+    });
+  };
 
   return (
     <div
@@ -173,6 +220,12 @@ export function AbseilingTripTypeEditor({
           />
         </div>
       </div>
+
+      <PitchEditor
+        pitches={editData.pitches}
+        isEditing={true}
+        onChange={handlePitchesChange}
+      />
 
       {!createMode && (
         <TypeEditorActions

@@ -174,11 +174,22 @@ export interface JoggingData {
   pace?: number | null; // seconds per kilometre
 }
 
+export interface AbseilPitch {
+  id?: number | null;
+  pitch_number: number;
+  height?: number | null;
+  anchor_location?: string | null;
+  anchor_type?: string | null;
+  did_rescue?: boolean | null;
+  did_setup?: boolean | null;
+}
+
 export interface AbseilingData {
   number_of_abseils?: number | null;
   total_length?: number | null; // total length in metres
   number_of_setups?: number | null;
   number_of_rescues?: number | null;
+  pitches?: AbseilPitch[];
 }
 
 export interface CanyoningData {
