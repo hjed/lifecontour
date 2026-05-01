@@ -88,23 +88,30 @@ test.describe('Journals Calendar Sync Features', () => {
   test('trigger calendar sync from integrations page', async ({
     authenticatedPage: page,
   }) => {
-    const googleStatusConnected = {
-      data: {
-        id: 'google',
-        type: 'integration-status',
-        attributes: {
-          connected: true,
-          lastSync: new Date().toISOString(),
-          syncCount: 10,
-          status: 'active',
-          needsReconsent: false,
+    const googleRegistryResponse = {
+      data: [
+        {
+          id: 'google',
+          type: 'integration',
+          attributes: {
+            name: 'Google',
+            status: 'connected',
+            capabilities: ['contacts_sync', 'calendar_sync'],
+            needs_reauth: false,
+            needs_reconsent: false,
+            sync_summary: {
+              last_sync_time: new Date().toISOString(),
+              sync_count: 10,
+              error_count: 0,
+            },
+          },
         },
-      },
+      ],
     };
 
-    // Route for integration status
-    await page.route('**/api/integrations/google/contacts/status', route =>
-      route.fulfill(json(googleStatusConnected))
+    // Route for integration registry
+    await page.route('**/api/integrations', route =>
+      route.fulfill(json(googleRegistryResponse))
     );
 
     // Route for calendar sync endpoint
@@ -162,7 +169,7 @@ test.describe('Journals Calendar Sync Features', () => {
     ).toBeVisible();
 
     // Trigger calendar sync
-    const syncCalendarButton = page.getByTestId('trigger-calendar-sync');
+    const syncCalendarButton = page.getByTestId('trigger-google-calendar-sync');
     await expect(syncCalendarButton).toBeVisible();
     await syncCalendarButton.click();
 
