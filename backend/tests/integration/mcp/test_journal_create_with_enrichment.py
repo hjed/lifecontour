@@ -217,6 +217,27 @@ class TestCreateJournalWithTypes:
             assert "error" in payload
             assert "TRIP" in payload.get("message", "")
 
+            # Verify no journal was persisted (no partial commit)
+            search_response = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "search_journals",
+                        "arguments": {"query": "Utah Trip 2025"},
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+            assert search_response.status_code == 200
+            search_payload = extract_mcp_json_payload(search_response.text)
+            journals = search_payload.get("journals", [])
+            assert not any(j.get("title") == "Utah Trip 2025" for j in journals), (
+                "Journal should not be persisted when types are invalid"
+            )
+
     @pytest.mark.asyncio
     async def test_create_journal_with_iso_datetime_event_date_range(
         self,

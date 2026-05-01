@@ -1530,34 +1530,21 @@ async def _update_type_specific_data(
         )
 
 
-async def _persist_contact_relationships(
-    journal_id: int,
+def _validate_contact_relationships(
     contact_relationships: list[dict[str, Any]],
-    contact_relationship_repo: SqlJournalContactRelationshipRepository,
-    db_connection: AsyncConnection,
 ) -> None:
     """
-    Validate and create contact relationships for a journal.
+    Validate contact relationship inputs without any DB operations.
 
-    Fails fast on invalid input (bad enum values, missing required fields)
-    by raising ValueError. DB errors propagate through savepoints so the
-    transaction stays clean and the original error reaches the caller.
-
-    Args:
-        journal_id: The ID of the journal
-        contact_relationships: List of relationship dicts with contact_id and relationship_type
-        contact_relationship_repo: Repository for contact relationships
-        db_connection: Database connection for savepoint management
-
-    Raises:
-        ValueError: If any relationship has invalid or missing required fields
+    Call this BEFORE any DB writes to ensure all inputs are valid.
+    Raises ValueError with a clear message if any relationship has invalid
+    or missing required fields, wrong types, or unrecognised enum values.
     """
     from core_shared.models.journals.attendee_status import AttendeeStatus
     from core_shared.models.journals.contact_event_role import ContactEventRole
 
     valid_relationship_types = {t.name for t in JournalContactRelationshipType}
 
-    # Validate all inputs upfront before any DB work
     for i, rel in enumerate(contact_relationships):
         if not isinstance(rel, dict):
             raise ValueError(
@@ -1571,9 +1558,19 @@ async def _persist_contact_relationships(
             raise ValueError(
                 f"contact_relationships[{i}]: missing required field 'contact_id'"
             )
+        if not isinstance(contact_id, int):
+            raise ValueError(
+                f"contact_relationships[{i}]: 'contact_id' must be an int, "
+                f"got {type(contact_id).__name__}"
+            )
         if not relationship_type_str:
             raise ValueError(
                 f"contact_relationships[{i}]: missing required field 'relationship_type'"
+            )
+        if not isinstance(relationship_type_str, str):
+            raise ValueError(
+                f"contact_relationships[{i}]: 'relationship_type' must be a string, "
+                f"got {type(relationship_type_str).__name__}"
             )
         if relationship_type_str.upper() not in valid_relationship_types:
             raise ValueError(
@@ -1603,6 +1600,33 @@ async def _persist_contact_relationships(
                     f"contact_relationships[{i}]: invalid role '{role_raw}'. "
                     f"Valid roles are: {', '.join(sorted(valid_roles))}"
                 ) from None
+
+
+async def _persist_contact_relationships(
+    journal_id: int,
+    contact_relationships: list[dict[str, Any]],
+    contact_relationship_repo: SqlJournalContactRelationshipRepository,
+    db_connection: AsyncConnection,
+) -> None:
+    """
+    Validate and create contact relationships for a journal.
+
+    Validates all inputs first via _validate_contact_relationships, then
+    persists each relationship inside a savepoint.
+
+    Args:
+        journal_id: The ID of the journal
+        contact_relationships: List of relationship dicts
+        contact_relationship_repo: Repository for contact relationships
+        db_connection: Database connection for savepoint management
+
+    Raises:
+        ValueError: If any relationship has invalid or missing fields
+    """
+    from core_shared.models.journals.attendee_status import AttendeeStatus
+    from core_shared.models.journals.contact_event_role import ContactEventRole
+
+    _validate_contact_relationships(contact_relationships)
 
     # All inputs valid — persist each relationship
     for rel in contact_relationships:
@@ -1979,6 +2003,34 @@ async def create_journal_entry(
     # Get current user ID from auth context
     user_id = await get_current_user_id()
 
+    # --- Validate ALL inputs upfront BEFORE any DB writes ---
+    # This ensures ValueError is raised before the journal INSERT,
+    # preventing partial data commits when the error handler catches it.
+    valid_type_names = {t.name for t in JournalType}
+
+    if request.types:
+        invalid_types = [t for t in request.types if t.upper() not in valid_type_names]
+        if invalid_types:
+            raise ValueError(
+                f"Invalid journal type(s): {', '.join(invalid_types)}. "
+                f"Valid types are: {', '.join(sorted(valid_type_names))}"
+            )
+
+    if request.type_data:
+        invalid_type_data_keys = [
+            k for k in request.type_data if k.upper() not in valid_type_names
+        ]
+        if invalid_type_data_keys:
+            raise ValueError(
+                f"Invalid type_data key(s): {', '.join(invalid_type_data_keys)}. "
+                f"Valid types are: {', '.join(sorted(valid_type_names))}"
+            )
+
+    if request.contact_relationships:
+        _validate_contact_relationships(request.contact_relationships)
+
+    # --- All inputs validated, proceed with DB writes ---
+
     # Create repositories
     repos = _create_journal_tool_repositories(db_connection)
     journal_repo = repos.journal_repo
@@ -2010,17 +2062,8 @@ async def create_journal_entry(
         raise ValueError(msg)
     journal_id = created_journal.id
 
-    # Add types if provided in the request
+    # Add types if provided in the request (already validated upfront)
     if request.types:
-        # Validate all type names before performing any DB operations
-        valid_type_names = {t.name for t in JournalType}
-        invalid_types = [t for t in request.types if t.upper() not in valid_type_names]
-        if invalid_types:
-            raise ValueError(
-                f"Invalid journal type(s): {', '.join(invalid_types)}. "
-                f"Valid types are: {', '.join(sorted(valid_type_names))}"
-            )
-
         for type_str in request.types:
             journal_type = JournalType[type_str.upper()]
 
@@ -2181,6 +2224,32 @@ async def update_journal_entry(
     except Exception as e:
         raise ValueError(f"Invalid journal data: {e}") from e
 
+    # --- Validate ALL inputs upfront BEFORE any DB writes ---
+    valid_type_names = {t.name for t in JournalType}
+
+    if request.types is not None:
+        invalid_types = [t for t in request.types if t.upper() not in valid_type_names]
+        if invalid_types:
+            raise ValueError(
+                f"Invalid journal type(s): {', '.join(invalid_types)}. "
+                f"Valid types are: {', '.join(sorted(valid_type_names))}"
+            )
+
+    if request.type_data is not None:
+        invalid_type_data_keys = [
+            k for k in request.type_data if k.upper() not in valid_type_names
+        ]
+        if invalid_type_data_keys:
+            raise ValueError(
+                f"Invalid type_data key(s): {', '.join(invalid_type_data_keys)}. "
+                f"Valid types are: {', '.join(sorted(valid_type_names))}"
+            )
+
+    if request.contact_relationships is not None:
+        _validate_contact_relationships(request.contact_relationships)
+
+    # --- All inputs validated, proceed with DB writes ---
+
     # Create repositories
     repos = _create_journal_tool_repositories(db_connection)
     journal_repo = repos.journal_repo
@@ -2220,17 +2289,8 @@ async def update_journal_entry(
         existing_journal, changed_fields, db_connection
     )
 
-    # Update types if provided (replace all types)
+    # Update types if provided (replace all types, already validated upfront)
     if request.types is not None:
-        # Validate all type names before performing any DB operations
-        valid_type_names = {t.name for t in JournalType}
-        invalid_types = [t for t in request.types if t.upper() not in valid_type_names]
-        if invalid_types:
-            raise ValueError(
-                f"Invalid journal type(s): {', '.join(invalid_types)}. "
-                f"Valid types are: {', '.join(sorted(valid_type_names))}"
-            )
-
         # Get current types
         current_types, _ = await _fetch_journal_types_and_data(
             journal_id,
@@ -2310,18 +2370,10 @@ async def update_journal_entry(
                     repos.cross_country_skiing_data_repo,
                 )
 
-    # Update type_data if provided (without changing types)
+    # Update type_data if provided (without changing types, already validated upfront)
     elif request.type_data is not None:
         for type_str, type_data_dict in request.type_data.items():
-            try:
-                journal_type = JournalType[type_str.upper()]
-            except KeyError:
-                logger.warning(
-                    "Skipping invalid type in type_data",
-                    type_name=type_str,
-                    journal_id=journal_id,
-                )
-                continue
+            journal_type = JournalType[type_str.upper()]
             await _update_type_specific_data(
                 journal_type,
                 journal_id,
