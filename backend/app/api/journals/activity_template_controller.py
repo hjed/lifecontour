@@ -180,6 +180,14 @@ async def update_template(
             )
         template.pitches = pitches
 
+    try:
+        template.__post_init__()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+
     updated = await repo.save(template)
     resource = ActivityTemplateConverter.to_resource(
         updated, base_url=str(req.base_url)

@@ -3811,7 +3811,7 @@ async def create_template(
         list[dict[str, Any]] | None,
         Field(
             default=None,
-            description="List of pitch objects (must contain pitch_number and height, optionally anchor_location, anchor_type, did_rescue, did_setup)",
+            description="List of pitch objects (must contain pitch_number, optionally height, anchor_location, anchor_type, did_rescue, did_setup)",
         ),
     ] = None,
     user_id: str = mcp_depends(get_current_user_id),

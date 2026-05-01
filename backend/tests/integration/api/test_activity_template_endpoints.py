@@ -62,6 +62,12 @@ class TestActivityTemplateEndpoints:
                         "attributes": {
                             "name": f"Canyon {i}",
                             "template_type": "canyoning",
+                            "pitches": [
+                                {
+                                    "pitch_number": 1,
+                                    "height": 10 + i,
+                                }
+                            ],
                         },
                     }
                 },
@@ -83,6 +89,15 @@ class TestActivityTemplateEndpoints:
 
         data = response.json()
         assert len(data["data"]) == 3
+
+        # Verify pitches are hydrated
+        canyon_templates = [
+            t for t in data["data"] if t["attributes"]["template_type"] == "canyoning"
+        ]
+        assert len(canyon_templates) == 2
+        for t in canyon_templates:
+            assert len(t["attributes"]["pitches"]) == 1
+            assert t["attributes"]["pitches"][0]["pitch_number"] == 1
 
         # Filter by type
         response = await authenticated_client.get("/api/templates?template_type=caving")

@@ -236,7 +236,12 @@ class SqlActivityTemplateRepository(ActivityTemplateRepository):
             )
             result = await self.conn.execute(query, {"user_id": user_id})
 
-        return [self._row_to_entity(row) for row in result.fetchall()]
+        rows = result.fetchall()
+        templates = []
+        for row in rows:
+            pitches = await self._find_pitches_by_template_id(str(row.id))
+            templates.append(self._row_to_entity(row, pitches))
+        return templates
 
     async def search_by_name(
         self, user_id: str, query: str, template_type: str | None = None
@@ -284,7 +289,12 @@ class SqlActivityTemplateRepository(ActivityTemplateRepository):
                 {"user_id": user_id, "search_pattern": search_pattern},
             )
 
-        return [self._row_to_entity(row) for row in result.fetchall()]
+        rows = result.fetchall()
+        templates = []
+        for row in rows:
+            pitches = await self._find_pitches_by_template_id(str(row.id))
+            templates.append(self._row_to_entity(row, pitches))
+        return templates
 
     async def delete(self, template_id: str) -> None:
         """Delete an activity template by ID (pitches cascade-deleted)."""
