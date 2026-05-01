@@ -2,6 +2,7 @@
 Integration API controllers for managing external service integrations.
 
 This module provides REST API endpoints for:
+- Integration registry (pluggable integration listing)
 - Google Contacts synchronization
 - Integration health monitoring
 - Sync job management and status tracking
@@ -17,7 +18,14 @@ from core_shared.repositories.sync_job_repository import SyncJobRepository
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.api.integrations.registry_schemas import (
+    IntegrationAttributes,
+    IntegrationData,
+    IntegrationListResponse,
+    IntegrationSyncSummaryAttributes,
+)
 from app.api.integrations.schemas import (
     ComponentHealthAttributes,
     GoogleCalendarAttributes,
@@ -45,6 +53,7 @@ from app.api.integrations.schemas import (
 from app.core.integrations.database import IntegrationDatabaseManager
 from app.core.integrations.exceptions import JobNotFoundException
 from app.core.integrations.health_service import IntegrationHealthService
+from app.core.integrations.registry.service import IntegrationRegistryService
 from app.core.integrations.task_queue_service import TaskQueueService
 from app.infrastructure.auth.google_token_service import GoogleTokenService
 from app.infrastructure.auth.models import SessionUser
@@ -56,6 +65,75 @@ logger = structlog.get_logger()
 
 # Error message constants
 ERROR_INVALID_JOB_ID_FORMAT = "Invalid job ID format"
+
+
+# ---------------------------------------------------------------------------
+# Integration Registry Endpoint
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "",
+    responses={
+        500: {"description": "An unexpected error occurred"},
+    },
+)
+@inject
+async def list_integrations(
+    user: FromDishka[SessionUser],
+    connection: FromDishka[AsyncConnection],
+    registry_service: FromDishka[IntegrationRegistryService],
+) -> IntegrationListResponse:
+    """
+    List all registered integrations with their current status.
+
+    Returns a JSON API list of integrations, each containing:
+    - ``id``: unique integration identifier (e.g. "google")
+    - ``status``: connection state (connected/disconnected/error/token_expired)
+    - ``capabilities``: what the integration can do (contacts_sync, calendar_sync, …)
+    - ``sync_summary``: last sync time, count, and error count
+    - ``needs_reauth`` / ``needs_reconsent``: whether user action is required
+    """
+    try:
+        integrations = await registry_service.list_integrations(
+            user_id=str(user.id), connection=connection
+        )
+
+        data = [
+            IntegrationData(
+                id=info.id,
+                attributes=IntegrationAttributes(
+                    status=info.status.value,
+                    capabilities=[c.value for c in info.capabilities],
+                    sync_summary=IntegrationSyncSummaryAttributes(
+                        last_sync_time=(
+                            info.sync_summary.last_sync_time.isoformat()
+                            if info.sync_summary.last_sync_time
+                            else None
+                        ),
+                        sync_count=info.sync_summary.sync_count,
+                        error_count=info.sync_summary.error_count,
+                    ),
+                    needs_reauth=info.needs_reauth,
+                    needs_reconsent=info.needs_reconsent,
+                ),
+            )
+            for info in integrations
+        ]
+
+        return IntegrationListResponse(data=data)
+
+    except Exception as e:
+        logger.error(
+            "Failed to list integrations",
+            user_id=user.id,
+            error=str(e),
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred while listing integrations",
+        ) from e
 
 
 def _build_sync_job_data(job: dict[str, Any]) -> SyncJobData:

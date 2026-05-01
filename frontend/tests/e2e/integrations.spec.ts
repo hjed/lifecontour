@@ -179,3 +179,76 @@ test.describe('Integration Management - Authenticated User', () => {
     }
   });
 });
+
+test.describe('Integration Registry API - GET /api/integrations', () => {
+  test('should return a valid JSON API response with data array', async ({
+    authenticatedPage,
+  }) => {
+    const response = await authenticatedPage.request.get('/api/integrations');
+    expect(response.ok()).toBeTruthy();
+
+    const body = await response.json();
+
+    // Root must have "data" key containing an array
+    expect(body).toHaveProperty('data');
+    expect(Array.isArray(body.data)).toBe(true);
+  });
+
+  test('should include Google integration with required fields', async ({
+    authenticatedPage,
+  }) => {
+    const response = await authenticatedPage.request.get('/api/integrations');
+    expect(response.ok()).toBeTruthy();
+
+    const body = await response.json();
+    expect(body.data.length).toBeGreaterThanOrEqual(1);
+
+    // Find the Google entry
+    const google = body.data.find(
+      (entry: { id: string }) => entry.id === 'google'
+    );
+    expect(google).toBeDefined();
+
+    // Verify JSON API type
+    expect(google.type).toBe('integration');
+
+    // Verify all required attributes exist
+    const attrs = google.attributes;
+    expect(attrs).toHaveProperty('status');
+    expect(attrs).toHaveProperty('capabilities');
+    expect(attrs).toHaveProperty('sync_summary');
+    expect(attrs).toHaveProperty('needs_reauth');
+    expect(attrs).toHaveProperty('needs_reconsent');
+
+    // Status must be one of the valid values
+    expect(['connected', 'disconnected', 'error', 'token_expired']).toContain(
+      attrs.status
+    );
+
+    // Capabilities must be an array
+    expect(Array.isArray(attrs.capabilities)).toBe(true);
+    expect(attrs.capabilities.length).toBeGreaterThan(0);
+
+    // Sync summary must have expected shape
+    expect(attrs.sync_summary).toHaveProperty('sync_count');
+    expect(attrs.sync_summary).toHaveProperty('error_count');
+    expect(typeof attrs.sync_summary.sync_count).toBe('number');
+    expect(typeof attrs.sync_summary.error_count).toBe('number');
+  });
+
+  test('should return Google with contacts_sync and calendar_sync capabilities', async ({
+    authenticatedPage,
+  }) => {
+    const response = await authenticatedPage.request.get('/api/integrations');
+    expect(response.ok()).toBeTruthy();
+
+    const body = await response.json();
+    const google = body.data.find(
+      (entry: { id: string }) => entry.id === 'google'
+    );
+    expect(google).toBeDefined();
+
+    expect(google.attributes.capabilities).toContain('contacts_sync');
+    expect(google.attributes.capabilities).toContain('calendar_sync');
+  });
+});

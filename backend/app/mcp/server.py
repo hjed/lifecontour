@@ -17,6 +17,7 @@ from fastmcp.server.auth.middleware import RequireAuthMiddleware
 from starlette.types import Send
 
 from app.mcp.domains.contacts.tools import register_contact_tools
+from app.mcp.domains.integrations.tools import register_integration_tools
 from app.mcp.domains.journals.tools import register_journal_tools
 
 logger = structlog.get_logger()
@@ -136,6 +137,9 @@ def create_mcp_server(auth: AuthProvider | None = None) -> FastMCP[None]:
 
     logger.info("MCP: Registering journal domain tools")
     register_journal_tools(mcp)
+
+    logger.info("MCP: Registering integration domain tools")
+    register_integration_tools(mcp)
 
     # Future domains can be registered here:
     # register_calendar_tools(mcp)

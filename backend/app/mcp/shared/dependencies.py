@@ -143,3 +143,13 @@ async def get_contact_relationship_service() -> ContactRelationshipService:
 async def get_daily_summary_service() -> DailySummaryService:
     """Resolve the daily summary service for the current MCP request."""
     return cast(DailySummaryService, await _resolve_dependency(DailySummaryService))
+
+
+async def get_integration_registry_service() -> Any:
+    """Resolve the integration registry service for the current MCP request."""
+    from app.core.integrations.registry.service import IntegrationRegistryService
+
+    return cast(
+        IntegrationRegistryService,
+        await _resolve_dependency(IntegrationRegistryService),
+    )

@@ -194,23 +194,24 @@ Remove the old `OutboxProcessor._process_single_event` monolithic dispatch, the 
 - [ ] Sync history, health status, and integration-specific settings accessible from each panel
 - [ ] Adding a new integration requires only a registry entry, not page layout changes
 
-#### Phase 1: Backend Integration Registry API and MCP Tool
+#### Phase 1: Backend Integration Registry API and MCP Tool ✅
 **PR Size:** ~5–7 files
 
 Create the integration registry domain model, REST API, and MCP tool. No frontend changes yet.
 
 **Acceptance Criteria:**
-- [ ] `IntegrationRegistryService` with pluggable provider registration
-- [ ] `GoogleIntegrationProvider` implements the registry interface: derives status from OAuth token state and `SyncJob` history
-- [ ] `GET /api/integrations` endpoint returns list of registered integrations
-- [ ] Each integration entry: `id`, `name`, `status` (connected/disconnected/error/token_expired), `capabilities` (list), `sync_summary` (last sync time, count, errors), `needs_reauth`, `needs_reconsent`
-- [ ] `list_integrations` MCP tool returns the same data
-- [ ] Integration provider registration via Dishka DI
-- [ ] `integration-architecture.md` updated: add pluggable integration registry pattern and `GET /api/integrations` API documentation
+- [x] `IntegrationRegistryService` with pluggable provider registration
+- [x] `GoogleIntegrationProvider` implements the registry interface: derives status from OAuth token state and `SyncJob` history
+- [x] `GET /api/integrations` endpoint returns list of registered integrations
+- [x] Each integration entry: `id`, `name`, `status` (connected/disconnected/error/token_expired), `capabilities` (list), `sync_summary` (last sync time, count, errors), `needs_reauth`, `needs_reconsent`
+- [x] `list_integrations` MCP tool returns the same data
+- [x] Integration provider registration via Dishka DI
+- [x] `integration-architecture.md` updated: add pluggable integration registry pattern and `GET /api/integrations` API documentation
 
 **Required Test Coverage:**
 - **Unit:** registry population, status derivation from token/worker state, capability declaration.
 - **Integration:** API endpoint tests with Google connected, disconnected, and token_expired states. MCP tool test.
+- **E2E:** Verify `GET /api/integrations` returns expected structure with Google entry.
 
 #### Phase 2: Shared Panel Components and Google Connection Migration
 **PR Size:** ~6–8 files

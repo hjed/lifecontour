@@ -2,7 +2,8 @@
 Dependency injection provider for integration services.
 
 Provides integration-related dependencies including task queue configuration,
-database managers, and base integration services.
+database managers, base integration services, and the pluggable integration
+registry.
 """
 
 from arq.connections import ArqRedis, RedisSettings
@@ -15,6 +16,8 @@ from app.core.integrations.encryption import EncryptionService
 from app.core.integrations.external_reference_service import ExternalReferenceService
 from app.core.integrations.health_service import IntegrationHealthService
 from app.core.integrations.outbox_event_processor import OutboxEventProcessor
+from app.core.integrations.registry.google_provider import GoogleIntegrationProvider
+from app.core.integrations.registry.service import IntegrationRegistryService
 from app.core.integrations.task_queue import get_redis_pool, get_redis_settings
 from app.core.integrations.task_queue_service import TaskQueueService
 from app.infrastructure.config import Settings
@@ -154,3 +157,30 @@ class IntegrationProvider(Provider):
             RedisSettings: Redis settings for ARQ
         """
         return get_redis_settings(settings)
+
+    # Registry providers
+
+    @provide(scope=Scope.APP)
+    def provide_google_integration_provider(self) -> GoogleIntegrationProvider:
+        """
+        Provide Google integration provider (singleton).
+
+        Returns:
+            GoogleIntegrationProvider: Google status/capability provider
+        """
+        return GoogleIntegrationProvider()
+
+    @provide(scope=Scope.APP)
+    def provide_integration_registry_service(
+        self, google_provider: GoogleIntegrationProvider
+    ) -> IntegrationRegistryService:
+        """
+        Provide integration registry service with all registered providers.
+
+        Args:
+            google_provider: Google integration provider
+
+        Returns:
+            IntegrationRegistryService: Registry aggregating all providers
+        """
+        return IntegrationRegistryService(providers=[google_provider])
