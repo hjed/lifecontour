@@ -547,10 +547,12 @@ The sequence reflects both user priority and technical dependency:
 **PR Size:** ~5-7 files
 
 **Acceptance Criteria:**
-- [ ] Activity/history data distinguishes UI, MCP, sync, and summary-regeneration sources reliably.
-- [ ] Provenance capture is added centrally rather than scattered through ad hoc string values.
-- [ ] No-op exports do not create activity entries.
-- [ ] Existing history retrieval remains backwards-compatible enough for staged UI rollout.
+- [x] Activity/history data distinguishes UI, MCP, sync, and summary-regeneration sources reliably.
+- [x] Provenance capture is added centrally rather than scattered through ad hoc string values.
+- [x] No-op exports do not create activity entries.
+- [x] Existing history retrieval remains backwards-compatible enough for staged UI rollout.
+- [x] Changes align with iter-5 event system.
+- [x] Provenance is captured transactionally with changes to the data.
 
 **Required Test Coverage:**
 - **Unit:** provenance classification, no-op suppression, summary-event shaping helpers.
@@ -559,17 +561,18 @@ The sequence reflects both user priority and technical dependency:
 
 #### Phase 2: Activity API Shape and UI Rendering
 **PR Size:** ~5-7 files
+**Status:** ✅ COMPLETE
 
 **Acceptance Criteria:**
-- [ ] Provenance is displayed with compact icons and hover text.
-- [ ] Summary regeneration appears in the same stream in abbreviated, collapsible form.
-- [ ] Existing pagination/load-more behaviour continues to work.
-- [ ] Mixed activity types remain understandable without adding filter UI in this iteration.
+- [x] Provenance is displayed with compact icons and hover text.
+- [x] Summary regeneration appears in the same stream in abbreviated, collapsible form.
+- [x] Existing pagination/load-more behaviour continues to work.
+- [x] Mixed activity types remain understandable without adding filter UI in this iteration.
 
 **Required Test Coverage:**
-- **Unit:** activity-item rendering helpers and collapse-state logic.
-- **Integration:** API payload tests for provenance-rich history responses.
-- **E2E:** contact activity feed scenario covering icons, hover text, and collapsed summary entries.
+- **Unit:** activity-item rendering helpers and collapse-state logic. ✅
+- **Integration:** API payload tests for provenance-rich history responses. ✅
+- **E2E:** contact activity feed scenario covering icons, hover text, and collapsed summary entries. ✅
 
 #### Phase 3: Mixed-Source Regression and Sync Visibility
 **PR Size:** ~4-6 files

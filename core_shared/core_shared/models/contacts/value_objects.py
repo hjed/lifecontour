@@ -2,6 +2,18 @@
 
 import re
 from dataclasses import dataclass
+from enum import StrEnum
+
+
+class Provenance(StrEnum):
+    """Source of a contact data change."""
+
+    UI = "ui"
+    MCP = "mcp"
+    GOOGLE_CONTACTS = "google_contacts"
+    STRAVA = "strava"
+    SUMMARY_REGENERATION = "summary_regeneration"
+    SYSTEM = "system"
 
 
 @dataclass(frozen=True)

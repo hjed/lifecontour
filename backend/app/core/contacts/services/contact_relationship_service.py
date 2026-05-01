@@ -2,6 +2,7 @@
 
 from core_shared.models.contacts.entities import ContactRelationship, RelationshipType
 from core_shared.models.contacts.exceptions import ContactValidationError
+from core_shared.models.contacts.value_objects import Provenance
 
 from app.core.contacts.models.events import (
     ContactRelationshipCreated,
@@ -16,6 +17,7 @@ from app.core.contacts.models.repositories import (
     ContactRelationshipRepository,
     ContactRepository,
 )
+from app.core.contacts.services.contact_history_service import ContactHistoryService
 
 
 class ContactRelationshipService:
@@ -26,10 +28,12 @@ class ContactRelationshipService:
         contact_repo: ContactRepository,
         relationship_repo: ContactRelationshipRepository,
         event_publisher: ContactEventPublisher,
+        history_service: ContactHistoryService,
     ):
         self.contact_repo = contact_repo
         self.relationship_repo = relationship_repo
         self.event_publisher = event_publisher
+        self.history_service = history_service
 
     async def create_relationship(
         self,
@@ -39,6 +43,8 @@ class ContactRelationshipService:
         create_bidirectional: bool = False,
         *,
         to_user: bool = False,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> ContactRelationship | list[ContactRelationship]:
         """
         Create a new relationship between contacts or from a contact to the user.
@@ -96,6 +102,17 @@ class ContactRelationshipService:
                     to_user=created.to_user,
                 )
             )
+
+            await self.history_service.record_relationship_change(
+                created.id,
+                {
+                    "status": (None, "created"),
+                    "relationship_type": (None, created.relationship_type.value),
+                },
+                changed_by=changed_by,
+                source=source,
+            )
+
             return created
         else:
             # Contact-to-contact relationship
@@ -140,6 +157,19 @@ class ContactRelationshipService:
                 )
             )
 
+            await self.history_service.record_relationship_change(
+                created_relationship.id,
+                {
+                    "status": (None, "created"),
+                    "relationship_type": (
+                        None,
+                        created_relationship.relationship_type.value,
+                    ),
+                },
+                changed_by=changed_by,
+                source=source,
+            )
+
             # Create bidirectional relationship if requested
             if create_bidirectional:
                 inverse_relationship = ContactRelationship(
@@ -165,6 +195,20 @@ class ContactRelationshipService:
                         to_user=created_inverse.to_user,
                     )
                 )
+
+                await self.history_service.record_relationship_change(
+                    created_inverse.id,
+                    {
+                        "status": (None, "created"),
+                        "relationship_type": (
+                            None,
+                            created_inverse.relationship_type.value,
+                        ),
+                    },
+                    changed_by=changed_by,
+                    source=source,
+                )
+
                 return [created_relationship, created_inverse]
 
             return created_relationship
@@ -215,6 +259,8 @@ class ContactRelationshipService:
         self,
         relationship_id: int,
         relationship_type: RelationshipType,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> ContactRelationship:
         """
         Update an existing relationship.
@@ -264,11 +310,26 @@ class ContactRelationshipService:
             )
         )
 
+        if updated.relationship_type != existing_relationship.relationship_type:
+            await self.history_service.record_relationship_change(
+                updated.id,
+                {
+                    "relationship_type": (
+                        existing_relationship.relationship_type.value,
+                        updated.relationship_type.value,
+                    )
+                },
+                changed_by=changed_by,
+                source=source,
+            )
+
         return updated
 
     async def delete_relationship(
         self,
         relationship_id: int,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> None:
         """
         Delete a relationship.
@@ -303,9 +364,18 @@ class ContactRelationshipService:
             )
         )
 
+        await self.history_service.record_relationship_change(
+            existing_relationship.id,
+            {"status": ("active", "deleted")},
+            changed_by=changed_by,
+            source=source,
+        )
+
     async def delete_all_relationships_for_contact(
         self,
         contact_id: int,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> None:
         """
         Delete all relationships for a contact.
@@ -325,6 +395,13 @@ class ContactRelationshipService:
                         relationship_type=relationship.relationship_type.value,
                         to_user=relationship.to_user,
                     )
+                )
+
+                await self.history_service.record_relationship_change(
+                    relationship.id,
+                    {"status": ("active", "deleted")},
+                    changed_by=changed_by,
+                    source=source,
                 )
 
     async def get_relationship_by_id(

@@ -2,7 +2,7 @@
  * Tests for ActivityItem component.
  */
 
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import {
   ActivityItem,
   formatFieldName,
@@ -10,6 +10,7 @@ import {
   formatActivityDescription,
 } from '../ActivityItem';
 import type { ContactHistoryResource } from '@/types/contacts';
+import { TooltipProvider } from '@/components/ui/tooltip';
 
 // Mock date-fns to have consistent time output
 jest.mock('date-fns', () => ({
@@ -31,12 +32,17 @@ describe('ActivityItem', () => {
       old_value: 'John',
       new_value: 'Jane',
       changed_by: 'user@example.com',
+      source: 'ui',
       created_at: '2024-01-15T10:30:00Z',
     },
   };
 
   it('renders activity item with correct structure', () => {
-    render(<ActivityItem activity={baseActivity} />);
+    render(
+      <TooltipProvider>
+        <ActivityItem activity={baseActivity} />
+      </TooltipProvider>
+    );
 
     expect(screen.getByTestId('activity-item-1')).toBeInTheDocument();
     expect(screen.getByText(/Changed First Name/i)).toBeInTheDocument();
@@ -44,7 +50,11 @@ describe('ActivityItem', () => {
   });
 
   it('displays update activity correctly', () => {
-    render(<ActivityItem activity={baseActivity} />);
+    render(
+      <TooltipProvider>
+        <ActivityItem activity={baseActivity} />
+      </TooltipProvider>
+    );
 
     expect(
       screen.getByText(/Changed First Name from "John" to "Jane"/i)
@@ -62,7 +72,11 @@ describe('ActivityItem', () => {
       },
     };
 
-    render(<ActivityItem activity={createActivity} />);
+    render(
+      <TooltipProvider>
+        <ActivityItem activity={createActivity} />
+      </TooltipProvider>
+    );
 
     expect(screen.getByText(/Added Nick Name: "JD"/i)).toBeInTheDocument();
   });
@@ -78,16 +92,54 @@ describe('ActivityItem', () => {
       },
     };
 
-    render(<ActivityItem activity={deleteActivity} />);
+    render(
+      <TooltipProvider>
+        <ActivityItem activity={deleteActivity} />
+      </TooltipProvider>
+    );
 
     expect(screen.getByText(/Removed Last Name/i)).toBeInTheDocument();
   });
 
   it('applies custom className', () => {
-    render(<ActivityItem activity={baseActivity} className='custom-class' />);
+    render(
+      <TooltipProvider>
+        <ActivityItem activity={baseActivity} className='custom-class' />
+      </TooltipProvider>
+    );
 
     const item = screen.getByTestId('activity-item-1');
     expect(item).toHaveClass('custom-class');
+  });
+
+  it('renders summary regeneration abbreviated and collapsible', () => {
+    const summaryActivity: ContactHistoryResource = {
+      ...baseActivity,
+      attributes: {
+        ...baseActivity.attributes,
+        field_name: 'summary_text',
+        source: 'summary_regeneration',
+        old_value: 'Old text',
+        new_value: 'New summarized text',
+      },
+    };
+
+    render(
+      <TooltipProvider>
+        <ActivityItem activity={summaryActivity} />
+      </TooltipProvider>
+    );
+
+    expect(screen.getByText('AI Summary Regenerated')).toBeInTheDocument();
+
+    // initially hidden
+    expect(screen.queryByText('New summarized text')).not.toBeInTheDocument();
+
+    // click expand
+    const expandButton = screen.getByRole('button', { name: /expand/i });
+    fireEvent.click(expandButton);
+
+    expect(screen.getByText('New summarized text')).toBeInTheDocument();
   });
 });
 

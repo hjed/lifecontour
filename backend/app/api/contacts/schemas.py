@@ -562,6 +562,7 @@ class ContactHistoryAttributes(BaseModel):
     changed_by: str | None = Field(
         default=None, description="User or system that made the change"
     )
+    source: str = Field(default="system", description="Provenance source of the change")
     created_at: datetime | None = Field(
         default=None, description="Timestamp when the change was recorded"
     )

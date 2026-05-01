@@ -14,6 +14,7 @@ import { useCallback, useReducer, useEffect } from 'react';
 import { Clock, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { useContactHistory } from '@/lib/api/contacts';
 import { ActivityItem } from './ActivityItem';
 import type { ContactHistoryResource } from '@/types/contacts';
@@ -178,32 +179,34 @@ export function ActivityFeed({
 
         {/* Activity list */}
         {!isLoading && !error && state.activities.length > 0 && (
-          <div className='space-y-1'>
-            {state.activities.map(activity => (
-              <ActivityItem key={activity.id} activity={activity} />
-            ))}
+          <TooltipProvider>
+            <div className='space-y-1'>
+              {state.activities.map(activity => (
+                <ActivityItem key={activity.id} activity={activity} />
+              ))}
 
-            {/* Load More button */}
-            {hasMore && (
-              <div className='pt-4 text-center'>
-                <Button
-                  variant='outline'
-                  size='sm'
-                  onClick={handleLoadMore}
-                  disabled={isFetching}
-                >
-                  {isFetching ? (
-                    <>
-                      <Loader2 className='mr-2 h-4 w-4 animate-spin' />
-                      Loading...
-                    </>
-                  ) : (
-                    'Load More'
-                  )}
-                </Button>
-              </div>
-            )}
-          </div>
+              {/* Load More button */}
+              {hasMore && (
+                <div className='pt-4 text-center'>
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    onClick={handleLoadMore}
+                    disabled={isFetching}
+                  >
+                    {isFetching ? (
+                      <>
+                        <Loader2 className='mr-2 h-4 w-4 animate-spin' />
+                        Loading...
+                      </>
+                    ) : (
+                      'Load More'
+                    )}
+                  </Button>
+                </div>
+              )}
+            </div>
+          </TooltipProvider>
         )}
       </CardContent>
     </Card>

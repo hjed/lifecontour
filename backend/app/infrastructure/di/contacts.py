@@ -135,9 +135,10 @@ class ContactProvider(Provider):
         contact_repo: ContactRepository,
         relationship_repo: ContactRelationshipRepository,
         event_publisher: ContactEventPublisher,
+        history_service: ContactHistoryService,
     ) -> ContactRelationshipService:
         return ContactRelationshipService(
-            contact_repo, relationship_repo, event_publisher
+            contact_repo, relationship_repo, event_publisher, history_service
         )
 
     # Main contact service
