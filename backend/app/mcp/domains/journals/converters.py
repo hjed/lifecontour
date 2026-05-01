@@ -9,9 +9,12 @@ from datetime import datetime
 from typing import Any
 
 from core_shared.models.journals import Calendar, Journal
+from core_shared.models.journals.activity_template import ActivityTemplate
 
 from app.core.journal.models.journal_tag import JournalTag
 from app.mcp.domains.journals.schemas import (
+    ActivityTemplateListMCPResponse,
+    ActivityTemplateMCPResponse,
     CalendarSchema,
     ContactRelationshipSchema,
     ContactRelationshipSummary,
@@ -19,6 +22,7 @@ from app.mcp.domains.journals.schemas import (
     JournalChildSummary,
     JournalResponse,
     JournalSearchResult,
+    TemplatePitchMCPSchema,
 )
 
 
@@ -224,5 +228,67 @@ class JournalConverter:
             types=types,
             tags=tags,
             highlighted=highlighted,
+            summary=summary,
+        )
+
+
+class ActivityTemplateMCPConverter:
+    """Converter for activity template entities to AI-friendly MCP formats."""
+
+    @staticmethod
+    def to_mcp_response(template: ActivityTemplate) -> ActivityTemplateMCPResponse:
+        """Convert a template entity to an MCP response."""
+        pitches = []
+        if template.pitches:
+            for p in template.pitches:
+                pitches.append(
+                    TemplatePitchMCPSchema(
+                        pitch_number=p.pitch_number,
+                        height=p.height or 0,
+                        anchor_location=p.anchor_location,
+                        anchor_type=p.anchor_type,
+                        did_rescue=p.did_rescue or False,
+                        did_setup=p.did_setup or False,
+                    )
+                )
+
+        # Build AI-friendly summary
+        summary = f"Template: {template.name} ({template.template_type})"
+        if template.region:
+            summary += f" in {template.region}"
+        if template.pitches:
+            summary += f" with {len(template.pitches)} pitches"
+
+        return ActivityTemplateMCPResponse(
+            id=str(template.id),
+            name=template.name,
+            template_type=template.template_type,
+            region=template.region,
+            description=template.description,
+            french_grade=template.french_grade,
+            canyon_type=template.canyon_type,
+            water_gauge_name=template.water_gauge_name,
+            is_vertical=template.is_vertical,
+            is_horizontal=template.is_horizontal,
+            climbing_type=template.climbing_type,
+            grade=template.grade,
+            length=template.length,
+            pitches=pitches,
+            summary=summary,
+        )
+
+    @staticmethod
+    def to_mcp_list_response(
+        templates: list[ActivityTemplate],
+    ) -> ActivityTemplateListMCPResponse:
+        """Convert a list of templates to an MCP list response."""
+        mcp_templates = [
+            ActivityTemplateMCPConverter.to_mcp_response(t) for t in templates
+        ]
+
+        summary = f"Found {len(templates)} templates."
+
+        return ActivityTemplateListMCPResponse(
+            templates=mcp_templates,
             summary=summary,
         )

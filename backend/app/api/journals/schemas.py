@@ -288,6 +288,10 @@ class AbseilingDataSchema(BaseModel):
 class CanyoningDataSchema(BaseModel):
     """Canyoning data for CANYONING type journals."""
 
+    template_id: str | None = Field(
+        default=None,
+        description="ID of the activity template",
+    )
     french_grade: str | None = Field(
         default=None,
         description="French canyoning grade (e.g. v3a2IV**)",
@@ -958,5 +962,122 @@ class CalendarResponse(JsonApiResponse[CalendarResource]):
 
 class CalendarListResponse(JsonApiCollectionResponse[CalendarResource]):
     """Response model for a list of calendars."""
+
+    pass
+
+
+# Activity Template Schemas
+class ActivityTemplateAttributes(BaseModel):
+    """Attributes for an ActivityTemplate."""
+
+    name: str = Field(..., description="Template name")
+    template_type: str = Field(
+        ..., description="Type of template (canyoning, climbing, etc)"
+    )
+    region: str | None = Field(default=None, description="Region")
+    description: str | None = Field(default=None, description="Description")
+    french_grade: str | None = Field(default=None, description="French grade")
+    canyon_type: str | None = Field(default=None, description="Canyon type")
+    water_gauge_name: str | None = Field(default=None, description="Water gauge name")
+    is_vertical: bool | None = Field(default=None, description="Is vertical")
+    is_horizontal: bool | None = Field(default=None, description="Is horizontal")
+    climbing_type: str | None = Field(default=None, description="Climbing type")
+    grade: int | None = Field(default=None, description="Grade")
+    length: int | None = Field(default=None, description="Length in metres")
+    pitches: list[AbseilPitchSchema] = Field(
+        default_factory=list, description="Template pitches"
+    )
+    created_at: datetime | None = Field(default=None, description="Creation timestamp")
+    updated_at: datetime | None = Field(
+        default=None, description="Last update timestamp"
+    )
+
+
+class ActivityTemplateResource(BaseModel):
+    """JSON API resource for an activity template."""
+
+    type: str = Field(default="activity-templates", description=RESOURCE_TYPE_DESC)
+    id: str = Field(..., description=RESOURCE_ID_DESC)
+    attributes: ActivityTemplateAttributes = Field(
+        ..., description="Template attributes"
+    )
+    links: JsonApiLinks | None = Field(default=None, description=RESOURCE_LINKS_DESC)
+
+
+class ActivityTemplateCreateAttributes(BaseModel):
+    """Attributes for creating an activity template."""
+
+    name: str = Field(..., description="Template name")
+    template_type: str = Field(..., description="Type of template")
+    region: str | None = Field(default=None, description="Region")
+    description: str | None = Field(default=None, description="Description")
+    french_grade: str | None = Field(default=None, description="French grade")
+    canyon_type: str | None = Field(default=None, description="Canyon type")
+    water_gauge_name: str | None = Field(default=None, description="Water gauge name")
+    is_vertical: bool | None = Field(default=None, description="Is vertical")
+    is_horizontal: bool | None = Field(default=None, description="Is horizontal")
+    climbing_type: str | None = Field(default=None, description="Climbing type")
+    grade: int | None = Field(default=None, description="Grade")
+    length: int | None = Field(default=None, description="Length in metres")
+    pitches: list[AbseilPitchSchema] | None = Field(
+        default=None, description="Template pitches"
+    )
+
+
+class ActivityTemplateCreateData(BaseModel):
+    """Data for creating an activity template."""
+
+    type: str = Field(default="activity-templates", description=RESOURCE_TYPE_DESC)
+    attributes: ActivityTemplateCreateAttributes
+
+
+class ActivityTemplateCreateRequest(JsonApiCreateRequest[ActivityTemplateCreateData]):
+    """Request to create an activity template."""
+
+    pass
+
+
+class ActivityTemplateUpdateAttributes(BaseModel):
+    """Attributes for updating an activity template."""
+
+    name: str | None = Field(default=None, description="Template name")
+    template_type: str | None = Field(default=None, description="Type of template")
+    region: str | None = Field(default=None, description="Region")
+    description: str | None = Field(default=None, description="Description")
+    french_grade: str | None = Field(default=None, description="French grade")
+    canyon_type: str | None = Field(default=None, description="Canyon type")
+    water_gauge_name: str | None = Field(default=None, description="Water gauge name")
+    is_vertical: bool | None = Field(default=None, description="Is vertical")
+    is_horizontal: bool | None = Field(default=None, description="Is horizontal")
+    climbing_type: str | None = Field(default=None, description="Climbing type")
+    grade: int | None = Field(default=None, description="Grade")
+    length: int | None = Field(default=None, description="Length in metres")
+    pitches: list[AbseilPitchSchema] | None = Field(
+        default=None, description="Template pitches"
+    )
+
+
+class ActivityTemplateUpdateData(BaseModel):
+    """Data for updating an activity template."""
+
+    type: str = Field(default="activity-templates", description=RESOURCE_TYPE_DESC)
+    id: str = Field(..., description=RESOURCE_ID_DESC)
+    attributes: ActivityTemplateUpdateAttributes
+
+
+class ActivityTemplateUpdateRequest(JsonApiUpdateRequest[ActivityTemplateUpdateData]):
+    """Request to update an activity template."""
+
+    pass
+
+
+class ActivityTemplateResponse(JsonApiResponse[ActivityTemplateResource]):
+    """Response containing a single activity template."""
+
+    pass
+
+
+class ActivityTemplateListResponse(JsonApiCollectionResponse[ActivityTemplateResource]):
+    """Response containing multiple activity templates."""
 
     pass

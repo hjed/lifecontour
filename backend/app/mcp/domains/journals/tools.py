@@ -15,6 +15,7 @@ from uuid import UUID
 import structlog
 from core_shared.models.journals import (
     AbseilingData,
+    ActivityTemplate,
     BushwalkingData,
     Calendar,
     CalendarInfo,
@@ -34,6 +35,7 @@ from core_shared.models.journals import (
     OutdoorActivityData,
     PhotoAlbumData,
     PlanData,
+    TemplatePitch,
     TravelData,
 )
 from fastmcp import FastMCP
@@ -44,6 +46,9 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
 from app.core.journal.adapters.sql.abseiling_data_repository import (
     SqlAbseilingDataRepository,
+)
+from app.core.journal.adapters.sql.activity_template_repository import (
+    SqlActivityTemplateRepository,
 )
 from app.core.journal.adapters.sql.bushwalking_data_repository import (
     SqlBushwalkingDataRepository,
@@ -92,7 +97,10 @@ from app.core.journal.services.hierarchy_service import HierarchyNode, Hierarchy
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_service import JournalService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
-from app.mcp.domains.journals.converters import JournalConverter
+from app.mcp.domains.journals.converters import (
+    ActivityTemplateMCPConverter,
+    JournalConverter,
+)
 from app.mcp.domains.journals.schemas import (
     ActivityPersonalRecord,
     ActivityStatsResponse,
@@ -153,6 +161,7 @@ class _JournalToolRepositories:
     contact_relationship_repo: SqlJournalContactRelationshipRepository
     contact_repo: SqlContactRepository
     tag_repo: SqlJournalTagRepository
+    activity_template_repo: SqlActivityTemplateRepository
 
 
 @dataclasses.dataclass(frozen=True)
@@ -209,6 +218,7 @@ def _create_journal_tool_repositories(
         ),
         contact_repo=SqlContactRepository(db_connection),
         tag_repo=SqlJournalTagRepository(db_connection),
+        activity_template_repo=SqlActivityTemplateRepository(db_connection),
     )
 
 
@@ -4025,6 +4035,259 @@ async def get_daily_summary(
     return MCPResponseBuilder.success_response(response)
 
 
+@mcp_unified_error_handler("create_template", "journal")
+async def create_template(
+    name: Annotated[str, Field(description="Template name")],
+    template_type: Annotated[
+        str, Field(description="Type of template (canyoning, climbing, etc)")
+    ],
+    region: Annotated[str | None, Field(default=None, description="Region")] = None,
+    description: Annotated[
+        str | None, Field(default=None, description="Description")
+    ] = None,
+    french_grade: Annotated[
+        str | None, Field(default=None, description="French grade")
+    ] = None,
+    canyon_type: Annotated[
+        str | None,
+        Field(default=None, description="Canyon type (vertical, horizontal, etc)"),
+    ] = None,
+    water_gauge_name: Annotated[
+        str | None, Field(default=None, description="Water gauge name")
+    ] = None,
+    is_vertical: Annotated[
+        bool | None, Field(default=None, description="Is vertical")
+    ] = None,
+    is_horizontal: Annotated[
+        bool | None, Field(default=None, description="Is horizontal")
+    ] = None,
+    climbing_type: Annotated[
+        str | None, Field(default=None, description="Climbing type")
+    ] = None,
+    grade: Annotated[int | None, Field(default=None, description="Grade")] = None,
+    length: Annotated[
+        int | None, Field(default=None, description="Length in metres")
+    ] = None,
+    pitches: Annotated[
+        list[dict[str, Any]] | None,
+        Field(
+            default=None,
+            description="List of pitch objects (must contain pitch_number, optionally height, anchor_location, anchor_type, did_rescue, did_setup)",
+        ),
+    ] = None,
+    user_id: str = mcp_depends(get_current_user_id),
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+) -> str:
+    """
+    Create a new activity template.
+    """
+    repos = _create_journal_tool_repositories(db_connection)
+
+    import uuid
+
+    template_id = str(uuid.uuid4())
+    pitch_entities: list[TemplatePitch] = []
+    if pitches:
+        for p in pitches:
+            if "pitch_number" not in p:
+                raise ValueError("pitch_number is required for all pitches")
+            pitch_entities.append(
+                TemplatePitch(
+                    template_id=template_id,
+                    pitch_number=p["pitch_number"],
+                    height=p.get("height"),
+                    anchor_location=p.get("anchor_location"),
+                    anchor_type=p.get("anchor_type"),
+                    did_rescue=p.get("did_rescue"),
+                    did_setup=p.get("did_setup"),
+                )
+            )
+
+    template = ActivityTemplate(
+        id=template_id,
+        user_id=user_id,
+        name=name,
+        template_type=template_type,
+        region=region,
+        description=description,
+        french_grade=french_grade,
+        canyon_type=canyon_type,
+        water_gauge_name=water_gauge_name,
+        is_vertical=is_vertical,
+        is_horizontal=is_horizontal,
+        climbing_type=climbing_type,
+        grade=grade,
+        length=length,
+        pitches=pitch_entities,
+    )
+
+    saved_template = await repos.activity_template_repo.save(template)
+
+    response = ActivityTemplateMCPConverter.to_mcp_response(saved_template)
+    return MCPResponseBuilder.success_response(response)
+
+
+@mcp_unified_error_handler("get_template", "journal")
+async def get_template(
+    template_id: Annotated[str, Field(description="Template UUID")],
+    user_id: str = mcp_depends(get_current_user_id),
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+) -> str:
+    """
+    Get a specific activity template by ID.
+    """
+    repos = _create_journal_tool_repositories(db_connection)
+
+    try:
+        import uuid
+
+        uuid.UUID(template_id)
+        template = await repos.activity_template_repo.find_by_id(template_id)
+        if not template or template.user_id != user_id:
+            return MCPResponseBuilder.not_found_error_response("Template", template_id)
+
+        response = ActivityTemplateMCPConverter.to_mcp_response(template)
+        return MCPResponseBuilder.success_response(response)
+    except ValueError:
+        return MCPResponseBuilder.validation_error_response(
+            "template_id", "Invalid UUID"
+        )
+
+
+@mcp_unified_error_handler("search_templates", "journal")
+async def search_templates(
+    template_type: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Optional type of template (e.g. canyoning, climbing) to filter by",
+        ),
+    ] = None,
+    user_id: str = mcp_depends(get_current_user_id),
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+) -> str:
+    """
+    Search activity templates for the user.
+    """
+    repos = _create_journal_tool_repositories(db_connection)
+
+    templates = await repos.activity_template_repo.find_by_user(user_id)
+
+    if template_type:
+        templates = [t for t in templates if t.template_type == template_type]
+
+    response = ActivityTemplateMCPConverter.to_mcp_list_response(templates)
+    return MCPResponseBuilder.success_response(response)
+
+
+@mcp_unified_error_handler("update_template", "journal")
+async def update_template(
+    template_id: Annotated[str, Field(description="Template UUID")],
+    name: Annotated[
+        str | None, Field(default=None, description="Template name")
+    ] = None,
+    region: Annotated[str | None, Field(default=None, description="Region")] = None,
+    description: Annotated[
+        str | None, Field(default=None, description="Description")
+    ] = None,
+    french_grade: Annotated[
+        str | None, Field(default=None, description="French grade")
+    ] = None,
+    canyon_type: Annotated[
+        str | None, Field(default=None, description="Canyon type")
+    ] = None,
+    water_gauge_name: Annotated[
+        str | None, Field(default=None, description="Water gauge name")
+    ] = None,
+    is_vertical: Annotated[
+        bool | None, Field(default=None, description="Is vertical")
+    ] = None,
+    is_horizontal: Annotated[
+        bool | None, Field(default=None, description="Is horizontal")
+    ] = None,
+    climbing_type: Annotated[
+        str | None, Field(default=None, description="Climbing type")
+    ] = None,
+    grade: Annotated[int | None, Field(default=None, description="Grade")] = None,
+    length: Annotated[
+        int | None, Field(default=None, description="Length in metres")
+    ] = None,
+    pitches: Annotated[
+        list[dict[str, Any]] | None,
+        Field(default=None, description="List of pitch objects"),
+    ] = None,
+    user_id: str = mcp_depends(get_current_user_id),
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+) -> str:
+    """
+    Update an existing activity template.
+    """
+    repos = _create_journal_tool_repositories(db_connection)
+
+    try:
+        import uuid
+
+        uuid.UUID(template_id)
+        template = await repos.activity_template_repo.find_by_id(template_id)
+        if not template or template.user_id != user_id:
+            return MCPResponseBuilder.not_found_error_response("Template", template_id)
+
+        if name is not None:
+            template.name = name
+        if region is not None:
+            template.region = region
+        if description is not None:
+            template.description = description
+        if french_grade is not None:
+            template.french_grade = french_grade
+        if canyon_type is not None:
+            template.canyon_type = canyon_type
+        if water_gauge_name is not None:
+            template.water_gauge_name = water_gauge_name
+        if is_vertical is not None:
+            template.is_vertical = is_vertical
+        if is_horizontal is not None:
+            template.is_horizontal = is_horizontal
+        if climbing_type is not None:
+            template.climbing_type = climbing_type
+        if grade is not None:
+            template.grade = grade
+        if length is not None:
+            template.length = length
+
+        if pitches is not None:
+            pitch_entities: list[TemplatePitch] = []
+            for p in pitches:
+                if "pitch_number" not in p:
+                    raise ValueError("pitch_number is required for all pitches")
+                pitch_entities.append(
+                    TemplatePitch(
+                        template_id=str(template.id),
+                        pitch_number=p["pitch_number"],
+                        height=p.get("height"),
+                        anchor_location=p.get("anchor_location"),
+                        anchor_type=p.get("anchor_type"),
+                        did_rescue=p.get("did_rescue"),
+                        did_setup=p.get("did_setup"),
+                    )
+                )
+            template.pitches = pitch_entities
+
+        try:
+            template.__post_init__()
+        except Exception as e:
+            return MCPResponseBuilder.validation_error_response("template", str(e))
+
+        saved_template = await repos.activity_template_repo.save(template)
+
+        response = ActivityTemplateMCPConverter.to_mcp_response(saved_template)
+        return MCPResponseBuilder.success_response(response)
+    except ValueError:
+        return MCPResponseBuilder.validation_error_response(
+            "template_id", "Invalid UUID"
+        )
+
+
 def register_journal_tools(mcp: FastMCP[None]) -> None:
     """
     Register journal-related MCP tools with the FastMCP server.
@@ -4052,3 +4315,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
     mcp.add_tool(list_review_items)
     mcp.add_tool(dismiss_review_item)
     mcp.add_tool(get_daily_summary)
+    mcp.add_tool(create_template)
+    mcp.add_tool(get_template)
+    mcp.add_tool(search_templates)
+    mcp.add_tool(update_template)

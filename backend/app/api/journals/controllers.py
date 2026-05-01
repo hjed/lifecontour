@@ -3259,6 +3259,10 @@ async def _update_canyoning_type_data(
     updates: dict[str, Any] = {}
     if "route_id" in attrs:
         updates["route_id"] = _parse_optional_uuid(attrs["route_id"], "route_id")
+    if "template_id" in attrs:
+        updates["template_id"] = _parse_optional_uuid(
+            attrs["template_id"], "template_id"
+        )
     if "french_grade" in attrs:
         if not isinstance(attrs["french_grade"], str):
             raise JournalValidationError("french_grade", "Must be a string")

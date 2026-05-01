@@ -158,12 +158,12 @@ Create the template entity, migration, and repository. No API or UI yet.
 Expose templates through REST API and MCP. Add `template_id` to canyoning API flow.
 
 **Acceptance Criteria:**
-- [ ] Template CRUD API endpoints: `GET /api/templates`, `POST /api/templates`, `GET /api/templates/{id}`, `PUT /api/templates/{id}`, `DELETE /api/templates/{id}`
-- [ ] Template search/filter by name and template_type
-- [ ] Template responses include nested pitches
-- [ ] `template_id` field added to `CanyoningDataSchema` and wired through converters/controllers
-- [ ] MCP tools: `create_template`, `search_templates`, `get_template`, `update_template`
-- [ ] Template DI registration in provider
+- [x] Template CRUD API endpoints: `GET /api/templates`, `POST /api/templates`, `GET /api/templates/{id}`, `PUT /api/templates/{id}`, `DELETE /api/templates/{id}`
+- [x] Template search/filter by name and template_type
+- [x] Template responses include nested pitches
+- [x] `template_id` field added to `CanyoningDataSchema` and wired through converters/controllers
+- [x] MCP tools: `create_template`, `search_templates`, `get_template`, `update_template`
+- [x] Template DI registration in provider
 
 **Required Test Coverage:**
 - **Unit:** template schema validation, converter logic.

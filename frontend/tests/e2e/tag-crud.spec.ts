@@ -26,12 +26,26 @@ test.describe('Tag CRUD UI Updates', () => {
       const tagId = tagData.data.id;
       cleanupTagId = tagId;
 
+      // Helper to open sidebar on mobile
+      const ensureSidebarVisible = async () => {
+        const hamburgerButton = authenticatedPage.locator(
+          'button[aria-label*="menu"], button[aria-label*="navigation"]'
+        );
+        if (
+          (await hamburgerButton.count()) > 0 &&
+          (await hamburgerButton.first().isVisible())
+        ) {
+          await hamburgerButton.first().click();
+        }
+      };
+
       // Reload page and poll until it appears in sidebar to handle caching/latency
       const tagLink = authenticatedPage.locator(
         `a[href*="/contacts?tag=${tagId}"]`
       );
       await expect(async () => {
         await authenticatedPage.reload();
+        await ensureSidebarVisible();
         await expect(tagLink).toBeVisible();
         await expect(tagLink).toHaveText(new RegExp(tagName, 'i'));
       }).toPass({ timeout: 15000 });
@@ -56,6 +70,7 @@ test.describe('Tag CRUD UI Updates', () => {
       // Reload page and poll until the new text appears
       await expect(async () => {
         await authenticatedPage.reload();
+        await ensureSidebarVisible();
         await expect(tagLink).toBeVisible();
         await expect(tagLink).toHaveText(new RegExp(newTagName, 'i'));
       }).toPass({ timeout: 15000 });
@@ -70,6 +85,7 @@ test.describe('Tag CRUD UI Updates', () => {
       // Reload page and poll until it disappears
       await expect(async () => {
         await authenticatedPage.reload();
+        await ensureSidebarVisible();
         await expect(tagLink).not.toBeVisible();
       }).toPass({ timeout: 15000 });
     } finally {
