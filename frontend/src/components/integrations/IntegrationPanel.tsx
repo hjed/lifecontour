@@ -47,7 +47,14 @@ export function IntegrationPanel({ integration }: IntegrationPanelProps) {
     needs_reconsent,
   } = attributes;
 
-  const connected = status !== 'disconnected';
+  const connected = status === 'connected';
+
+  const formatCapability = (cap: string) =>
+    cap
+      .replace('_sync', '')
+      .split('_')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
 
   return (
     <Card className='mb-6' data-testid={`integration-panel-${id}`}>
@@ -62,7 +69,7 @@ export function IntegrationPanel({ integration }: IntegrationPanelProps) {
                 variant='outline'
                 className='text-xs font-normal'
               >
-                {cap}
+                {formatCapability(cap)}
               </Badge>
             ))}
           </div>

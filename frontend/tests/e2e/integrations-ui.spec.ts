@@ -46,7 +46,7 @@ test.describe('Integrations Page UI (mocked API)', () => {
               attributes: {
                 name: 'Google',
                 status: 'disconnected',
-                capabilities: ['contacts', 'calendar'],
+                capabilities: ['contacts_sync', 'calendar_sync'],
                 sync_summary: {
                   last_sync_time: null,
                   sync_count: 0,
@@ -125,7 +125,7 @@ test.describe('Integrations Page UI (mocked API)', () => {
               attributes: {
                 name: 'Google',
                 status: connected ? 'connected' : 'disconnected',
-                capabilities: ['contacts', 'calendar'],
+                capabilities: ['contacts_sync', 'calendar_sync'],
                 sync_summary: {
                   last_sync_time: connected ? new Date().toISOString() : null,
                   sync_count: connected ? 123 : 0,
@@ -274,7 +274,7 @@ test.describe('Integrations Page UI (mocked API)', () => {
               attributes: {
                 name: 'Google',
                 status: 'connected',
-                capabilities: ['contacts', 'calendar'],
+                capabilities: ['contacts_sync', 'calendar_sync'],
                 sync_summary: {
                   last_sync_time: new Date().toISOString(),
                   sync_count: 42,
@@ -361,7 +361,7 @@ test.describe('Integrations Page UI (mocked API)', () => {
               attributes: {
                 name: 'Google',
                 status: 'connected',
-                capabilities: ['contacts', 'calendar'],
+                capabilities: ['contacts_sync', 'calendar_sync'],
                 sync_summary: {
                   last_sync_time: new Date().toISOString(),
                   sync_count: 42,
@@ -389,10 +389,10 @@ test.describe('Integrations Page UI (mocked API)', () => {
 
     await authenticatedPage.goto('/integrations');
 
-    // Status should show Active
+    // Status should show Connected
     await expect(
       authenticatedPage.locator('[data-testid="integration-panel-google"]')
-    ).toContainText('Active');
+    ).toContainText('Connected');
 
     // Banner should NOT be visible
     await expect(

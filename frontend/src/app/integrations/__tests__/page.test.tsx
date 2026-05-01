@@ -90,7 +90,7 @@ describe('IntegrationsPage', () => {
       },
       isLoading: false,
       error: null,
-    } as any);
+    } as unknown as ReturnType<typeof useIntegrations>);
 
     mockUseIntegrationHealth.mockReturnValue({
       data: {
@@ -107,7 +107,7 @@ describe('IntegrationsPage', () => {
       },
       isLoading: false,
       error: null,
-    } as any);
+    } as unknown as ReturnType<typeof useIntegrationHealth>);
 
     mockUseSyncHistory.mockReturnValue({
       data: {
@@ -116,34 +116,36 @@ describe('IntegrationsPage', () => {
       },
       isLoading: false,
       error: null,
-    } as any);
+    } as unknown as ReturnType<typeof useSyncHistory>);
 
     mockUseOAuthAuthorize.mockReturnValue({
       mutate: jest.fn(),
       isPending: false,
       error: null,
-    } as any);
+    } as unknown as ReturnType<typeof useOAuthAuthorize>);
 
     mockUseOAuthDisconnect.mockReturnValue({
       mutate: jest.fn(),
       isPending: false,
       error: null,
-    } as any);
+    } as unknown as ReturnType<typeof useOAuthDisconnect>);
 
     mockUseGenericSync.mockReturnValue({
       mutate: jest.fn(),
       isPending: false,
       error: null,
-    } as any);
+    } as unknown as ReturnType<typeof useGenericSync>);
 
     mockUseDeadLetters.mockReturnValue({
       data: {
-        data: [],
-        meta: { total: 0, page: 1, pageSize: 10 },
+        items: [],
+        total: 0,
+        limit: 10,
+        offset: 0,
       },
       isLoading: false,
       error: null,
-    } as any);
+    } as unknown as ReturnType<typeof useDeadLetters>);
   });
 
   it('should render integrations page with title', () => {
