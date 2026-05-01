@@ -32,7 +32,6 @@ class TestStreamEventAdapter:
         assert outbox_event.event_type == "ContactCreated"
         assert outbox_event.aggregate_id == 42
         assert outbox_event.event_data == {"contact_id": 42, "first_name": "John"}
-        assert outbox_event.processed_at is None
         assert outbox_event.retry_count == 0
         assert outbox_event.id == 0
 

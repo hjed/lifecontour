@@ -2,8 +2,6 @@
 
 This document defines the architecture for external service integrations including Google Contacts, Immich, Strava, Firefly III, and communication platforms.
 
-> [!IMPORTANT]
-> **Planned Migration:** The event dispatch system described in this document (direct-dispatch `OutboxProcessor` with ARQ broadcast) is being replaced with a **Redis Streams event bus** using consumer groups. The new architecture is specified in the [Integration Architecture & Strava Product Specification](../product-specifications/integration-architecture-and-strava-product-specification.md) and implemented via [Iteration 5](../tasks/iteration-5-integration-architecture-and-strava.md). The core outbox pattern and isolated worker architecture remain unchanged — only the event fan-out mechanism changes. This document will be updated as each migration phase completes.
 
 ## Overview
 
@@ -746,9 +744,8 @@ class OutboxEvent(BaseModel):
     aggregate_id: UUID               # ID of the entity that changed
     event_data: dict                 # JSON payload
     created_at: datetime = Field(default_factory=datetime.utcnow)
-    processed_at: Optional[datetime] = None
+    relayed_at: Optional[datetime] = None  # Set when published to Redis Stream
     retry_count: int = 0
-    max_retries: int = 3
 
 # In integration service
 async def sync_contact_with_outbox(contact_data: dict):
@@ -776,49 +773,40 @@ async def sync_contact_with_outbox(contact_data: dict):
             # No risk of database update without event or vice versa
 ```
 
-#### Outbox Event Publisher
+#### Outbox Relay
 ```python
-# In background/outbox_publisher.py
-async def publish_outbox_events():
+# In app/infrastructure/events/outbox_relay.py
+async def run_outbox_relay_loop():
     """
-    Reliable event publisher that processes outbox events.
-    Run as separate background process.
+    Reliable event relay that publishes outbox events to a Redis Stream.
+    Runs as a FastAPI lifespan background task.
     """
     while True:
-        with session_factory() as session:
-            # Get unprocessed events
-            events = session.query(OutboxEvent).filter(
-                OutboxEvent.processed_at.is_(None),
-                OutboxEvent.retry_count < OutboxEvent.max_retries
-            ).limit(100).all()
+        async with engine.begin() as conn:
+            # Get unrelayed events
+            events = await repository.get_unrelayed_events()
 
             for event in events:
                 try:
-                    # Publish to external systems (search index, webhooks, etc.)
-                    await publish_event(event.event_type, event.event_data)
+                    # Publish to Redis Stream (pms:domain-events)
+                    await stream_client.publish(event)
 
-                    # Mark as processed
-                    event.processed_at = datetime.utcnow()
-                    session.commit()
+                    # Mark as relayed
+                    await repository.mark_as_relayed(event.event_id)
 
                 except Exception as e:
-                    # Increment retry count
-                    event.retry_count += 1
-                    session.commit()
-
-                    logger.error(f"Failed to publish event {event.id}",
-                               extra={"event_id": str(event.id), "error": str(e)})
+                    logger.error("Failed to relay event",
+                               event_id=event.event_id, error=str(e))
 
         await asyncio.sleep(10)  # Poll every 10 seconds
 ```
 
-### Redis Stream Consumer Architecture (Phases 2–3)
+### Redis Stream Consumer Architecture
 
-> [!NOTE]
-> This architecture was introduced in ITER5-001 Phases 2–3. When `USE_STREAM_CONSUMERS=true`, the
-> `OutboxRelay` publishes events to a Redis Stream (`pms:domain-events`) and independent consumers
-> handle all event processing. The `OutboxProcessor` still runs but acts as a pass-through that
-> only marks events as processed — all actual processing is delegated to stream consumers.
+The `OutboxRelay` publishes events to a Redis Stream (`pms:domain-events`) and independent
+consumers handle all event processing. Each consumer group processes independently, providing
+failure isolation. Events that exceed `max_delivery_count` are routed to a `dead_letter_events`
+table via the `DeadLetterConsumerMixin`.
 
 #### Consumer Architecture
 
@@ -859,17 +847,10 @@ async def publish_outbox_events():
 | `SearchIndexerConsumer` | `app.infrastructure.events.search_indexer_consumer` | `search-indexer` | MeiliSearch indexing + daily summary invalidation |
 | `SummaryConsumer` | `app.infrastructure.events.summary_consumer` | `summary-generator` | AI contact summary generation + post-generation index update |
 | `InboundEventConsumer` | `app.infrastructure.events.inbound_event_consumer` | `inbound-processor` | Contact sync, journal sync, match detection from Google |
-| `GoogleOutboundConsumer` | `app.infrastructure.events.google_outbound_consumer` | `google-worker` | ARQ broadcast of journal/tag events to Google integration worker |
-| `StreamConsumer` (base) | `app.infrastructure.events.stream_consumer` | — | XREADGROUP loop, event filtering, XACK |
+| `GoogleWorkerStreamConsumer` | `integration_workers/google` | `google-worker` | Journal/tag event processing for Google Calendar sync |
+| `StreamConsumer` (base) | `core_shared.stream_client` | — | XREADGROUP loop, event filtering, XACK |
 | `stream_event_to_outbox_event` | `app.infrastructure.events.stream_event_adapter` | — | Converts `StreamEvent` → `OutboxEvent` for reuse of existing processors |
-
-#### Feature Flag Gating
-
-When `USE_STREAM_CONSUMERS=true`:
-
-- **OutboxProcessor** skips all event processing — acts as a pass-through that marks events as processed
-- **Stream consumers** handle all responsibilities via their own independent consumer groups
-- Consumer failure isolation: each consumer group processes independently, so a failure in one does not block others
+| `DeadLetterConsumerMixin` | `app.infrastructure.events.dead_letter_consumer_mixin` | — | Persists permanently failed events to `dead_letter_events` table |
 
 ### Inbound Sync Flow (Pulling Data from External Systems)
 
@@ -887,8 +868,8 @@ The system supports bidirectional synchronization:
 2. **Inbound Sync** (External Systems → Local Database)
    - Worker pulls data from external API (periodic, manual, or webhook-triggered)
    - Worker creates OutboxEvent records for each external entity
-   - OutboxProcessor (running in main app) processes events
-   - OutboxEventProcessor transforms external data to internal models
+   - OutboxRelay publishes events to the Redis Stream
+   - InboundEventConsumer processes events via its consumer group
    - Domain services create/update local entities
 
 #### Inbound Sync Flow Diagram
@@ -916,20 +897,18 @@ The system supports bidirectional synchronization:
 ┌─────────────────────────────────────────────────────────────────────┐
 │ Main Application (FastAPI Process)                                 │
 │                                                                     │
-│  5. OutboxProcessor (runs every 10 seconds)                        │
+│  5. OutboxRelay publishes events to Redis Stream                    │
 │     ↓                                                               │
-│  6. Fetch unprocessed OutboxEvents                                 │
+│  6. InboundEventConsumer picks up contact.* events                  │
 │     ↓                                                               │
-│  7. Route contact.* events to OutboxEventProcessor                 │
+│  7. JournalOutboxEventProcessor.process_event(event)                │
 │     ↓                                                               │
-│  8. OutboxEventProcessor.process_event(event)                      │
-│     ↓                                                               │
-│  9. Transform Google Person → Contact entity                       │
+│  8. Transform Google Person → Contact entity                        │
 │     (using GoogleContactTransformer)                               │
 │     ↓                                                               │
-│ 10. Create/Update Contact via ContactService                       │
+│  9. Create/Update Contact via ContactService                        │
 │     ↓                                                               │
-│ 11. Mark OutboxEvent as processed                                  │
+│ 10. ACK the stream message                                          │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -951,7 +930,7 @@ async def sync_google_contacts(
     2. Creates OutboxEvent records (NOT Contact entities directly)
     3. Returns sync metrics
 
-    The actual Contact creation happens in the main app via OutboxProcessor.
+    The actual Contact creation happens in the main app via InboundEventConsumer.
     """
     logger.info("Starting Google Contacts sync", email=google_account_email)
 

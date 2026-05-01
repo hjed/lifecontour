@@ -241,3 +241,41 @@ class TestStreamConsumer:
 
         # ensure_consumer_group should still be called
         mock_stream_client.ensure_consumer_group.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_consumer_dead_letters_exceeded_retries(
+        self,
+        consumer: ConcreteConsumer,
+        mock_stream_client: MagicMock,
+        contact_created_event: StreamEvent,
+    ) -> None:
+        """Test _retry_pending dead-letters entries exceeding max delivery count."""
+        from unittest.mock import AsyncMock, patch
+
+        from core_shared.stream_client import PendingEntry
+
+        mock_stream_client.get_pending_entries.return_value = [
+            PendingEntry(
+                message_id="1234567890-0",
+                consumer="test-consumer-1",
+                idle_time_ms=120000,
+                delivery_count=5,  # Hits default max (5)
+            )
+        ]
+        mock_stream_client.claim_pending.return_value = [contact_created_event]
+
+        # Patch the _handle_dead_letter method to verify it's called
+        with patch.object(
+            consumer, "_handle_dead_letter", new_callable=AsyncMock
+        ) as mock_dead_letter:
+            count = await consumer._retry_pending()
+
+        # Should not count as a successful retry
+        assert count == 0
+        assert len(consumer.handled_events) == 0
+
+        # Dead letter method should be called
+        mock_dead_letter.assert_called_once_with(
+            contact_created_event,
+            mock_stream_client.get_pending_entries.return_value[0],
+        )

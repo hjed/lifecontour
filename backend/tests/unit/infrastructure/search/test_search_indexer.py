@@ -47,7 +47,6 @@ class TestSearchIndexer:
             aggregate_id=42,
             event_data={"contact_id": 42, "first_name": "John", "last_name": "Doe"},
             occurred_at=datetime(2024, 1, 1, 12, 0, 0),
-            processed_at=None,
             retry_count=0,
             created_at=datetime(2024, 1, 1, 12, 0, 0),
         )
@@ -65,7 +64,6 @@ class TestSearchIndexer:
                 "changed_fields": {"first_name": "Jane", "last_name": "Smith"},
             },
             occurred_at=datetime(2024, 1, 1, 13, 0, 0),
-            processed_at=None,
             retry_count=0,
             created_at=datetime(2024, 1, 1, 13, 0, 0),
         )
@@ -80,7 +78,6 @@ class TestSearchIndexer:
             aggregate_id=42,
             event_data={"contact_id": 42},
             occurred_at=datetime(2024, 1, 1, 14, 0, 0),
-            processed_at=None,
             retry_count=0,
             created_at=datetime(2024, 1, 1, 14, 0, 0),
         )
@@ -203,7 +200,6 @@ class TestSearchIndexer:
             aggregate_id=1,
             event_data={},
             occurred_at=datetime(2024, 1, 1, 15, 0, 0),
-            processed_at=None,
             retry_count=0,
             created_at=datetime(2024, 1, 1, 15, 0, 0),
         )
@@ -267,7 +263,6 @@ class TestSearchIndexer:
             aggregate_id=42,
             event_data={"contact_id": 42, "tag_name": "VIP"},
             occurred_at=datetime(2024, 1, 1, 16, 0, 0),
-            processed_at=None,
             retry_count=0,
             created_at=datetime(2024, 1, 1, 16, 0, 0),
         )
@@ -425,7 +420,6 @@ class TestSearchIndexer:
                 "relationship_type": "friend",
             },
             occurred_at=datetime(2024, 1, 1, 17, 0, 0),
-            processed_at=None,
             retry_count=0,
             created_at=datetime(2024, 1, 1, 17, 0, 0),
         )

@@ -84,11 +84,6 @@ class Settings(BaseSettings):
     )
 
     # Redis Streams event bus settings
-    use_stream_consumers: bool = Field(
-        default=False,
-        description="Enable Redis Streams event bus relay alongside legacy OutboxProcessor. "
-        "When true, the OutboxRelay publishes events to the stream in parallel.",
-    )
     stream_name: str = Field(
         default="pms:domain-events",
         description="Redis Stream name for domain events",

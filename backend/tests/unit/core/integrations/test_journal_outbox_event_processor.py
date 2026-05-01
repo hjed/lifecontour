@@ -77,7 +77,6 @@ def _make_outbox_event(
         event_type=event_type,
         event_data=_make_journal_event_data(**event_data_kwargs),
         created_at=datetime.now(UTC),
-        processed_at=None,
         retry_count=0,
     )
 

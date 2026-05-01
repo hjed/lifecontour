@@ -169,12 +169,12 @@ class TestWorkerOutboxEventCreation:
         assert hasattr(outbox_event, "event_data")
         assert hasattr(outbox_event, "id")
         assert hasattr(outbox_event, "created_at")
-        assert hasattr(outbox_event, "processed_at")
+        assert hasattr(outbox_event, "relayed_at")
         assert hasattr(outbox_event, "retry_count")
 
         assert outbox_event.event_type == "contact.created"
         assert isinstance(outbox_event.event_data, dict)
-        assert outbox_event.processed_at is None
+        assert outbox_event.relayed_at is None
         # retry_count is None until inserted (server default applies on insert)
         assert outbox_event.retry_count is None
 

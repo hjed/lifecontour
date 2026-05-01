@@ -160,19 +160,19 @@ Migrate the Google integration worker from receiving journal/tag events via ARQ 
 Remove the old `OutboxProcessor._process_single_event` monolithic dispatch, the feature flag, and add operational tooling.
 
 **Acceptance Criteria:**
-- [ ] `OutboxProcessor` class and `run_outbox_processor_loop` removed entirely — relay is sole background task
-- [ ] Feature flag `USE_STREAM_CONSUMERS` removed — stream path is the only path
-- [ ] `processed_at` column removed from `outbox_events` table (migration) — relay path (`relayed_at`) is the sole dispatch mechanism
-- [ ] Dead-letter handling: events exceeding max retry count are moved to a dead-letter stream and persisted to `dead_letter_events` database table (displayable on integration dashboard, replayable)
-- [ ] Consumer lag monitoring endpoint: pending entry count per consumer group (for health checks)
-- [ ] `integration-architecture.md` updated: replace OutboxProcessor direct-dispatch sections with Redis Streams consumer group architecture. Remove the "Planned Migration" banner added in this iteration
-- [ ] `architecture.md` updated if it references ARQ-based event fan-out or OutboxProcessor direct dispatch
-- [ ] Old iteration 5 doc (`iteration-5-strava-integration.md`) — verify superseded banner is still accurate
+- [x] `OutboxProcessor` class and `run_outbox_processor_loop` removed entirely — relay is sole background task
+- [x] Feature flag `USE_STREAM_CONSUMERS` removed — stream path is the only path
+- [x] `processed_at` column removed from `outbox_events` table (migration) — relay path (`relayed_at`) is the sole dispatch mechanism
+- [x] Dead-letter handling: events exceeding max retry count are moved to a dead-letter stream and persisted to `dead_letter_events` database table (displayable on integration dashboard, replayable)
+- [x] Consumer lag monitoring endpoint: pending entry count per consumer group (for health checks)
+- [x] `integration-architecture.md` updated: replace OutboxProcessor direct-dispatch sections with Redis Streams consumer group architecture. Remove the "Planned Migration" banner added in this iteration
+- [x] `architecture.md` updated if it references ARQ-based event fan-out or OutboxProcessor direct dispatch
+- [x] Old iteration 5 doc (`iteration-5-strava-integration.md`) — verify superseded banner is still accurate
 
 **Required Test Coverage:**
-- **Unit:** dead-letter classification, lag calculation helpers, dead-letter repository CRUD.
-- **Integration:** verify dead-letter behaviour for permanently failing events (stream + DB persistence). Verify lag monitoring returns accurate counts.
-- **E2E:** full regression — contact CRUD, journal CRUD, Google sync, search all working end-to-end.
+- **Unit:** dead-letter classification, lag calculation helpers, dead-letter repository CRUD. ✅
+- **Integration:** verify dead-letter behaviour for permanently failing events (stream + DB persistence). Verify lag monitoring returns accurate counts. ✅
+- **E2E:** full regression — contact CRUD, journal CRUD, Google sync, search all working end-to-end. ✅
 
 ---
 
@@ -223,6 +223,7 @@ Create shared frontend components and migrate Google's connect/disconnect and sy
 - [ ] `SyncControls` component: per-capability sync buttons (e.g. "Sync Contacts", "Sync Calendar") driven by `capabilities` array
 - [ ] Integrations page renders panels dynamically from `GET /api/integrations` — no Google-specific layout
 - [ ] Google connect/disconnect, sync contacts, sync calendar migrated to shared components
+- [ ] Dead-letter queue observability: ensure API access to dead-letter events is available and surfaced in the dashboard
 - [ ] Existing Google integration E2E tests pass with the new component structure
 
 **Required Test Coverage:**

@@ -49,7 +49,6 @@ class TestJournalSearchIndexing:
                 "content": "This is my first journal entry",
             },
             occurred_at=now,
-            processed_at=None,
             retry_count=0,
             created_at=now,
         )
@@ -86,7 +85,6 @@ class TestJournalSearchIndexing:
                 "content": "Original content",
             },
             occurred_at=now,
-            processed_at=None,
             retry_count=0,
             created_at=now,
         )
@@ -105,7 +103,6 @@ class TestJournalSearchIndexing:
                 "content": "Updated content",
             },
             occurred_at=now,
-            processed_at=None,
             retry_count=0,
             created_at=now,
         )
@@ -139,7 +136,6 @@ class TestJournalSearchIndexing:
                 "content": "This will be deleted",
             },
             occurred_at=now,
-            processed_at=None,
             retry_count=0,
             created_at=now,
         )
@@ -153,7 +149,6 @@ class TestJournalSearchIndexing:
             event_type="JournalDeleted",
             event_data={"journal_id": 1},
             occurred_at=now,
-            processed_at=None,
             retry_count=0,
             created_at=now,
         )

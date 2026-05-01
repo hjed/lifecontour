@@ -10,15 +10,18 @@ from datetime import UTC, datetime
 from typing import Any
 
 import structlog
+from core_shared.stream_client import StreamClient
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, Response, status
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel
 from redis.asyncio import Redis
+from sqlalchemy.ext.asyncio import AsyncConnection
 from sqlalchemy.orm import Session
 
 from app.infrastructure.config import Settings
 from app.infrastructure.database import check_database_connection
+from app.infrastructure.events.dead_letter_repository import DeadLetterRepository
 
 logger = structlog.get_logger()
 router = APIRouter()
@@ -309,6 +312,69 @@ async def integration_health_check(
         uptime=_get_uptime(),
         services=services,
     )
+
+
+@router.get("/health/consumer-lag")
+@inject
+async def get_consumer_lag(
+    stream_client: FromDishka[StreamClient],
+    settings: FromDishka[Settings],
+) -> list[dict[str, Any]]:
+    """Get consumer lag for the application's domain events stream."""
+    try:
+        info = await stream_client.get_consumer_group_info(settings.stream_name)
+        return info
+    except Exception as e:
+        logger.error("Failed to get consumer lag", error=str(e), exc_info=True)
+        raise HTTPException(
+            status_code=500, detail="Failed to retrieve consumer lag"
+        ) from e
+
+
+@router.get("/health/dead-letters")
+@inject
+async def get_dead_letters(
+    connection: FromDishka[AsyncConnection],
+    limit: int = 50,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """Get dead letter events from the repository.
+
+    Returns event metadata without raw event_data to avoid
+    leaking potentially sensitive payloads.
+    """
+    # Clamp pagination parameters to safe bounds
+    limit = max(1, min(limit, 100))
+    offset = max(0, offset)
+    try:
+        repo = DeadLetterRepository(connection)
+        events = await repo.list_events(limit=limit, offset=offset)
+        total = await repo.count()
+        return {
+            "items": [
+                {
+                    "id": event.id,
+                    "event_id": event.event_id,
+                    "event_type": event.event_type,
+                    "aggregate_id": event.aggregate_id,
+                    "consumer_group": event.consumer_group,
+                    "delivery_count": event.delivery_count,
+                    "last_error": event.last_error,
+                    "created_at": event.created_at.isoformat()
+                    if event.created_at
+                    else None,
+                }
+                for event in events
+            ],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+    except Exception as e:
+        logger.error("Failed to get dead letters", error=str(e), exc_info=True)
+        raise HTTPException(
+            status_code=500, detail="Failed to retrieve dead letters"
+        ) from e
 
 
 @router.get("/metrics")

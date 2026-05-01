@@ -35,7 +35,6 @@ def stream_event_to_outbox_event(stream_event: StreamEvent) -> OutboxEvent:
         aggregate_id=stream_event.aggregate_id,
         event_data=stream_event.event_data,
         occurred_at=occurred_at,
-        processed_at=None,
         retry_count=0,
         created_at=occurred_at,
     )

@@ -136,7 +136,6 @@ class TestOutboxEventProcessor:
                 "sync_type": "created",
             },
             created_at=datetime.now(UTC),
-            processed_at=None,
             retry_count=0,
         )
 
@@ -159,7 +158,6 @@ class TestOutboxEventProcessor:
                 "sync_type": "updated",
             },
             created_at=datetime.now(UTC),
-            processed_at=None,
             retry_count=0,
         )
 
@@ -184,7 +182,6 @@ class TestOutboxEventProcessor:
                 "completed_at": datetime.now(UTC).isoformat(),
             },
             created_at=datetime.now(UTC),
-            processed_at=None,
             retry_count=0,
         )
 
@@ -337,7 +334,6 @@ class TestOutboxEventProcessor:
                 "sync_type": "created",
             },
             created_at=datetime.now(UTC),
-            processed_at=None,
             retry_count=0,
         )
 
@@ -452,7 +448,6 @@ class TestOutboxEventProcessor:
             event_type="unknown.event",
             event_data={"test": "data"},
             created_at=datetime.now(UTC),
-            processed_at=None,
             retry_count=0,
         )
 
@@ -859,7 +854,6 @@ class TestOutboxEventProcessor:
                 "sync_type": "created",
             },
             created_at=datetime.now(UTC),
-            processed_at=None,
             retry_count=0,
         )
 
@@ -919,7 +913,6 @@ class TestOutboxEventProcessor:
                 "sync_type": "updated",
             },
             created_at=datetime.now(UTC),
-            processed_at=None,
             retry_count=0,
         )
 

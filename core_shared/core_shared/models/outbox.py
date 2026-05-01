@@ -68,12 +68,6 @@ class OutboxEvent(Base):
         comment="When the event was created",
     )
 
-    processed_at = Column(
-        DateTime(timezone=True),
-        nullable=True,
-        comment="When the event was successfully processed",
-    )
-
     relayed_at = Column(
         DateTime(timezone=True),
         nullable=True,
@@ -92,7 +86,7 @@ class OutboxEvent(Base):
         """String representation of the outbox event."""
         return (
             f"<OutboxEvent(id={self.id}, event_type='{self.event_type}', "
-            f"aggregate_id={self.aggregate_id}, processed_at={self.processed_at})>"
+            f"aggregate_id={self.aggregate_id}, relayed_at={self.relayed_at})>"
         )
 
     @classmethod
@@ -248,9 +242,9 @@ class OutboxEvent(Base):
         )
 
     def is_failed(self) -> bool:
-        """Check if the event has failed processing."""
-        return bool(self.retry_count >= 3 and self.processed_at is None)
+        """Check if the event has exceeded max retries."""
+        return bool(self.retry_count >= 3)
 
     def can_retry(self) -> bool:
         """Check if the event can be retried."""
-        return bool(self.retry_count < 3 and self.processed_at is None)
+        return bool(self.retry_count < 3)

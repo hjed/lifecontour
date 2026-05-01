@@ -254,6 +254,33 @@ class StreamClient:
 
         return entries
 
+    async def get_consumer_group_info(self, stream_name: str) -> list[dict[str, Any]]:
+        """Get information about consumer groups for a stream using XINFO GROUPS.
+
+        Args:
+            stream_name: Name of the Redis Stream
+
+        Returns:
+            List of dictionaries containing consumer group info
+        """
+        try:
+            # redis-py's xinfo_groups returns bytes keys/values when
+            # decode_responses=False, so decode them for JSON safety.
+            raw: list[dict[Any, Any]] = await self._redis.xinfo_groups(stream_name)
+            return [
+                {
+                    (k.decode() if isinstance(k, bytes) else k): (
+                        v.decode() if isinstance(v, bytes) else v
+                    )
+                    for k, v in group.items()
+                }
+                for group in raw
+            ]
+        except ResponseError as e:
+            if "no such key" in str(e).lower():
+                return []
+            raise
+
     async def claim_pending(
         self,
         stream_name: str,

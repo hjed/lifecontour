@@ -11,6 +11,7 @@ from core_shared.stream_client import StreamClient, StreamEvent
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.infrastructure.database import get_async_database_engine
+from app.infrastructure.events.dead_letter_consumer_mixin import DeadLetterConsumerMixin
 from app.infrastructure.events.outbox_repository import OutboxEvent
 from app.infrastructure.events.stream_consumer import StreamConsumer
 from app.infrastructure.events.stream_event_adapter import stream_event_to_outbox_event
@@ -49,7 +50,7 @@ _JOURNAL_INVALIDATION_EVENTS = frozenset(
 )
 
 
-class SearchIndexerConsumer(StreamConsumer):
+class SearchIndexerConsumer(DeadLetterConsumerMixin, StreamConsumer):
     """Stream consumer for MeiliSearch indexing.
 
     Listens to contact, journal, and tag-related domain events on the
