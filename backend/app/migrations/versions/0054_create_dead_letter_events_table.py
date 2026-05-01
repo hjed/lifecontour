@@ -1,7 +1,7 @@
 """create dead letter events table
 
-Revision ID: f1572edff6aa
-Revises: 6443bec5305f
+Revision ID: 0054
+Revises: 0053
 Create Date: 2026-04-30 22:46:00.196806
 
 """

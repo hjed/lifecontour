@@ -1,5 +1,5 @@
 """
-Unit tests for the DeadLetterRepository.
+Integration tests for the DeadLetterRepository.
 """
 
 import pytest

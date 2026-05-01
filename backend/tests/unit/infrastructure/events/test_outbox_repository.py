@@ -188,6 +188,7 @@ class TestOutboxRepository:
         assert event.event_id == "test-event"
         assert event.event_type == "ContactCreated"
         assert event.aggregate_id == 42
+        assert event.event_data == event_data
         assert event.occurred_at == datetime(2024, 1, 1, 12, 0, 0)
         assert getattr(event, "relayed_at", None) is None
         assert event.retry_count == 0
