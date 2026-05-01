@@ -47,11 +47,19 @@ class TestActivityTemplateCreation:
     def test_create_canyoning_template_with_all_fields(self):
         """Test creating a canyoning template with all fields populated."""
         pitches = [
-            TemplatePitch(template_id="tid", pitch_number=1, height=20),
-            TemplatePitch(template_id="tid", pitch_number=2, height=30),
+            TemplatePitch(
+                template_id="22222222-2222-2222-2222-222222222222",
+                pitch_number=1,
+                height=20,
+            ),
+            TemplatePitch(
+                template_id="22222222-2222-2222-2222-222222222222",
+                pitch_number=2,
+                height=30,
+            ),
         ]
         template = ActivityTemplate(
-            id="my-uuid-123",
+            id="12345678-1234-5678-1234-567812345678",
             name="Empress Canyon",
             template_type="canyoning",
             user_id="user-123",
@@ -63,7 +71,7 @@ class TestActivityTemplateCreation:
             water_gauge_name="Kedumba",
         )
 
-        assert template.id == "my-uuid-123"
+        assert template.id == "12345678-1234-5678-1234-567812345678"
         assert template.name == "Empress Canyon"
         assert template.template_type == "canyoning"
         assert template.region == "Blue Mountains"
@@ -119,13 +127,13 @@ class TestActivityTemplateCreation:
     def test_explicit_id_preserved(self):
         """Test that an explicitly provided ID is preserved, not overwritten."""
         template = ActivityTemplate(
-            id="explicit-id",
+            id="87654321-4321-8765-4321-876543210987",
             name="Test",
             template_type="canyoning",
             user_id="user-123",
         )
 
-        assert template.id == "explicit-id"
+        assert template.id == "87654321-4321-8765-4321-876543210987"
 
 
 @pytest.mark.unit
@@ -320,7 +328,11 @@ class TestActivityTemplateOptionalFields:
         t2 = ActivityTemplate(
             name="Test2", template_type="canyoning", user_id="user-123"
         )
-        t1.pitches.append(TemplatePitch(template_id="x", pitch_number=1))
+        t1.pitches.append(
+            TemplatePitch(
+                template_id="33333333-3333-3333-3333-333333333333", pitch_number=1
+            )
+        )
         assert len(t2.pitches) == 0
 
     def test_climbing_grade_and_length_optional(self):

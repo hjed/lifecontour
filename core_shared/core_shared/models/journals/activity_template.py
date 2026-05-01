@@ -79,6 +79,7 @@ class ActivityTemplate:
         """Validate and set defaults for activity template properties."""
         if self.id is None:
             self.id = str(uuid.uuid4())
+        self._validate_id()
         self._validate_name()
         self._validate_template_type()
         self._enforce_type_exclusivity()
@@ -94,6 +95,16 @@ class ActivityTemplate:
         if self.id is not None:
             for pitch in self.pitches:
                 pitch.template_id = self.id
+
+    def _validate_id(self) -> None:
+        """Validate id is a valid UUID string."""
+        if self.id is not None:
+            try:
+                uuid.UUID(self.id)
+            except ValueError as e:
+                raise ActivityTemplateValidationError(
+                    "id", "ID must be a valid UUID"
+                ) from e
 
     def _validate_region(self) -> None:
         """Validate region length if provided."""

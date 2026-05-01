@@ -59,11 +59,19 @@ class TemplatePitch:
         self._validate_anchor_type()
 
     def _validate_template_id(self) -> None:
-        """Validate template_id is non-empty."""
+        """Validate template_id is a non-empty, valid UUID string."""
         if not self.template_id or not self.template_id.strip():
             raise TemplatePitchValidationError(
                 "template_id", "Template ID must be a non-empty string"
             )
+        import uuid
+
+        try:
+            uuid.UUID(self.template_id)
+        except ValueError as e:
+            raise TemplatePitchValidationError(
+                "template_id", "Template ID must be a valid UUID"
+            ) from e
 
     def _validate_pitch_number(self) -> None:
         """Validate pitch_number is positive."""

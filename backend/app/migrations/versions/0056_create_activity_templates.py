@@ -1,7 +1,7 @@
 """create activity templates
 
-Revision ID: 0055
-Revises: 0054
+Revision ID: 0056
+Revises: 0055
 Create Date: 2026-05-01
 
 """
