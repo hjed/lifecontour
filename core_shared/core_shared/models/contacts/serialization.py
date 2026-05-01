@@ -212,8 +212,19 @@ def deserialize_contact(data: dict[str, Any]) -> Contact:
             else None
         )
 
+        # Default to 'Unknown' when first_name is missing, None, or blank.
+        # Google contacts may lack a name (e.g. company-only entries);
+        # the transformer already defaults to 'Unknown' but outbox events
+        # from older code paths may omit the field entirely.
+        raw_first_name = data.get("first_name")
+        first_name = (
+            raw_first_name
+            if isinstance(raw_first_name, str) and raw_first_name.strip()
+            else "Unknown"
+        )
+
         return Contact(
-            first_name=data["first_name"],
+            first_name=first_name,
             last_name=data.get("last_name"),
             middle_name=data.get("middle_name"),
             nick_name=data.get("nick_name"),
