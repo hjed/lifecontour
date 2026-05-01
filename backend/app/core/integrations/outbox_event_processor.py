@@ -20,6 +20,7 @@ from core_shared.models.contacts.serialization import (
     ContactDeserializationError,
     deserialize_contact,
 )
+from core_shared.models.contacts.value_objects import Provenance
 from core_shared.models.external_reference import ExternalReference
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.sync_metadata import SyncStatus
@@ -56,6 +57,16 @@ def _normalize_integration_source(raw: str) -> str:
     return _INTEGRATION_SOURCE_ALIASES.get(raw, raw)
 
 
+def _map_provenance(integration_source: str) -> Provenance:
+    """Map integration source to Provenance enum."""
+    source_map = {
+        "google": Provenance.GOOGLE_CONTACTS,
+        "google_contacts": Provenance.GOOGLE_CONTACTS,
+        "strava": Provenance.STRAVA,
+    }
+    return source_map.get(integration_source, Provenance.SYSTEM)
+
+
 def _normalize_email_dedup_key(value: str) -> str:
     """Build a stable deduplication key for email methods."""
     return value.strip().lower()
@@ -67,6 +78,20 @@ class OutboxEventProcessingError(Exception):
 
 class PermanentOutboxEventProcessingError(OutboxEventProcessingError):
     """Raised when an outbox event payload is permanently invalid."""
+
+
+class ContactReconciliationConflictError(OutboxEventProcessingError):
+    """Raised when email reconciliation finds a conflict that should be recorded, not retried."""
+
+    def __init__(
+        self,
+        message: str,
+        matched_contact_id: int,
+        integration_source: str,
+    ):
+        super().__init__(message)
+        self.matched_contact_id = matched_contact_id
+        self.integration_source = integration_source
 
 
 class OutboxEventProcessor:
@@ -280,9 +305,13 @@ class OutboxEventProcessor:
 
         if len(matched_contacts) > 1:
             matched_contact_ids = sorted(matched_contacts.keys())
-            raise OutboxEventProcessingError(
-                "Multiple existing contacts matched inbound email addresses for "
-                f"{integration_source}: {matched_contact_ids}"
+            raise ContactReconciliationConflictError(
+                message=(
+                    "Multiple existing contacts matched inbound email addresses for "
+                    f"{integration_source}: {matched_contact_ids}"
+                ),
+                matched_contact_id=matched_contact_ids[0],
+                integration_source=integration_source,
             )
 
         matched_contact = next(iter(matched_contacts.values()))
@@ -299,10 +328,14 @@ class OutboxEventProcessor:
             )
         )
         if existing_integration_reference is not None:
-            raise OutboxEventProcessingError(
-                "Matched local contact is already linked to integration source "
-                f"{integration_source} via external ID "
-                f"{existing_integration_reference.external_entity_id}"
+            raise ContactReconciliationConflictError(
+                message=(
+                    "Matched local contact is already linked to integration source "
+                    f"{integration_source} via external ID "
+                    f"{existing_integration_reference.external_entity_id}"
+                ),
+                matched_contact_id=matched_contact.id,
+                integration_source=integration_source,
             )
 
         return matched_contact
@@ -610,6 +643,22 @@ class OutboxEventProcessor:
                     integration_source=integration_source,
                 )
             )
+        except ContactReconciliationConflictError as e:
+            logger.warning(
+                "Contact creation has reconciliation conflict - recording as conflict",
+                integration_source=integration_source,
+                external_id=external_id,
+                matched_contact_id=e.matched_contact_id,
+                error=str(e),
+            )
+            return {
+                "status": "conflict",
+                "reason": "reconciliation_conflict",
+                "event_type": EVENT_TYPE_CONTACT_CREATED,
+                "integration_source": integration_source,
+                "external_id": external_id,
+                "error": str(e),
+            }
         except Exception as e:
             raise OutboxEventProcessingError(
                 f"Failed to reconcile contact by email: {str(e)}"
@@ -619,6 +668,7 @@ class OutboxEventProcessor:
 
         # Derive provenance from integration source
         sync_changed_by = f"{integration_source}_sync"
+        provenance_source = _map_provenance(integration_source)
 
         # Create or update the contact using the contact service.
         try:
@@ -627,6 +677,7 @@ class OutboxEventProcessor:
                     contact,
                     self.connection,
                     changed_by=sync_changed_by,
+                    source=provenance_source,
                 )
             else:
                 contact.id = matched_contact.id
@@ -634,6 +685,7 @@ class OutboxEventProcessor:
                     contact,
                     self.connection,
                     changed_by=sync_changed_by,
+                    source=provenance_source,
                 )
                 contact_action = "reconciled"
                 logger.info(
@@ -853,6 +905,7 @@ class OutboxEventProcessor:
 
         # Update the contact using the contact service
         sync_changed_by = f"{integration_source}_sync"
+        provenance_source = _map_provenance(integration_source)
         try:
             # Wrap in a nested transaction (savepoint) so that if update_contact
             # fails with an IntegrityError (e.g. converted to DuplicateEmailError),
@@ -862,6 +915,7 @@ class OutboxEventProcessor:
                     updated_contact_data,
                     self.connection,
                     changed_by=sync_changed_by,
+                    source=provenance_source,
                 )
         except DuplicateEmailError as e:
             logger.warning(

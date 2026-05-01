@@ -10,7 +10,7 @@ from core_shared.models.contacts.entities import (
     Tag,
 )
 from core_shared.models.contacts.exceptions import ContactValidationError
-from core_shared.models.contacts.value_objects import TagName
+from core_shared.models.contacts.value_objects import Provenance, TagName
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql import (
@@ -259,12 +259,17 @@ class TestContactServiceIntegration:
 
         # Verify field history was recorded
         history = await history_repo.get_contact_history(saved_contact.id)
-        assert len(history) == 1
-        assert history[0].entity_type == "contact"
-        assert history[0].entity_id == saved_contact.id
-        assert history[0].field_name == "last_name"
-        assert history[0].old_value == "Smith"
-        assert history[0].new_value == "Doe"
+        assert len(history) >= 1
+        update_history = next((h for h in history if h.field_name == "last_name"), None)
+        assert update_history is not None, (
+            "History entry for last_name update not found"
+        )
+        assert update_history.entity_type == "contact"
+        assert update_history.entity_id == saved_contact.id
+        assert update_history.old_value == "Smith"
+        assert update_history.new_value == "Doe"
+        assert update_history.source == Provenance.SYSTEM
+        assert update_history.changed_by == "system"
 
     @pytest.mark.asyncio
     async def test_update_contact_with_methods_and_notes_single_call(

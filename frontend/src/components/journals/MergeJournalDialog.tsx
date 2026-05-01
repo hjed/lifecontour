@@ -121,7 +121,7 @@ export function MergeJournalDialog({
 
   return (
     <>
-      <Dialog open={open} onOpenChange={handleOpenChange}>
+      <Dialog open={open && !resolutionOpen} onOpenChange={handleOpenChange}>
         {externalOpen === undefined && (
           <DialogTrigger asChild>
             <Button

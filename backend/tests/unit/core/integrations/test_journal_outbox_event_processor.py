@@ -217,6 +217,7 @@ class TestJournalOutboxEventProcessor:
         mock_journal_service.create_journal.return_value = _make_journal()
 
         mock_connection.execute.side_effect = [
+            _mock_empty_result(),  # _find_external_event_link (idempotency check)
             _mock_empty_result(),  # _save_calendar_info
             _mock_empty_result(),  # _create_external_event_link
             _mock_resolve_contact(100),  # contact resolver
@@ -234,7 +235,7 @@ class TestJournalOutboxEventProcessor:
         assert result["status"] == "success"
         assert result["event_type"] == "journal_event.created"
         assert result["journal_id"] == 42
-        assert mock_connection.execute.call_count == 5
+        assert mock_connection.execute.call_count == 6
 
     @pytest.mark.asyncio
     async def test_process_journal_event_created_no_invitees(
@@ -251,13 +252,17 @@ class TestJournalOutboxEventProcessor:
         )
 
         mock_journal_service.create_journal.return_value = _make_journal()
-        mock_connection.execute.return_value = MagicMock()
+        mock_connection.execute.side_effect = [
+            _mock_empty_result(),  # _find_external_event_link
+            MagicMock(),  # _save_calendar_info
+            MagicMock(),  # _create_external_event_link
+        ]
 
         result = await processor.process_event(event)
 
         assert result["status"] == "success"
-        # 2 DB calls: calendar info + external link (no relationship calls, no match detection)
-        assert mock_connection.execute.call_count == 2
+        # 3 DB calls: _find_external_event_link + calendar info + external link
+        assert mock_connection.execute.call_count == 3
 
     # ── journal_event.updated ──────────────────────────────────────────
 
@@ -553,12 +558,17 @@ class TestJournalOutboxEventProcessor:
         )
 
         mock_journal_service.create_journal.return_value = _make_journal()
-        mock_connection.execute.return_value = MagicMock()
+        # Add side_effect so it doesn't return MagicMock directly when _find_external_event_link is called
+        mock_connection.execute.side_effect = [
+            _mock_empty_result(),  # _find_external_event_link
+            MagicMock(),  # _save_calendar_info
+            MagicMock(),  # _create_external_event_link
+        ]
 
         result = await processor.process_event(event)
 
         assert result["status"] == "success"
-        calendar_call = mock_connection.execute.call_args_list[0]
+        calendar_call = mock_connection.execute.call_args_list[1]
         sql_text = str(calendar_call[0][0].text)
         assert "updated_at" in sql_text
 
@@ -583,6 +593,7 @@ class TestJournalOutboxEventProcessor:
         mock_journal_service.create_journal.return_value = _make_journal()
 
         mock_connection.execute.side_effect = [
+            _mock_empty_result(),  # _find_external_event_link (idempotency check)
             _mock_empty_result(),  # _save_calendar_info
             _mock_empty_result(),  # _create_external_event_link
             _mock_resolve_contact(100),  # resolve_by_email
@@ -593,7 +604,7 @@ class TestJournalOutboxEventProcessor:
         await processor.process_event(event)
 
         # The get_relationships call should query for INVITEE type only
-        get_rels_call = mock_connection.execute.call_args_list[3]
+        get_rels_call = mock_connection.execute.call_args_list[4]
         params = get_rels_call[0][1]
         assert params["relationship_type"] == "INVITEE"
 
@@ -614,17 +625,22 @@ class TestJournalOutboxEventProcessor:
         )
 
         mock_journal_service.create_journal.return_value = _make_journal()
-        # Mock execute for: _create_external_event_link, _save_calendar_info,
+        # Mock execute for: _find_external_event_link, _save_calendar_info, _create_external_event_link,
         # _get_relationships_by_type (returns empty = nothing to delete)
-        mock_connection.execute.return_value = _mock_empty_rels()
+        mock_connection.execute.side_effect = [
+            _mock_empty_result(),
+            MagicMock(),
+            MagicMock(),
+            _mock_empty_rels(),
+        ]
 
         await processor.process_event(event)
 
         # With empty list [], _sync_contact_relationships should still run
         # (unlike None which would skip entirely). It queries for existing
         # INVITEE relationships and finds none, so no deletes needed.
-        # Call count: _save_calendar_info + _create_external_event_link = 2 minimum
-        assert mock_connection.execute.call_count >= 2
+        # Call count: _find_external_event_link + _save_calendar_info + _create_external_event_link = 3 minimum
+        assert mock_connection.execute.call_count >= 3
 
     # ── Invitee sync: unknown email skipped ───────────────────────────
 
@@ -653,6 +669,7 @@ class TestJournalOutboxEventProcessor:
         resolve_no_match.fetchone.return_value = None
 
         mock_connection.execute.side_effect = [
+            _mock_empty_result(),  # _find_external_event_link (idempotency check)
             _mock_empty_result(),  # _save_calendar_info
             _mock_empty_result(),  # _create_external_event_link
             resolve_no_match,  # resolve_by_email → None
@@ -662,8 +679,8 @@ class TestJournalOutboxEventProcessor:
         result = await processor.process_event(event)
 
         assert result["status"] == "success"
-        # 4 calls: calendar, link, resolve, get_rels (no create since email unresolved, no match detection)
-        assert mock_connection.execute.call_count == 4
+        # 5 calls: find link, calendar, link, resolve, get_rels
+        assert mock_connection.execute.call_count == 5
 
     # ── Invitee sync: handles role and status updates ─────────────────
 

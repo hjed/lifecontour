@@ -154,6 +154,21 @@ class JournalOutboxEventProcessor:
         etag = event_data.get("etag")
         contact_relationships = event_data.get("contact_relationships", [])
 
+        # Check for existing link to prevent duplicates (e.g. from retries)
+        existing_link = await self._find_external_event_link(
+            calendar_id=UUID(calendar_id),
+            external_event_id=external_event_id,
+        )
+        if existing_link is not None:
+            logger.info(
+                "External event link already exists for CREATE, treating as UPDATE",
+                external_event_id=external_event_id,
+                calendar_id=calendar_id,
+                existing_journal_id=existing_link.journal_id,
+            )
+            event_data["existing_journal_id"] = existing_link.journal_id
+            return await self._process_journal_updated(event)
+
         # Build the journal entity
         journal = self._build_journal_from_data(journal_data)
 

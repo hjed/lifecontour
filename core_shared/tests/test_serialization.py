@@ -145,6 +145,58 @@ class TestDeserializeImportantDates:
         assert len(contact.important_dates) == 0
 
 
+class TestDeserializeMissingFirstName:
+    """Test deserialization resilience when first_name is missing or empty.
+
+    Google contacts may not have a first name. The transformer defaults to
+    'Unknown', but outbox events could arrive without the field if the
+    serialization path differs or the data was created by an older version.
+    """
+
+    def test_deserialize_without_first_name_key(self) -> None:
+        """Missing first_name key defaults to 'Unknown'."""
+        data = {
+            "last_name": "Doe",
+            "methods": [],
+        }
+
+        contact = deserialize_contact(data)
+
+        assert contact.first_name == "Unknown"
+        assert contact.last_name == "Doe"
+
+    def test_deserialize_with_none_first_name(self) -> None:
+        """None first_name defaults to 'Unknown'."""
+        data = {
+            "first_name": None,
+            "last_name": "Smith",
+        }
+
+        contact = deserialize_contact(data)
+
+        assert contact.first_name == "Unknown"
+
+    def test_deserialize_with_empty_first_name(self) -> None:
+        """Empty string first_name defaults to 'Unknown'."""
+        data = {
+            "first_name": "   ",
+        }
+
+        contact = deserialize_contact(data)
+
+        assert contact.first_name == "Unknown"
+
+    def test_deserialize_with_valid_first_name_still_works(self) -> None:
+        """Valid first_name is preserved as-is."""
+        data = {
+            "first_name": "Jane",
+        }
+
+        contact = deserialize_contact(data)
+
+        assert contact.first_name == "Jane"
+
+
 class TestRoundTrip:
     """Test round-trip serialize → deserialize preserves important dates."""
 
