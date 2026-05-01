@@ -7,39 +7,26 @@
 
 'use client';
 
-import {
-  RefreshCw,
-  Settings,
-  Activity,
-  Clock,
-  Users,
-  AlertCircle,
-  ShieldAlert,
-  KeyRound,
-} from 'lucide-react';
+import { Settings, Activity, Clock, AlertCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { enAU } from 'date-fns/locale';
 import {
-  useGoogleStatus,
-  useGoogleSync,
+  useIntegrations,
   useIntegrationHealth,
   useSyncHistory,
-  useGoogleOAuthAuthorize,
-  useGoogleOAuthDisconnect,
-  useCalendarSync,
 } from '@/lib/api/integrations';
 import {
-  SyncType,
   SyncJobListResponse,
   IntegrationHealthAttributes,
 } from '@/types/integrations';
-import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { LoadingSpinner } from '@/components/ui/loading';
+import { IntegrationPanel } from '@/components/integrations/IntegrationPanel';
+import { DeadLetterQueue } from '@/components/integrations/DeadLetterQueue';
 
 // Generic helper function for safe date/time formatting
 function formatDateGenericSafely(
@@ -77,207 +64,6 @@ function getSyncStatusVariant(
   return 'secondary';
 }
 
-// Scope Upgrade Banner Component
-interface ScopeUpgradeBannerProps {
-  readonly onUpgrade: () => void;
-  readonly oauthLoading: boolean;
-}
-
-function ScopeUpgradeBanner({
-  onUpgrade,
-  oauthLoading,
-}: ScopeUpgradeBannerProps) {
-  return (
-    <Alert variant='destructive' data-testid='scope-upgrade-banner'>
-      <ShieldAlert className='h-4 w-4' />
-      <AlertTitle>Calendar permissions required</AlertTitle>
-      <AlertDescription className='flex flex-col gap-2'>
-        <p>
-          Your Google account is connected but does not have calendar sync
-          permissions. Upgrade your permissions to enable calendar
-          synchronisation.
-        </p>
-        <div>
-          <Button
-            size='sm'
-            onClick={onUpgrade}
-            disabled={oauthLoading}
-            data-testid='upgrade-permissions-button'
-          >
-            {oauthLoading ? (
-              <RefreshCw className='mr-2 h-4 w-4 animate-spin' />
-            ) : (
-              <ShieldAlert className='mr-2 h-4 w-4' />
-            )}
-            Upgrade Permissions
-          </Button>
-        </div>
-      </AlertDescription>
-    </Alert>
-  );
-}
-
-// Token Expired Banner Component
-interface TokenExpiredBannerProps {
-  readonly onRelink: () => void;
-  readonly oauthLoading: boolean;
-}
-
-function TokenExpiredBanner({
-  onRelink,
-  oauthLoading,
-}: TokenExpiredBannerProps) {
-  return (
-    <Alert variant='destructive' data-testid='token-expired-banner'>
-      <KeyRound className='h-4 w-4' />
-      <AlertTitle>Google connection expired</AlertTitle>
-      <AlertDescription className='flex flex-col gap-2'>
-        <p>
-          Your Google account connection has expired or been revoked. Please
-          relink your account to resume synchronisation. A full sync will run
-          automatically to catch up on any missed data.
-        </p>
-        <div>
-          <Button
-            size='sm'
-            onClick={onRelink}
-            disabled={oauthLoading}
-            data-testid='relink-google-button'
-          >
-            {oauthLoading ? (
-              <RefreshCw className='mr-2 h-4 w-4 animate-spin' />
-            ) : (
-              <KeyRound className='mr-2 h-4 w-4' />
-            )}
-            Relink Google Account
-          </Button>
-        </div>
-      </AlertDescription>
-    </Alert>
-  );
-}
-
-interface SyncControlsProps {
-  readonly connected: boolean;
-  readonly syncLoading: boolean;
-  readonly oauthLoading: boolean;
-  readonly disconnectLoading: boolean;
-  readonly needsReauth: boolean;
-  readonly needsReconsent: boolean;
-  readonly onSync: (syncType: SyncType) => void;
-  readonly onCalendarSync: (syncType: SyncType) => void;
-  readonly onConnect: () => void;
-  readonly onDisconnect: () => void;
-  readonly syncError: Error | null;
-  readonly calendarSyncLoading: boolean;
-  readonly calendarSyncError: Error | null;
-}
-
-function SyncControls({
-  connected,
-  syncLoading,
-  oauthLoading,
-  disconnectLoading,
-  needsReauth,
-  onSync,
-  onCalendarSync,
-  onConnect,
-  onDisconnect,
-  syncError,
-  calendarSyncLoading,
-  calendarSyncError,
-  needsReconsent,
-}: SyncControlsProps) {
-  const syncDisabled = syncLoading || needsReauth;
-  const calendarSyncDisabled =
-    calendarSyncLoading || needsReauth || needsReconsent;
-  return (
-    <>
-      <div className='flex gap-2'>
-        {connected ? (
-          <>
-            <Button
-              onClick={() => onSync('smart')}
-              disabled={syncDisabled}
-              data-testid='trigger-google-sync'
-            >
-              {syncLoading ? (
-                <RefreshCw className='mr-2 h-4 w-4 animate-spin' />
-              ) : (
-                <RefreshCw className='mr-2 h-4 w-4' />
-              )}
-              Sync Contacts
-            </Button>
-            <Button
-              variant='outline'
-              onClick={() => onCalendarSync('smart')}
-              disabled={calendarSyncDisabled}
-              data-testid='trigger-calendar-sync'
-            >
-              {calendarSyncLoading ? (
-                <RefreshCw className='mr-2 h-4 w-4 animate-spin' />
-              ) : (
-                <RefreshCw className='mr-2 h-4 w-4' />
-              )}
-              Sync Calendar
-            </Button>
-            <Button
-              variant='outline'
-              onClick={() => onSync('full')}
-              disabled={syncDisabled}
-            >
-              Full Sync
-            </Button>
-            <Button
-              variant='outline'
-              onClick={onDisconnect}
-              disabled={disconnectLoading}
-              data-testid='disconnect-google'
-            >
-              {disconnectLoading ? (
-                <RefreshCw className='mr-2 h-4 w-4 animate-spin' />
-              ) : (
-                <Settings className='mr-2 h-4 w-4' />
-              )}
-              Disconnect
-            </Button>
-          </>
-        ) : (
-          <Button
-            onClick={onConnect}
-            disabled={oauthLoading}
-            data-testid='connect-google'
-          >
-            {oauthLoading ? (
-              <RefreshCw className='mr-2 h-4 w-4 animate-spin' />
-            ) : (
-              <Users className='mr-2 h-4 w-4' />
-            )}
-            Connect Google Account
-          </Button>
-        )}
-      </div>
-
-      {syncLoading && (
-        <div data-testid='sync-progress'>
-          <LoadingSpinner size='sm' text='Sync in progress...' />
-        </div>
-      )}
-
-      {(syncError || calendarSyncError) && (
-        <Alert>
-          <AlertCircle className='h-4 w-4' />
-          <AlertDescription>
-            {syncError?.message}
-            {syncError && calendarSyncError ? ' | ' : ''}
-            {calendarSyncError?.message}
-          </AlertDescription>
-        </Alert>
-      )}
-    </>
-  );
-}
-
 // Sync History Section Component
 interface SyncHistorySectionProps {
   readonly historyData: SyncJobListResponse | undefined;
@@ -292,7 +78,6 @@ function SyncHistorySection({
 }: SyncHistorySectionProps) {
   const recentJobs = historyData?.data || [];
 
-  // Determine content to render
   let content: React.ReactNode;
 
   if (historyLoading) {
@@ -385,7 +170,6 @@ function HealthSection({
 }: HealthSectionProps) {
   const health = healthData?.data?.attributes;
 
-  // Determine content to render
   let content: React.ReactNode;
 
   if (healthLoading) {
@@ -466,10 +250,10 @@ export default function IntegrationsPage() {
 
 function IntegrationsPageContent() {
   const {
-    data: statusData,
-    isLoading: statusLoading,
-    error: statusError,
-  } = useGoogleStatus();
+    data: integrationsData,
+    isLoading: integrationsLoading,
+    error: integrationsError,
+  } = useIntegrations();
 
   const {
     data: healthData,
@@ -483,44 +267,7 @@ function IntegrationsPageContent() {
     error: historyError,
   } = useSyncHistory({ limit: 5 });
 
-  const {
-    mutate: triggerSync,
-    isPending: syncLoading,
-    error: syncError,
-  } = useGoogleSync();
-
-  const {
-    mutate: triggerCalendarSync,
-    isPending: calendarSyncLoading,
-    error: calendarSyncError,
-  } = useCalendarSync();
-
-  const { mutate: authorizeOAuth, isPending: oauthLoading } =
-    useGoogleOAuthAuthorize();
-
-  const { mutate: disconnectOAuth, isPending: disconnectLoading } =
-    useGoogleOAuthDisconnect();
-
-  const status = statusData?.data?.attributes;
-
-  const handleSync = (syncType: SyncType) => {
-    triggerSync(syncType);
-  };
-
-  const handleCalendarSync = (syncType: SyncType) => {
-    triggerCalendarSync(syncType);
-  };
-
-  const handleConnectGoogle = () => {
-    // OAuth flow type is now encoded in the state parameter by the backend
-    authorizeOAuth({ redirect_url: '/integrations' });
-  };
-
-  const handleDisconnectGoogle = () => {
-    disconnectOAuth();
-  };
-
-  if (statusLoading || healthLoading || historyLoading) {
+  if (integrationsLoading || healthLoading || historyLoading) {
     return (
       <div className='container mx-auto py-8'>
         <div className='mb-8'>
@@ -538,6 +285,8 @@ function IntegrationsPageContent() {
     );
   }
 
+  const integrations = integrationsData?.data || [];
+
   return (
     <div className='container mx-auto py-8'>
       <div className='mb-8'>
@@ -548,83 +297,30 @@ function IntegrationsPageContent() {
       </div>
 
       <div className='grid gap-6 lg:grid-cols-3'>
-        {/* Google Contacts Integration */}
-        <div className='lg:col-span-2'>
-          <Card data-testid='google-integration'>
-            <CardHeader>
-              <CardTitle className='flex items-center gap-2'>
-                <Users className='h-5 w-5 text-blue-500' />
-                Google Integration
-              </CardTitle>
-            </CardHeader>
-            <CardContent className='space-y-4'>
-              {statusError && (
-                <Alert>
-                  <AlertCircle className='h-4 w-4' />
-                  <AlertDescription>{statusError.message}</AlertDescription>
-                </Alert>
-              )}
-
-              {status && (
-                <>
-                  {/* Status Display */}
-                  <div className='flex items-center justify-between'>
-                    <div className='space-y-1'>
-                      <div className='flex items-center gap-2'>
-                        <Badge
-                          variant={status.connected ? 'default' : 'secondary'}
-                          data-testid='integration-status'
-                        >
-                          {status.connected ? 'Connected' : 'Disconnected'}
-                        </Badge>
-                        <Badge variant='outline'>
-                          {status.syncCount} contacts synced
-                        </Badge>
-                      </div>
-                      {status.lastSync && (
-                        <p className='text-muted-foreground text-sm'>
-                          Last sync: {formatDateSafely(status.lastSync)}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Scope Upgrade Banner */}
-                  {status.connected && status.needsReconsent && (
-                    <ScopeUpgradeBanner
-                      onUpgrade={handleConnectGoogle}
-                      oauthLoading={oauthLoading}
-                    />
-                  )}
-
-                  {/* Token Expired Banner */}
-                  {status.connected && status.needsReauth && (
-                    <TokenExpiredBanner
-                      onRelink={handleConnectGoogle}
-                      oauthLoading={oauthLoading}
-                    />
-                  )}
-
-                  {/* Sync Controls */}
-                  <SyncControls
-                    connected={status.connected}
-                    syncLoading={syncLoading}
-                    calendarSyncLoading={calendarSyncLoading}
-                    oauthLoading={oauthLoading}
-                    disconnectLoading={disconnectLoading}
-                    needsReauth={!!status.needsReauth}
-                    needsReconsent={!!status.needsReconsent}
-                    onSync={handleSync}
-                    onCalendarSync={handleCalendarSync}
-                    onConnect={handleConnectGoogle}
-                    onDisconnect={handleDisconnectGoogle}
-                    syncError={syncError}
-                    calendarSyncError={calendarSyncError}
-                  />
-                </>
-              )}
-            </CardContent>
-          </Card>
+        {/* Dynamic Integration Panels */}
+        <div className='space-y-6 lg:col-span-2'>
+          {integrationsError ? (
+            <Alert variant='destructive'>
+              <AlertCircle className='h-4 w-4' />
+              <AlertTitle>Error loading integrations</AlertTitle>
+              <AlertDescription>{integrationsError.message}</AlertDescription>
+            </Alert>
+          ) : integrations.length === 0 ? (
+            <Card>
+              <CardContent className='pt-6'>
+                <p className='text-muted-foreground text-center'>
+                  No integrations available.
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            integrations.map(integration => (
+              <IntegrationPanel
+                key={integration.id}
+                integration={integration}
+              />
+            ))
+          )}
 
           {/* Sync History */}
           <SyncHistorySection
@@ -634,13 +330,15 @@ function IntegrationsPageContent() {
           />
         </div>
 
-        {/* System Health */}
+        {/* Sidebar: System Health & Settings */}
         <div>
           <HealthSection
             healthData={healthData}
             healthLoading={healthLoading}
             healthError={healthError}
           />
+
+          <DeadLetterQueue />
 
           {/* Settings */}
           <Card className='mt-6'>

@@ -218,14 +218,22 @@ Create the integration registry domain model, REST API, and MCP tool. No fronten
 
 Create shared frontend components and migrate Google's connect/disconnect and sync controls from the monolithic page to the generic dashboard pattern.
 
+**Execution Plan:**
+1. Update `frontend/src/types/integrations.ts` to include registry schemas and `/api/health/dead-letters` types.
+2. Add React Query hooks `useIntegrations` and `useDeadLetters` in `frontend/src/lib/api/integrations.ts`.
+3. Create generic `IntegrationPanel`, `ConnectionControls`, `SyncControls` components.
+4. Create `DeadLetterQueue` display.
+5. Modify `frontend/src/app/integrations/page.tsx` to dynamically render `IntegrationPanel` components based on the registry.
+6. Verify UI accessibility, run frontend tests (`pnpm lint`, `pnpm type-check`), and verify E2E tests pass locally.
+
 **Acceptance Criteria:**
-- [ ] `IntegrationPanel` component: renders any integration from registry data (name, status badge, capability list)
-- [ ] `ConnectionControls` component: connect/disconnect buttons with OAuth flow handling (parameterised by integration ID and OAuth URL)
-- [ ] `SyncControls` component: per-capability sync buttons (e.g. "Sync Contacts", "Sync Calendar") driven by `capabilities` array
-- [ ] Integrations page renders panels dynamically from `GET /api/integrations` — no Google-specific layout
-- [ ] Google connect/disconnect, sync contacts, sync calendar migrated to shared components
-- [ ] Dead-letter queue observability: ensure API access to dead-letter events is available and surfaced in the dashboard
-- [ ] Existing Google integration E2E tests pass with the new component structure
+- [x] `IntegrationPanel` component: renders any integration from registry data (name, status badge, capability list)
+- [x] `ConnectionControls` component: connect/disconnect buttons with OAuth flow handling (parameterised by integration ID and OAuth URL)
+- [x] `SyncControls` component: per-capability sync buttons (e.g. "Sync Contacts", "Sync Calendar") driven by `capabilities` array
+- [x] Integrations page renders panels dynamically from `GET /api/integrations` — no Google-specific layout
+- [x] Google connect/disconnect, sync contacts, sync calendar migrated to shared components
+- [x] Dead-letter queue observability: ensure API access to dead-letter events is available and surfaced in the dashboard
+- [x] Existing Google integration E2E tests pass with the new component structure
 
 **Required Test Coverage:**
 - **Unit:** `IntegrationPanel` rendering for connected/disconnected/error states, `SyncControls` button visibility by capability.
