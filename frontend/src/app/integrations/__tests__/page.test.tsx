@@ -76,7 +76,7 @@ describe('IntegrationsPage', () => {
               name: 'Google',
               connected: true,
               capabilities: ['contacts_sync', 'calendar_sync'],
-              status: 'active',
+              status: 'connected',
               sync_summary: {
                 sync_count: 150,
                 last_sync_time: '2024-01-15T10:30:00Z',

@@ -19,8 +19,8 @@ function getIntegrationIcon(id: string) {
 
 function getStatusBadge(status: string) {
   switch (status) {
-    case 'active':
-      return <Badge variant='default'>Active</Badge>;
+    case 'connected':
+      return <Badge variant='default'>Connected</Badge>;
     case 'disconnected':
       return <Badge variant='secondary'>Disconnected</Badge>;
     case 'error':

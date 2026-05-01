@@ -69,7 +69,9 @@ export function DeadLetterQueue() {
                 <div className='mb-2 flex items-start justify-between'>
                   <span className='font-medium'>{item.event_type}</span>
                   <span className='text-muted-foreground text-xs'>
-                    {new Date(item.created_at).toLocaleString()}
+                    {item.created_at
+                      ? new Date(item.created_at).toLocaleString()
+                      : 'Unknown time'}
                   </span>
                 </div>
                 <div className='text-muted-foreground mb-1'>

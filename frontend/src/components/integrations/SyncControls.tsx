@@ -24,8 +24,12 @@ function SyncButton({
     capability
   );
 
-  const displayLabel =
-    label || `Sync ${capability.charAt(0).toUpperCase() + capability.slice(1)}`;
+  const formattedCapability = capability
+    .replace('_sync', '')
+    .split('_')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+  const displayLabel = label || `Sync ${formattedCapability}`;
 
   return (
     <Button

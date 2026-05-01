@@ -124,7 +124,7 @@ test.describe('Integrations Page UI (mocked API)', () => {
               type: 'integration',
               attributes: {
                 name: 'Google',
-                status: connected ? 'active' : 'disconnected',
+                status: connected ? 'connected' : 'disconnected',
                 capabilities: ['contacts', 'calendar'],
                 sync_summary: {
                   last_sync_time: connected ? new Date().toISOString() : null,
@@ -273,7 +273,7 @@ test.describe('Integrations Page UI (mocked API)', () => {
               type: 'integration',
               attributes: {
                 name: 'Google',
-                status: 'active',
+                status: 'connected',
                 capabilities: ['contacts', 'calendar'],
                 sync_summary: {
                   last_sync_time: new Date().toISOString(),
@@ -360,7 +360,7 @@ test.describe('Integrations Page UI (mocked API)', () => {
               type: 'integration',
               attributes: {
                 name: 'Google',
-                status: 'active',
+                status: 'connected',
                 capabilities: ['contacts', 'calendar'],
                 sync_summary: {
                   last_sync_time: new Date().toISOString(),

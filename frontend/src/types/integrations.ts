@@ -15,10 +15,9 @@ export type SyncStatus =
   | 'failed'
   | 'cancelled';
 export type IntegrationStatus =
-  | 'active'
-  | 'inactive'
-  | 'error'
+  | 'connected'
   | 'disconnected'
+  | 'error'
   | 'token_expired';
 export type HealthStatus = 'healthy' | 'degraded' | 'unhealthy';
 
@@ -55,7 +54,7 @@ export interface DeadLetterEvent {
   consumer_group: string;
   delivery_count: number;
   last_error: string;
-  created_at: string;
+  created_at: string | null;
 }
 
 export interface DeadLetterListResponse {

@@ -122,7 +122,7 @@ export async function triggerSync(
   const requestData: SyncTriggerRequest = { sync_type: syncType };
 
   const response = await fetch(
-    `/api/integrations/${integrationId}/${capability}/sync`,
+    `/api/integrations/${integrationId}/${capability.replace('_sync', '')}/sync`,
     {
       method: 'POST',
       headers: {
