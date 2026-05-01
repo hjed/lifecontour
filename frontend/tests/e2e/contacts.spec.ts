@@ -241,7 +241,9 @@ test.describe('Contact Management - Authenticated User', () => {
     ).toBeVisible({ timeout: 10000 });
 
     // Verify the relationship type is shown
-    await expect(authenticatedPage.getByText('Partner')).toBeVisible({
+    await expect(
+      authenticatedPage.getByText('Partner', { exact: true })
+    ).toBeVisible({
       timeout: 10000,
     });
 
