@@ -922,10 +922,6 @@ class ContactService:
             raise ContactValidationError(
                 "id", "Contact ID is required for event publishing"
             )
-        # TODO: Record creation in field history once the frontend
-        # ActivityItem can render creation events distinctly from
-        # field-change entries (currently would display as
-        # "Added Created: ...").
         await self.history_service.record_contact_change(
             contact.id,
             {"status": (None, "created")},
@@ -969,14 +965,7 @@ class ContactService:
                     source=source,
                     _transaction=transaction,
                 )
-        if contact.id is None:
-            raise ContactValidationError(
-                "id", "Contact ID is required for event publishing"
-            )
-        # TODO: Record creation in field history once the frontend
-        # ActivityItem can render creation events distinctly from
-        # field-change entries (currently would display as
-        # "Added Created: ...").
+
         event = ContactCreated(
             contact.id,
             contact.first_name,

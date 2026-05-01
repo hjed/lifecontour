@@ -107,7 +107,7 @@ class ContactRelationshipService:
                 created.id,
                 {
                     "status": (None, "created"),
-                    "type": (None, created.relationship_type.value),
+                    "relationship_type": (None, created.relationship_type.value),
                 },
                 changed_by=changed_by,
                 source=source,

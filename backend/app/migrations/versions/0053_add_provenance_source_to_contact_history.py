@@ -1,6 +1,6 @@
 """add provenance source to contact history
 
-Revision ID: ab4c2dc86432
+Revision ID: 0053
 Revises: 0052
 Create Date: 2026-04-30 22:57:18.039670
 
@@ -24,7 +24,10 @@ def upgrade() -> None:
     op.add_column(
         "contact_field_history",
         sa.Column(
-            "source", sa.String(length=50), nullable=False, server_default="system"
+            "source",
+            sa.String(length=50),
+            nullable=False,
+            server_default=sa.text("'system'"),
         ),
     )
 

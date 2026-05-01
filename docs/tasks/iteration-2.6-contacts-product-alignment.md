@@ -552,7 +552,7 @@ The sequence reflects both user priority and technical dependency:
 - [x] No-op exports do not create activity entries.
 - [x] Existing history retrieval remains backwards-compatible enough for staged UI rollout.
 - [x] Changes align with iter-5 event system.
-- [x] Provenance is captured transactionally with changes to the the data.
+- [x] Provenance is captured transactionally with changes to the data.
 
 **Required Test Coverage:**
 - **Unit:** provenance classification, no-op suppression, summary-event shaping helpers.
