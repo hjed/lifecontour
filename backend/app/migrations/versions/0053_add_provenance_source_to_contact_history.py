@@ -36,6 +36,10 @@ def upgrade() -> None:
     op.execute(
         "UPDATE contact_field_history SET source = 'google_contacts' WHERE changed_by = 'google_sync';"
     )
+    # For strava sync
+    op.execute(
+        "UPDATE contact_field_history SET source = 'strava' WHERE changed_by = 'strava_sync';"
+    )
     # For UI
     op.execute(
         "UPDATE contact_field_history SET source = 'ui' WHERE changed_by = 'ui';"

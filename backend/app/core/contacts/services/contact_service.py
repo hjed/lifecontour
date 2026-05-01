@@ -914,8 +914,6 @@ class ContactService:
             contact: The created contact
             transaction: Database transaction
             changed_by: Provenance identifier (e.g. "google_sync").
-                Threaded for future use when creation history recording
-                is implemented with proper frontend rendering support.
             source: Strongly typed provenance.
         """
         if contact.id is None:
