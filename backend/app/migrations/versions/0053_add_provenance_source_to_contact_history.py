@@ -31,7 +31,7 @@ def upgrade() -> None:
     # Backfill based on existing changed_by column
     # For google sync
     op.execute(
-        "UPDATE contact_field_history SET source = 'google_contacts' WHERE changed_by = 'google_sync' OR changed_by LIKE '%_sync';"
+        "UPDATE contact_field_history SET source = 'google_contacts' WHERE changed_by = 'google_sync';"
     )
     # For UI
     op.execute(

@@ -161,7 +161,10 @@ class ContactRelationshipService:
                 created_relationship.id,
                 {
                     "status": (None, "created"),
-                    "type": (None, created_relationship.relationship_type.value),
+                    "relationship_type": (
+                        None,
+                        created_relationship.relationship_type.value,
+                    ),
                 },
                 changed_by=changed_by,
                 source=source,
@@ -197,7 +200,10 @@ class ContactRelationshipService:
                     created_inverse.id,
                     {
                         "status": (None, "created"),
-                        "type": (None, created_inverse.relationship_type.value),
+                        "relationship_type": (
+                            None,
+                            created_inverse.relationship_type.value,
+                        ),
                     },
                     changed_by=changed_by,
                     source=source,

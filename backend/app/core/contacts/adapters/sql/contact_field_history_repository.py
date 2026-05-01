@@ -1,5 +1,6 @@
 """SQL implementation of ContactFieldHistoryRepository."""
 
+from core_shared.models.contacts.value_objects import Provenance
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -16,7 +17,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
     # Matches history entries for the contact itself and all related entities
     _CONTACT_HISTORY_WHERE_CLAUSE = """
         (entity_type = 'contact' AND entity_id = :contact_id)
-        OR (entity_type IN ('contact_method', 'contact_address', 'contact_note', 'contact_tag')
+        OR (entity_type IN ('contact_method', 'contact_address', 'contact_note', 'contact_tag', 'contact_relationship', 'contact_important_date')
             AND entity_id IN (
                 SELECT id FROM contact_methods WHERE contact_id = :contact_id
                 UNION
@@ -25,6 +26,10 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
                 SELECT id FROM contact_notes WHERE contact_id = :contact_id
                 UNION
                 SELECT tag_id FROM contact_tags WHERE contact_id = :contact_id
+                UNION
+                SELECT id FROM contact_relationships WHERE from_contact_id = :contact_id OR to_contact_id = :contact_id
+                UNION
+                SELECT id FROM contact_important_dates WHERE contact_id = :contact_id
             ))
     """
 
@@ -58,7 +63,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
                 old_value=row.old_value,
                 new_value=row.new_value,
                 changed_by=row.changed_by,
-                source=row.source,
+                source=Provenance(row.source),
                 id=row.id,
                 created_at=row.created_at.isoformat() if row.created_at else None,
             )
@@ -105,7 +110,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
                 old_value=row.old_value,
                 new_value=row.new_value,
                 changed_by=row.changed_by,
-                source=row.source,
+                source=Provenance(row.source),
                 id=row.id,
                 created_at=row.created_at.isoformat() if row.created_at else None,
             )
@@ -186,7 +191,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
                 old_value=row.old_value,
                 new_value=row.new_value,
                 changed_by=row.changed_by,
-                source=row.source,
+                source=Provenance(row.source),
                 id=row.id,
                 created_at=row.created_at.isoformat() if row.created_at else None,
             )
@@ -221,7 +226,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
                 old_value=row.old_value,
                 new_value=row.new_value,
                 changed_by=row.changed_by,
-                source=row.source,
+                source=Provenance(row.source),
                 id=row.id,
                 created_at=row.created_at.isoformat() if row.created_at else None,
             )

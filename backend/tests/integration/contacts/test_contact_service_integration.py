@@ -260,11 +260,12 @@ class TestContactServiceIntegration:
         # Verify field history was recorded
         history = await history_repo.get_contact_history(saved_contact.id)
         assert len(history) == 2
-        # Index 0 is the creation history, Index 1 is the update history
-        update_history = history[1]
+        update_history = next((h for h in history if h.field_name == "last_name"), None)
+        assert update_history is not None, (
+            "History entry for last_name update not found"
+        )
         assert update_history.entity_type == "contact"
         assert update_history.entity_id == saved_contact.id
-        assert update_history.field_name == "last_name"
         assert update_history.old_value == "Smith"
         assert update_history.new_value == "Doe"
 
