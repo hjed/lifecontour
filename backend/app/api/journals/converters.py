@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from core_shared.models.journals import (
     AbseilingData,
     AbseilPitch,
+    ActivityTemplate,
     BushwalkingData,
     Calendar,
     CalendarInfo,
@@ -35,6 +36,7 @@ from app.api.common.schemas import JsonApiLinks
 from app.api.journals.schemas import (
     AbseilingDataSchema,
     AbseilPitchSchema,
+    ActivityTemplateResource,
     BushwalkingDataSchema,
     CalendarInfoDataSchema,
     CalendarSchema,
@@ -477,6 +479,7 @@ class TypeDataConverter:
     def canyoning_data_to_schema(data: CanyoningData) -> dict[str, Any]:
         """Convert CanyoningData domain entity to API schema."""
         return CanyoningDataSchema(
+            template_id=str(data.template_id) if data.template_id else None,
             french_grade=data.french_grade,
             water_guage_name=data.water_guage_name,
             water_guage_level=data.water_guage_level,
@@ -577,4 +580,62 @@ class JournalRequestConverter:
             else existing.order,
             created_at=existing.created_at,
             updated_at=existing.updated_at,
+        )
+
+
+class ActivityTemplateConverter:
+    """Converter for ActivityTemplate models to API schemas."""
+
+    @staticmethod
+    def to_resource(
+        template: ActivityTemplate, base_url: str = ""
+    ) -> ActivityTemplateResource:
+        """Convert a template domain model to JSON API resource."""
+        from app.api.common.schemas import JsonApiLinks
+        from app.api.journals.schemas import (
+            AbseilPitchSchema,
+            ActivityTemplateAttributes,
+            ActivityTemplateResource,
+        )
+
+        pitches_schema = []
+        if template.pitches:
+            for p in template.pitches:
+                pitches_schema.append(
+                    AbseilPitchSchema(
+                        id=p.id,
+                        pitch_number=p.pitch_number,
+                        height=p.height,
+                        anchor_location=p.anchor_location,
+                        anchor_type=p.anchor_type,
+                        did_rescue=p.did_rescue,
+                        did_setup=p.did_setup,
+                    )
+                )
+
+        attributes = ActivityTemplateAttributes(
+            name=template.name,
+            template_type=template.template_type,
+            region=template.region,
+            description=template.description,
+            french_grade=template.french_grade,
+            canyon_type=template.canyon_type,
+            water_gauge_name=template.water_gauge_name,
+            is_vertical=template.is_vertical,
+            is_horizontal=template.is_horizontal,
+            climbing_type=template.climbing_type,
+            grade=template.grade,
+            length=template.length,
+            pitches=pitches_schema,
+            created_at=template.created_at,
+            updated_at=template.updated_at,
+        )
+
+        links = JsonApiLinks(self=f"{base_url}/api/templates/{template.id}")
+
+        return ActivityTemplateResource(
+            type="activity-templates",
+            id=str(template.id),
+            attributes=attributes,
+            links=links,
         )

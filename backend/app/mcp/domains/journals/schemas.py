@@ -406,3 +406,53 @@ class DailySummaryMCPResponse(BaseModel):
     summary: str = Field(
         description="AI-friendly summary of the daily summary results and context"
     )
+
+
+class TemplatePitchMCPSchema(BaseModel):
+    """AI-friendly pitch format."""
+
+    pitch_number: int = Field(description="Pitch number in sequence")
+    height: int = Field(description="Height of pitch in metres")
+    anchor_location: str | None = Field(
+        default=None, description="Anchor location (e.g., TR, TL)"
+    )
+    anchor_type: str | None = Field(
+        default=None, description="Anchor type (e.g., double bolt)"
+    )
+    did_rescue: bool = Field(default=False, description="Did rescue occur")
+    did_setup: bool = Field(default=False, description="Did user setup")
+
+
+class ActivityTemplateMCPResponse(BaseModel):
+    """AI-friendly activity template response."""
+
+    id: str = Field(description="Template UUID")
+    name: str = Field(description="Template name")
+    template_type: str = Field(
+        description="Type of template (canyoning, climbing, etc)"
+    )
+    region: str | None = Field(default=None, description="Region")
+    description: str | None = Field(default=None, description="Description")
+    french_grade: str | None = Field(default=None, description="French grade")
+    canyon_type: str | None = Field(
+        default=None, description="Canyon type (vertical, horizontal, etc)"
+    )
+    water_gauge_name: str | None = Field(default=None, description="Water gauge name")
+    is_vertical: bool | None = Field(default=None, description="Is vertical")
+    is_horizontal: bool | None = Field(default=None, description="Is horizontal")
+    climbing_type: str | None = Field(default=None, description="Climbing type")
+    grade: str | int | None = Field(default=None, description="Grade")
+    length: int | None = Field(default=None, description="Length in metres")
+    pitches: list[TemplatePitchMCPSchema] = Field(
+        default_factory=list, description="Pitches"
+    )
+    summary: str = Field(description="AI-friendly summary of the template")
+
+
+class ActivityTemplateListMCPResponse(BaseModel):
+    """AI-friendly activity template list response."""
+
+    templates: list[ActivityTemplateMCPResponse] = Field(
+        description="List of templates"
+    )
+    summary: str = Field(description="AI-friendly summary")
