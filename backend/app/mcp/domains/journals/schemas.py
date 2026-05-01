@@ -305,14 +305,26 @@ class JournalCreateRequest(BaseModel):
     title: str = Field(description=JOURNAL_TITLE_DESC)
     content: str = Field(description="Journal content (markdown)")
     event_date_range: EventDateRangeSchema = Field(description=EVENT_DATE_RANGE_DESC)
-    types: list[str] = Field(default_factory=list, description="Journal types to add")
+    types: list[str] = Field(
+        default_factory=list,
+        description="Journal types to add. Valid values: NOTE, EVENT, MOOD_RATING, "
+        "PLAN, TRAVEL, PHOTO_ALBUM, FITNESS, OUTDOOR_ACTIVITY, BUSHWALKING, "
+        "JOGGING, ABSEILING_TRIP, CANYONING, CLIMBING, KAYAKING, CROSS_COUNTRY_SKIING. "
+        "Dependencies are added automatically.",
+    )
     type_data: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
-        description="Type-specific data (e.g., EVENT: {calendar_id: uuid}, ABSEILING_TRIP: {pitches: [{pitch_number: int, height: int}]})",
+        description="Type-specific data keyed by type name. "
+        "Call list_journal_types to see available fields per type. "
+        'Example: {"EVENT": {"calendar_id": "uuid"}, '
+        '"MOOD_RATING": {"mood_value": 7}}',
     )
     contact_relationships: list[dict[str, Any]] = Field(
         default_factory=list,
-        description="Contact relationships [{contact_id: int, relationship_type: str}]",
+        description="Contact relationships. Each dict: {contact_id: int, "
+        "relationship_type: PARTICIPANT|INVITEE|MENTION|ABOUT, "
+        "status?: ATTENDING|ATTENDED|MAYBE|NO_REPLY|DECLINED, "
+        "role?: ORGANISER|FACILITATOR_HELPER}",
     )
     tags: list[str] = Field(default_factory=list, description="Tag names to assign")
     parent_id: int | None = Field(default=None, description="Parent journal ID")
@@ -326,13 +338,24 @@ class JournalUpdateRequest(BaseModel):
     event_date_range: EventDateRangeSchema | None = Field(
         default=None, description="Updated event date range"
     )
-    types: list[str] | None = Field(default=None, description="Replace all types")
+    types: list[str] | None = Field(
+        default=None,
+        description="Replace all types. Valid values: NOTE, EVENT, MOOD_RATING, "
+        "PLAN, TRAVEL, PHOTO_ALBUM, FITNESS, OUTDOOR_ACTIVITY, BUSHWALKING, "
+        "JOGGING, ABSEILING_TRIP, CANYONING, CLIMBING, KAYAKING, CROSS_COUNTRY_SKIING. "
+        "Dependencies are added automatically.",
+    )
     type_data: dict[str, dict[str, Any]] | None = Field(
         default=None,
-        description="Update type-specific data (e.g., ABSEILING_TRIP: {pitches: [{pitch_number: int}]})",
+        description="Update type-specific data keyed by type name. "
+        "Call list_journal_types to see available fields per type.",
     )
     contact_relationships: list[dict[str, Any]] | None = Field(
-        default=None, description="Replace all contact relationships"
+        default=None,
+        description="Replace all contact relationships. Each dict: {contact_id: int, "
+        "relationship_type: PARTICIPANT|INVITEE|MENTION|ABOUT, "
+        "status?: ATTENDING|ATTENDED|MAYBE|NO_REPLY|DECLINED, "
+        "role?: ORGANISER|FACILITATOR_HELPER}",
     )
     tags: list[str] | None = Field(default=None, description="Replace all tags")
     parent_id: int | None = Field(default=None, description="Parent journal ID")

@@ -1530,98 +1530,151 @@ async def _update_type_specific_data(
         )
 
 
-async def _persist_contact_relationships(
-    journal_id: int,
+def _validate_contact_relationships(
     contact_relationships: list[dict[str, Any]],
-    contact_relationship_repo: SqlJournalContactRelationshipRepository,
 ) -> None:
     """
-    Create contact relationships for a journal.
+    Validate contact relationship inputs without any DB operations.
 
-    Args:
-        journal_id: The ID of the journal
-        contact_relationships: List of relationship dictionaries with contact_id and relationship_type
-        contact_relationship_repo: Repository for contact relationships
+    Call this BEFORE any DB writes to ensure all inputs are valid.
+    Raises ValueError with a clear message if any relationship has invalid
+    or missing required fields, wrong types, or unrecognised enum values.
     """
     from core_shared.models.journals.attendee_status import AttendeeStatus
     from core_shared.models.journals.contact_event_role import ContactEventRole
 
-    for rel in contact_relationships:
+    valid_relationship_types = {t.name for t in JournalContactRelationshipType}
+
+    for i, rel in enumerate(contact_relationships):
         if not isinstance(rel, dict):
-            continue
+            raise ValueError(
+                f"contact_relationships[{i}]: expected a dict, got {type(rel).__name__}"
+            )
 
-        try:
-            contact_id = rel.get("contact_id")
-            relationship_type_str = rel.get("relationship_type")
+        contact_id = rel.get("contact_id")
+        relationship_type_str = rel.get("relationship_type")
 
-            if contact_id and relationship_type_str:
-                # Convert relationship type string to enum
-                relationship_type = JournalContactRelationshipType[
-                    relationship_type_str.upper()
-                ]
+        if not contact_id:
+            raise ValueError(
+                f"contact_relationships[{i}]: missing required field 'contact_id'"
+            )
+        if not isinstance(contact_id, int):
+            raise ValueError(
+                f"contact_relationships[{i}]: 'contact_id' must be an int, "
+                f"got {type(contact_id).__name__}"
+            )
+        if not relationship_type_str:
+            raise ValueError(
+                f"contact_relationships[{i}]: missing required field 'relationship_type'"
+            )
+        if not isinstance(relationship_type_str, str):
+            raise ValueError(
+                f"contact_relationships[{i}]: 'relationship_type' must be a string, "
+                f"got {type(relationship_type_str).__name__}"
+            )
+        if relationship_type_str.upper() not in valid_relationship_types:
+            raise ValueError(
+                f"contact_relationships[{i}]: invalid relationship_type "
+                f"'{relationship_type_str}'. "
+                f"Valid types are: {', '.join(sorted(valid_relationship_types))}"
+            )
 
-                # Parse status and role if present
-                status, role = None, None
+        status_raw = rel.get("status")
+        if isinstance(status_raw, str):
+            try:
+                AttendeeStatus[status_raw.upper()]
+            except KeyError:
+                valid_statuses = {s.name for s in AttendeeStatus}
+                raise ValueError(
+                    f"contact_relationships[{i}]: invalid status '{status_raw}'. "
+                    f"Valid statuses are: {', '.join(sorted(valid_statuses))}"
+                ) from None
 
-                import structlog
+        role_raw = rel.get("role")
+        if isinstance(role_raw, str):
+            try:
+                ContactEventRole[role_raw.upper()]
+            except KeyError:
+                valid_roles = {r.name for r in ContactEventRole}
+                raise ValueError(
+                    f"contact_relationships[{i}]: invalid role '{role_raw}'. "
+                    f"Valid roles are: {', '.join(sorted(valid_roles))}"
+                ) from None
 
-                logger = structlog.get_logger(__name__)
 
-                status_raw = rel.get("status")
-                if isinstance(status_raw, str):
-                    try:
-                        status = AttendeeStatus[status_raw.upper()]
-                    except KeyError:
-                        logger.warning(
-                            "Ignoring invalid contact relationship status",
-                            status=status_raw,
-                            journal_id=journal_id,
-                            contact_id=contact_id,
-                        )
+async def _persist_contact_relationships(
+    journal_id: int,
+    contact_relationships: list[dict[str, Any]],
+    contact_relationship_repo: SqlJournalContactRelationshipRepository,
+    db_connection: AsyncConnection,
+) -> None:
+    """
+    Validate and create contact relationships for a journal.
 
-                role_raw = rel.get("role")
-                if isinstance(role_raw, str):
-                    try:
-                        role = ContactEventRole[role_raw.upper()]
-                    except KeyError:
-                        logger.warning(
-                            "Ignoring invalid contact relationship role",
-                            role=role_raw,
-                            journal_id=journal_id,
-                            contact_id=contact_id,
-                        )
+    Validates all inputs first via _validate_contact_relationships, then
+    persists each relationship inside a savepoint.
 
-                # Create relationship
-                relationship = JournalContactRelationship(
-                    journal_id=journal_id,
-                    contact_id=contact_id,
-                    relationship_type=relationship_type,
-                    status=status,
-                    role=role,
-                )
-                await contact_relationship_repo.create(relationship)
-        except (ValueError, KeyError):
-            # Invalid relationship, skip
-            pass
+    Args:
+        journal_id: The ID of the journal
+        contact_relationships: List of relationship dicts
+        contact_relationship_repo: Repository for contact relationships
+        db_connection: Database connection for savepoint management
+
+    Raises:
+        ValueError: If any relationship has invalid or missing fields
+    """
+    from core_shared.models.journals.attendee_status import AttendeeStatus
+    from core_shared.models.journals.contact_event_role import ContactEventRole
+
+    _validate_contact_relationships(contact_relationships)
+
+    # All inputs valid — persist each relationship
+    for rel in contact_relationships:
+        contact_id = rel["contact_id"]
+        relationship_type = JournalContactRelationshipType[
+            rel["relationship_type"].upper()
+        ]
+        status = None
+        role = None
+        status_raw = rel.get("status")
+        if isinstance(status_raw, str):
+            status = AttendeeStatus[status_raw.upper()]
+        role_raw = rel.get("role")
+        if isinstance(role_raw, str):
+            role = ContactEventRole[role_raw.upper()]
+
+        relationship = JournalContactRelationship(
+            journal_id=journal_id,
+            contact_id=contact_id,
+            relationship_type=relationship_type,
+            status=status,
+            role=role,
+        )
+        async with db_connection.begin_nested():
+            await contact_relationship_repo.create(relationship)
 
 
 async def _persist_tags(
     journal_id: int,
     tags: list[str],
     tag_repo: SqlJournalTagRepository,
+    db_connection: AsyncConnection,
 ) -> None:
     """
     Find or create tags and assign them to a journal.
+
+    Each tag operation is wrapped in a savepoint so that if it fails, the
+    PostgreSQL transaction stays clean and the original error propagates
+    to the caller with a clear message.
 
     Args:
         journal_id: The ID of the journal
         tags: List of tag names
         tag_repo: Repository for tags
+        db_connection: Database connection for savepoint management
     """
-    from uuid import uuid4
-
     for tag_name in tags:
-        try:
+        async with db_connection.begin_nested():
             # Find or create tag by name
             all_tags = await tag_repo.get_all()
             tag: JournalTag | None = next(
@@ -1630,9 +1683,9 @@ async def _persist_tags(
             )
 
             if not tag:
-                # Tag doesn't exist, create it
+                # Tag doesn't exist, create it (id=None lets the DB generate it)
                 tag = JournalTag(
-                    id=uuid4(),
+                    id=None,
                     name=tag_name,
                     color="#808080",  # Default gray color
                 )
@@ -1641,9 +1694,6 @@ async def _persist_tags(
             # Assign tag to journal (tag.id is guaranteed to be set after save)
             if tag.id is not None:
                 await tag_repo.assign_tag(journal_id, tag.id)
-        except Exception:
-            # Error creating/assigning tag, skip
-            pass
 
 
 async def _fetch_enrichment_data(
@@ -1747,16 +1797,168 @@ Args:
     mcp: The FastMCP server instance to register tools with
 """
 
+# -- Type metadata for the discovery tool --
+# Keyed by JournalType enum name (uppercase), these describe the type_data
+# fields each type accepts.  Keep this in sync with the _update_*_data helpers.
+_JOURNAL_TYPE_DESCRIPTIONS: dict[str, str] = {
+    "NOTE": "Simple text note using only base journal fields (no type_data needed)",
+    "EVENT": "Calendar event with time and location",
+    "MOOD_RATING": "Mood and energy level tracking",
+    "PLAN": "Event planning (no specific type_data fields)",
+    "TRAVEL": "Travel itinerary (no specific type_data fields)",
+    "PHOTO_ALBUM": "Photo album linked to Immich",
+    "FITNESS": "Base fitness activity with optional metrics",
+    "OUTDOOR_ACTIVITY": "Outdoor activity extending FITNESS",
+    "BUSHWALKING": "Bushwalking/hiking activity",
+    "JOGGING": "Jogging/running activity",
+    "ABSEILING_TRIP": "Abseiling/rappelling trip",
+    "CANYONING": "Canyoning trip (combines bushwalking + abseiling)",
+    "CLIMBING": "Climbing activity",
+    "KAYAKING": "Kayaking activity",
+    "CROSS_COUNTRY_SKIING": "Cross-country skiing activity",
+}
+
+_JOURNAL_TYPE_DATA_FIELDS: dict[str, dict[str, str]] = {
+    "EVENT": {
+        "calendar_id": "UUID of the calendar (required)",
+        "start_time": "Start time (HH:MM or ISO datetime, optional)",
+        "end_time": "End time (HH:MM or ISO datetime, optional)",
+        "is_all_day": "bool (default false)",
+        "location": "string (optional)",
+        "timezone": "string (optional)",
+        "event_state": "string (default 'confirmed')",
+    },
+    "MOOD_RATING": {
+        "mood_value": "int 1-10",
+        "mood_label": "string (optional)",
+        "energy_level": "int 1-10 (optional)",
+    },
+    "PHOTO_ALBUM": {
+        "immich_album_id": "Immich album UUID",
+    },
+    "FITNESS": {
+        "heart_rate_avg": "int (optional)",
+        "heart_rate_max": "int (optional)",
+        "distance": "float in km (optional)",
+        "elevation_gain": "float in m (optional)",
+        "elevation_loss": "float in m (optional)",
+        "duration": "int in minutes (optional)",
+        "calories": "int (optional)",
+        "strava_activity_id": "string (optional)",
+    },
+    "OUTDOOR_ACTIVITY": {
+        "weather_conditions": "string (optional)",
+        "role": "string (optional)",
+        "in_leadership_role": "bool (optional)",
+        "participant_notes": "string (optional)",
+    },
+    "BUSHWALKING": {
+        "track_grading": "string (optional)",
+    },
+    "JOGGING": {
+        "pace": "string e.g. '5:30/km' (optional)",
+    },
+    "ABSEILING_TRIP": {
+        "number_of_abseils": "int (optional)",
+        "total_length": "float in m (optional)",
+        "number_of_setups": "int (optional)",
+        "number_of_rescues": "int (optional)",
+    },
+    "CANYONING": {
+        "french_grade": "string (optional)",
+        "water_guage_name": "string (optional)",
+        "water_guage_level": "float (optional)",
+        "is_vertical": "bool (optional)",
+        "is_night_canyon": "bool (optional)",
+        "is_white_water": "bool (optional)",
+    },
+    "CLIMBING": {
+        "climbing_type": "string (optional)",
+        "grade": "string (optional)",
+        "length": "float in m (optional)",
+    },
+    "KAYAKING": {
+        "water_type": "string (optional)",
+    },
+    "CROSS_COUNTRY_SKIING": {
+        "snow_conditions": "string (optional)",
+    },
+}
+
+
+@mcp_unified_error_handler("list_journal_types", "journal")
+async def list_journal_types() -> str:
+    """
+    List all valid journal types, their descriptions, dependencies, and type_data fields.
+
+    Call this BEFORE create_journal_entry or update_journal_entry to discover
+    valid type names and what type_data fields each type accepts.
+
+    Returns:
+        JSON with all available journal types and their schemas
+    """
+    from core_shared.models.journals.attendee_status import AttendeeStatus
+    from core_shared.models.journals.contact_event_role import ContactEventRole
+
+    types_info: list[dict[str, Any]] = []
+
+    for jt in JournalType:
+        type_name = jt.name
+        deps = JournalType.get_dependencies(jt)
+        dep_names = [d.name for d in deps]
+
+        entry: dict[str, Any] = {
+            "name": type_name,
+            "description": _JOURNAL_TYPE_DESCRIPTIONS.get(type_name, ""),
+            "dependencies": dep_names,
+        }
+        if type_name in _JOURNAL_TYPE_DATA_FIELDS:
+            entry["type_data_fields"] = _JOURNAL_TYPE_DATA_FIELDS[type_name]
+        else:
+            entry["type_data_fields"] = None
+
+        types_info.append(entry)
+
+    # Also include contact_relationship enum info
+    contact_enums = {
+        "relationship_types": [t.name for t in JournalContactRelationshipType],
+        "attendee_statuses": [s.name for s in AttendeeStatus],
+        "contact_event_roles": [r.name for r in ContactEventRole],
+    }
+
+    result = {
+        "journal_types": types_info,
+        "contact_relationship_enums": contact_enums,
+        "usage_hint": (
+            "Pass type names in the 'types' field of create/update journal_data. "
+            "Dependencies are added automatically. "
+            "Pass type-specific data in the 'type_data' field keyed by type name."
+        ),
+    }
+
+    return json.dumps(result, indent=2)
+
 
 @mcp_unified_error_handler("create_journal_entry", "journal")
 async def create_journal_entry(
     journal_data: Annotated[
         str,
         Field(
-            description="JSON string containing journal creation data with fields: "
-            "title (str), content (str), event_date_range (dict with start/end), "
-            "types (list[str]), type_data (dict), contact_relationships (list[dict]), "
-            "tags (list[str]), parent_id (int, optional)"
+            description="JSON string containing journal creation data. "
+            "Required fields: title (str), content (str), "
+            "event_date_range ({start: 'YYYY-MM-DD', end: 'YYYY-MM-DD'}). "
+            "Optional fields: "
+            "types (list[str] — valid values: NOTE, EVENT, MOOD_RATING, PLAN, "
+            "TRAVEL, PHOTO_ALBUM, FITNESS, OUTDOOR_ACTIVITY, BUSHWALKING, "
+            "JOGGING, ABSEILING_TRIP, CANYONING, CLIMBING, KAYAKING, "
+            "CROSS_COUNTRY_SKIING — call list_journal_types for details), "
+            "type_data (dict keyed by type name — call list_journal_types "
+            "to see fields for each type), "
+            "contact_relationships (list of {contact_id: int, "
+            "relationship_type: PARTICIPANT|INVITEE|MENTION|ABOUT, "
+            "status?: ATTENDING|ATTENDED|MAYBE|NO_REPLY|DECLINED, "
+            "role?: ORGANISER|FACILITATOR_HELPER}), "
+            "tags (list[str]), parent_id (int)"
         ),
     ],
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
@@ -1765,9 +1967,13 @@ async def create_journal_entry(
     """
     Create a new journal entry with types, type-specific data, relationships, and tags.
 
-    Creates a journal entry with support for multiple types (NOTE, EVENT, MOOD_RATING, etc.),
-    type-specific data (e.g., calendar_id for EVENT), contact relationships, and tags.
-    Returns AI-friendly response with contextual summary.
+    IMPORTANT: Call list_journal_types first if you are unsure which type names
+    or type_data fields are valid. Invalid type names will be rejected.
+
+    Creates a journal entry with support for multiple types, type-specific data
+    (e.g. calendar_id for EVENT), contact relationships, and tags.
+    Type dependencies are added automatically (e.g. BUSHWALKING adds
+    OUTDOOR_ACTIVITY and FITNESS).
 
     Args:
         journal_data: JSON string with journal creation data
@@ -1782,7 +1988,8 @@ async def create_journal_entry(
 
     Raises:
         JournalValidationError: If validation fails
-        ValueError: If JSON parsing fails or required fields are missing
+        ValueError: If JSON parsing fails, required fields are missing, or invalid
+                    type/relationship_type/status/role values are provided
     """
     # Parse JSON input
     try:
@@ -1795,6 +2002,34 @@ async def create_journal_entry(
 
     # Get current user ID from auth context
     user_id = await get_current_user_id()
+
+    # --- Validate ALL inputs upfront BEFORE any DB writes ---
+    # This ensures ValueError is raised before the journal INSERT,
+    # preventing partial data commits when the error handler catches it.
+    valid_type_names = {t.name for t in JournalType}
+
+    if request.types:
+        invalid_types = [t for t in request.types if t.upper() not in valid_type_names]
+        if invalid_types:
+            raise ValueError(
+                f"Invalid journal type(s): {', '.join(invalid_types)}. "
+                f"Valid types are: {', '.join(sorted(valid_type_names))}"
+            )
+
+    if request.type_data:
+        invalid_type_data_keys = [
+            k for k in request.type_data if k.upper() not in valid_type_names
+        ]
+        if invalid_type_data_keys:
+            raise ValueError(
+                f"Invalid type_data key(s): {', '.join(invalid_type_data_keys)}. "
+                f"Valid types are: {', '.join(sorted(valid_type_names))}"
+            )
+
+    if request.contact_relationships:
+        _validate_contact_relationships(request.contact_relationships)
+
+    # --- All inputs validated, proceed with DB writes ---
 
     # Create repositories
     repos = _create_journal_tool_repositories(db_connection)
@@ -1827,61 +2062,56 @@ async def create_journal_entry(
         raise ValueError(msg)
     journal_id = created_journal.id
 
-    # Add types if provided in the request
+    # Add types if provided in the request (already validated upfront)
     if request.types:
         for type_str in request.types:
-            try:
-                # Convert type string to enum
-                journal_type = JournalType[type_str.upper()]
+            journal_type = JournalType[type_str.upper()]
 
-                # Capture the return value: includes all types added (requested +
-                # auto-resolved dependencies like FITNESS for OUTDOOR_ACTIVITY).
-                added_types = await journal_service.add_type_to_journal(
-                    journal_id, journal_type, db_connection
+            # Capture the return value: includes all types added (requested +
+            # auto-resolved dependencies like FITNESS for OUTDOOR_ACTIVITY).
+            added_types = await journal_service.add_type_to_journal(
+                journal_id, journal_type, db_connection
+            )
+
+            # Create type-specific data rows for ALL added types (including
+            # dependency types like FITNESS). Mirrors REST controller behaviour.
+            for added_type in added_types:
+                await _create_type_specific_data(
+                    added_type,
+                    journal_id,
+                    repos.mood_data_repo,
+                    repos.plan_data_repo,
+                    repos.travel_data_repo,
+                    repos.fitness_data_repo,
+                    repos.outdoor_activity_data_repo,
+                    repos.bushwalking_data_repo,
+                    repos.jogging_data_repo,
+                    repos.abseiling_data_repo,
+                    repos.canyoning_data_repo,
+                    repos.climbing_data_repo,
+                    repos.kayaking_data_repo,
+                    repos.cross_country_skiing_data_repo,
                 )
 
-                # Create type-specific data rows for ALL added types (including
-                # dependency types like FITNESS). Mirrors REST controller behaviour.
-                for added_type in added_types:
-                    await _create_type_specific_data(
-                        added_type,
-                        journal_id,
-                        repos.mood_data_repo,
-                        repos.plan_data_repo,
-                        repos.travel_data_repo,
-                        repos.fitness_data_repo,
-                        repos.outdoor_activity_data_repo,
-                        repos.bushwalking_data_repo,
-                        repos.jogging_data_repo,
-                        repos.abseiling_data_repo,
-                        repos.canyoning_data_repo,
-                        repos.climbing_data_repo,
-                        repos.kayaking_data_repo,
-                        repos.cross_country_skiing_data_repo,
-                    )
-
-                # Update type-specific data if provided
-                if request.type_data and type_str.upper() in request.type_data:
-                    await _update_type_specific_data(
-                        journal_type,
-                        journal_id,
-                        request.type_data[type_str.upper()],
-                        repos.calendar_info_repo,
-                        repos.mood_data_repo,
-                        repos.photo_album_data_repo,
-                        repos.fitness_data_repo,
-                        repos.outdoor_activity_data_repo,
-                        repos.bushwalking_data_repo,
-                        repos.jogging_data_repo,
-                        repos.abseiling_data_repo,
-                        repos.canyoning_data_repo,
-                        repos.climbing_data_repo,
-                        repos.kayaking_data_repo,
-                        repos.cross_country_skiing_data_repo,
-                    )
-            except (ValueError, KeyError):
-                # Invalid type, skip
-                pass
+            # Update type-specific data if provided
+            if request.type_data and type_str.upper() in request.type_data:
+                await _update_type_specific_data(
+                    journal_type,
+                    journal_id,
+                    request.type_data[type_str.upper()],
+                    repos.calendar_info_repo,
+                    repos.mood_data_repo,
+                    repos.photo_album_data_repo,
+                    repos.fitness_data_repo,
+                    repos.outdoor_activity_data_repo,
+                    repos.bushwalking_data_repo,
+                    repos.jogging_data_repo,
+                    repos.abseiling_data_repo,
+                    repos.canyoning_data_repo,
+                    repos.climbing_data_repo,
+                    repos.kayaking_data_repo,
+                    repos.cross_country_skiing_data_repo,
+                )
 
     # Add contact relationships if provided
     if request.contact_relationships:
@@ -1889,11 +2119,12 @@ async def create_journal_entry(
             journal_id,
             request.contact_relationships,
             repos.contact_relationship_repo,
+            db_connection,
         )
 
     # Add tags if provided
     if request.tags:
-        await _persist_tags(journal_id, request.tags, repos.tag_repo)
+        await _persist_tags(journal_id, request.tags, repos.tag_repo, db_connection)
 
     # Fetch all enrichment data
     types, type_data, contacts, tags = await _fetch_enrichment_data(
@@ -1942,10 +2173,21 @@ async def update_journal_entry(
     journal_data: Annotated[
         str,
         Field(
-            description="JSON string containing journal update data with optional fields: "
-            "title (str), content (str), event_date_range (dict with start/end), "
-            "types (list[str]), type_data (dict), contact_relationships (list[dict]), "
-            "tags (list[str])"
+            description="JSON string with partial journal update data. "
+            "All fields are optional — only provided fields are updated. "
+            "Fields: title (str), content (str), "
+            "event_date_range ({start: 'YYYY-MM-DD', end: 'YYYY-MM-DD'}), "
+            "types (list[str] — replaces all types — valid values: NOTE, EVENT, "
+            "MOOD_RATING, PLAN, TRAVEL, PHOTO_ALBUM, FITNESS, OUTDOOR_ACTIVITY, "
+            "BUSHWALKING, JOGGING, ABSEILING_TRIP, CANYONING, CLIMBING, KAYAKING, "
+            "CROSS_COUNTRY_SKIING — call list_journal_types for details), "
+            "type_data (dict keyed by type name — call list_journal_types "
+            "to see fields for each type), "
+            "contact_relationships (list of {contact_id: int, "
+            "relationship_type: PARTICIPANT|INVITEE|MENTION|ABOUT, "
+            "status?: ATTENDING|ATTENDED|MAYBE|NO_REPLY|DECLINED, "
+            "role?: ORGANISER|FACILITATOR_HELPER} — replaces all relationships), "
+            "tags (list[str] — replaces all tags), parent_id (int)"
         ),
     ],
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
@@ -1954,13 +2196,16 @@ async def update_journal_entry(
     """
     Update an existing journal entry with partial data.
 
-    Updates journal fields, types, type-specific data, contact relationships, and tags.
+    IMPORTANT: Call list_journal_types first if you are unsure which type names
+    or type_data fields are valid. Invalid values will be rejected.
+
     Only provided fields are updated; omitted fields remain unchanged.
-    Returns AI-friendly response with contextual summary.
+    When types, tags, or contact_relationships are provided they REPLACE all
+    existing values (not merge).
 
     Args:
         journal_id: The unique identifier of the journal to update
-        journal_data: JSON string with journal update data (partial)
+        journal_data: JSON string with partial journal update data
 
     Returns:
         JSON string containing AI-friendly updated journal information
@@ -1968,7 +2213,7 @@ async def update_journal_entry(
     Raises:
         JournalNotFoundError: If the journal with the given ID does not exist
         JournalValidationError: If validation fails
-        ValueError: If JSON parsing fails
+        ValueError: If JSON parsing fails or invalid type/relationship values provided
     """
     # Parse JSON input
     try:
@@ -1978,6 +2223,32 @@ async def update_journal_entry(
         raise ValueError(f"Invalid JSON format: {e}") from e
     except Exception as e:
         raise ValueError(f"Invalid journal data: {e}") from e
+
+    # --- Validate ALL inputs upfront BEFORE any DB writes ---
+    valid_type_names = {t.name for t in JournalType}
+
+    if request.types is not None:
+        invalid_types = [t for t in request.types if t.upper() not in valid_type_names]
+        if invalid_types:
+            raise ValueError(
+                f"Invalid journal type(s): {', '.join(invalid_types)}. "
+                f"Valid types are: {', '.join(sorted(valid_type_names))}"
+            )
+
+    if request.type_data is not None:
+        invalid_type_data_keys = [
+            k for k in request.type_data if k.upper() not in valid_type_names
+        ]
+        if invalid_type_data_keys:
+            raise ValueError(
+                f"Invalid type_data key(s): {', '.join(invalid_type_data_keys)}. "
+                f"Valid types are: {', '.join(sorted(valid_type_names))}"
+            )
+
+    if request.contact_relationships is not None:
+        _validate_contact_relationships(request.contact_relationships)
+
+    # --- All inputs validated, proceed with DB writes ---
 
     # Create repositories
     repos = _create_journal_tool_repositories(db_connection)
@@ -2018,7 +2289,7 @@ async def update_journal_entry(
         existing_journal, changed_fields, db_connection
     )
 
-    # Update types if provided (replace all types)
+    # Update types if provided (replace all types, already validated upfront)
     if request.types is not None:
         # Get current types
         current_types, _ = await _fetch_journal_types_and_data(
@@ -2042,56 +2313,32 @@ async def update_journal_entry(
         # Remove types that are not in the new list
         for current_type_str in current_types:
             if current_type_str not in [t.upper() for t in request.types]:
-                try:
-                    current_type = JournalType[current_type_str.upper()]
-                    await journal_service.remove_type_from_journal(
-                        journal_id, current_type, db_connection
-                    )
-                except (ValueError, KeyError):
-                    pass
+                current_type = JournalType[current_type_str.upper()]
+                await journal_service.remove_type_from_journal(
+                    journal_id, current_type, db_connection
+                )
 
         # Add new types
         for type_str in request.types:
-            try:
-                journal_type = JournalType[type_str.upper()]
+            journal_type = JournalType[type_str.upper()]
 
-                # Only add if not already present
-                if type_str.upper() not in current_types:
-                    # Capture the return value: includes all types added (requested +
-                    # auto-resolved dependencies like FITNESS for OUTDOOR_ACTIVITY).
-                    added_types = await journal_service.add_type_to_journal(
-                        journal_id, journal_type, db_connection
-                    )
+            # Only add if not already present
+            if type_str.upper() not in current_types:
+                # Capture the return value: includes all types added (requested +
+                # auto-resolved dependencies like FITNESS for OUTDOOR_ACTIVITY).
+                added_types = await journal_service.add_type_to_journal(
+                    journal_id, journal_type, db_connection
+                )
 
-                    # Create type-specific data rows for ALL added types (including
-                    # dependency types like FITNESS). Mirrors REST controller behaviour.
-                    for added_type in added_types:
-                        await _create_type_specific_data(
-                            added_type,
-                            journal_id,
-                            repos.mood_data_repo,
-                            repos.plan_data_repo,
-                            repos.travel_data_repo,
-                            repos.fitness_data_repo,
-                            repos.outdoor_activity_data_repo,
-                            repos.bushwalking_data_repo,
-                            repos.jogging_data_repo,
-                            repos.abseiling_data_repo,
-                            repos.canyoning_data_repo,
-                            repos.climbing_data_repo,
-                            repos.kayaking_data_repo,
-                            repos.cross_country_skiing_data_repo,
-                        )
-
-                # Update type-specific data if provided
-                if request.type_data and type_str.upper() in request.type_data:
-                    await _update_type_specific_data(
-                        journal_type,
+                # Create type-specific data rows for ALL added types (including
+                # dependency types like FITNESS). Mirrors REST controller behaviour.
+                for added_type in added_types:
+                    await _create_type_specific_data(
+                        added_type,
                         journal_id,
-                        request.type_data[type_str.upper()],
-                        repos.calendar_info_repo,
                         repos.mood_data_repo,
-                        repos.photo_album_data_repo,
+                        repos.plan_data_repo,
+                        repos.travel_data_repo,
                         repos.fitness_data_repo,
                         repos.outdoor_activity_data_repo,
                         repos.bushwalking_data_repo,
@@ -2102,19 +2349,13 @@ async def update_journal_entry(
                         repos.kayaking_data_repo,
                         repos.cross_country_skiing_data_repo,
                     )
-            except (ValueError, KeyError):
-                # Invalid type, skip
-                pass
 
-    # Update type_data if provided (without changing types)
-    elif request.type_data is not None:
-        for type_str, type_data_dict in request.type_data.items():
-            try:
-                journal_type = JournalType[type_str.upper()]
+            # Update type-specific data if provided
+            if request.type_data and type_str.upper() in request.type_data:
                 await _update_type_specific_data(
                     journal_type,
                     journal_id,
-                    type_data_dict,
+                    request.type_data[type_str.upper()],
                     repos.calendar_info_repo,
                     repos.mood_data_repo,
                     repos.photo_album_data_repo,
@@ -2128,9 +2369,28 @@ async def update_journal_entry(
                     repos.kayaking_data_repo,
                     repos.cross_country_skiing_data_repo,
                 )
-            except (ValueError, KeyError):
-                # Invalid type, skip
-                pass
+
+    # Update type_data if provided (without changing types, already validated upfront)
+    elif request.type_data is not None:
+        for type_str, type_data_dict in request.type_data.items():
+            journal_type = JournalType[type_str.upper()]
+            await _update_type_specific_data(
+                journal_type,
+                journal_id,
+                type_data_dict,
+                repos.calendar_info_repo,
+                repos.mood_data_repo,
+                repos.photo_album_data_repo,
+                repos.fitness_data_repo,
+                repos.outdoor_activity_data_repo,
+                repos.bushwalking_data_repo,
+                repos.jogging_data_repo,
+                repos.abseiling_data_repo,
+                repos.canyoning_data_repo,
+                repos.climbing_data_repo,
+                repos.kayaking_data_repo,
+                repos.cross_country_skiing_data_repo,
+            )
 
     # Update contact relationships if provided (replace all relationships)
     if request.contact_relationships is not None:
@@ -2148,6 +2408,7 @@ async def update_journal_entry(
             journal_id,
             request.contact_relationships,
             repos.contact_relationship_repo,
+            db_connection,
         )
 
     # Update tags if provided (replace all tags)
@@ -2159,7 +2420,7 @@ async def update_journal_entry(
                 await repos.tag_repo.remove_tag(journal_id, existing_tag.id)
 
         # Add new tags
-        await _persist_tags(journal_id, request.tags, repos.tag_repo)
+        await _persist_tags(journal_id, request.tags, repos.tag_repo, db_connection)
 
     # Fetch all enrichment data
     types, type_data, contacts, tags = await _fetch_enrichment_data(
@@ -3768,6 +4029,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
     """
     Register journal-related MCP tools with the FastMCP server.
     """
+    mcp.add_tool(list_journal_types)
     mcp.add_tool(create_journal_entry)
     mcp.add_tool(update_journal_entry)
     mcp.add_tool(get_journal)
