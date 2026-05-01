@@ -174,7 +174,9 @@ export function ActivityItem({ activity, className }: ActivityItemProps) {
           <div className='mt-0.5 flex-shrink-0'>
             <Tooltip>
               <TooltipTrigger asChild>
-                <div className='cursor-help'>{getProvenanceIcon(source)}</div>
+                <div className='cursor-help' tabIndex={0}>
+                  {getProvenanceIcon(source)}
+                </div>
               </TooltipTrigger>
               <TooltipContent>{getProvenanceLabel(source)}</TooltipContent>
             </Tooltip>
@@ -207,7 +209,9 @@ export function ActivityItem({ activity, className }: ActivityItemProps) {
             </div>
             {isExpanded && (
               <div className='bg-muted mt-2 rounded-md p-2 text-xs'>
-                <p className='whitespace-pre-wrap'>{new_value || 'None'}</p>
+                <p className='whitespace-pre-wrap'>
+                  {new_value === '' ? 'Empty' : (new_value ?? 'None')}
+                </p>
               </div>
             )}
           </div>
@@ -239,7 +243,7 @@ export function ActivityItem({ activity, className }: ActivityItemProps) {
         <div className='mt-1 flex items-center gap-2'>
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className='flex cursor-help items-center'>
+              <div className='flex cursor-help items-center' tabIndex={0}>
                 {getProvenanceIcon(source || 'system')}
               </div>
             </TooltipTrigger>
