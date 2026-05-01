@@ -419,6 +419,7 @@ export interface ContactHistoryAttributes {
   old_value: string | null;
   new_value: string | null;
   changed_by: string | null;
+  source: string;
   created_at: string | null;
 }
 

@@ -561,17 +561,18 @@ The sequence reflects both user priority and technical dependency:
 
 #### Phase 2: Activity API Shape and UI Rendering
 **PR Size:** ~5-7 files
+**Status:** ✅ COMPLETE
 
 **Acceptance Criteria:**
-- [ ] Provenance is displayed with compact icons and hover text.
-- [ ] Summary regeneration appears in the same stream in abbreviated, collapsible form.
-- [ ] Existing pagination/load-more behaviour continues to work.
-- [ ] Mixed activity types remain understandable without adding filter UI in this iteration.
+- [x] Provenance is displayed with compact icons and hover text.
+- [x] Summary regeneration appears in the same stream in abbreviated, collapsible form.
+- [x] Existing pagination/load-more behaviour continues to work.
+- [x] Mixed activity types remain understandable without adding filter UI in this iteration.
 
 **Required Test Coverage:**
-- **Unit:** activity-item rendering helpers and collapse-state logic.
-- **Integration:** API payload tests for provenance-rich history responses.
-- **E2E:** contact activity feed scenario covering icons, hover text, and collapsed summary entries.
+- **Unit:** activity-item rendering helpers and collapse-state logic. ✅
+- **Integration:** API payload tests for provenance-rich history responses. ✅
+- **E2E:** contact activity feed scenario covering icons, hover text, and collapsed summary entries. ✅
 
 #### Phase 3: Mixed-Source Regression and Sync Visibility
 **PR Size:** ~4-6 files

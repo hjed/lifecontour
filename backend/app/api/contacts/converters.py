@@ -546,6 +546,9 @@ class ContactHistoryConverter:
             old_value=entry.old_value,
             new_value=entry.new_value,
             changed_by=entry.changed_by,
+            source=entry.source.value
+            if hasattr(entry.source, "value")
+            else str(entry.source),
             created_at=created_at,
         )
 

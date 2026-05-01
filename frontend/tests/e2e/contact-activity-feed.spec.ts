@@ -162,4 +162,86 @@ test.describe('Contact Activity Feed', () => {
     expect(historyData.meta.per_page).toBe(5);
     expect(historyData.data.length).toBeLessThanOrEqual(5);
   });
+
+  test('should display provenance indicators and collapsible summary regeneration', async ({
+    contactsWithData,
+  }) => {
+    const { page, contacts } = contactsWithData;
+    const contact = contacts[0];
+
+    // Mock the history API response to include specific provenance types
+    await page.route(`**/api/contacts/${contact.id}/history*`, async route => {
+      const json = {
+        data: [
+          {
+            type: 'contact_history',
+            id: '999',
+            attributes: {
+              entity_type: 'contact',
+              entity_id: contact.id,
+              field_name: 'first_name',
+              old_value: 'Old',
+              new_value: 'New',
+              changed_by: 'system',
+              source: 'google_contacts',
+              created_at: new Date().toISOString(),
+            },
+          },
+          {
+            type: 'contact_history',
+            id: '1000',
+            attributes: {
+              entity_type: 'contact_summary',
+              entity_id: 1,
+              field_name: 'summary_text',
+              old_value: 'Old summary',
+              new_value: 'New summary text that is very long',
+              changed_by: 'system',
+              source: 'summary_regeneration',
+              created_at: new Date().toISOString(),
+            },
+          },
+        ],
+        meta: {
+          total_count: 2,
+          current_page: 1,
+          page_count: 1,
+          per_page: 50,
+        },
+      };
+      await route.fulfill({ json });
+    });
+
+    await page.goto(`/contacts/${contact.id}`);
+    await expect(page).toHaveURL(new RegExp(`/contacts/${contact.id}`));
+
+    // Wait for Activity Feed to render
+    const activityHeading = page.getByRole('heading', { name: /Activity/i });
+    await expect(activityHeading).toBeVisible({ timeout: 10000 });
+
+    // Verify summary regeneration abbreviation
+    await expect(page.getByText('AI Summary Regenerated')).toBeVisible();
+
+    // Initially new summary is hidden
+    await expect(
+      page.getByText('New summary text that is very long')
+    ).not.toBeVisible();
+
+    // Expand
+    await page.getByRole('button', { name: /expand/i }).click();
+
+    // Text becomes visible
+    await expect(
+      page.getByText('New summary text that is very long')
+    ).toBeVisible();
+
+    // Check for Google Contacts provenance on the first item
+    const googleIconWrapper = page
+      .getByTestId('provenance-trigger-google_contacts')
+      .first();
+    await googleIconWrapper.hover();
+    await expect(
+      page.getByRole('tooltip', { name: 'Updated via Google Contacts Sync' })
+    ).toBeVisible();
+  });
 });

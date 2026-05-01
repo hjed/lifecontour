@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 
 import pytest
+from core_shared.models.contacts.value_objects import Provenance
 
 from app.api.contacts.converters import ContactHistoryConverter
 from app.core.contacts.models.repositories import ContactFieldHistoryEntry
@@ -20,6 +21,7 @@ class TestContactHistoryConverter:
             old_value="John",
             new_value="Jane",
             changed_by="user@example.com",
+            source=Provenance.GOOGLE_CONTACTS,
             id=1,
             created_at="2024-01-15T10:30:00+00:00",
         )
@@ -34,6 +36,7 @@ class TestContactHistoryConverter:
         assert resource.attributes.old_value == "John"
         assert resource.attributes.new_value == "Jane"
         assert resource.attributes.changed_by == "user@example.com"
+        assert resource.attributes.source == "google_contacts"
         assert resource.attributes.created_at is not None
 
     def test_to_resource_with_none_values(self):
