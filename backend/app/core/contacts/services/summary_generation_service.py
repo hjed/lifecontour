@@ -17,6 +17,7 @@ from core_shared.models.contacts.entities import (
     ContactSummary,
     SummaryStatus,
 )
+from core_shared.models.contacts.value_objects import Provenance
 
 from app.core.contacts.models.repositories import (
     ContactFieldHistoryRepository,
@@ -33,6 +34,9 @@ from app.core.journal.models.repositories import (
 )
 
 if TYPE_CHECKING:
+    from app.core.contacts.services.contact_history_service import (
+        ContactHistoryService,
+    )
     from app.core.contacts.services.summary_prompt_builder import (
         SummaryPromptBuilder,
     )
@@ -359,6 +363,7 @@ class SummaryGenerator:
         gemini_api_key: str,
         gemini_model: str,
         _gemini_response_override: str | None = None,
+        history_service: ContactHistoryService | None = None,
     ) -> None:
         self._input_assembler = input_assembler
         self._activity_checker = activity_checker
@@ -367,6 +372,7 @@ class SummaryGenerator:
         self._gemini_api_key = gemini_api_key
         self._gemini_model = gemini_model
         self._gemini_response_override = _gemini_response_override
+        self._history_service = history_service
 
     async def generate(self, contact_id: int) -> ContactSummary | None:
         """Generate or regenerate an AI summary for a contact.
@@ -411,7 +417,27 @@ class SummaryGenerator:
                 status=SummaryStatus.DISABLED,
                 is_disabled=True,
             )
-            return await self._summary_repo.upsert(disabled_summary)
+            result_summary = await self._summary_repo.upsert(disabled_summary)
+            if self._history_service and (not existing or not existing.is_disabled):
+                try:
+                    await self._history_service.record_summary_change(
+                        contact_id=contact_id,
+                        changed_fields={
+                            "is_disabled": (
+                                existing.is_disabled if existing else False,
+                                True,
+                            )
+                        },
+                        changed_by="system",
+                        source=Provenance.SUMMARY_REGENERATION,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Failed to record history for contact %s auto-disable: %s",
+                        contact_id,
+                        e,
+                    )
+            return result_summary
 
         # Build prompt
         prompt = self._prompt_builder.build(summary_input)
@@ -439,7 +465,31 @@ class SummaryGenerator:
             status=SummaryStatus.GENERATED,
             generated_at=now,
         )
-        return await self._summary_repo.upsert(generated_summary)
+        result_summary = await self._summary_repo.upsert(generated_summary)
+
+        if self._history_service and (
+            not existing or existing.summary_text != result["summary_text"]
+        ):
+            try:
+                await self._history_service.record_summary_change(
+                    contact_id=contact_id,
+                    changed_fields={
+                        "summary_text": (
+                            existing.summary_text if existing else None,
+                            result["summary_text"],
+                        )
+                    },
+                    changed_by="system",
+                    source=Provenance.SUMMARY_REGENERATION,
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to record history for contact %s summary generation: %s",
+                    contact_id,
+                    e,
+                )
+
+        return result_summary
 
     async def _call_gemini(self, prompt: str) -> str:
         """Call the Gemini API or use test override."""

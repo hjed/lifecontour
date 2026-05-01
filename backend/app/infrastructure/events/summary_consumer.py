@@ -163,6 +163,12 @@ class SummaryConsumer(DeadLetterConsumerMixin, StreamConsumer):
         summary_repo = SqlContactSummaryRepository(connection)
 
         # Create services
+        from app.core.contacts.services.contact_history_service import (
+            ContactHistoryService,
+        )
+
+        history_service = ContactHistoryService(history_repo)
+
         input_assembler = SummaryInputAssembler(
             contact_repo=contact_repo,
             history_repo=history_repo,
@@ -180,6 +186,7 @@ class SummaryConsumer(DeadLetterConsumerMixin, StreamConsumer):
             summary_repo=summary_repo,
             gemini_api_key=settings.gemini_api_key,
             gemini_model=settings.gemini_summary_model,
+            history_service=history_service,
         )
 
         result = await generator.generate(contact_id=contact_id)

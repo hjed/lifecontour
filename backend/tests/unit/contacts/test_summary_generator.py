@@ -1,7 +1,7 @@
 """Unit tests for SummaryGenerator — orchestrator for AI summary generation."""
 
 import json
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -72,6 +72,8 @@ def _make_generator(
             }
         )
 
+    history_service = AsyncMock()
+
     return SummaryGenerator(
         input_assembler=input_assembler,
         activity_checker=activity_checker,
@@ -80,6 +82,7 @@ def _make_generator(
         gemini_api_key="test-key",
         gemini_model="gemini-2.5-flash",
         _gemini_response_override=gemini_response,
+        history_service=history_service,
     )
 
 
@@ -102,6 +105,14 @@ class TestSummaryGenerator:
             "Ask about project X",
         ]
         assert result.generated_at is not None
+
+        # Verify history was recorded
+        assert generator._history_service is not None
+        record_mock = cast(AsyncMock, generator._history_service.record_summary_change)
+        record_mock.assert_awaited_once()
+        call_args = record_mock.call_args[1]
+        assert call_args["contact_id"] == 1
+        assert "summary_text" in call_args["changed_fields"]
 
     @pytest.mark.asyncio
     async def test_sets_generating_status_before_ai_call(self):
@@ -134,6 +145,14 @@ class TestSummaryGenerator:
         assert result is not None
         assert result.status == SummaryStatus.DISABLED
         assert result.is_disabled is True
+
+        # Verify history was recorded
+        assert generator._history_service is not None
+        record_mock = cast(AsyncMock, generator._history_service.record_summary_change)
+        record_mock.assert_awaited_once()
+        call_args = record_mock.call_args[1]
+        assert call_args["contact_id"] == 1
+        assert "is_disabled" in call_args["changed_fields"]
 
     @pytest.mark.asyncio
     async def test_disabled_contact_skipped(self):

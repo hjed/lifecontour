@@ -576,12 +576,13 @@ The sequence reflects both user priority and technical dependency:
 
 #### Phase 3: Mixed-Source Regression and Sync Visibility
 **PR Size:** ~4-6 files
+**Status:** ✅ COMPLETE
 
 **Acceptance Criteria:**
-- [ ] Meaningful edits from UI, MCP, and sync all appear correctly in one stream.
-- [ ] Sync-originated changes appear only when they changed the contact.
-- [ ] Summary regeneration entries coexist cleanly with ordinary history entries.
-- [ ] The final feed behaviour is stable under pagination and recent updates.
+- [x] Meaningful edits from UI, MCP, and sync all appear correctly in one stream.
+- [x] Sync-originated changes appear only when they changed the contact.
+- [x] Summary regeneration entries coexist cleanly with ordinary history entries.
+- [x] The final feed behaviour is stable under pagination and recent updates.
 
 **Required Test Coverage:**
 - **Unit:** mixed-source ordering and de-duplication helpers.

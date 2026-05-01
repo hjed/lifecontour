@@ -164,6 +164,26 @@ class ContactHistoryService:
             )
             await self.history_repo.record_change(entry)
 
+    async def record_summary_change(
+        self,
+        contact_id: int,
+        changed_fields: dict[str, tuple[Any, Any]],
+        changed_by: str = "system",
+        source: Provenance = Provenance.SUMMARY_REGENERATION,
+    ) -> None:
+        """Record field changes to a contact summary."""
+        for field_name, (old_value, new_value) in changed_fields.items():
+            entry = ContactFieldHistoryEntry(
+                entity_type="contact_summary",
+                entity_id=contact_id,
+                field_name=field_name,
+                old_value=str(old_value) if old_value is not None else None,
+                new_value=str(new_value) if new_value is not None else None,
+                changed_by=changed_by,
+                source=source,
+            )
+            await self.history_repo.record_change(entry)
+
     async def get_contact_history(
         self,
         contact_id: int,
