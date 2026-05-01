@@ -147,6 +147,7 @@ class TestIntegrationRegistryAPI:
     async def test_list_integrations_requires_authentication(
         self,
         authenticated_client: AsyncClient,
+        test_settings: object,
     ) -> None:
         """Unauthenticated requests should be rejected.
 
@@ -156,10 +157,9 @@ class TestIntegrationRegistryAPI:
         """
         from starlette.testclient import TestClient
 
-        from app.infrastructure.config import Settings
         from app.main import create_app
 
-        app = create_app(settings=Settings())
+        app = create_app(settings=test_settings)  # type: ignore[arg-type]
         client = TestClient(app)
         response = client.get("/api/integrations", headers={"Host": "localhost"})
 
