@@ -60,7 +60,7 @@ class TemplatePitch:
 
     def _validate_template_id(self) -> None:
         """Validate template_id is non-empty."""
-        if not self.template_id:
+        if not self.template_id or not self.template_id.strip():
             raise TemplatePitchValidationError(
                 "template_id", "Template ID must be a non-empty string"
             )

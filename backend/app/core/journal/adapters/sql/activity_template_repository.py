@@ -69,7 +69,15 @@ class SqlActivityTemplateRepository(ActivityTemplateRepository):
 
         Returns:
             The saved template with updated fields (id, timestamps, pitches)
+
+        Raises:
+            RuntimeError: If not called within an active database transaction.
         """
+        if not self.conn.in_transaction():
+            raise RuntimeError(
+                "ActivityTemplateRepository.save() must be called within an active transaction"
+            )
+
         query = text(
             """
             INSERT INTO activity_templates (

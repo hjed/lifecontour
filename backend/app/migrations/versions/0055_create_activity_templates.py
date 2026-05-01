@@ -46,9 +46,15 @@ def upgrade() -> None:
             -- Constraints
             CONSTRAINT ck_activity_templates_type
                 CHECK (template_type IN ('canyoning', 'caving', 'climbing')),
-            CONSTRAINT ck_activity_templates_canyon_type
+            CONSTRAINT ck_activity_templates_canyoning_fields
+                CHECK (template_type = 'canyoning' OR (french_grade IS NULL AND canyon_type IS NULL AND water_gauge_name IS NULL)),
+            CONSTRAINT ck_activity_templates_caving_fields
+                CHECK (template_type = 'caving' OR (is_vertical IS NULL AND is_horizontal IS NULL)),
+            CONSTRAINT ck_activity_templates_climbing_fields
+                CHECK (template_type = 'climbing' OR (climbing_type IS NULL AND grade IS NULL AND length IS NULL)),
+            CONSTRAINT ck_activity_templates_canyon_type_values
                 CHECK (canyon_type IS NULL OR canyon_type IN ('vertical', 'aquatic', 'mixed')),
-            CONSTRAINT ck_activity_templates_climbing_type
+            CONSTRAINT ck_activity_templates_climbing_type_values
                 CHECK (climbing_type IS NULL OR climbing_type IN ('sport', 'trad', 'bouldering'))
         )
         """

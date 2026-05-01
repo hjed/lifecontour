@@ -79,9 +79,24 @@ class ActivityTemplate:
             self.id = str(uuid.uuid4())
         self._validate_name()
         self._validate_template_type()
+        self._enforce_type_exclusivity()
         self._validate_user_id()
         self._validate_canyon_type()
         self._validate_climbing_type()
+
+    def _enforce_type_exclusivity(self) -> None:
+        """Ensure type-specific fields are only set for their corresponding template type."""
+        if self.template_type != "canyoning":
+            self.french_grade = None
+            self.canyon_type = None
+            self.water_gauge_name = None
+        if self.template_type != "caving":
+            self.is_vertical = None
+            self.is_horizontal = None
+        if self.template_type != "climbing":
+            self.climbing_type = None
+            self.grade = None
+            self.length = None
 
     def _validate_name(self) -> None:
         """Validate name is non-empty and within length limit."""
@@ -105,7 +120,7 @@ class ActivityTemplate:
 
     def _validate_user_id(self) -> None:
         """Validate user_id is non-empty."""
-        if not self.user_id:
+        if not self.user_id or not self.user_id.strip():
             raise ActivityTemplateValidationError(
                 "user_id", "User ID must be a non-empty string"
             )
