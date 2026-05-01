@@ -61,7 +61,7 @@ class IntegrationRegistryService:
                 info = await provider.get_integration_info(user_id, connection)
                 results.append(info)
             except Exception:
-                integration_id = getattr(provider, "integration_id", "unknown")
+                integration_id = provider.integration_id
                 logger.exception(
                     "Integration provider failed",
                     integration_id=integration_id,

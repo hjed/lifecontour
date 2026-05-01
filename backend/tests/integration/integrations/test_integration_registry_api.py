@@ -32,6 +32,7 @@ class TestIntegrationRegistryAPI:
         google = next((d for d in body["data"] if d["id"] == "google"), None)
         assert google is not None
         assert google["type"] == "integration"
+        assert google["attributes"]["name"] == "Google"
         assert google["attributes"]["status"] == "disconnected"
         assert google["attributes"]["needs_reauth"] is False
         assert google["attributes"]["needs_reconsent"] is False
@@ -131,6 +132,7 @@ class TestIntegrationRegistryAPI:
             assert "attributes" in entry
 
             attrs = entry["attributes"]
+            assert "name" in attrs
             assert "status" in attrs
             assert "capabilities" in attrs
             assert "sync_summary" in attrs
@@ -149,18 +151,17 @@ class TestIntegrationRegistryAPI:
         """Unauthenticated requests should be rejected.
 
         Note: The authenticated_client fixture always sends a valid session
-        cookie, so we create a raw client to test the unauthenticated case.
+        cookie, so we create a separate client to test the unauthenticated case.
+        Uses the same pattern as test_authentication_requirements.py.
         """
-        from httpx import ASGITransport, AsyncClient
+        from starlette.testclient import TestClient
 
+        from app.infrastructure.config import Settings
         from app.main import create_app
 
-        app = create_app()
-        transport = ASGITransport(app=app)
-        async with AsyncClient(
-            transport=transport, base_url="http://test"
-        ) as raw_client:
-            response = await raw_client.get("/api/integrations")
+        app = create_app(settings=Settings())
+        client = TestClient(app)
+        response = client.get("/api/integrations", headers={"Host": "localhost"})
 
-        # Should return 400, 401, or 403 (depends on auth middleware)
-        assert response.status_code in (400, 401, 403)
+        assert response.status_code == 401
+        assert "Authentication required" in response.json()["errors"][0]["detail"]

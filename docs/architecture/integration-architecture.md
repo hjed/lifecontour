@@ -1440,8 +1440,8 @@ Providers are registered as a `list[IntegrationProvider]` via Dishka. The regist
 
 ```python
 # In app/infrastructure/di/integrations.py
-@provide(scope=Scope.REQUEST)
-async def provide_integration_registry_service(
+@provide(scope=Scope.APP)
+def provide_integration_registry_service(
     google_provider: GoogleIntegrationProvider,
 ) -> IntegrationRegistryService:
     return IntegrationRegistryService(providers=[google_provider])

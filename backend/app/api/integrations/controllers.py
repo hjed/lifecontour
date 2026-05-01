@@ -103,6 +103,7 @@ async def list_integrations(
             IntegrationData(
                 id=info.id,
                 attributes=IntegrationAttributes(
+                    name=info.name,
                     status=info.status.value,
                     capabilities=[c.value for c in info.capabilities],
                     sync_summary=IntegrationSyncSummaryAttributes(

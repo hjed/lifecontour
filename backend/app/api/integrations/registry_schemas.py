@@ -20,6 +20,7 @@ class IntegrationSyncSummaryAttributes(BaseModel):
 class IntegrationAttributes(BaseModel):
     """Attributes for a single integration entry."""
 
+    name: str
     status: str
     capabilities: list[str]
     sync_summary: IntegrationSyncSummaryAttributes

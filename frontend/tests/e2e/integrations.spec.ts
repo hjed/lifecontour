@@ -214,6 +214,8 @@ test.describe('Integration Registry API - GET /api/integrations', () => {
 
     // Verify all required attributes exist
     const attrs = google.attributes;
+    expect(attrs).toHaveProperty('name');
+    expect(attrs.name).toBe('Google');
     expect(attrs).toHaveProperty('status');
     expect(attrs).toHaveProperty('capabilities');
     expect(attrs).toHaveProperty('sync_summary');

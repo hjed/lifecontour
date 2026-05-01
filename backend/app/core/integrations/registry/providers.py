@@ -21,7 +21,12 @@ class IntegrationProvider(Protocol):
 
     Implementations derive integration status, capabilities, and sync summary
     from their own data sources (OAuth tokens, sync jobs, etc.).
+
+    Every provider must expose ``integration_id`` as a class-level attribute
+    so that the registry can identify a failing provider in error entries.
     """
+
+    integration_id: str
 
     async def get_integration_info(
         self,
