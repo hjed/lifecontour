@@ -289,6 +289,7 @@ export interface ReviewSuggestion {
 export interface ReviewItemJournalSummary {
   id: number;
   title: string;
+  event_date_range: { start: string; end: string };
 }
 
 export interface ReviewItemAttributes {

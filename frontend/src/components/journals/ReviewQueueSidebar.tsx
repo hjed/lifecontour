@@ -13,6 +13,7 @@ import { AlertCircle, GitMerge, Loader2 } from 'lucide-react';
 import { useReviewItems, useDismissReviewItem } from '@/lib/api/journals';
 import { MergeJournalDialog } from './MergeJournalDialog';
 import { Badge } from '@/components/ui/badge';
+import { format } from 'date-fns';
 
 interface ReviewQueueSidebarProps {
   readonly open: boolean;
@@ -103,7 +104,7 @@ export function ReviewQueueSidebar({
                   </div>
 
                   <div className='space-y-2 text-sm'>
-                    <p>
+                    <div className='flex items-center justify-between'>
                       <Link
                         href={`/journals/${source_journal.id}` as Route}
                         className='font-medium hover:underline focus:outline-none'
@@ -111,7 +112,17 @@ export function ReviewQueueSidebar({
                       >
                         {source_journal.title}
                       </Link>
-                      {' may be a duplicate of '}
+                      <span className='text-muted-foreground text-xs'>
+                        {format(
+                          new Date(source_journal.event_date_range.start),
+                          'MMM d, yyyy'
+                        )}
+                      </span>
+                    </div>
+                    <div className='text-muted-foreground text-xs font-medium'>
+                      may be a duplicate of
+                    </div>
+                    <div className='flex items-center justify-between'>
                       <Link
                         href={`/journals/${candidate_journal.id}` as Route}
                         className='font-medium hover:underline focus:outline-none'
@@ -119,7 +130,13 @@ export function ReviewQueueSidebar({
                       >
                         {candidate_journal.title}
                       </Link>
-                    </p>
+                      <span className='text-muted-foreground text-xs'>
+                        {format(
+                          new Date(candidate_journal.event_date_range.start),
+                          'MMM d, yyyy'
+                        )}
+                      </span>
+                    </div>
                   </div>
 
                   <div className='flex justify-end gap-2 pt-2'>
