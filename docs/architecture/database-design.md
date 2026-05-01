@@ -203,6 +203,7 @@ See [Journal System Specification](../journal-system-specification.md) for compl
   - Activity types: `journal_fitness_data`, `journal_outdoor_activity_data`, `journal_bushwalking_data`, `journal_abseiling_data`, `journal_canyoning_data`, `journal_climbing_data`, `journal_kayaking_data`, `journal_skiing_data`, `journal_jogging_data`
 - Supporting tables: `routes`, `journal_tags`, `journal_contacts`, `journal_events`
 - Proper foreign key constraints and indexes for search/filtering
+- Template system: `activity_templates` (UUID pk, user-owned, type-specific columns for canyoning/caving/climbing), `template_pitches` (FK to activity_templates, cascade delete, unique template_id+pitch_number)
 
 ### Photo Integration (Iteration 4)
 ```sql

@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 from core_shared.models.journals import (
     AbseilingData,
     AbseilPitch,
+    ActivityTemplate,
     BushwalkingData,
     Calendar,
     CalendarInfo,
@@ -1744,5 +1745,90 @@ class ReviewItemRepository(ABC):
 
         Returns:
             The updated ReviewItem, or None if not found
+        """
+        pass
+
+
+class ActivityTemplateRepository(ABC):
+    """
+    Repository interface for activity template operations.
+
+    Activity templates are user-owned, reusable canyon/cave/climb definitions
+    that pre-populate pitch data when selected during journal creation.
+    """
+
+    @abstractmethod
+    async def save(self, template: ActivityTemplate) -> ActivityTemplate:
+        """
+        Save an activity template (insert or update).
+
+        When inserting, also persists associated pitches.
+        When updating, replaces existing pitches with the template's current pitches.
+
+        Args:
+            template: The activity template to save
+
+        Returns:
+            The saved template with updated fields (id, timestamps, pitches)
+        """
+        pass
+
+    @abstractmethod
+    async def find_by_id(self, template_id: str) -> ActivityTemplate | None:
+        """
+        Find an activity template by ID, including its pitches.
+
+        Args:
+            template_id: The template UUID string to look up
+
+        Returns:
+            The ActivityTemplate with pitches if found, None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def find_by_user(
+        self, user_id: str, template_type: str | None = None
+    ) -> list[ActivityTemplate]:
+        """
+        Find all templates for a user, optionally filtered by type.
+
+        Templates are returned ordered by name ascending.
+
+        Args:
+            user_id: The owner user ID
+            template_type: Optional type filter (canyoning, caving, climbing)
+
+        Returns:
+            List of templates (without pitches for performance)
+        """
+        pass
+
+    @abstractmethod
+    async def search_by_name(
+        self, user_id: str, query: str, template_type: str | None = None
+    ) -> list[ActivityTemplate]:
+        """
+        Search templates by name for a user using case-insensitive partial matching.
+
+        Args:
+            user_id: The owner user ID
+            query: The search query string
+            template_type: Optional type filter
+
+        Returns:
+            List of matching templates ordered by name (without pitches)
+        """
+        pass
+
+    @abstractmethod
+    async def delete(self, template_id: str) -> None:
+        """
+        Delete an activity template by ID.
+
+        Associated pitches are cascade-deleted by the database.
+
+        Args:
+            template_id: The template UUID string to delete
         """
         pass

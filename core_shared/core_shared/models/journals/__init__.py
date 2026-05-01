@@ -2,6 +2,7 @@
 
 from .abseil_pitch import AbseilPitch
 from .abseiling_data import AbseilingData
+from .activity_template import ActivityTemplate
 from .attendee_status import AttendeeStatus
 from .bushwalking_data import BushwalkingData
 from .calendar import Calendar
@@ -28,19 +29,24 @@ from .constants import (
     MAX_PARTICIPANT_NOTES_LENGTH,
     MAX_PLAN_DOCUMENT_TITLE_LENGTH,
     MAX_PLAN_DOCUMENT_URL_LENGTH,
+    MAX_REGION_LENGTH,
     MAX_ROLE_LENGTH,
     MAX_SEAT_NUMBER_LENGTH,
     MAX_STRAVA_ACTIVITY_ID_LENGTH,
+    MAX_TEMPLATE_NAME_LENGTH,
     MAX_TIMEZONE_LENGTH,
     MAX_TITLE_LENGTH,
     MAX_TRANSPORTATION_TYPE_LENGTH,
     MAX_USER_ID_LENGTH,
+    MAX_WATER_GAUGE_NAME_LENGTH,
     MAX_WEATHER_CONDITIONS_LENGTH,
     MIN_ENERGY_LEVEL,
     MIN_MOOD_VALUE,
     VALID_ANCHOR_LOCATIONS,
     VALID_ANCHOR_TYPES,
+    VALID_CANYON_TYPES,
     VALID_CLIMBING_TYPES,
+    VALID_TEMPLATE_TYPES,
     VALID_TRACK_GRADES,
 )
 from .contact_event_role import ContactEventRole
@@ -50,6 +56,7 @@ from .event_state import EventState
 from .exceptions import (
     AbseilingDataValidationError,
     AbseilPitchValidationError,
+    ActivityTemplateValidationError,
     BushwalkingDataValidationError,
     CalendarInfoValidationError,
     CalendarNotFoundError,
@@ -77,6 +84,7 @@ from .exceptions import (
     RouteInUseError,
     RouteNotFoundError,
     RouteValidationError,
+    TemplatePitchValidationError,
     TravelAccommodationValidationError,
     TravelDataValidationError,
     TravelFlightValidationError,
@@ -93,6 +101,7 @@ from .outdoor_activity_data import OutdoorActivityData
 from .photo_album_data import PhotoAlbumData
 from .plan_data import PlanData, PlanDocument
 from .review_item import ReviewItem, ReviewReason
+from .template_pitch import TemplatePitch
 from .travel_data import (
     TravelAccommodation,
     TravelData,
@@ -136,6 +145,11 @@ __all__ = [
     "VALID_CLIMBING_TYPES",
     "VALID_ANCHOR_LOCATIONS",
     "VALID_ANCHOR_TYPES",
+    "VALID_CANYON_TYPES",
+    "VALID_TEMPLATE_TYPES",
+    "MAX_REGION_LENGTH",
+    "MAX_TEMPLATE_NAME_LENGTH",
+    "MAX_WATER_GAUGE_NAME_LENGTH",
     # Entities
     "Journal",
     "Calendar",
@@ -154,6 +168,8 @@ __all__ = [
     "BushwalkingData",
     "AbseilPitch",
     "AbseilingData",
+    "ActivityTemplate",
+    "TemplatePitch",
     "CanyoningData",
     "ClimbingData",
     "KayakingData",
@@ -197,6 +213,8 @@ __all__ = [
     "JoggingDataValidationError",
     "AbseilPitchValidationError",
     "AbseilingDataValidationError",
+    "ActivityTemplateValidationError",
+    "TemplatePitchValidationError",
     "CanyoningDataValidationError",
     "ClimbingDataValidationError",
     "KayakingDataValidationError",

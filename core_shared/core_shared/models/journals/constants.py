@@ -92,3 +92,20 @@ VALID_ANCHOR_TYPES: list[str] = [
     "sling on bollard",
     "artificial removable",
 ]
+
+# ActivityTemplate constants (activity_templates table)
+VALID_TEMPLATE_TYPES: list[str] = [
+    "canyoning",
+    "caving",
+    "climbing",
+]
+
+VALID_CANYON_TYPES: list[str] = [
+    "vertical",
+    "aquatic",
+    "mixed",
+]
+
+MAX_TEMPLATE_NAME_LENGTH: int = 200
+MAX_REGION_LENGTH: int = 200
+MAX_WATER_GAUGE_NAME_LENGTH: int = 200
