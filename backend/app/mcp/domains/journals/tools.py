@@ -3828,15 +3828,17 @@ async def create_template(
     pitch_entities: list[TemplatePitch] = []
     if pitches:
         for p in pitches:
+            if "pitch_number" not in p:
+                raise ValueError("pitch_number is required for all pitches")
             pitch_entities.append(
                 TemplatePitch(
                     template_id=template_id,
-                    pitch_number=p.get("pitch_number", 0),
-                    height=p.get("height", 0),
+                    pitch_number=p["pitch_number"],
+                    height=p.get("height"),
                     anchor_location=p.get("anchor_location"),
                     anchor_type=p.get("anchor_type"),
-                    did_rescue=p.get("did_rescue", False),
-                    did_setup=p.get("did_setup", False),
+                    did_rescue=p.get("did_rescue"),
+                    did_setup=p.get("did_setup"),
                 )
             )
 
@@ -3876,6 +3878,9 @@ async def get_template(
     repos = _create_journal_tool_repositories(db_connection)
 
     try:
+        import uuid
+
+        uuid.UUID(template_id)
         template = await repos.activity_template_repo.find_by_id(template_id)
         if not template or template.user_id != user_id:
             return MCPResponseBuilder.not_found_error_response("Template", template_id)
@@ -3959,6 +3964,9 @@ async def update_template(
     repos = _create_journal_tool_repositories(db_connection)
 
     try:
+        import uuid
+
+        uuid.UUID(template_id)
         template = await repos.activity_template_repo.find_by_id(template_id)
         if not template or template.user_id != user_id:
             return MCPResponseBuilder.not_found_error_response("Template", template_id)
@@ -3989,15 +3997,17 @@ async def update_template(
         if pitches is not None:
             pitch_entities: list[TemplatePitch] = []
             for p in pitches:
+                if "pitch_number" not in p:
+                    raise ValueError("pitch_number is required for all pitches")
                 pitch_entities.append(
                     TemplatePitch(
                         template_id=str(template.id),
-                        pitch_number=p.get("pitch_number", 0),
-                        height=p.get("height", 0),
+                        pitch_number=p["pitch_number"],
+                        height=p.get("height"),
                         anchor_location=p.get("anchor_location"),
                         anchor_type=p.get("anchor_type"),
-                        did_rescue=p.get("did_rescue", False),
-                        did_setup=p.get("did_setup", False),
+                        did_rescue=p.get("did_rescue"),
+                        did_setup=p.get("did_setup"),
                     )
                 )
             template.pitches = pitch_entities

@@ -631,7 +631,8 @@ class ActivityTemplateConverter:
             updated_at=template.updated_at,
         )
 
-        links = JsonApiLinks(self=f"{base_url}/api/templates/{template.id}")
+        clean_base_url = base_url.rstrip("/") if base_url else ""
+        links = JsonApiLinks(self=f"{clean_base_url}/api/templates/{template.id}")
 
         return ActivityTemplateResource(
             type="activity-templates",

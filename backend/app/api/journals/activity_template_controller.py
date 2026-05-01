@@ -2,6 +2,8 @@
 Activity Template REST API controller.
 """
 
+import uuid
+
 from core_shared.models.journals.activity_template import ActivityTemplate
 from core_shared.models.journals.template_pitch import TemplatePitch
 from dishka.integrations.fastapi import FromDishka, inject
@@ -92,13 +94,13 @@ async def get_templates(
 @router.get("/{template_id}", response_model=ActivityTemplateResponse)
 @inject
 async def get_template(
-    template_id: str,
+    template_id: uuid.UUID,
     repo: FromDishka[ActivityTemplateRepository],
     user: FromDishka[SessionUser],
     req: Request,
 ) -> ActivityTemplateResponse:
     """Get a specific activity template."""
-    template = await repo.find_by_id(template_id)
+    template = await repo.find_by_id(str(template_id))
     if not template or template.user_id != user.id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="ActivityTemplate not found"
@@ -113,20 +115,21 @@ async def get_template(
 @router.put("/{template_id}", response_model=ActivityTemplateResponse)
 @inject
 async def update_template(
-    template_id: str,
+    template_id: uuid.UUID,
     request: ActivityTemplateUpdateRequest,
     repo: FromDishka[ActivityTemplateRepository],
     user: FromDishka[SessionUser],
     req: Request,
 ) -> ActivityTemplateResponse:
     """Update a specific activity template."""
-    if request.data.id != template_id:
+    template_id_str = str(template_id)
+    if request.data.id != template_id_str:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="URL ID does not match request body ID",
         )
 
-    template = await repo.find_by_id(template_id)
+    template = await repo.find_by_id(template_id_str)
     if not template or template.user_id != user.id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="ActivityTemplate not found"
@@ -166,7 +169,7 @@ async def update_template(
         for p in attrs.pitches:
             pitches.append(
                 TemplatePitch(
-                    template_id=template_id,
+                    template_id=template_id_str,
                     pitch_number=p.pitch_number,
                     height=p.height,
                     anchor_location=p.anchor_location,
@@ -187,15 +190,15 @@ async def update_template(
 @router.delete("/{template_id}", status_code=204)
 @inject
 async def delete_template(
-    template_id: str,
+    template_id: uuid.UUID,
     repo: FromDishka[ActivityTemplateRepository],
     user: FromDishka[SessionUser],
 ) -> None:
     """Delete a specific activity template."""
-    template = await repo.find_by_id(template_id)
+    template = await repo.find_by_id(str(template_id))
     if not template or template.user_id != user.id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="ActivityTemplate not found"
         )
 
-    await repo.delete(template_id)
+    await repo.delete(str(template_id))

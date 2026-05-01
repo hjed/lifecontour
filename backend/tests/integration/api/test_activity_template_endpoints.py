@@ -156,10 +156,10 @@ class TestActivityTemplateEndpoints:
         assert data["data"]["attributes"]["french_grade"] == "v3"
         assert data["data"]["attributes"]["template_type"] == "canyoning"  # Unchanged
 
-    async def test_delete_template(self, integration_api_client):
+    async def test_delete_template(self, authenticated_client):
         """Test deleting a template."""
         # Create a template
-        create_response = await integration_api_client.post(
+        create_response = await authenticated_client.post(
             "/api/templates",
             json={
                 "data": {
@@ -171,9 +171,9 @@ class TestActivityTemplateEndpoints:
         template_id = create_response.json()["data"]["id"]
 
         # Delete the template
-        response = await integration_api_client.delete(f"/api/templates/{template_id}")
+        response = await authenticated_client.delete(f"/api/templates/{template_id}")
         assert response.status_code == 204
 
         # Verify it's gone
-        get_response = await integration_api_client.get(f"/api/templates/{template_id}")
+        get_response = await authenticated_client.get(f"/api/templates/{template_id}")
         assert get_response.status_code == 404
