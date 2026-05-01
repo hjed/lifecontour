@@ -69,6 +69,20 @@ class PermanentOutboxEventProcessingError(OutboxEventProcessingError):
     """Raised when an outbox event payload is permanently invalid."""
 
 
+class ContactReconciliationConflictError(OutboxEventProcessingError):
+    """Raised when email reconciliation finds a conflict that should be recorded, not retried."""
+
+    def __init__(
+        self,
+        message: str,
+        matched_contact_id: int,
+        integration_source: str,
+    ):
+        super().__init__(message)
+        self.matched_contact_id = matched_contact_id
+        self.integration_source = integration_source
+
+
 class OutboxEventProcessor:
     """
     Processes outbox events from integration workers.
@@ -280,9 +294,13 @@ class OutboxEventProcessor:
 
         if len(matched_contacts) > 1:
             matched_contact_ids = sorted(matched_contacts.keys())
-            raise OutboxEventProcessingError(
-                "Multiple existing contacts matched inbound email addresses for "
-                f"{integration_source}: {matched_contact_ids}"
+            raise ContactReconciliationConflictError(
+                message=(
+                    "Multiple existing contacts matched inbound email addresses for "
+                    f"{integration_source}: {matched_contact_ids}"
+                ),
+                matched_contact_id=matched_contact_ids[0],
+                integration_source=integration_source,
             )
 
         matched_contact = next(iter(matched_contacts.values()))
@@ -299,10 +317,14 @@ class OutboxEventProcessor:
             )
         )
         if existing_integration_reference is not None:
-            raise OutboxEventProcessingError(
-                "Matched local contact is already linked to integration source "
-                f"{integration_source} via external ID "
-                f"{existing_integration_reference.external_entity_id}"
+            raise ContactReconciliationConflictError(
+                message=(
+                    "Matched local contact is already linked to integration source "
+                    f"{integration_source} via external ID "
+                    f"{existing_integration_reference.external_entity_id}"
+                ),
+                matched_contact_id=matched_contact.id,
+                integration_source=integration_source,
             )
 
         return matched_contact
@@ -610,6 +632,22 @@ class OutboxEventProcessor:
                     integration_source=integration_source,
                 )
             )
+        except ContactReconciliationConflictError as e:
+            logger.warning(
+                "Contact creation has reconciliation conflict - recording as conflict",
+                integration_source=integration_source,
+                external_id=external_id,
+                matched_contact_id=e.matched_contact_id,
+                error=str(e),
+            )
+            return {
+                "status": "conflict",
+                "reason": "reconciliation_conflict",
+                "event_type": EVENT_TYPE_CONTACT_CREATED,
+                "integration_source": integration_source,
+                "external_id": external_id,
+                "error": str(e),
+            }
         except Exception as e:
             raise OutboxEventProcessingError(
                 f"Failed to reconcile contact by email: {str(e)}"

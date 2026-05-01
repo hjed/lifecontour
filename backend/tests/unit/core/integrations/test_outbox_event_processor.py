@@ -505,6 +505,42 @@ class TestOutboxEventProcessor:
         mock_contact_service.create_contact.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_process_contact_created_already_linked_returns_conflict(
+        self,
+        processor: OutboxEventProcessor,
+        contact_created_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+        mock_external_ref_service: AsyncMock,
+    ):
+        """Test that reconciling with a contact already linked to the same source returns conflict."""
+        from core_shared.models.external_reference import ExternalReference
+
+        existing_contact = Contact(id=123, first_name="John", last_name="Doe")
+        mock_contact_service.get_contact_by_email.return_value = existing_contact
+
+        mock_external_ref_service.find_external_reference.return_value = (
+            ExternalReference(
+                id=99,
+                internal_entity_type="contact",
+                internal_entity_id=123,
+                external_system="google",
+                external_entity_type="person",
+                external_entity_id="people/existing",
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        )
+
+        result = await processor.process_event(contact_created_event)
+
+        assert result["status"] == "conflict"
+        assert result["reason"] == "reconciliation_conflict"
+        assert result["event_type"] == "contact.created"
+        assert result["integration_source"] == "google"
+        assert "error" in result
+        mock_contact_service.create_contact.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_process_contact_updated_duplicate_email_returns_conflict(
         self,
         processor: OutboxEventProcessor,
