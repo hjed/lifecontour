@@ -278,11 +278,14 @@ class OutboxEventProcessor:
         if not matched_contacts:
             return None
 
+        emails = self._extract_candidate_emails(contact_data)
+        conflict_email = emails[0] if emails else "unknown"
+
         if len(matched_contacts) > 1:
             matched_contact_ids = sorted(matched_contacts.keys())
-            raise OutboxEventProcessingError(
-                "Multiple existing contacts matched inbound email addresses for "
-                f"{integration_source}: {matched_contact_ids}"
+            raise DuplicateEmailError(
+                email=f"multiple_matches_for_{conflict_email}",
+                existing_contact_id=matched_contact_ids[0],
             )
 
         matched_contact = next(iter(matched_contacts.values()))
@@ -299,10 +302,9 @@ class OutboxEventProcessor:
             )
         )
         if existing_integration_reference is not None:
-            raise OutboxEventProcessingError(
-                "Matched local contact is already linked to integration source "
-                f"{integration_source} via external ID "
-                f"{existing_integration_reference.external_entity_id}"
+            raise DuplicateEmailError(
+                email=f"already_linked_to_{existing_integration_reference.external_entity_id}",
+                existing_contact_id=matched_contact.id,
             )
 
         return matched_contact
@@ -610,6 +612,21 @@ class OutboxEventProcessor:
                     integration_source=integration_source,
                 )
             )
+        except DuplicateEmailError as e:
+            logger.warning(
+                "Contact creation has duplicate email conflict during reconciliation - recording as conflict",
+                integration_source=integration_source,
+                external_id=external_id,
+                error=str(e),
+            )
+            return {
+                "status": "conflict",
+                "reason": "duplicate_email",
+                "event_type": EVENT_TYPE_CONTACT_CREATED,
+                "integration_source": integration_source,
+                "external_id": external_id,
+                "error": str(e),
+            }
         except Exception as e:
             raise OutboxEventProcessingError(
                 f"Failed to reconcile contact by email: {str(e)}"
