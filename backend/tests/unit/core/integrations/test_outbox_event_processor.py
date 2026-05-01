@@ -329,7 +329,10 @@ class TestOutboxEventProcessor:
             event_data={
                 "integration_source": "google",
                 "external_id": "people/invalid",
-                "contact_data": {"invalid": "data"},  # Missing required fields
+                "contact_data": {
+                    "first_name": "Test",
+                    "methods": [{"method_type": "INVALID_TYPE", "value": "x"}],
+                },
                 "sync_timestamp": datetime.now(UTC).isoformat(),
                 "sync_type": "created",
             },
@@ -566,14 +569,14 @@ class TestOutboxEventProcessor:
         processor: OutboxEventProcessor,
         mock_contact_service: AsyncMock,
     ):
-        """Test processing event with invalid contact data."""
+        """Test processing event with invalid contact data (invalid method_type)."""
         invalid_event = self._create_invalid_event()
 
         # Should raise a permanent processing error for malformed payloads
         with pytest.raises(PermanentOutboxEventProcessingError) as exc_info:
             await processor.process_event(invalid_event)
 
-        assert "Missing required contact field 'first_name'" in str(exc_info.value)
+        assert "INVALID_TYPE" in str(exc_info.value)
         mock_contact_service.create_contact.assert_not_called()
 
     @pytest.mark.asyncio
@@ -584,7 +587,10 @@ class TestOutboxEventProcessor:
         mock_contact_service: AsyncMock,
     ):
         """Test malformed contact.updated payloads are treated as permanent failures."""
-        contact_updated_event.event_data["contact_data"] = {"invalid": "data"}
+        contact_updated_event.event_data["contact_data"] = {
+            "first_name": "Test",
+            "methods": [{"method_type": "INVALID_TYPE", "value": "x"}],
+        }
 
         existing_contact = Contact(id=123, first_name="John", last_name="Doe")
         mock_contact_service.find_contact_by_external_reference.return_value = (
@@ -594,7 +600,7 @@ class TestOutboxEventProcessor:
         with pytest.raises(PermanentOutboxEventProcessingError) as exc_info:
             await processor.process_event(contact_updated_event)
 
-        assert "Missing required contact field 'first_name'" in str(exc_info.value)
+        assert "INVALID_TYPE" in str(exc_info.value)
         mock_contact_service.update_contact.assert_not_called()
 
     @pytest.mark.asyncio
@@ -617,6 +623,45 @@ class TestOutboxEventProcessor:
             "Outbox event has permanent invalid payload"
         )
         mock_contact_service.create_contact.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_process_contact_created_with_missing_first_name(
+        self,
+        processor: OutboxEventProcessor,
+        mock_contact_service: AsyncMock,
+        mock_connection: AsyncConnection,
+        mock_external_ref_service: AsyncMock,
+        mock_sync_metadata_repo: AsyncMock,
+    ):
+        """Test that contact.created with missing first_name defaults to 'Unknown' and succeeds."""
+        event = OutboxEvent(
+            id=uuid4(),
+            event_type="contact.created",
+            event_data={
+                "integration_source": "google",
+                "external_id": "people/c555",
+                "contact_data": {
+                    "last_name": "NoFirstName",
+                    "methods": [],
+                },
+                "sync_timestamp": datetime.now(UTC).isoformat(),
+                "sync_type": "created",
+            },
+            created_at=datetime.now(UTC),
+            retry_count=0,
+        )
+
+        expected_contact = Contact(
+            id=999, first_name="Unknown", last_name="NoFirstName"
+        )
+        mock_contact_service.create_contact.return_value = expected_contact
+        mock_contact_service.get_contact_by_email.return_value = None
+
+        result = await processor.process_event(event)
+
+        assert result["status"] == "success"
+        created_arg = mock_contact_service.create_contact.call_args[0][0]
+        assert created_arg.first_name == "Unknown"
 
     @pytest.mark.asyncio
     async def test_resolve_contact_tags_returns_none_if_tags_not_in_payload(
