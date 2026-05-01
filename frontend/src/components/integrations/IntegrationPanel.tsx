@@ -47,7 +47,7 @@ export function IntegrationPanel({ integration }: IntegrationPanelProps) {
     needs_reconsent,
   } = attributes;
 
-  const connected = status === 'connected';
+  const connected = status === 'connected' || status === 'token_expired';
 
   const formatCapability = (cap: string) =>
     cap

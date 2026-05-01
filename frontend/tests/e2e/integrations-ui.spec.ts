@@ -320,13 +320,15 @@ test.describe('Integrations Page UI (mocked API)', () => {
 
     // Banner should be visible with upgrade messaging
     const banner = authenticatedPage.locator(
-      '[data-testid="scope-upgrade-banner"]'
+      '[data-testid="scope-upgrade-banner-google"]'
     );
     await expect(banner).toBeVisible();
     await expect(banner).toContainText('permissions'); // Use 'permissions' since we don't list specific capabilities anymore
 
     // Click "Upgrade Permissions" button and verify OAuth is triggered
-    await authenticatedPage.click('[data-testid="upgrade-permissions-button"]');
+    await authenticatedPage.click(
+      '[data-testid="upgrade-permissions-button-google"]'
+    );
     await expect.poll(() => oauthAuthorizePayload).toBeTruthy();
     expect(oauthAuthorizePayload).toEqual({ redirect_url: '/integrations' });
   });
@@ -396,7 +398,7 @@ test.describe('Integrations Page UI (mocked API)', () => {
 
     // Banner should NOT be visible
     await expect(
-      authenticatedPage.locator('[data-testid="scope-upgrade-banner"]')
+      authenticatedPage.locator('[data-testid="scope-upgrade-banner-google"]')
     ).toHaveCount(0);
   });
 });

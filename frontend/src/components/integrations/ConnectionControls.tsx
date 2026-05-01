@@ -41,7 +41,10 @@ export function ConnectionControls({
     <div className='flex flex-col gap-4'>
       {/* Scope Upgrade Banner */}
       {connected && needsReconsent && (
-        <Alert variant='destructive' data-testid='scope-upgrade-banner'>
+        <Alert
+          variant='destructive'
+          data-testid={`scope-upgrade-banner-${integrationId}`}
+        >
           <ShieldAlert className='h-4 w-4' />
           <AlertTitle>Permissions required</AlertTitle>
           <AlertDescription className='flex flex-col gap-2'>
@@ -55,7 +58,7 @@ export function ConnectionControls({
                 size='sm'
                 onClick={handleConnect}
                 disabled={oauthLoading}
-                data-testid='upgrade-permissions-button'
+                data-testid={`upgrade-permissions-button-${integrationId}`}
               >
                 {oauthLoading ? (
                   <RefreshCw className='mr-2 h-4 w-4 animate-spin' />
@@ -71,7 +74,10 @@ export function ConnectionControls({
 
       {/* Token Expired Banner */}
       {connected && needsReauth && (
-        <Alert variant='destructive' data-testid='token-expired-banner'>
+        <Alert
+          variant='destructive'
+          data-testid={`token-expired-banner-${integrationId}`}
+        >
           <KeyRound className='h-4 w-4' />
           <AlertTitle>Connection expired</AlertTitle>
           <AlertDescription className='flex flex-col gap-2'>
@@ -84,7 +90,7 @@ export function ConnectionControls({
                 size='sm'
                 onClick={handleConnect}
                 disabled={oauthLoading}
-                data-testid='relink-button'
+                data-testid={`relink-button-${integrationId}`}
               >
                 {oauthLoading ? (
                   <RefreshCw className='mr-2 h-4 w-4 animate-spin' />

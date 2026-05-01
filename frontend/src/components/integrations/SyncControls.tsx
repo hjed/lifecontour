@@ -74,7 +74,7 @@ export function SyncControls({
           integrationId={integrationId}
           capability={capability}
           disabled={syncDisabled}
-          testId={`trigger-${integrationId}-${capability}-sync`}
+          testId={`trigger-${integrationId}-${capability.replace('_sync', '')}-sync`}
         />
       ))}
       <div className='text-muted-foreground mt-2 w-full text-xs'>
