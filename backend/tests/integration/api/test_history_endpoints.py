@@ -172,3 +172,91 @@ class TestContactHistoryEndpoints:
             assert "old_value" in attrs or attrs.get("old_value") is None
             assert "new_value" in attrs or attrs.get("new_value") is None
             assert "created_at" in attrs
+
+    @pytest.mark.asyncio
+    async def test_get_contact_history_mixed_source(
+        self,
+        authenticated_client,
+        contact_factory: ContactFactory,
+        async_connection,
+    ):
+        """Test chronological ordering of mixed source (UI, MCP, Sync, Summary) history."""
+        import asyncio
+
+        from core_shared.models.contacts.value_objects import Provenance
+
+        from app.core.contacts.adapters.sql.contact_field_history_repository import (
+            SqlContactFieldHistoryRepository,
+        )
+        from app.core.contacts.services.contact_history_service import (
+            ContactHistoryService,
+        )
+
+        contact = await contact_factory.create_contact(
+            first_name="Mixed", last_name="Source"
+        )
+
+        contact_id = int(contact["id"])
+
+        repo = SqlContactFieldHistoryRepository(async_connection)
+        history_service = ContactHistoryService(repo)
+
+        # 1. UI change
+        await history_service.record_contact_change(
+            contact_id,
+            changed_fields={"first_name": ("Mixed", "UI")},
+            changed_by="ui",
+            source=Provenance.UI,
+        )
+        await asyncio.sleep(0.01)
+
+        # 2. MCP change
+        await history_service.record_contact_change(
+            contact_id,
+            changed_fields={"last_name": ("Source", "MCP")},
+            changed_by="mcp",
+            source=Provenance.MCP,
+        )
+        await asyncio.sleep(0.01)
+
+        # 3. Sync change
+        await history_service.record_contact_change(
+            contact_id,
+            changed_fields={"company": (None, "Google")},
+            changed_by="system",
+            source=Provenance.GOOGLE_CONTACTS,
+        )
+        await asyncio.sleep(0.01)
+
+        # 4. Summary Regeneration change
+        await history_service.record_summary_change(
+            contact_id,
+            changed_fields={"summary_text": (None, "AI generated summary")},
+            changed_by="system",
+            source=Provenance.SUMMARY_REGENERATION,
+        )
+
+        response = await authenticated_client.get(f"/api/contacts/{contact_id}/history")
+        assert response.status_code == 200
+        data = response.json()
+        assert "data" in data
+        entries = data["data"]
+
+        # Verify all sources are present
+        sources = [entry["attributes"]["source"] for entry in entries]
+        assert "summary_regeneration" in sources
+        assert "google_contacts" in sources
+        assert "mcp" in sources
+        assert "ui" in sources
+
+        # Verify chronological ordering (newest first)
+        # We find the indices of each source in the response
+        idx_summary = sources.index("summary_regeneration")
+        idx_sync = sources.index("google_contacts")
+        idx_mcp = sources.index("mcp")
+        idx_ui = sources.index("ui")
+
+        # Since API returns newest first (DESC), summary should be before sync, etc.
+        assert idx_summary < idx_sync
+        assert idx_sync < idx_mcp
+        assert idx_mcp < idx_ui

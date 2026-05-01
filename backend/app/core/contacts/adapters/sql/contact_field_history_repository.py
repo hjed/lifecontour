@@ -32,6 +32,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
         OR (entity_type = 'contact_tag' AND entity_id IN (SELECT tag_id FROM contact_tags WHERE contact_id = :contact_id))
         OR (entity_type = 'contact_relationship' AND entity_id IN (SELECT id FROM contact_relationships WHERE from_contact_id = :contact_id OR to_contact_id = :contact_id))
         OR (entity_type = 'contact_important_date' AND entity_id IN (SELECT id FROM contact_important_dates WHERE contact_id = :contact_id))
+        OR (entity_type = 'contact_summary' AND entity_id = :contact_id)
     """
 
     def __init__(self, connection: AsyncConnection):
@@ -47,7 +48,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
                    changed_by, source, created_at
             FROM contact_field_history
             WHERE {self._CONTACT_HISTORY_WHERE_CLAUSE}
-            ORDER BY created_at DESC
+            ORDER BY created_at DESC, id DESC
             LIMIT :limit OFFSET :offset
         """
         )
@@ -95,7 +96,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
                    changed_by, source, created_at
             FROM contact_field_history
             WHERE entity_type = :entity_type AND entity_id = :entity_id
-            ORDER BY created_at DESC
+            ORDER BY created_at DESC, id DESC
         """
         )
         result = await self.conn.execute(
@@ -171,7 +172,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
                    changed_by, source, created_at
             FROM contact_field_history
             WHERE entity_type = :entity_type AND entity_id = :entity_id AND field_name = :field_name
-            ORDER BY created_at DESC
+            ORDER BY created_at DESC, id DESC
         """
         )
         result = await self.conn.execute(
@@ -210,7 +211,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
                    changed_by, source, created_at
             FROM contact_field_history
             WHERE changed_by = :changed_by
-            ORDER BY created_at DESC
+            ORDER BY created_at DESC, id DESC
             LIMIT :limit
         """
         )
