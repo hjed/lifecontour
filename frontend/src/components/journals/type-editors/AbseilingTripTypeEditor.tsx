@@ -60,16 +60,36 @@ export function AbseilingTripTypeEditor({
     0
   );
 
-  const [isManualAbseils, setIsManualAbseils] = useState<boolean>(
-    initialData.number_of_abseils != null &&
+  const [manualAbseilsState, setManualAbseilsState] = useState<boolean | null>(
+    null
+  );
+  const [manualLengthState, setManualLengthState] = useState<boolean | null>(
+    null
+  );
+
+  const isManualAbseils =
+    manualAbseilsState ??
+    (initialData.number_of_abseils != null &&
       initialCalcAbseils > 0 &&
-      initialData.number_of_abseils !== initialCalcAbseils
-  );
-  const [isManualLength, setIsManualLength] = useState<boolean>(
-    initialData.total_length != null &&
+      initialData.number_of_abseils !== initialCalcAbseils);
+
+  const isManualLength =
+    manualLengthState ??
+    (initialData.total_length != null &&
       initialCalcLength > 0 &&
-      initialData.total_length !== initialCalcLength
-  );
+      initialData.total_length !== initialCalcLength);
+
+  const handleCancelWrapper = () => {
+    setManualAbseilsState(null);
+    setManualLengthState(null);
+    handleCancel();
+  };
+
+  const handleSaveWrapper = async () => {
+    await handleSave();
+    setManualAbseilsState(null);
+    setManualLengthState(null);
+  };
 
   if (!isEditing && !createMode) {
     const hasData =
@@ -86,8 +106,8 @@ export function AbseilingTripTypeEditor({
           <TypeEditorActions
             isEditing={false}
             onEdit={handleEdit}
-            onSave={handleSave}
-            onCancel={handleCancel}
+            onSave={handleSaveWrapper}
+            onCancel={handleCancelWrapper}
           />
         </div>
       );
@@ -129,8 +149,8 @@ export function AbseilingTripTypeEditor({
         <TypeEditorActions
           isEditing={false}
           onEdit={handleEdit}
-          onSave={handleSave}
-          onCancel={handleCancel}
+          onSave={handleSaveWrapper}
+          onCancel={handleCancelWrapper}
         />
       </div>
     );
@@ -184,7 +204,7 @@ export function AbseilingTripTypeEditor({
             value={editData.number_of_abseils ?? ''}
             onChange={e => {
               const val = e.target.value;
-              setIsManualAbseils(val !== '');
+              setManualAbseilsState(val !== '');
               setEditData(previous => ({
                 ...previous,
                 number_of_abseils: val === '' ? null : Number.parseInt(val, 10),
@@ -212,7 +232,7 @@ export function AbseilingTripTypeEditor({
             value={editData.total_length ?? ''}
             onChange={e => {
               const val = e.target.value;
-              setIsManualLength(val !== '');
+              setManualLengthState(val !== '');
               setEditData(previous => ({
                 ...previous,
                 total_length: val === '' ? null : Number.parseInt(val, 10),
@@ -233,8 +253,8 @@ export function AbseilingTripTypeEditor({
         <TypeEditorActions
           isEditing={isEditing}
           onEdit={handleEdit}
-          onSave={handleSave}
-          onCancel={handleCancel}
+          onSave={handleSaveWrapper}
+          onCancel={handleCancelWrapper}
         />
       )}
     </div>

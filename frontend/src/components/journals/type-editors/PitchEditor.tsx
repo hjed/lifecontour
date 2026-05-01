@@ -166,7 +166,7 @@ export function PitchEditor({
                   <Input
                     type='number'
                     min={1}
-                    value={pitch.pitch_number}
+                    value={pitch.pitch_number || ''}
                     onChange={e =>
                       handleUpdatePitch(
                         index,

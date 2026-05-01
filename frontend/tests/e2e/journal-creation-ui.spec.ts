@@ -567,6 +567,11 @@ test.describe('Journal Creation UI Flow', () => {
     await page.getByTestId('number-of-abseils-input').fill('4');
     await page.getByTestId('total-length-input').fill('120');
 
+    // Assert that subsequent pitch edits do NOT change the overridden totals
+    await page.getByTestId('pitch-row-1').getByPlaceholder('Height').fill('70');
+    await expect(page.getByTestId('total-length-input')).toHaveValue('120');
+    await expect(page.getByTestId('number-of-abseils-input')).toHaveValue('4');
+
     await page.getByRole('button', { name: /create journal/i }).click();
 
     await awaitCreationAndAssertBadge(page, 'manage-type-abseiling_trip');
@@ -588,7 +593,7 @@ test.describe('Journal Creation UI Flow', () => {
     await expect(pitchReadOnly).toBeVisible();
     await expect(pitchReadOnly).toContainText('Pitches (2)');
     await expect(pitchReadOnly).toContainText('50m');
-    await expect(pitchReadOnly).toContainText('60m');
+    await expect(pitchReadOnly).toContainText('70m');
   });
 
   test('should create a CANYONING journal and verify transitive dependencies and summary', async ({
