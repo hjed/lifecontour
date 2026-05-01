@@ -325,7 +325,7 @@ async def get_consumer_lag(
         info = await stream_client.get_consumer_group_info(settings.stream_name)
         return info
     except Exception as e:
-        logger.error("Failed to get consumer lag", error=str(e))
+        logger.error("Failed to get consumer lag", error=str(e), exc_info=True)
         raise HTTPException(
             status_code=500, detail="Failed to retrieve consumer lag"
         ) from e
@@ -371,7 +371,7 @@ async def get_dead_letters(
             "offset": offset,
         }
     except Exception as e:
-        logger.error("Failed to get dead letters", error=str(e))
+        logger.error("Failed to get dead letters", error=str(e), exc_info=True)
         raise HTTPException(
             status_code=500, detail="Failed to retrieve dead letters"
         ) from e

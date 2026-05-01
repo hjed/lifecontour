@@ -168,10 +168,12 @@ test.describe('Journals AI Daily Summary', () => {
       timeout: 10000,
     });
 
-    // Should show loading state automatically
-    await expect(
-      authenticatedPage.getByTestId(`summary-loading-${journalDateId}`)
-    ).toBeVisible();
+    // Should show loading state or resolve quickly to the summary card
+    // (loading state is transient and may resolve before assertion on fast environments)
+    const loadingOrSummary = authenticatedPage
+      .getByTestId(`summary-loading-${journalDateId}`)
+      .or(authenticatedPage.getByTestId(`summary-card-${journalDateId}`));
+    await expect(loadingOrSummary).toBeVisible({ timeout: 15000 });
 
     // Eventually the summary should render
     const summaryCard = authenticatedPage.getByTestId(
