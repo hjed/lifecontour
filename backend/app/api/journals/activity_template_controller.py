@@ -32,36 +32,42 @@ async def create_template(
 ) -> ActivityTemplateResponse:
     """Create a new activity template."""
     attrs = request.data.attributes
-    template = ActivityTemplate(
-        user_id=user.id,
-        name=attrs.name,
-        template_type=attrs.template_type,
-        region=attrs.region,
-        description=attrs.description,
-        french_grade=attrs.french_grade,
-        canyon_type=attrs.canyon_type,
-        water_gauge_name=attrs.water_gauge_name,
-        is_vertical=attrs.is_vertical,
-        is_horizontal=attrs.is_horizontal,
-        climbing_type=attrs.climbing_type,
-        grade=attrs.grade,
-        length=attrs.length,
-    )
-    if attrs.pitches:
-        pitches = []
-        for p in attrs.pitches:
-            pitches.append(
-                TemplatePitch(
-                    template_id=str(template.id),
-                    pitch_number=p.pitch_number,
-                    height=p.height,
-                    anchor_location=p.anchor_location,
-                    anchor_type=p.anchor_type,
-                    did_rescue=p.did_rescue,
-                    did_setup=p.did_setup,
+    try:
+        template = ActivityTemplate(
+            user_id=user.id,
+            name=attrs.name,
+            template_type=attrs.template_type,
+            region=attrs.region,
+            description=attrs.description,
+            french_grade=attrs.french_grade,
+            canyon_type=attrs.canyon_type,
+            water_gauge_name=attrs.water_gauge_name,
+            is_vertical=attrs.is_vertical,
+            is_horizontal=attrs.is_horizontal,
+            climbing_type=attrs.climbing_type,
+            grade=attrs.grade,
+            length=attrs.length,
+        )
+        if attrs.pitches:
+            pitches = []
+            for p in attrs.pitches:
+                pitches.append(
+                    TemplatePitch(
+                        template_id=str(template.id),
+                        pitch_number=p.pitch_number,
+                        height=p.height,
+                        anchor_location=p.anchor_location,
+                        anchor_type=p.anchor_type,
+                        did_rescue=p.did_rescue,
+                        did_setup=p.did_setup,
+                    )
                 )
-            )
-        template.pitches = pitches
+            template.pitches = pitches
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
 
     created = await repo.save(template)
     resource = ActivityTemplateConverter.to_resource(
@@ -164,23 +170,23 @@ async def update_template(
     if attrs.length is not None:
         template.length = attrs.length
 
-    if attrs.pitches is not None:
-        pitches = []
-        for p in attrs.pitches:
-            pitches.append(
-                TemplatePitch(
-                    template_id=template_id_str,
-                    pitch_number=p.pitch_number,
-                    height=p.height,
-                    anchor_location=p.anchor_location,
-                    anchor_type=p.anchor_type,
-                    did_rescue=p.did_rescue,
-                    did_setup=p.did_setup,
-                )
-            )
-        template.pitches = pitches
-
     try:
+        if attrs.pitches is not None:
+            pitches = []
+            for p in attrs.pitches:
+                pitches.append(
+                    TemplatePitch(
+                        template_id=template_id_str,
+                        pitch_number=p.pitch_number,
+                        height=p.height,
+                        anchor_location=p.anchor_location,
+                        anchor_type=p.anchor_type,
+                        did_rescue=p.did_rescue,
+                        did_setup=p.did_setup,
+                    )
+                )
+            template.pitches = pitches
+
         template.__post_init__()
     except Exception as e:
         raise HTTPException(

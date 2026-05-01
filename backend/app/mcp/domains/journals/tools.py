@@ -4012,6 +4012,11 @@ async def update_template(
                 )
             template.pitches = pitch_entities
 
+        try:
+            template.__post_init__()
+        except Exception as e:
+            return MCPResponseBuilder.validation_error_response("template", str(e))
+
         saved_template = await repos.activity_template_repo.save(template)
 
         response = ActivityTemplateMCPConverter.to_mcp_response(saved_template)
