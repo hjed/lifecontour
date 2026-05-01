@@ -26,20 +26,12 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
     # Matches history entries for the contact itself and all related entities
     _CONTACT_HISTORY_WHERE_CLAUSE = """
         (entity_type = 'contact' AND entity_id = :contact_id)
-        OR (entity_type IN ('contact_method', 'contact_address', 'contact_note', 'contact_tag', 'contact_relationship', 'contact_important_date')
-            AND entity_id IN (
-                SELECT id FROM contact_methods WHERE contact_id = :contact_id
-                UNION
-                SELECT id FROM contact_addresses WHERE contact_id = :contact_id
-                UNION
-                SELECT id FROM contact_notes WHERE contact_id = :contact_id
-                UNION
-                SELECT tag_id FROM contact_tags WHERE contact_id = :contact_id
-                UNION
-                SELECT id FROM contact_relationships WHERE from_contact_id = :contact_id OR to_contact_id = :contact_id
-                UNION
-                SELECT id FROM contact_important_dates WHERE contact_id = :contact_id
-            ))
+        OR (entity_type = 'contact_method' AND entity_id IN (SELECT id FROM contact_methods WHERE contact_id = :contact_id))
+        OR (entity_type = 'contact_address' AND entity_id IN (SELECT id FROM contact_addresses WHERE contact_id = :contact_id))
+        OR (entity_type = 'contact_note' AND entity_id IN (SELECT id FROM contact_notes WHERE contact_id = :contact_id))
+        OR (entity_type = 'contact_tag' AND entity_id IN (SELECT tag_id FROM contact_tags WHERE contact_id = :contact_id))
+        OR (entity_type = 'contact_relationship' AND entity_id IN (SELECT id FROM contact_relationships WHERE from_contact_id = :contact_id OR to_contact_id = :contact_id))
+        OR (entity_type = 'contact_important_date' AND entity_id IN (SELECT id FROM contact_important_dates WHERE contact_id = :contact_id))
     """
 
     def __init__(self, connection: AsyncConnection):
