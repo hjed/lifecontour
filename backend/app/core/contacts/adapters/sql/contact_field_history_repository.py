@@ -1,5 +1,6 @@
 """SQL implementation of ContactFieldHistoryRepository."""
 
+from core_shared.models.contacts.value_objects import Provenance
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -12,20 +13,25 @@ from app.core.contacts.models.repositories import (
 class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
     """SQL implementation of ContactFieldHistoryRepository using SQLAlchemy Core."""
 
+    @staticmethod
+    def _parse_provenance(source: str | None) -> Provenance:
+        if not source:
+            return Provenance.SYSTEM
+        try:
+            return Provenance(source)
+        except ValueError:
+            return Provenance.SYSTEM
+
     # Shared WHERE clause for contact history queries
     # Matches history entries for the contact itself and all related entities
     _CONTACT_HISTORY_WHERE_CLAUSE = """
         (entity_type = 'contact' AND entity_id = :contact_id)
-        OR (entity_type IN ('contact_method', 'contact_address', 'contact_note', 'contact_tag')
-            AND entity_id IN (
-                SELECT id FROM contact_methods WHERE contact_id = :contact_id
-                UNION
-                SELECT id FROM contact_addresses WHERE contact_id = :contact_id
-                UNION
-                SELECT id FROM contact_notes WHERE contact_id = :contact_id
-                UNION
-                SELECT tag_id FROM contact_tags WHERE contact_id = :contact_id
-            ))
+        OR (entity_type = 'contact_method' AND entity_id IN (SELECT id FROM contact_methods WHERE contact_id = :contact_id))
+        OR (entity_type = 'contact_address' AND entity_id IN (SELECT id FROM contact_addresses WHERE contact_id = :contact_id))
+        OR (entity_type = 'contact_note' AND entity_id IN (SELECT id FROM contact_notes WHERE contact_id = :contact_id))
+        OR (entity_type = 'contact_tag' AND entity_id IN (SELECT tag_id FROM contact_tags WHERE contact_id = :contact_id))
+        OR (entity_type = 'contact_relationship' AND entity_id IN (SELECT id FROM contact_relationships WHERE from_contact_id = :contact_id OR to_contact_id = :contact_id))
+        OR (entity_type = 'contact_important_date' AND entity_id IN (SELECT id FROM contact_important_dates WHERE contact_id = :contact_id))
     """
 
     def __init__(self, connection: AsyncConnection):
@@ -38,7 +44,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
         query = text(
             f"""
             SELECT id, entity_type, entity_id, field_name, old_value, new_value,
-                   changed_by, created_at
+                   changed_by, source, created_at
             FROM contact_field_history
             WHERE {self._CONTACT_HISTORY_WHERE_CLAUSE}
             ORDER BY created_at DESC
@@ -58,6 +64,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
                 old_value=row.old_value,
                 new_value=row.new_value,
                 changed_by=row.changed_by,
+                source=self._parse_provenance(row.source),
                 id=row.id,
                 created_at=row.created_at.isoformat() if row.created_at else None,
             )
@@ -85,7 +92,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
         query = text(
             """
             SELECT id, entity_type, entity_id, field_name, old_value, new_value,
-                   changed_by, created_at
+                   changed_by, source, created_at
             FROM contact_field_history
             WHERE entity_type = :entity_type AND entity_id = :entity_id
             ORDER BY created_at DESC
@@ -104,6 +111,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
                 old_value=row.old_value,
                 new_value=row.new_value,
                 changed_by=row.changed_by,
+                source=self._parse_provenance(row.source),
                 id=row.id,
                 created_at=row.created_at.isoformat() if row.created_at else None,
             )
@@ -118,8 +126,8 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
         query = text(
             """
             INSERT INTO contact_field_history
-            (entity_type, entity_id, field_name, old_value, new_value, changed_by)
-            VALUES (:entity_type, :entity_id, :field_name, :old_value, :new_value, :changed_by)
+            (entity_type, entity_id, field_name, old_value, new_value, changed_by, source)
+            VALUES (:entity_type, :entity_id, :field_name, :old_value, :new_value, :changed_by, :source)
             RETURNING id, created_at
         """
         )
@@ -132,6 +140,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
                 "old_value": entry.old_value,
                 "new_value": entry.new_value,
                 "changed_by": entry.changed_by,
+                "source": entry.source.value,
             },
         )
         row = result.fetchone()
@@ -159,7 +168,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
         query = text(
             """
             SELECT id, entity_type, entity_id, field_name, old_value, new_value,
-                   changed_by, created_at
+                   changed_by, source, created_at
             FROM contact_field_history
             WHERE entity_type = :entity_type AND entity_id = :entity_id AND field_name = :field_name
             ORDER BY created_at DESC
@@ -183,6 +192,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
                 old_value=row.old_value,
                 new_value=row.new_value,
                 changed_by=row.changed_by,
+                source=self._parse_provenance(row.source),
                 id=row.id,
                 created_at=row.created_at.isoformat() if row.created_at else None,
             )
@@ -197,7 +207,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
         query = text(
             """
             SELECT id, entity_type, entity_id, field_name, old_value, new_value,
-                   changed_by, created_at
+                   changed_by, source, created_at
             FROM contact_field_history
             WHERE changed_by = :changed_by
             ORDER BY created_at DESC
@@ -217,6 +227,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
                 old_value=row.old_value,
                 new_value=row.new_value,
                 changed_by=row.changed_by,
+                source=self._parse_provenance(row.source),
                 id=row.id,
                 created_at=row.created_at.isoformat() if row.created_at else None,
             )
