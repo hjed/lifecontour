@@ -5,7 +5,7 @@ Activity Template REST API controller.
 from core_shared.models.journals.activity_template import ActivityTemplate
 from core_shared.models.journals.template_pitch import TemplatePitch
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 
 from app.api.journals.converters import ActivityTemplateConverter
 from app.api.journals.schemas import (
@@ -26,6 +26,7 @@ async def create_template(
     request: ActivityTemplateCreateRequest,
     repo: FromDishka[ActivityTemplateRepository],
     user: FromDishka[SessionUser],
+    req: Request,
 ) -> ActivityTemplateResponse:
     """Create a new activity template."""
     attrs = request.data.attributes
@@ -61,7 +62,9 @@ async def create_template(
         template.pitches = pitches
 
     created = await repo.save(template)
-    resource = ActivityTemplateConverter.to_resource(created)
+    resource = ActivityTemplateConverter.to_resource(
+        created, base_url=str(req.base_url)
+    )
     return ActivityTemplateResponse(data=resource)
 
 
@@ -70,6 +73,7 @@ async def create_template(
 async def get_templates(
     repo: FromDishka[ActivityTemplateRepository],
     user: FromDishka[SessionUser],
+    req: Request,
     name: str | None = Query(None, description="Filter by name"),
     template_type: str | None = Query(None, description="Filter by template type"),
 ) -> ActivityTemplateListResponse:
@@ -78,7 +82,10 @@ async def get_templates(
     if name:
         templates = [t for t in templates if name.lower() in t.name.lower()]
 
-    resources = [ActivityTemplateConverter.to_resource(t) for t in templates]
+    resources = [
+        ActivityTemplateConverter.to_resource(t, base_url=str(req.base_url))
+        for t in templates
+    ]
     return ActivityTemplateListResponse(data=resources)
 
 
@@ -88,6 +95,7 @@ async def get_template(
     template_id: str,
     repo: FromDishka[ActivityTemplateRepository],
     user: FromDishka[SessionUser],
+    req: Request,
 ) -> ActivityTemplateResponse:
     """Get a specific activity template."""
     template = await repo.find_by_id(template_id)
@@ -96,7 +104,9 @@ async def get_template(
             status_code=status.HTTP_404_NOT_FOUND, detail="ActivityTemplate not found"
         )
 
-    resource = ActivityTemplateConverter.to_resource(template)
+    resource = ActivityTemplateConverter.to_resource(
+        template, base_url=str(req.base_url)
+    )
     return ActivityTemplateResponse(data=resource)
 
 
@@ -107,8 +117,15 @@ async def update_template(
     request: ActivityTemplateUpdateRequest,
     repo: FromDishka[ActivityTemplateRepository],
     user: FromDishka[SessionUser],
+    req: Request,
 ) -> ActivityTemplateResponse:
     """Update a specific activity template."""
+    if request.data.id != template_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="URL ID does not match request body ID",
+        )
+
     template = await repo.find_by_id(template_id)
     if not template or template.user_id != user.id:
         raise HTTPException(
@@ -161,7 +178,9 @@ async def update_template(
         template.pitches = pitches
 
     updated = await repo.save(template)
-    resource = ActivityTemplateConverter.to_resource(updated)
+    resource = ActivityTemplateConverter.to_resource(
+        updated, base_url=str(req.base_url)
+    )
     return ActivityTemplateResponse(data=resource)
 
 

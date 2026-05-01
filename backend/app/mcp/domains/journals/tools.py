@@ -3822,12 +3822,15 @@ async def create_template(
     """
     repos = _create_journal_tool_repositories(db_connection)
 
+    import uuid
+
+    template_id = str(uuid.uuid4())
     pitch_entities: list[TemplatePitch] = []
     if pitches:
         for p in pitches:
             pitch_entities.append(
                 TemplatePitch(
-                    template_id="",  # will be set by repository or Entity
+                    template_id=template_id,
                     pitch_number=p.get("pitch_number", 0),
                     height=p.get("height", 0),
                     anchor_location=p.get("anchor_location"),
@@ -3838,6 +3841,7 @@ async def create_template(
             )
 
     template = ActivityTemplate(
+        id=template_id,
         user_id=user_id,
         name=name,
         template_type=template_type,
@@ -3854,13 +3858,9 @@ async def create_template(
         pitches=pitch_entities,
     )
 
-    if pitch_entities:
-        for pitch_entity in pitch_entities:
-            pitch_entity.template_id = str(template.id)
+    saved_template = await repos.activity_template_repo.save(template)
 
-    await repos.activity_template_repo.save(template)
-
-    response = ActivityTemplateMCPConverter.to_mcp_response(template)
+    response = ActivityTemplateMCPConverter.to_mcp_response(saved_template)
     return MCPResponseBuilder.success_response(response)
 
 
@@ -4002,9 +4002,9 @@ async def update_template(
                 )
             template.pitches = pitch_entities
 
-        await repos.activity_template_repo.save(template)
+        saved_template = await repos.activity_template_repo.save(template)
 
-        response = ActivityTemplateMCPConverter.to_mcp_response(template)
+        response = ActivityTemplateMCPConverter.to_mcp_response(saved_template)
         return MCPResponseBuilder.success_response(response)
     except ValueError:
         return MCPResponseBuilder.validation_error_response(
