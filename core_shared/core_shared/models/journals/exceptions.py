@@ -276,3 +276,19 @@ class JournalMergeConflictError(JournalDomainError):
 
     def __init__(self, message: str):
         super().__init__(message, 409)
+
+
+class ActivityTemplateValidationError(JournalDomainError):
+    """Exception raised when activity template validation fails."""
+
+    def __init__(self, field: str, message: str):
+        super().__init__(f"{field}: {message}", 400)
+        self.field = field
+
+
+class TemplatePitchValidationError(JournalDomainError):
+    """Exception raised when template pitch validation fails."""
+
+    def __init__(self, field: str, message: str):
+        super().__init__(f"{field}: {message}", 400)
+        self.field = field

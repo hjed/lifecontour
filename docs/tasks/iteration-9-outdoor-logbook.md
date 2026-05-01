@@ -141,16 +141,16 @@ Expose pitches through the REST API as nested data within abseiling responses, a
 Create the template entity, migration, and repository. No API or UI yet.
 
 **Acceptance Criteria:**
-- [ ] Migration creates `activity_templates` table (id UUID, user_id, name, template_type enum, region, description, timestamps) with type-specific columns: french_grade, canyon_type, water_gauge_name (canyoning), is_vertical, is_horizontal (caving), climbing_type, grade, length (climbing)
-- [ ] Migration creates `template_pitches` table (template_id FK, pitch_number, height, anchor_location, anchor_type, did_rescue, did_setup)
-- [ ] Migration adds `template_id` FK to `journal_canyoning_data`
-- [ ] `ActivityTemplate` domain entity with validation (name required, template_type constrained)
-- [ ] `TemplatePitch` domain entity (reuses same field constraints as `AbseilPitch`)
-- [ ] `ActivityTemplateRepository` interface and SQL implementation (save, find_by_id, find_by_user, search_by_name, delete)
+- [x] Migration creates `activity_templates` table (id UUID, user_id, name, template_type enum, region, description, timestamps) with type-specific columns: french_grade, canyon_type, water_gauge_name (canyoning), is_vertical, is_horizontal (caving), climbing_type, grade, length (climbing)
+- [x] Migration creates `template_pitches` table (template_id FK, pitch_number, height, anchor_location, anchor_type, did_rescue, did_setup)
+- [x] Migration adds `template_id` FK to `journal_canyoning_data`
+- [x] `ActivityTemplate` domain entity with validation (name required, template_type constrained)
+- [x] `TemplatePitch` domain entity (reuses same field constraints as `AbseilPitch`)
+- [x] `ActivityTemplateRepository` interface and SQL implementation (save, find_by_id, find_by_user, search_by_name, delete)
 
 **Required Test Coverage:**
-- **Unit:** ActivityTemplate entity validation, TemplatePitch validation.
-- **Integration:** ActivityTemplateRepository CRUD with pitches, search by name, template_type filtering.
+- **Unit:** ✅ ActivityTemplate entity validation (31 tests), TemplatePitch validation (31 tests).
+- **Integration:** ✅ ActivityTemplateRepository CRUD with pitches, search by name, template_type filtering (19 tests).
 
 #### Phase 5: Activity Template API and MCP Tools
 **PR Size:** ~5–7 files

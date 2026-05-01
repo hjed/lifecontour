@@ -9,6 +9,9 @@ from app.core.journal.adapters.sql.abseil_pitch_repository import (
 from app.core.journal.adapters.sql.abseiling_data_repository import (
     SqlAbseilingDataRepository,
 )
+from app.core.journal.adapters.sql.activity_template_repository import (
+    SqlActivityTemplateRepository,
+)
 from app.core.journal.adapters.sql.bushwalking_data_repository import (
     SqlBushwalkingDataRepository,
 )
@@ -58,6 +61,7 @@ from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRe
 from app.core.journal.models.repositories import (
     AbseilingDataRepository,
     AbseilPitchRepository,
+    ActivityTemplateRepository,
     BushwalkingDataRepository,
     CalendarInfoRepository,
     CalendarRepository,
@@ -238,6 +242,13 @@ class JournalProvider(Provider):
     ) -> ReviewItemRepository:
         """Provide a ReviewItemRepository instance."""
         return SqlReviewItemRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def activity_template_repository(
+        self, connection: AsyncConnection
+    ) -> ActivityTemplateRepository:
+        """Provide an ActivityTemplateRepository instance."""
+        return SqlActivityTemplateRepository(connection)
 
     @provide(scope=Scope.REQUEST)
     def journal_service(
