@@ -548,8 +548,29 @@ test.describe('Journal Creation UI Flow', () => {
     ]);
     await expect(page.getByTestId('abseiling-trip-type-editor')).toBeVisible();
 
+    // Verify auto-calculation with pitches
+    await page.getByTestId('add-pitch-button').click();
+    await page.getByTestId('pitch-row-0').getByPlaceholder('Height').fill('40');
+    await expect(page.getByTestId('number-of-abseils-input')).toHaveValue('1');
+    await expect(page.getByTestId('total-length-input')).toHaveValue('40');
+
+    await page.getByTestId('add-pitch-button').click();
+    await page.getByTestId('pitch-row-1').getByPlaceholder('Height').fill('60');
+    await expect(page.getByTestId('number-of-abseils-input')).toHaveValue('2');
+    await expect(page.getByTestId('total-length-input')).toHaveValue('100');
+
+    // Edit a pitch and verify totals update
+    await page.getByTestId('pitch-row-0').getByPlaceholder('Height').fill('50');
+    await expect(page.getByTestId('total-length-input')).toHaveValue('110');
+
+    // Manual override
     await page.getByTestId('number-of-abseils-input').fill('4');
     await page.getByTestId('total-length-input').fill('120');
+
+    // Assert that subsequent pitch edits do NOT change the overridden totals
+    await page.getByTestId('pitch-row-1').getByPlaceholder('Height').fill('70');
+    await expect(page.getByTestId('total-length-input')).toHaveValue('120');
+    await expect(page.getByTestId('number-of-abseils-input')).toHaveValue('4');
 
     await page.getByRole('button', { name: /create journal/i }).click();
 
@@ -566,6 +587,13 @@ test.describe('Journal Creation UI Flow', () => {
     await expect(summary).toBeVisible();
     await expect(summary).toContainText('4');
     await expect(summary).toContainText('120 m');
+
+    // Verify pitch readonly mode
+    const pitchReadOnly = page.getByTestId('pitch-editor-readonly');
+    await expect(pitchReadOnly).toBeVisible();
+    await expect(pitchReadOnly).toContainText('Pitches (2)');
+    await expect(pitchReadOnly).toContainText('50m');
+    await expect(pitchReadOnly).toContainText('70m');
   });
 
   test('should create a CANYONING journal and verify transitive dependencies and summary', async ({
