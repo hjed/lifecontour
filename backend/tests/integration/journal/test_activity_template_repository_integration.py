@@ -33,7 +33,7 @@ class TestActivityTemplateRepositorySave:
         """Test creating a canyoning template with all fields and pitches."""
         pitches = [
             TemplatePitch(
-                template_id="placeholder",
+                template_id="00000000-0000-0000-0000-000000000000",
                 pitch_number=1,
                 height=20,
                 anchor_location="TR",
@@ -42,7 +42,7 @@ class TestActivityTemplateRepositorySave:
                 did_setup=True,
             ),
             TemplatePitch(
-                template_id="placeholder",
+                template_id="00000000-0000-0000-0000-000000000000",
                 pitch_number=2,
                 height=30,
                 anchor_location="Centre",
@@ -181,8 +181,16 @@ class TestActivityTemplateRepositorySave:
             template_type="canyoning",
             user_id=TEST_USER_ID,
             pitches=[
-                TemplatePitch(template_id="p", pitch_number=1, height=10),
-                TemplatePitch(template_id="p", pitch_number=2, height=20),
+                TemplatePitch(
+                    template_id="11111111-1111-1111-1111-111111111111",
+                    pitch_number=1,
+                    height=10,
+                ),
+                TemplatePitch(
+                    template_id="11111111-1111-1111-1111-111111111111",
+                    pitch_number=2,
+                    height=20,
+                ),
             ],
         )
         first_save = await template_repository.save(template)
@@ -195,7 +203,11 @@ class TestActivityTemplateRepositorySave:
             template_type="canyoning",
             user_id=TEST_USER_ID,
             pitches=[
-                TemplatePitch(template_id="p", pitch_number=1, height=50),
+                TemplatePitch(
+                    template_id="11111111-1111-1111-1111-111111111111",
+                    pitch_number=1,
+                    height=50,
+                ),
             ],
         )
         second_save = await template_repository.save(updated)
@@ -223,8 +235,16 @@ class TestActivityTemplateRepositoryFind:
             template_type="canyoning",
             user_id=TEST_USER_ID,
             pitches=[
-                TemplatePitch(template_id="p", pitch_number=1, height=15),
-                TemplatePitch(template_id="p", pitch_number=2, height=25),
+                TemplatePitch(
+                    template_id="11111111-1111-1111-1111-111111111111",
+                    pitch_number=1,
+                    height=15,
+                ),
+                TemplatePitch(
+                    template_id="11111111-1111-1111-1111-111111111111",
+                    pitch_number=2,
+                    height=25,
+                ),
             ],
         )
         saved = await template_repository.save(template)
@@ -418,8 +438,16 @@ class TestActivityTemplateRepositoryDelete:
             template_type="canyoning",
             user_id=TEST_USER_ID,
             pitches=[
-                TemplatePitch(template_id="p", pitch_number=1, height=20),
-                TemplatePitch(template_id="p", pitch_number=2, height=30),
+                TemplatePitch(
+                    template_id="11111111-1111-1111-1111-111111111111",
+                    pitch_number=1,
+                    height=20,
+                ),
+                TemplatePitch(
+                    template_id="11111111-1111-1111-1111-111111111111",
+                    pitch_number=2,
+                    height=30,
+                ),
             ],
         )
         saved = await template_repository.save(template)
@@ -452,9 +480,21 @@ class TestActivityTemplateRepositoryPitchOperations:
             template_type="canyoning",
             user_id=TEST_USER_ID,
             pitches=[
-                TemplatePitch(template_id="p", pitch_number=3, height=30),
-                TemplatePitch(template_id="p", pitch_number=1, height=10),
-                TemplatePitch(template_id="p", pitch_number=2, height=20),
+                TemplatePitch(
+                    template_id="11111111-1111-1111-1111-111111111111",
+                    pitch_number=3,
+                    height=30,
+                ),
+                TemplatePitch(
+                    template_id="11111111-1111-1111-1111-111111111111",
+                    pitch_number=1,
+                    height=10,
+                ),
+                TemplatePitch(
+                    template_id="11111111-1111-1111-1111-111111111111",
+                    pitch_number=2,
+                    height=20,
+                ),
             ],
         )
         saved = await template_repository.save(template)
@@ -481,7 +521,7 @@ class TestActivityTemplateRepositoryPitchOperations:
             user_id=TEST_USER_ID,
             pitches=[
                 TemplatePitch(
-                    template_id="p",
+                    template_id="11111111-1111-1111-1111-111111111111",
                     pitch_number=1,
                     height=25,
                     anchor_location="TR",
