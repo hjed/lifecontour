@@ -1381,6 +1381,121 @@ async def sync_contact_batch(contacts):
         await sync_single_contact(contact)
 ```
 
+## Pluggable Integration Registry
+
+### Overview
+
+The **Integration Registry** provides a unified API for listing all registered integrations and their current status. Instead of individual status endpoints per integration (e.g. `/api/integrations/google/contacts/status`), the registry aggregates information from all providers into a single response.
+
+### Architecture
+
+```
+┌─────────────────────────────┐
+│  GET /api/integrations      │
+│  (IntegrationsController)   │
+└───────┬─────────────────────┘
+        │
+        ▼
+┌─────────────────────────────┐
+│ IntegrationRegistryService  │  ← Aggregates results from all providers
+│                             │     Error-isolating: one provider failure
+│                             │     does not affect others
+└───────┬─────────────────────┘
+        │  list[IntegrationProvider]
+        ├────────────────────────┐
+        ▼                        ▼
+┌──────────────────┐   ┌──────────────────┐
+│ GoogleIntegration │   │ StravaIntegration │  (future)
+│    Provider       │   │    Provider       │
+└──────────────────┘   └──────────────────┘
+```
+
+### Provider Protocol
+
+Every integration must implement the `IntegrationProvider` protocol:
+
+```python
+class IntegrationProvider(Protocol):
+    async def get_integration_info(
+        self, user_id: str, connection: AsyncConnection
+    ) -> IntegrationInfo:
+        ...
+```
+
+`IntegrationInfo` is a frozen dataclass containing:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `str` | Unique integration identifier (e.g. `"google"`) |
+| `name` | `str` | Human-readable name |
+| `status` | `IntegrationStatus` | `connected`, `disconnected`, `error`, `token_expired` |
+| `capabilities` | `list[IntegrationCapability]` | `contacts_sync`, `calendar_sync`, `activity_import` |
+| `sync_summary` | `SyncSummary` | `last_sync_time`, `sync_count`, `error_count` |
+| `needs_reauth` | `bool` | Token expired or revoked |
+| `needs_reconsent` | `bool` | Missing required OAuth scopes |
+
+### DI Registration
+
+Providers are registered as a `list[IntegrationProvider]` via Dishka. The registry service receives this list at construction time:
+
+```python
+# In app/infrastructure/di/integrations.py
+@provide(scope=Scope.APP)
+def provide_integration_registry_service(
+    google_provider: GoogleIntegrationProvider,
+) -> IntegrationRegistryService:
+    return IntegrationRegistryService(providers=[google_provider])
+```
+
+### Error Isolation
+
+If a provider raises an exception, the registry returns an error entry for that integration and continues querying remaining providers:
+
+```python
+IntegrationInfo(
+    id=integration_id,
+    name=integration_id.title(),
+    status=IntegrationStatus.ERROR,
+)
+```
+
+### REST API: `GET /api/integrations`
+
+Returns a JSON API response listing all registered integrations:
+
+```json
+{
+  "data": [
+    {
+      "id": "google",
+      "type": "integration",
+      "attributes": {
+        "status": "connected",
+        "capabilities": ["contacts_sync", "calendar_sync"],
+        "sync_summary": {
+          "last_sync_time": "2024-01-15T10:30:00",
+          "sync_count": 42,
+          "error_count": 0
+        },
+        "needs_reauth": false,
+        "needs_reconsent": false
+      }
+    }
+  ]
+}
+```
+
+### MCP Tool: `list_integrations`
+
+The same data is exposed via the MCP `list_integrations` tool in `app/mcp/domains/integrations/tools.py`. It returns both structured JSON data and an AI-friendly `summary` field (e.g. `"1/1 integrations connected"`).
+
+### Adding a New Integration Provider
+
+1. Create a class implementing `IntegrationProvider` (e.g. `StravaIntegrationProvider`)
+2. Register it in the Dishka DI container (`app/infrastructure/di/integrations.py`)
+3. Add it to the `providers` list in `provide_integration_registry_service`
+4. The REST and MCP endpoints automatically include the new integration
+
 ## Future Considerations
 
 ### Advanced Scalability Patterns
