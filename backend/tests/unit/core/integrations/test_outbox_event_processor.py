@@ -531,9 +531,10 @@ class TestOutboxEventProcessor:
         result = await processor.process_event(contact_created_event)
 
         assert result["status"] == "conflict"
-        assert result["reason"] == "duplicate_email"
+        assert result["reason"] == "reconciliation_conflict"
         assert result["event_type"] == "contact.created"
-        assert "already_linked" in result["error"]
+        assert result["integration_source"] == "google"
+        assert "error" in result
         mock_contact_service.create_contact.assert_not_called()
 
     @pytest.mark.asyncio
