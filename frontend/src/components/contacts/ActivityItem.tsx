@@ -174,9 +174,13 @@ export function ActivityItem({ activity, className }: ActivityItemProps) {
           <div className='mt-0.5 flex-shrink-0'>
             <Tooltip>
               <TooltipTrigger asChild>
-                <div className='cursor-help' tabIndex={0}>
+                <button
+                  type='button'
+                  className='cursor-help focus:outline-none'
+                  data-testid={`provenance-trigger-${source}`}
+                >
                   {getProvenanceIcon(source)}
-                </div>
+                </button>
               </TooltipTrigger>
               <TooltipContent>{getProvenanceLabel(source)}</TooltipContent>
             </Tooltip>
@@ -197,7 +201,11 @@ export function ActivityItem({ activity, className }: ActivityItemProps) {
                   size='icon'
                   className='h-6 w-6'
                   onClick={() => setIsExpanded(!isExpanded)}
-                  aria-label={isExpanded ? 'Collapse' : 'Expand'}
+                  aria-label={
+                    isExpanded ? 'Collapse summary text' : 'Expand summary text'
+                  }
+                  aria-expanded={isExpanded}
+                  aria-controls={`summary-content-${activity.id}`}
                 >
                   {isExpanded ? (
                     <ChevronDown className='h-4 w-4' />
@@ -208,7 +216,10 @@ export function ActivityItem({ activity, className }: ActivityItemProps) {
               </div>
             </div>
             {isExpanded && (
-              <div className='bg-muted mt-2 rounded-md p-2 text-xs'>
+              <div
+                id={`summary-content-${activity.id}`}
+                className='bg-muted mt-2 rounded-md p-2 text-xs'
+              >
                 <p className='whitespace-pre-wrap'>
                   {new_value === '' ? 'Empty' : (new_value ?? 'None')}
                 </p>
@@ -243,9 +254,13 @@ export function ActivityItem({ activity, className }: ActivityItemProps) {
         <div className='mt-1 flex items-center gap-2'>
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className='flex cursor-help items-center' tabIndex={0}>
+              <button
+                type='button'
+                className='flex cursor-help items-center focus:outline-none'
+                data-testid={`provenance-trigger-${source || 'system'}`}
+              >
                 {getProvenanceIcon(source || 'system')}
-              </div>
+              </button>
             </TooltipTrigger>
             <TooltipContent>
               {getProvenanceLabel(source || 'system')}

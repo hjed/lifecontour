@@ -236,7 +236,9 @@ test.describe('Contact Activity Feed', () => {
     ).toBeVisible();
 
     // Check for Google Contacts provenance on the first item
-    const googleIconWrapper = page.locator('.cursor-help').first();
+    const googleIconWrapper = page
+      .getByTestId('provenance-trigger-google_contacts')
+      .first();
     await googleIconWrapper.hover();
     await expect(
       page.getByRole('tooltip', { name: 'Updated via Google Contacts Sync' })
