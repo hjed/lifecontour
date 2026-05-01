@@ -106,6 +106,7 @@ class SqlActivityTemplateRepository(ActivityTemplateRepository):
                 grade = EXCLUDED.grade,
                 length = EXCLUDED.length,
                 updated_at = now()
+            WHERE activity_templates.user_id = EXCLUDED.user_id
             RETURNING id, user_id, name, template_type, region, description,
                       french_grade, canyon_type, water_gauge_name,
                       is_vertical, is_horizontal,
@@ -133,7 +134,10 @@ class SqlActivityTemplateRepository(ActivityTemplateRepository):
             },
         )
         saved_row = result.fetchone()
-        assert saved_row is not None  # INSERT...RETURNING always returns a row
+        if saved_row is None:
+            # If no row is returned, the UPSERT hit a conflict and the WHERE clause failed
+            raise PermissionError("Cannot update template belonging to another user.")
+
         template_id = str(saved_row.id)
 
         # Delete-reinsert pitches for this template

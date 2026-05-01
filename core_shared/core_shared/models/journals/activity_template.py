@@ -13,7 +13,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from .constants import (
+    MAX_REGION_LENGTH,
     MAX_TEMPLATE_NAME_LENGTH,
+    MAX_WATER_GAUGE_NAME_LENGTH,
     VALID_CANYON_TYPES,
     VALID_CLIMBING_TYPES,
     VALID_TEMPLATE_TYPES,
@@ -81,8 +83,36 @@ class ActivityTemplate:
         self._validate_template_type()
         self._enforce_type_exclusivity()
         self._validate_user_id()
+        self._validate_region()
         self._validate_canyon_type()
+        self._validate_water_gauge_name()
         self._validate_climbing_type()
+        self._reconcile_pitches()
+
+    def _reconcile_pitches(self) -> None:
+        """Ensure all pitches are assigned this template's ID."""
+        if self.id is not None:
+            for pitch in self.pitches:
+                pitch.template_id = self.id
+
+    def _validate_region(self) -> None:
+        """Validate region length if provided."""
+        if self.region is not None and len(self.region) > MAX_REGION_LENGTH:
+            raise ActivityTemplateValidationError(
+                "region",
+                f"Region must not exceed {MAX_REGION_LENGTH} characters",
+            )
+
+    def _validate_water_gauge_name(self) -> None:
+        """Validate water gauge name length if provided."""
+        if (
+            self.water_gauge_name is not None
+            and len(self.water_gauge_name) > MAX_WATER_GAUGE_NAME_LENGTH
+        ):
+            raise ActivityTemplateValidationError(
+                "water_gauge_name",
+                f"Water gauge name must not exceed {MAX_WATER_GAUGE_NAME_LENGTH} characters",
+            )
 
     def _enforce_type_exclusivity(self) -> None:
         """Ensure type-specific fields are only set for their corresponding template type."""
