@@ -13,6 +13,15 @@ from app.core.contacts.models.repositories import (
 class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
     """SQL implementation of ContactFieldHistoryRepository using SQLAlchemy Core."""
 
+    @staticmethod
+    def _parse_provenance(source: str | None) -> Provenance:
+        if not source:
+            return Provenance.SYSTEM
+        try:
+            return Provenance(source)
+        except ValueError:
+            return Provenance.SYSTEM
+
     # Shared WHERE clause for contact history queries
     # Matches history entries for the contact itself and all related entities
     _CONTACT_HISTORY_WHERE_CLAUSE = """
@@ -63,7 +72,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
                 old_value=row.old_value,
                 new_value=row.new_value,
                 changed_by=row.changed_by,
-                source=Provenance(row.source),
+                source=self._parse_provenance(row.source),
                 id=row.id,
                 created_at=row.created_at.isoformat() if row.created_at else None,
             )
@@ -110,7 +119,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
                 old_value=row.old_value,
                 new_value=row.new_value,
                 changed_by=row.changed_by,
-                source=Provenance(row.source),
+                source=self._parse_provenance(row.source),
                 id=row.id,
                 created_at=row.created_at.isoformat() if row.created_at else None,
             )
@@ -191,7 +200,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
                 old_value=row.old_value,
                 new_value=row.new_value,
                 changed_by=row.changed_by,
-                source=Provenance(row.source),
+                source=self._parse_provenance(row.source),
                 id=row.id,
                 created_at=row.created_at.isoformat() if row.created_at else None,
             )
@@ -226,7 +235,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
                 old_value=row.old_value,
                 new_value=row.new_value,
                 changed_by=row.changed_by,
-                source=Provenance(row.source),
+                source=self._parse_provenance(row.source),
                 id=row.id,
                 created_at=row.created_at.isoformat() if row.created_at else None,
             )

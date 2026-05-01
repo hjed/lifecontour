@@ -10,7 +10,7 @@ from core_shared.models.contacts.entities import (
     Tag,
 )
 from core_shared.models.contacts.exceptions import ContactValidationError
-from core_shared.models.contacts.value_objects import TagName
+from core_shared.models.contacts.value_objects import Provenance, TagName
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql import (
@@ -268,6 +268,8 @@ class TestContactServiceIntegration:
         assert update_history.entity_id == saved_contact.id
         assert update_history.old_value == "Smith"
         assert update_history.new_value == "Doe"
+        assert update_history.source == Provenance.SYSTEM
+        assert update_history.changed_by == "system"
 
     @pytest.mark.asyncio
     async def test_update_contact_with_methods_and_notes_single_call(
