@@ -17,6 +17,7 @@ from core_shared.models.contacts.entities import (
     ContactSummary,
     SummaryStatus,
 )
+from core_shared.models.contacts.value_objects import Provenance
 
 from app.core.contacts.models.repositories import (
     ContactFieldHistoryRepository,
@@ -33,6 +34,9 @@ from app.core.journal.models.repositories import (
 )
 
 if TYPE_CHECKING:
+    from app.core.contacts.services.contact_history_service import (
+        ContactHistoryService,
+    )
     from app.core.contacts.services.summary_prompt_builder import (
         SummaryPromptBuilder,
     )
@@ -359,7 +363,7 @@ class SummaryGenerator:
         gemini_api_key: str,
         gemini_model: str,
         _gemini_response_override: str | None = None,
-        history_service: Any | None = None,
+        history_service: ContactHistoryService | None = None,
     ) -> None:
         self._input_assembler = input_assembler
         self._activity_checker = activity_checker
@@ -415,15 +419,24 @@ class SummaryGenerator:
             )
             result_summary = await self._summary_repo.upsert(disabled_summary)
             if self._history_service and (not existing or not existing.is_disabled):
-                await self._history_service.record_summary_change(
-                    contact_id=contact_id,
-                    changed_fields={
-                        "is_disabled": (
-                            existing.is_disabled if existing else False,
-                            True,
-                        )
-                    },
-                )
+                try:
+                    await self._history_service.record_summary_change(
+                        contact_id=contact_id,
+                        changed_fields={
+                            "is_disabled": (
+                                existing.is_disabled if existing else False,
+                                True,
+                            )
+                        },
+                        changed_by="system",
+                        source=Provenance.SUMMARY_REGENERATION,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Failed to record history for contact %s auto-disable: %s",
+                        contact_id,
+                        e,
+                    )
             return result_summary
 
         # Build prompt
@@ -457,15 +470,24 @@ class SummaryGenerator:
         if self._history_service and (
             not existing or existing.summary_text != result["summary_text"]
         ):
-            await self._history_service.record_summary_change(
-                contact_id=contact_id,
-                changed_fields={
-                    "summary_text": (
-                        existing.summary_text if existing else None,
-                        result["summary_text"],
-                    )
-                },
-            )
+            try:
+                await self._history_service.record_summary_change(
+                    contact_id=contact_id,
+                    changed_fields={
+                        "summary_text": (
+                            existing.summary_text if existing else None,
+                            result["summary_text"],
+                        )
+                    },
+                    changed_by="system",
+                    source=Provenance.SUMMARY_REGENERATION,
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to record history for contact %s summary generation: %s",
+                    contact_id,
+                    e,
+                )
 
         return result_summary
 

@@ -1,7 +1,7 @@
 """Unit tests for SummaryGenerator — orchestrator for AI summary generation."""
 
 import json
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -108,8 +108,9 @@ class TestSummaryGenerator:
 
         # Verify history was recorded
         assert generator._history_service is not None
-        generator._history_service.record_summary_change.assert_called_once()
-        call_args = generator._history_service.record_summary_change.call_args[1]
+        record_mock = cast(AsyncMock, generator._history_service.record_summary_change)
+        record_mock.assert_awaited_once()
+        call_args = record_mock.call_args[1]
         assert call_args["contact_id"] == 1
         assert "summary_text" in call_args["changed_fields"]
 
@@ -147,8 +148,9 @@ class TestSummaryGenerator:
 
         # Verify history was recorded
         assert generator._history_service is not None
-        generator._history_service.record_summary_change.assert_called_once()
-        call_args = generator._history_service.record_summary_change.call_args[1]
+        record_mock = cast(AsyncMock, generator._history_service.record_summary_change)
+        record_mock.assert_awaited_once()
+        call_args = record_mock.call_args[1]
         assert call_args["contact_id"] == 1
         assert "is_disabled" in call_args["changed_fields"]
 

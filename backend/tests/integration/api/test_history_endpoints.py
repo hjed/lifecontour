@@ -181,7 +181,6 @@ class TestContactHistoryEndpoints:
         async_connection,
     ):
         """Test chronological ordering of mixed source (UI, MCP, Sync, Summary) history."""
-        import asyncio
 
         from core_shared.models.contacts.value_objects import Provenance
 
@@ -208,7 +207,6 @@ class TestContactHistoryEndpoints:
             changed_by="ui",
             source=Provenance.UI,
         )
-        await asyncio.sleep(0.01)
 
         # 2. MCP change
         await history_service.record_contact_change(
@@ -217,7 +215,6 @@ class TestContactHistoryEndpoints:
             changed_by="mcp",
             source=Provenance.MCP,
         )
-        await asyncio.sleep(0.01)
 
         # 3. Sync change
         await history_service.record_contact_change(
@@ -226,7 +223,6 @@ class TestContactHistoryEndpoints:
             changed_by="system",
             source=Provenance.GOOGLE_CONTACTS,
         )
-        await asyncio.sleep(0.01)
 
         # 4. Summary Regeneration change
         await history_service.record_summary_change(

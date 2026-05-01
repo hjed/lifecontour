@@ -167,10 +167,9 @@ class ContactHistoryService:
     async def record_summary_change(
         self,
         contact_id: int,
-        changed_fields: dict[str, Any],
+        changed_fields: dict[str, tuple[Any, Any]],
         changed_by: str = "system",
         source: Provenance = Provenance.SUMMARY_REGENERATION,
-        _transaction: AsyncConnection | None = None,
     ) -> None:
         """Record field changes to a contact summary."""
         for field_name, (old_value, new_value) in changed_fields.items():
