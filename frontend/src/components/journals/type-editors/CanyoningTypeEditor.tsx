@@ -265,7 +265,7 @@ export function CanyoningTypeEditor({
         <CreateTemplateDialog
           open={createTemplateOpen}
           onOpenChange={setCreateTemplateOpen}
-          templateType={ActivityTemplateType.CANYONING}
+          defaultTemplateType={ActivityTemplateType.CANYONING}
           onCreated={handleTemplateSelection}
         />
       </div>

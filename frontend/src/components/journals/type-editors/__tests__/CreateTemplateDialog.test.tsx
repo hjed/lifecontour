@@ -30,7 +30,7 @@ describe('CreateTemplateDialog', () => {
         <CreateTemplateDialog
           open={true}
           onOpenChange={jest.fn()}
-          templateType={ActivityTemplateType.CANYONING}
+          defaultTemplateType={ActivityTemplateType.CANYONING}
           onCreated={jest.fn()}
           {...props}
         />

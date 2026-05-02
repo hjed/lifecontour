@@ -185,17 +185,17 @@ Build the template selector component and integrate it into `CanyoningTypeEditor
 - **Unit:** TemplateSelector rendering, search, selection, pitch pre-population.
 - **E2E:** create a template, create a canyoning journal selecting that template, verify pitches pre-populate and are editable.
 
-#### Phase 7: Template Inline Creation and E2E Hardening
+#### Phase 7: Template Inline Creation and E2E Hardening [COMPLETED]
 **PR Size:** ~3–5 files
 
 Polish inline template creation flow, ensure template creation works from within journal forms, and add cross-cutting E2E coverage.
 
 **Acceptance Criteria:**
-- [ ] Inline template creation dialog: create a template with pitches without leaving the journal form
-- [ ] Newly created template is immediately selectable and pre-populates pitches
-- [ ] Template management accessible from a dedicated UI surface (e.g. settings or sidebar link)
-- [ ] E2E coverage for the full pitch + template workflow end-to-end
-- [ ] Can copy pitches on the current journal/make a template from the journal
+- [x] Inline template creation dialog: create a template with pitches without leaving the journal form
+- [x] Newly created template is immediately selectable and pre-populates pitches
+- [x] Template management accessible from a dedicated UI surface (e.g. settings or sidebar link)
+- [x] E2E coverage for the full pitch + template workflow end-to-end
+- [x] Can copy pitches on the current journal/make a template from the journal
 
 **Required Test Coverage:**
 - **E2E:** full workflow: create template → create journal with template → edit pitches → verify totals. Template CRUD from management surface.
