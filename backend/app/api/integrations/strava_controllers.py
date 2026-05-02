@@ -6,13 +6,13 @@ token exchange (callback), and disconnection.
 """
 
 import secrets
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import httpx
 import structlog
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.auth.strava_token_service import StravaTokenService
@@ -36,6 +36,17 @@ class StravaOAuthAuthorizeRequest(BaseModel):
     """Request body for Strava OAuth authorization initiation."""
 
     redirect_url: str = "/integrations"
+
+    @field_validator("redirect_url")
+    @classmethod
+    def validate_safe_redirect(cls, v: str) -> str:
+        """Prevent open-redirect by ensuring the URL is a relative path."""
+        parsed = urlparse(v)
+        if parsed.scheme or parsed.netloc:
+            raise ValueError("redirect_url must be a relative path")
+        if not v.startswith("/") or v.startswith("//"):
+            raise ValueError("redirect_url must be a relative path starting with /")
+        return v
 
 
 class StravaOAuthAuthorizeResponse(BaseModel):

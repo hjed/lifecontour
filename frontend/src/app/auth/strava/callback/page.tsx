@@ -64,7 +64,13 @@ function StravaCallbackContent() {
 
         if (!response.ok) {
           const errorData = await response.json();
-          throw new Error(errorData.detail ?? 'Failed to connect Strava');
+          // Handle JSON:API error format ({ errors: [{ detail }] }) and
+          // plain FastAPI format ({ detail })
+          const detail =
+            errorData?.errors?.[0]?.detail ??
+            errorData?.detail ??
+            'Failed to connect Strava';
+          throw new Error(detail);
         }
 
         const data = await response.json();

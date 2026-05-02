@@ -57,7 +57,12 @@ class StravaTokenService:
         if self._fernet is None:
             if not self._encryption_key:
                 raise StravaTokenStorageError("Strava encryption key is not configured")
-            self._fernet = Fernet(self._encryption_key.encode())
+            try:
+                self._fernet = Fernet(self._encryption_key.encode())
+            except (ValueError, Exception) as e:
+                raise StravaTokenStorageError(
+                    f"Invalid Strava encryption key: {e!s}"
+                ) from e
         return self._fernet
 
     def encrypt(self, data: str) -> bytes:
