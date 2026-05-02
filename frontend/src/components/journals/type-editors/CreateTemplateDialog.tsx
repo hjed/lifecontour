@@ -61,6 +61,11 @@ interface CreateTemplateDialogProps {
   readonly initialPitches?: TemplatePitch[];
 }
 
+/**
+ * Outer dialog wrapper. The inner form content remounts each time the
+ * dialog opens so that `initialPitches` is always fresh via `useState`
+ * on mount — no useEffect or useRef needed.
+ */
 export function CreateTemplateDialog({
   open,
   onOpenChange,
@@ -68,6 +73,37 @@ export function CreateTemplateDialog({
   onCreated,
   initialPitches = [],
 }: CreateTemplateDialogProps) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      {open && (
+        <CreateTemplateDialogContent
+          defaultTemplateType={defaultTemplateType}
+          initialPitches={initialPitches}
+          onCreated={onCreated}
+          onClose={() => onOpenChange(false)}
+        />
+      )}
+    </Dialog>
+  );
+}
+
+interface CreateTemplateDialogContentProps {
+  readonly defaultTemplateType?: ActivityTemplateType;
+  readonly initialPitches: TemplatePitch[];
+  readonly onCreated: (template: ActivityTemplateResource) => void;
+  readonly onClose: () => void;
+}
+
+/**
+ * Inner form content that mounts fresh each time the dialog opens.
+ * This ensures `initialPitches` is always the current value.
+ */
+function CreateTemplateDialogContent({
+  defaultTemplateType,
+  initialPitches,
+  onCreated,
+  onClose,
+}: CreateTemplateDialogContentProps) {
   const queryClient = useQueryClient();
   const [pitches, setPitches] = useState<TemplatePitch[]>(initialPitches);
 
@@ -99,10 +135,8 @@ export function CreateTemplateDialog({
     onSuccess: response => {
       toast.success('Template created successfully');
       queryClient.invalidateQueries({ queryKey: ['templates'] });
-      form.reset();
-      setPitches(initialPitches);
       onCreated(response.data);
-      onOpenChange(false);
+      onClose();
     },
     onError: error => {
       toast.error('Failed to create template');
@@ -114,128 +148,118 @@ export function CreateTemplateDialog({
     mutation.mutate(values);
   };
 
-  const handleOpenChange = (newOpen: boolean) => {
-    if (!newOpen) {
-      form.reset();
-      setPitches([]);
-    }
-    onOpenChange(newOpen);
-  };
-
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className='max-h-[90vh] overflow-y-auto sm:max-w-[600px]'>
-        <DialogHeader>
-          <DialogTitle>Create Template</DialogTitle>
-          <DialogDescription>
-            Create a new template to quickly populate your journal entries.
-          </DialogDescription>
-        </DialogHeader>
+    <DialogContent className='max-h-[90vh] overflow-y-auto sm:max-w-[600px]'>
+      <DialogHeader>
+        <DialogTitle>Create Template</DialogTitle>
+        <DialogDescription>
+          Create a new template to quickly populate your journal entries.
+        </DialogDescription>
+      </DialogHeader>
 
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className='space-y-4'>
-            <FormField
-              control={form.control}
-              name='name'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Template Name</FormLabel>
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(onSubmit)} className='space-y-4'>
+          <FormField
+            control={form.control}
+            name='name'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Template Name</FormLabel>
+                <FormControl>
+                  <Input placeholder='e.g. Kowmung River Canyon' {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='template_type'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Template Type</FormLabel>
+                <Select
+                  onValueChange={field.onChange}
+                  defaultValue={field.value}
+                >
                   <FormControl>
-                    <Input placeholder='e.g. Kowmung River Canyon' {...field} />
+                    <SelectTrigger>
+                      <SelectValue placeholder='Select a template type' />
+                    </SelectTrigger>
                   </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
+                  <SelectContent>
+                    <SelectItem value={ActivityTemplateType.CANYONING}>
+                      Canyoning
+                    </SelectItem>
+                    <SelectItem value={ActivityTemplateType.CAVING}>
+                      Caving
+                    </SelectItem>
+                    <SelectItem value={ActivityTemplateType.CLIMBING}>
+                      Climbing
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='region'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Region</FormLabel>
+                <FormControl>
+                  <Input placeholder='e.g. Blue Mountains' {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='description'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Description (Optional)</FormLabel>
+                <FormControl>
+                  <Textarea
+                    placeholder='Any notes about this template...'
+                    {...field}
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <div className='pt-2'>
+            <h4 className='mb-2 text-sm font-medium'>Standard Pitches</h4>
+            <PitchEditor
+              pitches={pitches}
+              isEditing={true}
+              onChange={setPitches}
             />
+          </div>
 
-            <FormField
-              control={form.control}
-              name='template_type'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Template Type</FormLabel>
-                  <Select
-                    onValueChange={field.onChange}
-                    defaultValue={field.value}
-                  >
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder='Select a template type' />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value={ActivityTemplateType.CANYONING}>
-                        Canyoning
-                      </SelectItem>
-                      <SelectItem value={ActivityTemplateType.CAVING}>
-                        Caving
-                      </SelectItem>
-                      <SelectItem value={ActivityTemplateType.CLIMBING}>
-                        Climbing
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name='region'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Region</FormLabel>
-                  <FormControl>
-                    <Input placeholder='e.g. Blue Mountains' {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name='description'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Description (Optional)</FormLabel>
-                  <FormControl>
-                    <Textarea
-                      placeholder='Any notes about this template...'
-                      {...field}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <div className='pt-2'>
-              <h4 className='mb-2 text-sm font-medium'>Standard Pitches</h4>
-              <PitchEditor
-                pitches={pitches}
-                isEditing={true}
-                onChange={setPitches}
-              />
-            </div>
-
-            <DialogFooter className='pt-4'>
-              <Button
-                type='button'
-                variant='outline'
-                onClick={() => handleOpenChange(false)}
-                disabled={mutation.isPending}
-              >
-                Cancel
-              </Button>
-              <Button type='submit' disabled={mutation.isPending}>
-                {mutation.isPending ? 'Creating...' : 'Create Template'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </Form>
-      </DialogContent>
-    </Dialog>
+          <DialogFooter className='pt-4'>
+            <Button
+              type='button'
+              variant='outline'
+              onClick={onClose}
+              disabled={mutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button type='submit' disabled={mutation.isPending}>
+              {mutation.isPending ? 'Creating...' : 'Create Template'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </Form>
+    </DialogContent>
   );
 }

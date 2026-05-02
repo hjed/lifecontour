@@ -878,12 +878,21 @@ test.describe('Journal Creation UI Flow', () => {
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
 
+    // Verify pitches are pre-populated inside the dialog's pitch editor
+    await expect(dialog.getByTestId('pitch-row-0')).toBeVisible();
+    await expect(
+      dialog.getByTestId('pitch-row-0').getByPlaceholder('Height')
+    ).toHaveValue('45');
+    await expect(
+      dialog.getByTestId('pitch-row-1').getByPlaceholder('Height')
+    ).toHaveValue('55');
+
     // Fill new template
     const templateName = `Abseil UI Template ${Date.now()}`;
     await dialog.getByLabel('Template Name').fill(templateName);
 
     // Select the template type (since abseiling is not a template type, we must select one, e.g. canyoning)
-    await dialog.getByRole('combobox').click();
+    await dialog.getByRole('combobox', { name: 'Template Type' }).click();
     await page.getByRole('option', { name: 'Canyoning' }).click();
 
     await dialog.getByRole('button', { name: 'Create Template' }).click();
