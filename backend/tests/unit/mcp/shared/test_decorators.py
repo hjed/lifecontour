@@ -127,6 +127,35 @@ class TestMCPUnifiedErrorHandler:
         assert "Invalid input value" in response_data["message"]
 
     @pytest.mark.asyncio
+    async def test_pydantic_validation_error(self):
+        """Test handling of Pydantic ValidationError."""
+        from pydantic import BaseModel
+
+        class DummyModel(BaseModel):
+            title: str
+
+            class NestedModel(BaseModel):
+                value: int
+
+            nested: NestedModel
+
+        @mcp_unified_error_handler("test_operation", "general")
+        async def test_function() -> str:
+            # Trigger a validation error with a nested loc ("nested", "value")
+            DummyModel.model_validate(
+                {"title": "test", "nested": {"value": "not-an-int"}}
+            )
+            return "Should not reach here"
+
+        # Test error handling
+        result = await test_function()
+
+        # Parse the JSON response
+        response_data = json.loads(result)
+        assert response_data["error"] == "Validation error"
+        assert response_data["field"] == "nested.value"
+
+    @pytest.mark.asyncio
     async def test_search_operation_error_handling(self):
         """Test error handling for search operations."""
 

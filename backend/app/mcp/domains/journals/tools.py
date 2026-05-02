@@ -1967,7 +1967,7 @@ async def create_journal_entry(
 
     Raises:
         JournalValidationError: If validation fails
-        ValueError: If JSON parsing fails, required fields are missing, or invalid
+        ValueError: If required fields are missing, or invalid
                     type/relationship_type/status/role values are provided
     """
     # No JSON parsing needed, FastMCP handles request model conversion directly
@@ -2163,7 +2163,7 @@ async def update_journal_entry(
     Raises:
         JournalNotFoundError: If the journal with the given ID does not exist
         JournalValidationError: If validation fails
-        ValueError: If JSON parsing fails or invalid type/relationship values provided
+        ValueError: If invalid type/relationship values provided
     """
     # No JSON parsing needed, FastMCP handles request model conversion directly
 

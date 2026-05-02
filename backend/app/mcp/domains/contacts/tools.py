@@ -424,7 +424,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         Update an existing contact for AI-managed relationship maintenance.
 
         Supports two update modes:
-        1. Full contact update: Provide contact_data JSON with multiple fields
+        1. Full contact update: Provide request object with multiple fields
         2. Field-level update: Provide field_name and field_value for single field updates
 
         Updates an existing contact with validation and returns AI-friendly confirmation.

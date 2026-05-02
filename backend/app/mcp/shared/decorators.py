@@ -106,7 +106,7 @@ def mcp_unified_error_handler(
                 # Extract the first error's field path if available
                 errors = e.errors()
                 field_name = (
-                    str(errors[0]["loc"][0])
+                    ".".join(str(p) for p in errors[0]["loc"])
                     if errors and errors[0].get("loc")
                     else "Input"
                 )
