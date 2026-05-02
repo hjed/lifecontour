@@ -3299,8 +3299,6 @@ async def _update_climbing_type_data(
 
     # Build update kwargs and use dataclasses.replace() to trigger __post_init__ validation.
     updates: dict[str, Any] = {}
-    if "route_id" in attrs:
-        updates["route_id"] = _parse_optional_uuid(attrs["route_id"], "route_id")
     if "template_id" in attrs:
         updates["template_id"] = _parse_optional_uuid(
             attrs["template_id"], "template_id"
@@ -3332,8 +3330,6 @@ async def _update_kayaking_type_data(
         )
 
     updates: dict[str, Any] = {}
-    if "route_id" in attrs:
-        updates["route_id"] = _parse_optional_uuid(attrs["route_id"], "route_id")
     if "water_type" in attrs:
         raw_water_type = attrs["water_type"]
         if raw_water_type is not None and not isinstance(raw_water_type, str):
