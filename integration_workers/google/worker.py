@@ -3102,6 +3102,8 @@ async def sync_calendar_events(
                             )
 
                             # Check if the event already ended (past event)
+                            # Use a 1-day buffer to avoid edge cases with all-day
+                            # events where event_date_range_end is midnight-normalised.
                             if existing_journal_id is not None:
                                 end_date_stmt = text("""
                                     SELECT event_date_range_end
@@ -3116,7 +3118,8 @@ async def sync_calendar_events(
 
                                 if (
                                     event_end_date is not None
-                                    and event_end_date < datetime.now(UTC)
+                                    and event_end_date
+                                    < datetime.now(UTC) - timedelta(days=1)
                                 ):
                                     logger.info(
                                         "Skipping cancellation for past event",
