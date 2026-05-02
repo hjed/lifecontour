@@ -2,13 +2,19 @@
  * EventTypeEditor component for editing EVENT type journal data.
  *
  * Provides inline editing for calendar selection, start/end times, location,
- * all-day toggle, and sync_invitees setting.
+ * all-day toggle, event state, and sync_invitees setting.
  */
 
 'use client';
 
 import { useMemo } from 'react';
-import { Calendar as CalendarIcon, MapPin, Clock, Globe } from 'lucide-react';
+import {
+  Calendar as CalendarIcon,
+  MapPin,
+  Clock,
+  Globe,
+  CircleCheck,
+} from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -21,10 +27,18 @@ import {
 } from '@/components/ui/select';
 import { useCalendars } from '@/lib/api/journals';
 import { cn } from '@/lib/utils';
+import { EventState } from '@/types/journals';
 import type { CalendarInfoData } from '@/types/journals';
 import { useTypeEditorState } from './useTypeEditorState';
 import { TypeEditorActions } from './TypeEditorActions';
 import { getDefaultTimezone } from '@/components/settings/TimezoneSettings';
+
+const EVENT_STATE_OPTIONS: { value: EventState; label: string }[] = [
+  { value: EventState.CONFIRMED, label: 'Confirmed' },
+  { value: EventState.TENTATIVE, label: 'Tentative' },
+  { value: EventState.INVITED, label: 'Invited' },
+  { value: EventState.CANCELLED, label: 'Cancelled' },
+];
 
 interface EventTypeEditorProps {
   readonly journalId?: string;
@@ -283,6 +297,37 @@ export function EventTypeEditor({
                 {Intl.DateTimeFormat().resolvedOptions().timeZone}
               </p>
             )}
+        </div>
+      )}
+
+      {/* Event State (only in edit mode, not create mode) */}
+      {!createMode && (
+        <div className='space-y-2'>
+          <Label htmlFor='event-state' className='flex items-center gap-2'>
+            <CircleCheck className='h-4 w-4' aria-hidden='true' />
+            Event Status
+          </Label>
+          <Select
+            value={editData.event_state || EventState.CONFIRMED}
+            onValueChange={value =>
+              setEditData(previous => ({
+                ...previous,
+                event_state: value as EventState,
+              }))
+            }
+            disabled={!isEditing}
+          >
+            <SelectTrigger id='event-state' data-testid='event-state-select'>
+              <SelectValue placeholder='Select status' />
+            </SelectTrigger>
+            <SelectContent>
+              {EVENT_STATE_OPTIONS.map(option => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       )}
 

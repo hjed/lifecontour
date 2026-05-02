@@ -155,6 +155,8 @@ describe('calendarEventHelpers', () => {
           id: '1',
           title: 'Event A',
           date: '2026-04-15',
+          endDate: '2026-04-15',
+          isMultiDay: false,
           startTime: '10:00',
           endTime: '11:00',
           isAllDay: false,
@@ -168,6 +170,8 @@ describe('calendarEventHelpers', () => {
           id: '2',
           title: 'Event B',
           date: '2026-04-15',
+          endDate: '2026-04-15',
+          isMultiDay: false,
           startTime: '14:00',
           endTime: '15:00',
           isAllDay: false,
@@ -181,6 +185,8 @@ describe('calendarEventHelpers', () => {
           id: '3',
           title: 'Event C',
           date: '2026-04-16',
+          endDate: '2026-04-16',
+          isMultiDay: false,
           startTime: null,
           endTime: null,
           isAllDay: true,
@@ -274,6 +280,110 @@ describe('calendarEventHelpers', () => {
       const range = getDayDateRange(date);
       expect(range.start).toBe('2026-04-15');
       expect(range.end).toBe('2026-04-15');
+    });
+  });
+
+  describe('multiday events', () => {
+    it('toCalendarEvent sets endDate and isMultiDay for multiday events', () => {
+      const journal = createMockDisplayJournal({
+        event_date_range: {
+          start: '2026-04-15T00:00:00',
+          end: '2026-04-17T23:59:59',
+        },
+        type_data: {
+          event: {
+            calendar_id: 'cal-1',
+            start_time: null,
+            end_time: null,
+            is_all_day: true,
+            sync_invitees: false,
+          },
+        },
+      });
+      const event = toCalendarEvent(journal);
+
+      expect(event.date).toBe('2026-04-15');
+      expect(event.endDate).toBe('2026-04-17');
+      expect(event.isMultiDay).toBe(true);
+    });
+
+    it('toCalendarEvent marks single-day events as not multiday', () => {
+      const journal = createMockDisplayJournal();
+      const event = toCalendarEvent(journal);
+
+      expect(event.date).toBe('2026-04-15');
+      expect(event.endDate).toBe('2026-04-15');
+      expect(event.isMultiDay).toBe(false);
+    });
+
+    it('groupEventsByDate places multiday events in every day bucket', () => {
+      const multidayEvent: CalendarEvent = {
+        id: '10',
+        title: 'Conference',
+        date: '2026-04-15',
+        endDate: '2026-04-17',
+        isMultiDay: true,
+        startTime: null,
+        endTime: null,
+        isAllDay: true,
+        calendarColor: '#3b82f6',
+        isCancelled: false,
+        journalTypes: [JournalType.EVENT],
+        hasPendingReviews: false,
+        isSyncedToGoogle: false,
+      };
+
+      const grouped = groupEventsByDate([multidayEvent]);
+      expect(Object.keys(grouped).sort()).toEqual([
+        '2026-04-15',
+        '2026-04-16',
+        '2026-04-17',
+      ]);
+      // Same event should appear in each bucket
+      expect(grouped['2026-04-15'][0].id).toBe('10');
+      expect(grouped['2026-04-16'][0].id).toBe('10');
+      expect(grouped['2026-04-17'][0].id).toBe('10');
+    });
+
+    it('groupEventsByDate handles mix of single and multiday events', () => {
+      const singleEvent: CalendarEvent = {
+        id: '1',
+        title: 'Meeting',
+        date: '2026-04-15',
+        endDate: '2026-04-15',
+        isMultiDay: false,
+        startTime: '10:00',
+        endTime: '11:00',
+        isAllDay: false,
+        calendarColor: '#ef4444',
+        isCancelled: false,
+        journalTypes: [JournalType.EVENT],
+        hasPendingReviews: false,
+        isSyncedToGoogle: false,
+      };
+
+      const multidayEvent: CalendarEvent = {
+        id: '2',
+        title: 'Trip',
+        date: '2026-04-15',
+        endDate: '2026-04-16',
+        isMultiDay: true,
+        startTime: null,
+        endTime: null,
+        isAllDay: true,
+        calendarColor: '#3b82f6',
+        isCancelled: false,
+        journalTypes: [JournalType.EVENT],
+        hasPendingReviews: false,
+        isSyncedToGoogle: false,
+      };
+
+      const grouped = groupEventsByDate([singleEvent, multidayEvent]);
+      // April 15 should have both events
+      expect(grouped['2026-04-15']).toHaveLength(2);
+      // April 16 should only have the multiday event
+      expect(grouped['2026-04-16']).toHaveLength(1);
+      expect(grouped['2026-04-16'][0].id).toBe('2');
     });
   });
 });

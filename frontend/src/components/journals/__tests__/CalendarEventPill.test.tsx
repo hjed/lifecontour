@@ -8,6 +8,8 @@ describe('CalendarEventPill', () => {
     startTime: '10:00 AM',
     endTime: '11:00 AM',
     date: '2023-10-10',
+    endDate: '2023-10-10',
+    isMultiDay: false,
     isAllDay: false,
     calendarColor: '#ff0000',
     calendarName: 'Personal',

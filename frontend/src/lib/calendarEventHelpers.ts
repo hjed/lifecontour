@@ -16,6 +16,7 @@ import {
   startOfWeek,
   endOfWeek,
   parseISO,
+  eachDayOfInterval,
 } from 'date-fns';
 import { DisplayJournal } from '@/utils/journalTransformers';
 import { JournalType, EventState, CalendarInfoData } from '@/types/journals';
@@ -29,8 +30,12 @@ export interface CalendarEvent {
   id: string;
   /** Journal title */
   title: string;
-  /** Display date in YYYY-MM-DD format (local) */
+  /** Display date in YYYY-MM-DD format (local) — start of the event */
   date: string;
+  /** End date in YYYY-MM-DD format (local) — same as date for single-day events */
+  endDate: string;
+  /** Whether this event spans multiple days */
+  isMultiDay: boolean;
   /** Start time as HH:MM, or null for all-day / non-event journals */
   startTime: string | null;
   /** End time as HH:MM, or null for all-day / non-event journals */
@@ -89,14 +94,19 @@ export function toCalendarEvent(journal: DisplayJournal): CalendarEvent {
   const eventState = calendarInfo?.event_state;
   const isCancelled = eventState === EventState.CANCELLED;
 
-  // Extract the date portion from the event_date_range start
+  // Extract the date portions from the event_date_range
   const dateStr = journal.event_date_range.start;
+  const endDateStr = journal.event_date_range.end;
   const localDate = format(parseISO(dateStr), 'yyyy-MM-dd');
+  const localEndDate = format(parseISO(endDateStr), 'yyyy-MM-dd');
+  const isMultiDay = localDate !== localEndDate;
 
   return {
     id: journal.id,
     title: journal.title,
     date: localDate,
+    endDate: localEndDate,
+    isMultiDay,
     startTime,
     endTime,
     isAllDay,
@@ -127,10 +137,26 @@ export function groupEventsByDate(
   const grouped: Record<string, CalendarEvent[]> = {};
 
   for (const event of events) {
-    if (!grouped[event.date]) {
-      grouped[event.date] = [];
+    if (event.isMultiDay && event.endDate && event.endDate !== event.date) {
+      // Multiday events: place into every date bucket they span
+      const days = eachDayOfInterval({
+        start: parseISO(event.date),
+        end: parseISO(event.endDate),
+      });
+      for (const day of days) {
+        const dayKey = format(day, 'yyyy-MM-dd');
+        if (!grouped[dayKey]) {
+          grouped[dayKey] = [];
+        }
+        grouped[dayKey].push(event);
+      }
+    } else {
+      // Single-day events: place into their date bucket
+      if (!grouped[event.date]) {
+        grouped[event.date] = [];
+      }
+      grouped[event.date].push(event);
     }
-    grouped[event.date].push(event);
   }
 
   return grouped;
