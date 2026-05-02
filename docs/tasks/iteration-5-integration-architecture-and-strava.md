@@ -1,6 +1,6 @@
 # Iteration 5: Integration Architecture & Strava Integration
 
-**Status:** 🟡 PLANNED
+**Status:** 🟡 IN PROGRESS
 **Dependencies:** Iteration 4.5 (fitness & activity types), Iteration 7 (calendar sync, merge/review, MCP parity — partial), Iteration 9 (outdoor logbook activity types — partial)
 **Goal:** Replace the hard-coded outbox processor with a Redis Streams event bus, make integrations pluggable, and deliver one-way Strava activity import with merge review.
 
@@ -70,11 +70,11 @@ These rules apply to every task:
 - [Integration Architecture — Transactional Outbox Pattern](../architecture/integration-architecture.md#transactional-outbox-pattern)
 
 **Acceptance Criteria (task-level):**
-- [ ] Outbox relay publishes events to a Redis Stream (`domain-events`)
-- [ ] Search indexer, AI summary generator, Google worker, and inbound event processor each run as independent consumer groups
-- [ ] All existing tests pass without modification (behaviour unchanged)
-- [ ] Failed events are retried per-consumer independently
-- [ ] No hard-coded event routing remains in `OutboxProcessor`
+- [x] Outbox relay publishes events to a Redis Stream (`domain-events`)
+- [x] Search indexer, AI summary generator, Google worker, and inbound event processor each run as independent consumer groups
+- [x] All existing tests pass without modification (behaviour unchanged)
+- [x] Failed events are retried per-consumer independently
+- [x] No hard-coded event routing remains in `OutboxProcessor`
 
 #### Phase 1: Outbox Relay, Base Consumer Framework, and Stream Infrastructure
 **PR Size:** ~6–8 files
@@ -188,11 +188,11 @@ Remove the old `OutboxProcessor._process_single_event` monolithic dispatch, the 
 **Dependencies:** ITER5-001 (consumer groups must exist so integration status reflects stream-based health)
 
 **Acceptance Criteria (task-level):**
-- [ ] Backend exposes `GET /api/integrations` returning all registered integrations with status, capabilities, and sync summary
-- [ ] Frontend integrations page renders panels from the registry without integration-specific page components
-- [ ] Google integration fully migrated to the new pattern
-- [ ] Sync history, health status, and integration-specific settings accessible from each panel
-- [ ] Adding a new integration requires only a registry entry, not page layout changes
+- [x] Backend exposes `GET /api/integrations` returning all registered integrations with status, capabilities, and sync summary
+- [x] Frontend integrations page renders panels from the registry without integration-specific page components
+- [x] Google integration fully migrated to the new pattern
+- [x] Sync history, health status, and integration-specific settings accessible from each panel
+- [x] Adding a new integration requires only a registry entry, not page layout changes
 
 #### Phase 1: Backend Integration Registry API and MCP Tool ✅
 **PR Size:** ~5–7 files
@@ -240,7 +240,7 @@ Create shared frontend components and migrate Google's connect/disconnect and sy
 - **Integration:** panel rendering with mocked registry responses for single and multiple integrations.
 - **E2E:** connect/disconnect Google and trigger sync through the generic dashboard.
 
-#### Phase 3: Pluggable Integration Observability (Current Phase)
+#### Phase 3: Pluggable Integration Observability ✅
 
 **Goal:** Provide full visibility into integration syncs and health status.
 
