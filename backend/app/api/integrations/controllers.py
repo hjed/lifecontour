@@ -237,7 +237,7 @@ async def trigger_google_sync(
 
 
 @router.get(
-    "/google/contacts/sync-history",
+    "/{integration_id}/sync-history",
     responses={
         400: {"description": "Invalid date filter format"},
         500: {"description": "An unexpected error occurred"},
@@ -245,6 +245,7 @@ async def trigger_google_sync(
 )
 @inject
 async def list_sync_jobs(
+    integration_id: str,
     user: FromDishka[SessionUser],
     task_queue_service: FromDishka[TaskQueueService],
     status: str | None = Query(None, description="Filter by status"),
@@ -259,7 +260,7 @@ async def list_sync_jobs(
     offset: int = Query(0, ge=0, description="Number of results to skip"),
 ) -> SyncJobListResponse:
     """
-    List sync job history for the authenticated user.
+    List sync job history for the authenticated user and specified integration.
 
     Returns a paginated list of sync jobs with optional filtering by status,
     sync type, and date range.
@@ -288,12 +289,12 @@ async def list_sync_jobs(
                 ) from e
 
         # Get sync jobs from the task queue service
-        # Filter by google integration source since this endpoint is specific to Google Contacts
+        # Filter by integration source
         jobs, total = await task_queue_service.list_sync_jobs(
             user_id=user.id,
             status=status,
             sync_type=sync_type,
-            integration_source="google",
+            integration_source=integration_id,
             date_from=date_from_dt,
             date_to=date_to_dt,
             limit=limit,
@@ -337,6 +338,7 @@ async def list_sync_jobs(
         logger.error(
             "Failed to list sync jobs",
             user_id=user.id,
+            integration_id=integration_id,
             error=str(e),
             exc_info=True,
         )

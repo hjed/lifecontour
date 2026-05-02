@@ -176,6 +176,57 @@ test.describe('Integration Management - Authenticated User', () => {
       expect(await disconnectButton.isEnabled()).toBeTruthy();
     }
   });
+
+  test('should display and open Sync History, Health Status, and Settings modals', async ({
+    authenticatedPage,
+  }) => {
+    await authenticatedPage.goto('/integrations');
+
+    // Wait for integration panel to load
+    await authenticatedPage.waitForSelector(
+      '[data-testid="integration-panel-google"]'
+    );
+
+    // Test Sync History dialog
+    const historyButton = authenticatedPage.getByRole('button', {
+      name: /Sync History/i,
+    });
+    await expect(historyButton).toBeVisible();
+    await historyButton.click();
+    await expect(authenticatedPage.getByRole('dialog')).toBeVisible();
+    await expect(
+      authenticatedPage.getByRole('heading', { name: /Sync History/i }).first()
+    ).toBeVisible();
+    await authenticatedPage.keyboard.press('Escape'); // Close dialog
+
+    // Test Health Status dialog
+    const healthButton = authenticatedPage.getByRole('button', {
+      name: /Health Status/i,
+    });
+    await expect(healthButton).toBeVisible();
+    await healthButton.click();
+    await expect(authenticatedPage.getByRole('dialog')).toBeVisible();
+    await expect(
+      authenticatedPage
+        .getByRole('heading', { name: /Worker & Connection Health/i })
+        .first()
+    ).toBeVisible();
+    await authenticatedPage.keyboard.press('Escape'); // Close dialog
+
+    // Test Settings dialog
+    const settingsButton = authenticatedPage
+      .getByRole('button', { name: /Settings/i })
+      .first();
+    await expect(settingsButton).toBeVisible();
+    await settingsButton.click();
+    await expect(authenticatedPage.getByRole('dialog')).toBeVisible();
+    await expect(
+      authenticatedPage
+        .getByRole('heading', { name: /Integration Settings/i })
+        .first()
+    ).toBeVisible();
+    await authenticatedPage.keyboard.press('Escape'); // Close dialog
+  });
 });
 
 test.describe('Integration Registry API - GET /api/integrations', () => {
