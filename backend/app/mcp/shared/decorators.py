@@ -10,6 +10,7 @@ from collections.abc import Awaitable, Callable
 from functools import wraps
 from typing import Any
 
+import pydantic
 from core_shared.models.contacts.exceptions import ContactValidationError
 from core_shared.models.journals import JournalDomainError, JournalNotFoundError
 
@@ -42,16 +43,26 @@ def mcp_unified_error_handler(
         async def wrapper(*args: Any, **kwargs: Any) -> str:
             try:
                 # Log operation start with appropriate context
+                from pydantic import BaseModel
+
+                # Make kwargs serializable for structlog JSONRenderer
+                serializable_kwargs = {}
+                for k, v in kwargs.items():
+                    if isinstance(v, BaseModel):
+                        serializable_kwargs[k] = v.model_dump()
+                    else:
+                        serializable_kwargs[k] = v
+
                 if operation_type == "search":
                     # Extract search-specific parameters for logging
                     search_kwargs = {
                         k: v
-                        for k, v in kwargs.items()
+                        for k, v in serializable_kwargs.items()
                         if k in ["query", "limit", "tags", "entity_types", "page"]
                     }
                     MCPLogger.log_operation_start(operation_name, **search_kwargs)
                 else:
-                    MCPLogger.log_operation_start(operation_name, **kwargs)
+                    MCPLogger.log_operation_start(operation_name, **serializable_kwargs)
 
                 # Execute the function
                 result = await func(*args, **kwargs)
@@ -97,6 +108,20 @@ def mcp_unified_error_handler(
                 return MCPResponseBuilder.validation_error_response(
                     field_name, f"Failed to parse JSON data: {str(e)}"
                 )
+
+            except pydantic.ValidationError as e:
+                MCPLogger.log_validation_error(
+                    operation_name, f"Schema validation failed: {str(e)}"
+                )
+                # Extract the first error's field path if available
+                errors = e.errors()
+                field_name = (
+                    ".".join(str(p) for p in errors[0]["loc"])
+                    if errors and errors[0].get("loc")
+                    else "Input"
+                )
+                message = errors[0]["msg"] if errors else str(e)
+                return MCPResponseBuilder.validation_error_response(field_name, message)
 
             except ValueError as e:
                 MCPLogger.log_validation_error(operation_name, str(e))

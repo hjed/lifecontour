@@ -5,7 +5,6 @@ Provides AI access to contact management functionality through MCP tools.
 Each tool is designed to return AI-friendly, contextual information.
 """
 
-import json
 from typing import Annotated
 
 import structlog
@@ -273,9 +272,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
     @mcp.tool
     @mcp_unified_error_handler("create_contact", "management")
     async def create_contact(
-        contact_data: Annotated[
-            str, Field(description="JSON string with contact data")
-        ],
+        request: ContactCreateRequest,
         contact_service: ContactService = mcp_depends(get_contact_service),
         tag_repo: TagRepository = mcp_depends(get_tag_repository),
         connection: AsyncConnection = mcp_depends(get_async_connection),
@@ -286,28 +283,13 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         Creates a new contact with validation and returns AI-friendly confirmation.
         Supports adding contact methods, tags, and initial notes.
 
-        Args:
-            contact_data: JSON string containing contact information with fields:
-                - first_name (required): Contact's first name
-                - last_name (optional): Contact's last name
-                - middle_name (optional): Contact's middle name
-                - nick_name (optional): Contact's nickname
-                - email (optional): Primary email address
-                - phone (optional): Primary phone number
-                - tags (optional): List of tags to assign
-                - notes (optional): Initial notes about the contact
-
         Returns:
             JSON string containing AI-friendly contact creation confirmation including:
             - Created contact details with assigned ID
             - Validation results and any warnings
             - Contextual summary for AI understanding
         """
-        logger.info("MCP: Creating contact", contact_data=contact_data)
-
-        # Parse contact data
-        data = json.loads(contact_data)
-        request = ContactCreateRequest(**data)
+        logger.info("MCP: Creating contact", request=request.model_dump())
 
         # Create contact entity with methods and notes
         contact = Contact(
@@ -419,9 +401,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
     @mcp.tool
     @mcp_unified_error_handler("update_contact", "management")
     async def update_contact(
-        contact_data: Annotated[
-            str, Field(description="JSON string with contact update data")
-        ],
+        request: ContactUpdateRequest,
         field_name: Annotated[
             str | None,
             Field(
@@ -444,7 +424,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         Update an existing contact for AI-managed relationship maintenance.
 
         Supports two update modes:
-        1. Full contact update: Provide contact_data JSON with multiple fields
+        1. Full contact update: Provide request object with multiple fields
         2. Field-level update: Provide field_name and field_value for single field updates
 
         Updates an existing contact with validation and returns AI-friendly confirmation.
@@ -452,21 +432,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         strategy for methods/addresses/notes - all existing ones are replaced with
         the provided ones.
 
-        Args:
-            contact_data: JSON string containing contact update information with fields:
-                - contact_id (required): ID of the contact to update
-                - first_name (optional): Updated first name
-                - last_name (optional): Updated last name
-                - middle_name (optional): Updated middle name
-                - nick_name (optional): Updated nickname
-                - company (optional): Updated company or organization name
-                - job_title (optional): Updated job title or position
-                - email (optional): Updated primary email address
-                - phone (optional): Updated primary phone number
-                - tags (optional): Updated tags (replaces existing tags)
-                - notes (optional): Additional notes to add
-            field_name: Optional field name for field-level updates
-            field_value: Optional field value for field-level updates
+
 
         Returns:
             JSON string containing AI-friendly contact update confirmation including:
@@ -474,11 +440,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             - Validation results and any warnings
             - Contextual summary for AI understanding
         """
-        logger.info("MCP: Updating contact", contact_data=contact_data)
-
-        # Parse contact data
-        data = json.loads(contact_data)
-        request = ContactUpdateRequest(**data)
+        logger.info("MCP: Updating contact", request=request.model_dump())
 
         # Get existing contact
         existing_contact = await contact_service.get_contact_by_id(request.contact_id)

@@ -43,17 +43,14 @@ async def test_important_dates_via_mounted_http_session(
             return extract_mcp_json_payload(resp.text)
 
         # 1. Create a new contact without important dates
-        import json
 
         create_payload = await call_mcp(
             "create_contact",
             {
-                "contact_data": json.dumps(
-                    {
-                        "first_name": "Jane",
-                        "last_name": "Doe",
-                    }
-                )
+                "request": {
+                    "first_name": "Jane",
+                    "last_name": "Doe",
+                }
             },
         )
         assert create_payload["name"] == "Jane Doe"
@@ -63,21 +60,19 @@ async def test_important_dates_via_mounted_http_session(
         update_payload = await call_mcp(
             "update_contact",
             {
-                "contact_data": json.dumps(
-                    {
-                        "contact_id": int(c1_id),
-                        "first_name": "Jane",
-                        "important_dates": [
-                            {
-                                "date_type": "birthday",
-                                "precision": "full",
-                                "year": 1990,
-                                "month": 5,
-                                "day": 15,
-                            }
-                        ],
-                    }
-                )
+                "request": {
+                    "contact_id": int(c1_id),
+                    "first_name": "Jane",
+                    "important_dates": [
+                        {
+                            "date_type": "birthday",
+                            "precision": "full",
+                            "year": 1990,
+                            "month": 5,
+                            "day": 15,
+                        }
+                    ],
+                }
             },
         )
 
@@ -107,19 +102,17 @@ async def test_important_dates_via_mounted_http_session(
         create_payload2 = await call_mcp(
             "create_contact",
             {
-                "contact_data": json.dumps(
-                    {
-                        "first_name": "John",
-                        "last_name": "Dates",
-                        "important_dates": [
-                            {
-                                "date_type": "work_anniversary",
-                                "precision": "year",
-                                "year": 2020,
-                            }
-                        ],
-                    }
-                )
+                "request": {
+                    "first_name": "John",
+                    "last_name": "Dates",
+                    "important_dates": [
+                        {
+                            "date_type": "work_anniversary",
+                            "precision": "year",
+                            "year": 2020,
+                        }
+                    ],
+                }
             },
         )
 

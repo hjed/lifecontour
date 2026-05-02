@@ -131,8 +131,7 @@ class TestContactTools:
 
             # Verify the tool has the expected parameter
             properties = update_tool.inputSchema.get("properties", {})
-            assert "contact_data" in properties
-            assert properties["contact_data"]["type"] == "string"
+            assert "request" in properties
 
     def test_contact_update_request_schema_validation(self):
         """Test that ContactUpdateRequest schema validates correctly."""

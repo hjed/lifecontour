@@ -5,7 +5,6 @@ Tests the full MCP journal tools with real database integration
 using Dishka dependency injection patterns.
 """
 
-import json
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
@@ -494,17 +493,15 @@ class TestJournalToolsIntegration:
                     "params": {
                         "name": "create_journal_entry",
                         "arguments": {
-                            "journal_data": json.dumps(
-                                {
-                                    "title": "Child Journal",
-                                    "content": "This is a child journal",
-                                    "event_date_range": {
-                                        "start": "2024-01-15T00:00:00Z",
-                                        "end": "2024-01-15T01:00:00Z",
-                                    },
-                                    "parent_id": sample_journal_id,
-                                }
-                            )
+                            "request": {
+                                "title": "Child Journal",
+                                "content": "This is a child journal",
+                                "event_date_range": {
+                                    "start": "2024-01-15T00:00:00Z",
+                                    "end": "2024-01-15T01:00:00Z",
+                                },
+                                "parent_id": sample_journal_id,
+                            }
                         },
                     },
                 },
@@ -535,16 +532,14 @@ class TestJournalToolsIntegration:
                     "params": {
                         "name": "create_journal_entry",
                         "arguments": {
-                            "journal_data": json.dumps(
-                                {
-                                    "title": "Independent Journal",
-                                    "content": "Will be moved to under parent",
-                                    "event_date_range": {
-                                        "start": "2024-01-15T00:00:00Z",
-                                        "end": "2024-01-15T01:00:00Z",
-                                    },
-                                }
-                            )
+                            "request": {
+                                "title": "Independent Journal",
+                                "content": "Will be moved to under parent",
+                                "event_date_range": {
+                                    "start": "2024-01-15T00:00:00Z",
+                                    "end": "2024-01-15T01:00:00Z",
+                                },
+                            }
                         },
                     },
                 },
@@ -565,9 +560,7 @@ class TestJournalToolsIntegration:
                         "name": "update_journal_entry",
                         "arguments": {
                             "journal_id": child_id,
-                            "journal_data": json.dumps(
-                                {"parent_id": sample_journal_id}
-                            ),
+                            "request": {"parent_id": sample_journal_id},
                         },
                     },
                 },
@@ -599,9 +592,7 @@ class TestJournalToolsIntegration:
                         "name": "update_journal_entry",
                         "arguments": {
                             "journal_id": sample_journal_id,
-                            "journal_data": json.dumps(
-                                {"parent_id": sample_journal_id}
-                            ),
+                            "request": {"parent_id": sample_journal_id},
                         },
                     },
                 },

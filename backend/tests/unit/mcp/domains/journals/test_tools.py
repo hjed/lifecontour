@@ -102,8 +102,7 @@ class TestJournalTools:
 
             # Verify the tool has the expected parameter
             properties = create_tool.inputSchema.get("properties", {})
-            assert "journal_data" in properties
-            assert properties["journal_data"]["type"] == "string"
+            assert "request" in properties
 
     @pytest.mark.asyncio
     async def test_update_journal_entry_tool_registration(self, mcp_server):
@@ -133,7 +132,7 @@ class TestJournalTools:
             # Verify the tool has the expected parameters
             properties = update_tool.inputSchema.get("properties", {})
             assert "journal_id" in properties
-            assert "journal_data" in properties
+            assert "request" in properties
 
     @pytest.mark.asyncio
     async def test_get_journal_tool_registration(self, mcp_server):
