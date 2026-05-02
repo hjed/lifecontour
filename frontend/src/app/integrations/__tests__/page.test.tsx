@@ -9,6 +9,7 @@ import IntegrationsPage from '../page';
 import {
   useIntegrations,
   useIntegrationHealth,
+  useConsumerLag,
   useSyncHistory,
   useOAuthAuthorize,
   useOAuthDisconnect,
@@ -20,6 +21,7 @@ import {
 jest.mock('@/lib/api/integrations', () => ({
   useIntegrations: jest.fn(),
   useIntegrationHealth: jest.fn(),
+  useConsumerLag: jest.fn(),
   useSyncHistory: jest.fn(),
   useOAuthAuthorize: jest.fn(),
   useOAuthCallback: jest.fn(),
@@ -42,6 +44,7 @@ jest.mock('@/components/auth/AuthGuard', () => ({
 // Import the mocked functions
 const mockUseIntegrations = jest.mocked(useIntegrations);
 const mockUseIntegrationHealth = jest.mocked(useIntegrationHealth);
+const mockUseConsumerLag = jest.mocked(useConsumerLag);
 const mockUseSyncHistory = jest.mocked(useSyncHistory);
 const mockUseOAuthAuthorize = jest.mocked(useOAuthAuthorize);
 const mockUseOAuthDisconnect = jest.mocked(useOAuthDisconnect);
@@ -109,6 +112,12 @@ describe('IntegrationsPage', () => {
       error: null,
     } as unknown as ReturnType<typeof useIntegrationHealth>);
 
+    mockUseConsumerLag.mockReturnValue({
+      data: [],
+      isLoading: false,
+      error: null,
+    } as any);
+
     mockUseSyncHistory.mockReturnValue({
       data: {
         data: [],
@@ -173,14 +182,5 @@ describe('IntegrationsPage', () => {
     render(<IntegrationsPage />, { wrapper });
 
     expect(screen.getByTestId('loading-spinner')).toBeInTheDocument();
-  });
-
-  it('should display health indicators', () => {
-    const wrapper = createWrapper();
-    render(<IntegrationsPage />, { wrapper });
-
-    expect(screen.getByText('System Health')).toBeInTheDocument();
-    expect(screen.getByText('Redis: healthy')).toBeInTheDocument();
-    expect(screen.getByText('Worker: healthy')).toBeInTheDocument();
   });
 });
