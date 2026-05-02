@@ -64,6 +64,7 @@ const TYPE_ICONS: Record<
   [JournalType.JOGGING]: Timer,
   [JournalType.ABSEILING_TRIP]: ArrowDownToLine,
   [JournalType.CANYONING]: Droplets,
+  [JournalType.CAVING]: Mountain,
   [JournalType.CLIMBING]: TrendingUp,
   [JournalType.KAYAKING]: Waves,
   [JournalType.CROSS_COUNTRY_SKIING]: Snowflake,

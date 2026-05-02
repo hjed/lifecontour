@@ -69,6 +69,7 @@ import {
   JournalType,
   type AbseilingData,
   type CanyoningData,
+  type CavingData,
   type ClimbingData,
   type CrossCountrySkiingData,
   type CalendarInfoData,
@@ -89,6 +90,7 @@ import {
   AbseilingTripTypeEditor,
   BushwalkingTypeEditor,
   CanyoningTypeEditor,
+  CavingTypeEditor,
   ClimbingTypeEditor,
   CrossCountrySkiingTypeEditor,
   EventTypeEditor,
@@ -135,6 +137,7 @@ interface TypeDataState {
   [JournalType.BUSHWALKING]?: BushwalkingData;
   [JournalType.ABSEILING_TRIP]?: AbseilingData;
   [JournalType.CANYONING]?: CanyoningData;
+  [JournalType.CAVING]?: CavingData;
   [JournalType.CLIMBING]?: ClimbingData;
   [JournalType.KAYAKING]?: KayakingData;
   [JournalType.CROSS_COUNTRY_SKIING]?: CrossCountrySkiingData;
@@ -154,6 +157,7 @@ const TYPE_DATA_JOURNAL_TYPES = new Set<TypeDataJournalType>([
   JournalType.BUSHWALKING,
   JournalType.ABSEILING_TRIP,
   JournalType.CANYONING,
+  JournalType.CAVING,
   JournalType.CLIMBING,
   JournalType.KAYAKING,
   JournalType.CROSS_COUNTRY_SKIING,
@@ -179,6 +183,7 @@ const typeOptions = [
   { value: JournalType.JOGGING, label: 'Jogging' },
   { value: JournalType.ABSEILING_TRIP, label: 'Abseiling Trip' },
   { value: JournalType.CANYONING, label: 'Canyoning' },
+  { value: JournalType.CAVING, label: 'Caving' },
   { value: JournalType.CLIMBING, label: 'Climbing' },
   { value: JournalType.KAYAKING, label: 'Kayaking' },
   { value: JournalType.CROSS_COUNTRY_SKIING, label: 'Cross-Country Skiing' },
@@ -213,6 +218,11 @@ const TYPE_DEPENDENCIES: Partial<Record<JournalType, JournalType[]>> = {
   [JournalType.KAYAKING]: [JournalType.OUTDOOR_ACTIVITY, JournalType.FITNESS],
   [JournalType.CROSS_COUNTRY_SKIING]: [
     JournalType.BUSHWALKING,
+    JournalType.OUTDOOR_ACTIVITY,
+    JournalType.FITNESS,
+  ],
+  [JournalType.CAVING]: [
+    JournalType.ABSEILING_TRIP,
     JournalType.OUTDOOR_ACTIVITY,
     JournalType.FITNESS,
   ],
@@ -294,6 +304,7 @@ const TYPE_LABELS: Record<JournalType, string> = {
   [JournalType.JOGGING]: 'Jogging',
   [JournalType.ABSEILING_TRIP]: 'Abseiling Trip',
   [JournalType.CANYONING]: 'Canyoning',
+  [JournalType.CAVING]: 'Caving',
   [JournalType.CLIMBING]: 'Climbing',
   [JournalType.KAYAKING]: 'Kayaking',
   [JournalType.CROSS_COUNTRY_SKIING]: 'Cross-Country Skiing',
@@ -508,6 +519,12 @@ export function JournalCreateForm({
   const handleCanyoningChange = useCallback(
     (data: unknown) =>
       handleTypeDataChange(JournalType.CANYONING, data as CanyoningData),
+    [handleTypeDataChange]
+  );
+
+  const handleCavingChange = useCallback(
+    (data: unknown) =>
+      handleTypeDataChange(JournalType.CAVING, data as CavingData),
     [handleTypeDataChange]
   );
 
@@ -910,6 +927,13 @@ export function JournalCreateForm({
                       <CanyoningTypeEditor
                         createMode
                         onChange={handleCanyoningChange}
+                        onTemplateSelect={handleTemplateSelect}
+                      />
+                    )}
+                    {type === JournalType.CAVING && (
+                      <CavingTypeEditor
+                        createMode
+                        onChange={handleCavingChange}
                         onTemplateSelect={handleTemplateSelect}
                       />
                     )}

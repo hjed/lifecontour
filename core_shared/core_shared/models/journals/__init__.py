@@ -8,6 +8,7 @@ from .bushwalking_data import BushwalkingData
 from .calendar import Calendar
 from .calendar_info import CalendarInfo
 from .canyoning_data import CanyoningData
+from .caving_data import CavingData
 from .climbing_data import ClimbingData
 from .constants import (
     FRENCH_CANYON_GRADE_PATTERN,
@@ -62,6 +63,7 @@ from .exceptions import (
     CalendarNotFoundError,
     CalendarValidationError,
     CanyoningDataValidationError,
+    CavingDataValidationError,
     ClimbingDataValidationError,
     CrossCountrySkiingDataValidationError,
     FitnessDataValidationError,
@@ -171,6 +173,7 @@ __all__ = [
     "ActivityTemplate",
     "TemplatePitch",
     "CanyoningData",
+    "CavingData",
     "ClimbingData",
     "KayakingData",
     "CrossCountrySkiingData",
@@ -216,6 +219,7 @@ __all__ = [
     "ActivityTemplateValidationError",
     "TemplatePitchValidationError",
     "CanyoningDataValidationError",
+    "CavingDataValidationError",
     "ClimbingDataValidationError",
     "KayakingDataValidationError",
     "CrossCountrySkiingDataValidationError",

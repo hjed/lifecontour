@@ -22,6 +22,9 @@ from app.core.journal.adapters.sql.calendar_repository import SqlCalendarReposit
 from app.core.journal.adapters.sql.canyoning_data_repository import (
     SqlCanyoningDataRepository,
 )
+from app.core.journal.adapters.sql.caving_data_repository import (
+    SqlCavingDataRepository,
+)
 from app.core.journal.adapters.sql.climbing_data_repository import (
     SqlClimbingDataRepository,
 )
@@ -66,6 +69,7 @@ from app.core.journal.models.repositories import (
     CalendarInfoRepository,
     CalendarRepository,
     CanyoningDataRepository,
+    CavingDataRepository,
     ClimbingDataRepository,
     CrossCountrySkiingDataRepository,
     FitnessDataRepository,
@@ -209,6 +213,13 @@ class JournalProvider(Provider):
     ) -> CanyoningDataRepository:
         """Provide a CanyoningDataRepository instance."""
         return SqlCanyoningDataRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def caving_data_repository(
+        self, connection: AsyncConnection
+    ) -> CavingDataRepository:
+        """Provide a CavingDataRepository instance."""
+        return SqlCavingDataRepository(connection)
 
     @provide(scope=Scope.REQUEST)
     def climbing_data_repository(

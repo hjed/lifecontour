@@ -856,6 +856,35 @@ test.describe('Journal Creation UI Flow', () => {
     });
   });
 
+  test('should create a CAVING journal and verify dependencies and summary', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+    await createRouteBackedComplexJournal(page, {
+      gpxTrackName: `E2E_Caving_Route_${Date.now()}`,
+      journal: {
+        title: `Caving Trip ${Date.now()}`,
+        content: 'Deep dark cave exploration.',
+        typeLabelRegex: /^caving$/i,
+      },
+      selectedTypeTestId: 'CAVING',
+      dependencyTypeTestIds: ['OUTDOOR_ACTIVITY', 'FITNESS'],
+      editorTestId: 'caving-type-editor',
+      badgeTestId: 'manage-type-caving',
+      attachedTypes: ['caving', 'outdoor_activity', 'fitness'],
+      typeSectionTriggerTestId: 'type-section-trigger-caving',
+      summaryTestId: 'caving-summary',
+      fillTypeFields: async ({ page: detailPage }) => {
+        await detailPage.getByTestId('vertical-switch').click();
+        await detailPage.getByTestId('horizontal-switch').click();
+      },
+      assertSummary: async ({ summary }) => {
+        await expect(summary).toContainText('Vertical');
+        await expect(summary).toContainText('Horizontal');
+      },
+    });
+  });
+
   test('should pre-populate canyoning fields and abseiling pitches when a template is selected', async ({
     authenticatedPage,
   }) => {

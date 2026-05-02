@@ -20,6 +20,7 @@ from core_shared.models.journals import (
     Calendar,
     CalendarInfo,
     CanyoningData,
+    CavingData,
     ClimbingData,
     CrossCountrySkiingData,
     FitnessData,
@@ -1641,6 +1642,54 @@ class CrossCountrySkiingDataRepository(ABC):
 
         Args:
             journal_id: The journal ID to delete cross-country skiing data for
+        """
+        pass
+
+
+class CavingDataRepository(ABC):
+    """
+    Repository interface for caving data (CAVING type) operations.
+
+    A journal has the CAVING type if a CavingData row exists for its journal_id.
+    """
+
+    @abstractmethod
+    async def find_by_journal_id(self, journal_id: int) -> CavingData | None:
+        """
+        Find caving data by journal ID.
+
+        Args:
+            journal_id: The journal ID to look up
+
+        Returns:
+            The CavingData if found, None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def save(self, data: CavingData) -> CavingData:
+        """
+        Save caving data (insert or update).
+
+        This effectively adds or updates the CAVING type for a journal.
+
+        Args:
+            data: The caving data to save
+
+        Returns:
+            The saved data with updated timestamps
+        """
+        pass
+
+    @abstractmethod
+    async def delete(self, journal_id: int) -> None:
+        """
+        Delete caving data by journal ID.
+
+        This effectively removes the CAVING type from a journal.
+
+        Args:
+            journal_id: The journal ID to delete caving data for
         """
         pass
 

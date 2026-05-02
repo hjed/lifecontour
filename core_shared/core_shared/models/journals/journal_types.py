@@ -52,6 +52,7 @@ class JournalType(StrEnum):
     CLIMBING = "climbing"  # Iteration 4.5-004
     KAYAKING = "kayaking"  # Iteration 4.5-005
     CROSS_COUNTRY_SKIING = "cross_country_skiing"  # Iteration 4.5-005
+    CAVING = "caving"  # Iteration 9-003
 
     def __str__(self) -> str:
         """Return string representation of the type."""
@@ -128,6 +129,11 @@ class JournalType(StrEnum):
             cls.KAYAKING: [cls.OUTDOOR_ACTIVITY, cls.FITNESS],
             cls.CROSS_COUNTRY_SKIING: [
                 cls.BUSHWALKING,
+                cls.OUTDOOR_ACTIVITY,
+                cls.FITNESS,
+            ],
+            cls.CAVING: [
+                cls.ABSEILING_TRIP,
                 cls.OUTDOOR_ACTIVITY,
                 cls.FITNESS,
             ],
