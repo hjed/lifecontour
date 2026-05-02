@@ -3,7 +3,7 @@
 KayakingData represents the KAYAKING journal type data. A journal has the KAYAKING
 type if a row exists in the journal_kayaking_data table.
 
-This entity stores kayaking-specific data including route reference, water type,
+This entity stores kayaking-specific data including water type,
 white water flag, and rapids grade.
 
 KAYAKING requires OUTDOOR_ACTIVITY and FITNESS types.

@@ -1891,8 +1891,8 @@ _JOURNAL_TYPE_DATA_FIELDS: dict[str, dict[str, str]] = {
     "CLIMBING": {
         "template_id": "UUID of the activity template (optional)",
         "climbing_type": "string (optional)",
-        "grade": "string (optional)",
-        "length": "float in m (optional)",
+        "grade": "int (optional)",
+        "length": "int in m (optional)",
     },
     "KAYAKING": {
         "water_type": "string (optional)",

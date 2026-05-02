@@ -3,7 +3,7 @@
 ClimbingData represents the CLIMBING journal type data. A journal has the CLIMBING
 type if a row exists in the journal_climbing_data table.
 
-This entity stores climbing-specific data including route reference, climbing type,
+This entity stores climbing-specific data including climbing type,
 grade, route length, and optional activity template reference.
 
 CLIMBING requires ABSEILING_TRIP, OUTDOOR_ACTIVITY, and FITNESS types.
