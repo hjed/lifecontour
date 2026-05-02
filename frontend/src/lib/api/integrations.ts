@@ -400,12 +400,13 @@ export function useSyncHistory(
   });
 }
 
-export function useIntegrationHealth() {
+export function useIntegrationHealth(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: integrationKeys.health(),
     queryFn: fetchIntegrationHealth,
     staleTime: 10 * 1000, // 10 seconds
     refetchInterval: 30 * 1000, // 30 seconds
+    enabled: options?.enabled,
   });
 }
 
@@ -417,12 +418,13 @@ export function useIntegrationStats() {
   });
 }
 
-export function useConsumerLag() {
+export function useConsumerLag(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: [...integrationKeys.health(), 'consumer-lag'],
     queryFn: fetchConsumerLag,
     staleTime: 10 * 1000, // 10 seconds
     refetchInterval: 30 * 1000, // 30 seconds
+    enabled: options?.enabled,
   });
 }
 

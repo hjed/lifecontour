@@ -62,7 +62,7 @@ test.describe('Integrations Page UI (mocked API)', () => {
     );
 
     await authenticatedPage.route(
-      '**/api/integrations/google/contacts/sync-history**',
+      '**/api/integrations/google/sync-history**',
       route =>
         route.fulfill(
           json({
@@ -141,7 +141,7 @@ test.describe('Integrations Page UI (mocked API)', () => {
     );
 
     await authenticatedPage.route(
-      '**/api/integrations/google/contacts/sync-history**',
+      '**/api/integrations/google/sync-history**',
       route =>
         route.fulfill(
           json({
@@ -211,11 +211,20 @@ test.describe('Integrations Page UI (mocked API)', () => {
     await authenticatedPage.goto('/integrations');
 
     // Sync history renders 0 values (regression test for falsy rendering)
+    // Open Sync History dialog first
+    const googlePanel = authenticatedPage.getByTestId(
+      'integration-panel-google'
+    );
+    await googlePanel.getByRole('button', { name: /Sync History/i }).click();
+
     const jobItem = authenticatedPage
       .locator('[data-testid="sync-job-item"]')
       .first();
     await expect(jobItem).toContainText('0 processed');
     await expect(jobItem).toContainText('0 created');
+
+    // Close the dialog
+    await authenticatedPage.keyboard.press('Escape');
 
     // Trigger sync sends correct payload and shows progress briefly
     // Wait, with multiple capabilities there might be multiple sync buttons.
@@ -290,7 +299,7 @@ test.describe('Integrations Page UI (mocked API)', () => {
     );
 
     await authenticatedPage.route(
-      '**/api/integrations/google/contacts/sync-history**',
+      '**/api/integrations/google/sync-history**',
       route =>
         route.fulfill(
           json({
@@ -379,7 +388,7 @@ test.describe('Integrations Page UI (mocked API)', () => {
     );
 
     await authenticatedPage.route(
-      '**/api/integrations/google/contacts/sync-history**',
+      '**/api/integrations/google/sync-history**',
       route =>
         route.fulfill(
           json({

@@ -187,8 +187,12 @@ test.describe('Integration Management - Authenticated User', () => {
       '[data-testid="integration-panel-google"]'
     );
 
+    const googlePanel = authenticatedPage.getByTestId(
+      'integration-panel-google'
+    );
+
     // Test Sync History dialog
-    const historyButton = authenticatedPage.getByRole('button', {
+    const historyButton = googlePanel.getByRole('button', {
       name: /Sync History/i,
     });
     await expect(historyButton).toBeVisible();
@@ -200,7 +204,7 @@ test.describe('Integration Management - Authenticated User', () => {
     await authenticatedPage.keyboard.press('Escape'); // Close dialog
 
     // Test Health Status dialog
-    const healthButton = authenticatedPage.getByRole('button', {
+    const healthButton = googlePanel.getByRole('button', {
       name: /Health Status/i,
     });
     await expect(healthButton).toBeVisible();
@@ -214,9 +218,9 @@ test.describe('Integration Management - Authenticated User', () => {
     await authenticatedPage.keyboard.press('Escape'); // Close dialog
 
     // Test Settings dialog
-    const settingsButton = authenticatedPage
-      .getByRole('button', { name: /Settings/i })
-      .first();
+    const settingsButton = googlePanel.getByRole('button', {
+      name: /Settings/i,
+    });
     await expect(settingsButton).toBeVisible();
     await settingsButton.click();
     await expect(authenticatedPage.getByRole('dialog')).toBeVisible();

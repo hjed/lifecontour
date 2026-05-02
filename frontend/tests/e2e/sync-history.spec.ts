@@ -12,7 +12,7 @@ test.describe('Sync History - Authenticated User', () => {
   }) => {
     // Test sync history endpoint
     const response = await authenticatedPage.request.get(
-      '/api/integrations/google/contacts/sync-history?limit=5'
+      '/api/integrations/google/sync-history?limit=5'
     );
 
     expect(response.ok()).toBeTruthy();
@@ -33,7 +33,7 @@ test.describe('Sync History - Authenticated User', () => {
   }) => {
     // Test filtering by status
     const response = await authenticatedPage.request.get(
-      '/api/integrations/google/contacts/sync-history?status=completed&limit=5'
+      '/api/integrations/google/sync-history?status=completed&limit=5'
     );
 
     expect(response.ok()).toBeTruthy();
@@ -54,7 +54,7 @@ test.describe('Sync History - Authenticated User', () => {
   }) => {
     // Test filtering by sync type
     const response = await authenticatedPage.request.get(
-      '/api/integrations/google/contacts/sync-history?sync_type=smart&limit=5'
+      '/api/integrations/google/sync-history?sync_type=smart&limit=5'
     );
 
     expect(response.ok()).toBeTruthy();
@@ -78,7 +78,7 @@ test.describe('Sync History - Authenticated User', () => {
     const dateTo = '2024-12-31T23:59:59Z';
 
     const response = await authenticatedPage.request.get(
-      `/api/integrations/google/contacts/sync-history?date_from=${dateFrom}&date_to=${dateTo}&limit=5`
+      `/api/integrations/google/sync-history?date_from=${dateFrom}&date_to=${dateTo}&limit=5`
     );
 
     expect(response.ok()).toBeTruthy();
@@ -99,7 +99,7 @@ test.describe('Sync History - Authenticated User', () => {
   test('should paginate sync history', async ({ authenticatedPage }) => {
     // Test pagination
     const response1 = await authenticatedPage.request.get(
-      '/api/integrations/google/contacts/sync-history?limit=2&offset=0'
+      '/api/integrations/google/sync-history?limit=2&offset=0'
     );
 
     expect(response1.ok()).toBeTruthy();
@@ -110,7 +110,7 @@ test.describe('Sync History - Authenticated User', () => {
 
     // Get second page
     const response2 = await authenticatedPage.request.get(
-      '/api/integrations/google/contacts/sync-history?limit=2&offset=2'
+      '/api/integrations/google/sync-history?limit=2&offset=2'
     );
 
     expect(response2.ok()).toBeTruthy();
@@ -125,7 +125,7 @@ test.describe('Sync History - Authenticated User', () => {
   }) => {
     // Test invalid date format
     const response = await authenticatedPage.request.get(
-      '/api/integrations/google/contacts/sync-history?date_from=invalid-date'
+      '/api/integrations/google/sync-history?date_from=invalid-date'
     );
 
     expect(response.status()).toBe(400);
@@ -143,7 +143,7 @@ test.describe('Sync History - Unauthenticated User', () => {
   test('should require authentication', async ({ unauthenticatedPage }) => {
     // Test that unauthenticated users cannot access sync history
     const response = await unauthenticatedPage.request.get(
-      '/api/integrations/google/contacts/sync-history'
+      '/api/integrations/google/sync-history'
     );
 
     expect(response.status()).toBe(401);

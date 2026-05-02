@@ -36,12 +36,12 @@ export function HealthStatus({
     data: healthData,
     isLoading: healthLoading,
     error: healthError,
-  } = useIntegrationHealth();
+  } = useIntegrationHealth({ enabled: open });
   const {
     data: lagData,
     isLoading: lagLoading,
     error: lagError,
-  } = useConsumerLag();
+  } = useConsumerLag({ enabled: open });
 
   const health = healthData?.data?.attributes;
   const isLoading = healthLoading || lagLoading;
@@ -133,7 +133,9 @@ export function HealthStatus({
                         </span>
                         <Badge
                           variant={
-                            (group.lag ?? 0) > 0 ? 'secondary' : 'default'
+                            (group.lag ?? group.pending ?? 0) > 0
+                              ? 'secondary'
+                              : 'default'
                           }
                         >
                           Lag: {group.lag ?? group.pending ?? 0}
