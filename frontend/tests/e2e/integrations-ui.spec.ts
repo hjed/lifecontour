@@ -225,6 +225,7 @@ test.describe('Integrations Page UI (mocked API)', () => {
 
     // Close the dialog
     await authenticatedPage.keyboard.press('Escape');
+    await expect(authenticatedPage.getByRole('dialog')).toBeHidden();
 
     // Trigger sync sends correct payload and shows progress briefly
     // Wait, with multiple capabilities there might be multiple sync buttons.

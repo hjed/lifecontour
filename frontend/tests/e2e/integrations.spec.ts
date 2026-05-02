@@ -202,6 +202,7 @@ test.describe('Integration Management - Authenticated User', () => {
       authenticatedPage.getByRole('heading', { name: /Sync History/i }).first()
     ).toBeVisible();
     await authenticatedPage.keyboard.press('Escape'); // Close dialog
+    await expect(authenticatedPage.getByRole('dialog')).toBeHidden();
 
     // Test Health Status dialog
     const healthButton = googlePanel.getByRole('button', {
@@ -216,6 +217,7 @@ test.describe('Integration Management - Authenticated User', () => {
         .first()
     ).toBeVisible();
     await authenticatedPage.keyboard.press('Escape'); // Close dialog
+    await expect(authenticatedPage.getByRole('dialog')).toBeHidden();
 
     // Test Settings dialog
     const settingsButton = googlePanel.getByRole('button', {
