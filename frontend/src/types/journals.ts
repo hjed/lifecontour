@@ -241,7 +241,7 @@ export interface ActivityTemplateListResponse {
 
 export interface ActivityTemplateCreateData {
   type: 'activity-templates';
-  attributes: Partial<ActivityTemplateAttributes>;
+  attributes: Omit<ActivityTemplateAttributes, 'created_at' | 'updated_at'>;
 }
 
 export interface ActivityTemplateCreateRequest {

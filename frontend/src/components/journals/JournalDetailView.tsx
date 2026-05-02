@@ -277,12 +277,20 @@ export function JournalDetailView({
           JournalType.ABSEILING_TRIP
         ] as AbseilingData | undefined;
 
+        const pitches = template.attributes.pitches;
+        const totalLength = pitches.reduce(
+          (sum, p) => sum + (p.height || 0),
+          0
+        );
+
         await updateTypeData.mutateAsync({
           journalId: journal.id,
           journalType: JournalType.ABSEILING_TRIP,
           typeData: {
             ...(currentAbseil as Record<string, unknown>),
-            pitches: template.attributes.pitches,
+            pitches: pitches,
+            number_of_abseils: pitches.length,
+            total_length: totalLength,
           },
         });
         toast.success('Pitches imported from template');

@@ -232,7 +232,7 @@ export function CanyoningTypeEditor({
       onCancel={handleEditorCancel}
     >
       <div className='space-y-2'>
-        <Label className='flex items-center gap-2'>
+        <Label htmlFor='template-selector' className='flex items-center gap-2'>
           <Compass
             className='text-muted-foreground h-4 w-4'
             aria-hidden='true'
@@ -240,6 +240,7 @@ export function CanyoningTypeEditor({
           Template
         </Label>
         <TemplateSelector
+          inputId='template-selector'
           templateType={ActivityTemplateType.CANYONING}
           onSelect={handleTemplateSelection}
           onCreateTemplate={() => setCreateTemplateOpen(true)}

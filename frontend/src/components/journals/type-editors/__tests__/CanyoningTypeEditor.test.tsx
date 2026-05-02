@@ -1,5 +1,15 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { CanyoningTypeEditor } from '../CanyoningTypeEditor';
+
+const createTestQueryClient = () =>
+  new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+      },
+    },
+  });
 
 describe('CanyoningTypeEditor', () => {
   beforeEach(() => {
@@ -7,7 +17,12 @@ describe('CanyoningTypeEditor', () => {
   });
 
   it('renders grade, gauge fields, and flags in create mode', () => {
-    render(<CanyoningTypeEditor createMode={true} />);
+    const queryClient = createTestQueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <CanyoningTypeEditor createMode={true} />
+      </QueryClientProvider>
+    );
 
     expect(screen.getByTestId('french-grade-input')).toBeInTheDocument();
     expect(screen.getByTestId('water-gauge-name-input')).toBeInTheDocument();
@@ -19,7 +34,12 @@ describe('CanyoningTypeEditor', () => {
 
   it('parses and normalises a French canyon grade before emitting onChange', () => {
     const handleChange = jest.fn();
-    render(<CanyoningTypeEditor createMode={true} onChange={handleChange} />);
+    const queryClient = createTestQueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <CanyoningTypeEditor createMode={true} onChange={handleChange} />
+      </QueryClientProvider>
+    );
 
     fireEvent.change(screen.getByTestId('french-grade-input'), {
       target: { value: 'v3a2iv**' },
@@ -32,7 +52,12 @@ describe('CanyoningTypeEditor', () => {
 
   it('clears stale French grade data when the current input becomes invalid', () => {
     const handleChange = jest.fn();
-    render(<CanyoningTypeEditor createMode={true} onChange={handleChange} />);
+    const queryClient = createTestQueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <CanyoningTypeEditor createMode={true} onChange={handleChange} />
+      </QueryClientProvider>
+    );
 
     fireEvent.change(screen.getByTestId('french-grade-input'), {
       target: { value: 'v3a2iv**' },
@@ -49,8 +74,13 @@ describe('CanyoningTypeEditor', () => {
 
   it('preserves gauge updates when typing', () => {
     const handleChange = jest.fn();
+    const queryClient = createTestQueryClient();
 
-    render(<CanyoningTypeEditor createMode={true} onChange={handleChange} />);
+    render(
+      <QueryClientProvider client={queryClient}>
+        <CanyoningTypeEditor createMode={true} onChange={handleChange} />
+      </QueryClientProvider>
+    );
 
     handleChange.mockClear();
 
@@ -68,7 +98,12 @@ describe('CanyoningTypeEditor', () => {
   });
 
   it('shows a validation message for invalid French canyon grades', () => {
-    render(<CanyoningTypeEditor createMode={true} />);
+    const queryClient = createTestQueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <CanyoningTypeEditor createMode={true} />
+      </QueryClientProvider>
+    );
 
     fireEvent.change(screen.getByTestId('french-grade-input'), {
       target: { value: 'bad-grade' },
@@ -78,11 +113,14 @@ describe('CanyoningTypeEditor', () => {
   });
 
   it('resets local French grade input state on cancel', () => {
+    const queryClient = createTestQueryClient();
     render(
-      <CanyoningTypeEditor
-        createMode={false}
-        data={{ french_grade: 'v3a2IV**' }}
-      />
+      <QueryClientProvider client={queryClient}>
+        <CanyoningTypeEditor
+          createMode={false}
+          data={{ french_grade: 'v3a2IV**' }}
+        />
+      </QueryClientProvider>
     );
 
     fireEvent.click(screen.getByTestId('edit-button'));
@@ -103,17 +141,20 @@ describe('CanyoningTypeEditor', () => {
   });
 
   it('renders view mode with canyoning summary values', () => {
+    const queryClient = createTestQueryClient();
     render(
-      <CanyoningTypeEditor
-        createMode={false}
-        data={{
-          french_grade: 'v3a2IV**',
-          water_guage_name: 'Kowmung Gauge',
-          water_guage_level: 8,
-          is_vertical: true,
-          is_white_water: true,
-        }}
-      />
+      <QueryClientProvider client={queryClient}>
+        <CanyoningTypeEditor
+          createMode={false}
+          data={{
+            french_grade: 'v3a2IV**',
+            water_guage_name: 'Kowmung Gauge',
+            water_guage_level: 8,
+            is_vertical: true,
+            is_white_water: true,
+          }}
+        />
+      </QueryClientProvider>
     );
 
     expect(screen.getByTestId('canyoning-summary')).toBeInTheDocument();
@@ -124,7 +165,12 @@ describe('CanyoningTypeEditor', () => {
   });
 
   it('renders the empty read-only state when no canyoning data exists', () => {
-    render(<CanyoningTypeEditor createMode={false} data={{}} />);
+    const queryClient = createTestQueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <CanyoningTypeEditor createMode={false} data={{}} />
+      </QueryClientProvider>
+    );
 
     expect(
       screen.getByText('No canyoning details provided.')
@@ -133,14 +179,17 @@ describe('CanyoningTypeEditor', () => {
   });
 
   it('falls back to a default water gauge label when only a level is provided', () => {
+    const queryClient = createTestQueryClient();
     render(
-      <CanyoningTypeEditor
-        createMode={false}
-        data={{
-          water_guage_name: '',
-          water_guage_level: 8,
-        }}
-      />
+      <QueryClientProvider client={queryClient}>
+        <CanyoningTypeEditor
+          createMode={false}
+          data={{
+            water_guage_name: '',
+            water_guage_level: 8,
+          }}
+        />
+      </QueryClientProvider>
     );
 
     expect(screen.getByTestId('canyoning-summary')).toBeInTheDocument();
@@ -148,11 +197,14 @@ describe('CanyoningTypeEditor', () => {
   });
 
   it('resets local French grade UI state when saved data changes', () => {
+    const queryClient = createTestQueryClient();
     const { rerender } = render(
-      <CanyoningTypeEditor
-        createMode={false}
-        data={{ french_grade: 'v3a2IV**' }}
-      />
+      <QueryClientProvider client={queryClient}>
+        <CanyoningTypeEditor
+          createMode={false}
+          data={{ french_grade: 'v3a2IV**' }}
+        />
+      </QueryClientProvider>
     );
 
     fireEvent.click(screen.getByTestId('edit-button'));
@@ -161,10 +213,12 @@ describe('CanyoningTypeEditor', () => {
     });
 
     rerender(
-      <CanyoningTypeEditor
-        createMode={false}
-        data={{ french_grade: 'v4a3V*' }}
-      />
+      <QueryClientProvider client={queryClient}>
+        <CanyoningTypeEditor
+          createMode={false}
+          data={{ french_grade: 'v4a3V*' }}
+        />
+      </QueryClientProvider>
     );
 
     expect(screen.getByTestId('french-grade-input')).toHaveValue('v4a3V*');

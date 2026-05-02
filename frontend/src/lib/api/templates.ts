@@ -13,20 +13,20 @@ export async function getTemplates(
   templateType?: ActivityTemplateType,
   name?: string
 ): Promise<ActivityTemplateListResponse> {
-  const url = new URL(API_ENDPOINTS.TEMPLATES.BASE, window.location.origin);
-  if (templateType) {
-    url.searchParams.append('template_type', templateType);
-  }
-  if (name) {
-    url.searchParams.append('name', name);
-  }
+  const query = new URLSearchParams();
+  if (templateType) query.append('template_type', templateType);
+  if (name) query.append('name', name);
 
-  const response = await fetch(url.toString(), {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-  });
+  const queryString = query.toString() ? `?${query.toString()}` : '';
+  const response = await fetch(
+    `${API_ENDPOINTS.TEMPLATES.BASE}${queryString}`,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    }
+  );
 
   if (!response.ok) {
     throw new Error('Failed to fetch activity templates');

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useId } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Search, Map } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -55,6 +55,10 @@ export function TemplateSelector({
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const debouncedQuery = useDebounce(searchQuery, SEARCH_DEBOUNCE_MS);
   const blurTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const uniqueFallbackId = useId();
+  const listboxId = inputId
+    ? `${inputId}-listbox`
+    : `template-results-${uniqueFallbackId}`;
 
   // Search templates
   const {
@@ -154,12 +158,15 @@ export function TemplateSelector({
           role='combobox'
           aria-expanded={showResults}
           aria-haspopup='listbox'
-          aria-controls={showResults ? 'template-search-results' : undefined}
+          aria-controls={showResults ? listboxId : undefined}
         />
       </div>
 
       {showResults && (
-        <Card className='absolute top-full right-0 left-0 z-50 mt-1 max-h-60 overflow-auto'>
+        <Card
+          id={listboxId}
+          className='absolute top-full right-0 left-0 z-50 mt-1 max-h-60 overflow-auto'
+        >
           <CardContent className='p-0'>
             {isLoading && (
               <div className='flex items-center gap-2 p-3'>
