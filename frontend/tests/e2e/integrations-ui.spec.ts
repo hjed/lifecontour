@@ -5,6 +5,7 @@
  * connected/disconnected UI states and request contracts (method + payload).
  */
 
+import type { Page, Route } from '@playwright/test';
 import { expect, test } from './fixtures';
 
 function json(data: unknown) {
@@ -410,5 +411,154 @@ test.describe('Integrations Page UI (mocked API)', () => {
     await expect(
       authenticatedPage.locator('[data-testid="scope-upgrade-banner-google"]')
     ).toHaveCount(0);
+  });
+});
+
+test.describe('Strava Integration Panel (mocked API)', () => {
+  /**
+   * Helper to set up common route mocks for the integrations page
+   * with a given set of integration entries.
+   */
+  async function setupIntegrationsMocks(page: Page, integrations: unknown[]) {
+    await page.route('**/api/integrations/health', (route: Route) =>
+      route.fulfill(
+        json({
+          data: {
+            id: 'integrations',
+            type: 'integration-health',
+            attributes: {
+              overall: 'healthy',
+              lastChecked: new Date().toISOString(),
+              redis: { status: 'healthy', latency: 1, lastSeen: null },
+              worker: { status: 'healthy', latency: 1, lastSeen: null },
+            },
+          },
+        })
+      )
+    );
+
+    await page.route('**/api/integrations', (route: Route) =>
+      route.fulfill(
+        json({
+          data: integrations,
+        })
+      )
+    );
+
+    // Strava has no sync-history endpoint yet, but the page may request Google's
+    await page.route(
+      '**/api/integrations/google/sync-history**',
+      (route: Route) =>
+        route.fulfill(
+          json({
+            data: [],
+            meta: { total: 0, page: 1, pageSize: 5 },
+          })
+        )
+    );
+  }
+
+  const stravaDisconnected = {
+    id: 'strava',
+    type: 'integration',
+    attributes: {
+      name: 'Strava',
+      status: 'disconnected',
+      capabilities: ['activity_import'],
+      sync_summary: {
+        last_sync_time: null,
+        sync_count: 0,
+        error_count: 0,
+      },
+      needs_reauth: false,
+      needs_reconsent: false,
+    },
+  };
+
+  const stravaConnected = {
+    id: 'strava',
+    type: 'integration',
+    attributes: {
+      name: 'Strava',
+      status: 'connected',
+      capabilities: ['activity_import'],
+      sync_summary: {
+        last_sync_time: '2026-01-01T12:00:00Z',
+        sync_count: 5,
+        error_count: 0,
+      },
+      needs_reauth: false,
+      needs_reconsent: false,
+    },
+  };
+
+  test('strava disconnected: shows Connect button', async ({
+    authenticatedPage,
+  }) => {
+    await setupIntegrationsMocks(authenticatedPage, [stravaDisconnected]);
+    await authenticatedPage.goto('/integrations');
+
+    const panel = authenticatedPage.locator(
+      '[data-testid="integration-panel-strava"]'
+    );
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText('Strava');
+    await expect(panel).toContainText('Disconnected');
+    await expect(panel.getByRole('button', { name: /connect/i })).toBeVisible();
+  });
+
+  test('strava connected: shows Disconnect button', async ({
+    authenticatedPage,
+  }) => {
+    await setupIntegrationsMocks(authenticatedPage, [stravaConnected]);
+    await authenticatedPage.goto('/integrations');
+
+    const panel = authenticatedPage.locator(
+      '[data-testid="integration-panel-strava"]'
+    );
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText('Connected');
+    await expect(
+      panel.getByRole('button', { name: /disconnect/i })
+    ).toBeVisible();
+  });
+
+  test('strava connect initiates OAuth redirect', async ({
+    authenticatedPage,
+  }) => {
+    await setupIntegrationsMocks(authenticatedPage, [stravaDisconnected]);
+
+    // Intercept the authorize POST and return a mock authorization URL
+    await authenticatedPage.route(
+      '**/api/integrations/strava/oauth/authorize',
+      route =>
+        route.fulfill(
+          json({
+            authorization_url:
+              'https://www.strava.com/oauth/authorize?client_id=test',
+            state: 'test-state',
+          })
+        )
+    );
+
+    await authenticatedPage.goto('/integrations');
+
+    const panel = authenticatedPage.locator(
+      '[data-testid="integration-panel-strava"]'
+    );
+
+    // Click connect and verify the authorize request fires
+    const authorizePromise = authenticatedPage.waitForRequest(
+      request =>
+        request.url().includes('/api/integrations/strava/oauth/authorize') &&
+        request.method() === 'POST'
+    );
+
+    await panel.getByRole('button', { name: /connect/i }).click();
+    const authorizeRequest = await authorizePromise;
+
+    expect(authorizeRequest.method()).toBe('POST');
+    const body = JSON.parse(authorizeRequest.postData() ?? '{}');
+    expect(body.redirect_url).toBe('/integrations');
   });
 });

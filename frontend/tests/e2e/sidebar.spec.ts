@@ -410,6 +410,10 @@ test.describe('Sidebar Navigation', () => {
       await page.goto('/contacts');
       await expect(page).toHaveTitle(/Personal Management System/);
 
+      // Reload to ensure sidebar tag tree picks up the newly created tags
+      // (tag API data may be cached from a prior navigation)
+      await page.reload();
+
       // Wait for sidebar tag tree to load
       const tagTreeArea = page.getByTestId('tag-tree-container');
       await expect(tagTreeArea).toBeVisible({ timeout: 10000 });
@@ -473,6 +477,9 @@ test.describe('Sidebar Navigation', () => {
       // Navigate
       await page.goto('/contacts');
       await expect(page).toHaveTitle(/Personal Management System/);
+
+      // Reload to ensure sidebar tag tree picks up the newly created tags
+      await page.reload();
 
       // Wait for tag tree, expand parent
       const tagTreeArea = page.getByTestId('tag-tree-container');

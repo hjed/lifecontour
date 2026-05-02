@@ -18,8 +18,10 @@ from app.core.integrations.health_service import IntegrationHealthService
 from app.core.integrations.outbox_event_processor import OutboxEventProcessor
 from app.core.integrations.registry.google_provider import GoogleIntegrationProvider
 from app.core.integrations.registry.service import IntegrationRegistryService
+from app.core.integrations.registry.strava_provider import StravaIntegrationProvider
 from app.core.integrations.task_queue import get_redis_pool, get_redis_settings
 from app.core.integrations.task_queue_service import TaskQueueService
+from app.infrastructure.auth.strava_token_service import StravaTokenService
 from app.infrastructure.config import Settings
 
 
@@ -171,16 +173,48 @@ class IntegrationProvider(Provider):
         return GoogleIntegrationProvider()
 
     @provide(scope=Scope.APP)
+    def provide_strava_integration_provider(self) -> StravaIntegrationProvider:
+        """
+        Provide Strava integration provider (singleton).
+
+        Returns:
+            StravaIntegrationProvider: Strava status/capability provider
+        """
+        return StravaIntegrationProvider()
+
+    @provide(scope=Scope.APP)
     def provide_integration_registry_service(
-        self, google_provider: GoogleIntegrationProvider
+        self,
+        google_provider: GoogleIntegrationProvider,
+        strava_provider: StravaIntegrationProvider,
     ) -> IntegrationRegistryService:
         """
         Provide integration registry service with all registered providers.
 
         Args:
             google_provider: Google integration provider
+            strava_provider: Strava integration provider
 
         Returns:
             IntegrationRegistryService: Registry aggregating all providers
         """
-        return IntegrationRegistryService(providers=[google_provider])
+        return IntegrationRegistryService(providers=[google_provider, strava_provider])
+
+    @provide(scope=Scope.REQUEST)
+    def provide_strava_token_service(
+        self, connection: AsyncConnection, settings: Settings
+    ) -> StravaTokenService:
+        """
+        Provide Strava token service for request scope.
+
+        Args:
+            connection: Database connection
+            settings: Application settings for encryption key
+
+        Returns:
+            StravaTokenService: Service for Strava token CRUD operations
+        """
+        return StravaTokenService(
+            connection=connection,
+            encryption_key=settings.strava_encryption_key,
+        )
