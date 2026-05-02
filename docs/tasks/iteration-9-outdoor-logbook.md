@@ -224,14 +224,14 @@ Polish inline template creation flow, ensure template creation works from within
 Update type dependencies, schema, and API for both types. No frontend changes yet.
 
 **Acceptance Criteria:**
-- [ ] CLIMBING type dependency updated: CLIMBING → [ABSEILING_TRIP, OUTDOOR_ACTIVITY, FITNESS]
-- [ ] Migration adds `template_id` (UUID FK to activity_templates) to `journal_climbing_data`
-- [ ] Migration backfills null `journal_abseiling_data` rows for existing climbing journals
-- [ ] Migration adds `is_white_water` (boolean) and `rapids_grade` (string) to `journal_kayaking_data`
-- [ ] `ClimbingData` entity updated with `template_id` field
-- [ ] `KayakingData` entity updated with `is_white_water` and `rapids_grade` fields, rapids_grade validated against International Scale (I–VI)
-- [ ] API schemas and converters updated for both types
-- [ ] MCP type data handling updated for both types
+- [x] CLIMBING type dependency updated: CLIMBING → [ABSEILING_TRIP, OUTDOOR_ACTIVITY, FITNESS]
+- [x] Migration adds `template_id` (UUID FK to activity_templates) to `journal_climbing_data`
+- [x] Migration backfills null `journal_abseiling_data` rows for existing climbing journals
+- [x] Migration adds `is_white_water` (boolean) and `rapids_grade` (string) to `journal_kayaking_data`
+- [x] `ClimbingData` entity updated with `template_id` field
+- [x] `KayakingData` entity updated with `is_white_water` and `rapids_grade` fields, rapids_grade validated against International Scale (I–VI)
+- [x] API schemas and converters updated for both types
+- [x] MCP type data handling updated for both types
 
 **Required Test Coverage:**
 - **Unit:** ClimbingData with template_id, KayakingData with white water fields and rapids_grade validation. Type dependency tests updated.
@@ -244,9 +244,9 @@ Update frontend type editors and add E2E tests.
 
 **Acceptance Criteria:**
 - [ ] `ClimbingTypeEditor` gains template selector (reuses `TemplateSelector` from ITER9-001) and pitch editing via `PitchEditor`
-- [ ] `KayakingTypeEditor` gains white water toggle and rapids grade dropdown (I–VI)
-- [ ] Frontend TypeScript types updated for both modified schemas
-- [ ] Existing climbing and kayaking E2E tests still pass
+- [x] `KayakingTypeEditor` gains white water toggle and rapids grade dropdown (I–VI)
+- [x] Frontend TypeScript types updated for both modified schemas
+- [x] Existing climbing and kayaking E2E tests still pass
 
 **Required Test Coverage:**
 - **Unit:** ClimbingTypeEditor with template/pitch integration, KayakingTypeEditor with white water fields.

@@ -109,3 +109,7 @@ VALID_CANYON_TYPES: list[str] = [
 MAX_TEMPLATE_NAME_LENGTH: int = 200
 MAX_REGION_LENGTH: int = 200
 MAX_WATER_GAUGE_NAME_LENGTH: int = 200
+
+# KayakingData constants (KAYAKING type)
+# International Scale of River Difficulty — Grade I (easiest) to VI (hardest)
+VALID_RAPIDS_GRADES: list[str] = ["I", "II", "III", "IV", "V", "VI"]

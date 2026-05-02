@@ -21,6 +21,8 @@ class SqlKayakingDataRepository(KayakingDataRepository):
         return KayakingData(
             journal_id=row.journal_id,
             water_type=row.water_type,
+            is_white_water=row.is_white_water,
+            rapids_grade=row.rapids_grade,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -29,7 +31,7 @@ class SqlKayakingDataRepository(KayakingDataRepository):
         """Find kayaking data by journal ID."""
         query = text(
             """
-            SELECT journal_id, water_type,
+            SELECT journal_id, water_type, is_white_water, rapids_grade,
                    created_at, updated_at
             FROM journal_kayaking_data
             WHERE journal_id = :journal_id
@@ -56,15 +58,17 @@ class SqlKayakingDataRepository(KayakingDataRepository):
         query = text(
             """
             INSERT INTO journal_kayaking_data (
-                journal_id, water_type
+                journal_id, water_type, is_white_water, rapids_grade
             )
             VALUES (
-                :journal_id, :water_type
+                :journal_id, :water_type, :is_white_water, :rapids_grade
             )
             ON CONFLICT (journal_id) DO UPDATE SET
                 water_type = EXCLUDED.water_type,
+                is_white_water = EXCLUDED.is_white_water,
+                rapids_grade = EXCLUDED.rapids_grade,
                 updated_at = now()
-            RETURNING journal_id, water_type,
+            RETURNING journal_id, water_type, is_white_water, rapids_grade,
                       created_at, updated_at
             """
         )
@@ -73,6 +77,8 @@ class SqlKayakingDataRepository(KayakingDataRepository):
             {
                 "journal_id": data.journal_id,
                 "water_type": data.water_type,
+                "is_white_water": data.is_white_water,
+                "rapids_grade": data.rapids_grade,
             },
         )
         row = result.fetchone()

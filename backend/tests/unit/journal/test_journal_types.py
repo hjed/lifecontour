@@ -83,8 +83,9 @@ class TestJournalType:
         assert JournalType.FITNESS in deps
 
     def test_climbing_dependencies(self):
-        """Test CLIMBING depends on OUTDOOR_ACTIVITY and FITNESS."""
+        """Test CLIMBING depends on ABSEILING_TRIP, OUTDOOR_ACTIVITY, and FITNESS."""
         deps = JournalType.get_dependencies(JournalType.CLIMBING)
+        assert JournalType.ABSEILING_TRIP in deps
         assert JournalType.OUTDOOR_ACTIVITY in deps
         assert JournalType.FITNESS in deps
         assert JournalType.BUSHWALKING not in deps

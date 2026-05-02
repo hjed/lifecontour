@@ -4,13 +4,14 @@ ClimbingData represents the CLIMBING journal type data. A journal has the CLIMBI
 type if a row exists in the journal_climbing_data table.
 
 This entity stores climbing-specific data including route reference, climbing type,
-grade, and route length.
+grade, route length, and optional activity template reference.
 
-CLIMBING requires OUTDOOR_ACTIVITY and FITNESS types.
+CLIMBING requires ABSEILING_TRIP, OUTDOOR_ACTIVITY, and FITNESS types.
 """
 
 from dataclasses import dataclass
 from datetime import datetime
+from uuid import UUID
 
 from .constants import VALID_CLIMBING_TYPES
 from .exceptions import ClimbingDataValidationError
@@ -25,13 +26,14 @@ class ClimbingData:
     type. A journal is considered to have the CLIMBING type if a row exists in
     journal_climbing_data for that journal_id.
 
-    CLIMBING automatically requires OUTDOOR_ACTIVITY and FITNESS types, which
-    are resolved by the service layer's type dependency system.
+    CLIMBING automatically requires ABSEILING_TRIP, OUTDOOR_ACTIVITY, and FITNESS
+    types, which are resolved by the service layer's type dependency system.
 
     All fields except journal_id are optional.
 
     Attributes:
         journal_id: Foreign key to the journal (primary key in DB)
+        template_id: Foreign key to the activity template (nullable)
         climbing_type: Type of climbing (sport, trad, bouldering) (nullable)
         grade: Numeric climbing grade (nullable, non-negative)
         length: Route length in metres (nullable, non-negative)
@@ -40,6 +42,7 @@ class ClimbingData:
     """
 
     journal_id: int
+    template_id: UUID | str | None = None
     climbing_type: str | None = None
     grade: int | None = None
     length: int | None = None
