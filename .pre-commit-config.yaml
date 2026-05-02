@@ -91,6 +91,50 @@ repos:
         pass_filenames: false
         require_serial: true
 
+  # Google Worker Python hooks
+  - repo: local
+    hooks:
+      - id: ruff-format-google-worker
+        name: ruff format (google-worker)
+        entry: uv run --directory integration_workers/google ruff format .
+        language: system
+        files: ^integration_workers/google/.*\.py$
+        pass_filenames: false
+      - id: ruff-google-worker
+        name: ruff check (google-worker)
+        entry: uv run --directory integration_workers/google ruff check --fix .
+        language: system
+        files: ^integration_workers/google/.*\.py$
+        pass_filenames: false
+      - id: mypy-google-worker
+        name: mypy (google-worker)
+        entry: uv run --directory integration_workers/google mypy .
+        language: system
+        files: ^integration_workers/google/.*\.py$
+        pass_filenames: false
+
+  # Strava Worker Python hooks
+  - repo: local
+    hooks:
+      - id: ruff-format-strava-worker
+        name: ruff format (strava-worker)
+        entry: uv run --directory integration_workers/strava ruff format .
+        language: system
+        files: ^integration_workers/strava/.*\.py$
+        pass_filenames: false
+      - id: ruff-strava-worker
+        name: ruff check (strava-worker)
+        entry: uv run --directory integration_workers/strava ruff check --fix .
+        language: system
+        files: ^integration_workers/strava/.*\.py$
+        pass_filenames: false
+      - id: mypy-strava-worker
+        name: mypy (strava-worker)
+        entry: uv run --directory integration_workers/strava mypy .
+        language: system
+        files: ^integration_workers/strava/.*\.py$
+        pass_filenames: false
+
   # General hooks
   - repo: local
     hooks:

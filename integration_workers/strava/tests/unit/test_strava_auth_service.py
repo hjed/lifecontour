@@ -13,7 +13,9 @@ import pytest
 from strava_auth_service import StravaAuthService, StravaTokenData
 
 
-def _make_httpx_response(json_data: dict[str, object] | None = None, status: int = 200) -> MagicMock:
+def _make_httpx_response(
+    json_data: dict[str, object] | None = None, status: int = 200
+) -> MagicMock:
     """Create a mock httpx.Response with synchronous .json() and .raise_for_status()."""
     mock = MagicMock()
     mock.status_code = status
