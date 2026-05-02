@@ -26,6 +26,13 @@ import {
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 import {
   ActivityTemplateType,
@@ -39,6 +46,9 @@ const createTemplateSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   description: z.string().optional(),
   region: z.string().optional(),
+  template_type: z.nativeEnum(ActivityTemplateType, {
+    error: 'Template type is required',
+  }),
 });
 
 type CreateTemplateFormValues = z.infer<typeof createTemplateSchema>;
@@ -46,18 +56,20 @@ type CreateTemplateFormValues = z.infer<typeof createTemplateSchema>;
 interface CreateTemplateDialogProps {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
-  readonly templateType: ActivityTemplateType;
+  readonly defaultTemplateType?: ActivityTemplateType;
   readonly onCreated: (template: ActivityTemplateResource) => void;
+  readonly initialPitches?: TemplatePitch[];
 }
 
 export function CreateTemplateDialog({
   open,
   onOpenChange,
-  templateType,
+  defaultTemplateType,
   onCreated,
+  initialPitches = [],
 }: CreateTemplateDialogProps) {
   const queryClient = useQueryClient();
-  const [pitches, setPitches] = useState<TemplatePitch[]>([]);
+  const [pitches, setPitches] = useState<TemplatePitch[]>(initialPitches);
 
   const form = useForm<CreateTemplateFormValues>({
     resolver: zodResolver(createTemplateSchema),
@@ -65,6 +77,7 @@ export function CreateTemplateDialog({
       name: '',
       description: '',
       region: '',
+      template_type: defaultTemplateType || ActivityTemplateType.CANYONING,
     },
   });
 
@@ -75,7 +88,7 @@ export function CreateTemplateDialog({
           type: 'activity-templates',
           attributes: {
             name: values.name,
-            template_type: templateType,
+            template_type: values.template_type,
             description: values.description || null,
             region: values.region || null,
             pitches: pitches.length > 0 ? pitches : null,
@@ -87,7 +100,7 @@ export function CreateTemplateDialog({
       toast.success('Template created successfully');
       queryClient.invalidateQueries({ queryKey: ['templates'] });
       form.reset();
-      setPitches([]);
+      setPitches(initialPitches);
       onCreated(response.data);
       onOpenChange(false);
     },
@@ -130,6 +143,38 @@ export function CreateTemplateDialog({
                   <FormControl>
                     <Input placeholder='e.g. Kowmung River Canyon' {...field} />
                   </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='template_type'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Template Type</FormLabel>
+                  <Select
+                    onValueChange={field.onChange}
+                    defaultValue={field.value}
+                  >
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder='Select a template type' />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value={ActivityTemplateType.CANYONING}>
+                        Canyoning
+                      </SelectItem>
+                      <SelectItem value={ActivityTemplateType.CAVING}>
+                        Caving
+                      </SelectItem>
+                      <SelectItem value={ActivityTemplateType.CLIMBING}>
+                        Climbing
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
                   <FormMessage />
                 </FormItem>
               )}

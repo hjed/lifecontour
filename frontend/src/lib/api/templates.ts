@@ -75,3 +75,19 @@ export async function createTemplate(
 
   return response.json();
 }
+
+/**
+ * Delete an activity template.
+ */
+export async function deleteTemplate(id: string): Promise<void> {
+  const response = await fetch(API_ENDPOINTS.TEMPLATES.BY_ID(id), {
+    method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to delete activity template');
+  }
+}

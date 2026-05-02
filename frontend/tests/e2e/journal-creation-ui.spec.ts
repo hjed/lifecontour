@@ -846,4 +846,52 @@ test.describe('Journal Creation UI Flow', () => {
     // Verify success toast
     await expect(page.getByText('Template created successfully')).toBeVisible();
   });
+
+  test('should support saving abseiling pitches as a template', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+    await navigateToNewJournal(page);
+
+    await page
+      .getByLabel(/title/i)
+      .fill(`Abseil Pitches Template ${Date.now()}`);
+    await page
+      .getByLabel(/content/i)
+      .fill('Testing saving pitches as a template.');
+    await page.getByLabel(/^abseiling trip$/i).check();
+
+    await expect(page.getByTestId('abseiling-trip-type-editor')).toBeVisible();
+
+    // Add some pitches
+    await page.getByTestId('add-pitch-button').click();
+    await page.getByTestId('pitch-row-0').getByPlaceholder('Height').fill('45');
+    await page.getByTestId('add-pitch-button').click();
+    await page.getByTestId('pitch-row-1').getByPlaceholder('Height').fill('55');
+
+    // Click "Save Pitches as Template"
+    const saveAsTemplateBtn = page.getByTestId('save-as-template-button');
+    await expect(saveAsTemplateBtn).toBeVisible();
+    await saveAsTemplateBtn.click();
+
+    // Verify dialog opens
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+
+    // Fill new template
+    const templateName = `Abseil UI Template ${Date.now()}`;
+    await dialog.getByLabel('Template Name').fill(templateName);
+
+    // Select the template type (since abseiling is not a template type, we must select one, e.g. canyoning)
+    await dialog.getByRole('combobox').click();
+    await page.getByRole('option', { name: 'Canyoning' }).click();
+
+    await dialog.getByRole('button', { name: 'Create Template' }).click();
+
+    // Dialog should close
+    await expect(dialog).toBeHidden();
+
+    // Verify success toast
+    await expect(page.getByText('Template created successfully')).toBeVisible();
+  });
 });

@@ -3,6 +3,7 @@
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { CalendarSettings } from '@/components/settings/CalendarSettings';
 import { TimezoneSettings } from '@/components/settings/TimezoneSettings';
+import { TemplateSettings } from '@/components/settings/TemplateSettings';
 
 export default function SettingsPage() {
   return (
@@ -18,6 +19,7 @@ export default function SettingsPage() {
         <div className='grid gap-6 lg:grid-cols-2'>
           <CalendarSettings />
           <TimezoneSettings />
+          <TemplateSettings />
         </div>
       </div>
     </AuthGuard>

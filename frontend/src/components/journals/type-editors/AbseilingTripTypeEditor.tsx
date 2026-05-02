@@ -4,6 +4,7 @@ import { useId, useMemo, useState } from 'react';
 import { Hash, Ruler } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { AbseilingData, AbseilPitch } from '@/types/journals';
 import {
@@ -13,6 +14,7 @@ import {
 import { useTypeEditorState } from './useTypeEditorState';
 import { TypeEditorActions } from './TypeEditorActions';
 import { PitchEditor } from './PitchEditor';
+import { CreateTemplateDialog } from './CreateTemplateDialog';
 
 interface AbseilingTripTypeEditorProps {
   readonly journalId?: string;
@@ -39,6 +41,8 @@ export function AbseilingTripTypeEditor({
   const baseId = useId();
   const abseilsFieldId = `${baseId}-number-of-abseils`;
   const totalLengthFieldId = `${baseId}-total-length`;
+
+  const [createTemplateOpen, setCreateTemplateOpen] = useState(false);
 
   const {
     isEditing,
@@ -249,14 +253,37 @@ export function AbseilingTripTypeEditor({
         onChange={handlePitchesChange}
       />
 
-      {!createMode && (
-        <TypeEditorActions
-          isEditing={isEditing}
-          onEdit={handleEdit}
-          onSave={handleSaveWrapper}
-          onCancel={handleCancelWrapper}
-        />
-      )}
+      <div className='mt-4 flex items-center justify-between'>
+        <div className='flex-1'>
+          {!createMode && (
+            <TypeEditorActions
+              isEditing={isEditing}
+              onEdit={handleEdit}
+              onSave={handleSaveWrapper}
+              onCancel={handleCancelWrapper}
+            />
+          )}
+        </div>
+
+        {editData.pitches && editData.pitches.length > 0 && (
+          <Button
+            variant='outline'
+            size='sm'
+            onClick={() => setCreateTemplateOpen(true)}
+            data-testid='save-as-template-button'
+            type='button'
+          >
+            Save Pitches as Template
+          </Button>
+        )}
+      </div>
+
+      <CreateTemplateDialog
+        open={createTemplateOpen}
+        onOpenChange={setCreateTemplateOpen}
+        initialPitches={editData.pitches}
+        onCreated={() => setCreateTemplateOpen(false)}
+      />
     </div>
   );
 }
