@@ -1967,8 +1967,7 @@ async def create_journal_entry(
 
     Raises:
         JournalValidationError: If validation fails
-        ValueError: If required fields are missing, or invalid
-                    type/relationship_type/status/role values are provided
+        ValueError: If invalid type/relationship_type/status/role values are provided
     """
     # No JSON parsing needed, FastMCP handles request model conversion directly
 

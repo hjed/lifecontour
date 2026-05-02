@@ -289,7 +289,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             - Validation results and any warnings
             - Contextual summary for AI understanding
         """
-        logger.info("MCP: Creating contact", request=request)
+        logger.info("MCP: Creating contact", request=request.model_dump())
 
         # Create contact entity with methods and notes
         contact = Contact(
@@ -440,7 +440,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             - Validation results and any warnings
             - Contextual summary for AI understanding
         """
-        logger.info("MCP: Updating contact", request=request)
+        logger.info("MCP: Updating contact", request=request.model_dump())
 
         # Get existing contact
         existing_contact = await contact_service.get_contact_by_id(request.contact_id)

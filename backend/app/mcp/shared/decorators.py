@@ -43,16 +43,26 @@ def mcp_unified_error_handler(
         async def wrapper(*args: Any, **kwargs: Any) -> str:
             try:
                 # Log operation start with appropriate context
+                from pydantic import BaseModel
+
+                # Make kwargs serializable for structlog JSONRenderer
+                serializable_kwargs = {}
+                for k, v in kwargs.items():
+                    if isinstance(v, BaseModel):
+                        serializable_kwargs[k] = v.model_dump()
+                    else:
+                        serializable_kwargs[k] = v
+
                 if operation_type == "search":
                     # Extract search-specific parameters for logging
                     search_kwargs = {
                         k: v
-                        for k, v in kwargs.items()
+                        for k, v in serializable_kwargs.items()
                         if k in ["query", "limit", "tags", "entity_types", "page"]
                     }
                     MCPLogger.log_operation_start(operation_name, **search_kwargs)
                 else:
-                    MCPLogger.log_operation_start(operation_name, **kwargs)
+                    MCPLogger.log_operation_start(operation_name, **serializable_kwargs)
 
                 # Execute the function
                 result = await func(*args, **kwargs)
