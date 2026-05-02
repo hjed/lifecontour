@@ -82,6 +82,8 @@ import {
   type OutdoorActivityData,
   type JoggingData,
   type BushwalkingData,
+  ActivityTemplateResource,
+  AbseilPitch,
 } from '@/types/journals';
 import {
   AbseilingTripTypeEditor,
@@ -397,6 +399,7 @@ export function JournalCreateForm({
   const { mutateAsync: createRoute, isPending: isCreatingRoute } =
     useCreateRoute();
   const [typeData, setTypeData] = useState<TypeDataState>({});
+  const [abseilKey, setAbseilKey] = useState(0);
 
   // Fetch parent journal title for pre-population
   const { data: parentJournalData } = useJournal(
@@ -502,6 +505,38 @@ export function JournalCreateForm({
     (data: unknown) =>
       handleTypeDataChange(JournalType.CANYONING, data as CanyoningData),
     [handleTypeDataChange]
+  );
+
+  const handleTemplateSelect = useCallback(
+    (template: ActivityTemplateResource) => {
+      if (
+        template.attributes.pitches &&
+        template.attributes.pitches.length > 0
+      ) {
+        setTypeData(prev => {
+          const pitches = (template.attributes.pitches || []) as AbseilPitch[];
+          const number_of_abseils =
+            pitches.length > 0 ? pitches.length : undefined;
+          const total_length =
+            pitches.length > 0
+              ? pitches.reduce((sum, p) => sum + (p.height || 0), 0)
+              : undefined;
+
+          return {
+            ...prev,
+            [JournalType.ABSEILING_TRIP]: {
+              ...(prev[JournalType.ABSEILING_TRIP] || {}),
+              pitches,
+              ...(number_of_abseils !== undefined ? { number_of_abseils } : {}),
+              ...(total_length !== undefined ? { total_length } : {}),
+            },
+          };
+        });
+        setAbseilKey(k => k + 1);
+        toast.success('Pitches imported from template');
+      }
+    },
+    []
   );
 
   const handleClimbingChange = useCallback(
@@ -861,7 +896,9 @@ export function JournalCreateForm({
                     )}
                     {type === JournalType.ABSEILING_TRIP && (
                       <AbseilingTripTypeEditor
+                        key={abseilKey}
                         createMode
+                        data={typeData[JournalType.ABSEILING_TRIP]}
                         onChange={handleAbseilingTripChange}
                       />
                     )}
@@ -869,6 +906,7 @@ export function JournalCreateForm({
                       <CanyoningTypeEditor
                         createMode
                         onChange={handleCanyoningChange}
+                        onTemplateSelect={handleTemplateSelect}
                       />
                     )}
                     {type === JournalType.CLIMBING && (

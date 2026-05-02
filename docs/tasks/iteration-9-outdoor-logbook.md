@@ -169,17 +169,17 @@ Expose templates through REST API and MCP. Add `template_id` to canyoning API fl
 - **Unit:** template schema validation, converter logic.
 - **Integration:** API endpoint tests for template CRUD, search, and canyoning journal with template_id. MCP tool integration tests.
 
-#### Phase 6: Template Selector UI
+#### Phase 6: Template Selector UI [COMPLETED]
 **PR Size:** ~4–6 files
 
 Build the template selector component and integrate it into `CanyoningTypeEditor`.
 
 **Acceptance Criteria:**
-- [ ] `TemplateSelector` component: searchable combobox that loads templates filtered by template_type
-- [ ] Selecting a template copies its standard pitches into the journal's pitch editor as editable defaults
-- [ ] Template reference stored as `template_id` on the journal type data
-- [ ] Inline "Create Template" action within the selector (opens a dialog to create and immediately select a new template)
-- [ ] Integration into `CanyoningTypeEditor` — template selector appears alongside existing canyoning fields
+- [x] `TemplateSelector` component: searchable combobox that loads templates filtered by template_type
+- [x] Selecting a template copies its standard pitches into the journal's pitch editor as editable defaults
+- [x] Template reference stored as `template_id` on the journal type data
+- [x] Inline "Create Template" action within the selector (opens a dialog to create and immediately select a new template)
+- [x] Integration into `CanyoningTypeEditor` — template selector appears alongside existing canyoning fields
 
 **Required Test Coverage:**
 - **Unit:** TemplateSelector rendering, search, selection, pitch pre-population.
@@ -195,6 +195,7 @@ Polish inline template creation flow, ensure template creation works from within
 - [ ] Newly created template is immediately selectable and pre-populates pitches
 - [ ] Template management accessible from a dedicated UI surface (e.g. settings or sidebar link)
 - [ ] E2E coverage for the full pitch + template workflow end-to-end
+- [ ] Can copy pitches on the current journal/make a template from the journal
 
 **Required Test Coverage:**
 - **E2E:** full workflow: create template → create journal with template → edit pitches → verify totals. Template CRUD from management surface.

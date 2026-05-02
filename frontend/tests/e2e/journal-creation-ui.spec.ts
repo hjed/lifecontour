@@ -741,4 +741,109 @@ test.describe('Journal Creation UI Flow', () => {
       },
     });
   });
+
+  test('should pre-populate canyoning fields and abseiling pitches when a template is selected', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+
+    // Create a template via API with specific canyoning data and pitches
+    const templateName = `E2E Hydration Template ${Date.now()}`;
+    const templateRes = await page.request.post('/api/templates', {
+      data: {
+        data: {
+          type: 'activity-templates',
+          attributes: {
+            name: templateName,
+            template_type: 'canyoning',
+            region: 'Blue Mountains',
+            french_grade: 'v4a3V*',
+            pitches: [
+              { pitch_number: 1, height: 15 },
+              { pitch_number: 2, height: 25 },
+            ],
+          },
+        },
+      },
+    });
+    expect(templateRes.ok()).toBeTruthy();
+
+    await navigateToNewJournal(page);
+
+    await page.getByLabel(/title/i).fill(`Template Hydration ${Date.now()}`);
+    await page.getByLabel(/content/i).fill('Journal using template.');
+    await page.getByLabel(/^canyoning$/i).check();
+
+    await expect(page.getByTestId('canyoning-type-editor')).toBeVisible();
+
+    // Select the template by typing to filter and trigger the dropdown
+    await page.getByPlaceholder('Select a canyoning template...').click();
+    await page
+      .getByPlaceholder('Select a canyoning template...')
+      .fill('E2E Hydration');
+
+    // Wait for the option to appear and click it
+    const option = page.getByRole('option', {
+      name: new RegExp(templateName, 'i'),
+    });
+    await expect(option).toBeVisible();
+    await option.click();
+
+    // Verify Canyoning fields are populated
+    await expect(page.getByTestId('french-grade-input')).toHaveValue('v4a3V*');
+
+    // Verify Abseiling Trip editor is visible and pitches are populated
+    await expect(page.getByTestId('abseiling-trip-type-editor')).toBeVisible();
+    await expect(page.getByTestId('number-of-abseils-input')).toHaveValue('2');
+    await expect(page.getByTestId('total-length-input')).toHaveValue('40');
+
+    await expect(
+      page.getByTestId('pitch-row-0').getByPlaceholder('Height')
+    ).toHaveValue('15');
+    await expect(
+      page.getByTestId('pitch-row-1').getByPlaceholder('Height')
+    ).toHaveValue('25');
+  });
+
+  test('should support inline template creation workflow', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+    await navigateToNewJournal(page);
+
+    await page.getByLabel(/title/i).fill(`Template Creation ${Date.now()}`);
+    await page.getByLabel(/content/i).fill('Testing inline template creation.');
+    await page.getByLabel(/^canyoning$/i).check();
+
+    await expect(page.getByTestId('canyoning-type-editor')).toBeVisible();
+
+    // Open template selector by typing
+    await page.getByPlaceholder('Select a canyoning template...').click();
+    await page
+      .getByPlaceholder('Select a canyoning template...')
+      .fill('new template');
+
+    // Click create new
+    const createBtn = page.getByRole('option', {
+      name: /\+ Create new template/i,
+    });
+    await expect(createBtn).toBeVisible();
+    await createBtn.click();
+
+    // Verify dialog opens
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+
+    // Fill new template
+    const templateName = `UI Template ${Date.now()}`;
+    await dialog.getByLabel('Template Name').fill(templateName);
+    await dialog.getByLabel('Region').fill('Test Region');
+    await dialog.getByRole('button', { name: 'Create Template' }).click();
+
+    // Dialog should close
+    await expect(dialog).toBeHidden();
+
+    // Verify success toast
+    await expect(page.getByText('Template created successfully')).toBeVisible();
+  });
 });

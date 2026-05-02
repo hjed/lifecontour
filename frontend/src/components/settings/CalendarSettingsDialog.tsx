@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import {
@@ -98,7 +98,10 @@ export function CalendarSettingsDialog({
     },
   });
 
-  const isSyncEnabled = form.watch('is_synced_to_google');
+  const isSyncEnabled = useWatch({
+    control: form.control,
+    name: 'is_synced_to_google',
+  });
 
   useEffect(() => {
     if (open) {

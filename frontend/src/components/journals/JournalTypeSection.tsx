@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/collapsible';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { JournalType } from '@/types/journals';
+import { ActivityTemplateResource, JournalType } from '@/types/journals';
 import type {
   AbseilingData,
   BushwalkingData,
@@ -76,6 +76,7 @@ interface JournalTypeSectionProps {
   readonly type: JournalType;
   readonly typeData?: TypeSectionData;
   readonly onSave?: OnSaveFn;
+  readonly onTemplateSelect?: (template: ActivityTemplateResource) => void;
   readonly defaultOpen?: boolean;
   readonly className?: string;
   readonly 'data-testid'?: string;
@@ -117,6 +118,7 @@ export function JournalTypeSection({
   type,
   typeData,
   onSave,
+  onTemplateSelect,
   defaultOpen = false,
   className,
   'data-testid': testId,
@@ -159,6 +161,7 @@ export function JournalTypeSection({
               type={type}
               typeData={typeData}
               onSave={onSave}
+              onTemplateSelect={onTemplateSelect}
             />
           </CardContent>
         </CollapsibleContent>
@@ -188,11 +191,13 @@ function TypeSpecificContent({
   type,
   typeData,
   onSave,
+  onTemplateSelect,
 }: {
   readonly journalId: string;
   readonly type: JournalType;
   readonly typeData?: TypeSectionData;
   readonly onSave?: OnSaveFn;
+  readonly onTemplateSelect?: (template: ActivityTemplateResource) => void;
 }) {
   // Render type-specific editor based on journal type
   switch (type) {
@@ -282,6 +287,7 @@ function TypeSpecificContent({
           journalId={journalId}
           data={typeData as CanyoningData | undefined}
           onSave={makeEditorSave<CanyoningData>(onSave, type)}
+          onTemplateSelect={onTemplateSelect}
         />
       );
     case JournalType.CLIMBING:

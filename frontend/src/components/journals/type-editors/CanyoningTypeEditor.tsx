@@ -14,6 +14,13 @@ import {
 import { GenericTypeEditorLayout } from './GenericTypeEditorLayout';
 import { useTypeEditorState } from './useTypeEditorState';
 
+import { TemplateSelector } from './TemplateSelector';
+import { CreateTemplateDialog } from './CreateTemplateDialog';
+import {
+  ActivityTemplateResource,
+  ActivityTemplateType,
+} from '@/types/journals';
+
 interface CanyoningTypeEditorProps {
   readonly journalId?: string;
   readonly data?: CanyoningData;
@@ -22,6 +29,7 @@ interface CanyoningTypeEditorProps {
   readonly 'data-testid'?: string;
   readonly createMode?: boolean;
   readonly onChange?: (data: CanyoningData) => void;
+  readonly onTemplateSelect?: (template: ActivityTemplateResource) => void;
 }
 
 const DEFAULT_DATA: CanyoningData = {};
@@ -108,6 +116,7 @@ export function CanyoningTypeEditor({
   'data-testid': testId,
   createMode = false,
   onChange,
+  onTemplateSelect,
 }: CanyoningTypeEditorProps) {
   const baseId = useId();
   const frenchGradeFieldId = `${baseId}-french-grade`;
@@ -177,6 +186,38 @@ export function CanyoningTypeEditor({
     canyonFlags
   );
 
+  const [createTemplateOpen, setCreateTemplateOpen] = useState(false);
+
+  const handleTemplateSelection = (template: ActivityTemplateResource) => {
+    // Update local canyoning data fields that the template provides
+    setEditData(prev => {
+      const next = {
+        ...prev,
+        template_id: template.id,
+      };
+      if (template.attributes.french_grade) {
+        next.french_grade = template.attributes.french_grade;
+        setGradeState(
+          createTransientGradeState(
+            gradeResetKey,
+            template.attributes.french_grade
+          )
+        );
+      }
+      if (template.attributes.water_gauge_name) {
+        next.water_guage_name = template.attributes.water_gauge_name;
+      }
+      if (template.attributes.is_vertical != null) {
+        next.is_vertical = template.attributes.is_vertical;
+      }
+      return next;
+    });
+
+    if (onTemplateSelect) {
+      onTemplateSelect(template);
+    }
+  };
+
   return (
     <GenericTypeEditorLayout
       className={className}
@@ -190,6 +231,29 @@ export function CanyoningTypeEditor({
       onSave={handleSave}
       onCancel={handleEditorCancel}
     >
+      <div className='space-y-2'>
+        <Label className='flex items-center gap-2'>
+          <Compass
+            className='text-muted-foreground h-4 w-4'
+            aria-hidden='true'
+          />
+          Template
+        </Label>
+        <TemplateSelector
+          templateType={ActivityTemplateType.CANYONING}
+          onSelect={handleTemplateSelection}
+          onCreateTemplate={() => setCreateTemplateOpen(true)}
+          disabled={!isEditing && !createMode}
+          placeholder='Select a canyoning template...'
+        />
+        <CreateTemplateDialog
+          open={createTemplateOpen}
+          onOpenChange={setCreateTemplateOpen}
+          templateType={ActivityTemplateType.CANYONING}
+          onCreated={handleTemplateSelection}
+        />
+      </div>
+
       <div className='space-y-2'>
         <Label htmlFor={frenchGradeFieldId} className='flex items-center gap-2'>
           <Compass

@@ -24,6 +24,10 @@ export const API_ENDPOINTS = {
     BY_ID: (id: string) => `/api/journals/${id}`,
     SEARCH: '/api/journals/search',
   },
+  TEMPLATES: {
+    BASE: '/api/templates',
+    BY_ID: (id: string) => `/api/templates/${id}`,
+  },
   ROUTES: {
     BASE: '/api/routes',
     BY_ID: (id: string) => `/api/routes/${id}`,
