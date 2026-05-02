@@ -3340,7 +3340,10 @@ async def _update_kayaking_type_data(
             raise JournalValidationError("water_type", "Must be a string or null")
         updates["water_type"] = raw_water_type
     if "is_white_water" in attrs:
-        updates["is_white_water"] = attrs["is_white_water"]
+        raw_is_white_water = attrs["is_white_water"]
+        if raw_is_white_water is not None and not isinstance(raw_is_white_water, bool):
+            raise JournalValidationError("is_white_water", "Must be a boolean or null")
+        updates["is_white_water"] = raw_is_white_water
     if "rapids_grade" in attrs:
         raw_rapids_grade = attrs["rapids_grade"]
         if raw_rapids_grade is not None and not isinstance(raw_rapids_grade, str):

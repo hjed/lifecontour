@@ -70,20 +70,10 @@ def downgrade() -> None:
     op.drop_column("journal_kayaking_data", "is_white_water")
 
     # --- CLIMBING: remove backfilled abseiling data ---
-    # Remove abseiling data rows that were backfilled for climbing journals
-    # that didn't originally have abseiling data. We can identify these
-    # because they have all-null optional fields.
-    op.execute(
-        """
-        DELETE FROM journal_abseiling_data a
-        USING journal_climbing_data c
-        WHERE a.journal_id = c.journal_id
-          AND a.number_of_abseils IS NULL
-          AND a.total_length IS NULL
-          AND a.number_of_setups IS NULL
-          AND a.number_of_rescues IS NULL
-        """
-    )
+    # Note: Downgrade is non-destructive for journal_abseiling_data.
+    # We intentionally do not delete backfilled rows, as deleting rows where all fields
+    # are NULL could also unintentionally delete legitimately-created ABSEILING_TRIP
+    # rows that have no aggregate values entered yet.
 
     # --- CLIMBING: remove template_id column ---
     op.drop_column("journal_climbing_data", "template_id")
