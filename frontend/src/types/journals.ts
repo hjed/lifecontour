@@ -184,6 +184,80 @@ export interface AbseilPitch {
   did_setup?: boolean | null;
 }
 
+// Activity Templates
+export enum ActivityTemplateType {
+  CANYONING = 'canyoning',
+  CAVING = 'caving',
+  CLIMBING = 'climbing',
+}
+
+export interface TemplatePitch {
+  id?: number | null;
+  pitch_number: number;
+  height?: number | null;
+  anchor_location?: string | null;
+  anchor_type?: string | null;
+  did_rescue?: boolean | null;
+  did_setup?: boolean | null;
+}
+
+export interface ActivityTemplateAttributes {
+  name: string;
+  template_type: ActivityTemplateType;
+  region?: string | null;
+  description?: string | null;
+  pitches?: TemplatePitch[] | null;
+  french_grade?: string | null;
+  canyon_type?: string | null;
+  water_gauge_name?: string | null;
+  is_vertical?: boolean | null;
+  is_horizontal?: boolean | null;
+  climbing_type?: string | null;
+  grade?: number | null;
+  length?: number | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface ActivityTemplateResource {
+  type: 'activity-templates';
+  id: string;
+  attributes: ActivityTemplateAttributes;
+  links?: JsonApiLinks;
+  meta?: JsonApiMeta;
+}
+
+export interface ActivityTemplateResponse {
+  data: ActivityTemplateResource;
+  links?: JsonApiLinks;
+  meta?: JsonApiMeta;
+}
+
+export interface ActivityTemplateListResponse {
+  data: ActivityTemplateResource[];
+  links?: JsonApiLinks;
+  meta?: JsonApiMeta;
+}
+
+export interface ActivityTemplateCreateData {
+  type: 'activity-templates';
+  attributes: Omit<ActivityTemplateAttributes, 'created_at' | 'updated_at'>;
+}
+
+export interface ActivityTemplateCreateRequest {
+  data: ActivityTemplateCreateData;
+}
+
+export interface ActivityTemplateUpdateData {
+  type: 'activity-templates';
+  id: string;
+  attributes: Partial<ActivityTemplateAttributes>;
+}
+
+export interface ActivityTemplateUpdateRequest {
+  data: ActivityTemplateUpdateData;
+}
+
 export interface AbseilingData {
   number_of_abseils?: number | null;
   total_length?: number | null; // total length in metres
@@ -193,6 +267,7 @@ export interface AbseilingData {
 }
 
 export interface CanyoningData {
+  template_id?: string | null;
   french_grade?: string | null; // French canyoning grade
   water_guage_name?: string | null; // Name of the water gauge
   water_guage_level?: number | null; // Water gauge reading
@@ -202,6 +277,7 @@ export interface CanyoningData {
 }
 
 export interface ClimbingData {
+  template_id?: string | null;
   climbing_type?: string | null; // e.g. sport, trad, bouldering
   grade?: number | null;
   length?: number | null; // length in metres

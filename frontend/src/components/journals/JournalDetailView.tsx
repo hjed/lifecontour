@@ -34,8 +34,10 @@ import type {
   BushwalkingData,
   JoggingData,
   JournalTypeData,
+  ActivityTemplateResource,
 } from '@/types/journals';
 import { JournalContactRelationshipType, JournalType } from '@/types/journals';
+import { toast } from 'sonner';
 import { JournalBreadcrumb } from './JournalBreadcrumb';
 import { JournalCalendarBadge } from './JournalCalendarBadge';
 import { JournalContactBadge } from './JournalContactBadge';
@@ -264,6 +266,39 @@ export function JournalDetailView({
     [journal.id, updateJournal]
   );
 
+  // Handle template select for canyoning
+  const handleTemplateSelect = useCallback(
+    async (template: ActivityTemplateResource) => {
+      if (
+        template.attributes.pitches &&
+        template.attributes.pitches.length > 0
+      ) {
+        const currentAbseil = journal.type_data?.[
+          JournalType.ABSEILING_TRIP
+        ] as AbseilingData | undefined;
+
+        const pitches = template.attributes.pitches;
+        const totalLength = pitches.reduce(
+          (sum, p) => sum + (p.height || 0),
+          0
+        );
+
+        await updateTypeData.mutateAsync({
+          journalId: journal.id,
+          journalType: JournalType.ABSEILING_TRIP,
+          typeData: {
+            ...(currentAbseil as Record<string, unknown>),
+            pitches: pitches,
+            number_of_abseils: pitches.length,
+            total_length: totalLength,
+          },
+        });
+        toast.success('Pitches imported from template');
+      }
+    },
+    [journal.id, journal.type_data, updateTypeData]
+  );
+
   // Handle adding an existing journal as a child of this journal
   const handleAddExistingChild = useCallback(
     async (childJournalId: string) => {
@@ -452,6 +487,7 @@ export function JournalDetailView({
                   type={type}
                   typeData={journal.type_data?.[type] as JournalTypeData}
                   onSave={handleTypeDataSave}
+                  onTemplateSelect={handleTemplateSelect}
                   defaultOpen={false}
                 />
               ))}

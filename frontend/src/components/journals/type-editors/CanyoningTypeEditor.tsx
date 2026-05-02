@@ -14,6 +14,13 @@ import {
 import { GenericTypeEditorLayout } from './GenericTypeEditorLayout';
 import { useTypeEditorState } from './useTypeEditorState';
 
+import { TemplateSelector } from './TemplateSelector';
+import { CreateTemplateDialog } from './CreateTemplateDialog';
+import {
+  ActivityTemplateResource,
+  ActivityTemplateType,
+} from '@/types/journals';
+
 interface CanyoningTypeEditorProps {
   readonly journalId?: string;
   readonly data?: CanyoningData;
@@ -22,6 +29,9 @@ interface CanyoningTypeEditorProps {
   readonly 'data-testid'?: string;
   readonly createMode?: boolean;
   readonly onChange?: (data: CanyoningData) => void;
+  readonly onTemplateSelect?: (
+    template: ActivityTemplateResource
+  ) => void | Promise<void>;
 }
 
 const DEFAULT_DATA: CanyoningData = {};
@@ -108,6 +118,7 @@ export function CanyoningTypeEditor({
   'data-testid': testId,
   createMode = false,
   onChange,
+  onTemplateSelect,
 }: CanyoningTypeEditorProps) {
   const baseId = useId();
   const frenchGradeFieldId = `${baseId}-french-grade`;
@@ -169,6 +180,7 @@ export function CanyoningTypeEditor({
 
   const handleEditorCancel = () => {
     setGradeState(createSavedGradeState(gradeResetKey, data?.french_grade));
+    setPendingTemplate(null);
     handleCancel();
   };
 
@@ -176,6 +188,50 @@ export function CanyoningTypeEditor({
     data ?? DEFAULT_DATA,
     canyonFlags
   );
+
+  const [createTemplateOpen, setCreateTemplateOpen] = useState(false);
+  const [pendingTemplate, setPendingTemplate] =
+    useState<ActivityTemplateResource | null>(null);
+
+  const handleCustomSave = async () => {
+    await handleSave();
+    if (!createMode && pendingTemplate && onTemplateSelect) {
+      await Promise.resolve(onTemplateSelect(pendingTemplate));
+      setPendingTemplate(null);
+    }
+  };
+
+  const handleTemplateSelection = (template: ActivityTemplateResource) => {
+    // Update local canyoning data fields that the template provides
+    setEditData(prev => {
+      const next = {
+        ...prev,
+        template_id: template.id,
+      };
+      if (template.attributes.french_grade) {
+        next.french_grade = template.attributes.french_grade;
+        setGradeState(
+          createTransientGradeState(
+            gradeResetKey,
+            template.attributes.french_grade
+          )
+        );
+      }
+      if (template.attributes.water_gauge_name) {
+        next.water_guage_name = template.attributes.water_gauge_name;
+      }
+      if (template.attributes.is_vertical != null) {
+        next.is_vertical = template.attributes.is_vertical;
+      }
+      return next;
+    });
+
+    if (createMode && onTemplateSelect) {
+      Promise.resolve(onTemplateSelect(template)).catch(console.error);
+    } else {
+      setPendingTemplate(template);
+    }
+  };
 
   return (
     <GenericTypeEditorLayout
@@ -187,9 +243,33 @@ export function CanyoningTypeEditor({
       summaryItems={summaryItems}
       summaryTestId='canyoning-summary'
       onEdit={handleEdit}
-      onSave={handleSave}
+      onSave={handleCustomSave}
       onCancel={handleEditorCancel}
     >
+      <div className='space-y-2'>
+        <Label htmlFor='template-selector' className='flex items-center gap-2'>
+          <Compass
+            className='text-muted-foreground h-4 w-4'
+            aria-hidden='true'
+          />
+          Template
+        </Label>
+        <TemplateSelector
+          inputId='template-selector'
+          templateType={ActivityTemplateType.CANYONING}
+          onSelect={handleTemplateSelection}
+          onCreateTemplate={() => setCreateTemplateOpen(true)}
+          disabled={!isEditing && !createMode}
+          placeholder='Select a canyoning template...'
+        />
+        <CreateTemplateDialog
+          open={createTemplateOpen}
+          onOpenChange={setCreateTemplateOpen}
+          templateType={ActivityTemplateType.CANYONING}
+          onCreated={handleTemplateSelection}
+        />
+      </div>
+
       <div className='space-y-2'>
         <Label htmlFor={frenchGradeFieldId} className='flex items-center gap-2'>
           <Compass

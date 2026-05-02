@@ -63,7 +63,10 @@ export function ContactTagsEditor({
   const removeTag = useRemoveContactTag();
   const createTag = useCreateTag();
 
-  const assignedTags = contactTagsData?.data ?? [];
+  const assignedTags = useMemo(
+    () => contactTagsData?.data ?? [],
+    [contactTagsData?.data]
+  );
   const allTags = useMemo(() => allTagsData?.data ?? [], [allTagsData?.data]);
   const assignedTagIds = useMemo(
     () => new Set(assignedTags.map(t => t.id)),
