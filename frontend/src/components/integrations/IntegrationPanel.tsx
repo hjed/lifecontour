@@ -4,6 +4,9 @@ import { Badge } from '@/components/ui/badge';
 import { IntegrationData } from '@/types/integrations';
 import { ConnectionControls } from './ConnectionControls';
 import { SyncControls } from './SyncControls';
+import { SyncHistory } from './SyncHistory';
+import { HealthStatus } from './HealthStatus';
+import { IntegrationSettings } from './IntegrationSettings';
 
 // Map integration ID to a specific icon
 function getIntegrationIcon(id: string) {
@@ -109,6 +112,12 @@ export function IntegrationPanel({ integration }: IntegrationPanelProps) {
             needsReauth={needs_reauth}
             needsReconsent={needs_reconsent}
           />
+
+          <div className='flex flex-wrap items-center gap-2 border-t pt-4'>
+            <SyncHistory integrationId={id} />
+            <HealthStatus integrationId={id} />
+            <IntegrationSettings integrationId={id} />
+          </div>
         </div>
       </CardContent>
     </Card>

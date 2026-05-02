@@ -240,18 +240,19 @@ Create shared frontend components and migrate Google's connect/disconnect and sy
 - **Integration:** panel rendering with mocked registry responses for single and multiple integrations.
 - **E2E:** connect/disconnect Google and trigger sync through the generic dashboard.
 
-#### Phase 3: Sync History, Health Status, and Integration-Specific Settings
-**PR Size:** ~5–7 files
+#### Phase 3: Pluggable Integration Observability (Current Phase)
 
-Add the remaining dashboard surfaces: sync job history, worker health, and per-integration settings modals.
+**Goal:** Provide full visibility into integration syncs and health status.
 
-**Acceptance Criteria:**
-- [ ] `SyncHistory` component: renders recent `SyncJob` records for an integration (timestamp, status, count, errors)
-- [ ] `GET /api/integrations/{id}/sync-history` endpoint returns paginated sync job history
-- [ ] `HealthStatus` component: worker health indicator (last heartbeat, pending events from consumer lag)
-- [ ] Integration-specific settings accessible from panel via modal or sub-page (e.g. Google Calendar selection, future Strava type mapping)
-- [ ] Settings rendered dynamically from integration-declared settings schema — not hard-coded per integration
-- [ ] Existing Google Calendar selection UI (`CalendarSettingsDialog`) accessible from the Google panel settings
+- [x] Implement generic `GET /api/integrations/{id}/sync-history` endpoint
+- [x] Create generic `SyncHistory` component for integration panel
+  - [x] Paginated table of sync jobs
+  - [x] Filter by sync type/status
+- [x] `HealthStatus` component: worker health indicator (last heartbeat, pending events from consumer lag)
+- [x] Integration-specific settings accessible from panel via modal or sub-page (e.g. Google Calendar selection, future Strava type mapping)
+  - [x] Settings rendered dynamically from integration-declared settings schema — not hard-coded per integration
+  - [x] Existing Google Calendar selection UI (CalendarSettingsDialog) accessible from the Google panel settings
+- [x] Unit, Integration, and E2E Tests for the new observability components
 
 **Required Test Coverage:**
 - **Unit:** `SyncHistory` rendering with various job states, `HealthStatus` indicator logic.

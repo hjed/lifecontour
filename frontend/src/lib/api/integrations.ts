@@ -42,8 +42,8 @@ export const integrationKeys = {
     [...integrationKeys.all, 'google', 'calendars'] as const,
   syncJobs: () => [...integrationKeys.all, 'sync-jobs'] as const,
   syncJob: (jobId: string) => [...integrationKeys.syncJobs(), jobId] as const,
-  syncHistory: (filters: SyncHistoryFilters) =>
-    [...integrationKeys.syncJobs(), 'history', filters] as const,
+  syncHistory: (integrationId: string, filters: SyncHistoryFilters) =>
+    [...integrationKeys.syncJobs(), integrationId, 'history', filters] as const,
   health: () => [...integrationKeys.all, 'health'] as const,
   stats: () => [...integrationKeys.all, 'stats'] as const,
   list: () => [...integrationKeys.all, 'list'] as const,
@@ -198,6 +198,7 @@ export async function fetchSyncJobStatus(
 }
 
 export async function fetchSyncHistory(
+  integrationId: string,
   filters: SyncHistoryFilters = {}
 ): Promise<SyncJobListResponse> {
   const params = new URLSearchParams();
@@ -210,7 +211,7 @@ export async function fetchSyncHistory(
   if (filters.offset) params.append('offset', filters.offset.toString());
 
   const queryString = params.toString();
-  const url = `/api/integrations/google/contacts/sync-history${
+  const url = `/api/integrations/${integrationId}/sync-history${
     queryString ? `?${queryString}` : ''
   }`;
 
@@ -232,6 +233,22 @@ export async function fetchIntegrationStats(): Promise<IntegrationStatsResponse>
     credentials: 'include',
   });
   return handleApiResponse<IntegrationStatsResponse>(response);
+}
+
+export interface ConsumerGroupLag {
+  name: string;
+  consumers: number;
+  pending: number;
+  lag?: number;
+  'last-delivered-id'?: string;
+  'entries-read'?: number;
+}
+
+export async function fetchConsumerLag(): Promise<ConsumerGroupLag[]> {
+  const response = await fetch('/api/health/consumer-lag', {
+    credentials: 'include',
+  });
+  return handleApiResponse<ConsumerGroupLag[]>(response);
 }
 
 export async function cancelSyncJob(jobId: string): Promise<void> {
@@ -370,20 +387,26 @@ export function useSyncJobStatus(jobId: string | null) {
   });
 }
 
-export function useSyncHistory(filters: SyncHistoryFilters = {}) {
+export function useSyncHistory(
+  integrationId: string,
+  filters: SyncHistoryFilters = {},
+  enabled: boolean = true
+) {
   return useQuery({
-    queryKey: integrationKeys.syncHistory(filters),
-    queryFn: () => fetchSyncHistory(filters),
+    queryKey: integrationKeys.syncHistory(integrationId, filters),
+    queryFn: () => fetchSyncHistory(integrationId, filters),
+    enabled,
     staleTime: 30 * 1000, // 30 seconds
   });
 }
 
-export function useIntegrationHealth() {
+export function useIntegrationHealth(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: integrationKeys.health(),
     queryFn: fetchIntegrationHealth,
     staleTime: 10 * 1000, // 10 seconds
     refetchInterval: 30 * 1000, // 30 seconds
+    enabled: options?.enabled,
   });
 }
 
@@ -392,6 +415,16 @@ export function useIntegrationStats() {
     queryKey: integrationKeys.stats(),
     queryFn: fetchIntegrationStats,
     staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+}
+
+export function useConsumerLag(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: [...integrationKeys.health(), 'consumer-lag'],
+    queryFn: fetchConsumerLag,
+    staleTime: 10 * 1000, // 10 seconds
+    refetchInterval: 30 * 1000, // 30 seconds
+    enabled: options?.enabled,
   });
 }
 

@@ -157,9 +157,8 @@ test.describe('Journals Calendar Sync Features', () => {
         })
       )
     );
-    await page.route(
-      '**/api/integrations/google/contacts/sync-history**',
-      route => route.fulfill(json({ data: [] }))
+    await page.route('**/api/integrations/google/sync-history**', route =>
+      route.fulfill(json({ data: [] }))
     );
 
     // Navigate to integrations page
