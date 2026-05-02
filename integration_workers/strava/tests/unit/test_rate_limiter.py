@@ -87,3 +87,14 @@ class TestRateLimiterReset:
         # Simulate 16 minutes passing
         with patch.object(time, "monotonic", return_value=time.monotonic() + 16 * 60):
             limiter.check()  # Should not raise after reset
+
+    def test_daily_window_resets_after_utc_midnight(self) -> None:
+        """Daily count resets when the UTC date changes."""
+        limiter = StravaRateLimiter()
+        limiter._daily_count = 1000
+
+        # Advance the stored date so the next check sees a new day
+        limiter._daily_window_date -= 1
+
+        limiter.check()  # Should not raise — daily count was reset
+        assert limiter._daily_count == 0

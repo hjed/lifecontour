@@ -17,6 +17,7 @@ import pytest
 
 from strava_api_client import StravaAPIClient, StravaAPIError
 from strava_auth_service import StravaTokenData
+from strava_rate_limiter import StravaRateLimitError
 
 
 def _strava_athlete_json() -> dict[str, Any]:
@@ -277,7 +278,7 @@ class TestErrorResponsesIntegration:
             headers={"Retry-After": "900"},
         )
 
-        with pytest.raises((StravaAPIError, Exception)):
+        with pytest.raises(StravaRateLimitError):
             await integration_client.get_athlete()
 
     @pytest.mark.asyncio

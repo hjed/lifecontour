@@ -96,7 +96,7 @@ class TestGetAthlete:
 
         call_kwargs = mock_get.call_args
         # Bearer token is set on the client level, verify URL is correct
-        assert "/athlete" in str(call_kwargs)
+        assert "athlete" in str(call_kwargs)
 
 
 # -- Activities endpoints --
@@ -302,7 +302,7 @@ class TestErrorHandling:
         mock_resp = _make_response(status_code=429, headers={"Retry-After": "900"})
 
         with patch.object(api_client._client, "get", return_value=mock_resp):
-            with pytest.raises((StravaRateLimitError, StravaAPIError)):
+            with pytest.raises(StravaRateLimitError):
                 await api_client.get_athlete()
 
     @pytest.mark.asyncio

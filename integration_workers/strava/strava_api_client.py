@@ -79,7 +79,7 @@ class StravaAPIClient:
             StravaAPIError: On non-retryable errors.
             StravaRateLimitError: When rate limits are exceeded.
         """
-        data = await self._get("/athlete")
+        data = await self._get("athlete")
         return StravaAthlete.model_validate(data)
 
     async def list_activities(
@@ -107,7 +107,7 @@ class StravaAPIClient:
         if before is not None:
             params["before"] = before
 
-        data = await self._get("/athlete/activities", params=params)
+        data = await self._get("athlete/activities", params=params)
         return [StravaActivity.model_validate(item) for item in data]
 
     async def get_activity(self, activity_id: int) -> StravaActivity:
@@ -119,7 +119,7 @@ class StravaAPIClient:
         Returns:
             StravaActivity with full detail including ``start_latlng``.
         """
-        data = await self._get(f"/activities/{activity_id}")
+        data = await self._get(f"activities/{activity_id}")
         return StravaActivity.model_validate(data)
 
     async def get_activity_streams(
@@ -147,7 +147,7 @@ class StravaAPIClient:
             "key_by_type": "false",
         }
         data = await self._get(
-            f"/activities/{activity_id}/streams", params=stream_params
+            f"activities/{activity_id}/streams", params=stream_params
         )
         return StravaStreamSet.from_api_response(data)
 
@@ -167,7 +167,7 @@ class StravaAPIClient:
         """Execute a GET request with rate limiting and 401 refresh.
 
         Args:
-            path: API path relative to base URL (e.g. ``/athlete``).
+            path: API path relative to base URL (e.g. ``athlete``).
             params: Optional query parameters.
             _is_retry: Internal flag to prevent infinite refresh loops.
 
@@ -179,9 +179,11 @@ class StravaAPIClient:
 
         response = await self._client.get(path, params=params)
 
-        # Update rate limiter from response headers
-        self._rate_limiter.update_from_headers(dict(response.headers))
-        self._rate_limiter.record_request()
+        # Synchronise rate limiter from server-reported usage.
+        # Strava's X-RateLimit-Usage already includes this request, so we
+        # do NOT call record_request() when headers are present to avoid
+        # double-counting.
+        self._rate_limiter.update_from_headers(response.headers)
 
         # Handle 401 — token refresh and retry
         if response.status_code == 401 and not _is_retry:

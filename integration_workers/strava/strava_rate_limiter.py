@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping
+from datetime import UTC, datetime
 
 import structlog
 
@@ -24,6 +25,7 @@ logger = structlog.get_logger()
 _SHORT_LIMIT = 100  # requests per 15 minutes
 _DAILY_LIMIT = 1000  # requests per day
 _SHORT_WINDOW_SECONDS = 15 * 60  # 15 minutes
+_DAILY_WINDOW_SECONDS = 24 * 60 * 60  # 24 hours
 
 
 class StravaRateLimitError(Exception):
@@ -51,10 +53,12 @@ class StravaRateLimiter:
         self._short_count: int = 0
         self._daily_count: int = 0
         self._short_window_start: float = time.monotonic()
+        self._daily_window_date: int = datetime.now(tz=UTC).toordinal()
 
     def check(self) -> None:
         """Raise ``StravaRateLimitError`` if the next request would exceed limits."""
         self._maybe_reset_short_window()
+        self._maybe_reset_daily_window()
 
         if self._short_count >= _SHORT_LIMIT:
             elapsed = time.monotonic() - self._short_window_start
@@ -74,6 +78,7 @@ class StravaRateLimiter:
     def record_request(self) -> None:
         """Record that a request was made."""
         self._maybe_reset_short_window()
+        self._maybe_reset_daily_window()
         self._short_count += 1
         self._daily_count += 1
 
@@ -113,3 +118,10 @@ class StravaRateLimiter:
         if elapsed >= _SHORT_WINDOW_SECONDS:
             self._short_count = 0
             self._short_window_start = time.monotonic()
+
+    def _maybe_reset_daily_window(self) -> None:
+        """Reset the daily counter if the UTC day has changed."""
+        today = datetime.now(tz=UTC).toordinal()
+        if today != self._daily_window_date:
+            self._daily_count = 0
+            self._daily_window_date = today
