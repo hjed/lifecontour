@@ -116,7 +116,7 @@ describe('IntegrationsPage', () => {
       data: [],
       isLoading: false,
       error: null,
-    } as any);
+    } as unknown as ReturnType<typeof useConsumerLag>);
 
     mockUseSyncHistory.mockReturnValue({
       data: {

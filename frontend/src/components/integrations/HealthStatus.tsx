@@ -122,9 +122,9 @@ export function HealthStatus({
                   Event Stream Consumers
                 </h4>
                 {lagData && lagData.length > 0 ? (
-                  lagData.map((group, i) => (
+                  lagData.map(group => (
                     <div
-                      key={i}
+                      key={group.name}
                       className='flex flex-col gap-1 border-t pt-2 text-sm first:border-0 first:pt-0'
                     >
                       <div className='flex items-center justify-between'>
