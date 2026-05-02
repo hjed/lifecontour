@@ -10,6 +10,7 @@ from collections.abc import Awaitable, Callable
 from functools import wraps
 from typing import Any
 
+import pydantic
 from core_shared.models.contacts.exceptions import ContactValidationError
 from core_shared.models.journals import JournalDomainError, JournalNotFoundError
 
@@ -97,6 +98,20 @@ def mcp_unified_error_handler(
                 return MCPResponseBuilder.validation_error_response(
                     field_name, f"Failed to parse JSON data: {str(e)}"
                 )
+
+            except pydantic.ValidationError as e:
+                MCPLogger.log_validation_error(
+                    operation_name, f"Schema validation failed: {str(e)}"
+                )
+                # Extract the first error's field path if available
+                errors = e.errors()
+                field_name = (
+                    str(errors[0]["loc"][0])
+                    if errors and errors[0].get("loc")
+                    else "Input"
+                )
+                message = errors[0]["msg"] if errors else str(e)
+                return MCPResponseBuilder.validation_error_response(field_name, message)
 
             except ValueError as e:
                 MCPLogger.log_validation_error(operation_name, str(e))

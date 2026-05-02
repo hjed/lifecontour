@@ -9,8 +9,6 @@ Reproduces production bugs where:
 - Parent_id was not reflected when the transaction rolled back
 """
 
-import json
-
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -38,7 +36,7 @@ def _create_journal_via_mcp():
                 "params": {
                     "name": "create_journal_entry",
                     "arguments": {
-                        "journal_data": json.dumps(journal_data),
+                        "request": journal_data,
                     },
                 },
             },
@@ -70,7 +68,7 @@ def _update_journal_via_mcp():
                     "name": "update_journal_entry",
                     "arguments": {
                         "journal_id": journal_id,
-                        "journal_data": json.dumps(journal_data),
+                        "request": journal_data,
                     },
                 },
             },

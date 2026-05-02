@@ -1941,26 +1941,7 @@ async def list_journal_types() -> str:
 
 @mcp_unified_error_handler("create_journal_entry", "journal")
 async def create_journal_entry(
-    journal_data: Annotated[
-        str,
-        Field(
-            description="JSON string containing journal creation data. "
-            "Required fields: title (str), content (str), "
-            "event_date_range ({start: 'YYYY-MM-DD', end: 'YYYY-MM-DD'}). "
-            "Optional fields: "
-            "types (list[str] — valid values: NOTE, EVENT, MOOD_RATING, PLAN, "
-            "TRAVEL, PHOTO_ALBUM, FITNESS, OUTDOOR_ACTIVITY, BUSHWALKING, "
-            "JOGGING, ABSEILING_TRIP, CANYONING, CLIMBING, KAYAKING, "
-            "CROSS_COUNTRY_SKIING — call list_journal_types for details), "
-            "type_data (dict keyed by type name — call list_journal_types "
-            "to see fields for each type), "
-            "contact_relationships (list of {contact_id: int, "
-            "relationship_type: PARTICIPANT|INVITEE|MENTION|ABOUT, "
-            "status?: ATTENDING|ATTENDED|MAYBE|NO_REPLY|DECLINED, "
-            "role?: ORGANISER|FACILITATOR_HELPER}), "
-            "tags (list[str]), parent_id (int)"
-        ),
-    ],
+    request: JournalCreateRequest,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     event_publisher: OutboxEventPublisher = mcp_depends(get_outbox_event_publisher),
 ) -> str:
@@ -1975,8 +1956,6 @@ async def create_journal_entry(
     Type dependencies are added automatically (e.g. BUSHWALKING adds
     OUTDOOR_ACTIVITY and FITNESS).
 
-    Args:
-        journal_data: JSON string with journal creation data
 
     Returns:
         JSON string containing AI-friendly journal information including:
@@ -1991,14 +1970,7 @@ async def create_journal_entry(
         ValueError: If JSON parsing fails, required fields are missing, or invalid
                     type/relationship_type/status/role values are provided
     """
-    # Parse JSON input
-    try:
-        data_dict = json.loads(journal_data)
-        request = JournalCreateRequest(**data_dict)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON format: {e}") from e
-    except Exception as e:
-        raise ValueError(f"Invalid journal data: {e}") from e
+    # No JSON parsing needed, FastMCP handles request model conversion directly
 
     # Get current user ID from auth context
     user_id = await get_current_user_id()
@@ -2170,26 +2142,7 @@ async def update_journal_entry(
     journal_id: Annotated[
         int, Field(description="The unique identifier of the journal to update")
     ],
-    journal_data: Annotated[
-        str,
-        Field(
-            description="JSON string with partial journal update data. "
-            "All fields are optional — only provided fields are updated. "
-            "Fields: title (str), content (str), "
-            "event_date_range ({start: 'YYYY-MM-DD', end: 'YYYY-MM-DD'}), "
-            "types (list[str] — replaces all types — valid values: NOTE, EVENT, "
-            "MOOD_RATING, PLAN, TRAVEL, PHOTO_ALBUM, FITNESS, OUTDOOR_ACTIVITY, "
-            "BUSHWALKING, JOGGING, ABSEILING_TRIP, CANYONING, CLIMBING, KAYAKING, "
-            "CROSS_COUNTRY_SKIING — call list_journal_types for details), "
-            "type_data (dict keyed by type name — call list_journal_types "
-            "to see fields for each type), "
-            "contact_relationships (list of {contact_id: int, "
-            "relationship_type: PARTICIPANT|INVITEE|MENTION|ABOUT, "
-            "status?: ATTENDING|ATTENDED|MAYBE|NO_REPLY|DECLINED, "
-            "role?: ORGANISER|FACILITATOR_HELPER} — replaces all relationships), "
-            "tags (list[str] — replaces all tags), parent_id (int)"
-        ),
-    ],
+    request: JournalUpdateRequest,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     event_publisher: OutboxEventPublisher = mcp_depends(get_outbox_event_publisher),
 ) -> str:
@@ -2203,9 +2156,6 @@ async def update_journal_entry(
     When types, tags, or contact_relationships are provided they REPLACE all
     existing values (not merge).
 
-    Args:
-        journal_id: The unique identifier of the journal to update
-        journal_data: JSON string with partial journal update data
 
     Returns:
         JSON string containing AI-friendly updated journal information
@@ -2215,14 +2165,7 @@ async def update_journal_entry(
         JournalValidationError: If validation fails
         ValueError: If JSON parsing fails or invalid type/relationship values provided
     """
-    # Parse JSON input
-    try:
-        data_dict = json.loads(journal_data)
-        request = JournalUpdateRequest(**data_dict)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON format: {e}") from e
-    except Exception as e:
-        raise ValueError(f"Invalid journal data: {e}") from e
+    # No JSON parsing needed, FastMCP handles request model conversion directly
 
     # --- Validate ALL inputs upfront BEFORE any DB writes ---
     valid_type_names = {t.name for t in JournalType}
