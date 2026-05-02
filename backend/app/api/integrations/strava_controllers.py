@@ -200,11 +200,16 @@ async def strava_oauth_callback(
         access_token = token_data.get("access_token")
         refresh_token = token_data.get("refresh_token")
         expires_at_epoch = token_data.get("expires_at")
-        athlete = token_data.get("athlete", {})
+        athlete = token_data.get("athlete")
+        if not isinstance(athlete, dict):
+            raise ValueError("Missing or invalid athlete data in Strava token response")
         athlete_id = athlete.get("id")
 
         if not all([access_token, refresh_token, expires_at_epoch, athlete_id]):
             raise ValueError("Incomplete token response from Strava")
+
+        # Type narrowing — all() above ensures these are non-None
+        assert athlete_id is not None  # noqa: S101
 
         from datetime import UTC, datetime
 
@@ -288,24 +293,30 @@ async def strava_oauth_disconnect(
     Imported journals and their data remain.
     """
     try:
-        # Get current tokens to revoke with Strava
-        auth_data = await strava_token_service.get_auth(str(user.id))
-
-        if auth_data:
-            # Best-effort revoke with Strava API
-            try:
-                async with httpx.AsyncClient() as client:
-                    await client.post(
-                        STRAVA_DEAUTHORIZE_URL,
-                        data={"access_token": auth_data["access_token"]},
+        # Best-effort revocation: try to decrypt and revoke with Strava API
+        try:
+            auth_data = await strava_token_service.get_auth(str(user.id))
+            if auth_data:
+                try:
+                    async with httpx.AsyncClient() as client:
+                        await client.post(
+                            STRAVA_DEAUTHORIZE_URL,
+                            data={"access_token": auth_data["access_token"]},
+                        )
+                except Exception as revoke_err:
+                    logger.warning(
+                        "Strava token revocation failed (continuing disconnect)",
+                        user_id=user.id,
+                        error=str(revoke_err),
                     )
-            except Exception as revoke_err:
-                # Don't fail the disconnect if revocation fails
-                logger.warning(
-                    "Strava token revocation failed (continuing disconnect)",
-                    user_id=user.id,
-                    error=str(revoke_err),
-                )
+        except Exception as auth_err:
+            # Decryption/retrieval failed — still proceed with DB cleanup
+            logger.warning(
+                "Could not retrieve Strava tokens for revocation "
+                "(continuing with DB cleanup)",
+                user_id=user.id,
+                error=str(auth_err),
+            )
 
         # Delete stored tokens regardless of revocation result
         deleted = await strava_token_service.delete_tokens(str(user.id))

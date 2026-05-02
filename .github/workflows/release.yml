@@ -33,7 +33,7 @@ jobs:
 
     strategy:
       matrix:
-        component: [backend, frontend, google-worker]
+        component: [backend, frontend, google-worker, strava-worker]
 
     steps:
       - name: Checkout code
@@ -63,6 +63,8 @@ jobs:
         run: |
           if [ "${{ matrix.component }}" = "google-worker" ]; then
             echo "path=integration_workers/google/Dockerfile" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.component }}" = "strava-worker" ]; then
+            echo "path=integration_workers/strava/Dockerfile" >> $GITHUB_OUTPUT
           else
             echo "path=docker/${{ matrix.component }}/Dockerfile" >> $GITHUB_OUTPUT
           fi
@@ -139,6 +141,7 @@ jobs:
             - Backend: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ steps.version.outputs.version }}`
             - Frontend: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ steps.version.outputs.version }}`
             - Google Worker: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-google-worker:${{ steps.version.outputs.version }}`
+            - Strava Worker: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-strava-worker:${{ steps.version.outputs.version }}`
 
             ## Installation
 

@@ -176,11 +176,13 @@ class StravaAuthService:
             response.raise_for_status()
             token_data = response.json()
 
+        result = self.parse_token_response(token_data)
+
         logger.info(
             "Exchanged Strava authorization code",
-            athlete_id=token_data.get("athlete", {}).get("id"),
+            athlete_id=result.athlete_id,
         )
-        return self.parse_token_response(token_data)
+        return result
 
     async def refresh_token(self, refresh_token_value: str) -> StravaTokenData:
         """

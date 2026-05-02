@@ -293,7 +293,7 @@ Establish the Strava package structure, auth persistence, OAuth flow endpoints, 
 - [x] OAuth endpoints: `POST /api/integrations/strava/oauth/authorize`, `POST /api/integrations/strava/oauth/callback` (token exchange), `DELETE /api/integrations/strava/oauth/disconnect` (token revocation + credential cleanup)
 - [x] `StravaIntegrationProvider` implements registry interface: derives status from `UserStravaAuth` state
 - [x] Strava panel appears in integrations dashboard with Connect/Disconnect controls
-- [ ] New worker is setup in CI with tests and integration tests
+- [x] New worker is setup in CI with tests and integration tests
 - [x] New worker is setup in docker.
 
 **Required Test Coverage:**

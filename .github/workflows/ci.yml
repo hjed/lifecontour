@@ -382,6 +382,72 @@ jobs:
           ENCRYPTION_KEY: test_encryption_key_32_characters_long_for_testing
         run: uv run pytest tests/integration/ -v --tb=short
 
+  strava-worker-unit-test:
+    name: Strava Worker Unit Tests
+    runs-on: ubuntu-latest
+    needs: changes
+    defaults:
+      run:
+        working-directory: ./integration_workers/strava
+    if: |
+      github.event_name == 'workflow_call' ||
+      github.event_name == 'push' ||
+      needs.changes.outputs.backend == 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run unit tests
+        run: uv run pytest tests/unit/ -v --tb=short
+
+  strava-worker-lint:
+    name: Strava Worker Lint & Type Check
+    runs-on: ubuntu-latest
+    needs: changes
+    defaults:
+      run:
+        working-directory: ./integration_workers/strava
+    if: |
+      github.event_name == 'workflow_call' ||
+      github.event_name == 'push' ||
+      needs.changes.outputs.backend == 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run ruff check
+        run: uv run ruff check .
+
+      - name: Run ruff format check
+        run: uv run ruff format --check .
+
+      - name: Run mypy
+        run: uv run mypy .
+
   backend-integration-test:
     name: Backend Integration Tests
     runs-on: ubuntu-latest
