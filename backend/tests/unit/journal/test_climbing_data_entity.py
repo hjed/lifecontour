@@ -37,7 +37,7 @@ class TestClimbingData:
         assert data.climbing_type == "sport"
         assert data.grade == 18
         assert data.length == 25
-        assert data.template_id == template_uuid
+        assert str(data.template_id) == template_uuid
 
     def test_climbing_type_sport(self):
         """Test creating climbing data with 'sport' climbing type."""
@@ -126,4 +126,4 @@ class TestClimbingData:
         """Test that a string UUID is accepted as template_id."""
         uuid_str = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
         data = ClimbingData(journal_id=1, template_id=uuid_str)
-        assert data.template_id == uuid_str
+        assert str(data.template_id) == uuid_str

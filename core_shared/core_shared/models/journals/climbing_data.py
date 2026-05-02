@@ -52,9 +52,25 @@ class ClimbingData:
     def __post_init__(self) -> None:
         """Validate climbing data properties."""
         self._validate_journal_id()
+        self._validate_template_id()
         self._validate_climbing_type()
         self._validate_grade()
         self._validate_length()
+
+    def _validate_template_id(self) -> None:
+        """Validate template_id is a valid UUID if provided."""
+        if self.template_id is not None:
+            if isinstance(self.template_id, str):
+                try:
+                    self.template_id = UUID(self.template_id)
+                except ValueError as err:
+                    raise ClimbingDataValidationError(
+                        "template_id", "Template ID must be a valid UUID"
+                    ) from err
+            elif not isinstance(self.template_id, UUID):
+                raise ClimbingDataValidationError(
+                    "template_id", "Template ID must be a valid UUID"
+                )
 
     def _validate_journal_id(self) -> None:
         """Validate journal_id is positive."""

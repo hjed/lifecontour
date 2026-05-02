@@ -50,7 +50,17 @@ class KayakingData:
         """Validate kayaking data properties."""
         self._validate_journal_id()
         self._validate_water_type()
+        self._validate_is_white_water()
         self._validate_rapids_grade()
+
+    def _validate_is_white_water(self) -> None:
+        """Validate is_white_water is a boolean if provided."""
+        if self.is_white_water is not None and not isinstance(
+            self.is_white_water, bool
+        ):
+            raise KayakingDataValidationError(
+                "is_white_water", "is_white_water must be a boolean"
+            )
 
     def _validate_journal_id(self) -> None:
         """Validate journal_id is positive."""
