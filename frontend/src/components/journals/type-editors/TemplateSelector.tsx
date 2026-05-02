@@ -163,10 +163,7 @@ export function TemplateSelector({
       </div>
 
       {showResults && (
-        <Card
-          id={listboxId}
-          className='absolute top-full right-0 left-0 z-50 mt-1 max-h-60 overflow-auto'
-        >
+        <Card className='absolute top-full right-0 left-0 z-50 mt-1 max-h-60 overflow-auto'>
           <CardContent className='p-0'>
             {isLoading && (
               <div className='flex items-center gap-2 p-3'>
@@ -188,11 +185,7 @@ export function TemplateSelector({
             )}
 
             {!isLoading && !error && (
-              <ul
-                id='template-search-results'
-                role='listbox'
-                className='m-0 list-none p-0'
-              >
+              <ul id={listboxId} role='listbox' className='m-0 list-none p-0'>
                 {templates.map((template, index) => {
                   const isSelected = index === selectedIndex;
                   return (

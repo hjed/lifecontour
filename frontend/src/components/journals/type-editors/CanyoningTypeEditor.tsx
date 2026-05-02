@@ -29,7 +29,9 @@ interface CanyoningTypeEditorProps {
   readonly 'data-testid'?: string;
   readonly createMode?: boolean;
   readonly onChange?: (data: CanyoningData) => void;
-  readonly onTemplateSelect?: (template: ActivityTemplateResource) => void;
+  readonly onTemplateSelect?: (
+    template: ActivityTemplateResource
+  ) => void | Promise<void>;
 }
 
 const DEFAULT_DATA: CanyoningData = {};
@@ -178,6 +180,7 @@ export function CanyoningTypeEditor({
 
   const handleEditorCancel = () => {
     setGradeState(createSavedGradeState(gradeResetKey, data?.french_grade));
+    setPendingTemplate(null);
     handleCancel();
   };
 
@@ -187,6 +190,16 @@ export function CanyoningTypeEditor({
   );
 
   const [createTemplateOpen, setCreateTemplateOpen] = useState(false);
+  const [pendingTemplate, setPendingTemplate] =
+    useState<ActivityTemplateResource | null>(null);
+
+  const handleCustomSave = async () => {
+    await handleSave();
+    if (!createMode && pendingTemplate && onTemplateSelect) {
+      await Promise.resolve(onTemplateSelect(pendingTemplate));
+      setPendingTemplate(null);
+    }
+  };
 
   const handleTemplateSelection = (template: ActivityTemplateResource) => {
     // Update local canyoning data fields that the template provides
@@ -213,8 +226,10 @@ export function CanyoningTypeEditor({
       return next;
     });
 
-    if (onTemplateSelect) {
-      onTemplateSelect(template);
+    if (createMode && onTemplateSelect) {
+      Promise.resolve(onTemplateSelect(template)).catch(console.error);
+    } else {
+      setPendingTemplate(template);
     }
   };
 
@@ -228,7 +243,7 @@ export function CanyoningTypeEditor({
       summaryItems={summaryItems}
       summaryTestId='canyoning-summary'
       onEdit={handleEdit}
-      onSave={handleSave}
+      onSave={handleCustomSave}
       onCancel={handleEditorCancel}
     >
       <div className='space-y-2'>
