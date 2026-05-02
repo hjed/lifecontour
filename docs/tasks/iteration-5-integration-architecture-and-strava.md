@@ -287,13 +287,14 @@ Create shared frontend components and migrate Google's connect/disconnect and sy
 Establish the Strava package structure, auth persistence, OAuth flow endpoints, and register Strava in the integration registry so it appears in the dashboard.
 
 **Acceptance Criteria:**
-- [ ] `integration_workers/strava/` package structure following isolated worker pattern
-- [ ] `UserStravaAuth` model in `core_shared/models/` (user_id, access_token encrypted, refresh_token encrypted, expires_at, athlete_id, strava_webhook_subscription_id)
-- [ ] Database migration for `user_strava_auth` table
-- [ ] OAuth endpoints: `GET /api/integrations/strava/auth-url`, `GET /api/integrations/strava/callback` (token exchange), `POST /api/integrations/strava/disconnect` (token revocation + credential cleanup)
-- [ ] Automatic token refresh on 401 responses
-- [ ] `StravaIntegrationProvider` implements registry interface: derives status from `UserStravaAuth` state
-- [ ] Strava panel appears in integrations dashboard with Connect/Disconnect controls
+- [x] `integration_workers/strava/` package structure following isolated worker pattern
+- [x] `UserStravaAuth` model in `core_shared/models/` (user_id, access_token encrypted, refresh_token encrypted, expires_at, athlete_id, strava_webhook_subscription_id)
+- [x] Database migration for `user_strava_auth` table
+- [x] OAuth endpoints: `POST /api/integrations/strava/oauth/authorize`, `POST /api/integrations/strava/oauth/callback` (token exchange), `DELETE /api/integrations/strava/oauth/disconnect` (token revocation + credential cleanup)
+- [x] `StravaIntegrationProvider` implements registry interface: derives status from `UserStravaAuth` state
+- [x] Strava panel appears in integrations dashboard with Connect/Disconnect controls
+- [ ] New worker is setup in CI with tests and integration tests
+- [x] New worker is setup in docker.
 
 **Required Test Coverage:**
 - **Unit:** OAuth URL generation, token exchange parsing, token refresh logic, disconnect cleanup.
@@ -313,7 +314,7 @@ Build the `StravaAPIClient` with all methods needed for activity import. This is
 - [ ] `get_activity_streams(activity_id, keys)` — fetch latlng, altitude, time streams for GPX generation
 - [ ] Pydantic response models: `StravaAthlete`, `StravaActivity`, `StravaActivityStream`
 - [ ] Rate limiting: respect Strava's 100 requests/15 minutes and 1000 requests/day limits
-- [ ] Automatic token refresh integrated (uses `UserStravaAuth` refresh flow from Phase 1)
+- [ ] Automatic token refresh on 401 responses: `StravaTokenService.refresh_tokens()` method + `StravaAPIClient` retry logic (moved from Phase 1 — no Phase 1 endpoints trigger 401)
 
 **Required Test Coverage:**
 - **Unit:** response model parsing for each endpoint, rate limit header handling, pagination logic.

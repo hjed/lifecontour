@@ -170,6 +170,16 @@ class Settings(BaseSettings):
     google_encryption_key: str = Field(
         default="", description="Fernet encryption key for Google OAuth tokens"
     )
+
+    # Strava integration settings
+    strava_client_id: str = Field(default="", description="Strava OAuth client ID")
+    strava_client_secret: str = Field(
+        default="", description="Strava OAuth client secret"
+    )
+    strava_encryption_key: str = Field(
+        default="", description="Fernet encryption key for Strava OAuth tokens"
+    )
+
     immich_base_url: str = Field(default="", description="Immich instance base URL")
     immich_api_key: str = Field(default="", description="Immich API key")
 

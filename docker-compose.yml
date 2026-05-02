@@ -340,6 +340,32 @@ services:
       - personal-management
     restart: unless-stopped
 
+  strava-worker:
+    build:
+      context: .
+      dockerfile: integration_workers/strava/Dockerfile
+    container_name: ${CONTAINER_PREFIX:-pms}-strava-worker
+    profiles: [dev, test, prod]
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@${CONTAINER_PREFIX:-pms}-postgres:5432/${DB_NAME:-personal_management}
+      REDIS_URL: redis://${CONTAINER_PREFIX:-pms}-redis:6379
+      STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID:-dev-strava-client-id}
+      STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET:-dev-strava-client-secret}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-KzC1vYhL3bQpT_x5Ue8q0Wl1MvX-oVwYwK9cQx7lKHg=}
+      LOG_LEVEL: ${WORKER_LOG_LEVEL:-DEBUG}
+      WORKER_ID: strava-worker
+    volumes:
+      - ./core_shared:/core_shared:ro
+      - ./integration_workers/strava:/app
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - personal-management
+    restart: unless-stopped
+
   # ============================================================================
   # PRODUCTION SERVICES
   # ============================================================================
