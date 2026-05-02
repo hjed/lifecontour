@@ -22,6 +22,8 @@ import {
   OAuthCallbackResponse,
   OAuthDisconnectResponse,
   IntegrationStatsResponse,
+  IntegrationListResponse,
+  DeadLetterListResponse,
 } from '@/types/integrations';
 import { JsonApiErrorResponse } from '@/types/api';
 
@@ -44,6 +46,9 @@ export const integrationKeys = {
     [...integrationKeys.syncJobs(), 'history', filters] as const,
   health: () => [...integrationKeys.all, 'health'] as const,
   stats: () => [...integrationKeys.all, 'stats'] as const,
+  list: () => [...integrationKeys.all, 'list'] as const,
+  deadLetters: (limit: number, offset: number) =>
+    [...integrationKeys.all, 'dead-letters', limit, offset] as const,
 };
 
 // Error handling helper
@@ -83,6 +88,85 @@ export async function fetchGoogleStatus(): Promise<GoogleStatusResponse> {
     credentials: 'include',
   });
   return handleApiResponse<GoogleStatusResponse>(response);
+}
+
+export async function fetchIntegrations(): Promise<IntegrationListResponse> {
+  const response = await fetch('/api/integrations', {
+    credentials: 'include',
+  });
+  return handleApiResponse<IntegrationListResponse>(response);
+}
+
+export async function fetchDeadLetters(
+  limit: number = 50,
+  offset: number = 0
+): Promise<DeadLetterListResponse> {
+  const params = new URLSearchParams();
+  params.append('limit', limit.toString());
+  params.append('offset', offset.toString());
+
+  const response = await fetch(
+    `/api/health/dead-letters?${params.toString()}`,
+    {
+      credentials: 'include',
+    }
+  );
+  return handleApiResponse<DeadLetterListResponse>(response);
+}
+
+export async function triggerSync(
+  integrationId: string,
+  capability: string,
+  syncType: SyncType = 'smart'
+): Promise<SyncJobResponse> {
+  const requestData: SyncTriggerRequest = { sync_type: syncType };
+
+  const response = await fetch(
+    `/api/integrations/${integrationId}/${capability.replace('_sync', '')}/sync`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify(requestData),
+    }
+  );
+  return handleApiResponse<SyncJobResponse>(response);
+}
+
+export function useGenericSync(integrationId: string, capability: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (syncType: SyncType = 'smart') =>
+      triggerSync(integrationId, capability, syncType),
+    onSuccess: data => {
+      // Invalidate status and sync history queries
+      queryClient.invalidateQueries({
+        queryKey: integrationKeys.list(),
+      });
+      queryClient.invalidateQueries({ queryKey: integrationKeys.syncJobs() });
+
+      // Legacy fallback
+      if (integrationId === 'google') {
+        queryClient.invalidateQueries({
+          queryKey: integrationKeys.googleContactsStatus(),
+        });
+      }
+
+      toast.success(`${capability} Sync started successfully`);
+
+      // Start polling for job status
+      const jobId = data.data.id;
+      queryClient.invalidateQueries({
+        queryKey: integrationKeys.syncJob(jobId),
+      });
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to start ${capability} sync: ${error.message}`);
+    },
+  });
 }
 
 export async function triggerGoogleSync(
@@ -178,6 +262,23 @@ export function useGoogleStatus() {
     queryFn: fetchGoogleStatus,
     staleTime: 30 * 1000, // 30 seconds
     refetchInterval: 60 * 1000, // 1 minute
+  });
+}
+
+export function useIntegrations() {
+  return useQuery({
+    queryKey: integrationKeys.list(),
+    queryFn: fetchIntegrations,
+    staleTime: 30 * 1000, // 30 seconds
+    refetchInterval: 60 * 1000, // 1 minute
+  });
+}
+
+export function useDeadLetters(limit: number = 50, offset: number = 0) {
+  return useQuery({
+    queryKey: integrationKeys.deadLetters(limit, offset),
+    queryFn: () => fetchDeadLetters(limit, offset),
+    staleTime: 30 * 1000, // 30 seconds
   });
 }
 
@@ -316,7 +417,41 @@ export function useCancelSyncJob() {
 // OAuth Integration Functions
 
 /**
- * Initiate Google Contacts OAuth authorization flow.
+ * Initiate OAuth authorization flow for an integration.
+ */
+export function useOAuthAuthorize(integrationId: string) {
+  return useMutation<OAuthAuthorizeResponse, Error, OAuthAuthorizeRequest>({
+    mutationFn: async (request: OAuthAuthorizeRequest) => {
+      // Map integration IDs to their specific oauth endpoints
+      // In the future this might be standard, e.g., `/api/integrations/${integrationId}/oauth/authorize`
+      const endpoint =
+        integrationId === 'google'
+          ? '/api/integrations/google/contacts/oauth/authorize'
+          : `/api/integrations/${integrationId}/oauth/authorize`;
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(request),
+        credentials: 'include',
+      });
+
+      return handleApiResponse<OAuthAuthorizeResponse>(response);
+    },
+    onSuccess: (data: OAuthAuthorizeResponse) => {
+      // Redirect to OAuth authorization URL
+      globalThis.location.href = data.authorization_url;
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to initiate OAuth: ${error.message}`);
+    },
+  });
+}
+
+/**
+ * Initiate Google Contacts OAuth authorization flow. (DEPRECATED: use useOAuthAuthorize instead)
  */
 export function useGoogleOAuthAuthorize() {
   return useMutation<OAuthAuthorizeResponse, Error, OAuthAuthorizeRequest>({
@@ -387,7 +522,47 @@ export function useGoogleOAuthCallback() {
 }
 
 /**
- * Disconnect Google Contacts OAuth integration.
+ * Disconnect OAuth integration.
+ */
+export function useOAuthDisconnect(integrationId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation<OAuthDisconnectResponse, Error, void>({
+    mutationFn: async () => {
+      const endpoint =
+        integrationId === 'google'
+          ? '/api/integrations/google/contacts/oauth/disconnect'
+          : `/api/integrations/${integrationId}/oauth/disconnect`;
+
+      const response = await fetch(endpoint, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+
+      return handleApiResponse<OAuthDisconnectResponse>(response);
+    },
+    onSuccess: (data: OAuthDisconnectResponse) => {
+      // Invalidate integration list to refresh connection state
+      queryClient.invalidateQueries({
+        queryKey: integrationKeys.list(),
+      });
+      // Legacy cache invalidation
+      if (integrationId === 'google') {
+        queryClient.invalidateQueries({
+          queryKey: integrationKeys.googleContactsStatus(),
+        });
+      }
+
+      toast.success(data.message);
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to disconnect: ${error.message}`);
+    },
+  });
+}
+
+/**
+ * Disconnect Google Contacts OAuth integration. (DEPRECATED)
  */
 export function useGoogleOAuthDisconnect() {
   const queryClient = useQueryClient();

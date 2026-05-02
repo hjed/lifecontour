@@ -144,7 +144,7 @@ test.describe('Integration Management - Authenticated User', () => {
 
     // Wait for page to load
     await authenticatedPage.waitForSelector(
-      '[data-testid="google-integration"]'
+      '[data-testid="integration-panel-google"]'
     );
 
     // Check if connect or disconnect button is present
@@ -163,9 +163,7 @@ test.describe('Integration Management - Authenticated User', () => {
 
     if (connectVisible) {
       // Test connect button functionality
-      expect(await connectButton.textContent()).toContain(
-        'Connect Google Account'
-      );
+      expect(await connectButton.textContent()).toContain('Connect Account');
 
       // Click should trigger OAuth flow (but we won't complete it in tests)
       // Just verify the button is clickable

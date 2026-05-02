@@ -15,12 +15,54 @@ export type SyncStatus =
   | 'failed'
   | 'cancelled';
 export type IntegrationStatus =
-  | 'active'
-  | 'inactive'
-  | 'error'
+  | 'connected'
   | 'disconnected'
+  | 'error'
   | 'token_expired';
 export type HealthStatus = 'healthy' | 'degraded' | 'unhealthy';
+
+export interface IntegrationSyncSummaryAttributes {
+  last_sync_time: string | null;
+  sync_count: number;
+  error_count: number;
+}
+
+export interface IntegrationAttributes {
+  name: string;
+  status: IntegrationStatus;
+  capabilities: string[];
+  sync_summary: IntegrationSyncSummaryAttributes;
+  needs_reauth: boolean;
+  needs_reconsent: boolean;
+}
+
+export interface IntegrationData {
+  id: string;
+  type: 'integration';
+  attributes: IntegrationAttributes;
+}
+
+export interface IntegrationListResponse {
+  data: IntegrationData[];
+}
+
+export interface DeadLetterEvent {
+  id: string;
+  event_id: string;
+  event_type: string;
+  aggregate_id: string | null;
+  consumer_group: string;
+  delivery_count: number;
+  last_error: string;
+  created_at: string | null;
+}
+
+export interface DeadLetterListResponse {
+  items: DeadLetterEvent[];
+  total: number;
+  limit: number;
+  offset: number;
+}
 
 // Google Contacts Integration Status
 export interface GoogleStatusAttributes {
