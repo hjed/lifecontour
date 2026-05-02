@@ -3092,10 +3092,41 @@ async def sync_calendar_events(
                             continue
 
                         # Handle cancellation: mark linked journal as cancelled
+                        # BUT skip if the event's end date is in the past — some calendars
+                        # (e.g. shared/subscribed) don't preserve past events and return
+                        # them as cancelled during incremental sync even though they already
+                        # happened.
                         if action == InboundSyncAction.CANCEL_JOURNAL:
                             existing_journal_id = (
                                 existing_link.journal_id if existing_link else None
                             )
+
+                            # Check if the event already ended (past event)
+                            if existing_journal_id is not None:
+                                end_date_stmt = text("""
+                                    SELECT event_date_range_end
+                                    FROM journals
+                                    WHERE id = :journal_id
+                                """)
+                                end_date_result = await session.execute(
+                                    end_date_stmt,
+                                    {"journal_id": existing_journal_id},
+                                )
+                                event_end_date = end_date_result.scalar()
+
+                                if (
+                                    event_end_date is not None
+                                    and event_end_date < datetime.now(UTC)
+                                ):
+                                    logger.info(
+                                        "Skipping cancellation for past event",
+                                        external_event_id=google_event.id,
+                                        journal_id=existing_journal_id,
+                                        event_end_date=event_end_date.isoformat(),
+                                    )
+                                    metrics["events_skipped"] += 1
+                                    continue
+
                             outbox_event = OutboxEvent.create_journal_sync_event(
                                 journal_data={},
                                 calendar_info_data={},

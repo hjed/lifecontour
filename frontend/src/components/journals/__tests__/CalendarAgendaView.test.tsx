@@ -28,6 +28,8 @@ const createMockEvent = (
   id: '1',
   title: 'Test Event',
   date: '2026-04-15',
+  endDate: '2026-04-15',
+  isMultiDay: false,
   startTime: '10:00',
   endTime: '11:00',
   isAllDay: false,

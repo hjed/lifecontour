@@ -396,3 +396,135 @@ class TestSyncCalendarEvents:
         assert mock_client.list_events.call_count == 2
         # Two outbox events should be added (one per page)
         assert mock_session.add.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_sync_skips_cancellation_for_past_events(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        """Cancelled events whose end date is in the past should be skipped, not cancelled.
+
+        Some calendars (e.g. shared/subscribed) don't preserve past events and
+        return them as cancelled during incremental sync. Since the event already
+        happened, we should not mark the journal as cancelled.
+        """
+        from datetime import UTC, datetime, timedelta
+
+        from worker import sync_calendar_events
+
+        synced_cal = _make_calendar_row(is_synced_to_google=True)
+        cal_result = MagicMock()
+        cal_result.fetchall.return_value = [synced_cal]
+
+        token_result = MagicMock()
+        token_result.scalar.return_value = None
+
+        # Existing link for the cancelled event
+        existing_link = MagicMock()
+        existing_link.external_version = '"etag-old"'
+        existing_link.sync_capability = "bidirectional"
+        existing_link.journal_id = 42
+        link_result = MagicMock()
+        link_result.fetchone.return_value = existing_link
+
+        # Journal end date query — event ended yesterday (in the past)
+        past_end_date = datetime.now(UTC) - timedelta(days=1)
+        journal_end_result = MagicMock()
+        journal_end_result.scalar.return_value = past_end_date
+
+        mock_session.execute.side_effect = [
+            cal_result,  # calendar query
+            token_result,  # sync token query
+            link_result,  # existing link lookup
+            journal_end_result,  # journal end date lookup
+            MagicMock(),  # sync token save
+        ]
+
+        # Google returns a cancelled event (minimal — only id + status as per API spec)
+        cancelled_event = {
+            "id": "google-event-past",
+            "status": "cancelled",
+            "etag": '"etag-cancelled"',
+        }
+        google_events = {
+            "items": [cancelled_event],
+            "nextSyncToken": "new-sync-token",
+        }
+
+        mock_client = MagicMock()
+        mock_client.list_events = AsyncMock(return_value=google_events)
+
+        with patch(
+            "worker._create_google_client",
+            return_value=mock_client,
+        ):
+            result = await sync_calendar_events(
+                mock_ctx, "test@example.com", "user-1", "full"
+            )
+
+        assert result["status"] == "success"
+        # No outbox event should be created — the cancellation was skipped
+        mock_session.add.assert_not_called()
+        assert result["events_skipped"] >= 1
+
+    @pytest.mark.asyncio
+    async def test_sync_cancels_future_events_normally(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        """Cancelled events whose end date is in the future should still be cancelled."""
+        from datetime import UTC, datetime, timedelta
+
+        from worker import sync_calendar_events
+
+        synced_cal = _make_calendar_row(is_synced_to_google=True)
+        cal_result = MagicMock()
+        cal_result.fetchall.return_value = [synced_cal]
+
+        token_result = MagicMock()
+        token_result.scalar.return_value = None
+
+        # Existing link for the cancelled event
+        existing_link = MagicMock()
+        existing_link.external_version = '"etag-old"'
+        existing_link.sync_capability = "bidirectional"
+        existing_link.journal_id = 99
+        link_result = MagicMock()
+        link_result.fetchone.return_value = existing_link
+
+        # Journal end date query — event ends tomorrow (in the future)
+        future_end_date = datetime.now(UTC) + timedelta(days=1)
+        journal_end_result = MagicMock()
+        journal_end_result.scalar.return_value = future_end_date
+
+        mock_session.execute.side_effect = [
+            cal_result,  # calendar query
+            token_result,  # sync token query
+            link_result,  # existing link lookup
+            journal_end_result,  # journal end date lookup
+            MagicMock(),  # sync token save
+        ]
+
+        cancelled_event = {
+            "id": "google-event-future",
+            "status": "cancelled",
+            "etag": '"etag-cancelled"',
+        }
+        google_events = {
+            "items": [cancelled_event],
+            "nextSyncToken": "new-sync-token",
+        }
+
+        mock_client = MagicMock()
+        mock_client.list_events = AsyncMock(return_value=google_events)
+
+        with patch(
+            "worker._create_google_client",
+            return_value=mock_client,
+        ):
+            result = await sync_calendar_events(
+                mock_ctx, "test@example.com", "user-1", "full"
+            )
+
+        assert result["status"] == "success"
+        # Outbox event SHOULD be created — this is a genuine cancellation
+        mock_session.add.assert_called_once()
+        assert result.get("events_cancelled", 0) >= 1
