@@ -424,6 +424,8 @@ async def _delete_type_specific_data(
         await kayaking_data_repo.delete(journal_id)
     elif journal_type == JournalType.CROSS_COUNTRY_SKIING:
         await skiing_data_repo.delete(journal_id)
+    elif journal_type == JournalType.CAVING:
+        await caving_data_repo.delete(journal_id)
     # EVENT has no dedicated type-specific table (uses calendar_info via CalendarInfo)
     # and is handled by the service layer
 
@@ -578,6 +580,13 @@ async def _enrich_journal_data(
         types.append(JournalType.CROSS_COUNTRY_SKIING.value)
         type_data[JournalType.CROSS_COUNTRY_SKIING.value] = (
             TypeDataConverter.cross_country_skiing_data_to_schema(skiing_data)
+        )
+
+    caving_data = await caving_data_repo.find_by_journal_id(journal_id)
+    if caving_data:
+        types.append(JournalType.CAVING.value)
+        type_data[JournalType.CAVING.value] = TypeDataConverter.caving_data_to_schema(
+            caving_data
         )
 
     # If no types found, it's a NOTE
@@ -2005,6 +2014,15 @@ async def _process_journal_type_data(
             canyoning_data_repo,
         )
 
+    # Process CAVING type data
+    if "caving" in normalized_type_data and caving_data_repo:
+        await _update_caving_type_data(
+            journal_id,
+            "CAVING",
+            normalized_type_data["caving"],
+            caving_data_repo,
+        )
+
     # Process CLIMBING type data
     if "climbing" in normalized_type_data and climbing_data_repo:
         await _update_climbing_type_data(
@@ -3318,6 +3336,34 @@ async def _update_canyoning_type_data(
     await canyoning_data_repo.save(validated_data)
 
 
+async def _update_caving_type_data(
+    journal_id: int,
+    journal_type: str,
+    attrs: dict[str, Any],
+    caving_data_repo: CavingDataRepository,
+) -> None:
+    """Update CAVING type-specific data."""
+    caving_data = await caving_data_repo.find_by_journal_id(journal_id)
+    if not caving_data:
+        raise JournalValidationError(
+            "journal_type", f"Journal does not have type {journal_type}"
+        )
+
+    # Build update kwargs and use dataclasses.replace() to trigger __post_init__ validation.
+    updates: dict[str, Any] = {}
+    if "template_id" in attrs:
+        updates["template_id"] = _parse_optional_uuid(
+            attrs["template_id"], "template_id"
+        )
+    if "is_vertical" in attrs:
+        updates["is_vertical"] = attrs["is_vertical"]
+    if "is_horizontal" in attrs:
+        updates["is_horizontal"] = attrs["is_horizontal"]
+
+    validated_data = dataclasses.replace(caving_data, **updates)
+    await caving_data_repo.save(validated_data)
+
+
 async def _update_climbing_type_data(
     journal_id: int,
     journal_type: str,
@@ -3503,6 +3549,10 @@ async def update_type_data(
     elif jtype == JournalType.CANYONING:
         await _update_canyoning_type_data(
             journal_id, journal_type, attrs, canyoning_data_repo
+        )
+    elif jtype == JournalType.CAVING:
+        await _update_caving_type_data(
+            journal_id, journal_type, attrs, caving_data_repo
         )
     elif jtype == JournalType.CLIMBING:
         await _update_climbing_type_data(
