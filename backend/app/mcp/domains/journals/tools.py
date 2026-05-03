@@ -4375,7 +4375,7 @@ async def list_gear_items(
 
 
 @mcp_unified_error_handler("get_gear_item", "journal")
-async def get_gear_item_mcp(
+async def get_gear_item(
     gear_item_id: Annotated[str, Field(description="Gear item UUID")],
     user_id: str = mcp_depends(get_current_user_id),
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
@@ -4404,7 +4404,7 @@ async def get_gear_item_mcp(
 
 
 @mcp_unified_error_handler("update_gear_item", "journal")
-async def update_gear_item_mcp(
+async def update_gear_item(
     gear_item_id: Annotated[str, Field(description="Gear item UUID")],
     name: Annotated[str | None, Field(default=None, description="Updated name")] = None,
     model: Annotated[
@@ -4516,5 +4516,5 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
     mcp.add_tool(update_template)
     mcp.add_tool(create_gear_item)
     mcp.add_tool(list_gear_items)
-    mcp.add_tool(get_gear_item_mcp)
-    mcp.add_tool(update_gear_item_mcp)
+    mcp.add_tool(get_gear_item)
+    mcp.add_tool(update_gear_item)
