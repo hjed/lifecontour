@@ -8,7 +8,7 @@ reducing duplication and ensuring consistent response structures.
 from datetime import datetime
 from typing import Any
 
-from core_shared.models.journals import Calendar, Journal
+from core_shared.models.journals import Calendar, GearItem, Journal
 from core_shared.models.journals.activity_template import ActivityTemplate
 
 from app.core.journal.models.journal_tag import JournalTag
@@ -19,6 +19,8 @@ from app.mcp.domains.journals.schemas import (
     ContactRelationshipSchema,
     ContactRelationshipSummary,
     EventDateRangeSchema,
+    GearItemListMCPResponse,
+    GearItemMCPResponse,
     JournalChildSummary,
     JournalResponse,
     JournalSearchResult,
@@ -290,5 +292,46 @@ class ActivityTemplateMCPConverter:
 
         return ActivityTemplateListMCPResponse(
             templates=mcp_templates,
+            summary=summary,
+        )
+
+
+class GearItemMCPConverter:
+    """Converter for gear item entities to AI-friendly MCP formats."""
+
+    @staticmethod
+    def to_mcp_response(
+        gear_item: GearItem,
+    ) -> GearItemMCPResponse:
+        """Convert a gear item entity to an MCP response."""
+        summary = f"Gear: {gear_item.name}"
+        if gear_item.manufacturer:
+            summary += f" by {gear_item.manufacturer}"
+        if gear_item.model:
+            summary += f" ({gear_item.model})"
+
+        return GearItemMCPResponse(
+            id=str(gear_item.id),
+            name=gear_item.name,
+            model=gear_item.model,
+            serial_number=gear_item.serial_number,
+            purchase_date=(
+                gear_item.purchase_date.isoformat() if gear_item.purchase_date else None
+            ),
+            manufacturer=gear_item.manufacturer,
+            summary=summary,
+        )
+
+    @staticmethod
+    def to_mcp_list_response(
+        gear_items: list[GearItem],
+    ) -> GearItemListMCPResponse:
+        """Convert a list of gear items to an MCP list response."""
+        mcp_items = [GearItemMCPConverter.to_mcp_response(item) for item in gear_items]
+
+        summary = f"Found {len(gear_items)} gear items."
+
+        return GearItemListMCPResponse(
+            gear_items=mcp_items,
             summary=summary,
         )

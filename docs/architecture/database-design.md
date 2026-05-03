@@ -204,6 +204,7 @@ See [Journal System Specification](../journal-system-specification.md) for compl
 - Supporting tables: `routes`, `journal_tags`, `journal_contacts`, `journal_events`
 - Proper foreign key constraints and indexes for search/filtering
 - Template system: `activity_templates` (UUID pk, user-owned, type-specific columns for canyoning/caving/climbing), `template_pitches` (FK to activity_templates, cascade delete, unique template_id+pitch_number)
+- Gear item tracking: `gear_items` (UUID pk, user-owned, name required, model/serial_number/purchase_date/manufacturer optional, timestamps, indexed by user_id and name)
 
 ### Photo Integration (Iteration 4)
 ```sql

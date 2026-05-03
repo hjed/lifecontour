@@ -1137,3 +1137,100 @@ class ActivityTemplateListResponse(JsonApiCollectionResponse[ActivityTemplateRes
     """Response containing multiple activity templates."""
 
     pass
+
+
+# Gear Item Schemas
+class GearItemAttributes(BaseModel):
+    """Attributes for a GearItem."""
+
+    name: str = Field(..., description="Gear item name")
+    model: str | None = Field(default=None, description="Model name/number")
+    serial_number: str | None = Field(default=None, description="Serial number")
+    purchase_date: date | None = Field(default=None, description="Date of purchase")
+    manufacturer: str | None = Field(default=None, description="Manufacturer name")
+    created_at: datetime | None = Field(default=None, description="Creation timestamp")
+    updated_at: datetime | None = Field(
+        default=None, description="Last update timestamp"
+    )
+
+
+class GearItemResource(BaseModel):
+    """JSON API resource for a gear item."""
+
+    type: str = Field(default="gear-items", description=RESOURCE_TYPE_DESC)
+    id: str = Field(..., description=RESOURCE_ID_DESC)
+    attributes: GearItemAttributes = Field(..., description="Gear item attributes")
+    links: JsonApiLinks | None = Field(default=None, description=RESOURCE_LINKS_DESC)
+
+
+class GearItemCreateAttributes(BaseModel):
+    """Attributes for creating a gear item."""
+
+    name: str = Field(..., description="Gear item name", min_length=1, max_length=200)
+    model: str | None = Field(
+        default=None, description="Model name/number", max_length=200
+    )
+    serial_number: str | None = Field(
+        default=None, description="Serial number", max_length=200
+    )
+    purchase_date: date | None = Field(default=None, description="Date of purchase")
+    manufacturer: str | None = Field(
+        default=None, description="Manufacturer name", max_length=200
+    )
+
+
+class GearItemCreateData(BaseModel):
+    """Data for creating a gear item."""
+
+    type: str = Field(default="gear-items", description=RESOURCE_TYPE_DESC)
+    attributes: GearItemCreateAttributes
+
+
+class GearItemCreateRequest(JsonApiCreateRequest[GearItemCreateData]):
+    """Request to create a gear item."""
+
+    pass
+
+
+class GearItemUpdateAttributes(BaseModel):
+    """Attributes for updating a gear item."""
+
+    name: str | None = Field(
+        default=None, description="Gear item name", min_length=1, max_length=200
+    )
+    model: str | None = Field(
+        default=None, description="Model name/number", max_length=200
+    )
+    serial_number: str | None = Field(
+        default=None, description="Serial number", max_length=200
+    )
+    purchase_date: date | None = Field(default=None, description="Date of purchase")
+    manufacturer: str | None = Field(
+        default=None, description="Manufacturer name", max_length=200
+    )
+
+
+class GearItemUpdateData(BaseModel):
+    """Data for updating a gear item."""
+
+    type: str = Field(default="gear-items", description=RESOURCE_TYPE_DESC)
+    id: str = Field(..., description=RESOURCE_ID_DESC)
+    attributes: GearItemUpdateAttributes
+
+
+class GearItemUpdateRequest(JsonApiUpdateRequest[GearItemUpdateData]):
+    """Request to update a gear item."""
+
+    pass
+
+
+class GearItemResponse(JsonApiResponse[GearItemResource]):
+    """Response containing a single gear item."""
+
+    pass
+
+
+class GearItemListResponse(JsonApiCollectionResponse[GearItemResource]):
+    """Response containing multiple gear items."""
+
+    pass

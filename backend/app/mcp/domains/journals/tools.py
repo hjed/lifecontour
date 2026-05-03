@@ -24,6 +24,7 @@ from core_shared.models.journals import (
     CrossCountrySkiingData,
     EventDateRange,
     FitnessData,
+    GearItem,
     JoggingData,
     Journal,
     JournalContactRelationship,
@@ -72,6 +73,9 @@ from app.core.journal.adapters.sql.cross_country_skiing_data_repository import (
 from app.core.journal.adapters.sql.fitness_data_repository import (
     SqlFitnessDataRepository,
 )
+from app.core.journal.adapters.sql.gear_item_repository import (
+    SqlGearItemRepository,
+)
 from app.core.journal.adapters.sql.jogging_data_repository import (
     SqlJoggingDataRepository,
 )
@@ -102,6 +106,7 @@ from app.core.journal.services.journal_service import JournalService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.mcp.domains.journals.converters import (
     ActivityTemplateMCPConverter,
+    GearItemMCPConverter,
     JournalConverter,
 )
 from app.mcp.domains.journals.schemas import (
@@ -166,6 +171,7 @@ class _JournalToolRepositories:
     contact_repo: SqlContactRepository
     tag_repo: SqlJournalTagRepository
     activity_template_repo: SqlActivityTemplateRepository
+    gear_item_repo: SqlGearItemRepository
 
 
 @dataclasses.dataclass(frozen=True)
@@ -225,6 +231,7 @@ def _create_journal_tool_repositories(
         contact_repo=SqlContactRepository(db_connection),
         tag_repo=SqlJournalTagRepository(db_connection),
         activity_template_repo=SqlActivityTemplateRepository(db_connection),
+        gear_item_repo=SqlGearItemRepository(db_connection),
     )
 
 
@@ -4304,6 +4311,178 @@ async def update_template(
         )
 
 
+@mcp_unified_error_handler("create_gear_item", "journal")
+async def create_gear_item(
+    name: Annotated[str, Field(description="Gear item name")],
+    model: Annotated[
+        str | None, Field(default=None, description="Model name/number")
+    ] = None,
+    serial_number: Annotated[
+        str | None, Field(default=None, description="Serial number")
+    ] = None,
+    purchase_date: Annotated[
+        str | None, Field(default=None, description="Purchase date (YYYY-MM-DD)")
+    ] = None,
+    manufacturer: Annotated[
+        str | None, Field(default=None, description="Manufacturer name")
+    ] = None,
+    user_id: str = mcp_depends(get_current_user_id),
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+) -> str:
+    """
+    Create a new gear item for tracking equipment (ropes, harnesses, helmets, etc.).
+    """
+    repos = _create_journal_tool_repositories(db_connection)
+
+    parsed_purchase_date = None
+    if purchase_date:
+        try:
+            parsed_purchase_date = date.fromisoformat(purchase_date)
+        except ValueError:
+            return MCPResponseBuilder.validation_error_response(
+                "purchase_date", "Invalid date format, use YYYY-MM-DD"
+            )
+
+    item = GearItem(
+        user_id=user_id,
+        name=name,
+        model=model,
+        serial_number=serial_number,
+        purchase_date=parsed_purchase_date,
+        manufacturer=manufacturer,
+    )
+
+    saved_item = await repos.gear_item_repo.save(item)
+
+    response = GearItemMCPConverter.to_mcp_response(saved_item)
+    return MCPResponseBuilder.success_response(response)
+
+
+@mcp_unified_error_handler("list_gear_items", "journal")
+async def list_gear_items(
+    user_id: str = mcp_depends(get_current_user_id),
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+) -> str:
+    """
+    List all gear items for the current user.
+    """
+    repos = _create_journal_tool_repositories(db_connection)
+
+    items = await repos.gear_item_repo.find_by_user(user_id)
+
+    response = GearItemMCPConverter.to_mcp_list_response(items)
+    return MCPResponseBuilder.success_response(response)
+
+
+@mcp_unified_error_handler("get_gear_item", "journal")
+async def get_gear_item(
+    gear_item_id: Annotated[str, Field(description="Gear item UUID")],
+    user_id: str = mcp_depends(get_current_user_id),
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+) -> str:
+    """
+    Get a specific gear item by ID.
+    """
+    repos = _create_journal_tool_repositories(db_connection)
+
+    try:
+        import uuid as uuid_mod
+
+        uuid_mod.UUID(gear_item_id)
+        item = await repos.gear_item_repo.find_by_id(gear_item_id)
+        if not item or item.user_id != user_id:
+            return MCPResponseBuilder.not_found_error_response(
+                "Gear item", gear_item_id
+            )
+
+        response = GearItemMCPConverter.to_mcp_response(item)
+        return MCPResponseBuilder.success_response(response)
+    except ValueError:
+        return MCPResponseBuilder.validation_error_response(
+            "gear_item_id", "Invalid UUID"
+        )
+
+
+@mcp_unified_error_handler("update_gear_item", "journal")
+async def update_gear_item(
+    gear_item_id: Annotated[str, Field(description="Gear item UUID")],
+    name: Annotated[str | None, Field(default=None, description="Updated name")] = None,
+    model: Annotated[
+        str | None,
+        Field(default=None, description="Updated model (pass empty string to clear)"),
+    ] = None,
+    serial_number: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Updated serial number (pass empty string to clear)",
+        ),
+    ] = None,
+    purchase_date: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Updated purchase date YYYY-MM-DD (pass empty string to clear)",
+        ),
+    ] = None,
+    manufacturer: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Updated manufacturer (pass empty string to clear)",
+        ),
+    ] = None,
+    user_id: str = mcp_depends(get_current_user_id),
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+) -> str:
+    """
+    Update an existing gear item.
+    """
+    repos = _create_journal_tool_repositories(db_connection)
+
+    try:
+        import uuid as uuid_mod
+
+        uuid_mod.UUID(gear_item_id)
+    except ValueError:
+        return MCPResponseBuilder.validation_error_response(
+            "gear_item_id", "Invalid UUID"
+        )
+
+    item = await repos.gear_item_repo.find_by_id(gear_item_id)
+    if not item or item.user_id != user_id:
+        return MCPResponseBuilder.not_found_error_response("Gear item", gear_item_id)
+
+    if name is not None:
+        item.name = name
+    if model is not None:
+        item.model = None if model == "" else model
+    if serial_number is not None:
+        item.serial_number = None if serial_number == "" else serial_number
+    if purchase_date is not None:
+        if purchase_date == "":
+            item.purchase_date = None
+        else:
+            try:
+                item.purchase_date = date.fromisoformat(purchase_date)
+            except ValueError:
+                return MCPResponseBuilder.validation_error_response(
+                    "purchase_date", "Invalid date format, use YYYY-MM-DD"
+                )
+    if manufacturer is not None:
+        item.manufacturer = None if manufacturer == "" else manufacturer
+
+    try:
+        item.__post_init__()
+    except Exception as e:
+        return MCPResponseBuilder.validation_error_response("gear_item", str(e))
+
+    saved_item = await repos.gear_item_repo.save(item)
+
+    response = GearItemMCPConverter.to_mcp_response(saved_item)
+    return MCPResponseBuilder.success_response(response)
+
+
 def register_journal_tools(mcp: FastMCP[None]) -> None:
     """
     Register journal-related MCP tools with the FastMCP server.
@@ -4335,3 +4514,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
     mcp.add_tool(get_template)
     mcp.add_tool(search_templates)
     mcp.add_tool(update_template)
+    mcp.add_tool(create_gear_item)
+    mcp.add_tool(list_gear_items)
+    mcp.add_tool(get_gear_item)
+    mcp.add_tool(update_gear_item)

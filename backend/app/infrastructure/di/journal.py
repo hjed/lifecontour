@@ -46,6 +46,9 @@ from app.core.journal.adapters.sql.downhill_skiing_data_repository import (
 from app.core.journal.adapters.sql.fitness_data_repository import (
     SqlFitnessDataRepository,
 )
+from app.core.journal.adapters.sql.gear_item_repository import (
+    SqlGearItemRepository,
+)
 from app.core.journal.adapters.sql.jogging_data_repository import (
     SqlJoggingDataRepository,
 )
@@ -88,6 +91,7 @@ from app.core.journal.models.repositories import (
     DivingDataRepository,
     DownhillSkiingDataRepository,
     FitnessDataRepository,
+    GearItemRepository,
     JoggingDataRepository,
     JournalContactRelationshipRepository,
     JournalRepository,
@@ -304,6 +308,11 @@ class JournalProvider(Provider):
     ) -> DivingDataRepository:
         """Provide a DivingDataRepository instance."""
         return SqlDivingDataRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def gear_item_repository(self, connection: AsyncConnection) -> GearItemRepository:
+        """Provide a GearItemRepository instance."""
+        return SqlGearItemRepository(connection)
 
     @provide(scope=Scope.REQUEST)
     def journal_service(

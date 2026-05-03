@@ -370,17 +370,17 @@ Deliver three minimal types together. Each has no unique fields beyond journal_i
 Create the gear item supporting entity with full CRUD. No journal type yet — gear items are standalone.
 
 **Acceptance Criteria:**
-- [ ] Migration creates `gear_items` table (id UUID, user_id, name string required, model string nullable, serial_number string nullable, purchase_date date nullable, manufacturer string nullable, timestamps)
-- [ ] `GearItem` domain entity with validation (name required, length constraints)
-- [ ] `GearItemRepository` interface and SQL implementation (save, find_by_id, find_by_user, search_by_name, delete)
-- [ ] `GearItemService` with Dishka DI
-- [ ] API endpoints: `GET /api/gear-items`, `POST /api/gear-items`, `GET /api/gear-items/{id}`, `PUT /api/gear-items/{id}`, `DELETE /api/gear-items/{id}`
-- [ ] MCP tools: `create_gear_item`, `list_gear_items`, `get_gear_item`, `update_gear_item`
-- [ ] DI provider registration
+- [x] Migration creates `gear_items` table (id UUID, user_id, name string required, model string nullable, serial_number string nullable, purchase_date date nullable, manufacturer string nullable, timestamps)
+- [x] `GearItem` domain entity with validation (name required, length constraints)
+- [x] `GearItemRepository` interface and SQL implementation (save, find_by_id, find_by_user, search_by_name, delete)
+- [x] `GearItemService` with Dishka DI
+- [x] API endpoints: `GET /api/gear-items`, `POST /api/gear-items`, `GET /api/gear-items/{id}`, `PUT /api/gear-items/{id}`, `DELETE /api/gear-items/{id}`
+- [x] MCP tools: `create_gear_item`, `list_gear_items`, `get_gear_item`, `update_gear_item`
+- [x] DI provider registration
 
 **Required Test Coverage:**
-- **Unit:** GearItem entity validation.
-- **Integration:** GearItemRepository CRUD, API endpoint tests, MCP tool tests.
+- **Unit:** ✅ GearItem entity validation (18 tests).
+- **Integration:** ✅ GearItemRepository CRUD (13 tests), API endpoint tests (9 tests).
 
 #### Phase 2: OUTDOOR_TRAINING — Full Vertical Slice
 **PR Size:** ~7–9 files

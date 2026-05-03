@@ -479,3 +479,24 @@ class ActivityTemplateListMCPResponse(BaseModel):
         description="List of templates"
     )
     summary: str = Field(description="AI-friendly summary")
+
+
+class GearItemMCPResponse(BaseModel):
+    """AI-friendly gear item response."""
+
+    id: str = Field(description="Gear item UUID")
+    name: str = Field(description="Gear item name")
+    model: str | None = Field(default=None, description="Model name/number")
+    serial_number: str | None = Field(default=None, description="Serial number")
+    purchase_date: str | None = Field(
+        default=None, description="Purchase date (ISO format)"
+    )
+    manufacturer: str | None = Field(default=None, description="Manufacturer")
+    summary: str = Field(description="AI-friendly summary of the gear item")
+
+
+class GearItemListMCPResponse(BaseModel):
+    """AI-friendly gear item list response."""
+
+    gear_items: list[GearItemMCPResponse] = Field(description="List of gear items")
+    summary: str = Field(description="AI-friendly summary")

@@ -24,6 +24,7 @@ from core_shared.models.journals import (
     DivingData,
     DownhillSkiingData,
     FitnessData,
+    GearItem,
     JoggingData,
     Journal,
     JournalContactRelationship,
@@ -54,6 +55,8 @@ from app.api.journals.schemas import (
     DownhillSkiingDataSchema,
     EventDateRangeSchema,
     FitnessDataSchema,
+    GearItemAttributes,
+    GearItemResource,
     JoggingDataSchema,
     JournalAttributes,
     JournalContactRelationshipSchema,
@@ -681,6 +684,35 @@ class ActivityTemplateConverter:
         return ActivityTemplateResource(
             type="activity-templates",
             id=str(template.id),
+            attributes=attributes,
+            links=links,
+        )
+
+
+class GearItemConverter:
+    """Converter for GearItem models to API schemas."""
+
+    @staticmethod
+    def to_resource(gear_item: GearItem, base_url: str = "") -> GearItemResource:
+        """Convert a GearItem domain model to JSON API resource."""
+        from app.api.common.schemas import JsonApiLinks
+
+        attributes = GearItemAttributes(
+            name=gear_item.name,
+            model=gear_item.model,
+            serial_number=gear_item.serial_number,
+            purchase_date=gear_item.purchase_date,
+            manufacturer=gear_item.manufacturer,
+            created_at=gear_item.created_at,
+            updated_at=gear_item.updated_at,
+        )
+
+        clean_base_url = base_url.rstrip("/") if base_url else ""
+        links = JsonApiLinks(self=f"{clean_base_url}/api/gear-items/{gear_item.id}")
+
+        return GearItemResource(
+            type="gear-items",
+            id=str(gear_item.id),
             attributes=attributes,
             links=links,
         )
