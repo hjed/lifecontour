@@ -307,18 +307,19 @@ Establish the Strava package structure, auth persistence, OAuth flow endpoints, 
 Build the `StravaAPIClient` with all methods needed for activity import. This is a pure client layer with no sync logic.
 
 **Acceptance Criteria:**
-- [ ] `StravaAPIClient` class using `httpx` async client with token injection
-- [ ] `get_athlete()` — fetch authenticated athlete profile
-- [ ] `list_activities(after, before, page, per_page)` — paginated activity listing
-- [ ] `get_activity(activity_id)` — full activity detail including `start_latlng`
-- [ ] `get_activity_streams(activity_id, keys)` — fetch latlng, altitude, time streams for GPX generation
-- [ ] Pydantic response models: `StravaAthlete`, `StravaActivity`, `StravaActivityStream`
-- [ ] Rate limiting: respect Strava's 100 requests/15 minutes and 1000 requests/day limits
-- [ ] Automatic token refresh on 401 responses: `StravaTokenService.refresh_tokens()` method + `StravaAPIClient` retry logic (moved from Phase 1 — no Phase 1 endpoints trigger 401)
+- [x] `StravaAPIClient` class using `httpx` async client with token injection
+- [x] `get_athlete()` — fetch authenticated athlete profile
+- [x] `list_activities(after, before, page, per_page)` — paginated activity listing
+- [x] `get_activity(activity_id)` — full activity detail including `start_latlng`
+- [x] `get_activity_streams(activity_id, keys)` — fetch latlng, altitude, time streams for GPX generation
+- [x] Pydantic response models: `StravaAthlete`, `StravaActivity`, `StravaActivityStream`
+- [x] Rate limiting: respect Strava's 100 requests/15 minutes and 1000 requests/day limits
+- [x] Automatic token refresh on 401 responses: `StravaTokenService.refresh_tokens()` method + `StravaAPIClient` retry logic (moved from Phase 1 — no Phase 1 endpoints trigger 401)
+- [x] Ensure code is placed appropriately in the worker according to the architecture design
 
 **Required Test Coverage:**
-- **Unit:** response model parsing for each endpoint, rate limit header handling, pagination logic.
-- **Integration:** API client with mocked Strava HTTP responses for each method, including error responses (401, 429, 500).
+- **Unit (29 tests):** response model parsing for each endpoint (11), rate limit header handling and enforcement (7), API client endpoint routing and token refresh (11).
+- **Integration (7 tests):** API client with mocked Strava HTTP responses (httpx MockTransport) for each method, including error responses (401 refresh flow, 429, 500).
 
 #### Phase 3: Webhook Subscription and Worker Shell
 **PR Size:** ~5–7 files
