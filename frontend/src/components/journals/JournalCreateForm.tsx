@@ -104,6 +104,9 @@ import {
   PlanTypeEditor,
   TravelTypeEditor,
   PhotoAlbumTypeEditor,
+  SnorkellingTypeEditor,
+  DivingTypeEditor,
+  DownhillSkiingTypeEditor,
 } from './type-editors';
 import { JournalSearchCombobox } from './JournalSearchCombobox';
 
@@ -615,6 +618,30 @@ export function JournalCreateForm({
     [handleTypeDataChange]
   );
 
+  const handleSnorkellingChange = useCallback(
+    (data: unknown) =>
+      handleTypeDataChange(
+        JournalType.SNORKELLING,
+        data as Record<string, never>
+      ),
+    [handleTypeDataChange]
+  );
+
+  const handleDivingChange = useCallback(
+    (data: unknown) =>
+      handleTypeDataChange(JournalType.DIVING, data as Record<string, never>),
+    [handleTypeDataChange]
+  );
+
+  const handleDownhillSkiingChange = useCallback(
+    (data: unknown) =>
+      handleTypeDataChange(
+        JournalType.DOWNHILL_SKIING,
+        data as Record<string, never>
+      ),
+    [handleTypeDataChange]
+  );
+
   const onSubmit = async (values: FormValues) => {
     try {
       const endDate = values.dateRange.to || values.dateRange.from;
@@ -994,6 +1021,24 @@ export function JournalCreateForm({
                       <CrossCountrySkiingTypeEditor
                         createMode
                         onChange={handleCrossCountrySkiingChange}
+                      />
+                    )}
+                    {type === JournalType.SNORKELLING && (
+                      <SnorkellingTypeEditor
+                        createMode
+                        onChange={handleSnorkellingChange}
+                      />
+                    )}
+                    {type === JournalType.DIVING && (
+                      <DivingTypeEditor
+                        createMode
+                        onChange={handleDivingChange}
+                      />
+                    )}
+                    {type === JournalType.DOWNHILL_SKIING && (
+                      <DownhillSkiingTypeEditor
+                        createMode
+                        onChange={handleDownhillSkiingChange}
                       />
                     )}
                   </CardContent>

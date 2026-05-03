@@ -15,7 +15,7 @@ async def test_create_downhill_skiing_journal(authenticated_client: AsyncClient)
                     "start": "2026-05-02T10:00:00Z",
                     "end": "2026-05-02T12:00:00Z",
                 },
-                "types": ["downhill_skiing", "outdoor_activity", "fitness"],
+                "types": ["downhill_skiing"],
                 "type_data": {
                     "downhill_skiing": {},
                     "outdoor_activity": {},

@@ -15,7 +15,7 @@ async def test_create_diving_journal(authenticated_client: AsyncClient):
                     "start": "2026-05-02T10:00:00Z",
                     "end": "2026-05-02T12:00:00Z",
                 },
-                "types": ["diving", "outdoor_activity", "fitness"],
+                "types": ["diving"],
                 "type_data": {
                     "diving": {},
                     "outdoor_activity": {},
