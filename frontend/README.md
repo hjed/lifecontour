@@ -6,8 +6,8 @@ Next.js TypeScript frontend for the Personal CRM & Journal System with shadcn/ui
 
 ### Prerequisites
 
-- Node.js 18+
-- pnpm 8+
+- Node.js 22+
+- pnpm 11+
 
 ### Development Setup
 

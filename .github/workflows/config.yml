@@ -12,13 +12,13 @@ on:
         value: "3.11"
       node-version:
         description: "Node.js version to use"
-        value: "18"
+        value: "22"
       uv-version:
         description: "UV version to use"
         value: "0.4.18"
       pnpm-version:
         description: "PNPM version to use"
-        value: "9.12.0"
+        value: "11.0.4"
 
 # Environment variables that can be used across workflows
 env:
@@ -27,8 +27,8 @@ env:
   UV_VERSION: "0.4.18"
 
   # Node.js configuration
-  NODE_VERSION: "18"
-  PNPM_VERSION: "9.12.0"
+  NODE_VERSION: "22"
+  PNPM_VERSION: "11.0.4"
 
   # Testing configuration
   PYTEST_ARGS: "--cov=app --cov-report=xml --cov-report=term-missing"
