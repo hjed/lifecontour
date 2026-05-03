@@ -1,6 +1,6 @@
 'use client';
 
-import { useId } from 'react';
+import { useId, useState } from 'react';
 import { Compass, Ruler } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -18,6 +18,13 @@ import {
 } from './GenericTypeEditorLayout';
 import { useTypeEditorState } from './useTypeEditorState';
 
+import { TemplateSelector } from './TemplateSelector';
+import { CreateTemplateDialog } from './CreateTemplateDialog';
+import {
+  ActivityTemplateResource,
+  ActivityTemplateType,
+} from '@/types/journals';
+
 interface ClimbingTypeEditorProps {
   readonly journalId?: string;
   readonly data?: ClimbingData;
@@ -26,6 +33,9 @@ interface ClimbingTypeEditorProps {
   readonly 'data-testid'?: string;
   readonly createMode?: boolean;
   readonly onChange?: (data: ClimbingData) => void;
+  readonly onTemplateSelect?: (
+    template: ActivityTemplateResource
+  ) => void | Promise<void>;
 }
 
 const DEFAULT_DATA: ClimbingData = {};
@@ -39,6 +49,7 @@ export function ClimbingTypeEditor({
   'data-testid': testId,
   createMode = false,
   onChange,
+  onTemplateSelect,
 }: ClimbingTypeEditorProps) {
   const baseId = useId();
   const climbingTypeFieldId = `${baseId}-climbing-type`;
@@ -58,6 +69,51 @@ export function ClimbingTypeEditor({
     createMode,
     onChange,
   });
+
+  const [createTemplateOpen, setCreateTemplateOpen] = useState(false);
+  const [pendingTemplate, setPendingTemplate] =
+    useState<ActivityTemplateResource | null>(null);
+
+  const handleCustomSave = async () => {
+    await handleSave();
+    if (!createMode && pendingTemplate && onTemplateSelect) {
+      try {
+        await Promise.resolve(onTemplateSelect(pendingTemplate));
+      } finally {
+        setPendingTemplate(null);
+      }
+    }
+  };
+
+  const handleEditorCancel = () => {
+    setPendingTemplate(null);
+    handleCancel();
+  };
+
+  const handleTemplateSelection = (template: ActivityTemplateResource) => {
+    setEditData(prev => {
+      const next = {
+        ...prev,
+        template_id: template.id,
+      };
+      if (template.attributes.climbing_type) {
+        next.climbing_type = template.attributes.climbing_type;
+      }
+      if (template.attributes.grade != null) {
+        next.grade = template.attributes.grade;
+      }
+      if (template.attributes.length != null) {
+        next.length = template.attributes.length;
+      }
+      return next;
+    });
+
+    if (createMode && onTemplateSelect) {
+      Promise.resolve(onTemplateSelect(template)).catch(console.error);
+    } else {
+      setPendingTemplate(template);
+    }
+  };
 
   const summaryItems = compactSummaryItems(
     data?.climbing_type
@@ -90,9 +146,36 @@ export function ClimbingTypeEditor({
       summaryItems={summaryItems}
       summaryTestId='climbing-summary'
       onEdit={handleEdit}
-      onSave={handleSave}
-      onCancel={handleCancel}
+      onSave={handleCustomSave}
+      onCancel={handleEditorCancel}
     >
+      <div className='space-y-2'>
+        <Label
+          htmlFor={`${baseId}-template-selector`}
+          className='flex items-center gap-2'
+        >
+          <Compass
+            className='text-muted-foreground h-4 w-4'
+            aria-hidden='true'
+          />
+          Template
+        </Label>
+        <TemplateSelector
+          inputId={`${baseId}-template-selector`}
+          templateType={ActivityTemplateType.CLIMBING}
+          onSelect={handleTemplateSelection}
+          onCreateTemplate={() => setCreateTemplateOpen(true)}
+          disabled={!isEditing && !createMode}
+          placeholder='Select a climbing template...'
+        />
+        <CreateTemplateDialog
+          open={createTemplateOpen}
+          onOpenChange={setCreateTemplateOpen}
+          defaultTemplateType={ActivityTemplateType.CLIMBING}
+          onCreated={handleTemplateSelection}
+        />
+      </div>
+
       <div className='space-y-2'>
         <Label htmlFor={climbingTypeFieldId}>Climbing Type</Label>
         <Select

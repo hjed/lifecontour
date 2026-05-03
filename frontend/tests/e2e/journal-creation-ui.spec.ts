@@ -643,6 +643,76 @@ test.describe('Journal Creation UI Flow', () => {
     });
   });
 
+  test('should pre-populate climbing fields and abseiling pitches when a template is selected', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+
+    // Create a template via API with specific climbing data and pitches
+    const templateName = `E2E Climbing Template ${Date.now()}`;
+    const templateRes = await page.request.post('/api/templates', {
+      data: {
+        data: {
+          type: 'activity-templates',
+          attributes: {
+            name: templateName,
+            template_type: 'climbing',
+            climbing_type: 'sport',
+            grade: 21,
+            length: 30,
+            pitches: [
+              { pitch_number: 1, height: 15 },
+              { pitch_number: 2, height: 15 },
+            ],
+          },
+        },
+      },
+    });
+    expect(templateRes.ok()).toBeTruthy();
+
+    await navigateToNewJournal(page);
+
+    await page.getByLabel(/title/i).fill(`Climbing Template ${Date.now()}`);
+    await page.getByLabel(/content/i).fill('Journal using template.');
+    await page.getByLabel(/^climbing$/i).check();
+
+    await expect(page.getByTestId('climbing-type-editor')).toBeVisible();
+
+    // Select the template by typing to filter and trigger the dropdown
+    await page.getByPlaceholder('Select a climbing template...').click();
+    await page
+      .getByPlaceholder('Select a climbing template...')
+      .fill('E2E Climbing');
+
+    // Wait for the option to appear and click it
+    const option = page.getByRole('option', {
+      name: new RegExp(templateName, 'i'),
+    });
+    await expect(option).toBeVisible();
+    await option.click();
+
+    // Verify Climbing fields are populated
+    await expect(page.getByTestId('climbing-grade-input')).toHaveValue('21');
+    await expect(page.getByTestId('climbing-length-input')).toHaveValue('30');
+    // climbing type combobox
+    const climbingTypeCombobox = page
+      .getByTestId('climbing-type-editor')
+      .getByRole('combobox', { name: /climbing type/i });
+    await expect(climbingTypeCombobox).toContainText('sport');
+
+    // Verify Abseiling Trip editor is visible and pitches are populated
+    await expect(page.getByTestId('abseiling-trip-type-editor')).toBeVisible();
+    await expect(page.getByTestId('number-of-abseils-input')).toHaveValue('2');
+    await expect(page.getByTestId('total-length-input')).toHaveValue('30');
+
+    await expect(
+      page.getByTestId('pitch-row-0').getByPlaceholder('Height')
+    ).toHaveValue('15');
+    await expect(
+      page.getByTestId('pitch-row-1').getByPlaceholder('Height')
+    ).toHaveValue('15');
+  });
+
   test('should create a CLIMBING journal and verify dependencies and summary', async ({
     authenticatedPage,
   }) => {
@@ -655,10 +725,15 @@ test.describe('Journal Creation UI Flow', () => {
         typeLabelRegex: /^climbing$/i,
       },
       selectedTypeTestId: 'CLIMBING',
-      dependencyTypeTestIds: ['OUTDOOR_ACTIVITY', 'FITNESS'],
+      dependencyTypeTestIds: ['ABSEILING_TRIP', 'OUTDOOR_ACTIVITY', 'FITNESS'],
       editorTestId: 'climbing-type-editor',
       badgeTestId: 'manage-type-climbing',
-      attachedTypes: ['climbing', 'outdoor_activity', 'fitness'],
+      attachedTypes: [
+        'climbing',
+        'abseiling_trip',
+        'outdoor_activity',
+        'fitness',
+      ],
       typeSectionTriggerTestId: 'type-section-trigger-climbing',
       summaryTestId: 'climbing-summary',
       fillTypeFields: async ({ page: detailPage, editor }) => {
@@ -672,6 +747,13 @@ test.describe('Journal Creation UI Flow', () => {
 
         await detailPage.getByTestId('climbing-grade-input').fill('18');
         await detailPage.getByTestId('climbing-length-input').fill('30');
+
+        // Verify abseiling pitch editor is available and add a pitch
+        await detailPage.getByTestId('add-pitch-button').click();
+        await detailPage
+          .getByTestId('pitch-row-0')
+          .getByPlaceholder('Height')
+          .fill('30');
       },
       assertSummary: async ({ summary }) => {
         await expect(summary).toContainText('sport');
@@ -681,7 +763,7 @@ test.describe('Journal Creation UI Flow', () => {
     });
   });
 
-  test('should create a KAYAKING journal and verify dependencies and summary', async ({
+  test('should create a KAYAKING journal (non-white-water) and verify dependencies and summary', async ({
     authenticatedPage,
   }) => {
     const page = authenticatedPage;
@@ -704,6 +786,38 @@ test.describe('Journal Creation UI Flow', () => {
       },
       assertSummary: async ({ summary }) => {
         await expect(summary).toContainText('river');
+      },
+    });
+  });
+
+  test('should create a KAYAKING journal (white-water) and verify dependencies and summary', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+    await createRouteBackedComplexJournal(page, {
+      gpxTrackName: `E2E_Kayak_WW_Route_${Date.now()}`,
+      journal: {
+        title: `White Water Kayak ${Date.now()}`,
+        content: 'Intense white water session.',
+        typeLabelRegex: /^kayaking$/i,
+      },
+      selectedTypeTestId: 'KAYAKING',
+      dependencyTypeTestIds: ['OUTDOOR_ACTIVITY', 'FITNESS'],
+      editorTestId: 'kayaking-type-editor',
+      badgeTestId: 'manage-type-kayaking',
+      attachedTypes: ['kayaking', 'outdoor_activity', 'fitness'],
+      typeSectionTriggerTestId: 'type-section-trigger-kayaking',
+      summaryTestId: 'kayaking-summary',
+      fillTypeFields: async ({ page: detailPage }) => {
+        await detailPage.getByTestId('water-type-input').fill('river');
+        await detailPage.getByTestId('is-white-water-input').click();
+        await detailPage.getByTestId('rapids-grade-input').click();
+        await detailPage.getByRole('option', { name: 'Grade III' }).click();
+      },
+      assertSummary: async ({ summary }) => {
+        await expect(summary).toContainText('river');
+        await expect(summary).toContainText('Yes');
+        await expect(summary).toContainText('III');
       },
     });
   });
