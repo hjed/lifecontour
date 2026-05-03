@@ -266,7 +266,10 @@ export function JournalContactBadge({
                 </div>
                 <ContactSearchCombobox
                   onSelect={contact =>
-                    setSelectedContacts(prev => [...prev, contact])
+                    setSelectedContacts(prev => {
+                      if (prev.some(c => c.id === contact.id)) return prev;
+                      return [...prev, contact];
+                    })
                   }
                   placeholder='Search for a contact...'
                   inputId='journal-contact-search'

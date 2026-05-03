@@ -139,8 +139,10 @@ test.describe('Journal Contact Search (Typeahead)', () => {
       await expect(page.getByRole('listbox')).toBeVisible({ timeout: 10000 });
       await page.getByRole('option', { name: contactName }).click();
 
-      // Verify the contact was selected (shown in the "Selected:" text)
-      await expect(page.getByText(`Selected: ${contactName}`)).toBeVisible();
+      // Verify the contact was selected (shown as a badge)
+      await expect(
+        page.getByRole('button', { name: `Remove ${contactName}` })
+      ).toBeVisible();
 
       // Confirm the addition
       await page.getByRole('button', { name: 'Add', exact: true }).click();
