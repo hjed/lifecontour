@@ -27,6 +27,7 @@ from core_shared.models.journals import (
     DivingData,
     DownhillSkiingData,
     FitnessData,
+    GearItem,
     JoggingData,
     Journal,
     JournalContactRelationship,
@@ -2075,5 +2076,78 @@ class DownhillSkiingDataRepository(ABC):
 
         Args:
             journal_id: The journal ID to delete downhill skiing data for
+        """
+        pass
+
+
+class GearItemRepository(ABC):
+    """
+    Repository interface for gear item operations.
+
+    Gear items are user-owned supporting entities that represent
+    equipment (e.g. rope, harness, helmet). They are referenced
+    from GEAR_MAINTENANCE journal type data.
+    """
+
+    @abstractmethod
+    async def save(self, gear_item: GearItem) -> GearItem:
+        """
+        Save a gear item (insert or update).
+
+        Args:
+            gear_item: The gear item to save
+
+        Returns:
+            The saved gear item with updated fields (id, timestamps)
+        """
+        pass
+
+    @abstractmethod
+    async def find_by_id(self, gear_item_id: str) -> GearItem | None:
+        """
+        Find a gear item by ID.
+
+        Args:
+            gear_item_id: The gear item UUID string to look up
+
+        Returns:
+            The GearItem if found, None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def find_by_user(self, user_id: str) -> list[GearItem]:
+        """
+        Find all gear items for a user, ordered by name ascending.
+
+        Args:
+            user_id: The owner user ID
+
+        Returns:
+            List of gear items ordered by name
+        """
+        pass
+
+    @abstractmethod
+    async def search_by_name(self, user_id: str, query: str) -> list[GearItem]:
+        """
+        Search gear items by name using case-insensitive partial matching.
+
+        Args:
+            user_id: The owner user ID
+            query: The search query string
+
+        Returns:
+            List of matching gear items ordered by name
+        """
+        pass
+
+    @abstractmethod
+    async def delete(self, gear_item_id: str) -> None:
+        """
+        Delete a gear item by ID.
+
+        Args:
+            gear_item_id: The gear item UUID string to delete
         """
         pass

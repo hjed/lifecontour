@@ -22,6 +22,8 @@ from .constants import (
     MAX_CONFIRMATION_NUMBER_LENGTH,
     MAX_ENERGY_LEVEL,
     MAX_FLIGHT_NUMBER_LENGTH,
+    MAX_GEAR_ITEM_FIELD_LENGTH,
+    MAX_GEAR_ITEM_NAME_LENGTH,
     MAX_GOOGLE_CALENDAR_ID_LENGTH,
     MAX_HIERARCHY_DEPTH,
     MAX_IMMICH_ALBUM_ID_LENGTH,
@@ -73,6 +75,7 @@ from .exceptions import (
     DivingDataValidationError,
     DownhillSkiingDataValidationError,
     FitnessDataValidationError,
+    GearItemValidationError,
     GPXParsingError,
     JoggingDataValidationError,
     JournalCycleError,
@@ -100,6 +103,7 @@ from .exceptions import (
     TravelTransportationValidationError,
 )
 from .fitness_data import FitnessData
+from .gear_item import GearItem
 from .jogging_data import JoggingData
 from .journal_contact_relationship import JournalContactRelationship
 from .journal_relationship_types import JournalContactRelationshipType
@@ -159,6 +163,8 @@ __all__ = [
     "VALID_TEMPLATE_TYPES",
     "MAX_REGION_LENGTH",
     "MAX_TEMPLATE_NAME_LENGTH",
+    "MAX_GEAR_ITEM_NAME_LENGTH",
+    "MAX_GEAR_ITEM_FIELD_LENGTH",
     "MAX_WATER_GAUGE_NAME_LENGTH",
     # Entities
     "Journal",
@@ -178,6 +184,7 @@ __all__ = [
     "BushwalkingData",
     "AbseilPitch",
     "AbseilingData",
+    "GearItem",
     "ActivityTemplate",
     "TemplatePitch",
     "CanoeingData",
@@ -229,6 +236,7 @@ __all__ = [
     "AbseilPitchValidationError",
     "AbseilingDataValidationError",
     "ActivityTemplateValidationError",
+    "GearItemValidationError",
     "TemplatePitchValidationError",
     "CanoeingDataValidationError",
     "CanyoningDataValidationError",
