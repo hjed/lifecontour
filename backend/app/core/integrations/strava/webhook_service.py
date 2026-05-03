@@ -16,6 +16,10 @@ logger = structlog.get_logger()
 # Strava Push Subscription API endpoint
 STRAVA_PUSH_SUBSCRIPTIONS_URL = "https://www.strava.com/api/v3/push_subscriptions"
 
+# Timeout for Strava API calls (seconds). Prevents indefinite hangs
+# on slow/unresponsive network connections during OAuth and webhook ops.
+STRAVA_API_TIMEOUT_SECONDS = 30.0
+
 
 class StravaWebhookError(Exception):
     """Raised when a Strava webhook operation fails."""
@@ -69,7 +73,7 @@ class StravaWebhookService:
             StravaWebhookError: If subscription creation fails.
         """
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=STRAVA_API_TIMEOUT_SECONDS) as client:
                 response = await client.post(
                     STRAVA_PUSH_SUBSCRIPTIONS_URL,
                     data={
@@ -130,7 +134,7 @@ class StravaWebhookService:
         """
         try:
             url = f"{STRAVA_PUSH_SUBSCRIPTIONS_URL}/{subscription_id}"
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=STRAVA_API_TIMEOUT_SECONDS) as client:
                 response = await client.delete(
                     url,
                     params={
@@ -180,7 +184,7 @@ class StravaWebhookService:
             StravaWebhookError: If the verification request fails.
         """
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=STRAVA_API_TIMEOUT_SECONDS) as client:
                 response = await client.get(
                     STRAVA_PUSH_SUBSCRIPTIONS_URL,
                     params={

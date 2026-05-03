@@ -264,6 +264,51 @@ class StravaTokenService:
             subscription_id=subscription_id,
         )
 
+    async def set_webhook_verify_token(
+        self,
+        user_id: str,
+        verify_token: str,
+    ) -> None:
+        """
+        Store the webhook verify token without overwriting subscription_id.
+
+        Used before calling Strava's subscribe API so the handshake GET
+        can look up the verify token. Preserves any existing subscription_id
+        to avoid losing a valid ID if subscribe() subsequently fails.
+
+        Args:
+            user_id: User ID.
+            verify_token: Verify token for subscription handshake.
+        """
+        stmt = text("""
+            UPDATE user_strava_auth
+            SET strava_webhook_verify_token = :verify_token,
+                updated_at = :now
+            WHERE user_id = :user_id
+        """)
+        await self.connection.execute(
+            stmt,
+            {
+                "user_id": user_id,
+                "verify_token": verify_token,
+                "now": datetime.now(UTC),
+            },
+        )
+        logger.info(
+            "Updated Strava webhook verify token",
+            user_id=user_id,
+        )
+
+    async def commit(self) -> None:
+        """
+        Explicitly commit the current transaction.
+
+        Used to flush pending writes so that concurrent requests (e.g.
+        Strava's webhook handshake GET arriving while the OAuth callback
+        is still processing) can see the data.
+        """
+        await self.connection.commit()
+
     async def get_webhook_verify_token(self) -> str | None:
         """
         Retrieve the stored webhook verify token.

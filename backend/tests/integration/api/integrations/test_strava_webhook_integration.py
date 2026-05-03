@@ -314,19 +314,23 @@ class TestStravaWebhookPost:
         """POST with unknown subscription_id returns 200 but skips enqueue."""
         await self._insert_subscription(async_connection, test_settings)
 
-        response = await authenticated_client.post(
-            "/api/integrations/strava/webhook",
-            json={
-                "aspect_type": "create",
-                "object_type": "activity",
-                "object_id": 12345678,
-                "owner_id": 67890,
-                "subscription_id": 11111,  # Not the known ID
-                "event_time": 1700000000,
-            },
-        )
+        with patch(
+            "app.api.integrations.strava_controllers.ArqRedis.enqueue_job",
+        ) as mock_enqueue:
+            response = await authenticated_client.post(
+                "/api/integrations/strava/webhook",
+                json={
+                    "aspect_type": "create",
+                    "object_type": "activity",
+                    "object_id": 12345678,
+                    "owner_id": 67890,
+                    "subscription_id": 11111,  # Not the known ID
+                    "event_time": 1700000000,
+                },
+            )
 
         assert response.status_code == 200
+        mock_enqueue.assert_not_called()
 
     async def test_webhook_post_enqueue_failure_returns_500(
         self, authenticated_client, async_connection, test_settings

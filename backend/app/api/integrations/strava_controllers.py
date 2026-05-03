@@ -236,12 +236,19 @@ async def strava_oauth_callback(
                 )
 
                 # Store the verify token BEFORE calling Strava so the
-                # validation GET handler can look it up during handshake
-                await strava_token_service.set_webhook_subscription(
+                # validation GET handler can look it up during handshake.
+                # Only update the verify_token — preserve any existing
+                # subscription_id to avoid losing a valid ID if subscribe()
+                # fails (e.g. Strava 409 for an existing app subscription).
+                await strava_token_service.set_webhook_verify_token(
                     user_id=str(user.id),
-                    subscription_id=None,  # Not yet known
                     verify_token=verify_token,
                 )
+
+                # Explicitly commit so the Strava handshake GET — which
+                # arrives as a separate HTTP request/transaction — can see
+                # the verify token we just stored.
+                await strava_token_service.commit()
 
                 webhook_service = StravaWebhookService(
                     client_id=settings.strava_client_id,
