@@ -226,3 +226,131 @@ class StravaTokenService:
         """)
         result = await self.connection.execute(stmt, {"user_id": user_id})
         return result.fetchone() is not None
+
+    async def set_webhook_subscription(
+        self,
+        user_id: str,
+        subscription_id: int | None,
+        verify_token: str | None,
+    ) -> None:
+        """
+        Store or clear the Strava webhook subscription data.
+
+        Args:
+            user_id: User ID.
+            subscription_id: Strava push subscription ID, or None to clear.
+            verify_token: Verify token used during subscription handshake,
+                or None to clear.
+        """
+        stmt = text("""
+            UPDATE user_strava_auth
+            SET strava_webhook_subscription_id = :subscription_id,
+                strava_webhook_verify_token = :verify_token,
+                updated_at = :now
+            WHERE user_id = :user_id
+        """)
+        await self.connection.execute(
+            stmt,
+            {
+                "user_id": user_id,
+                "subscription_id": subscription_id,
+                "verify_token": verify_token,
+                "now": datetime.now(UTC),
+            },
+        )
+        logger.info(
+            "Updated Strava webhook subscription",
+            user_id=user_id,
+            subscription_id=subscription_id,
+        )
+
+    async def set_webhook_verify_token(
+        self,
+        user_id: str,
+        verify_token: str,
+    ) -> None:
+        """
+        Store the webhook verify token without overwriting subscription_id.
+
+        Used before calling Strava's subscribe API so the handshake GET
+        can look up the verify token. Preserves any existing subscription_id
+        to avoid losing a valid ID if subscribe() subsequently fails.
+
+        Args:
+            user_id: User ID.
+            verify_token: Verify token for subscription handshake.
+        """
+        stmt = text("""
+            UPDATE user_strava_auth
+            SET strava_webhook_verify_token = :verify_token,
+                updated_at = :now
+            WHERE user_id = :user_id
+        """)
+        await self.connection.execute(
+            stmt,
+            {
+                "user_id": user_id,
+                "verify_token": verify_token,
+                "now": datetime.now(UTC),
+            },
+        )
+        logger.info(
+            "Updated Strava webhook verify token",
+            user_id=user_id,
+        )
+
+    async def commit(self) -> None:
+        """
+        Explicitly commit the current transaction.
+
+        Used to flush pending writes so that concurrent requests (e.g.
+        Strava's webhook handshake GET arriving while the OAuth callback
+        is still processing) can see the data.
+        """
+        await self.connection.commit()
+
+    async def get_webhook_verify_token(self) -> str | None:
+        """
+        Retrieve the stored webhook verify token.
+
+        Looks up the verify token from any user_strava_auth row. The token
+        is stored *before* Strava's validation handshake (when
+        ``subscription_id`` is still NULL), so the query must not
+        filter on ``subscription_id``.
+
+        Returns:
+            The verify token string, or None if no token exists.
+        """
+        stmt = text("""
+            SELECT strava_webhook_verify_token
+            FROM user_strava_auth
+            WHERE strava_webhook_verify_token IS NOT NULL
+            LIMIT 1
+        """)
+        result = await self.connection.execute(stmt)
+        row = result.fetchone()
+        if row and row.strava_webhook_verify_token:
+            return str(row.strava_webhook_verify_token)
+        return None
+
+    async def has_subscription_id(self, subscription_id: int) -> bool:
+        """
+        Check whether a given Strava webhook subscription ID is stored.
+
+        Used by the webhook POST endpoint to validate that incoming events
+        come from a known subscription before enqueuing work.
+
+        Args:
+            subscription_id: The subscription ID from the webhook event.
+
+        Returns:
+            True if the subscription ID is found in any auth row.
+        """
+        stmt = text("""
+            SELECT 1
+            FROM user_strava_auth
+            WHERE strava_webhook_subscription_id = :sub_id
+            LIMIT 1
+        """)
+        result = await self.connection.execute(stmt, {"sub_id": subscription_id})
+        return result.fetchone() is not None

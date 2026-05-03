@@ -321,25 +321,26 @@ Build the `StravaAPIClient` with all methods needed for activity import. This is
 - **Unit (29 tests):** response model parsing for each endpoint (11), rate limit header handling and enforcement (7), API client endpoint routing and token refresh (11).
 - **Integration (7 tests):** API client with mocked Strava HTTP responses (httpx MockTransport) for each method, including error responses (401 refresh flow, 429, 500).
 
-#### Phase 3: Webhook Subscription and Worker Shell
+#### Phase 3: Webhook Subscription and Worker Shell ✅ COMPLETE
 **PR Size:** ~5–7 files
 
 Implement Strava webhook handling and the ARQ worker container for background processing.
 
 **Acceptance Criteria:**
-- [ ] Webhook callback endpoint: `GET /api/integrations/strava/webhook` handles `hub.challenge` validation handshake
-- [ ] Webhook callback endpoint: `POST /api/integrations/strava/webhook` receives activity create/update/delete events, responds 200 within 2 seconds
-- [ ] Webhook events acknowledged immediately, enqueued as ARQ tasks for async processing
-- [ ] Webhook subscription created automatically on successful OAuth connect (Phase 1 endpoint updated)
-- [ ] Webhook subscription deleted on disconnect
-- [ ] `integration_workers/strava/worker.py` — ARQ worker entry point with health checks
-- [ ] Strava worker added to `docker-compose.yml` (follows Google worker container pattern)
-- [ ] Worker registers as `strava-worker` consumer group on Redis Stream
-- [ ] `integration-architecture.md` updated: add Strava worker to the integration workers section, webhook subscription pattern, and deployment topology
+- [x] Webhook callback endpoint: `GET /api/integrations/strava/webhook` handles `hub.challenge` validation handshake
+- [x] Webhook callback endpoint: `POST /api/integrations/strava/webhook` receives activity create/update/delete events, responds 200 within 2 seconds
+- [x] Webhook events acknowledged immediately, enqueued as ARQ tasks for async processing
+- [x] Webhook subscription created automatically on successful OAuth connect (Phase 1 endpoint updated)
+- [x] Webhook subscription deleted on disconnect
+- [x] Webhook subscription verification and forced resubscribe mechanism
+- [x] `integration_workers/strava/worker.py` — ARQ worker entry point with health checks
+- [x] Strava worker added to `docker-compose.yml` (follows Google worker container pattern) ✅ ALREADY EXISTS
+- [x] Worker registers as `strava-worker` consumer group on Redis Stream
+- [x] `integration-architecture.md` updated: add Strava worker to the integration workers section, webhook subscription pattern, and deployment topology
 
 **Required Test Coverage:**
-- **Unit:** webhook validation handshake echo logic, event payload parsing for each aspect_type (create/update/delete).
-- **Integration:** webhook endpoints with simulated Strava payloads. Worker container starts and connects to Redis.
+- **Unit (11 tests):** webhook service subscribe/unsubscribe/verify/force_resubscribe (7), worker task dispatch create/update/delete/ignore (4), stream consumer group name/patterns/event handling/stream name (4).
+- **Integration (7 tests):** webhook GET validation handshake (2), webhook GET reject wrong token (1), webhook GET reject missing params (1), webhook POST activity create/update/delete (3), webhook POST non-activity ignore (1).
 - **E2E:** simulated webhook delivery triggers ARQ task enqueue (verified via test Redis).
 
 ---

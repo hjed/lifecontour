@@ -18,6 +18,9 @@ dependencies = [
     # HTTP client
     "httpx==0.28.1",
 
+    # Task queue
+    "arq>=0.26",
+
     # Logging and monitoring
     "structlog==25.5.0",
 

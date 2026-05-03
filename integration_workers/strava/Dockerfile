@@ -30,5 +30,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # Switch to non-root user
 USER worker
 
-# Run the worker (placeholder — Phase 3 adds the ARQ worker entrypoint)
-CMD ["python", "-c", "print('Strava worker ready — waiting for Phase 3 worker.py')"]
+# Run the ARQ worker
+CMD ["python", "worker.py"]
