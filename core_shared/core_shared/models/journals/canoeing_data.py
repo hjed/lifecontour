@@ -48,10 +48,13 @@ class CanoeingData:
 
     def _validate_water_type(self) -> None:
         """Validate water_type is not empty if provided."""
-        if self.water_type is not None and not self.water_type.strip():
-            raise CanoeingDataValidationError(
-                "water_type", "water_type cannot be an empty string"
-            )
+        if self.water_type is not None:
+            if not isinstance(self.water_type, str):
+                raise CanoeingDataValidationError("water_type", "Must be a string")
+            if not self.water_type.strip():
+                raise CanoeingDataValidationError(
+                    "water_type", "water_type cannot be an empty string"
+                )
 
     def _validate_journal_id(self) -> None:
         """Validate journal_id is positive."""

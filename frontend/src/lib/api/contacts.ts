@@ -1143,9 +1143,24 @@ export function useDeleteTag() {
 
   return useMutation({
     mutationFn: (id: string) => deleteTag(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: tagKeys.lists() });
-      queryClient.invalidateQueries({ queryKey: contactKeys.all });
+    onSuccess: (_, id) => {
+      // Optimistically remove the deleted tag from the cache
+      queryClient.setQueryData<TagListResponse | undefined>(
+        tagKeys.lists(),
+        old => {
+          if (!old?.data) return old;
+          return {
+            ...old,
+            data: old.data.filter(tag => tag.id !== id),
+          };
+        }
+      );
+
+      // Delay invalidation to avoid backend transaction commit race conditions
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: tagKeys.lists() });
+        queryClient.invalidateQueries({ queryKey: contactKeys.all });
+      }, 300);
       toast.success(SUCCESS_MESSAGES.TAG_DELETED);
     },
     onError: (error: Error) => {
@@ -1188,9 +1203,24 @@ export function useMergeTag() {
       sourceId: string;
       targetId: string;
     }) => mergeTag(sourceId, targetId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: tagKeys.lists() });
-      queryClient.invalidateQueries({ queryKey: contactKeys.all });
+    onSuccess: (_, { sourceId }) => {
+      // Optimistically remove the source tag from the cache
+      queryClient.setQueryData<TagListResponse | undefined>(
+        tagKeys.lists(),
+        old => {
+          if (!old?.data) return old;
+          return {
+            ...old,
+            data: old.data.filter(tag => tag.id !== sourceId),
+          };
+        }
+      );
+
+      // Delay invalidation to avoid backend transaction commit race conditions
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: tagKeys.lists() });
+        queryClient.invalidateQueries({ queryKey: contactKeys.all });
+      }, 300);
       toast.success('Tag successfully merged');
     },
     onError: (error: Error) => {
