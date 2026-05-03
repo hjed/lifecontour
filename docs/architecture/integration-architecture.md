@@ -69,8 +69,12 @@ integration_workers/
 │   ├── requirements.txt   # Immich-specific dependencies
 │   └── worker.py
 ├── strava/
-│   ├── requirements.txt   # Strava-specific dependencies
-│   └── worker.py
+│   ├── requirements.txt            # Strava-specific dependencies
+│   ├── worker.py                   # ARQ worker process (webhook event + stream consumer)
+│   ├── stream_consumer_tasks.py    # Redis Streams consumer (strava-worker group)
+│   ├── strava_auth_service.py      # Token encryption/refresh for Strava OAuth
+│   ├── strava_settings.py          # Worker-specific Pydantic settings
+│   └── Dockerfile                  # Container isolation
 └── firefly_iii/
     ├── requirements.txt   # Firefly III-specific dependencies
     └── worker.py
@@ -418,6 +422,17 @@ class WorkerSettings:
 5. Record sync metadata
 
 **Journal Integration Example**: Strava activities are imported as journal entries with FITNESS + OUTDOOR_ACTIVITY types. See [Journal System Specification](../journal-system-specification.md) for merge behavior and conflict resolution patterns.
+
+#### Strava Webhook Push Subscription
+
+Strava uses a push subscription model for real-time event delivery. The system implements the full webhook lifecycle:
+
+1. **Subscription Creation**: When a user connects Strava via OAuth, a push subscription is created automatically. A random `verify_token` is generated and stored alongside the subscription ID in `user_strava_auth`.
+2. **Validation Handshake**: Strava sends a GET request to `GET /api/integrations/strava/webhook` with `hub.mode`, `hub.challenge`, and `hub.verify_token`. The endpoint validates the token against the stored value and echoes the challenge.
+3. **Event Delivery**: Strava sends POST requests to `POST /api/integrations/strava/webhook` for activity create/update/delete events. The endpoint responds 200 immediately (within 2 seconds) and enqueues an ARQ task on the `strava` queue for async processing.
+4. **Worker Processing**: The Strava ARQ worker (`integration_workers/strava/worker.py`) picks up enqueued tasks and dispatches them based on `aspect_type` (create/update/delete).
+5. **Stream Consumer**: The `StravaWorkerStreamConsumer` registers as the `strava-worker` consumer group on the `pms:domain-events` Redis Stream for future domain event fan-out.
+6. **Subscription Lifecycle**: Subscriptions are deleted on OAuth disconnect. A `verify_subscription()` method checks if the subscription is still active, and `force_resubscribe()` deletes and recreates if needed.
 
 ### 4. Bi-Directional Sync (Google Calendar)
 

@@ -226,3 +226,64 @@ class StravaTokenService:
         """)
         result = await self.connection.execute(stmt, {"user_id": user_id})
         return result.fetchone() is not None
+
+    async def set_webhook_subscription(
+        self,
+        user_id: str,
+        subscription_id: int | None,
+        verify_token: str | None,
+    ) -> None:
+        """
+        Store or clear the Strava webhook subscription data.
+
+        Args:
+            user_id: User ID.
+            subscription_id: Strava push subscription ID, or None to clear.
+            verify_token: Verify token used during subscription handshake,
+                or None to clear.
+        """
+        stmt = text("""
+            UPDATE user_strava_auth
+            SET strava_webhook_subscription_id = :subscription_id,
+                strava_webhook_verify_token = :verify_token,
+                updated_at = :now
+            WHERE user_id = :user_id
+        """)
+        await self.connection.execute(
+            stmt,
+            {
+                "user_id": user_id,
+                "subscription_id": subscription_id,
+                "verify_token": verify_token,
+                "now": datetime.now(UTC),
+            },
+        )
+        logger.info(
+            "Updated Strava webhook subscription",
+            user_id=user_id,
+            subscription_id=subscription_id,
+        )
+
+    async def get_webhook_verify_token(self) -> str | None:
+        """
+        Retrieve the stored webhook verify token.
+
+        Looks up the verify token from any user_strava_auth row that has an
+        active subscription. Used by the webhook validation endpoint to
+        check the hub.verify_token during handshake.
+
+        Returns:
+            The verify token string, or None if no subscription exists.
+        """
+        stmt = text("""
+            SELECT strava_webhook_verify_token
+            FROM user_strava_auth
+            WHERE strava_webhook_subscription_id IS NOT NULL
+              AND strava_webhook_verify_token IS NOT NULL
+            LIMIT 1
+        """)
+        result = await self.connection.execute(stmt)
+        row = result.fetchone()
+        if row and row.strava_webhook_verify_token:
+            return str(row.strava_webhook_verify_token)
+        return None

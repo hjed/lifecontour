@@ -1,8 +1,8 @@
 """
-Strava OAuth API controllers.
+Strava OAuth and Webhook API controllers.
 
 Provides REST API endpoints for Strava OAuth 2.0 authorization,
-token exchange (callback), and disconnection.
+token exchange (callback), disconnection, and webhook event handling.
 """
 
 import secrets
@@ -10,10 +10,12 @@ from urllib.parse import urlencode, urlparse
 
 import httpx
 import structlog
+from arq.connections import ArqRedis
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, field_validator
 
+from app.core.integrations.strava.webhook_service import StravaWebhookService
 from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.auth.strava_token_service import StravaTokenService
 from app.infrastructure.config import Settings
@@ -224,6 +226,52 @@ async def strava_oauth_callback(
             expires_at=expires_at,
         )
 
+        # Create webhook subscription (best-effort — connection succeeds
+        # even if subscription fails; it can be re-created later)
+        if settings.webhook_base_url:
+            try:
+                verify_token = secrets.token_urlsafe(32)
+                callback_url = (
+                    f"{settings.webhook_base_url}/api/integrations/strava/webhook"
+                )
+
+                # Store the verify token BEFORE calling Strava so the
+                # validation GET handler can look it up during handshake
+                await strava_token_service.set_webhook_subscription(
+                    user_id=str(user.id),
+                    subscription_id=None,  # Not yet known
+                    verify_token=verify_token,
+                )
+
+                webhook_service = StravaWebhookService(
+                    client_id=settings.strava_client_id,
+                    client_secret=settings.strava_client_secret,
+                )
+                subscription_id = await webhook_service.subscribe(
+                    callback_url=callback_url,
+                    verify_token=verify_token,
+                )
+
+                # Store the returned subscription ID alongside the token
+                await strava_token_service.set_webhook_subscription(
+                    user_id=str(user.id),
+                    subscription_id=subscription_id,
+                    verify_token=verify_token,
+                )
+
+                logger.info(
+                    "Strava webhook subscription created during OAuth",
+                    user_id=user.id,
+                    subscription_id=subscription_id,
+                )
+            except Exception as webhook_err:
+                logger.warning(
+                    "Strava webhook subscription failed during OAuth "
+                    "(connection still active)",
+                    user_id=user.id,
+                    error=str(webhook_err),
+                )
+
         # Get redirect URL from session
         redirect_url = request.session.pop("strava_redirect_url", "/integrations")
 
@@ -297,6 +345,24 @@ async def strava_oauth_disconnect(
         try:
             auth_data = await strava_token_service.get_auth(str(user.id))
             if auth_data:
+                # Best-effort webhook unsubscribe
+                sub_id = auth_data.get("strava_webhook_subscription_id")
+                if sub_id and settings.strava_client_id:
+                    try:
+                        webhook_service = StravaWebhookService(
+                            client_id=settings.strava_client_id,
+                            client_secret=settings.strava_client_secret,
+                        )
+                        await webhook_service.unsubscribe(int(sub_id))
+                    except Exception as unsub_err:
+                        logger.warning(
+                            "Strava webhook unsubscribe failed (continuing disconnect)",
+                            user_id=user.id,
+                            subscription_id=sub_id,
+                            error=str(unsub_err),
+                        )
+
+                # Best-effort token revocation
                 try:
                     async with httpx.AsyncClient() as client:
                         await client.post(
@@ -351,3 +417,135 @@ async def strava_oauth_disconnect(
             status_code=500,
             detail="Failed to disconnect Strava integration",
         ) from e
+
+
+# ---------- Webhook Endpoints ----------
+
+
+class StravaWebhookEvent(BaseModel):
+    """Strava webhook event payload."""
+
+    aspect_type: str  # "create", "update", or "delete"
+    object_type: str  # "activity" or "athlete"
+    object_id: int
+    owner_id: int  # Strava athlete ID
+    subscription_id: int
+    event_time: int  # Unix timestamp
+    updates: dict[str, str | int | float | bool] | None = None
+
+
+@router.get(
+    "/webhook",
+    include_in_schema=False,
+)
+@inject
+async def strava_webhook_validation(
+    strava_token_service: FromDishka[StravaTokenService],
+    hub_mode: str | None = Query(None, alias="hub.mode"),
+    hub_challenge: str | None = Query(None, alias="hub.challenge"),
+    hub_verify_token: str | None = Query(None, alias="hub.verify_token"),
+) -> dict[str, str]:
+    """
+    Handle Strava webhook validation handshake.
+
+    Strava sends a GET request with ``hub.mode``, ``hub.challenge``, and
+    ``hub.verify_token`` when creating a push subscription. The endpoint
+    must echo ``hub.challenge`` if the verify token matches.
+
+    This endpoint is unauthenticated — Strava calls it directly.
+    """
+    if hub_mode != "subscribe" or not hub_challenge:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing or invalid hub.mode / hub.challenge parameters",
+        )
+
+    if not hub_verify_token:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing hub.verify_token parameter",
+        )
+
+    # Look up the stored verify token from the database
+    stored_token = await strava_token_service.get_webhook_verify_token()
+
+    if not stored_token or hub_verify_token != stored_token:
+        logger.warning(
+            "Strava webhook validation failed: token mismatch",
+            received_token_prefix=hub_verify_token[:8] + "..."
+            if hub_verify_token
+            else None,
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="Invalid verify token",
+        )
+
+    logger.info("Strava webhook validation handshake successful")
+    return {"hub.challenge": hub_challenge}
+
+
+@router.post(
+    "/webhook",
+    include_in_schema=False,
+    status_code=200,
+)
+@inject
+async def strava_webhook_event(
+    event: StravaWebhookEvent,
+    redis_pool: FromDishka[ArqRedis],
+) -> Response:
+    """
+    Receive Strava webhook events.
+
+    Strava sends POST requests when activities are created, updated, or
+    deleted. The endpoint must respond with HTTP 200 within 2 seconds.
+    Events are enqueued as ARQ tasks for asynchronous processing by the
+    Strava worker.
+
+    This endpoint is unauthenticated — Strava calls it directly.
+    """
+    from core_shared.integration_constants import STRAVA_ARQ_QUEUE_NAME
+
+    if event.object_type != "activity":
+        logger.debug(
+            "Ignoring non-activity Strava webhook event",
+            object_type=event.object_type,
+            aspect_type=event.aspect_type,
+            owner_id=event.owner_id,
+        )
+        return Response(status_code=200)
+
+    # Enqueue ARQ task for the Strava worker
+    try:
+        job = await redis_pool.enqueue_job(
+            "process_strava_webhook_event",
+            {
+                "aspect_type": event.aspect_type,
+                "object_type": event.object_type,
+                "object_id": event.object_id,
+                "owner_id": event.owner_id,
+                "subscription_id": event.subscription_id,
+                "event_time": event.event_time,
+                "updates": event.updates,
+            },
+            _queue_name=STRAVA_ARQ_QUEUE_NAME,
+        )
+        logger.info(
+            "Enqueued Strava webhook event for processing",
+            job_id=job.job_id if job else None,
+            aspect_type=event.aspect_type,
+            object_id=event.object_id,
+            owner_id=event.owner_id,
+        )
+    except Exception:
+        # Log but still return 200 — Strava will retry if we fail
+        logger.error(
+            "Failed to enqueue Strava webhook event",
+            aspect_type=event.aspect_type,
+            object_id=event.object_id,
+            owner_id=event.owner_id,
+            exc_info=True,
+        )
+
+    return Response(status_code=200)
