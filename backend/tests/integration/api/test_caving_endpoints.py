@@ -2,6 +2,7 @@ import pytest
 from httpx import AsyncClient
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_create_caving_journal(authenticated_client: AsyncClient):
     payload = {

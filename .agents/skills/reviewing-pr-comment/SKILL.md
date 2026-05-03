@@ -16,3 +16,5 @@ Follow this guide on how to handle them.
 
 4. Ensure any changes made from PR comments also have test coverage at both the unit and integration/e2e test level. If not, add it.
 
+If there are sonarqube failures you can run `gh annotations` to see the specific issues. Sonarqube failures are not blocking failures and may be wrong.
+

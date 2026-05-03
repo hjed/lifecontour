@@ -3331,11 +3331,22 @@ async def _update_canyoning_type_data(
             attrs["water_guage_level"], "water_guage_level"
         )
     if "is_vertical" in attrs:
-        updates["is_vertical"] = attrs["is_vertical"]
+        raw_is_vertical = attrs["is_vertical"]
+        if raw_is_vertical is not None and not isinstance(raw_is_vertical, bool):
+            raise JournalValidationError("is_vertical", "Must be a boolean or null")
+        updates["is_vertical"] = raw_is_vertical
     if "is_night_canyon" in attrs:
-        updates["is_night_canyon"] = attrs["is_night_canyon"]
+        raw_is_night_canyon = attrs["is_night_canyon"]
+        if raw_is_night_canyon is not None and not isinstance(
+            raw_is_night_canyon, bool
+        ):
+            raise JournalValidationError("is_night_canyon", "Must be a boolean or null")
+        updates["is_night_canyon"] = raw_is_night_canyon
     if "is_white_water" in attrs:
-        updates["is_white_water"] = attrs["is_white_water"]
+        raw_is_white_water = attrs["is_white_water"]
+        if raw_is_white_water is not None and not isinstance(raw_is_white_water, bool):
+            raise JournalValidationError("is_white_water", "Must be a boolean or null")
+        updates["is_white_water"] = raw_is_white_water
 
     validated_data = dataclasses.replace(canyoning_data, **updates)
     await canyoning_data_repo.save(validated_data)
@@ -3361,9 +3372,15 @@ async def _update_caving_type_data(
             attrs["template_id"], "template_id"
         )
     if "is_vertical" in attrs:
-        updates["is_vertical"] = attrs["is_vertical"]
+        raw_is_vertical = attrs["is_vertical"]
+        if raw_is_vertical is not None and not isinstance(raw_is_vertical, bool):
+            raise JournalValidationError("is_vertical", "Must be a boolean or null")
+        updates["is_vertical"] = raw_is_vertical
     if "is_horizontal" in attrs:
-        updates["is_horizontal"] = attrs["is_horizontal"]
+        raw_is_horizontal = attrs["is_horizontal"]
+        if raw_is_horizontal is not None and not isinstance(raw_is_horizontal, bool):
+            raise JournalValidationError("is_horizontal", "Must be a boolean or null")
+        updates["is_horizontal"] = raw_is_horizontal
 
     validated_data = dataclasses.replace(caving_data, **updates)
     await caving_data_repo.save(validated_data)
