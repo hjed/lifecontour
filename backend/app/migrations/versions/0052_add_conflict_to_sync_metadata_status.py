@@ -1,7 +1,7 @@
 """Add 'conflict' to sync_metadata sync_status CHECK constraint
 
-Revision ID: 0051
-Revises: 0050
+Revision ID: 0052
+Revises: 0051
 Create Date: 2026-04-30 08:47:59.580642
 
 """
