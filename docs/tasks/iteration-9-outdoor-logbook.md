@@ -267,13 +267,13 @@ Update frontend type editors and add E2E tests.
 - [Updated Type Dependency Summary](../product-specifications/outdoor-logbook-product-specification.md#updated-type-dependency-summary)
 
 **Acceptance Criteria (task-level):**
-- [ ] All five types can be created, updated, and queried through REST API and MCP
-- [ ] CAVING journals automatically gain ABSEILING_TRIP data and can use caving templates
-- [ ] CANOEING journals capture water type
-- [ ] SNORKELLING, DIVING, and DOWNHILL_SKIING journals work with minimal type-specific data
-- [ ] All types inherit OUTDOOR_ACTIVITY fields (weather, role, leadership, participant notes)
-- [ ] Frontend editors render for each type with appropriate fields
-- [ ] Unit, integration, and e2e test coverage for all five types
+- [x] All five types can be created, updated, and queried through REST API and MCP
+- [x] CAVING journals automatically gain ABSEILING_TRIP data and can use caving templates
+- [x] CANOEING journals capture water type
+- [x] SNORKELLING, DIVING, and DOWNHILL_SKIING journals work with minimal type-specific data
+- [x] All types inherit OUTDOOR_ACTIVITY fields (weather, role, leadership, participant notes)
+- [x] Frontend editors render for each type with appropriate fields
+- [x] Unit, integration, and e2e test coverage for all five types
 
 #### Phase 1: CAVING — Full Vertical Slice
 **PR Size:** ~8–10 files
@@ -325,16 +325,18 @@ Deliver CANOEING as a complete vertical slice. Simpler than CAVING — one type-
 Deliver three minimal types together. Each has no unique fields beyond journal_id and timestamps, so they follow an identical pattern.
 
 **Acceptance Criteria:**
-- [ ] Migration creates `journal_snorkelling_data`, `journal_diving_data`, `journal_downhill_skiing_data` tables (journal_id PK/FK, timestamps only)
-- [ ] All three added to `JournalType` enum with dependencies: each → [OUTDOOR_ACTIVITY, FITNESS]
-- [ ] Domain entities (`SnorkellingData`, `DivingData`, `DownhillSkiingData`) with journal_id validation
-- [ ] Repository interfaces and SQL implementations for all three
-- [ ] Type system updated: dependency map, table mapping, NOTE detection JOINs for all three
-- [ ] API schemas, converters, and controller integration for all three
-- [ ] MCP handles all three through existing generic journal tools
-- [ ] Frontend: type enum updated, minimal editor components for each (placeholder indicating no type-specific fields, inheriting OUTDOOR_ACTIVITY fields)
-- [ ] DI provider registration for all three
-- [ ] Outdoor activity subtype enum finalised with all new types (used by OUTDOOR_TRAINING/OUTDOOR_PLANNING in Task 4)
+- [x] Migration creates `journal_snorkelling_data`, `journal_diving_data`, `journal_downhill_skiing_data` tables (journal_id PK/FK, timestamps only)
+- [x] All three added to `JournalType` enum with dependencies: each → [OUTDOOR_ACTIVITY, FITNESS]
+- [x] Domain entities (`SnorkellingData`, `DivingData`, `DownhillSkiingData`) with journal_id validation
+- [x] Repository interfaces and SQL implementations for all three
+- [x] Type system updated: dependency map, table mapping, NOTE detection JOINs for all three
+- [x] API schemas, converters, and controller integration for all three
+- [x] MCP handles all three through existing generic journal tools
+- [x] Frontend: type enum updated, minimal editor components for each (placeholder indicating no type-specific fields, inheriting OUTDOOR_ACTIVITY fields)
+- [x] DI provider registration for all three
+- [x] Outdoor activity subtype enum finalised with all new types (used by OUTDOOR_TRAINING/OUTDOOR_PLANNING in Task 4)
+- [x] Any refatoring required to handle common outdoor activity types logic
+- [x] Any maintanability refactoring required for adding more journal types easily
 
 **Required Test Coverage:**
 - **Unit:** entity validation for all three, journal type count and dependency tests updated.

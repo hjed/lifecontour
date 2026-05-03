@@ -256,6 +256,30 @@ class CanoeingDataValidationError(JournalDomainError):
         self.field = field
 
 
+class SnorkellingDataValidationError(JournalDomainError):
+    """Exception raised when snorkelling data validation fails."""
+
+    def __init__(self, field: str, message: str):
+        super().__init__(f"{field}: {message}", 400)
+        self.field = field
+
+
+class DivingDataValidationError(JournalDomainError):
+    """Exception raised when diving data validation fails."""
+
+    def __init__(self, field: str, message: str):
+        super().__init__(f"{field}: {message}", 400)
+        self.field = field
+
+
+class DownhillSkiingDataValidationError(JournalDomainError):
+    """Exception raised when downhill skiing data validation fails."""
+
+    def __init__(self, field: str, message: str):
+        super().__init__(f"{field}: {message}", 400)
+        self.field = field
+
+
 class ClimbingDataValidationError(JournalDomainError):
     """Exception raised when climbing data (CLIMBING type) validation fails."""
 

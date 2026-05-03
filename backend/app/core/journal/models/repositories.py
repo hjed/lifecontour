@@ -24,6 +24,8 @@ from core_shared.models.journals import (
     CavingData,
     ClimbingData,
     CrossCountrySkiingData,
+    DivingData,
+    DownhillSkiingData,
     FitnessData,
     JoggingData,
     Journal,
@@ -35,6 +37,7 @@ from core_shared.models.journals import (
     PhotoAlbumData,
     PlanData,
     PlanDocument,
+    SnorkellingData,
     TravelAccommodation,
     TravelData,
     TravelFlight,
@@ -1928,5 +1931,149 @@ class ActivityTemplateRepository(ABC):
 
         Args:
             template_id: The template UUID string to delete
+        """
+        pass
+
+
+class SnorkellingDataRepository(ABC):
+    """
+    Repository interface for snorkelling data (SNORKELLING type) operations.
+
+    A journal has the SNORKELLING type if a SnorkellingData row exists for its journal_id.
+    """
+
+    @abstractmethod
+    async def find_by_journal_id(self, journal_id: int) -> SnorkellingData | None:
+        """
+        Find snorkelling data by journal ID.
+
+        Args:
+            journal_id: The journal ID to look up
+
+        Returns:
+            The SnorkellingData if found, None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def save(self, data: SnorkellingData) -> SnorkellingData:
+        """
+        Save snorkelling data (insert or update).
+
+        This effectively adds or updates the SNORKELLING type for a journal.
+
+        Args:
+            data: The snorkelling data to save
+
+        Returns:
+            The saved data with updated timestamps
+        """
+        pass
+
+    @abstractmethod
+    async def delete(self, journal_id: int) -> None:
+        """
+        Delete snorkelling data by journal ID.
+
+        This effectively removes the SNORKELLING type from a journal.
+
+        Args:
+            journal_id: The journal ID to delete snorkelling data for
+        """
+        pass
+
+
+class DivingDataRepository(ABC):
+    """
+    Repository interface for diving data (DIVING type) operations.
+
+    A journal has the DIVING type if a DivingData row exists for its journal_id.
+    """
+
+    @abstractmethod
+    async def find_by_journal_id(self, journal_id: int) -> DivingData | None:
+        """
+        Find diving data by journal ID.
+
+        Args:
+            journal_id: The journal ID to look up
+
+        Returns:
+            The DivingData if found, None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def save(self, data: DivingData) -> DivingData:
+        """
+        Save diving data (insert or update).
+
+        This effectively adds or updates the DIVING type for a journal.
+
+        Args:
+            data: The diving data to save
+
+        Returns:
+            The saved data with updated timestamps
+        """
+        pass
+
+    @abstractmethod
+    async def delete(self, journal_id: int) -> None:
+        """
+        Delete diving data by journal ID.
+
+        This effectively removes the DIVING type from a journal.
+
+        Args:
+            journal_id: The journal ID to delete diving data for
+        """
+        pass
+
+
+class DownhillSkiingDataRepository(ABC):
+    """
+    Repository interface for downhill skiing data (DOWNHILL_SKIING type) operations.
+
+    A journal has the DOWNHILL_SKIING type if a DownhillSkiingData row exists for its journal_id.
+    """
+
+    @abstractmethod
+    async def find_by_journal_id(self, journal_id: int) -> DownhillSkiingData | None:
+        """
+        Find downhill skiing data by journal ID.
+
+        Args:
+            journal_id: The journal ID to look up
+
+        Returns:
+            The DownhillSkiingData if found, None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def save(self, data: DownhillSkiingData) -> DownhillSkiingData:
+        """
+        Save downhill skiing data (insert or update).
+
+        This effectively adds or updates the DOWNHILL_SKIING type for a journal.
+
+        Args:
+            data: The downhill skiing data to save
+
+        Returns:
+            The saved data with updated timestamps
+        """
+        pass
+
+    @abstractmethod
+    async def delete(self, journal_id: int) -> None:
+        """
+        Delete downhill skiing data by journal ID.
+
+        This effectively removes the DOWNHILL_SKIING type from a journal.
+
+        Args:
+            journal_id: The journal ID to delete downhill skiing data for
         """
         pass

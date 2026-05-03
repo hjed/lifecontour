@@ -50,7 +50,9 @@ class TestJournalType:
     def test_journal_type_can_be_iterated(self):
         """Test that JournalType can be iterated."""
         all_types = list(JournalType)
-        assert len(all_types) == 17  # Updated for CANOEING
+        assert (
+            len(all_types) == 20
+        )  # Updated for CANOEING, SNORKELLING, DIVING, DOWNHILL_SKIING
         assert JournalType.NOTE in all_types
         assert JournalType.EVENT in all_types
         assert JournalType.MOOD_RATING in all_types
@@ -68,6 +70,9 @@ class TestJournalType:
         assert JournalType.CROSS_COUNTRY_SKIING in all_types
         assert JournalType.CAVING in all_types
         assert JournalType.CANOEING in all_types
+        assert JournalType.SNORKELLING in all_types
+        assert JournalType.DIVING in all_types
+        assert JournalType.DOWNHILL_SKIING in all_types
 
     def test_abseiling_trip_dependencies(self):
         """Test ABSEILING_TRIP depends on OUTDOOR_ACTIVITY and FITNESS."""
@@ -116,6 +121,27 @@ class TestJournalType:
     def test_canoeing_dependencies(self):
         """Test CANOEING depends on OUTDOOR_ACTIVITY and FITNESS."""
         deps = JournalType.get_dependencies(JournalType.CANOEING)
+        assert JournalType.OUTDOOR_ACTIVITY in deps
+        assert JournalType.FITNESS in deps
+        assert JournalType.BUSHWALKING not in deps
+
+    def test_snorkelling_dependencies(self):
+        """Test SNORKELLING depends on OUTDOOR_ACTIVITY and FITNESS."""
+        deps = JournalType.get_dependencies(JournalType.SNORKELLING)
+        assert JournalType.OUTDOOR_ACTIVITY in deps
+        assert JournalType.FITNESS in deps
+        assert JournalType.BUSHWALKING not in deps
+
+    def test_diving_dependencies(self):
+        """Test DIVING depends on OUTDOOR_ACTIVITY and FITNESS."""
+        deps = JournalType.get_dependencies(JournalType.DIVING)
+        assert JournalType.OUTDOOR_ACTIVITY in deps
+        assert JournalType.FITNESS in deps
+        assert JournalType.BUSHWALKING not in deps
+
+    def test_downhill_skiing_dependencies(self):
+        """Test DOWNHILL_SKIING depends on OUTDOOR_ACTIVITY and FITNESS."""
+        deps = JournalType.get_dependencies(JournalType.DOWNHILL_SKIING)
         assert JournalType.OUTDOOR_ACTIVITY in deps
         assert JournalType.FITNESS in deps
         assert JournalType.BUSHWALKING not in deps

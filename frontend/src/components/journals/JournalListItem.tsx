@@ -70,6 +70,9 @@ const TYPE_ICONS: Record<
   [JournalType.CLIMBING]: TrendingUp,
   [JournalType.KAYAKING]: Waves,
   [JournalType.CROSS_COUNTRY_SKIING]: Snowflake,
+  [JournalType.SNORKELLING]: Waves,
+  [JournalType.DIVING]: ArrowDownToLine,
+  [JournalType.DOWNHILL_SKIING]: Snowflake,
 };
 
 /**

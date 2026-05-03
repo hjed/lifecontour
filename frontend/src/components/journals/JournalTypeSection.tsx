@@ -53,6 +53,9 @@ import {
   PhotoAlbumTypeEditor,
   PlanTypeEditor,
   TravelTypeEditor,
+  SnorkellingTypeEditor,
+  DivingTypeEditor,
+  DownhillSkiingTypeEditor,
 } from './type-editors';
 
 /** Union of all type-specific data shapes supported by JournalTypeSection. */
@@ -104,9 +107,12 @@ const TYPE_SECTION_LABELS: Record<JournalType, string> = {
   [JournalType.CANYONING]: 'Canyoning',
   [JournalType.CAVING]: 'Caving',
   [JournalType.CANOEING]: 'Canoeing',
-  [JournalType.CLIMBING]: 'Climbing',
-  [JournalType.KAYAKING]: 'Kayaking',
-  [JournalType.CROSS_COUNTRY_SKIING]: 'Cross-Country Skiing',
+  [JournalType.CLIMBING]: 'Climbing Data',
+  [JournalType.KAYAKING]: 'Kayaking Data',
+  [JournalType.CROSS_COUNTRY_SKIING]: 'Cross-Country Skiing Data',
+  [JournalType.SNORKELLING]: 'Snorkelling Data',
+  [JournalType.DIVING]: 'Diving Data',
+  [JournalType.DOWNHILL_SKIING]: 'Downhill Skiing Data',
 };
 
 /**
@@ -338,6 +344,30 @@ function TypeSpecificContent({
           journalId={journalId}
           data={typeData as CrossCountrySkiingData | undefined}
           onSave={makeEditorSave<CrossCountrySkiingData>(onSave, type)}
+        />
+      );
+    case JournalType.SNORKELLING:
+      return (
+        <SnorkellingTypeEditor
+          journalId={journalId}
+          data={typeData as Record<string, never> | undefined}
+          onSave={makeEditorSave<Record<string, never>>(onSave, type)}
+        />
+      );
+    case JournalType.DIVING:
+      return (
+        <DivingTypeEditor
+          journalId={journalId}
+          data={typeData as Record<string, never> | undefined}
+          onSave={makeEditorSave<Record<string, never>>(onSave, type)}
+        />
+      );
+    case JournalType.DOWNHILL_SKIING:
+      return (
+        <DownhillSkiingTypeEditor
+          journalId={journalId}
+          data={typeData as Record<string, never> | undefined}
+          onSave={makeEditorSave<Record<string, never>>(onSave, type)}
         />
       );
     case JournalType.NOTE:

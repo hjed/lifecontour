@@ -28,6 +28,9 @@ export enum JournalType {
   CLIMBING = 'climbing',
   KAYAKING = 'kayaking',
   CROSS_COUNTRY_SKIING = 'cross_country_skiing',
+  SNORKELLING = 'snorkelling',
+  DIVING = 'diving',
+  DOWNHILL_SKIING = 'downhill_skiing',
 }
 
 // Journal Contact Relationship Type Enum

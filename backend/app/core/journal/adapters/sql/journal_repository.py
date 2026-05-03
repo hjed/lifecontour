@@ -44,6 +44,12 @@ _JOURNAL_TYPE_TABLE_MAP = {
     "caving": "journal_caving_data",
     "CANOEING": "journal_canoeing_data",
     "canoeing": "journal_canoeing_data",
+    "SNORKELLING": "journal_snorkelling_data",
+    "snorkelling": "journal_snorkelling_data",
+    "DIVING": "journal_diving_data",
+    "diving": "journal_diving_data",
+    "DOWNHILL_SKIING": "journal_downhill_skiing_data",
+    "downhill_skiing": "journal_downhill_skiing_data",
 }
 
 
@@ -108,6 +114,9 @@ class SqlJournalRepository(JournalRepository):
                     "LEFT JOIN journal_skiing_data jskid ON j.id = jskid.journal_id",
                     "LEFT JOIN journal_caving_data jcvd ON j.id = jcvd.journal_id",
                     "LEFT JOIN journal_canoeing_data jcnd ON j.id = jcnd.journal_id",
+                    "LEFT JOIN journal_snorkelling_data jsnkd ON j.id = jsnkd.journal_id",
+                    "LEFT JOIN journal_diving_data jdivd ON j.id = jdivd.journal_id",
+                    "LEFT JOIN journal_downhill_skiing_data jdsd ON j.id = jdsd.journal_id",
                 ]
             )
             where_clauses.extend(
@@ -128,6 +137,9 @@ class SqlJournalRepository(JournalRepository):
                     "jskid.journal_id IS NULL",
                     "jcvd.journal_id IS NULL",
                     "jcnd.journal_id IS NULL",
+                    "jsnkd.journal_id IS NULL",
+                    "jdivd.journal_id IS NULL",
+                    "jdsd.journal_id IS NULL",
                 ]
             )
             return joins, where_clauses
@@ -172,6 +184,9 @@ class SqlJournalRepository(JournalRepository):
             "journal_skiing_data": "INNER JOIN journal_skiing_data t ON j.id = t.journal_id",
             "journal_caving_data": "INNER JOIN journal_caving_data t ON j.id = t.journal_id",
             "journal_canoeing_data": "INNER JOIN journal_canoeing_data t ON j.id = t.journal_id",
+            "journal_snorkelling_data": "INNER JOIN journal_snorkelling_data t ON j.id = t.journal_id",
+            "journal_diving_data": "INNER JOIN journal_diving_data t ON j.id = t.journal_id",
+            "journal_downhill_skiing_data": "INNER JOIN journal_downhill_skiing_data t ON j.id = t.journal_id",
         }
 
         if type_table not in table_joins:
@@ -303,7 +318,10 @@ class SqlJournalRepository(JournalRepository):
                 CASE WHEN jkyd.journal_id IS NOT NULL THEN 'KAYAKING' END as kayaking_type,
                 CASE WHEN jskid.journal_id IS NOT NULL THEN 'CROSS_COUNTRY_SKIING' END as skiing_type,
                 CASE WHEN jcvd.journal_id IS NOT NULL THEN 'CAVING' END as caving_type,
-                CASE WHEN jcnd.journal_id IS NOT NULL THEN 'CANOEING' END as canoeing_type
+                CASE WHEN jcnd.journal_id IS NOT NULL THEN 'CANOEING' END as canoeing_type,
+                CASE WHEN jsnkd.journal_id IS NOT NULL THEN 'SNORKELLING' END as snorkelling_type,
+                CASE WHEN jdivd.journal_id IS NOT NULL THEN 'DIVING' END as diving_type,
+                CASE WHEN jdsd.journal_id IS NOT NULL THEN 'DOWNHILL_SKIING' END as downhill_skiing_type
             FROM journals j
             LEFT JOIN journal_calendar_info jci ON j.id = jci.journal_id
             LEFT JOIN journal_mood_data jmd ON j.id = jmd.journal_id
@@ -321,6 +339,9 @@ class SqlJournalRepository(JournalRepository):
             LEFT JOIN journal_skiing_data jskid ON j.id = jskid.journal_id
             LEFT JOIN journal_caving_data jcvd ON j.id = jcvd.journal_id
             LEFT JOIN journal_canoeing_data jcnd ON j.id = jcnd.journal_id
+            LEFT JOIN journal_snorkelling_data jsnkd ON j.id = jsnkd.journal_id
+            LEFT JOIN journal_diving_data jdivd ON j.id = jdivd.journal_id
+            LEFT JOIN journal_downhill_skiing_data jdsd ON j.id = jdsd.journal_id
             WHERE j.id = :journal_id
         """)
         result = await self.conn.execute(query, {"journal_id": journal_id})
