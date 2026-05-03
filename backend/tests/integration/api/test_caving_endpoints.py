@@ -26,6 +26,9 @@ async def test_create_caving_journal(authenticated_client: AsyncClient):
     }
 
     response = await authenticated_client.post("/api/journals", json=payload)
-    print(response.status_code)
-    print(response.json())
     assert response.status_code == 201
+
+    response_data = response.json()["data"]
+    assert "caving" in response_data["attributes"]["types"]
+    assert response_data["attributes"]["type_data"]["caving"]["is_vertical"] is True
+    assert response_data["attributes"]["type_data"]["caving"]["is_horizontal"] is True

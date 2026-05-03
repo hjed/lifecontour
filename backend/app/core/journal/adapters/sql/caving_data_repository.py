@@ -26,13 +26,16 @@ class SqlCavingDataRepository(CavingDataRepository):
             template_id=template_id,
             is_vertical=row.is_vertical,
             is_horizontal=row.is_horizontal,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
         )
 
     async def find_by_journal_id(self, journal_id: int) -> CavingData | None:
         """Find caving data by journal ID."""
         query = text(
             """
-            SELECT journal_id, template_id, is_vertical, is_horizontal
+            SELECT journal_id, template_id, is_vertical, is_horizontal,
+                   created_at, updated_at
             FROM journal_caving_data
             WHERE journal_id = :journal_id
             """
@@ -58,8 +61,9 @@ class SqlCavingDataRepository(CavingDataRepository):
             ON CONFLICT (journal_id) DO UPDATE SET
                 template_id = EXCLUDED.template_id,
                 is_vertical = EXCLUDED.is_vertical,
-                is_horizontal = EXCLUDED.is_horizontal
-            RETURNING journal_id, template_id, is_vertical, is_horizontal
+                is_horizontal = EXCLUDED.is_horizontal,
+                updated_at = now()
+            RETURNING journal_id, template_id, is_vertical, is_horizontal, created_at, updated_at
             """
         )
         result = await self.conn.execute(
