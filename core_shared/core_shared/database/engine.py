@@ -48,6 +48,10 @@ def create_session_factory(database_url: str) -> AsyncSessionmaker[AsyncSession]
         echo=False,  # Set to True for debugging
     )
 
+    from core_shared.telemetry import instrument_sqlalchemy_engine
+
+    instrument_sqlalchemy_engine(engine)
+
     # Create session factory
     return async_sessionmaker(
         bind=engine,
@@ -83,7 +87,7 @@ def create_async_engine_from_url(
     else:
         async_url = database_url
 
-    return create_async_engine(
+    engine = create_async_engine(
         async_url,
         pool_size=pool_size,
         max_overflow=max_overflow,
@@ -91,3 +95,9 @@ def create_async_engine_from_url(
         pool_recycle=pool_recycle,
         echo=echo,
     )
+
+    from core_shared.telemetry import instrument_sqlalchemy_engine
+
+    instrument_sqlalchemy_engine(engine)
+
+    return engine

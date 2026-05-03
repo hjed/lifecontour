@@ -40,6 +40,11 @@ def get_database_engine() -> Engine:
     )
 
     logger.info("Database engine created", url=str(settings.database_url).split("@")[0])
+
+    from core_shared.telemetry import instrument_sqlalchemy_engine
+
+    instrument_sqlalchemy_engine(engine)
+
     return engine
 
 
@@ -61,6 +66,11 @@ def get_async_database_engine() -> AsyncEngine:
     )
 
     logger.info("Async database engine created", url=async_url.split("@")[0])
+
+    from core_shared.telemetry import instrument_sqlalchemy_engine
+
+    instrument_sqlalchemy_engine(engine)
+
     return engine
 
 

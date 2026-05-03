@@ -92,13 +92,6 @@ def setup_telemetry(settings: Any, app: Any | None = None) -> None:
             logger.debug("HTTPX instrumentation not available")
 
         try:
-            from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
-
-            SQLAlchemyInstrumentor().instrument()
-        except ImportError:
-            logger.debug("SQLAlchemy instrumentation not available")
-
-        try:
             from opentelemetry.instrumentation.redis import RedisInstrumentor
 
             RedisInstrumentor().instrument()
@@ -123,3 +116,19 @@ def setup_telemetry(settings: Any, app: Any | None = None) -> None:
         service_name=getattr(settings, "otel_service_name", "unknown-service"),
         endpoint=getattr(settings, "otel_exporter_otlp_endpoint", None),
     )
+
+
+def instrument_sqlalchemy_engine(engine: Any) -> None:
+    """Instrument a SQLAlchemy engine with OpenTelemetry."""
+    if not _TELEMETRY_SETUP_DONE:
+        return
+
+    try:
+        from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+
+        if hasattr(engine, "sync_engine"):
+            SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)
+        else:
+            SQLAlchemyInstrumentor().instrument(engine=engine)
+    except ImportError:
+        pass
