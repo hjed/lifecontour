@@ -44,6 +44,14 @@ class CanoeingData:
     def __post_init__(self) -> None:
         """Validate canoeing data properties."""
         self._validate_journal_id()
+        self._validate_water_type()
+
+    def _validate_water_type(self) -> None:
+        """Validate water_type is not empty if provided."""
+        if self.water_type is not None and not self.water_type.strip():
+            raise CanoeingDataValidationError(
+                "water_type", "water_type cannot be an empty string"
+            )
 
     def _validate_journal_id(self) -> None:
         """Validate journal_id is positive."""

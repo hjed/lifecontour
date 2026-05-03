@@ -53,3 +53,11 @@ class TestCanoeingData:
 
         assert exc_info.value.field == "journal_id"
         assert "positive integer" in str(exc_info.value)
+
+    def test_invalid_water_type_empty(self) -> None:
+        """Test validation fails when water_type is an empty string."""
+        with pytest.raises(CanoeingDataValidationError) as exc_info:
+            CanoeingData(journal_id=1, water_type="   ")
+
+        assert exc_info.value.field == "water_type"
+        assert "empty string" in str(exc_info.value)

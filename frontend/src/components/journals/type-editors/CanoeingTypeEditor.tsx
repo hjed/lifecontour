@@ -90,11 +90,11 @@ export function CanoeingTypeEditor({
             Water Type
           </Label>
           <Select
-            value={editData.water_type ?? ''}
+            value={editData.water_type ?? 'none'}
             onValueChange={value =>
               setEditData(previous => ({
                 ...previous,
-                water_type: value || null,
+                water_type: value === 'none' ? null : value,
               }))
             }
           >
@@ -102,6 +102,7 @@ export function CanoeingTypeEditor({
               <SelectValue placeholder='Select water type' />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value='none'>None</SelectItem>
               {WATER_TYPES.map(type => (
                 <SelectItem key={type} value={type}>
                   {type.charAt(0).toUpperCase() + type.slice(1)}
