@@ -251,6 +251,7 @@ export function JournalContactBadge({
                           type='button'
                           className='hover:text-destructive ml-1'
                           aria-label={`Remove ${fallbackDisplayName}`}
+                          disabled={disabled || isLoading}
                           onClick={() =>
                             setSelectedContacts(prev =>
                               prev.filter(c => c.id !== contact.id)
@@ -269,7 +270,7 @@ export function JournalContactBadge({
                   }
                   placeholder='Search for a contact...'
                   inputId='journal-contact-search'
-                  disabled={isLoading}
+                  disabled={disabled || isLoading}
                   excludeContactIds={excludeContactIds}
                 />
               </div>
@@ -288,7 +289,7 @@ export function JournalContactBadge({
                       value as JournalContactRelationshipType
                     )
                   }
-                  disabled={isLoading}
+                  disabled={disabled || isLoading}
                 >
                   <SelectTrigger
                     id='relationship-type-select'
@@ -313,7 +314,7 @@ export function JournalContactBadge({
                   onValueChange={v =>
                     setSelectedStatus(v as AttendeeStatus | 'NO_STATUS')
                   }
-                  disabled={isLoading}
+                  disabled={disabled || isLoading}
                 >
                   <SelectTrigger className='h-9'>
                     <SelectValue />
@@ -336,7 +337,7 @@ export function JournalContactBadge({
                   onValueChange={v =>
                     setSelectedRole(v as ContactEventRole | 'NO_ROLE')
                   }
-                  disabled={isLoading}
+                  disabled={disabled || isLoading}
                 >
                   <SelectTrigger className='h-9'>
                     <SelectValue />
@@ -354,7 +355,9 @@ export function JournalContactBadge({
 
               <Button
                 onClick={handleAddContact}
-                disabled={selectedContacts.length === 0 || isLoading}
+                disabled={
+                  disabled || selectedContacts.length === 0 || isLoading
+                }
                 className='w-full'
                 size='sm'
               >
