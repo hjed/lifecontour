@@ -1469,6 +1469,7 @@ async def auto_merge_review_items(
                 await review_item_repo.update_status(
                     item.id, new_status="resolved", user_id=user.id
                 )
+            skipped_count += 1
             continue
 
         # Ensure we are not merging cross-tenant
@@ -1498,7 +1499,7 @@ async def auto_merge_review_items(
             )
             errors.append(
                 f"Failed to merge journals {item.source_journal_id} → "
-                f"{item.candidate_journal_id}: {exc!s}"
+                f"{item.candidate_journal_id}: Internal error occurred."
             )
 
     remaining_count = await review_item_repo.count_pending_by_user(user.id)

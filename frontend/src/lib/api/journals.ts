@@ -1470,7 +1470,7 @@ export function useAutoMergeReviewItems() {
   return useMutation({
     mutationFn: autoMergeReviewItems,
     onSuccess: data => {
-      const { merged_count } = data.data.attributes;
+      const { merged_count, errors } = data.data.attributes;
       queryClient.invalidateQueries({ queryKey: reviewItemKeys.all });
       queryClient.invalidateQueries({ queryKey: journalKeys.lists() });
       queryClient.invalidateQueries({ queryKey: journalKeys.details() });
@@ -1478,8 +1478,17 @@ export function useAutoMergeReviewItems() {
         toast.success(
           `Auto-merged ${merged_count} journal${merged_count === 1 ? '' : 's'} successfully`
         );
+        if (errors && errors.length > 0) {
+          toast.warning(
+            `Some items failed to merge: ${errors.length} error(s)`
+          );
+        }
+      } else if (errors && errors.length > 0) {
+        toast.error(`Auto-merge failed: ${errors[0]}`);
       } else {
-        toast.info('No journals could be auto-merged (all have conflicts)');
+        toast.info(
+          'No journals could be auto-merged (remaining items skipped)'
+        );
       }
     },
     onError: (error: Error) => {
