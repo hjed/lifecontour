@@ -102,7 +102,7 @@ describe('ContactSearchCombobox', () => {
         <ContactSearchCombobox
           onSelect={jest.fn()}
           placeholder='Search contacts...'
-          excludeContactId='1'
+          excludeContactIds={['1']}
         />
       </Wrapper>
     );
@@ -189,7 +189,7 @@ describe('ContactSearchCombobox', () => {
 
     render(
       <Wrapper>
-        <ContactSearchCombobox onSelect={jest.fn()} excludeContactId='1' />
+        <ContactSearchCombobox onSelect={jest.fn()} excludeContactIds={['1']} />
       </Wrapper>
     );
 

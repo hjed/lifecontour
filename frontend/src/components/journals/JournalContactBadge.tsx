@@ -7,7 +7,7 @@
 
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import Link from 'next/link';
 import { X, Plus, Pencil } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -45,7 +45,7 @@ import {
 interface JournalContactBadgeProps {
   readonly contacts: JournalContact[];
   readonly onContactAdd?: (
-    contactId: string,
+    contactIds: string[],
     relationshipType: JournalContactRelationshipType,
     status?: AttendeeStatus | null,
     role?: ContactEventRole | null
@@ -59,6 +59,7 @@ interface JournalContactBadgeProps {
   ) => Promise<void>;
   readonly relationshipTypes?: JournalContactRelationshipType[];
   readonly disabled?: boolean;
+  readonly defaultStatus?: AttendeeStatus;
   readonly className?: string;
 }
 
@@ -77,50 +78,61 @@ export function JournalContactBadge({
     JournalContactRelationshipType.MENTION,
     JournalContactRelationshipType.ABOUT,
   ],
+  defaultStatus,
   disabled = false,
   className,
 }: JournalContactBadgeProps) {
   const [isAddOpen, setIsAddOpen] = useState(false);
-  const [selectedContact, setSelectedContact] =
-    useState<ContactResource | null>(null);
+  const [selectedContacts, setSelectedContacts] = useState<ContactResource[]>(
+    []
+  );
   const [selectedRelationshipType, setSelectedRelationshipType] =
     useState<JournalContactRelationshipType>(
       JournalContactRelationshipType.PARTICIPANT
     );
+  const [selectedStatus, setSelectedStatus] = useState<
+    AttendeeStatus | 'NO_STATUS'
+  >(defaultStatus || 'NO_STATUS');
+  const [selectedRole, setSelectedRole] = useState<
+    ContactEventRole | 'NO_ROLE'
+  >('NO_ROLE');
   const [isLoading, setIsLoading] = useState(false);
 
-  const isSelectedContactAlreadyLinked = useMemo(
-    () =>
-      selectedContact !== null &&
-      contacts.some(contact => contact.id === selectedContact.id),
-    [contacts, selectedContact]
+  // Reset form when opened
+  useEffect(() => {
+    if (isAddOpen) {
+      setSelectedContacts([]);
+      setSelectedRelationshipType(JournalContactRelationshipType.PARTICIPANT);
+      setSelectedStatus(defaultStatus || 'NO_STATUS');
+      setSelectedRole('NO_ROLE');
+    }
+  }, [isAddOpen, defaultStatus]);
+
+  const existingContactIds = useMemo(() => contacts.map(c => c.id), [contacts]);
+  const excludeContactIds = useMemo(
+    () => [...existingContactIds, ...selectedContacts.map(c => c.id)],
+    [existingContactIds, selectedContacts]
   );
 
-  const selectedContactName = useMemo(() => {
-    if (!selectedContact) return null;
-
-    return [
-      selectedContact.attributes.first_name,
-      selectedContact.attributes.last_name,
-    ]
-      .filter(Boolean)
-      .join(' ')
-      .trim();
-  }, [selectedContact]);
-
   const handleAddContact = async () => {
-    if (!onContactAdd || !selectedContact || isSelectedContactAlreadyLinked) {
+    if (!onContactAdd || selectedContacts.length === 0) {
       return;
     }
 
     setIsLoading(true);
     try {
-      await onContactAdd(selectedContact.id, selectedRelationshipType);
+      const resolvedStatus =
+        selectedStatus === 'NO_STATUS' ? null : selectedStatus;
+      const resolvedRole = selectedRole === 'NO_ROLE' ? null : selectedRole;
+      await onContactAdd(
+        selectedContacts.map(c => c.id),
+        selectedRelationshipType,
+        resolvedStatus,
+        resolvedRole
+      );
       setIsAddOpen(false);
-      setSelectedContact(null);
-      setSelectedRelationshipType(JournalContactRelationshipType.PARTICIPANT);
     } catch (error) {
-      console.error('Failed to add contact:', error);
+      console.error('Failed to add contacts:', error);
     } finally {
       setIsLoading(false);
     }
@@ -206,23 +218,48 @@ export function JournalContactBadge({
           <PopoverContent className='w-80 p-3' align='start'>
             <div className='space-y-3'>
               <div className='space-y-2'>
-                <Label htmlFor='journal-contact-search'>Select Contact</Label>
+                <Label htmlFor='journal-contact-search'>Select Contacts</Label>
+                <div className='mb-2 flex flex-wrap gap-1'>
+                  {selectedContacts.map(contact => {
+                    const fallbackDisplayName =
+                      [
+                        contact.attributes.first_name,
+                        contact.attributes.last_name,
+                      ]
+                        .filter(Boolean)
+                        .join(' ')
+                        .trim() || `Contact ${contact.id}`;
+                    return (
+                      <Badge
+                        key={contact.id}
+                        variant='secondary'
+                        className='text-xs'
+                      >
+                        {fallbackDisplayName}
+                        <button
+                          type='button'
+                          className='hover:text-destructive ml-1'
+                          onClick={() =>
+                            setSelectedContacts(prev =>
+                              prev.filter(c => c.id !== contact.id)
+                            )
+                          }
+                        >
+                          <X className='h-3 w-3' />
+                        </button>
+                      </Badge>
+                    );
+                  })}
+                </div>
                 <ContactSearchCombobox
-                  onSelect={setSelectedContact}
+                  onSelect={contact =>
+                    setSelectedContacts(prev => [...prev, contact])
+                  }
                   placeholder='Search for a contact...'
                   inputId='journal-contact-search'
                   disabled={isLoading}
+                  excludeContactIds={excludeContactIds}
                 />
-                {selectedContactName && (
-                  <p className='text-muted-foreground text-xs'>
-                    Selected: {selectedContactName}
-                  </p>
-                )}
-                {isSelectedContactAlreadyLinked && (
-                  <p className='text-destructive text-xs'>
-                    That contact is already linked to this journal.
-                  </p>
-                )}
               </div>
 
               <div className='space-y-2'>
@@ -257,13 +294,55 @@ export function JournalContactBadge({
                 </Select>
               </div>
 
+              <div className='space-y-2'>
+                <Label className='text-sm font-medium'>Status</Label>
+                <Select
+                  value={selectedStatus}
+                  onValueChange={v =>
+                    setSelectedStatus(v as AttendeeStatus | 'NO_STATUS')
+                  }
+                  disabled={isLoading}
+                >
+                  <SelectTrigger className='h-9'>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value='NO_STATUS'>None</SelectItem>
+                    {Object.values(AttendeeStatus).map(s => (
+                      <SelectItem key={s} value={s}>
+                        {s}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className='space-y-2'>
+                <Label className='text-sm font-medium'>Role</Label>
+                <Select
+                  value={selectedRole}
+                  onValueChange={v =>
+                    setSelectedRole(v as ContactEventRole | 'NO_ROLE')
+                  }
+                  disabled={isLoading}
+                >
+                  <SelectTrigger className='h-9'>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value='NO_ROLE'>None</SelectItem>
+                    {Object.values(ContactEventRole).map(r => (
+                      <SelectItem key={r} value={r}>
+                        {r}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
               <Button
                 onClick={handleAddContact}
-                disabled={
-                  !selectedContact ||
-                  isSelectedContactAlreadyLinked ||
-                  isLoading
-                }
+                disabled={selectedContacts.length === 0 || isLoading}
                 className='w-full'
                 size='sm'
               >

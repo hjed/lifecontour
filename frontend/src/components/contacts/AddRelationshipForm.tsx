@@ -188,7 +188,7 @@ export function AddRelationshipForm({
               onSelect={handleContactSelect}
               placeholder='Search for a contact...'
               inputId='contact-search'
-              excludeContactId={contactId}
+              excludeContactIds={[contactId]}
               disabled={disabled}
             />
             {errors.contact && (

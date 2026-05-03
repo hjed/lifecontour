@@ -14,6 +14,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
+import { isPast, parseISO } from 'date-fns';
 import type {
   Journal,
   JournalCalendar,
@@ -111,6 +112,14 @@ export function JournalDetailView({
       color: c.attributes.color,
     })) || [];
 
+  // Calculate default status based on event date
+  const isPastEvent = journal.event_date_range?.start
+    ? isPast(parseISO(journal.event_date_range.start))
+    : false;
+  const defaultStatus = isPastEvent
+    ? AttendeeStatus.ATTENDED
+    : AttendeeStatus.ATTENDING;
+
   // Handlers
   const handleCalendarChange = async (calendarId: string) => {
     await updateTypeData.mutateAsync({
@@ -125,14 +134,22 @@ export function JournalDetailView({
   };
 
   const handleContactAdd = async (
-    contactId: string,
-    relationshipType: JournalContactRelationshipType
+    contactIds: string[],
+    relationshipType: JournalContactRelationshipType,
+    status?: AttendeeStatus | null,
+    role?: ContactEventRole | null
   ) => {
-    await addContact.mutateAsync({
-      journalId: journal.id,
-      contactId: contactId,
-      relationshipType,
-    });
+    await Promise.all(
+      contactIds.map(contactId =>
+        addContact.mutateAsync({
+          journalId: journal.id,
+          contactId: contactId,
+          relationshipType,
+          status,
+          role,
+        })
+      )
+    );
   };
 
   const handleContactRemove = async (contactId: string) => {
@@ -438,6 +455,7 @@ export function JournalDetailView({
                 onContactAdd={handleContactAdd}
                 onContactRemove={handleContactRemove}
                 onRelationshipUpdate={handleContactUpdate}
+                defaultStatus={defaultStatus}
               />
             </div>
 

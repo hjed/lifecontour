@@ -651,7 +651,9 @@ test.describe('Journal Detail Page', () => {
       await contactSearchCombobox.fill(contact.firstName);
       await expect(page.getByRole('listbox')).toBeVisible();
       await page.getByRole('option', { name: contactName }).click();
-      await expect(page.getByText(`Selected: ${contactName}`)).toBeVisible();
+      await expect(
+        page.getByText(contactName, { exact: true }).first()
+      ).toBeVisible();
 
       // Wait for the update request to finish
       const [addResponse] = await Promise.all([
