@@ -233,3 +233,11 @@ class TestSummaryPromptBuilder:
         assert "John Doe" in prompt
         # Should still produce a valid prompt
         assert len(prompt) > 0
+
+    def test_prompt_includes_current_system_time(self):
+        """Test prompt includes the current system time."""
+        builder = SummaryPromptBuilder()
+        prompt = builder.build(_make_input())
+
+        assert "Current System Time" in prompt
+        assert "UTC" in prompt

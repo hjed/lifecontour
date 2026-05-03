@@ -145,6 +145,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         summary_consumer = SummaryConsumer(
             stream_client=stream_client,
+            container=container,
             stream_name=settings.stream_name,
         )
         summary_consumer_task = asyncio.create_task(summary_consumer.start())

@@ -339,3 +339,31 @@ class TestSummaryGenerator:
 
         assert result is not None
         assert result.status == SummaryStatus.FAILED
+
+    @pytest.mark.asyncio
+    async def test_early_exit_when_no_journals_present(self):
+        """Test that generation is skipped when no journals are available for the prompt."""
+        generator = _make_generator()
+
+        # Override assembler to return no journals
+        empty_input = _make_input(recent_journals=[], future_journals=[])
+        generator._input_assembler.assemble = AsyncMock(return_value=empty_input)  # type: ignore[method-assign]
+
+        existing = ContactSummary(
+            contact_id=1, status=SummaryStatus.GENERATED, summary_text="Old summary"
+        )
+        generator._summary_repo.find_by_contact_id = AsyncMock(return_value=existing)  # type: ignore[method-assign]
+
+        result = await generator.generate(contact_id=1)
+
+        assert result is not None
+        assert result.summary_text == ""
+        assert result.follow_up_suggestions == []
+        assert result.status == SummaryStatus.GENERATED
+        assert result.generated_at is not None
+
+        # Ensure that it was saved with cleared data
+        generator._summary_repo.upsert.assert_called_once_with(result)  # type: ignore[attr-defined]
+
+        # Ensure full generation flow was skipped
+        generator._summary_repo.update_status.assert_not_called()  # type: ignore[attr-defined]

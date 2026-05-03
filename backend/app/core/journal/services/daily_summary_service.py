@@ -183,13 +183,42 @@ class DailySummaryService:
         if self._gemini_response_override is not None:
             return self._gemini_response_override
 
+        from fastmcp import Client, FastMCP
         from google import genai
+        from google.genai import types
+
+        from app.mcp.server import create_mcp_server
+
+        # Filter to only read-only tools for AI safety
+        main_mcp = create_mcp_server()
+        read_only_mcp = FastMCP("Daily Summary Generation Tools")
+
+        read_only_tools = [
+            "get_contact",
+            "search_contacts",
+            "list_contacts",
+            "get_journal",
+            "search_journals",
+            "list_journals",
+            "global_search",
+        ]
+
+        for tool_name in read_only_tools:
+            t = await main_mcp.get_tool(tool_name)
+            if t:
+                read_only_mcp._local_provider.add_tool(t)
 
         client = genai.Client(api_key=self._gemini_api_key)
-        response = await client.aio.models.generate_content(
-            model=self._gemini_model,
-            contents=prompt,
-        )
+
+        async with Client(read_only_mcp) as mcp_client:
+            response = await client.aio.models.generate_content(
+                model=self._gemini_model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    tools=[mcp_client.session],
+                    temperature=0.3,
+                ),
+            )
         return response.text or ""
 
     @staticmethod

@@ -141,3 +141,30 @@ class TestDailySummaryPromptBuilder:
         prompt = builder.build(_make_input(previous_summary=None))
 
         assert "Previous Summary" not in prompt
+
+    def test_prompt_includes_current_system_time_and_temporal_context(self) -> None:
+        """Prompt includes current time and past/today/future context."""
+        builder = DailySummaryPromptBuilder()
+
+        from datetime import UTC, datetime, timedelta
+
+        now_time = datetime.now(tz=UTC)
+        now_date = now_time.date()
+
+        # Test Past
+        prompt_past = builder.build(
+            _make_input(summary_date=now_date - timedelta(days=1)), now=now_time
+        )
+        assert "Current System Time" in prompt_past
+        assert "UTC" in prompt_past
+        assert "(Past)" in prompt_past
+
+        # Test Today
+        prompt_today = builder.build(_make_input(summary_date=now_date), now=now_time)
+        assert "(Today)" in prompt_today
+
+        # Test Future
+        prompt_future = builder.build(
+            _make_input(summary_date=now_date + timedelta(days=1)), now=now_time
+        )
+        assert "(Future)" in prompt_future

@@ -8,6 +8,7 @@ Runs as the 'summary-generator' consumer group.
 
 import structlog
 from core_shared.stream_client import StreamClient, StreamEvent
+from dishka import AsyncContainer
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.infrastructure.config import get_settings
@@ -32,6 +33,7 @@ class SummaryConsumer(DeadLetterConsumerMixin, StreamConsumer):
     def __init__(
         self,
         stream_client: StreamClient,
+        container: AsyncContainer,
         stream_name: str = "pms:domain-events",
         consumer_name: str = "summary-generator-1",
         batch_size: int = 5,
@@ -41,6 +43,7 @@ class SummaryConsumer(DeadLetterConsumerMixin, StreamConsumer):
 
         Args:
             stream_client: Redis Streams client
+            container: Dishka DI container
             stream_name: Name of the domain events stream
             consumer_name: Individual consumer name within the group
             batch_size: Maximum events to read per XREADGROUP call
@@ -55,6 +58,7 @@ class SummaryConsumer(DeadLetterConsumerMixin, StreamConsumer):
             batch_size=batch_size,
             block_ms=block_ms,
         )
+        self._container = container
 
     async def _handle_event(self, event: StreamEvent) -> None:
         """Process a ContactSummaryRefreshRequested event.
@@ -68,14 +72,22 @@ class SummaryConsumer(DeadLetterConsumerMixin, StreamConsumer):
         outbox_event = stream_event_to_outbox_event(event)
 
         engine = get_async_database_engine()
-        async with engine.begin() as conn:
-            # Attempt summary generation
-            await self._generate_summary(outbox_event, conn)
 
-            # Always update the search index (even if summary was skipped)
-            # so the contact record reflects the latest state
-            search_indexer = SearchIndexer(db_connection=conn)
-            await search_indexer.process_event(outbox_event)
+        # Set up MCP background context
+        from app.mcp.shared.dependencies import mcp_background_container
+
+        async with self._container() as request_container:
+            # Set the container in contextvar for FastMCP tools
+            mcp_background_container.set(request_container)
+
+            async with engine.begin() as conn:
+                # Attempt summary generation
+                await self._generate_summary(outbox_event, conn)
+
+                # Always update the search index (even if summary was skipped)
+                # so the contact record reflects the latest state
+                search_indexer = SearchIndexer(db_connection=conn)
+                await search_indexer.process_event(outbox_event)
 
         logger.debug(
             "Summary consumer processed event",

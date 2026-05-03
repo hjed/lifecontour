@@ -5,6 +5,7 @@ incremental context (prior summary), long-term activity statistics,
 and tone/safety guardrails per the product specification.
 """
 
+from datetime import datetime
 from typing import Any
 
 from app.core.contacts.services.summary_models import (
@@ -23,8 +24,12 @@ class SummaryPromptBuilder:
         """Build a structured prompt from assembled input data."""
         sections: list[str] = []
 
+        from datetime import UTC, datetime
+
+        now = datetime.now(tz=UTC)
+
         # System instructions
-        sections.append(self._system_instructions())
+        sections.append(self._system_instructions(now))
 
         # Contact identity
         sections.append(self._contact_section(summary_input))
@@ -85,10 +90,13 @@ class SummaryPromptBuilder:
 
         return prompt
 
-    def _system_instructions(self) -> str:
+    def _system_instructions(self, now: "datetime") -> str:
+        current_time = now.strftime("%Y-%m-%d %H:%M:%S UTC")
         return (
             "You are an AI assistant that generates concise, evidence-grounded "
             "interaction summaries for a personal contact management system.\n\n"
+            f"Current System Time: {current_time}\n"
+            "Use this time context to differentiate between past and future events.\n\n"
             "Guidelines:\n"
             "- Be conservative and grounded in the evidence provided\n"
             "- Avoid overstating certainty or making intrusive assumptions\n"

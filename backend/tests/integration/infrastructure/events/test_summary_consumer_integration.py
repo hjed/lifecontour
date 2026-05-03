@@ -5,6 +5,7 @@ Tests the end-to-end flow: Redis stream -> consumer -> Summary Generation -> Sea
 """
 
 import uuid
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -15,6 +16,18 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.infrastructure.events.summary_consumer import SummaryConsumer
+
+
+@asynccontextmanager
+async def mock_container_context() -> AsyncGenerator[MagicMock, None]:
+    yield MagicMock()
+
+
+def make_mock_container() -> MagicMock:
+    mock = MagicMock()
+    mock.return_value = mock_container_context()
+    return mock
+
 
 GROUP_NAME = "summary-generator"
 
@@ -59,6 +72,7 @@ class TestSummaryConsumerIntegration:
             stream_name=test_stream_name,
             consumer_name="test-summary-1",
             block_ms=100,
+            container=make_mock_container(),
         )
         await stream_client.ensure_consumer_group(test_stream_name, GROUP_NAME)
 

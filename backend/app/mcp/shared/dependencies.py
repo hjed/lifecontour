@@ -1,5 +1,6 @@
 """FastMCP-compatible dependency helpers for mounted MCP tools."""
 
+import contextvars
 from collections.abc import Callable
 from typing import Any, TypeVar, cast
 
@@ -24,10 +25,24 @@ T = TypeVar("T")
 
 logger = structlog.get_logger()
 
+# ContextVar for background workers to supply the DI container
+mcp_background_container: contextvars.ContextVar[AsyncContainer | None] = (
+    contextvars.ContextVar("mcp_background_container", default=None)
+)
+
 
 def _get_request_container() -> AsyncContainer:
     """Resolve the Dishka container for the current MCP HTTP request."""
-    request = get_http_request()
+    bg_container = mcp_background_container.get()
+    if bg_container is not None:
+        return bg_container
+
+    try:
+        request = get_http_request()
+    except RuntimeError:
+        raise RuntimeError(
+            "Dishka container not found in MCP context (neither HTTP nor background)"
+        ) from None
 
     container = getattr(request.state, "dishka_container", None)
     if container is None:
@@ -72,7 +87,10 @@ async def get_session_user() -> SessionUser:
     """
     from fastmcp.server.dependencies import get_access_token
 
-    token = get_access_token()
+    try:
+        token = get_access_token()
+    except RuntimeError:
+        token = None
 
     if token is not None:
         # Authenticated via OAuth — extract user identity from token claims

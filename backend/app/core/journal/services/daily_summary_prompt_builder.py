@@ -6,6 +6,8 @@ actual journal content and metadata.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from app.core.journal.services.daily_summary_models import DailySummaryInput
 
 # Truncate content beyond this length to keep prompts bounded
@@ -15,7 +17,9 @@ MAX_CONTENT_LENGTH = 500
 class DailySummaryPromptBuilder:
     """Builds structured prompts for daily summary generation."""
 
-    def build(self, summary_input: DailySummaryInput) -> str:
+    def build(
+        self, summary_input: DailySummaryInput, now: datetime | None = None
+    ) -> str:
         """Build a complete prompt from the assembled day input.
 
         Sections:
@@ -28,10 +32,17 @@ class DailySummaryPromptBuilder:
         sections: list[str] = []
 
         # 1. System instructions
-        sections.append(self._build_system_instructions())
+        from datetime import UTC, datetime
+
+        if now is None:
+            now = datetime.now(tz=UTC)
+        else:
+            now = now.astimezone(UTC) if now.tzinfo else now.replace(tzinfo=UTC)
+
+        sections.append(self._build_system_instructions(now))
 
         # 2. Day overview
-        sections.append(self._build_day_overview(summary_input))
+        sections.append(self._build_day_overview(summary_input, now))
 
         # 3. Journal entries
         entries_section = self._build_journal_entries(summary_input)
@@ -49,19 +60,33 @@ class DailySummaryPromptBuilder:
 
         return "\n\n".join(sections)
 
-    def _build_system_instructions(self) -> str:
+    def _build_system_instructions(self, now: datetime) -> str:
+        current_time = now.strftime("%Y-%m-%d %H:%M:%S UTC")
         return (
             "You are summarising a user's day based on their journal entries.\n"
+            f"Current System Time: {current_time}\n"
+            "Use this time context to differentiate between past events, today's events, and upcoming future events.\n"
             "Be short, practical, and descriptive rather than speculative.\n"
             "Do not invent information not present in the journals.\n"
             "Do not rewrite the journal record — just summarise.\n"
             "If mood data is present, mention the general mood direction."
         )
 
-    def _build_day_overview(self, summary_input: DailySummaryInput) -> str:
+    def _build_day_overview(
+        self, summary_input: DailySummaryInput, now: datetime
+    ) -> str:
         date_str = summary_input.summary_date.isoformat()
+
+        now_date = now.date()
+        if summary_input.summary_date < now_date:
+            temporal_context = "Past"
+        elif summary_input.summary_date == now_date:
+            temporal_context = "Today"
+        else:
+            temporal_context = "Future"
+
         lines = [
-            f"## Day Overview: {date_str}",
+            f"## Day Overview: {date_str} ({temporal_context})",
             f"- Journal count: {summary_input.journal_count}",
             f"- Event count: {summary_input.event_count}",
         ]
