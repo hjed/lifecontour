@@ -494,6 +494,7 @@ async def strava_webhook_validation(
 async def strava_webhook_event(
     event: StravaWebhookEvent,
     redis_pool: FromDishka[ArqRedis],
+    strava_token_service: FromDishka[StravaTokenService],
 ) -> Response:
     """
     Receive Strava webhook events.
@@ -504,6 +505,8 @@ async def strava_webhook_event(
     Strava worker.
 
     This endpoint is unauthenticated — Strava calls it directly.
+    The ``subscription_id`` is validated against stored subscriptions to
+    reject unsolicited events.
     """
     from core_shared.integration_constants import STRAVA_ARQ_QUEUE_NAME
 
@@ -512,6 +515,19 @@ async def strava_webhook_event(
             "Ignoring non-activity Strava webhook event",
             object_type=event.object_type,
             aspect_type=event.aspect_type,
+            owner_id=event.owner_id,
+        )
+        return Response(status_code=200)
+
+    # Validate that the subscription_id is known — reject unknown events
+    # silently (return 200 to avoid leaking info, but skip enqueue)
+    is_known = await strava_token_service.has_subscription_id(
+        event.subscription_id,
+    )
+    if not is_known:
+        logger.warning(
+            "Strava webhook event from unknown subscription_id — skipping",
+            subscription_id=event.subscription_id,
             owner_id=event.owner_id,
         )
         return Response(status_code=200)
@@ -539,7 +555,7 @@ async def strava_webhook_event(
             owner_id=event.owner_id,
         )
     except Exception:
-        # Log but still return 200 — Strava will retry if we fail
+        # Return 500 so Strava treats delivery as failed and retries
         logger.error(
             "Failed to enqueue Strava webhook event",
             aspect_type=event.aspect_type,
@@ -547,5 +563,6 @@ async def strava_webhook_event(
             owner_id=event.owner_id,
             exc_info=True,
         )
+        return Response(status_code=500)
 
     return Response(status_code=200)
