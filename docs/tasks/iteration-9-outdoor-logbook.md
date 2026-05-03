@@ -304,15 +304,15 @@ CAVING is the most complex new type — it has ABSEILING_TRIP as a dependency (l
 Deliver CANOEING as a complete vertical slice. Simpler than CAVING — one type-specific field, no compound dependencies.
 
 **Acceptance Criteria:**
-- [ ] Migration creates `journal_canoeing_data` table (journal_id PK/FK, water_type string nullable, timestamps)
-- [ ] CANOEING added to `JournalType` enum with dependencies: CANOEING → [OUTDOOR_ACTIVITY, FITNESS]
-- [ ] `CanoeingData` domain entity with validation
-- [ ] `CanoeingDataRepository` interface and SQL implementation
-- [ ] Type system updated: dependency map, table mapping, NOTE detection JOINs
-- [ ] API schema (`CanoeingDataSchema`), converter, and controller integration
-- [ ] MCP handles CANOEING type data
-- [ ] Frontend: `CanoeingTypeEditor` with water_type dropdown (river, lake, sea)
-- [ ] DI provider registration
+- [x] Migration creates `journal_canoeing_data` table (journal_id PK/FK, water_type string nullable, timestamps)
+- [x] CANOEING added to `JournalType` enum with dependencies: CANOEING → [OUTDOOR_ACTIVITY, FITNESS]
+- [x] `CanoeingData` domain entity with validation
+- [x] `CanoeingDataRepository` interface and SQL implementation
+- [x] Type system updated: dependency map, table mapping, NOTE detection JOINs
+- [x] API schema (`CanoeingDataSchema`), converter, and controller integration
+- [x] MCP handles CANOEING type data
+- [x] Frontend: `CanoeingTypeEditor` with water_type dropdown (river, lake, sea)
+- [x] DI provider registration
 
 **Required Test Coverage:**
 - **Unit:** CanoeingData entity validation.
