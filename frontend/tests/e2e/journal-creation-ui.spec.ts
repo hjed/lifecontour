@@ -1100,9 +1100,7 @@ test.describe('Journal Creation UI Flow', () => {
     await page.getByTestId('type-section-trigger-snorkelling').click();
 
     // Verify type section is rendered with correct content
-    await expect(
-      page.getByText('No additional snorkelling data.')
-    ).toBeVisible();
+    await expect(page.getByText('Snorkelling logbook.')).toBeVisible();
   });
 
   test('should create a DIVING journal and verify rendering', async ({
@@ -1123,7 +1121,7 @@ test.describe('Journal Creation UI Flow', () => {
     await page.getByTestId('type-section-trigger-diving').click();
 
     // Verify type section is rendered with correct content
-    await expect(page.getByText('No additional diving data.')).toBeVisible();
+    await expect(page.getByText('Diving logbook.')).toBeVisible();
   });
 
   test('should create a DOWNHILL_SKIING journal and verify rendering', async ({
@@ -1144,8 +1142,6 @@ test.describe('Journal Creation UI Flow', () => {
     await page.getByTestId('type-section-trigger-downhill_skiing').click();
 
     // Verify type section is rendered with correct content
-    await expect(
-      page.getByText('No additional downhill skiing data.')
-    ).toBeVisible();
+    await expect(page.getByText('Downhill skiing logbook.')).toBeVisible();
   });
 });
