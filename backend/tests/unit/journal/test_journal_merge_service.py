@@ -390,3 +390,154 @@ class TestJournalMergeService:
         assert "status = 'resolved'" in query_text
         assert params["target_id"] == 1
         assert params["source_id"] == 2
+
+
+class TestHasBaseConflicts:
+    """Tests for the has_base_conflicts method that determines if two journals have conflicting fields."""
+
+    def test_identical_journals_have_no_conflicts(self):
+        """Journals with identical title, content, and date range have no base conflicts."""
+        now = datetime(2024, 1, 1)
+        target = Journal(
+            id=1,
+            user_id="user123",
+            title="Same Title",
+            content="Same Content",
+            event_date_range=EventDateRange(start=now, end=now),
+        )
+        source = Journal(
+            id=2,
+            user_id="user123",
+            title="Same Title",
+            content="Same Content",
+            event_date_range=EventDateRange(start=now, end=now),
+        )
+
+        service = JournalMergeService(
+            journal_repo=AsyncMock(),
+            event_publisher=AsyncMock(),
+        )
+        assert service.has_base_conflicts(target, source) is False
+
+    def test_different_titles_are_a_conflict(self):
+        """Journals with different non-empty titles have a base conflict."""
+        now = datetime(2024, 1, 1)
+        target = Journal(
+            id=1,
+            user_id="user123",
+            title="Target Title",
+            content="Same Content",
+            event_date_range=EventDateRange(start=now, end=now),
+        )
+        source = Journal(
+            id=2,
+            user_id="user123",
+            title="Source Title",
+            content="Same Content",
+            event_date_range=EventDateRange(start=now, end=now),
+        )
+
+        service = JournalMergeService(
+            journal_repo=AsyncMock(),
+            event_publisher=AsyncMock(),
+        )
+        assert service.has_base_conflicts(target, source) is True
+
+    def test_different_content_is_a_conflict(self):
+        """Journals with different non-empty content have a base conflict."""
+        now = datetime(2024, 1, 1)
+        target = Journal(
+            id=1,
+            user_id="user123",
+            title="Same Title",
+            content="Target Content",
+            event_date_range=EventDateRange(start=now, end=now),
+        )
+        source = Journal(
+            id=2,
+            user_id="user123",
+            title="Same Title",
+            content="Source Content",
+            event_date_range=EventDateRange(start=now, end=now),
+        )
+
+        service = JournalMergeService(
+            journal_repo=AsyncMock(),
+            event_publisher=AsyncMock(),
+        )
+        assert service.has_base_conflicts(target, source) is True
+
+    def test_different_date_ranges_are_a_conflict(self):
+        """Journals with different non-null date ranges have a base conflict."""
+        target = Journal(
+            id=1,
+            user_id="user123",
+            title="Same Title",
+            content="Same Content",
+            event_date_range=EventDateRange(
+                start=datetime(2024, 1, 1), end=datetime(2024, 1, 1)
+            ),
+        )
+        source = Journal(
+            id=2,
+            user_id="user123",
+            title="Same Title",
+            content="Same Content",
+            event_date_range=EventDateRange(
+                start=datetime(2024, 2, 1), end=datetime(2024, 2, 1)
+            ),
+        )
+
+        service = JournalMergeService(
+            journal_repo=AsyncMock(),
+            event_publisher=AsyncMock(),
+        )
+        assert service.has_base_conflicts(target, source) is True
+
+    def test_source_only_content_is_not_a_conflict(self):
+        """When only the source has content and target is empty, it's not a conflict."""
+        now = datetime(2024, 1, 1)
+        target = Journal(
+            id=1,
+            user_id="user123",
+            title="Same Title",
+            content="",
+            event_date_range=EventDateRange(start=now, end=now),
+        )
+        source = Journal(
+            id=2,
+            user_id="user123",
+            title="Same Title",
+            content="Source Content",
+            event_date_range=EventDateRange(start=now, end=now),
+        )
+
+        service = JournalMergeService(
+            journal_repo=AsyncMock(),
+            event_publisher=AsyncMock(),
+        )
+        assert service.has_base_conflicts(target, source) is False
+
+    def test_one_empty_content_is_not_a_conflict(self):
+        """When one journal has empty content, it's not a conflict."""
+        now = datetime(2024, 1, 1)
+        target = Journal(
+            id=1,
+            user_id="user123",
+            title="Same",
+            content="Target Content",
+            event_date_range=EventDateRange(start=now, end=now),
+        )
+        source = Journal(
+            id=2,
+            user_id="user123",
+            title="Same",
+            content="",
+            event_date_range=EventDateRange(start=now, end=now),
+        )
+
+        service = JournalMergeService(
+            journal_repo=AsyncMock(),
+            event_publisher=AsyncMock(),
+        )
+        assert service.has_base_conflicts(target, source) is False

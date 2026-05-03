@@ -119,4 +119,54 @@ describe('MergeJournalDialog', () => {
       await screen.findByText(/Resolve Merge Conflicts/i)
     ).toBeInTheDocument();
   });
+
+  it('calls onOpenChange(false) after successful merge when externally controlled', async () => {
+    const user = userEvent.setup();
+    const onOpenChangeMock = jest.fn();
+
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { useJournal } = require('@/lib/api/journals');
+    // Return journals with identical attributes (no conflicts)
+    useJournal.mockImplementation((id: string) => {
+      if (!id) return { data: null, isPending: false };
+      return {
+        data: {
+          data: {
+            id,
+            type: 'journals',
+            attributes: {
+              title: 'Same Title',
+              content: 'Same Content',
+              event_date_range: null,
+              types: ['note'],
+              contacts: [],
+              tags: [],
+              type_data: {},
+            },
+          },
+        },
+        isPending: false,
+      };
+    });
+
+    render(
+      <MergeJournalDialog
+        targetJournalId={targetJournalId}
+        sourceJournalId='source-123'
+        open={true}
+        onOpenChange={onOpenChangeMock}
+      />
+    );
+
+    // Wait for the resolution dialog to auto-open (since sourceJournalId is pre-populated)
+    const mergeBtn = await screen.findByRole('button', { name: /Merge/i });
+
+    await user.click(mergeBtn);
+
+    // The mutateAsync should have been called
+    expect(mutateAsyncMock).toHaveBeenCalled();
+
+    // onOpenChange should be called with false to notify the parent
+    expect(onOpenChangeMock).toHaveBeenCalledWith(false);
+  });
 });

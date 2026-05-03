@@ -27,6 +27,7 @@ import {
   AttendeeStatus,
   ContactEventRole,
   DailySummaryResponse,
+  AutoMergeResponse,
 } from '@/types/journals';
 import { JsonApiErrorResponse, JsonApiMeta } from '@/types/api';
 import {
@@ -1087,6 +1088,7 @@ export function useMergeJournal() {
       queryClient.invalidateQueries({ queryKey: journalKeys.detail(targetId) });
       queryClient.invalidateQueries({ queryKey: journalKeys.detail(sourceId) });
       queryClient.invalidateQueries({ queryKey: journalKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: reviewItemKeys.all });
       toast.success('Journals merged successfully');
     },
     onError: (error: Error) => {
@@ -1431,6 +1433,63 @@ export function useDismissReviewItem() {
       queryClient.invalidateQueries({ queryKey: journalKeys.lists() });
       queryClient.invalidateQueries({ queryKey: journalKeys.details() });
       toast.success('Review item dismissed');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+/**
+ * Auto-merge all pending review items that have no conflicts
+ */
+export async function autoMergeReviewItems(): Promise<AutoMergeResponse> {
+  const response = await fetch('/api/journals/review-items/auto-merge', {
+    method: 'POST',
+    credentials: 'include',
+  });
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response
+      .json()
+      .catch(() => ({}));
+    throw new Error(
+      errorData.errors?.[0]?.detail || 'Failed to auto-merge review items'
+    );
+  }
+
+  return response.json();
+}
+
+/**
+ * Hook to auto-merge all non-conflicting review items
+ */
+export function useAutoMergeReviewItems() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: autoMergeReviewItems,
+    onSuccess: data => {
+      const { merged_count, errors } = data.data.attributes;
+      queryClient.invalidateQueries({ queryKey: reviewItemKeys.all });
+      queryClient.invalidateQueries({ queryKey: journalKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: journalKeys.details() });
+      if (merged_count > 0) {
+        toast.success(
+          `Auto-merged ${merged_count} journal${merged_count === 1 ? '' : 's'} successfully`
+        );
+        if (errors && errors.length > 0) {
+          toast.warning(
+            `Some items failed to merge: ${errors.length} error(s)`
+          );
+        }
+      } else if (errors && errors.length > 0) {
+        toast.error(`Auto-merge failed: ${errors[0]}`);
+      } else {
+        toast.info(
+          'No journals could be auto-merged (remaining items skipped)'
+        );
+      }
     },
     onError: (error: Error) => {
       toast.error(error.message);

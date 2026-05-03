@@ -607,3 +607,18 @@ export interface DailySummaryResource {
 export interface DailySummaryResponse {
   data: DailySummaryResource | null;
 }
+
+// Auto-merge response
+export interface AutoMergeResultAttributes {
+  merged_count: number;
+  skipped_count: number;
+  remaining_count: number;
+  errors: string[];
+}
+
+export interface AutoMergeResponse {
+  data: {
+    type: 'auto-merge-result';
+    attributes: AutoMergeResultAttributes;
+  };
+}
