@@ -33,6 +33,25 @@ configure_logging(
 logger = get_logger(__name__)
 
 
+def _on_consumer_task_done(task: asyncio.Task[None]) -> None:
+    """Log unhandled exceptions from the stream consumer background task.
+
+    Without this callback, if the consumer task raises, the exception
+    goes un-retrieved and the worker silently runs in a degraded state.
+    """
+    if task.cancelled():
+        logger.info("Stream consumer task was cancelled")
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.error(
+            "Stream consumer task failed unexpectedly",
+            error=str(exc),
+            error_type=type(exc).__name__,
+            exc_info=exc,
+        )
+
+
 async def startup(ctx: dict[str, Any]) -> None:
     """
     Worker startup function.
@@ -55,6 +74,7 @@ async def startup(ctx: dict[str, Any]) -> None:
             redis_url=settings.redis_url,
         )
     )
+    consumer_task.add_done_callback(_on_consumer_task_done)
     ctx["stream_consumer_task"] = consumer_task
 
     logger.info("Strava worker startup complete", worker_id=settings.worker_id)

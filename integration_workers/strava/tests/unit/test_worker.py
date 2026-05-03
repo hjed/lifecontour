@@ -189,3 +189,97 @@ class TestProcessStravaWebhookEvent:
 
         assert result["status"] == "ignored"
         assert "athlete" in result["reason"]
+
+
+class TestOnConsumerTaskDone:
+    """Tests for _on_consumer_task_done callback."""
+
+    @pytest.mark.asyncio
+    async def test_logs_error_on_task_exception(self) -> None:
+        """Callback logs error when the background task raises."""
+        import asyncio
+        import importlib
+        import sys
+        from unittest.mock import MagicMock, patch
+
+        mock_settings = MagicMock()
+        mock_settings.log_level = "DEBUG"
+        mock_settings.worker_id = "test"
+        mock_settings.redis_url = "redis://localhost:6379"
+        mock_settings.database_url.get_secret_value.return_value = (
+            "postgresql://test:test@localhost/test"
+        )
+
+        fake_strava_settings = MagicMock()
+        fake_strava_settings.StravaSettings.return_value = mock_settings
+        sys.modules["strava_settings"] = fake_strava_settings
+
+        mock_logger = MagicMock()
+        with (
+            patch("core_shared.logging.configure_logging"),
+            patch("core_shared.logging.get_logger", return_value=mock_logger),
+        ):
+            if "worker" in sys.modules:
+                del sys.modules["worker"]
+            worker_mod = importlib.import_module("worker")
+
+        # Create a task that raises an exception
+        async def _failing_task() -> None:
+            raise RuntimeError("Redis connection lost")
+
+        task: asyncio.Task[None] = asyncio.create_task(_failing_task())
+        # Let the task finish
+        try:
+            await task
+        except RuntimeError:
+            pass
+
+        worker_mod._on_consumer_task_done(task)
+        mock_logger.error.assert_called_once()
+        call_args = mock_logger.error.call_args
+        assert "failed unexpectedly" in call_args.args[0]
+
+    @pytest.mark.asyncio
+    async def test_logs_info_on_task_cancelled(self) -> None:
+        """Callback logs info when the background task is cancelled."""
+        import asyncio
+        import importlib
+        import sys
+        from unittest.mock import MagicMock, patch
+
+        mock_settings = MagicMock()
+        mock_settings.log_level = "DEBUG"
+        mock_settings.worker_id = "test"
+        mock_settings.redis_url = "redis://localhost:6379"
+        mock_settings.database_url.get_secret_value.return_value = (
+            "postgresql://test:test@localhost/test"
+        )
+
+        fake_strava_settings = MagicMock()
+        fake_strava_settings.StravaSettings.return_value = mock_settings
+        sys.modules["strava_settings"] = fake_strava_settings
+
+        mock_logger = MagicMock()
+        with (
+            patch("core_shared.logging.configure_logging"),
+            patch("core_shared.logging.get_logger", return_value=mock_logger),
+        ):
+            if "worker" in sys.modules:
+                del sys.modules["worker"]
+            worker_mod = importlib.import_module("worker")
+
+        # Create a task that gets cancelled
+        async def _long_running() -> None:
+            await asyncio.sleep(999)
+
+        task: asyncio.Task[None] = asyncio.create_task(_long_running())
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+        worker_mod._on_consumer_task_done(task)
+        mock_logger.info.assert_called_once()
+        call_args = mock_logger.info.call_args
+        assert "cancelled" in call_args.args[0]

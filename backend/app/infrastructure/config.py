@@ -179,10 +179,6 @@ class Settings(BaseSettings):
     strava_encryption_key: str = Field(
         default="", description="Fernet encryption key for Strava OAuth tokens"
     )
-    strava_webhook_verify_token: str = Field(
-        default="",
-        description="Shared secret for Strava webhook subscription handshake validation",
-    )
 
     immich_base_url: str = Field(default="", description="Immich instance base URL")
     immich_api_key: str = Field(default="", description="Immich API key")
