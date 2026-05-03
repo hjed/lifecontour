@@ -36,7 +36,7 @@ class DailySummaryPromptBuilder:
         sections.append(self._build_system_instructions(now))
 
         # 2. Day overview
-        sections.append(self._build_day_overview(summary_input))
+        sections.append(self._build_day_overview(summary_input, now))
 
         # 3. Journal entries
         entries_section = self._build_journal_entries(summary_input)
@@ -66,12 +66,12 @@ class DailySummaryPromptBuilder:
             "If mood data is present, mention the general mood direction."
         )
 
-    def _build_day_overview(self, summary_input: DailySummaryInput) -> str:
+    def _build_day_overview(
+        self, summary_input: DailySummaryInput, now: datetime
+    ) -> str:
         date_str = summary_input.summary_date.isoformat()
 
-        from datetime import UTC, datetime
-
-        now_date = datetime.now(tz=UTC).date()
+        now_date = now.date()
         if summary_input.summary_date < now_date:
             temporal_context = "Past"
         elif summary_input.summary_date == now_date:

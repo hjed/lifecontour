@@ -87,7 +87,10 @@ async def get_session_user() -> SessionUser:
     """
     from fastmcp.server.dependencies import get_access_token
 
-    token = get_access_token()
+    try:
+        token = get_access_token()
+    except RuntimeError:
+        token = None
 
     if token is not None:
         # Authenticated via OAuth — extract user identity from token claims
