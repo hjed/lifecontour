@@ -248,6 +248,14 @@ class CavingDataValidationError(JournalDomainError):
         self.field = field
 
 
+class CanoeingDataValidationError(JournalDomainError):
+    """Exception raised when canoeing data (CANOEING type) validation fails."""
+
+    def __init__(self, field: str, message: str):
+        super().__init__(f"{field}: {message}", 400)
+        self.field = field
+
+
 class ClimbingDataValidationError(JournalDomainError):
     """Exception raised when climbing data (CLIMBING type) validation fails."""
 

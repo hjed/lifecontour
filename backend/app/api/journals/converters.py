@@ -16,6 +16,7 @@ from core_shared.models.journals import (
     BushwalkingData,
     Calendar,
     CalendarInfo,
+    CanoeingData,
     CanyoningData,
     CavingData,
     ClimbingData,
@@ -41,6 +42,7 @@ from app.api.journals.schemas import (
     BushwalkingDataSchema,
     CalendarInfoDataSchema,
     CalendarSchema,
+    CanoeingDataSchema,
     CanyoningDataSchema,
     CavingDataSchema,
     ClimbingDataSchema,
@@ -497,6 +499,13 @@ class TypeDataConverter:
             template_id=str(data.template_id) if data.template_id else None,
             is_vertical=data.is_vertical,
             is_horizontal=data.is_horizontal,
+        ).model_dump(exclude_none=True)
+
+    @staticmethod
+    def canoeing_data_to_schema(data: CanoeingData) -> dict[str, Any]:
+        """Convert CanoeingData domain entity to API schema."""
+        return CanoeingDataSchema(
+            water_type=data.water_type,
         ).model_dump(exclude_none=True)
 
     @staticmethod

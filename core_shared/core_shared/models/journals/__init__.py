@@ -7,6 +7,7 @@ from .attendee_status import AttendeeStatus
 from .bushwalking_data import BushwalkingData
 from .calendar import Calendar
 from .calendar_info import CalendarInfo
+from .canoeing_data import CanoeingData
 from .canyoning_data import CanyoningData
 from .caving_data import CavingData
 from .climbing_data import ClimbingData
@@ -62,6 +63,7 @@ from .exceptions import (
     CalendarInfoValidationError,
     CalendarNotFoundError,
     CalendarValidationError,
+    CanoeingDataValidationError,
     CanyoningDataValidationError,
     CavingDataValidationError,
     ClimbingDataValidationError,
@@ -172,6 +174,7 @@ __all__ = [
     "AbseilingData",
     "ActivityTemplate",
     "TemplatePitch",
+    "CanoeingData",
     "CanyoningData",
     "CavingData",
     "ClimbingData",
@@ -218,6 +221,7 @@ __all__ = [
     "AbseilingDataValidationError",
     "ActivityTemplateValidationError",
     "TemplatePitchValidationError",
+    "CanoeingDataValidationError",
     "CanyoningDataValidationError",
     "CavingDataValidationError",
     "ClimbingDataValidationError",

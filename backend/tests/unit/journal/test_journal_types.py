@@ -50,7 +50,7 @@ class TestJournalType:
     def test_journal_type_can_be_iterated(self):
         """Test that JournalType can be iterated."""
         all_types = list(JournalType)
-        assert len(all_types) == 16  # Updated for CAVING
+        assert len(all_types) == 17  # Updated for CANOEING
         assert JournalType.NOTE in all_types
         assert JournalType.EVENT in all_types
         assert JournalType.MOOD_RATING in all_types
@@ -67,6 +67,7 @@ class TestJournalType:
         assert JournalType.KAYAKING in all_types
         assert JournalType.CROSS_COUNTRY_SKIING in all_types
         assert JournalType.CAVING in all_types
+        assert JournalType.CANOEING in all_types
 
     def test_abseiling_trip_dependencies(self):
         """Test ABSEILING_TRIP depends on OUTDOOR_ACTIVITY and FITNESS."""
@@ -111,3 +112,10 @@ class TestJournalType:
         assert JournalType.ABSEILING_TRIP in deps
         assert JournalType.OUTDOOR_ACTIVITY in deps
         assert JournalType.FITNESS in deps
+
+    def test_canoeing_dependencies(self):
+        """Test CANOEING depends on OUTDOOR_ACTIVITY and FITNESS."""
+        deps = JournalType.get_dependencies(JournalType.CANOEING)
+        assert JournalType.OUTDOOR_ACTIVITY in deps
+        assert JournalType.FITNESS in deps
+        assert JournalType.BUSHWALKING not in deps

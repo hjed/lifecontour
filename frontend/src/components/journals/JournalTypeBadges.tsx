@@ -4,7 +4,7 @@
  * Displays journal types with appropriate icons and consistent styling.
  * Supports all journal types: NOTE, EVENT, MOOD_RATING, PLAN, TRAVEL,
  * PHOTO_ALBUM, FITNESS, OUTDOOR_ACTIVITY, BUSHWALKING, JOGGING,
- * ABSEILING_TRIP, CANYONING, CLIMBING, KAYAKING, CROSS_COUNTRY_SKIING.
+ * ABSEILING_TRIP, CANYONING, CAVING, CANOEING, CLIMBING, KAYAKING, CROSS_COUNTRY_SKIING.
  */
 
 'use client';
@@ -24,6 +24,7 @@ import {
   Droplets,
   TrendingUp,
   Waves,
+  Ship,
   Snowflake,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -54,6 +55,7 @@ export const TYPE_ICONS: Record<
   [JournalType.ABSEILING_TRIP]: ArrowDownToLine,
   [JournalType.CANYONING]: Droplets,
   [JournalType.CAVING]: Mountain,
+  [JournalType.CANOEING]: Ship,
   [JournalType.CLIMBING]: TrendingUp,
   [JournalType.KAYAKING]: Waves,
   [JournalType.CROSS_COUNTRY_SKIING]: Snowflake,
@@ -74,6 +76,7 @@ export const TYPE_LABELS: Record<JournalType, string> = {
   [JournalType.ABSEILING_TRIP]: 'Abseiling Trip',
   [JournalType.CANYONING]: 'Canyoning',
   [JournalType.CAVING]: 'Caving',
+  [JournalType.CANOEING]: 'Canoeing',
   [JournalType.CLIMBING]: 'Climbing',
   [JournalType.KAYAKING]: 'Kayaking',
   [JournalType.CROSS_COUNTRY_SKIING]: 'Cross-Country Skiing',
@@ -97,6 +100,7 @@ export const TYPE_VARIANTS: Record<
   [JournalType.ABSEILING_TRIP]: 'default',
   [JournalType.CANYONING]: 'default',
   [JournalType.CAVING]: 'default',
+  [JournalType.CANOEING]: 'secondary',
   [JournalType.CLIMBING]: 'default',
   [JournalType.KAYAKING]: 'secondary',
   [JournalType.CROSS_COUNTRY_SKIING]: 'secondary',
