@@ -121,9 +121,20 @@ export function JournalContactBadge({
 
     setIsLoading(true);
     try {
-      const resolvedStatus =
-        selectedStatus === 'NO_STATUS' ? null : selectedStatus;
-      const resolvedRole = selectedRole === 'NO_ROLE' ? null : selectedRole;
+      const isEventRole =
+        selectedRelationshipType ===
+          JournalContactRelationshipType.PARTICIPANT ||
+        selectedRelationshipType === JournalContactRelationshipType.INVITEE;
+      const resolvedStatus = isEventRole
+        ? selectedStatus === 'NO_STATUS'
+          ? null
+          : selectedStatus
+        : null;
+      const resolvedRole = isEventRole
+        ? selectedRole === 'NO_ROLE'
+          ? null
+          : selectedRole
+        : null;
       await onContactAdd(
         selectedContacts.map(c => c.id),
         selectedRelationshipType,
@@ -239,6 +250,7 @@ export function JournalContactBadge({
                         <button
                           type='button'
                           className='hover:text-destructive ml-1'
+                          aria-label={`Remove ${fallbackDisplayName}`}
                           onClick={() =>
                             setSelectedContacts(prev =>
                               prev.filter(c => c.id !== contact.id)

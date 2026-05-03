@@ -139,7 +139,7 @@ export function JournalDetailView({
     status?: AttendeeStatus | null,
     role?: ContactEventRole | null
   ) => {
-    await Promise.all(
+    const results = await Promise.allSettled(
       contactIds.map(contactId =>
         addContact.mutateAsync({
           journalId: journal.id,
@@ -150,6 +150,13 @@ export function JournalDetailView({
         })
       )
     );
+
+    const failures = results.filter(
+      (r): r is PromiseRejectedResult => r.status === 'rejected'
+    );
+    if (failures.length > 0) {
+      throw new Error(`Failed to add ${failures.length} contact(s)`);
+    }
   };
 
   const handleContactRemove = async (contactId: string) => {
