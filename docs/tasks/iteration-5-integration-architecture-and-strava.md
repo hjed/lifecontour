@@ -376,22 +376,22 @@ Implement Strava webhook handling and the ARQ worker container for background pr
 - [ ] Deduplication by `strava_activity_id`
 - [ ] Imported journals trigger merge review detection for same-day overlaps
 
-#### Phase 1: Data Transformation and Type Mapping
+#### Phase 1: Data Transformation and Type Mapping ✅ COMPLETE
 **PR Size:** ~5–7 files
 
 Pure transformation logic with no I/O or sync orchestration. Converts Strava API responses into journal domain data.
 
 **Acceptance Criteria:**
-- [ ] `StravaDataTransformer` class: maps Strava activity type → journal type hierarchy per the [type mapping table](../product-specifications/integration-architecture-and-strava-product-specification.md#activity-type-mapping)
-- [ ] Field transformation: Strava fields → journal fields per the [data transformation table](../product-specifications/integration-architecture-and-strava-product-specification.md#data-transformation)
-- [ ] `GpxGenerator`: converts Strava streams (latlng, altitude, time) into GPX XML
-- [ ] `ElevationCalculator`: computes elevation loss from altitude stream (sum of negative deltas between consecutive points); returns null when no altitude data
-- [ ] Unmapped Strava activity types default to FITNESS only
-- [ ] Note: Pydantic response models (`StravaActivity`, `StravaActivityStream`) already exist from ITER5-003 Phase 2
+- [x] `StravaDataTransformer` class: maps Strava activity type → journal type hierarchy per the [type mapping table](../product-specifications/integration-architecture-and-strava-product-specification.md#activity-type-mapping)
+- [x] Field transformation: Strava fields → journal fields per the [data transformation table](../product-specifications/integration-architecture-and-strava-product-specification.md#data-transformation)
+- [x] `GpxGenerator`: converts Strava streams (latlng, altitude, time) into GPX XML
+- [x] `ElevationCalculator`: computes elevation loss from altitude stream (sum of negative deltas between consecutive points); returns null when no altitude data
+- [x] Unmapped Strava activity types default to FITNESS only
+- [x] Note: Pydantic response models (`StravaActivity`, `StravaActivityStream`) already exist from ITER5-003 Phase 2
 
 **Required Test Coverage:**
-- **Unit:** type mapping for each Strava type in the mapping table, field transformation for each data field, GPX generation with sample stream data, elevation loss calculation (positive-only, mixed, empty stream).
-- **Integration:** round-trip transformation tests with realistic Strava API response fixtures covering Run, Hike, Ride, Kayaking, and unmapped types.
+- **Unit (54 tests):** 18 type mapping tests (all Strava types in mapping table + unmapped), 19 field transformation tests (all data fields + edge cases), 8 GPX generation tests (full/partial streams, empty, well-formed XML, time offsets), 9 elevation loss tests (ascending, descending, mixed, empty, null, flat, rounding). ✅ All pass.
+- **Integration (7 tests):** round-trip transformation tests with realistic Strava API response fixtures covering Run, Hike, Ride, Kayaking, unmapped (Yoga), activity with streams, and activity without streams. ✅ All pass.
 
 #### Phase 2: Sync Orchestration and Journal Creation
 **PR Size:** ~6–8 files
