@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from typing import cast
 
 
 def _get_workspace_ports() -> dict[str, str]:
@@ -18,9 +19,11 @@ def _get_workspace_ports() -> dict[str, str]:
         result = subprocess.run(
             ["python3", str(script), "json"], check=True, capture_output=True, text=True
         )
-        return json.loads(result.stdout)
+        return cast(dict[str, str], json.loads(result.stdout))
     except Exception as e:
-        raise RuntimeError(f"Failed to load workspace environment from {script}: {e}")
+        raise RuntimeError(
+            f"Failed to load workspace environment from {script}: {e}"
+        ) from e
 
 
 _ws = _get_workspace_ports()

@@ -34,6 +34,7 @@ from core_shared.models.contacts.serialization import serialize_contact
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.sync_metadata import SyncStatus
 from core_shared.repositories import SyncJobRepository
+from core_shared.telemetry import setup_telemetry
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import text
@@ -86,6 +87,12 @@ class WorkerSettings(BaseSettings):
 
     # Webhook configuration
     webhook_base_url: str = ""  # Public HTTPS URL for webhook callbacks
+
+    # Observability
+    enable_telemetry: bool = False
+    otel_exporter_otlp_endpoint: str = ""
+    otel_service_name: str = "google-worker"
+    otel_resource_attributes: str = ""
 
 
 # Global settings instance
@@ -3540,6 +3547,9 @@ class GoogleWorkerSettings(WorkerSettingsBase):
 
 
 if __name__ == "__main__":
+    # Setup OpenTelemetry
+    setup_telemetry(settings)
+
     # Run the worker
     logger.info("Starting Google Contacts ARQ worker", worker_id=settings.worker_id)
     run_worker(GoogleWorkerSettings)

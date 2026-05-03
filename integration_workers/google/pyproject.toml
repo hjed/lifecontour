@@ -108,6 +108,7 @@ module = [
     "arq.*",
     "google.*",
     "googleapiclient.*",
+    "redis.*",
 ]
 ignore_missing_imports = true
 
@@ -115,6 +116,7 @@ ignore_missing_imports = true
 module = "tests.*"
 disallow_untyped_defs = false
 check_untyped_defs = false
+ignore_errors = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

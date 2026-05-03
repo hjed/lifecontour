@@ -24,7 +24,9 @@ def get_workspace_env() -> dict[str, str]:
         )
         return cast(dict[str, str], json.loads(result.stdout))
     except Exception as e:
-        raise RuntimeError(f"Failed to load workspace environment from {script}: {e}")
+        raise RuntimeError(
+            f"Failed to load workspace environment from {script}: {e}"
+        ) from e
 
 
 def get_async_database_url() -> str:

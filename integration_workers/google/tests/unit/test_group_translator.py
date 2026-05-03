@@ -72,15 +72,23 @@ def test_translate_uses_fallback_name_as_mapping_key() -> None:
         == "Old Coworkers"
     )
 
+
 def test_translate_prevents_hex_id_fallback() -> None:
     """Test that a raw hex ID (15+ chars) is not returned as a fallback name if unmatched."""
     translator = GoogleGroupNameTranslator(reserved_group_ids=[], group_mapping={})
 
     # 14 chars -> still allowed as a name
-    assert translator.translate(None, fallback_name="1234567890abcd") == "1234567890abcd"
+    assert (
+        translator.translate(None, fallback_name="1234567890abcd") == "1234567890abcd"
+    )
 
     # 15 chars -> blocked (returns None)
     assert translator.translate(None, fallback_name="1234567890abcde") is None
 
     # Typical Google ID format
-    assert translator.translate("contactGroups/839c81a0f6f88d5", fallback_name="839c81a0f6f88d5") is None
+    assert (
+        translator.translate(
+            "contactGroups/839c81a0f6f88d5", fallback_name="839c81a0f6f88d5"
+        )
+        is None
+    )
