@@ -150,7 +150,10 @@ export function ClimbingTypeEditor({
       onCancel={handleEditorCancel}
     >
       <div className='space-y-2'>
-        <Label htmlFor='template-selector' className='flex items-center gap-2'>
+        <Label
+          htmlFor={`${baseId}-template-selector`}
+          className='flex items-center gap-2'
+        >
           <Compass
             className='text-muted-foreground h-4 w-4'
             aria-hidden='true'
