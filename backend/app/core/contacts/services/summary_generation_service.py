@@ -416,6 +416,7 @@ class SummaryGenerator:
                     summary_text="",
                     follow_up_suggestions=[],
                     status=SummaryStatus.GENERATED,
+                    generated_at=datetime.now(tz=UTC),
                 )
                 return await self._summary_repo.upsert(cleared_summary)
             return existing

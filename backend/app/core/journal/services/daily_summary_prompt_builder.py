@@ -36,6 +36,8 @@ class DailySummaryPromptBuilder:
 
         if now is None:
             now = datetime.now(tz=UTC)
+        else:
+            now = now.astimezone(UTC) if now.tzinfo else now.replace(tzinfo=UTC)
 
         sections.append(self._build_system_instructions(now))
 
@@ -59,11 +61,7 @@ class DailySummaryPromptBuilder:
         return "\n\n".join(sections)
 
     def _build_system_instructions(self, now: datetime) -> str:
-        from datetime import UTC
-
-        # Ensure 'now' is evaluated in UTC
-        utc_now = now.astimezone(UTC) if now.tzinfo else now.replace(tzinfo=UTC)
-        current_time = utc_now.strftime("%Y-%m-%d %H:%M:%S UTC")
+        current_time = now.strftime("%Y-%m-%d %H:%M:%S UTC")
         return (
             "You are summarising a user's day based on their journal entries.\n"
             f"Current System Time: {current_time}\n"

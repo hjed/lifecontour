@@ -360,6 +360,7 @@ class TestSummaryGenerator:
         assert result.summary_text == ""
         assert result.follow_up_suggestions == []
         assert result.status == SummaryStatus.GENERATED
+        assert result.generated_at is not None
 
         # Ensure that it was saved with cleared data
         generator._summary_repo.upsert.assert_called_once_with(result)  # type: ignore[attr-defined]
