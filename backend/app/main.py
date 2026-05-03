@@ -32,9 +32,12 @@ from app.infrastructure.tasks.attendance_transition_task import (
 )
 from app.mcp.server import create_mcp_app
 
+_TELEMETRY_SETUP_DONE = False
+
 
 def setup_telemetry(app: FastAPI, settings: Settings) -> None:
     """Setup OpenTelemetry instrumentation."""
+    global _TELEMETRY_SETUP_DONE
     if not settings.enable_telemetry:
         return
 
@@ -57,53 +60,65 @@ def setup_telemetry(app: FastAPI, settings: Settings) -> None:
 
     logger = structlog.get_logger()
 
-    # Configure resource attributes
-    resource_attrs = {"service.name": settings.otel_service_name}
-    if settings.otel_resource_attributes:
-        # Parse additional resource attributes
-        for attr in settings.otel_resource_attributes.split(","):
-            if "=" in attr:
-                key, value = attr.strip().split("=", 1)
-                resource_attrs[key] = value
+    if not _TELEMETRY_SETUP_DONE:
+        # Configure resource attributes
+        resource_attrs = {"service.name": settings.otel_service_name}
+        if settings.otel_resource_attributes:
+            # Parse additional resource attributes
+            for attr in settings.otel_resource_attributes.split(","):
+                if "=" in attr:
+                    key, value = attr.strip().split("=", 1)
+                    resource_attrs[key.strip()] = value.strip()
 
-    # Set up tracer provider
-    resource = Resource.create(resource_attrs)
-    trace.set_tracer_provider(TracerProvider(resource=resource))
+        # Set up tracer provider
+        resource = Resource.create(resource_attrs)
+        trace.set_tracer_provider(TracerProvider(resource=resource))
 
-    # Set up logger provider
-    logger_provider = LoggerProvider(resource=resource)
-    set_logger_provider(logger_provider)
+        # Set up logger provider
+        logger_provider = LoggerProvider(resource=resource)
+        set_logger_provider(logger_provider)
 
-    # Configure OTLP exporter if endpoint is provided
-    if settings.otel_exporter_otlp_endpoint:
-        otlp_exporter = OTLPSpanExporter(
-            endpoint=f"{settings.otel_exporter_otlp_endpoint}/v1/traces"
-        )
-        span_processor = BatchSpanProcessor(otlp_exporter)
-        tracer_provider = trace.get_tracer_provider()
-        if hasattr(tracer_provider, "add_span_processor"):
-            tracer_provider.add_span_processor(span_processor)
+        # Configure OTLP exporter if endpoint is provided
+        if settings.otel_exporter_otlp_endpoint:
+            otlp_exporter = OTLPSpanExporter(
+                endpoint=f"{settings.otel_exporter_otlp_endpoint}/v1/traces"
+            )
+            span_processor = BatchSpanProcessor(otlp_exporter)
+            tracer_provider = trace.get_tracer_provider()
+            if hasattr(tracer_provider, "add_span_processor"):
+                tracer_provider.add_span_processor(span_processor)
 
-        otlp_log_exporter = OTLPLogExporter(
-            endpoint=f"{settings.otel_exporter_otlp_endpoint}/v1/logs"
-        )
-        logger_provider.add_log_record_processor(LogBatchProcessor(otlp_log_exporter))
-        handler = LoggingHandler(level=logging.NOTSET, logger_provider=logger_provider)
-        logging.getLogger().addHandler(handler)
+            otlp_log_exporter = OTLPLogExporter(
+                endpoint=f"{settings.otel_exporter_otlp_endpoint}/v1/logs"
+            )
+            logger_provider.add_log_record_processor(
+                LogBatchProcessor(otlp_log_exporter)
+            )
+
+            if not any(
+                isinstance(h, LoggingHandler) for h in logging.getLogger().handlers
+            ):
+                handler = LoggingHandler(
+                    level=logging.NOTSET, logger_provider=logger_provider
+                )
+                logging.getLogger().addHandler(handler)
+
+        HTTPXClientInstrumentor().instrument()
+
+        engine = get_database_engine()
+        SQLAlchemyInstrumentor().instrument(engine=engine)
+
+        try:
+            from opentelemetry.instrumentation.redis import RedisInstrumentor
+
+            RedisInstrumentor().instrument()
+        except ImportError:
+            logger.warning("Redis instrumentation not available")
+
+        _TELEMETRY_SETUP_DONE = True
 
     # Instrument FastAPI, HTTP clients, SQLAlchemy and Redis
     FastAPIInstrumentor.instrument_app(app, tracer_provider=trace.get_tracer_provider())
-    HTTPXClientInstrumentor().instrument()
-
-    engine = get_database_engine()
-    SQLAlchemyInstrumentor().instrument(engine=engine)
-
-    try:
-        from opentelemetry.instrumentation.redis import RedisInstrumentor
-
-        RedisInstrumentor().instrument()
-    except ImportError:
-        logger.warning("Redis instrumentation not available")
 
     logger.info(
         "OpenTelemetry instrumentation enabled",
@@ -118,8 +133,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     settings: Settings = app.state.settings
     logger = structlog.get_logger()
 
-    # Setup logging
-    setup_logging(settings.log_level)
     logger.info("Starting Personal Management System Backend", version="0.1.0")
 
     # Initialize database
@@ -283,6 +296,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url="/api/openapi.json" if settings.debug else None,
         lifespan=combined_lifespan,
     )
+
+    # Setup logging early so basicConfig runs before OTEL adds handlers
+    setup_logging(settings.log_level)
 
     # Setup OpenTelemetry BEFORE middleware and routes are compiled by Uvicorn/Starlette
     setup_telemetry(app, settings)
