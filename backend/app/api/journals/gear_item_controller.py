@@ -115,15 +115,16 @@ async def update_gear_item(
         )
 
     attrs = request.data.attributes
-    if attrs.name is not None:
+    set_fields = attrs.model_fields_set
+    if "name" in set_fields and attrs.name is not None:
         item.name = attrs.name
-    if attrs.model is not None:
+    if "model" in set_fields:
         item.model = attrs.model
-    if attrs.serial_number is not None:
+    if "serial_number" in set_fields:
         item.serial_number = attrs.serial_number
-    if attrs.purchase_date is not None:
+    if "purchase_date" in set_fields:
         item.purchase_date = attrs.purchase_date
-    if attrs.manufacturer is not None:
+    if "manufacturer" in set_fields:
         item.manufacturer = attrs.manufacturer
 
     try:

@@ -201,6 +201,43 @@ class TestGearItemEndpoints:
         assert data["data"]["attributes"]["model"] == "Model A"  # Unchanged
         assert data["data"]["attributes"]["manufacturer"] == "DMM"
 
+    async def test_update_gear_item_clear_field(self, authenticated_client):
+        """Test clearing an optional gear item field."""
+        create_response = await authenticated_client.post(
+            "/api/gear-items",
+            json={
+                "data": {
+                    "type": "gear-items",
+                    "attributes": {
+                        "name": "Original Name",
+                        "model": "Model A",
+                        "manufacturer": "DMM",
+                    },
+                }
+            },
+        )
+        item_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "gear-items",
+                "id": item_id,
+                "attributes": {
+                    "manufacturer": None,
+                },
+            }
+        }
+
+        response = await authenticated_client.put(
+            f"/api/gear-items/{item_id}", json=update_data
+        )
+        assert response.status_code == 200
+
+        data = response.json()
+        assert data["data"]["attributes"]["name"] == "Original Name"  # Unchanged
+        assert data["data"]["attributes"]["model"] == "Model A"  # Unchanged
+        assert data["data"]["attributes"]["manufacturer"] is None  # Cleared
+
     async def test_delete_gear_item(self, authenticated_client):
         """Test deleting a gear item."""
         create_response = await authenticated_client.post(

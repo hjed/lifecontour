@@ -4403,17 +4403,29 @@ async def update_gear_item_mcp(
     gear_item_id: Annotated[str, Field(description="Gear item UUID")],
     name: Annotated[str | None, Field(default=None, description="Updated name")] = None,
     model: Annotated[
-        str | None, Field(default=None, description="Updated model")
+        str | None,
+        Field(default=None, description="Updated model (pass empty string to clear)"),
     ] = None,
     serial_number: Annotated[
-        str | None, Field(default=None, description="Updated serial number")
+        str | None,
+        Field(
+            default=None,
+            description="Updated serial number (pass empty string to clear)",
+        ),
     ] = None,
     purchase_date: Annotated[
         str | None,
-        Field(default=None, description="Updated purchase date (YYYY-MM-DD)"),
+        Field(
+            default=None,
+            description="Updated purchase date YYYY-MM-DD (pass empty string to clear)",
+        ),
     ] = None,
     manufacturer: Annotated[
-        str | None, Field(default=None, description="Updated manufacturer")
+        str | None,
+        Field(
+            default=None,
+            description="Updated manufacturer (pass empty string to clear)",
+        ),
     ] = None,
     user_id: str = mcp_depends(get_current_user_id),
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
@@ -4427,36 +4439,43 @@ async def update_gear_item_mcp(
         import uuid as uuid_mod
 
         uuid_mod.UUID(gear_item_id)
-        item = await repos.gear_item_repo.find_by_id(gear_item_id)
-        if not item or item.user_id != user_id:
-            return MCPResponseBuilder.not_found_error_response(
-                "Gear item", gear_item_id
-            )
-
-        if name is not None:
-            item.name = name
-        if model is not None:
-            item.model = model
-        if serial_number is not None:
-            item.serial_number = serial_number
-        if purchase_date is not None:
-            item.purchase_date = date.fromisoformat(purchase_date)
-        if manufacturer is not None:
-            item.manufacturer = manufacturer
-
-        try:
-            item.__post_init__()
-        except Exception as e:
-            return MCPResponseBuilder.validation_error_response("gear_item", str(e))
-
-        saved_item = await repos.gear_item_repo.save(item)
-
-        response = GearItemMCPConverter.to_mcp_response(saved_item)
-        return MCPResponseBuilder.success_response(response)
     except ValueError:
         return MCPResponseBuilder.validation_error_response(
             "gear_item_id", "Invalid UUID"
         )
+
+    item = await repos.gear_item_repo.find_by_id(gear_item_id)
+    if not item or item.user_id != user_id:
+        return MCPResponseBuilder.not_found_error_response("Gear item", gear_item_id)
+
+    if name is not None:
+        item.name = name
+    if model is not None:
+        item.model = None if model == "" else model
+    if serial_number is not None:
+        item.serial_number = None if serial_number == "" else serial_number
+    if purchase_date is not None:
+        if purchase_date == "":
+            item.purchase_date = None
+        else:
+            try:
+                item.purchase_date = date.fromisoformat(purchase_date)
+            except ValueError:
+                return MCPResponseBuilder.validation_error_response(
+                    "purchase_date", "Invalid date format, use YYYY-MM-DD"
+                )
+    if manufacturer is not None:
+        item.manufacturer = None if manufacturer == "" else manufacturer
+
+    try:
+        item.__post_init__()
+    except Exception as e:
+        return MCPResponseBuilder.validation_error_response("gear_item", str(e))
+
+    saved_item = await repos.gear_item_repo.save(item)
+
+    response = GearItemMCPConverter.to_mcp_response(saved_item)
+    return MCPResponseBuilder.success_response(response)
 
 
 def register_journal_tools(mcp: FastMCP[None]) -> None:
