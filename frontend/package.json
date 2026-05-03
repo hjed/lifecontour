@@ -102,5 +102,11 @@
     "node": ">=22.13.0",
     "pnpm": ">=11.0.0"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "sharp",
+      "unrs-resolver"
+    ]
+  },
   "packageManager": "pnpm@11.0.4"
 }
