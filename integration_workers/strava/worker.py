@@ -17,6 +17,7 @@ from arq.typing import StartupShutdown, WorkerSettingsBase
 from core_shared.database.engine import create_session_factory
 from core_shared.integration_constants import STRAVA_ARQ_QUEUE_NAME
 from core_shared.logging import configure_logging, get_logger
+from core_shared.telemetry import setup_telemetry
 
 from strava_settings import StravaSettings
 
@@ -209,6 +210,9 @@ class StravaWorkerSettings(WorkerSettingsBase):
 
 
 if __name__ == "__main__":
+    # Setup OpenTelemetry
+    setup_telemetry(settings)
+
     # Run the worker
     logger.info("Starting Strava ARQ worker", worker_id=settings.worker_id)
     run_worker(StravaWorkerSettings)

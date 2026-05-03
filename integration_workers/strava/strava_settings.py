@@ -34,3 +34,9 @@ class StravaSettings(BaseSettings):
     # Worker configuration
     worker_id: str = "strava-worker"
     log_level: str = "INFO"
+
+    # Observability
+    enable_telemetry: bool = False
+    otel_exporter_otlp_endpoint: str = ""
+    otel_service_name: str = "strava-worker"
+    otel_resource_attributes: str = ""

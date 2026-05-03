@@ -265,7 +265,9 @@ class GoogleEventTransformer:
                 )
             }
         else:
-            tz = UTC
+            from datetime import tzinfo
+
+            tz: tzinfo = UTC
             if calendar_info.timezone:
                 try:
                     from zoneinfo import ZoneInfo

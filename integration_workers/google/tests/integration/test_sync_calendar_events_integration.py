@@ -27,8 +27,6 @@ class TestSyncCalendarEventsIntegration:
         test_contact_id = 9900
         etag = '"etag-abc"'
 
-
-
         # Insert synced calendar
         await db_session.execute(
             text("""
@@ -54,7 +52,12 @@ class TestSyncCalendarEventsIntegration:
                 (journal_id, calendar_id, external_event_id, external_version, sync_capability, sync_status, created_at, updated_at)
                 VALUES (:journal_id, :cal_id, 'google-event-1', :etag, 'bidirectional', 'synced', :now, :now)
             """),
-            {"journal_id": test_journal_id, "cal_id": test_calendar_uuid, "etag": etag, "now": now},
+            {
+                "journal_id": test_journal_id,
+                "cal_id": test_calendar_uuid,
+                "etag": etag,
+                "now": now,
+            },
         )
 
         # Insert new contact matching the attendee email
