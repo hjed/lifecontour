@@ -24,7 +24,7 @@ interface ContactSearchComboboxProps {
   readonly onSelect: (contact: ContactResource) => void;
   readonly placeholder?: string;
   readonly inputId?: string;
-  readonly excludeContactId?: string;
+  readonly excludeContactIds?: string[];
   readonly className?: string;
   readonly disabled?: boolean;
 }
@@ -74,7 +74,7 @@ export function ContactSearchCombobox({
   onSelect,
   placeholder = 'Search contacts...',
   inputId,
-  excludeContactId,
+  excludeContactIds,
   className,
   disabled = false,
 }: ContactSearchComboboxProps) {
@@ -96,10 +96,10 @@ export function ContactSearchCombobox({
     staleTime: 30000, // 30 seconds
   });
 
-  // Filter out excluded contact
   const filteredContacts =
-    searchResults?.data?.filter(contact => contact.id !== excludeContactId) ||
-    [];
+    searchResults?.data?.filter(
+      contact => !excludeContactIds?.includes(contact.id)
+    ) || [];
 
   // Cleanup timeout on unmount
   useEffect(() => {

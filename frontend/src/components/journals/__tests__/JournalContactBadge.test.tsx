@@ -183,8 +183,10 @@ describe('JournalContactBadge', () => {
       await user.click(screen.getByRole('button', { name: 'Add' }));
 
       expect(mockOnContactAdd).toHaveBeenCalledWith(
-        '3',
-        JournalContactRelationshipType.PARTICIPANT
+        ['3'],
+        JournalContactRelationshipType.PARTICIPANT,
+        null,
+        null
       );
     });
   });
