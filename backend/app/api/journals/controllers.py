@@ -3458,7 +3458,10 @@ async def _update_canoeing_type_data(
     # Build update kwargs and use dataclasses.replace() to trigger __post_init__ validation.
     updates: dict[str, Any] = {}
     if "water_type" in attrs:
-        updates["water_type"] = attrs["water_type"]
+        raw_water_type = attrs["water_type"]
+        if raw_water_type is not None and not isinstance(raw_water_type, str):
+            raise JournalValidationError("water_type", "Must be a string or null")
+        updates["water_type"] = raw_water_type
 
     validated_data = dataclasses.replace(canoeing_data, **updates)
     await canoeing_data_repo.save(validated_data)
@@ -3654,6 +3657,10 @@ async def update_type_data(
     elif jtype == JournalType.CAVING:
         await _update_caving_type_data(
             journal_id, journal_type, attrs, caving_data_repo
+        )
+    elif jtype == JournalType.CANOEING:
+        await _update_canoeing_type_data(
+            journal_id, journal_type, attrs, canoeing_data_repo
         )
     elif jtype == JournalType.CLIMBING:
         await _update_climbing_type_data(
