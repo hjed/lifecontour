@@ -95,6 +95,7 @@ from app.core.journal.services.journal_service import JournalService
 from app.core.search.exceptions import SearchServiceUnavailableError
 from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.config import Settings
+from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.search.search_service import SearchService
 
 logger = structlog.get_logger()
@@ -1747,6 +1748,8 @@ async def _process_journal_type_data(
     climbing_data_repo: ClimbingDataRepository | None = None,
     kayaking_data_repo: KayakingDataRepository | None = None,
     skiing_data_repo: CrossCountrySkiingDataRepository | None = None,
+    event_publisher: "OutboxEventPublisher | None" = None,
+    connection: "AsyncConnection | None" = None,
 ) -> None:
     """
     Process and save type-specific data for a journal.
@@ -1816,6 +1819,17 @@ async def _process_journal_type_data(
                 sync_invitees=event_data.get("sync_invitees", False),
             )
             await calendar_info_repo.save(calendar_info)
+
+            # Publish JournalUpdated event so Google Calendar worker can sync
+            if event_publisher is not None:
+                from app.core.journal.models.events import JournalUpdated
+
+                calendar_sync_event = JournalUpdated(
+                    journal_id=journal_id,
+                    changed_fields={"calendar_info": True},
+                    transaction=connection,
+                )
+                await event_publisher.publish(calendar_sync_event)
         except (ValueError, KeyError) as exc:
             from fastapi import HTTPException
 
@@ -2273,6 +2287,8 @@ async def create_journal(
             climbing_data_repo,
             kayaking_data_repo,
             skiing_data_repo,
+            event_publisher=journal_service.event_publisher,
+            connection=connection,
         )
 
     # Add contact relationships if provided in the request (via relationships field)
@@ -3620,6 +3636,15 @@ async def update_type_data(
         await _update_event_type_data(
             journal_id, journal_type, attrs, calendar_info_repo
         )
+        # Publish JournalUpdated event so Google Calendar worker can sync
+        from app.core.journal.models.events import JournalUpdated
+
+        calendar_sync_event = JournalUpdated(
+            journal_id=journal_id,
+            changed_fields={"calendar_info": True},
+            transaction=connection,
+        )
+        await journal_service.event_publisher.publish(calendar_sync_event)
     elif jtype == JournalType.MOOD_RATING:
         await _update_mood_type_data(journal_id, journal_type, attrs, mood_data_repo)
     elif jtype == JournalType.PHOTO_ALBUM:

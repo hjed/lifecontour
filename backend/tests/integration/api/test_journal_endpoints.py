@@ -3126,3 +3126,162 @@ class TestJournalHierarchyReparenting:
         b_children = b_get.json()["data"]["attributes"]["children"]
         b_child_ids = [str(c["id"]) for c in b_children]
         assert str(child_id) in b_child_ids
+
+
+@pytest.mark.integration
+class TestJournalCalendarSyncEvents:
+    """Integration tests for Google Calendar sync event publishing.
+
+    These tests verify that modifying EVENT type data publishes
+    JournalUpdated outbox events with calendar_info in changed_fields,
+    which the Google worker uses to trigger outbound sync.
+    """
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def setup_method(self, clean_database):  # noqa: ARG002
+        """Setup method to ensure clean database for each test."""
+        pass
+
+    async def _create_calendar(self, client, name="Test Cal"):
+        """Create a calendar via the API and return its ID."""
+        import uuid
+
+        cal_data = {
+            "data": {
+                "type": "calendars",
+                "attributes": {
+                    "name": name,
+                    "color": "#FF0000",
+                    "is_synced_to_google": True,
+                    "google_calendar_id": f"cal_{uuid.uuid4().hex[:8]}@group.calendar.google.com",
+                },
+            }
+        }
+        resp = await client.post("/api/calendars", json=cal_data)
+        assert resp.status_code == 201, resp.text
+        return resp.json()["data"]["id"]
+
+    async def test_update_event_type_data_publishes_journal_updated_event(
+        self, integration_api_client, async_connection
+    ):
+        """Updating EVENT type data should publish a JournalUpdated outbox event
+        with calendar_info in changed_fields so the Google worker can sync."""
+        import json
+
+        from sqlalchemy import text
+
+        # 1. Create a calendar
+        calendar_id = await self._create_calendar(integration_api_client)
+
+        # 2. Create a journal with EVENT type and calendar data
+        create_data = create_journal_request_data(
+            title="Calendar Sync Test",
+            content="Testing sync event",
+            types=["EVENT"],
+            type_data={
+                "EVENT": {
+                    "calendar_id": calendar_id,
+                    "is_all_day": True,
+                },
+            },
+        )
+        create_resp = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_resp.status_code == 201, create_resp.text
+        journal_id = create_resp.json()["data"]["id"]
+
+        # 3. Clear all outbox events from creation
+        await async_connection.execute(text("DELETE FROM outbox_events"))
+
+        # 4. Update EVENT type data (change location)
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {
+                    "location": "Sydney Opera House",
+                },
+            }
+        }
+        update_resp = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/EVENT/data", json=update_data
+        )
+        assert update_resp.status_code == 200, update_resp.text
+
+        # 5. Verify a JournalUpdated outbox event was published
+        result = await async_connection.execute(
+            text(
+                "SELECT event_type, event_data FROM outbox_events"
+                " WHERE event_type = 'JournalUpdated'"
+                " AND aggregate_id = :journal_id"
+            ),
+            {"journal_id": int(journal_id)},
+        )
+        rows = result.fetchall()
+
+        assert len(rows) >= 1, (
+            "Expected a JournalUpdated outbox event after updating EVENT type data"
+        )
+
+        # Verify changed_fields contains calendar_info
+        event_data = json.loads(rows[0].event_data)
+        assert "changed_fields" in event_data
+        assert "calendar_info" in event_data["changed_fields"], (
+            "JournalUpdated event must include calendar_info in changed_fields "
+            "for Google Calendar sync to trigger"
+        )
+
+    async def test_create_journal_with_event_type_publishes_sync_event(
+        self, integration_api_client, async_connection
+    ):
+        """Creating a journal with EVENT type should publish a JournalUpdated event
+        with calendar_info in changed_fields (in addition to JournalCreated)."""
+        import json
+
+        from sqlalchemy import text
+
+        # 1. Create a calendar
+        calendar_id = await self._create_calendar(integration_api_client)
+
+        # 2. Clear all outbox events
+        await async_connection.execute(text("DELETE FROM outbox_events"))
+
+        # 3. Create a journal with EVENT type and calendar data
+        create_data = create_journal_request_data(
+            title="New Event Journal",
+            content="Testing sync on create",
+            types=["EVENT"],
+            type_data={
+                "EVENT": {
+                    "calendar_id": calendar_id,
+                    "is_all_day": False,
+                    "start_time": "09:00",
+                    "end_time": "10:00",
+                    "location": "Conference Room",
+                },
+            },
+        )
+        create_resp = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_resp.status_code == 201, create_resp.text
+        journal_id = create_resp.json()["data"]["id"]
+
+        # 4. Verify a JournalUpdated event with calendar_info was published
+        result = await async_connection.execute(
+            text(
+                "SELECT event_type, event_data FROM outbox_events"
+                " WHERE event_type = 'JournalUpdated'"
+                " AND aggregate_id = :journal_id"
+            ),
+            {"journal_id": int(journal_id)},
+        )
+        rows = result.fetchall()
+
+        assert len(rows) >= 1, (
+            "Expected a JournalUpdated outbox event after creating journal with EVENT type"
+        )
+
+        event_data = json.loads(rows[0].event_data)
+        assert "changed_fields" in event_data
+        assert "calendar_info" in event_data["changed_fields"]
