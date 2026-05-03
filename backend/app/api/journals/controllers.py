@@ -1465,10 +1465,15 @@ async def auto_merge_review_items(
 
         if not source_journal or not candidate_journal:
             # One of the journals was deleted; dismiss the review item
-            assert item.id is not None, "Review item from DB must have an ID"
-            await review_item_repo.update_status(
-                item.id, new_status="resolved", user_id=user.id
-            )
+            if item.id is not None:
+                await review_item_repo.update_status(
+                    item.id, new_status="resolved", user_id=user.id
+                )
+            continue
+
+        # Ensure we are not merging cross-tenant
+        if source_journal.user_id != user.id or candidate_journal.user_id != user.id:
+            skipped_count += 1
             continue
 
         # Check for base-field conflicts
@@ -1478,14 +1483,15 @@ async def auto_merge_review_items(
 
         # No conflicts - auto-merge (source → candidate as target)
         try:
-            await journal_merge_service.merge_journals(
-                target_id=item.candidate_journal_id,
-                source_id=item.source_journal_id,
-                transaction=connection,
-            )
+            async with connection.begin_nested():
+                await journal_merge_service.merge_journals(
+                    target_id=item.candidate_journal_id,
+                    source_id=item.source_journal_id,
+                    transaction=connection,
+                )
             merged_count += 1
         except Exception as exc:
-            await logger.awarning(
+            logger.warning(
                 "Auto-merge failed for review item",
                 review_item_id=item.id,
                 error=str(exc),
