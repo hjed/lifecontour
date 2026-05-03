@@ -1748,8 +1748,8 @@ async def _process_journal_type_data(
     climbing_data_repo: ClimbingDataRepository | None = None,
     kayaking_data_repo: KayakingDataRepository | None = None,
     skiing_data_repo: CrossCountrySkiingDataRepository | None = None,
-    event_publisher: "OutboxEventPublisher | None" = None,
-    connection: "AsyncConnection | None" = None,
+    event_publisher: OutboxEventPublisher | None = None,
+    connection: AsyncConnection | None = None,
 ) -> None:
     """
     Process and save type-specific data for a journal.

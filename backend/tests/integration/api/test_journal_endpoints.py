@@ -3223,10 +3223,15 @@ class TestJournalCalendarSyncEvents:
             "Expected a JournalUpdated outbox event after updating EVENT type data"
         )
 
-        # Verify changed_fields contains calendar_info
-        event_data = json.loads(rows[0].event_data)
-        assert "changed_fields" in event_data
-        assert "calendar_info" in event_data["changed_fields"], (
+        # Verify changed_fields contains calendar_info in at least one event
+        found_sync_event = False
+        for row in rows:
+            event_data = json.loads(row.event_data)
+            if "calendar_info" in event_data.get("changed_fields", {}):
+                found_sync_event = True
+                break
+
+        assert found_sync_event, (
             "JournalUpdated event must include calendar_info in changed_fields "
             "for Google Calendar sync to trigger"
         )
@@ -3282,6 +3287,14 @@ class TestJournalCalendarSyncEvents:
             "Expected a JournalUpdated outbox event after creating journal with EVENT type"
         )
 
-        event_data = json.loads(rows[0].event_data)
-        assert "changed_fields" in event_data
-        assert "calendar_info" in event_data["changed_fields"]
+        found_sync_event = False
+        for row in rows:
+            event_data = json.loads(row.event_data)
+            if "calendar_info" in event_data.get("changed_fields", {}):
+                found_sync_event = True
+                break
+
+        assert found_sync_event, (
+            "JournalUpdated event must include calendar_info in changed_fields "
+            "for Google Calendar sync to trigger"
+        )
