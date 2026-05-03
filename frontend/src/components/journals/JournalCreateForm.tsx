@@ -205,7 +205,11 @@ const TYPE_DEPENDENCIES: Partial<Record<JournalType, JournalType[]>> = {
     JournalType.OUTDOOR_ACTIVITY,
     JournalType.FITNESS,
   ],
-  [JournalType.CLIMBING]: [JournalType.OUTDOOR_ACTIVITY, JournalType.FITNESS],
+  [JournalType.CLIMBING]: [
+    JournalType.ABSEILING_TRIP,
+    JournalType.OUTDOOR_ACTIVITY,
+    JournalType.FITNESS,
+  ],
   [JournalType.KAYAKING]: [JournalType.OUTDOOR_ACTIVITY, JournalType.FITNESS],
   [JournalType.CROSS_COUNTRY_SKIING]: [
     JournalType.BUSHWALKING,

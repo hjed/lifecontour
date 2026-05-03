@@ -321,6 +321,10 @@ class CanyoningDataSchema(BaseModel):
 class ClimbingDataSchema(BaseModel):
     """Climbing data for CLIMBING type journals."""
 
+    template_id: str | None = Field(
+        default=None,
+        description="ID of the activity template",
+    )
     climbing_type: str | None = Field(
         default=None,
         description="Type of climbing (sport, trad, bouldering)",
@@ -343,6 +347,14 @@ class KayakingDataSchema(BaseModel):
     water_type: str | None = Field(
         default=None,
         description="Type of water (e.g. river, lake, sea)",
+    )
+    is_white_water: bool | None = Field(
+        default=None,
+        description="Whether this is a white water kayaking session",
+    )
+    rapids_grade: str | None = Field(
+        default=None,
+        description="International Scale of River Difficulty (I–VI)",
     )
 
 

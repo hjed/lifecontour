@@ -991,6 +991,9 @@ def _build_canyoning_data(canyoning_data: Any) -> dict[str, Any]:
 def _build_climbing_data(climbing_data: Any) -> dict[str, Any]:
     """Build climbing data dictionary."""
     return {
+        "template_id": str(climbing_data.template_id)
+        if climbing_data.template_id
+        else None,
         "climbing_type": climbing_data.climbing_type,
         "grade": climbing_data.grade,
         "length": climbing_data.length,
@@ -1001,6 +1004,8 @@ def _build_kayaking_data(kayaking_data: Any) -> dict[str, Any]:
     """Build kayaking data dictionary."""
     return {
         "water_type": kayaking_data.water_type,
+        "is_white_water": kayaking_data.is_white_water,
+        "rapids_grade": kayaking_data.rapids_grade,
     }
 
 
@@ -1427,7 +1432,7 @@ async def _update_climbing_data(
     existing_climbing = await climbing_data_repo.find_by_journal_id(journal_id)
     if existing_climbing:
         clb_updates: dict[str, Any] = {}
-        for field in ["climbing_type", "grade", "length"]:
+        for field in ["template_id", "climbing_type", "grade", "length"]:
             if field in type_data_dict:
                 clb_updates[field] = type_data_dict[field]
         validated_climbing = dataclasses.replace(existing_climbing, **clb_updates)
@@ -1442,8 +1447,9 @@ async def _update_kayaking_data(
     existing_kayaking = await kayaking_data_repo.find_by_journal_id(journal_id)
     if existing_kayaking:
         kayaking_updates: dict[str, Any] = {}
-        if "water_type" in type_data_dict:
-            kayaking_updates["water_type"] = type_data_dict["water_type"]
+        for field in ["water_type", "is_white_water", "rapids_grade"]:
+            if field in type_data_dict:
+                kayaking_updates[field] = type_data_dict[field]
         validated_kayaking = dataclasses.replace(existing_kayaking, **kayaking_updates)
         await kayaking_data_repo.save(validated_kayaking)
 
@@ -1823,8 +1829,8 @@ _JOURNAL_TYPE_DESCRIPTIONS: dict[str, str] = {
     "JOGGING": "Jogging/running activity",
     "ABSEILING_TRIP": "Abseiling/rappelling trip",
     "CANYONING": "Canyoning trip (combines bushwalking + abseiling)",
-    "CLIMBING": "Climbing activity",
-    "KAYAKING": "Kayaking activity",
+    "CLIMBING": "Climbing activity (includes abseiling pitches via dependency)",
+    "KAYAKING": "Kayaking activity (with optional white water tracking)",
     "CROSS_COUNTRY_SKIING": "Cross-country skiing activity",
 }
 
@@ -1883,12 +1889,15 @@ _JOURNAL_TYPE_DATA_FIELDS: dict[str, dict[str, str]] = {
         "is_white_water": "bool (optional)",
     },
     "CLIMBING": {
+        "template_id": "UUID of the activity template (optional)",
         "climbing_type": "string (optional)",
-        "grade": "string (optional)",
-        "length": "float in m (optional)",
+        "grade": "int (optional)",
+        "length": "int in m (optional)",
     },
     "KAYAKING": {
         "water_type": "string (optional)",
+        "is_white_water": "bool (optional)",
+        "rapids_grade": "string I-VI, International Scale of River Difficulty (optional)",
     },
     "CROSS_COUNTRY_SKIING": {
         "snow_conditions": "string (optional)",

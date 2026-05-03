@@ -285,6 +285,8 @@ export interface ClimbingData {
 
 export interface KayakingData {
   water_type?: string | null; // Type of water (e.g. river, lake, sea)
+  is_white_water?: boolean | null; // Whether this is white water kayaking
+  rapids_grade?: string | null; // International Scale of River Difficulty (I–VI)
 }
 
 export interface CrossCountrySkiingData {

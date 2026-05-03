@@ -492,6 +492,7 @@ class TypeDataConverter:
     def climbing_data_to_schema(data: ClimbingData) -> dict[str, Any]:
         """Convert ClimbingData domain entity to API schema."""
         return ClimbingDataSchema(
+            template_id=str(data.template_id) if data.template_id else None,
             climbing_type=data.climbing_type,
             grade=data.grade,
             length=data.length,
@@ -502,6 +503,8 @@ class TypeDataConverter:
         """Convert KayakingData domain entity to API schema."""
         return KayakingDataSchema(
             water_type=data.water_type,
+            is_white_water=data.is_white_water,
+            rapids_grade=data.rapids_grade,
         ).model_dump(exclude_none=True)
 
     @staticmethod

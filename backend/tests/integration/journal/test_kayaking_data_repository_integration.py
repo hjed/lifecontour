@@ -81,12 +81,16 @@ class TestKayakingDataRepositorySave:
         data = KayakingData(
             journal_id=test_journal.id,  # type: ignore[arg-type]
             water_type="river",
+            is_white_water=True,
+            rapids_grade="III",
         )
 
         saved = await kayaking_repository.save(data)
 
         assert saved.journal_id == test_journal.id
         assert saved.water_type == "river"
+        assert saved.is_white_water is True
+        assert saved.rapids_grade == "III"
         assert saved.created_at is not None
         assert saved.updated_at is not None
 
@@ -102,6 +106,8 @@ class TestKayakingDataRepositorySave:
 
         assert saved.journal_id == test_journal.id
         assert saved.water_type is None
+        assert saved.is_white_water is None
+        assert saved.rapids_grade is None
         assert saved.created_at is not None
         assert saved.updated_at is not None
 
@@ -120,10 +126,14 @@ class TestKayakingDataRepositorySave:
         updated_data = KayakingData(
             journal_id=test_journal.id,  # type: ignore[arg-type]
             water_type="sea",
+            is_white_water=False,
+            rapids_grade=None,
         )
         saved = await kayaking_repository.save(updated_data)
 
         assert saved.water_type == "sea"
+        assert saved.is_white_water is False
+        assert saved.rapids_grade is None
 
 
 @pytest.mark.integration
@@ -139,6 +149,8 @@ class TestKayakingDataRepositoryFind:
         data = KayakingData(
             journal_id=test_journal.id,  # type: ignore[arg-type]
             water_type="river",
+            is_white_water=True,
+            rapids_grade="IV",
         )
         await kayaking_repository.save(data)
 
@@ -147,6 +159,8 @@ class TestKayakingDataRepositoryFind:
         assert found is not None
         assert found.journal_id == test_journal.id
         assert found.water_type == "river"
+        assert found.is_white_water is True
+        assert found.rapids_grade == "IV"
 
     async def test_find_by_journal_id_returns_none_when_not_found(
         self,

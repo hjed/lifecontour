@@ -3299,8 +3299,10 @@ async def _update_climbing_type_data(
 
     # Build update kwargs and use dataclasses.replace() to trigger __post_init__ validation.
     updates: dict[str, Any] = {}
-    if "route_id" in attrs:
-        updates["route_id"] = _parse_optional_uuid(attrs["route_id"], "route_id")
+    if "template_id" in attrs:
+        updates["template_id"] = _parse_optional_uuid(
+            attrs["template_id"], "template_id"
+        )
     if "climbing_type" in attrs:
         if not isinstance(attrs["climbing_type"], str):
             raise JournalValidationError("climbing_type", "Must be a string")
@@ -3328,13 +3330,21 @@ async def _update_kayaking_type_data(
         )
 
     updates: dict[str, Any] = {}
-    if "route_id" in attrs:
-        updates["route_id"] = _parse_optional_uuid(attrs["route_id"], "route_id")
     if "water_type" in attrs:
         raw_water_type = attrs["water_type"]
         if raw_water_type is not None and not isinstance(raw_water_type, str):
             raise JournalValidationError("water_type", "Must be a string or null")
         updates["water_type"] = raw_water_type
+    if "is_white_water" in attrs:
+        raw_is_white_water = attrs["is_white_water"]
+        if raw_is_white_water is not None and not isinstance(raw_is_white_water, bool):
+            raise JournalValidationError("is_white_water", "Must be a boolean or null")
+        updates["is_white_water"] = raw_is_white_water
+    if "rapids_grade" in attrs:
+        raw_rapids_grade = attrs["rapids_grade"]
+        if raw_rapids_grade is not None and not isinstance(raw_rapids_grade, str):
+            raise JournalValidationError("rapids_grade", "Must be a string or null")
+        updates["rapids_grade"] = raw_rapids_grade
 
     validated_data = dataclasses.replace(kayaking_data, **updates)
     await kayaking_data_repo.save(validated_data)

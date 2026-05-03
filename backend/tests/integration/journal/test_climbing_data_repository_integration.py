@@ -4,10 +4,18 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
-from core_shared.models.journals import ClimbingData, EventDateRange, Journal
+from core_shared.models.journals import (
+    ActivityTemplate,
+    ClimbingData,
+    EventDateRange,
+    Journal,
+)
 from core_shared.models.route import Route
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.journal.adapters.sql.activity_template_repository import (
+    SqlActivityTemplateRepository,
+)
 from app.core.journal.adapters.sql.climbing_data_repository import (
     SqlClimbingDataRepository,
 )
@@ -37,6 +45,28 @@ async def route_repository(
 ) -> SqlRouteRepository:
     """Create a route repository for testing."""
     return SqlRouteRepository(async_connection)
+
+
+@pytest_asyncio.fixture
+async def template_repository(
+    async_connection: AsyncConnection,
+) -> SqlActivityTemplateRepository:
+    """Create a template repository for testing."""
+    return SqlActivityTemplateRepository(async_connection)
+
+
+@pytest_asyncio.fixture
+async def test_template(
+    template_repository: SqlActivityTemplateRepository,
+) -> ActivityTemplate:
+    """Create a test template."""
+    template = ActivityTemplate(
+        name="Climb Test Template",
+        template_type="climbing",
+        user_id="test-user-123",
+        climbing_type="sport",
+    )
+    return await template_repository.save(template)
 
 
 @pytest_asyncio.fixture
@@ -76,6 +106,7 @@ class TestClimbingDataRepositorySave:
         self,
         climbing_repository: SqlClimbingDataRepository,
         test_journal: Journal,
+        test_template: ActivityTemplate,
     ):
         """Test creating climbing data (adding CLIMBING type to journal)."""
         data = ClimbingData(
@@ -83,6 +114,7 @@ class TestClimbingDataRepositorySave:
             climbing_type="sport",
             grade=18,
             length=25,
+            template_id=test_template.id,
         )
 
         saved = await climbing_repository.save(data)
@@ -91,6 +123,7 @@ class TestClimbingDataRepositorySave:
         assert saved.climbing_type == "sport"
         assert saved.grade == 18
         assert saved.length == 25
+        assert str(saved.template_id) == str(test_template.id)
         assert saved.created_at is not None
         assert saved.updated_at is not None
 
@@ -108,6 +141,7 @@ class TestClimbingDataRepositorySave:
         assert saved.climbing_type is None
         assert saved.grade is None
         assert saved.length is None
+        assert saved.template_id is None
         assert saved.created_at is not None
         assert saved.updated_at is not None
 
@@ -145,6 +179,7 @@ class TestClimbingDataRepositoryFind:
         self,
         climbing_repository: SqlClimbingDataRepository,
         test_journal: Journal,
+        test_template: ActivityTemplate,
     ):
         """Test finding climbing data by journal ID."""
         data = ClimbingData(
@@ -152,6 +187,7 @@ class TestClimbingDataRepositoryFind:
             climbing_type="sport",
             grade=22,
             length=30,
+            template_id=test_template.id,
         )
         await climbing_repository.save(data)
 
@@ -162,6 +198,7 @@ class TestClimbingDataRepositoryFind:
         assert found.climbing_type == "sport"
         assert found.grade == 22
         assert found.length == 30
+        assert str(found.template_id) == str(test_template.id)
 
     async def test_find_by_journal_id_returns_none_when_not_found(
         self,

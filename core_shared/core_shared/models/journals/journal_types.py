@@ -91,7 +91,7 @@ class JournalType(StrEnum):
         - BUSHWALKING: Requires OUTDOOR_ACTIVITY, FITNESS
         - ABSEILING_TRIP: Requires OUTDOOR_ACTIVITY, FITNESS
         - CANYONING: Requires BUSHWALKING, ABSEILING_TRIP, OUTDOOR_ACTIVITY, FITNESS
-        - CLIMBING: Requires OUTDOOR_ACTIVITY, FITNESS
+        - CLIMBING: Requires ABSEILING_TRIP, OUTDOOR_ACTIVITY, FITNESS
         - KAYAKING: Requires OUTDOOR_ACTIVITY, FITNESS
         - CROSS_COUNTRY_SKIING: Requires BUSHWALKING, OUTDOOR_ACTIVITY, FITNESS
         - JOGGING: Requires FITNESS
@@ -124,7 +124,7 @@ class JournalType(StrEnum):
                 cls.OUTDOOR_ACTIVITY,
                 cls.FITNESS,
             ],
-            cls.CLIMBING: [cls.OUTDOOR_ACTIVITY, cls.FITNESS],
+            cls.CLIMBING: [cls.ABSEILING_TRIP, cls.OUTDOOR_ACTIVITY, cls.FITNESS],
             cls.KAYAKING: [cls.OUTDOOR_ACTIVITY, cls.FITNESS],
             cls.CROSS_COUNTRY_SKIING: [
                 cls.BUSHWALKING,
