@@ -5,12 +5,25 @@ Tests event routing, filtering, and the _handle_event integration with
 the summary generation pipeline for the summary-generator consumer group.
 """
 
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from core_shared.stream_client import StreamClient, StreamEvent
 
 from app.infrastructure.events.summary_consumer import SummaryConsumer
+
+
+@asynccontextmanager
+async def mock_container_context() -> AsyncGenerator[MagicMock, None]:
+    yield MagicMock()
+
+
+def make_mock_container() -> MagicMock:
+    mock = MagicMock()
+    mock.return_value = mock_container_context()
+    return mock
 
 
 def _make_summary_event(contact_id: int = 42) -> StreamEvent:
@@ -44,7 +57,7 @@ class TestSummaryConsumerEventMatching:
         return SummaryConsumer(
             stream_client=mock_client,
             stream_name="pms:domain-events",
-            container=MagicMock(),
+            container=make_mock_container(),
         )
 
     def test_matches_summary_refresh_event(self, consumer: SummaryConsumer) -> None:
@@ -87,7 +100,7 @@ class TestSummaryConsumerHandleEvent:
         return SummaryConsumer(
             stream_client=mock_stream_client,
             stream_name="pms:domain-events",
-            container=MagicMock(),
+            container=make_mock_container(),
         )
 
     @pytest.mark.asyncio

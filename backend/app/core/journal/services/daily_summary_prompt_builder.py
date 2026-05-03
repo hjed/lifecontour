@@ -17,7 +17,9 @@ MAX_CONTENT_LENGTH = 500
 class DailySummaryPromptBuilder:
     """Builds structured prompts for daily summary generation."""
 
-    def build(self, summary_input: DailySummaryInput) -> str:
+    def build(
+        self, summary_input: DailySummaryInput, now: datetime | None = None
+    ) -> str:
         """Build a complete prompt from the assembled day input.
 
         Sections:
@@ -32,7 +34,9 @@ class DailySummaryPromptBuilder:
         # 1. System instructions
         from datetime import UTC, datetime
 
-        now = datetime.now(tz=UTC)
+        if now is None:
+            now = datetime.now(tz=UTC)
+
         sections.append(self._build_system_instructions(now))
 
         # 2. Day overview
