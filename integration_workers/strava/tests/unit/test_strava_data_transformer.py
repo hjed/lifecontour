@@ -139,6 +139,18 @@ class TestTypeMapping:
             JournalType.FITNESS,
         ]
 
+    def test_backcountry_ski_maps_to_xc_skiing_bushwalking_outdoor_fitness(
+        self,
+    ) -> None:
+        """BackcountrySki → [CROSS_COUNTRY_SKIING, BUSHWALKING, OUTDOOR_ACTIVITY, FITNESS]."""
+        result = StravaDataTransformer.map_activity_types("BackcountrySki")
+        assert result == [
+            JournalType.CROSS_COUNTRY_SKIING,
+            JournalType.BUSHWALKING,
+            JournalType.OUTDOOR_ACTIVITY,
+            JournalType.FITNESS,
+        ]
+
     def test_alpine_ski_maps_to_downhill_skiing_outdoor_fitness(self) -> None:
         """AlpineSki → [DOWNHILL_SKIING, OUTDOOR_ACTIVITY, FITNESS]."""
         result = StravaDataTransformer.map_activity_types("AlpineSki")

@@ -68,6 +68,12 @@ _STRAVA_TYPE_MAP: dict[str, list[JournalType]] = {
         JournalType.OUTDOOR_ACTIVITY,
         JournalType.FITNESS,
     ],
+    "BackcountrySki": [
+        JournalType.CROSS_COUNTRY_SKIING,
+        JournalType.BUSHWALKING,
+        JournalType.OUTDOOR_ACTIVITY,
+        JournalType.FITNESS,
+    ],
     "AlpineSki": [
         JournalType.DOWNHILL_SKIING,
         JournalType.OUTDOOR_ACTIVITY,
