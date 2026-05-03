@@ -891,6 +891,35 @@ test.describe('Journal Creation UI Flow', () => {
     });
   });
 
+  test('should create a CANOEING journal and verify dependencies and summary', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+    await createRouteBackedComplexJournal(page, {
+      gpxTrackName: `E2E_Canoeing_Route_${Date.now()}`,
+      journal: {
+        title: `Canoeing Trip ${Date.now()}`,
+        content: 'A peaceful paddle on the river.',
+        typeLabelRegex: /^canoeing$/i,
+      },
+      selectedTypeTestId: 'CANOEING',
+      dependencyTypeTestIds: ['OUTDOOR_ACTIVITY', 'FITNESS'],
+      editorTestId: 'canoeing-type-editor',
+      badgeTestId: 'manage-type-canoeing',
+      attachedTypes: ['canoeing', 'outdoor_activity', 'fitness'],
+      typeSectionTriggerTestId: 'type-section-trigger-canoeing',
+      summaryTestId: 'canoeing-summary',
+      fillTypeFields: async ({ page: detailPage }) => {
+        // Select water type from dropdown
+        await detailPage.getByTestId('water-type-input').click();
+        await detailPage.getByRole('option', { name: /river/i }).click();
+      },
+      assertSummary: async ({ summary }) => {
+        await expect(summary).toContainText('River');
+      },
+    });
+  });
+
   test('should pre-populate canyoning fields and abseiling pitches when a template is selected', async ({
     authenticatedPage,
   }) => {

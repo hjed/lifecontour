@@ -70,6 +70,7 @@ import {
   type AbseilingData,
   type CanyoningData,
   type CavingData,
+  type CanoeingData,
   type ClimbingData,
   type CrossCountrySkiingData,
   type CalendarInfoData,
@@ -91,6 +92,7 @@ import {
   BushwalkingTypeEditor,
   CanyoningTypeEditor,
   CavingTypeEditor,
+  CanoeingTypeEditor,
   ClimbingTypeEditor,
   CrossCountrySkiingTypeEditor,
   EventTypeEditor,
@@ -138,6 +140,7 @@ interface TypeDataState {
   [JournalType.ABSEILING_TRIP]?: AbseilingData;
   [JournalType.CANYONING]?: CanyoningData;
   [JournalType.CAVING]?: CavingData;
+  [JournalType.CANOEING]?: CanoeingData;
   [JournalType.CLIMBING]?: ClimbingData;
   [JournalType.KAYAKING]?: KayakingData;
   [JournalType.CROSS_COUNTRY_SKIING]?: CrossCountrySkiingData;
@@ -158,6 +161,7 @@ const TYPE_DATA_JOURNAL_TYPES = new Set<TypeDataJournalType>([
   JournalType.ABSEILING_TRIP,
   JournalType.CANYONING,
   JournalType.CAVING,
+  JournalType.CANOEING,
   JournalType.CLIMBING,
   JournalType.KAYAKING,
   JournalType.CROSS_COUNTRY_SKIING,
@@ -184,6 +188,7 @@ const typeOptions = [
   { value: JournalType.ABSEILING_TRIP, label: 'Abseiling Trip' },
   { value: JournalType.CANYONING, label: 'Canyoning' },
   { value: JournalType.CAVING, label: 'Caving' },
+  { value: JournalType.CANOEING, label: 'Canoeing' },
   { value: JournalType.CLIMBING, label: 'Climbing' },
   { value: JournalType.KAYAKING, label: 'Kayaking' },
   { value: JournalType.CROSS_COUNTRY_SKIING, label: 'Cross-Country Skiing' },
@@ -226,6 +231,7 @@ const TYPE_DEPENDENCIES: Partial<Record<JournalType, JournalType[]>> = {
     JournalType.OUTDOOR_ACTIVITY,
     JournalType.FITNESS,
   ],
+  [JournalType.CANOEING]: [JournalType.OUTDOOR_ACTIVITY, JournalType.FITNESS],
 };
 
 interface TypeCheckboxFieldProps {
@@ -305,6 +311,7 @@ const TYPE_LABELS: Record<JournalType, string> = {
   [JournalType.ABSEILING_TRIP]: 'Abseiling Trip',
   [JournalType.CANYONING]: 'Canyoning',
   [JournalType.CAVING]: 'Caving',
+  [JournalType.CANOEING]: 'Canoeing',
   [JournalType.CLIMBING]: 'Climbing',
   [JournalType.KAYAKING]: 'Kayaking',
   [JournalType.CROSS_COUNTRY_SKIING]: 'Cross-Country Skiing',
@@ -525,6 +532,12 @@ export function JournalCreateForm({
   const handleCavingChange = useCallback(
     (data: unknown) =>
       handleTypeDataChange(JournalType.CAVING, data as CavingData),
+    [handleTypeDataChange]
+  );
+
+  const handleCanoeingChange = useCallback(
+    (data: unknown) =>
+      handleTypeDataChange(JournalType.CANOEING, data as CanoeingData),
     [handleTypeDataChange]
   );
 
@@ -935,6 +948,12 @@ export function JournalCreateForm({
                         createMode
                         onChange={handleCavingChange}
                         onTemplateSelect={handleTemplateSelect}
+                      />
+                    )}
+                    {type === JournalType.CANOEING && (
+                      <CanoeingTypeEditor
+                        createMode
+                        onChange={handleCanoeingChange}
                       />
                     )}
                     {type === JournalType.CLIMBING && (

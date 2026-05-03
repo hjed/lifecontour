@@ -21,6 +21,7 @@ import type {
   AbseilingData,
   BushwalkingData,
   CalendarInfoData,
+  CanoeingData,
   CanyoningData,
   CavingData,
   ClimbingData,
@@ -38,6 +39,7 @@ import { cn } from '@/lib/utils';
 import {
   AbseilingTripTypeEditor,
   BushwalkingTypeEditor,
+  CanoeingTypeEditor,
   CanyoningTypeEditor,
   CavingTypeEditor,
   ClimbingTypeEditor,
@@ -67,6 +69,7 @@ type TypeSectionData =
   | AbseilingData
   | CanyoningData
   | CavingData
+  | CanoeingData
   | ClimbingData
   | KayakingData
   | CrossCountrySkiingData;
@@ -100,6 +103,7 @@ const TYPE_SECTION_LABELS: Record<JournalType, string> = {
   [JournalType.ABSEILING_TRIP]: 'Abseiling Trip',
   [JournalType.CANYONING]: 'Canyoning',
   [JournalType.CAVING]: 'Caving',
+  [JournalType.CANOEING]: 'Canoeing',
   [JournalType.CLIMBING]: 'Climbing',
   [JournalType.KAYAKING]: 'Kayaking',
   [JournalType.CROSS_COUNTRY_SKIING]: 'Cross-Country Skiing',
@@ -301,6 +305,14 @@ function TypeSpecificContent({
           data={typeData as CavingData | undefined}
           onSave={makeEditorSave<CavingData>(onSave, type)}
           onTemplateSelect={onTemplateSelect}
+        />
+      );
+    case JournalType.CANOEING:
+      return (
+        <CanoeingTypeEditor
+          journalId={journalId}
+          data={typeData as CanoeingData | undefined}
+          onSave={makeEditorSave<CanoeingData>(onSave, type)}
         />
       );
     case JournalType.CLIMBING:

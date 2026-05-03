@@ -24,6 +24,7 @@ export enum JournalType {
   ABSEILING_TRIP = 'abseiling_trip',
   CANYONING = 'canyoning',
   CAVING = 'caving',
+  CANOEING = 'canoeing',
   CLIMBING = 'climbing',
   KAYAKING = 'kayaking',
   CROSS_COUNTRY_SKIING = 'cross_country_skiing',
@@ -283,6 +284,10 @@ export interface CavingData {
   is_horizontal?: boolean | null;
 }
 
+export interface CanoeingData {
+  water_type?: string | null;
+}
+
 export interface ClimbingData {
   template_id?: string | null;
   climbing_type?: string | null; // e.g. sport, trad, bouldering
@@ -314,6 +319,7 @@ export type JournalTypeData =
   | AbseilingData
   | CanyoningData
   | CavingData
+  | CanoeingData
   | ClimbingData
   | KayakingData
   | CrossCountrySkiingData;

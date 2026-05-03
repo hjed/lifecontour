@@ -335,6 +335,15 @@ class CavingDataSchema(BaseModel):
     )
 
 
+class CanoeingDataSchema(BaseModel):
+    """Canoeing data for CANOEING type journals."""
+
+    water_type: str | None = Field(
+        default=None,
+        description="Type of water body (e.g. river, lake, sea)",
+    )
+
+
 class ClimbingDataSchema(BaseModel):
     """Climbing data for CLIMBING type journals."""
 

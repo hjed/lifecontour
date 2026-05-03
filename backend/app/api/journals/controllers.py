@@ -70,6 +70,7 @@ from app.core.journal.models.repositories import (
     BushwalkingDataRepository,
     CalendarInfoRepository,
     CalendarRepository,
+    CanoeingDataRepository,
     CanyoningDataRepository,
     CavingDataRepository,
     ClimbingDataRepository,
@@ -263,6 +264,7 @@ async def _create_type_specific_data(
     abseil_pitch_repo: AbseilPitchRepository,
     canyoning_data_repo: CanyoningDataRepository,
     caving_data_repo: CavingDataRepository,
+    canoeing_data_repo: CanoeingDataRepository,
     climbing_data_repo: ClimbingDataRepository,
     kayaking_data_repo: KayakingDataRepository,
     skiing_data_repo: CrossCountrySkiingDataRepository,
@@ -355,6 +357,11 @@ async def _create_type_specific_data(
 
         caving_data = CavingData(journal_id=journal_id)
         await caving_data_repo.save(caving_data)
+    elif journal_type == JournalType.CANOEING:
+        from core_shared.models.journals import CanoeingData
+
+        canoeing_data = CanoeingData(journal_id=journal_id)
+        await canoeing_data_repo.save(canoeing_data)
     # EVENT and PHOTO_ALBUM types require additional data (calendar_id, immich_album_id)
     # These will be created when the user updates the type data
 
@@ -374,6 +381,7 @@ async def _delete_type_specific_data(
     abseil_pitch_repo: AbseilPitchRepository,
     canyoning_data_repo: CanyoningDataRepository,
     caving_data_repo: CavingDataRepository,
+    canoeing_data_repo: CanoeingDataRepository,
     climbing_data_repo: ClimbingDataRepository,
     kayaking_data_repo: KayakingDataRepository,
     skiing_data_repo: CrossCountrySkiingDataRepository,
@@ -431,6 +439,8 @@ async def _delete_type_specific_data(
         await skiing_data_repo.delete(journal_id)
     elif journal_type == JournalType.CAVING:
         await caving_data_repo.delete(journal_id)
+    elif journal_type == JournalType.CANOEING:
+        await canoeing_data_repo.delete(journal_id)
     # EVENT has no dedicated type-specific table (uses calendar_info via CalendarInfo)
     # and is handled by the service layer
 
@@ -454,6 +464,7 @@ async def _enrich_journal_data(
     abseil_pitch_repo: AbseilPitchRepository,
     canyoning_data_repo: CanyoningDataRepository,
     caving_data_repo: CavingDataRepository,
+    canoeing_data_repo: CanoeingDataRepository,
     climbing_data_repo: ClimbingDataRepository,
     kayaking_data_repo: KayakingDataRepository,
     skiing_data_repo: CrossCountrySkiingDataRepository,
@@ -592,6 +603,13 @@ async def _enrich_journal_data(
         types.append(JournalType.CAVING.value)
         type_data[JournalType.CAVING.value] = TypeDataConverter.caving_data_to_schema(
             caving_data
+        )
+
+    canoeing_data = await canoeing_data_repo.find_by_journal_id(journal_id)
+    if canoeing_data:
+        types.append(JournalType.CANOEING.value)
+        type_data[JournalType.CANOEING.value] = (
+            TypeDataConverter.canoeing_data_to_schema(canoeing_data)
         )
 
     # If no types found, it's a NOTE
@@ -850,6 +868,7 @@ async def _fetch_children_types(
     abseiling_data_repo: AbseilingDataRepository,
     canyoning_data_repo: CanyoningDataRepository,
     caving_data_repo: CavingDataRepository,
+    canoeing_data_repo: CanoeingDataRepository,
     climbing_data_repo: ClimbingDataRepository,
     kayaking_data_repo: KayakingDataRepository,
     skiing_data_repo: CrossCountrySkiingDataRepository,
@@ -925,6 +944,7 @@ async def _build_journal_list_resources(
     abseil_pitch_repo: AbseilPitchRepository,
     canyoning_data_repo: CanyoningDataRepository,
     caving_data_repo: CavingDataRepository,
+    canoeing_data_repo: CanoeingDataRepository,
     climbing_data_repo: ClimbingDataRepository,
     kayaking_data_repo: KayakingDataRepository,
     skiing_data_repo: CrossCountrySkiingDataRepository,
@@ -993,6 +1013,7 @@ async def _build_journal_list_resources(
             abseil_pitch_repo,
             canyoning_data_repo,
             caving_data_repo,
+            canoeing_data_repo,
             climbing_data_repo,
             kayaking_data_repo,
             skiing_data_repo,
@@ -1051,6 +1072,7 @@ async def list_journals(
     abseil_pitch_repo: FromDishka[AbseilPitchRepository],
     canyoning_data_repo: FromDishka[CanyoningDataRepository],
     caving_data_repo: FromDishka[CavingDataRepository],
+    canoeing_data_repo: FromDishka[CanoeingDataRepository],
     climbing_data_repo: FromDishka[ClimbingDataRepository],
     kayaking_data_repo: FromDishka[KayakingDataRepository],
     skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
@@ -1140,6 +1162,7 @@ async def list_journals(
         abseil_pitch_repo=abseil_pitch_repo,
         canyoning_data_repo=canyoning_data_repo,
         caving_data_repo=caving_data_repo,
+        canoeing_data_repo=canoeing_data_repo,
         climbing_data_repo=climbing_data_repo,
         kayaking_data_repo=kayaking_data_repo,
         skiing_data_repo=skiing_data_repo,
@@ -1501,6 +1524,7 @@ async def get_journal(
     abseil_pitch_repo: FromDishka[AbseilPitchRepository],
     canyoning_data_repo: FromDishka[CanyoningDataRepository],
     caving_data_repo: FromDishka[CavingDataRepository],
+    canoeing_data_repo: FromDishka[CanoeingDataRepository],
     climbing_data_repo: FromDishka[ClimbingDataRepository],
     kayaking_data_repo: FromDishka[KayakingDataRepository],
     skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
@@ -1542,6 +1566,7 @@ async def get_journal(
         abseil_pitch_repo,
         canyoning_data_repo,
         caving_data_repo,
+        canoeing_data_repo,
         climbing_data_repo,
         kayaking_data_repo,
         skiing_data_repo,
@@ -1565,6 +1590,7 @@ async def get_journal(
         abseiling_data_repo,
         canyoning_data_repo,
         caving_data_repo,
+        canoeing_data_repo,
         climbing_data_repo,
         kayaking_data_repo,
         skiing_data_repo,
@@ -1638,6 +1664,7 @@ async def _process_journal_types(
     abseil_pitch_repo: AbseilPitchRepository,
     canyoning_data_repo: CanyoningDataRepository,
     caving_data_repo: CavingDataRepository,
+    canoeing_data_repo: CanoeingDataRepository,
     climbing_data_repo: ClimbingDataRepository,
     kayaking_data_repo: KayakingDataRepository,
     skiing_data_repo: CrossCountrySkiingDataRepository,
@@ -1690,6 +1717,7 @@ async def _process_journal_types(
                     abseil_pitch_repo,
                     canyoning_data_repo,
                     caving_data_repo,
+                    canoeing_data_repo,
                     climbing_data_repo,
                     kayaking_data_repo,
                     skiing_data_repo,
@@ -1715,6 +1743,7 @@ async def _process_journal_type_data(
     abseil_pitch_repo: AbseilPitchRepository | None = None,
     canyoning_data_repo: CanyoningDataRepository | None = None,
     caving_data_repo: CavingDataRepository | None = None,
+    canoeing_data_repo: CanoeingDataRepository | None = None,
     climbing_data_repo: ClimbingDataRepository | None = None,
     kayaking_data_repo: KayakingDataRepository | None = None,
     skiing_data_repo: CrossCountrySkiingDataRepository | None = None,
@@ -2028,6 +2057,15 @@ async def _process_journal_type_data(
             caving_data_repo,
         )
 
+    # Process CANOEING type data
+    if "canoeing" in normalized_type_data and canoeing_data_repo:
+        await _update_canoeing_type_data(
+            journal_id,
+            "CANOEING",
+            normalized_type_data["canoeing"],
+            canoeing_data_repo,
+        )
+
     # Process CLIMBING type data
     if "climbing" in normalized_type_data and climbing_data_repo:
         await _update_climbing_type_data(
@@ -2162,6 +2200,7 @@ async def create_journal(
     abseil_pitch_repo: FromDishka[AbseilPitchRepository],
     canyoning_data_repo: FromDishka[CanyoningDataRepository],
     caving_data_repo: FromDishka[CavingDataRepository],
+    canoeing_data_repo: FromDishka[CanoeingDataRepository],
     climbing_data_repo: FromDishka[ClimbingDataRepository],
     kayaking_data_repo: FromDishka[KayakingDataRepository],
     skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
@@ -2205,6 +2244,7 @@ async def create_journal(
             abseil_pitch_repo,
             canyoning_data_repo,
             caving_data_repo,
+            canoeing_data_repo,
             climbing_data_repo,
             kayaking_data_repo,
             skiing_data_repo,
@@ -2229,6 +2269,7 @@ async def create_journal(
             abseil_pitch_repo,
             canyoning_data_repo,
             caving_data_repo,
+            canoeing_data_repo,
             climbing_data_repo,
             kayaking_data_repo,
             skiing_data_repo,
@@ -2270,6 +2311,7 @@ async def create_journal(
         abseil_pitch_repo,
         canyoning_data_repo,
         caving_data_repo,
+        canoeing_data_repo,
         climbing_data_repo,
         kayaking_data_repo,
         skiing_data_repo,
@@ -2323,6 +2365,7 @@ async def update_journal(
     abseil_pitch_repo: FromDishka[AbseilPitchRepository],
     canyoning_data_repo: FromDishka[CanyoningDataRepository],
     caving_data_repo: FromDishka[CavingDataRepository],
+    canoeing_data_repo: FromDishka[CanoeingDataRepository],
     climbing_data_repo: FromDishka[ClimbingDataRepository],
     kayaking_data_repo: FromDishka[KayakingDataRepository],
     skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
@@ -2389,6 +2432,7 @@ async def update_journal(
         abseil_pitch_repo,
         canyoning_data_repo,
         caving_data_repo,
+        canoeing_data_repo,
         climbing_data_repo,
         kayaking_data_repo,
         skiing_data_repo,
@@ -2413,6 +2457,7 @@ async def update_journal(
         abseiling_data_repo,
         canyoning_data_repo,
         caving_data_repo,
+        canoeing_data_repo,
         climbing_data_repo,
         kayaking_data_repo,
         skiing_data_repo,
@@ -2464,6 +2509,7 @@ async def partial_update_journal(
     abseil_pitch_repo: FromDishka[AbseilPitchRepository],
     canyoning_data_repo: FromDishka[CanyoningDataRepository],
     caving_data_repo: FromDishka[CavingDataRepository],
+    canoeing_data_repo: FromDishka[CanoeingDataRepository],
     climbing_data_repo: FromDishka[ClimbingDataRepository],
     kayaking_data_repo: FromDishka[KayakingDataRepository],
     skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
@@ -2576,6 +2622,7 @@ async def partial_update_journal(
         abseil_pitch_repo,
         canyoning_data_repo,
         caving_data_repo,
+        canoeing_data_repo,
         climbing_data_repo,
         kayaking_data_repo,
         skiing_data_repo,
@@ -2600,6 +2647,7 @@ async def partial_update_journal(
         abseiling_data_repo,
         canyoning_data_repo,
         caving_data_repo,
+        canoeing_data_repo,
         climbing_data_repo,
         kayaking_data_repo,
         skiing_data_repo,
@@ -2673,6 +2721,7 @@ async def merge_journal(
     abseil_pitch_repo: FromDishka[AbseilPitchRepository],
     canyoning_data_repo: FromDishka[CanyoningDataRepository],
     caving_data_repo: FromDishka[CavingDataRepository],
+    canoeing_data_repo: FromDishka[CanoeingDataRepository],
     climbing_data_repo: FromDishka[ClimbingDataRepository],
     kayaking_data_repo: FromDishka[KayakingDataRepository],
     skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
@@ -2762,6 +2811,7 @@ async def merge_journal(
         abseil_pitch_repo,
         canyoning_data_repo,
         caving_data_repo,
+        canoeing_data_repo,
         climbing_data_repo,
         kayaking_data_repo,
         skiing_data_repo,
@@ -2803,6 +2853,7 @@ async def add_type_to_journal(
     abseil_pitch_repo: FromDishka[AbseilPitchRepository],
     canyoning_data_repo: FromDishka[CanyoningDataRepository],
     caving_data_repo: FromDishka[CavingDataRepository],
+    canoeing_data_repo: FromDishka[CanoeingDataRepository],
     climbing_data_repo: FromDishka[ClimbingDataRepository],
     kayaking_data_repo: FromDishka[KayakingDataRepository],
     skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
@@ -2858,6 +2909,7 @@ async def add_type_to_journal(
             abseil_pitch_repo,
             canyoning_data_repo,
             caving_data_repo,
+            canoeing_data_repo,
             climbing_data_repo,
             kayaking_data_repo,
             skiing_data_repo,
@@ -2888,6 +2940,7 @@ async def add_type_to_journal(
         abseil_pitch_repo,
         canyoning_data_repo,
         caving_data_repo,
+        canoeing_data_repo,
         climbing_data_repo,
         kayaking_data_repo,
         skiing_data_repo,
@@ -2922,6 +2975,7 @@ async def remove_type_from_journal(
     abseil_pitch_repo: FromDishka[AbseilPitchRepository],
     canyoning_data_repo: FromDishka[CanyoningDataRepository],
     caving_data_repo: FromDishka[CavingDataRepository],
+    canoeing_data_repo: FromDishka[CanoeingDataRepository],
     climbing_data_repo: FromDishka[ClimbingDataRepository],
     kayaking_data_repo: FromDishka[KayakingDataRepository],
     skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
@@ -2974,6 +3028,7 @@ async def remove_type_from_journal(
         abseil_pitch_repo,
         canyoning_data_repo,
         caving_data_repo,
+        canoeing_data_repo,
         climbing_data_repo,
         kayaking_data_repo,
         skiing_data_repo,
@@ -3004,6 +3059,7 @@ async def remove_type_from_journal(
         abseil_pitch_repo,
         canyoning_data_repo,
         caving_data_repo,
+        canoeing_data_repo,
         climbing_data_repo,
         kayaking_data_repo,
         skiing_data_repo,
@@ -3386,6 +3442,28 @@ async def _update_caving_type_data(
     await caving_data_repo.save(validated_data)
 
 
+async def _update_canoeing_type_data(
+    journal_id: int,
+    journal_type: str,
+    attrs: dict[str, Any],
+    canoeing_data_repo: CanoeingDataRepository,
+) -> None:
+    """Update CANOEING type-specific data."""
+    canoeing_data = await canoeing_data_repo.find_by_journal_id(journal_id)
+    if not canoeing_data:
+        raise JournalValidationError(
+            "journal_type", f"Journal does not have type {journal_type}"
+        )
+
+    # Build update kwargs and use dataclasses.replace() to trigger __post_init__ validation.
+    updates: dict[str, Any] = {}
+    if "water_type" in attrs:
+        updates["water_type"] = attrs["water_type"]
+
+    validated_data = dataclasses.replace(canoeing_data, **updates)
+    await canoeing_data_repo.save(validated_data)
+
+
 async def _update_climbing_type_data(
     journal_id: int,
     journal_type: str,
@@ -3500,6 +3578,7 @@ async def update_type_data(
     abseil_pitch_repo: FromDishka[AbseilPitchRepository],
     canyoning_data_repo: FromDishka[CanyoningDataRepository],
     caving_data_repo: FromDishka[CavingDataRepository],
+    canoeing_data_repo: FromDishka[CanoeingDataRepository],
     climbing_data_repo: FromDishka[ClimbingDataRepository],
     kayaking_data_repo: FromDishka[KayakingDataRepository],
     skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
@@ -3627,6 +3706,7 @@ async def update_type_data(
         abseil_pitch_repo,
         canyoning_data_repo,
         caving_data_repo,
+        canoeing_data_repo,
         climbing_data_repo,
         kayaking_data_repo,
         skiing_data_repo,
@@ -3662,6 +3742,7 @@ async def add_contact_to_journal(
     abseil_pitch_repo: FromDishka[AbseilPitchRepository],
     canyoning_data_repo: FromDishka[CanyoningDataRepository],
     caving_data_repo: FromDishka[CavingDataRepository],
+    canoeing_data_repo: FromDishka[CanoeingDataRepository],
     climbing_data_repo: FromDishka[ClimbingDataRepository],
     kayaking_data_repo: FromDishka[KayakingDataRepository],
     skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
@@ -3764,6 +3845,7 @@ async def add_contact_to_journal(
         abseil_pitch_repo,
         canyoning_data_repo,
         caving_data_repo,
+        canoeing_data_repo,
         climbing_data_repo,
         kayaking_data_repo,
         skiing_data_repo,
@@ -3800,6 +3882,7 @@ async def update_journal_contact_relationship(
     abseil_pitch_repo: FromDishka[AbseilPitchRepository],
     canyoning_data_repo: FromDishka[CanyoningDataRepository],
     caving_data_repo: FromDishka[CavingDataRepository],
+    canoeing_data_repo: FromDishka[CanoeingDataRepository],
     climbing_data_repo: FromDishka[ClimbingDataRepository],
     kayaking_data_repo: FromDishka[KayakingDataRepository],
     skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
@@ -3914,6 +3997,7 @@ async def update_journal_contact_relationship(
         abseil_pitch_repo,
         canyoning_data_repo,
         caving_data_repo,
+        canoeing_data_repo,
         climbing_data_repo,
         kayaking_data_repo,
         skiing_data_repo,
@@ -3949,6 +4033,7 @@ async def remove_contact_from_journal(
     abseil_pitch_repo: FromDishka[AbseilPitchRepository],
     canyoning_data_repo: FromDishka[CanyoningDataRepository],
     caving_data_repo: FromDishka[CavingDataRepository],
+    canoeing_data_repo: FromDishka[CanoeingDataRepository],
     climbing_data_repo: FromDishka[ClimbingDataRepository],
     kayaking_data_repo: FromDishka[KayakingDataRepository],
     skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
@@ -4021,6 +4106,7 @@ async def remove_contact_from_journal(
         abseil_pitch_repo,
         canyoning_data_repo,
         caving_data_repo,
+        canoeing_data_repo,
         climbing_data_repo,
         kayaking_data_repo,
         skiing_data_repo,
@@ -4055,6 +4141,7 @@ async def add_tag_to_journal(
     abseil_pitch_repo: FromDishka[AbseilPitchRepository],
     canyoning_data_repo: FromDishka[CanyoningDataRepository],
     caving_data_repo: FromDishka[CavingDataRepository],
+    canoeing_data_repo: FromDishka[CanoeingDataRepository],
     climbing_data_repo: FromDishka[ClimbingDataRepository],
     kayaking_data_repo: FromDishka[KayakingDataRepository],
     skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
@@ -4118,6 +4205,7 @@ async def add_tag_to_journal(
         abseil_pitch_repo,
         canyoning_data_repo,
         caving_data_repo,
+        canoeing_data_repo,
         climbing_data_repo,
         kayaking_data_repo,
         skiing_data_repo,
@@ -4152,6 +4240,7 @@ async def remove_tag_from_journal(
     abseil_pitch_repo: FromDishka[AbseilPitchRepository],
     canyoning_data_repo: FromDishka[CanyoningDataRepository],
     caving_data_repo: FromDishka[CavingDataRepository],
+    canoeing_data_repo: FromDishka[CanoeingDataRepository],
     climbing_data_repo: FromDishka[ClimbingDataRepository],
     kayaking_data_repo: FromDishka[KayakingDataRepository],
     skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
@@ -4210,6 +4299,7 @@ async def remove_tag_from_journal(
         abseil_pitch_repo,
         canyoning_data_repo,
         caving_data_repo,
+        canoeing_data_repo,
         climbing_data_repo,
         kayaking_data_repo,
         skiing_data_repo,

@@ -19,6 +19,7 @@ from core_shared.models.journals import (
     BushwalkingData,
     Calendar,
     CalendarInfo,
+    CanoeingData,
     CanyoningData,
     CavingData,
     ClimbingData,
@@ -1690,6 +1691,54 @@ class CavingDataRepository(ABC):
 
         Args:
             journal_id: The journal ID to delete caving data for
+        """
+        pass
+
+
+class CanoeingDataRepository(ABC):
+    """
+    Repository interface for canoeing data (CANOEING type) operations.
+
+    A journal has the CANOEING type if a CanoeingData row exists for its journal_id.
+    """
+
+    @abstractmethod
+    async def find_by_journal_id(self, journal_id: int) -> CanoeingData | None:
+        """
+        Find canoeing data by journal ID.
+
+        Args:
+            journal_id: The journal ID to look up
+
+        Returns:
+            The CanoeingData if found, None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def save(self, data: CanoeingData) -> CanoeingData:
+        """
+        Save canoeing data (insert or update).
+
+        This effectively adds or updates the CANOEING type for a journal.
+
+        Args:
+            data: The canoeing data to save
+
+        Returns:
+            The saved data with updated timestamps
+        """
+        pass
+
+    @abstractmethod
+    async def delete(self, journal_id: int) -> None:
+        """
+        Delete canoeing data by journal ID.
+
+        This effectively removes the CANOEING type from a journal.
+
+        Args:
+            journal_id: The journal ID to delete canoeing data for
         """
         pass
 

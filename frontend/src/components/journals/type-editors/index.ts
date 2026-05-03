@@ -16,6 +16,7 @@ export { BushwalkingTypeEditor } from './BushwalkingTypeEditor';
 export { AbseilingTripTypeEditor } from './AbseilingTripTypeEditor';
 export { CanyoningTypeEditor } from './CanyoningTypeEditor';
 export { CavingTypeEditor } from './CavingTypeEditor';
+export { CanoeingTypeEditor } from './CanoeingTypeEditor';
 export { ClimbingTypeEditor } from './ClimbingTypeEditor';
 export { KayakingTypeEditor } from './KayakingTypeEditor';
 export { CrossCountrySkiingTypeEditor } from './CrossCountrySkiingTypeEditor';
