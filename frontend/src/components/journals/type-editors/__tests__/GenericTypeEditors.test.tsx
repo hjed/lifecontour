@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BushwalkingTypeEditor } from '../BushwalkingTypeEditor';
 import { ClimbingTypeEditor } from '../ClimbingTypeEditor';
 import { CrossCountrySkiingTypeEditor } from '../CrossCountrySkiingTypeEditor';
@@ -8,6 +9,15 @@ import { KayakingTypeEditor } from '../KayakingTypeEditor';
 jest.mock('@/lib/api/routes', () => ({
   useRoute: () => ({ data: undefined }),
 }));
+
+const createTestQueryClient = () =>
+  new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+      },
+    },
+  });
 
 const genericEditorCases = [
   {
@@ -31,7 +41,12 @@ const genericEditorCases = [
   },
   {
     name: 'ClimbingTypeEditor',
-    renderCreate: () => render(<ClimbingTypeEditor createMode={true} />),
+    renderCreate: () =>
+      render(
+        <QueryClientProvider client={createTestQueryClient()}>
+          <ClimbingTypeEditor createMode={true} />
+        </QueryClientProvider>
+      ),
     assertCreate: () => {
       expect(screen.getByText(/Climbing Type/i)).toBeInTheDocument();
       expect(screen.getByTestId('climbing-grade-input')).toBeInTheDocument();
@@ -39,19 +54,25 @@ const genericEditorCases = [
     },
     renderView: () =>
       render(
-        <ClimbingTypeEditor
-          createMode={false}
-          data={{
-            climbing_type: 'sport',
-            grade: 18,
-            length: 30,
-          }}
-        />
+        <QueryClientProvider client={createTestQueryClient()}>
+          <ClimbingTypeEditor
+            createMode={false}
+            data={{
+              climbing_type: 'sport',
+              grade: 18,
+              length: 30,
+            }}
+          />
+        </QueryClientProvider>
       ),
     summaryTestId: 'climbing-summary',
     summaryTexts: ['sport', '18', '30 m'],
     renderEmptyView: () =>
-      render(<ClimbingTypeEditor createMode={false} data={{}} />),
+      render(
+        <QueryClientProvider client={createTestQueryClient()}>
+          <ClimbingTypeEditor createMode={false} data={{}} />
+        </QueryClientProvider>
+      ),
     emptyMessage: 'No climbing details provided.',
   },
   {

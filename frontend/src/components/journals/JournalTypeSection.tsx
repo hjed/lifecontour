@@ -296,6 +296,7 @@ function TypeSpecificContent({
           journalId={journalId}
           data={typeData as ClimbingData | undefined}
           onSave={makeEditorSave<ClimbingData>(onSave, type)}
+          onTemplateSelect={onTemplateSelect}
         />
       );
     case JournalType.KAYAKING:

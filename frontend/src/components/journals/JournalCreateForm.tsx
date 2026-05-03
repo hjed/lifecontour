@@ -917,6 +917,7 @@ export function JournalCreateForm({
                       <ClimbingTypeEditor
                         createMode
                         onChange={handleClimbingChange}
+                        onTemplateSelect={handleTemplateSelect}
                       />
                     )}
                     {type === JournalType.KAYAKING && (

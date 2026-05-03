@@ -211,12 +211,12 @@ Polish inline template creation flow, ensure template creation works from within
 - [KAYAKING](../product-specifications/outdoor-logbook-product-specification.md#kayaking)
 
 **Acceptance Criteria (task-level):**
-- [ ] Creating a CLIMBING journal automatically creates ABSEILING_TRIP data (with null fields)
-- [ ] Climbing journals can optionally track abseil pitches and link to climbing templates
-- [ ] Kayaking journals can record white water status and rapids grade
-- [ ] Existing climbing and kayaking journals are not broken by the migration
-- [ ] All capabilities available through REST API and MCP
-- [ ] Unit, integration, and e2e test coverage
+- [x] Creating a CLIMBING journal automatically creates ABSEILING_TRIP data (with null fields)
+- [x] Climbing journals can optionally track abseil pitches and link to climbing templates
+- [x] Kayaking journals can record white water status and rapids grade
+- [x] Existing climbing and kayaking journals are not broken by the migration
+- [x] All capabilities available through REST API and MCP
+- [x] Unit, integration, and e2e test coverage
 
 #### Phase 1: CLIMBING Dependency Change and KAYAKING Schema Updates
 **PR Size:** ~5–7 files
@@ -243,7 +243,7 @@ Update type dependencies, schema, and API for both types. No frontend changes ye
 Update frontend type editors and add E2E tests.
 
 **Acceptance Criteria:**
-- [ ] `ClimbingTypeEditor` gains template selector (reuses `TemplateSelector` from ITER9-001) and pitch editing via `PitchEditor`
+- [x] `ClimbingTypeEditor` gains template selector (reuses `TemplateSelector` from ITER9-001) and pitch editing via `PitchEditor`
 - [x] `KayakingTypeEditor` gains white water toggle and rapids grade dropdown (I–VI)
 - [x] Frontend TypeScript types updated for both modified schemas
 - [x] Existing climbing and kayaking E2E tests still pass
