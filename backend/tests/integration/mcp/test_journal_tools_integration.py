@@ -718,6 +718,9 @@ class TestFetchJournalTypesAndDataNewActivityTypes:
         from app.core.journal.adapters.sql.canyoning_data_repository import (
             SqlCanyoningDataRepository,
         )
+        from app.core.journal.adapters.sql.caving_data_repository import (
+            SqlCavingDataRepository,
+        )
         from app.core.journal.adapters.sql.climbing_data_repository import (
             SqlClimbingDataRepository,
         )
@@ -753,6 +756,7 @@ class TestFetchJournalTypesAndDataNewActivityTypes:
             SqlJoggingDataRepository(conn),
             SqlAbseilingDataRepository(conn),
             SqlCanyoningDataRepository(conn),
+            SqlCavingDataRepository(conn),
             SqlClimbingDataRepository(conn),
             SqlKayakingDataRepository(conn),
             SqlCrossCountrySkiingDataRepository(conn),

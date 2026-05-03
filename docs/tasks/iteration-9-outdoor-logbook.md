@@ -283,15 +283,15 @@ Deliver CAVING as a complete vertical slice: domain, migration, repository, API,
 CAVING is the most complex new type — it has ABSEILING_TRIP as a dependency (like CANYONING) and supports templates.
 
 **Acceptance Criteria:**
-- [ ] Migration creates `journal_caving_data` table (journal_id PK/FK, template_id UUID FK nullable, is_vertical boolean nullable, is_horizontal boolean nullable, timestamps)
-- [ ] CAVING added to `JournalType` enum with dependencies: CAVING → [ABSEILING_TRIP, OUTDOOR_ACTIVITY, FITNESS]
-- [ ] `CavingData` domain entity with validation
-- [ ] `CavingDataRepository` interface and SQL implementation
-- [ ] Type system updated: dependency map, table mapping, NOTE detection JOINs
-- [ ] API schema (`CavingDataSchema`), converter, and controller integration
-- [ ] MCP handles CAVING type data through existing generic journal tools
-- [ ] Frontend: CAVING added to `JournalType` enum, `CavingTypeEditor` component with template selector, is_vertical/is_horizontal toggles
-- [ ] DI provider registration
+- [x] Migration creates `journal_caving_data` table (journal_id PK/FK, template_id UUID FK nullable, is_vertical boolean nullable, is_horizontal boolean nullable, timestamps)
+- [x] CAVING added to `JournalType` enum with dependencies: CAVING → [ABSEILING_TRIP, OUTDOOR_ACTIVITY, FITNESS]
+- [x] `CavingData` domain entity with validation
+- [x] `CavingDataRepository` interface and SQL implementation
+- [x] Type system updated: dependency map, table mapping, NOTE detection JOINs
+- [x] API schema (`CavingDataSchema`), converter, and controller integration
+- [x] MCP handles CAVING type data through existing generic journal tools
+- [x] Frontend: CAVING added to `JournalType` enum, `CavingTypeEditor` component with template selector, is_vertical/is_horizontal toggles
+- [x] DI provider registration
 
 **Required Test Coverage:**
 - **Unit:** CavingData entity validation. Type dependency resolution for CAVING (verify ABSEILING_TRIP auto-created).

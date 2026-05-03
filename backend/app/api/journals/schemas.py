@@ -318,6 +318,23 @@ class CanyoningDataSchema(BaseModel):
     )
 
 
+class CavingDataSchema(BaseModel):
+    """Caving data for CAVING type journals."""
+
+    template_id: str | None = Field(
+        default=None,
+        description="ID of the activity template",
+    )
+    is_vertical: bool | None = Field(
+        default=None,
+        description="Whether the cave is primarily vertical (requires ropes)",
+    )
+    is_horizontal: bool | None = Field(
+        default=None,
+        description="Whether the cave is primarily horizontal",
+    )
+
+
 class ClimbingDataSchema(BaseModel):
     """Climbing data for CLIMBING type journals."""
 

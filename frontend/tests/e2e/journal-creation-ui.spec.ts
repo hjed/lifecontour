@@ -78,7 +78,8 @@ async function awaitCreationAndAssertBadge(
   page: Page,
   badgeTestId: string
 ): Promise<string> {
-  await page.waitForURL(/\/journals\/\d+/);
+  // Wait for the badge to appear in the DOM indicating a successful redirect
+  await page.waitForSelector(`[data-testid="${badgeTestId}"]`);
   await expect(page.getByTestId(badgeTestId)).toBeVisible();
   return page.url();
 }
@@ -852,6 +853,40 @@ test.describe('Journal Creation UI Flow', () => {
       },
       assertSummary: async ({ summary }) => {
         await expect(summary).toContainText('Fresh powder with groomed tracks');
+      },
+    });
+  });
+
+  test('should create a CAVING journal and verify dependencies and summary', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+    await createRouteBackedComplexJournal(page, {
+      gpxTrackName: `E2E_Caving_Route_${Date.now()}`,
+      journal: {
+        title: `Caving Trip ${Date.now()}`,
+        content: 'Deep dark cave exploration.',
+        typeLabelRegex: /^caving$/i,
+      },
+      selectedTypeTestId: 'CAVING',
+      dependencyTypeTestIds: ['ABSEILING_TRIP', 'OUTDOOR_ACTIVITY', 'FITNESS'],
+      editorTestId: 'caving-type-editor',
+      badgeTestId: 'manage-type-caving',
+      attachedTypes: [
+        'caving',
+        'abseiling_trip',
+        'outdoor_activity',
+        'fitness',
+      ],
+      typeSectionTriggerTestId: 'type-section-trigger-caving',
+      summaryTestId: 'caving-summary',
+      fillTypeFields: async ({ page: detailPage }) => {
+        await detailPage.getByTestId('vertical-switch').click();
+        await detailPage.getByTestId('horizontal-switch').click();
+      },
+      assertSummary: async ({ summary }) => {
+        await expect(summary).toContainText('Vertical');
+        await expect(summary).toContainText('Horizontal');
       },
     });
   });

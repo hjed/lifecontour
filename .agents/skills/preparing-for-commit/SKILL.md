@@ -17,6 +17,10 @@ When you are preparing for a commit please consider the following:
 
 5. If you've made frontend tests ensure you've at least run the e2e tests related to your changes. If you've made significant changes consider running all of them.
 
+6. Remove any scratch or temporary files you've created as part of the task. These are not wanted in the repository.
+
 For each of these steps the recent run should have been after all file changes were done.
 
 Only once you've done all of the above should you consider making a commit. Reapt the process if you make changes
+
+DO NOT make commit names such as "fix pr comments", the commit message should reflect what the commit actually changes.

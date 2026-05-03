@@ -128,9 +128,13 @@ test.describe('Contact Journals Display', () => {
       // Navigate to contact detail page and wait for journals section
       await navigateToContactAndWaitForJournals(page, contact.id);
 
-      // Verify the journal title is displayed
+      // Verify the journal title is displayed. Use a retry loop with page reload
+      // to handle async MeiliSearch indexing latency.
       const journalCard = page.getByTestId(`journal-${journal.id}`);
-      await expect(journalCard).toBeVisible();
+      await expect(async () => {
+        await page.reload();
+        await expect(journalCard).toBeVisible();
+      }).toPass({ timeout: 15000 });
 
       // Verify that the contact's name is rendered in the journal's contact badges
       // It should NOT render as "Contact <id>"

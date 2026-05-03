@@ -40,6 +40,8 @@ _JOURNAL_TYPE_TABLE_MAP = {
     "kayaking": "journal_kayaking_data",
     "CROSS_COUNTRY_SKIING": "journal_skiing_data",
     "cross_country_skiing": "journal_skiing_data",
+    "CAVING": "journal_caving_data",
+    "caving": "journal_caving_data",
 }
 
 
@@ -102,6 +104,7 @@ class SqlJournalRepository(JournalRepository):
                     "LEFT JOIN journal_climbing_data jcld ON j.id = jcld.journal_id",
                     "LEFT JOIN journal_kayaking_data jkyd ON j.id = jkyd.journal_id",
                     "LEFT JOIN journal_skiing_data jskid ON j.id = jskid.journal_id",
+                    "LEFT JOIN journal_caving_data jcvd ON j.id = jcvd.journal_id",
                 ]
             )
             where_clauses.extend(
@@ -120,6 +123,7 @@ class SqlJournalRepository(JournalRepository):
                     "jcld.journal_id IS NULL",
                     "jkyd.journal_id IS NULL",
                     "jskid.journal_id IS NULL",
+                    "jcvd.journal_id IS NULL",
                 ]
             )
             return joins, where_clauses
@@ -162,6 +166,7 @@ class SqlJournalRepository(JournalRepository):
             "journal_climbing_data": "INNER JOIN journal_climbing_data t ON j.id = t.journal_id",
             "journal_kayaking_data": "INNER JOIN journal_kayaking_data t ON j.id = t.journal_id",
             "journal_skiing_data": "INNER JOIN journal_skiing_data t ON j.id = t.journal_id",
+            "journal_caving_data": "INNER JOIN journal_caving_data t ON j.id = t.journal_id",
         }
 
         if type_table not in table_joins:
@@ -291,7 +296,8 @@ class SqlJournalRepository(JournalRepository):
                 CASE WHEN jcyd.journal_id IS NOT NULL THEN 'CANYONING' END as canyoning_type,
                 CASE WHEN jcld.journal_id IS NOT NULL THEN 'CLIMBING' END as climbing_type,
                 CASE WHEN jkyd.journal_id IS NOT NULL THEN 'KAYAKING' END as kayaking_type,
-                CASE WHEN jskid.journal_id IS NOT NULL THEN 'CROSS_COUNTRY_SKIING' END as skiing_type
+                CASE WHEN jskid.journal_id IS NOT NULL THEN 'CROSS_COUNTRY_SKIING' END as skiing_type,
+                CASE WHEN jcvd.journal_id IS NOT NULL THEN 'CAVING' END as caving_type
             FROM journals j
             LEFT JOIN journal_calendar_info jci ON j.id = jci.journal_id
             LEFT JOIN journal_mood_data jmd ON j.id = jmd.journal_id
@@ -307,6 +313,7 @@ class SqlJournalRepository(JournalRepository):
             LEFT JOIN journal_climbing_data jcld ON j.id = jcld.journal_id
             LEFT JOIN journal_kayaking_data jkyd ON j.id = jkyd.journal_id
             LEFT JOIN journal_skiing_data jskid ON j.id = jskid.journal_id
+            LEFT JOIN journal_caving_data jcvd ON j.id = jcvd.journal_id
             WHERE j.id = :journal_id
         """)
         result = await self.conn.execute(query, {"journal_id": journal_id})
