@@ -2,19 +2,30 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ClimbingTypeEditor } from '../ClimbingTypeEditor';
+import {
+  ActivityTemplateType,
+  type ActivityTemplateResource,
+} from '@/types/journals';
 
 jest.mock('@/lib/api/routes', () => ({
   useRoute: () => ({ data: undefined }),
 }));
 
 jest.mock('../TemplateSelector', () => ({
-  TemplateSelector: ({ onSelect, templateType }: any) => {
+  TemplateSelector: ({
+    onSelect,
+    templateType,
+  }: {
+    onSelect: (template: ActivityTemplateResource) => void;
+    templateType: ActivityTemplateType;
+  }) => {
     return (
       <button
         data-testid='mock-template-selector'
         onClick={() =>
           onSelect({
             id: 'template-123',
+            type: 'activity-templates',
             attributes: {
               name: 'Test Template',
               template_type: templateType,

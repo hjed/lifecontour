@@ -513,30 +513,30 @@ export function JournalCreateForm({
 
   const handleTemplateSelect = useCallback(
     (template: ActivityTemplateResource) => {
+      setTypeData(prev => {
+        const pitches = (template.attributes.pitches || []) as AbseilPitch[];
+        const number_of_abseils = pitches.length > 0 ? pitches.length : null;
+        const total_length =
+          pitches.length > 0
+            ? pitches.reduce((sum, p) => sum + (p.height || 0), 0)
+            : null;
+
+        return {
+          ...prev,
+          [JournalType.ABSEILING_TRIP]: {
+            ...(prev[JournalType.ABSEILING_TRIP] || {}),
+            pitches,
+            number_of_abseils,
+            total_length,
+          },
+        };
+      });
+      setAbseilKey(k => k + 1);
+
       if (
         template.attributes.pitches &&
         template.attributes.pitches.length > 0
       ) {
-        setTypeData(prev => {
-          const pitches = (template.attributes.pitches || []) as AbseilPitch[];
-          const number_of_abseils =
-            pitches.length > 0 ? pitches.length : undefined;
-          const total_length =
-            pitches.length > 0
-              ? pitches.reduce((sum, p) => sum + (p.height || 0), 0)
-              : undefined;
-
-          return {
-            ...prev,
-            [JournalType.ABSEILING_TRIP]: {
-              ...(prev[JournalType.ABSEILING_TRIP] || {}),
-              pitches,
-              ...(number_of_abseils !== undefined ? { number_of_abseils } : {}),
-              ...(total_length !== undefined ? { total_length } : {}),
-            },
-          };
-        });
-        setAbseilKey(k => k + 1);
         toast.success('Pitches imported from template');
       }
     },

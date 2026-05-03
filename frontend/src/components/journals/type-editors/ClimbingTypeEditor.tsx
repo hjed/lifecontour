@@ -77,8 +77,11 @@ export function ClimbingTypeEditor({
   const handleCustomSave = async () => {
     await handleSave();
     if (!createMode && pendingTemplate && onTemplateSelect) {
-      await Promise.resolve(onTemplateSelect(pendingTemplate));
-      setPendingTemplate(null);
+      try {
+        await Promise.resolve(onTemplateSelect(pendingTemplate));
+      } finally {
+        setPendingTemplate(null);
+      }
     }
   };
 
@@ -155,7 +158,7 @@ export function ClimbingTypeEditor({
           Template
         </Label>
         <TemplateSelector
-          inputId='template-selector'
+          inputId={`${baseId}-template-selector`}
           templateType={ActivityTemplateType.CLIMBING}
           onSelect={handleTemplateSelection}
           onCreateTemplate={() => setCreateTemplateOpen(true)}
