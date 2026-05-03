@@ -116,7 +116,12 @@ async def update_gear_item(
 
     attrs = request.data.attributes
     set_fields = attrs.model_fields_set
-    if "name" in set_fields and attrs.name is not None:
+    if "name" in set_fields:
+        if attrs.name is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="name cannot be null",
+            )
         item.name = attrs.name
     if "model" in set_fields:
         item.model = attrs.model

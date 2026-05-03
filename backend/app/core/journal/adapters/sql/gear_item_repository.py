@@ -54,6 +54,7 @@ class SqlGearItemRepository(GearItemRepository):
                 purchase_date = EXCLUDED.purchase_date,
                 manufacturer = EXCLUDED.manufacturer,
                 updated_at = now()
+            WHERE gear_items.user_id = EXCLUDED.user_id
             RETURNING id, user_id, name, model, serial_number,
                       purchase_date, manufacturer, created_at, updated_at
             """

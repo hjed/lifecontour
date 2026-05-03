@@ -4336,7 +4336,12 @@ async def create_gear_item(
 
     parsed_purchase_date = None
     if purchase_date:
-        parsed_purchase_date = date.fromisoformat(purchase_date)
+        try:
+            parsed_purchase_date = date.fromisoformat(purchase_date)
+        except ValueError:
+            return MCPResponseBuilder.validation_error_response(
+                "purchase_date", "Invalid date format, use YYYY-MM-DD"
+            )
 
     item = GearItem(
         user_id=user_id,

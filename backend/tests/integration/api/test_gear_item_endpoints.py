@@ -61,7 +61,7 @@ class TestGearItemEndpoints:
         assert response_json["data"]["attributes"]["manufacturer"] is None
 
     async def test_create_gear_item_missing_name(self, authenticated_client):
-        """Test creating a gear item without name returns 422."""
+        """Test creating a gear item without name returns 400."""
         data = {
             "data": {
                 "type": "gear-items",
@@ -237,6 +237,36 @@ class TestGearItemEndpoints:
         assert data["data"]["attributes"]["name"] == "Original Name"  # Unchanged
         assert data["data"]["attributes"]["model"] == "Model A"  # Unchanged
         assert data["data"]["attributes"]["manufacturer"] is None  # Cleared
+
+    async def test_update_gear_item_explicit_null_name(self, authenticated_client):
+        """Test updating a gear item with an explicit null name returns 400."""
+        create_response = await authenticated_client.post(
+            "/api/gear-items",
+            json={
+                "data": {
+                    "type": "gear-items",
+                    "attributes": {
+                        "name": "Original Name",
+                    },
+                }
+            },
+        )
+        item_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "gear-items",
+                "id": item_id,
+                "attributes": {
+                    "name": None,
+                },
+            }
+        }
+
+        response = await authenticated_client.put(
+            f"/api/gear-items/{item_id}", json=update_data
+        )
+        assert response.status_code == 400
 
     async def test_delete_gear_item(self, authenticated_client):
         """Test deleting a gear item."""
