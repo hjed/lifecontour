@@ -958,10 +958,11 @@ export class TestDataManager {
   async createJournal(journalData: JournalCreateRequest): Promise<TestJournal> {
     // Make journal titles unique to avoid conflicts using UUID
     const uniqueId = this.generateUniqueId();
-    // Only bypass if it already ends with _ followed by an alphanumeric ID
-    const uniqueTitle = /_[a-z0-9]{8,12}$/i.test(journalData.title)
-      ? journalData.title
-      : `${journalData.title}_${uniqueId}`;
+    // Use exact title if requested, or bypass if it already ends with _ followed by an alphanumeric ID
+    const uniqueTitle =
+      journalData.exactTitle || /_[a-z0-9]{8,12}$/i.test(journalData.title)
+        ? journalData.title
+        : `${journalData.title}_${uniqueId}`;
 
     console.debug(`📝 [Data Manager] Creating journal: ${uniqueTitle}`);
 

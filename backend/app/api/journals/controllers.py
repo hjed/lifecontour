@@ -1431,6 +1431,85 @@ def _build_review_item_resource(
     )
 
 
+@router.post("/review-items/auto-merge", status_code=status.HTTP_200_OK)
+@inject
+async def auto_merge_review_items(
+    review_item_repo: FromDishka[ReviewItemRepository],
+    journal_service: FromDishka[JournalService],
+    journal_merge_service: FromDishka[JournalMergeService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],
+) -> dict[str, Any]:
+    """
+    Auto-merge all pending review items that have no base-field conflicts.
+
+    For each pending review item where the source and candidate journals
+    have identical title, content, and event_date_range (no conflicts),
+    automatically merge the source journal into the candidate journal.
+
+    Returns the count of successfully merged items and remaining pending count.
+    """
+    # Fetch all pending review items for the user (up to 100)
+    pending_items = await review_item_repo.find_pending_by_user(
+        user.id, limit=100, offset=0
+    )
+
+    merged_count = 0
+    skipped_count = 0
+    errors: list[str] = []
+
+    for item in pending_items:
+        # Fetch both journals
+        source_journal = await journal_service.get_journal(item.source_journal_id)
+        candidate_journal = await journal_service.get_journal(item.candidate_journal_id)
+
+        if not source_journal or not candidate_journal:
+            # One of the journals was deleted; dismiss the review item
+            assert item.id is not None, "Review item from DB must have an ID"
+            await review_item_repo.update_status(
+                item.id, new_status="resolved", user_id=user.id
+            )
+            continue
+
+        # Check for base-field conflicts
+        if journal_merge_service.has_base_conflicts(candidate_journal, source_journal):
+            skipped_count += 1
+            continue
+
+        # No conflicts - auto-merge (source → candidate as target)
+        try:
+            await journal_merge_service.merge_journals(
+                target_id=item.candidate_journal_id,
+                source_id=item.source_journal_id,
+                transaction=connection,
+            )
+            merged_count += 1
+        except Exception as exc:
+            await logger.awarning(
+                "Auto-merge failed for review item",
+                review_item_id=item.id,
+                error=str(exc),
+            )
+            errors.append(
+                f"Failed to merge journals {item.source_journal_id} → "
+                f"{item.candidate_journal_id}: {exc!s}"
+            )
+
+    remaining_count = await review_item_repo.count_pending_by_user(user.id)
+
+    return {
+        "data": {
+            "type": "auto-merge-result",
+            "attributes": {
+                "merged_count": merged_count,
+                "skipped_count": skipped_count,
+                "remaining_count": remaining_count,
+                "errors": errors,
+            },
+        }
+    }
+
+
 @router.post("/review-items", status_code=status.HTTP_201_CREATED)
 @inject
 async def create_review_item(

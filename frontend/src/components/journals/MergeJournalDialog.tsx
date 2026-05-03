@@ -105,6 +105,10 @@ export function MergeJournalDialog({
       });
       setResolutionOpen(false);
       setSelectedJournal(null);
+      // Notify parent that the dialog should close (e.g., ReviewQueueSidebar)
+      if (externalOnOpenChange) {
+        externalOnOpenChange(false);
+      }
     } catch {
       // Error is handled by the mutation's onError (toast)
     }

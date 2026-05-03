@@ -242,4 +242,256 @@ test.describe('Journal Review Queue', () => {
       sidebar.getByText('Your review queue is empty.')
     ).toBeVisible();
   });
+
+  test('should auto-merge identical journals when Merge All Identical is clicked', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const page = authenticatedPage;
+    const dataManager = new (await import('./data-management')).TestDataManager(
+      page
+    );
+    const contactTestHelpers = new ContactTestHelpers(page);
+
+    await dataManager.clearAllJournals();
+
+    const d = new Date();
+    d.setHours(12, 0, 0, 0);
+    const startStr = d.toISOString();
+    d.setHours(13, 0, 0, 0);
+    const endStr = d.toISOString();
+
+    // Create two journals with IDENTICAL title, content, and date range
+    const sourceJournal = await dataManager.createJournal({
+      title: 'Identical Entry',
+      content: 'Same content here',
+      event_date_range: { start: startStr, end: endStr },
+      types: ['note'],
+      exactTitle: true,
+    });
+
+    const candidateJournal = await dataManager.createJournal({
+      title: 'Identical Entry',
+      content: 'Same content here',
+      event_date_range: { start: startStr, end: endStr },
+      types: ['note'],
+      exactTitle: true,
+    });
+
+    // Create a review item linking them
+    await dataManager.createReviewItem({
+      source_journal_id: Number.parseInt(sourceJournal.id),
+      candidate_journal_id: Number.parseInt(candidateJournal.id),
+      reason: 'duplicate_journal',
+      confidence_score: 0.95,
+    });
+
+    testCleanup(async () => {
+      await dataManager.clearAllJournals();
+    });
+
+    // Navigate to journals and open the review queue
+    await contactTestHelpers.navigateToAuthenticatedPage('/journals');
+    const queueBtn = page.getByRole('button', { name: /Review Queue/i });
+    await expect(queueBtn).toBeVisible();
+    await queueBtn.click();
+
+    const sidebar = page.locator('[role="dialog"]', {
+      hasText: 'Review Queue',
+    });
+    await expect(sidebar).toBeVisible();
+
+    // Click the "Merge All Identical" button
+    const autoMergeBtn = sidebar.getByTestId('auto-merge-all-btn');
+    await expect(autoMergeBtn).toBeVisible();
+    await autoMergeBtn.click();
+
+    // Wait for success toast
+    await expect(page.getByText(/Auto-merged 1 journal/i)).toBeVisible({
+      timeout: 15000,
+    });
+
+    // The review queue should now be empty
+    await expect(sidebar.getByText('Your review queue is empty.')).toBeVisible({
+      timeout: 15000,
+    });
+  });
+
+  test('should close merge dialog after successful merge from review queue', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const page = authenticatedPage;
+    const dataManager = new (await import('./data-management')).TestDataManager(
+      page
+    );
+    const contactTestHelpers = new ContactTestHelpers(page);
+
+    await dataManager.clearAllJournals();
+
+    const d = new Date();
+    d.setHours(12, 0, 0, 0);
+    const startStr = d.toISOString();
+    d.setHours(13, 0, 0, 0);
+    const endStr = d.toISOString();
+
+    // Create two journals with IDENTICAL fields (no conflicts)
+    const sourceJournal = await dataManager.createJournal({
+      title: 'Merge Close Source',
+      content: 'Same content',
+      event_date_range: { start: startStr, end: endStr },
+      types: ['note'],
+      exactTitle: true,
+    });
+
+    const candidateJournal = await dataManager.createJournal({
+      title: 'Merge Close Source',
+      content: 'Same content',
+      event_date_range: { start: startStr, end: endStr },
+      types: ['note'],
+      exactTitle: true,
+    });
+
+    await dataManager.createReviewItem({
+      source_journal_id: Number.parseInt(sourceJournal.id),
+      candidate_journal_id: Number.parseInt(candidateJournal.id),
+      reason: 'duplicate_journal',
+      confidence_score: 0.85,
+    });
+
+    testCleanup(async () => {
+      await dataManager.clearAllJournals();
+    });
+
+    // Navigate and open review queue
+    await contactTestHelpers.navigateToAuthenticatedPage('/journals');
+    const queueBtn = page.getByRole('button', { name: /Review Queue/i });
+    await expect(queueBtn).toBeVisible();
+    await queueBtn.click();
+
+    const sidebar = page.locator('[role="dialog"]', {
+      hasText: 'Review Queue',
+    });
+    await expect(sidebar).toBeVisible();
+
+    // Click "Confirm Match" to open merge dialog
+    const confirmBtn = sidebar
+      .getByRole('button', { name: /Confirm Match/i })
+      .first();
+    await confirmBtn.click();
+
+    // Resolution dialog should appear (no conflicts → "Confirm Merge" mode)
+    const resolutionDialog = page.locator('[role="dialog"]', {
+      hasText: /Confirm Merge|Resolve Merge/,
+    });
+    await expect(resolutionDialog).toBeVisible({ timeout: 15000 });
+
+    // Click the merge button
+    const mergeBtn = resolutionDialog.getByRole('button', {
+      name: /Merge/i,
+    });
+    await mergeBtn.click();
+
+    // Wait for success toast
+    await expect(page.getByText('Journals merged successfully')).toBeVisible({
+      timeout: 15000,
+    });
+
+    // The merge resolution dialog should be closed
+    await expect(resolutionDialog).not.toBeVisible({ timeout: 10000 });
+  });
+
+  test('should skip conflicting journals during auto-merge and only merge identical ones', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const page = authenticatedPage;
+    const dataManager = new (await import('./data-management')).TestDataManager(
+      page
+    );
+    const contactTestHelpers = new ContactTestHelpers(page);
+
+    await dataManager.clearAllJournals();
+
+    const d = new Date();
+    d.setHours(12, 0, 0, 0);
+    const startStr = d.toISOString();
+    d.setHours(13, 0, 0, 0);
+    const endStr = d.toISOString();
+
+    // Pair 1: IDENTICAL (should be auto-merged)
+    const identicalSource = await dataManager.createJournal({
+      title: 'AutoMerge Same',
+      content: 'Same content',
+      event_date_range: { start: startStr, end: endStr },
+      types: ['note'],
+      exactTitle: true,
+    });
+
+    const identicalCandidate = await dataManager.createJournal({
+      title: 'AutoMerge Same',
+      content: 'Same content',
+      event_date_range: { start: startStr, end: endStr },
+      types: ['note'],
+      exactTitle: true,
+    });
+
+    // Pair 2: CONFLICTING titles (should be skipped)
+    const conflictSource = await dataManager.createJournal({
+      title: 'Conflict Source',
+      content: 'Same content',
+      event_date_range: { start: startStr, end: endStr },
+      types: ['note'],
+    });
+
+    const conflictCandidate = await dataManager.createJournal({
+      title: 'Conflict Candidate',
+      content: 'Same content',
+      event_date_range: { start: startStr, end: endStr },
+      types: ['note'],
+    });
+
+    // Create review items for both pairs
+    await dataManager.createReviewItem({
+      source_journal_id: Number.parseInt(identicalSource.id),
+      candidate_journal_id: Number.parseInt(identicalCandidate.id),
+      reason: 'duplicate_journal',
+      confidence_score: 0.95,
+    });
+
+    await dataManager.createReviewItem({
+      source_journal_id: Number.parseInt(conflictSource.id),
+      candidate_journal_id: Number.parseInt(conflictCandidate.id),
+      reason: 'duplicate_journal',
+      confidence_score: 0.8,
+    });
+
+    testCleanup(async () => {
+      await dataManager.clearAllJournals();
+    });
+
+    // Navigate and open review queue
+    await contactTestHelpers.navigateToAuthenticatedPage('/journals');
+    const queueBtn = page.getByRole('button', { name: /Review Queue/i });
+    await expect(queueBtn).toBeVisible();
+    await queueBtn.click();
+
+    const sidebar = page.locator('[role="dialog"]', {
+      hasText: 'Review Queue',
+    });
+    await expect(sidebar).toBeVisible();
+
+    // Click "Merge All Identical"
+    const autoMergeBtn = sidebar.getByTestId('auto-merge-all-btn');
+    await expect(autoMergeBtn).toBeVisible();
+    await autoMergeBtn.click();
+
+    // Should report 1 merged
+    await expect(page.getByText(/Auto-merged 1 journal/i)).toBeVisible({
+      timeout: 15000,
+    });
+
+    // The conflicting pair should still be in the queue
+    await expect(sidebar).toContainText('Conflict', { timeout: 10000 });
+  });
 });

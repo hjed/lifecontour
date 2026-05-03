@@ -33,6 +33,31 @@ class JournalMergeService:
         self.journal_repo = journal_repo
         self.event_publisher = event_publisher
 
+    def has_base_conflicts(self, target: Journal, source: Journal) -> bool:
+        """Check whether two journals have conflicting base fields.
+
+        Returns True if title, content, or event_date_range differ between the
+        two journals when **both** have non-empty values for those fields.
+        This mirrors the conflict detection in the frontend MergeResolutionDialog.
+        """
+        # Title conflict: both non-empty and different
+        if source.title and target.title and source.title != target.title:
+            return True
+
+        # Content conflict: both non-empty and different
+        if source.content and target.content and source.content != target.content:
+            return True
+
+        # Date range conflict: both non-null and different
+        if (
+            source.event_date_range
+            and target.event_date_range
+            and source.event_date_range != target.event_date_range
+        ):
+            return True
+
+        return False
+
     async def merge_journals(
         self,
         target_id: int,

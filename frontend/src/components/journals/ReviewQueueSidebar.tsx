@@ -9,8 +9,12 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
-import { AlertCircle, GitMerge, Loader2 } from 'lucide-react';
-import { useReviewItems, useDismissReviewItem } from '@/lib/api/journals';
+import { AlertCircle, GitMerge, Loader2, Zap } from 'lucide-react';
+import {
+  useReviewItems,
+  useDismissReviewItem,
+  useAutoMergeReviewItems,
+} from '@/lib/api/journals';
 import { MergeJournalDialog } from './MergeJournalDialog';
 import { Badge } from '@/components/ui/badge';
 import { format } from 'date-fns';
@@ -45,6 +49,7 @@ export function ReviewQueueSidebar({
   const items = data?.data || [];
 
   const dismissMutation = useDismissReviewItem();
+  const autoMergeMutation = useAutoMergeReviewItems();
 
   const handleReviewClick = (sourceId: number, candidateId: number) => {
     setSelectedSourceId(sourceId.toString());
@@ -79,6 +84,21 @@ export function ReviewQueueSidebar({
           <EmptyQueueState />
         ) : (
           <div className='space-y-4'>
+            <Button
+              variant='outline'
+              size='sm'
+              className='w-full'
+              onClick={() => autoMergeMutation.mutate()}
+              disabled={autoMergeMutation.isPending}
+              data-testid='auto-merge-all-btn'
+            >
+              {autoMergeMutation.isPending ? (
+                <Loader2 className='mr-2 h-4 w-4 animate-spin' />
+              ) : (
+                <Zap className='mr-2 h-4 w-4' />
+              )}
+              Merge All Identical
+            </Button>
             {items.map(item => {
               const { attributes, id } = item;
               const {
