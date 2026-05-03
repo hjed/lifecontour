@@ -405,7 +405,11 @@ class SummaryGenerator:
             logger.info(
                 "Contact %d has no journals for prompt, skipping generation", contact_id
             )
-            if existing and (existing.summary_text or existing.follow_up_suggestions):
+            if existing and (
+                existing.summary_text
+                or existing.follow_up_suggestions
+                or existing.status != SummaryStatus.GENERATED
+            ):
                 cleared_summary = self._merge_with_existing(
                     existing,
                     contact_id=contact_id,

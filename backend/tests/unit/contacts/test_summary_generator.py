@@ -357,7 +357,12 @@ class TestSummaryGenerator:
         result = await generator.generate(contact_id=1)
 
         assert result is not None
-        assert result == existing
+        assert result.summary_text == ""
+        assert result.follow_up_suggestions == []
+        assert result.status == SummaryStatus.GENERATED
 
-        # Ensure generation was skipped
+        # Ensure that it was saved with cleared data
+        generator._summary_repo.upsert.assert_called_once_with(result)  # type: ignore[attr-defined]
+
+        # Ensure full generation flow was skipped
         generator._summary_repo.update_status.assert_not_called()  # type: ignore[attr-defined]
