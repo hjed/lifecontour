@@ -112,13 +112,11 @@ export function JournalDetailView({
       color: c.attributes.color,
     })) || [];
 
-  // Calculate default status based on event date
-  const isPastEvent = journal.event_date_range?.start
+  const defaultStatus = journal.event_date_range?.start
     ? isPast(parseISO(journal.event_date_range.start))
-    : false;
-  const defaultStatus = isPastEvent
-    ? AttendeeStatus.ATTENDED
-    : AttendeeStatus.ATTENDING;
+      ? AttendeeStatus.ATTENDED
+      : AttendeeStatus.ATTENDING
+    : undefined;
 
   // Handlers
   const handleCalendarChange = async (calendarId: string) => {
@@ -155,7 +153,13 @@ export function JournalDetailView({
       (r): r is PromiseRejectedResult => r.status === 'rejected'
     );
     if (failures.length > 0) {
-      throw new Error(`Failed to add ${failures.length} contact(s)`);
+      const firstError =
+        failures[0].reason instanceof Error
+          ? failures[0].reason.message
+          : String(failures[0].reason);
+      throw new Error(
+        `Failed to add ${failures.length} contact(s). First error: ${firstError}`
+      );
     }
   };
 

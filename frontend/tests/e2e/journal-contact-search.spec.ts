@@ -139,6 +139,9 @@ test.describe('Journal Contact Search (Typeahead)', () => {
       await expect(page.getByRole('listbox')).toBeVisible({ timeout: 10000 });
       await page.getByRole('option', { name: contactName }).click();
 
+      // Wait for the combobox to close before proceeding to avoid click interception
+      await expect(page.getByRole('listbox')).toBeHidden();
+
       // Verify the contact was selected (shown as a badge)
       await expect(
         page.getByRole('button', { name: `Remove ${contactName}` })
