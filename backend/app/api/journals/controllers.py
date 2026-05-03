@@ -984,6 +984,16 @@ async def _fetch_children_types(
             types.append(JournalType.KAYAKING.value)
         if await skiing_data_repo.find_by_journal_id(journal_id):
             types.append(JournalType.CROSS_COUNTRY_SKIING.value)
+        if await caving_data_repo.find_by_journal_id(journal_id):
+            types.append(JournalType.CAVING.value)
+        if await canoeing_data_repo.find_by_journal_id(journal_id):
+            types.append(JournalType.CANOEING.value)
+        if await snorkelling_data_repo.find_by_journal_id(journal_id):
+            types.append(JournalType.SNORKELLING.value)
+        if await diving_data_repo.find_by_journal_id(journal_id):
+            types.append(JournalType.DIVING.value)
+        if await downhill_skiing_data_repo.find_by_journal_id(journal_id):
+            types.append(JournalType.DOWNHILL_SKIING.value)
 
         result[journal_id] = types
 
@@ -3937,6 +3947,21 @@ async def update_type_data(
         await _update_cross_country_skiing_type_data(
             journal_id, journal_type, attrs, skiing_data_repo
         )
+    elif jtype == JournalType.SNORKELLING:
+        if not await snorkelling_data_repo.find_by_journal_id(journal_id):
+            raise JournalValidationError(
+                "journal_type", f"Journal does not have type {journal_type}"
+            )
+    elif jtype == JournalType.DIVING:
+        if not await diving_data_repo.find_by_journal_id(journal_id):
+            raise JournalValidationError(
+                "journal_type", f"Journal does not have type {journal_type}"
+            )
+    elif jtype == JournalType.DOWNHILL_SKIING:
+        if not await downhill_skiing_data_repo.find_by_journal_id(journal_id):
+            raise JournalValidationError(
+                "journal_type", f"Journal does not have type {journal_type}"
+            )
     elif jtype in (JournalType.PLAN, JournalType.TRAVEL):
         # PLAN and TRAVEL types have complex nested data structures
         # For now, return an error indicating this is not yet supported
