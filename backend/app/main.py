@@ -32,44 +32,35 @@ from app.infrastructure.tasks.attendance_transition_task import (
 )
 from app.mcp.server import create_mcp_app
 
+_TELEMETRY_SETUP_DONE = False
 
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Application lifespan manager for startup and shutdown events."""
-    settings: Settings = app.state.settings
+
+def setup_telemetry(app: FastAPI, settings: Settings) -> None:
+    """Setup OpenTelemetry instrumentation."""
+    global _TELEMETRY_SETUP_DONE
+    if not settings.enable_telemetry:
+        return
+
+    import logging
+
+    from opentelemetry._logs import set_logger_provider
+    from opentelemetry.exporter.otlp.proto.http._log_exporter import (
+        OTLPLogExporter,
+    )
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+        OTLPSpanExporter,
+    )
+    from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+    from opentelemetry.sdk._logs.export import (
+        BatchLogRecordProcessor as LogBatchProcessor,
+    )
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
     logger = structlog.get_logger()
 
-    # Setup logging
-    setup_logging(settings.log_level)
-    logger.info("Starting Personal Management System Backend", version="0.1.0")
-
-    # Initialize database
-    engine = get_database_engine()
-    logger.info("Database engine initialized")
-
-    # Setup Dishka container (get from app state)
-    container = app.state.dishka_container
-    logger.info("Dishka container initialized")
-
-    # Setup OpenTelemetry instrumentation
-    if settings.enable_telemetry:
-        import logging
-
-        from opentelemetry._logs import set_logger_provider
-        from opentelemetry.exporter.otlp.proto.http._log_exporter import (
-            OTLPLogExporter,
-        )
-        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
-            OTLPSpanExporter,
-        )
-        from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
-        from opentelemetry.sdk._logs.export import (
-            BatchLogRecordProcessor as LogBatchProcessor,
-        )
-        from opentelemetry.sdk.resources import Resource
-        from opentelemetry.sdk.trace import TracerProvider
-        from opentelemetry.sdk.trace.export import BatchSpanProcessor
-
+    if not _TELEMETRY_SETUP_DONE:
         # Configure resource attributes
         resource_attrs = {"service.name": settings.otel_service_name}
         if settings.otel_resource_attributes:
@@ -77,7 +68,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             for attr in settings.otel_resource_attributes.split(","):
                 if "=" in attr:
                     key, value = attr.strip().split("=", 1)
-                    resource_attrs[key] = value
+                    resource_attrs[key.strip()] = value.strip()
 
         # Set up tracer provider
         resource = Resource.create(resource_attrs)
@@ -103,16 +94,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger_provider.add_log_record_processor(
                 LogBatchProcessor(otlp_log_exporter)
             )
-            handler = LoggingHandler(
-                level=logging.NOTSET, logger_provider=logger_provider
-            )
-            logging.getLogger().addHandler(handler)
 
-        # Instrument FastAPI, HTTP clients, SQLAlchemy and Redis
-        FastAPIInstrumentor.instrument_app(
-            app, tracer_provider=trace.get_tracer_provider()
-        )
+            if not any(
+                isinstance(h, LoggingHandler) for h in logging.getLogger().handlers
+            ):
+                handler = LoggingHandler(
+                    level=logging.NOTSET, logger_provider=logger_provider
+                )
+                logging.getLogger().addHandler(handler)
+
         HTTPXClientInstrumentor().instrument()
+
+        engine = get_database_engine()
         SQLAlchemyInstrumentor().instrument(engine=engine)
 
         try:
@@ -122,11 +115,33 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except ImportError:
             logger.warning("Redis instrumentation not available")
 
-        logger.info(
-            "OpenTelemetry instrumentation enabled",
-            service_name=settings.otel_service_name,
-            endpoint=settings.otel_exporter_otlp_endpoint,
-        )
+        _TELEMETRY_SETUP_DONE = True
+
+    # Instrument FastAPI, HTTP clients, SQLAlchemy and Redis
+    FastAPIInstrumentor.instrument_app(app, tracer_provider=trace.get_tracer_provider())
+
+    logger.info(
+        "OpenTelemetry instrumentation enabled",
+        service_name=settings.otel_service_name,
+        endpoint=settings.otel_exporter_otlp_endpoint,
+    )
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Application lifespan manager for startup and shutdown events."""
+    settings: Settings = app.state.settings
+    logger = structlog.get_logger()
+
+    logger.info("Starting Personal Management System Backend", version="0.1.0")
+
+    # Initialize database
+    get_database_engine()
+    logger.info("Database engine initialized")
+
+    # Setup Dishka container (get from app state)
+    container = app.state.dishka_container
+    logger.info("Dishka container initialized")
 
     # Start background tasks
     attendance_task = None
@@ -281,6 +296,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url="/api/openapi.json" if settings.debug else None,
         lifespan=combined_lifespan,
     )
+
+    # Setup logging early so basicConfig runs before OTEL adds handlers
+    setup_logging(settings.log_level)
+
+    # Setup OpenTelemetry BEFORE middleware and routes are compiled by Uvicorn/Starlette
+    setup_telemetry(app, settings)
 
     # Setup Dishka dependency injection
     app.state.settings = settings
