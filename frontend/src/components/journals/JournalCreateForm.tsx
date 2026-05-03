@@ -144,6 +144,9 @@ interface TypeDataState {
   [JournalType.CLIMBING]?: ClimbingData;
   [JournalType.KAYAKING]?: KayakingData;
   [JournalType.CROSS_COUNTRY_SKIING]?: CrossCountrySkiingData;
+  [JournalType.SNORKELLING]?: Record<string, never>;
+  [JournalType.DIVING]?: Record<string, never>;
+  [JournalType.DOWNHILL_SKIING]?: Record<string, never>;
 }
 
 type TypeDataJournalType = keyof TypeDataState;
@@ -165,6 +168,9 @@ const TYPE_DATA_JOURNAL_TYPES = new Set<TypeDataJournalType>([
   JournalType.CLIMBING,
   JournalType.KAYAKING,
   JournalType.CROSS_COUNTRY_SKIING,
+  JournalType.SNORKELLING,
+  JournalType.DIVING,
+  JournalType.DOWNHILL_SKIING,
 ]);
 
 function hasTypeDataJournalType(
@@ -192,6 +198,9 @@ const typeOptions = [
   { value: JournalType.CLIMBING, label: 'Climbing' },
   { value: JournalType.KAYAKING, label: 'Kayaking' },
   { value: JournalType.CROSS_COUNTRY_SKIING, label: 'Cross-Country Skiing' },
+  { value: JournalType.SNORKELLING, label: 'Snorkelling' },
+  { value: JournalType.DIVING, label: 'Diving' },
+  { value: JournalType.DOWNHILL_SKIING, label: 'Downhill Skiing' },
 ];
 
 /**
@@ -232,6 +241,15 @@ const TYPE_DEPENDENCIES: Partial<Record<JournalType, JournalType[]>> = {
     JournalType.FITNESS,
   ],
   [JournalType.CANOEING]: [JournalType.OUTDOOR_ACTIVITY, JournalType.FITNESS],
+  [JournalType.SNORKELLING]: [
+    JournalType.OUTDOOR_ACTIVITY,
+    JournalType.FITNESS,
+  ],
+  [JournalType.DIVING]: [JournalType.OUTDOOR_ACTIVITY, JournalType.FITNESS],
+  [JournalType.DOWNHILL_SKIING]: [
+    JournalType.OUTDOOR_ACTIVITY,
+    JournalType.FITNESS,
+  ],
 };
 
 interface TypeCheckboxFieldProps {
@@ -315,6 +333,9 @@ const TYPE_LABELS: Record<JournalType, string> = {
   [JournalType.CLIMBING]: 'Climbing',
   [JournalType.KAYAKING]: 'Kayaking',
   [JournalType.CROSS_COUNTRY_SKIING]: 'Cross-Country Skiing',
+  [JournalType.SNORKELLING]: 'Snorkelling',
+  [JournalType.DIVING]: 'Diving',
+  [JournalType.DOWNHILL_SKIING]: 'Downhill Skiing',
 };
 
 function getJournalTypeTestId(type: JournalType): string {

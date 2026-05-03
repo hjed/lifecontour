@@ -21,6 +21,8 @@ from core_shared.models.journals import (
     CavingData,
     ClimbingData,
     CrossCountrySkiingData,
+    DivingData,
+    DownhillSkiingData,
     FitnessData,
     JoggingData,
     Journal,
@@ -30,6 +32,7 @@ from core_shared.models.journals import (
     OutdoorActivityData,
     PhotoAlbumData,
     PlanData,
+    SnorkellingData,
     TravelData,
 )
 from core_shared.models.route import Route
@@ -47,6 +50,8 @@ from app.api.journals.schemas import (
     CavingDataSchema,
     ClimbingDataSchema,
     CrossCountrySkiingDataSchema,
+    DivingDataSchema,
+    DownhillSkiingDataSchema,
     EventDateRangeSchema,
     FitnessDataSchema,
     JoggingDataSchema,
@@ -61,6 +66,7 @@ from app.api.journals.schemas import (
     PhotoAlbumDataSchema,
     PlanDataSchema,
     PlanDocumentSchema,
+    SnorkellingDataSchema,
     TravelAccommodationSchema,
     TravelDataSchema,
     TravelFlightSchema,
@@ -507,6 +513,21 @@ class TypeDataConverter:
         return CanoeingDataSchema(
             water_type=data.water_type,
         ).model_dump(exclude_none=True)
+
+    @staticmethod
+    def snorkelling_data_to_schema(data: SnorkellingData) -> dict[str, Any]:
+        """Convert SnorkellingData domain entity to API schema."""
+        return SnorkellingDataSchema().model_dump(exclude_none=True)
+
+    @staticmethod
+    def diving_data_to_schema(data: DivingData) -> dict[str, Any]:
+        """Convert DivingData domain entity to API schema."""
+        return DivingDataSchema().model_dump(exclude_none=True)
+
+    @staticmethod
+    def downhill_skiing_data_to_schema(data: DownhillSkiingData) -> dict[str, Any]:
+        """Convert DownhillSkiingData domain entity to API schema."""
+        return DownhillSkiingDataSchema().model_dump(exclude_none=True)
 
     @staticmethod
     def climbing_data_to_schema(data: ClimbingData) -> dict[str, Any]:

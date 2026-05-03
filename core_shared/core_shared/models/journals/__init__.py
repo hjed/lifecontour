@@ -53,6 +53,8 @@ from .constants import (
 )
 from .contact_event_role import ContactEventRole
 from .cross_country_skiing_data import CrossCountrySkiingData
+from .diving_data import DivingData
+from .downhill_skiing_data import DownhillSkiingData
 from .entities import Journal
 from .event_state import EventState
 from .exceptions import (
@@ -68,6 +70,8 @@ from .exceptions import (
     CavingDataValidationError,
     ClimbingDataValidationError,
     CrossCountrySkiingDataValidationError,
+    DivingDataValidationError,
+    DownhillSkiingDataValidationError,
     FitnessDataValidationError,
     GPXParsingError,
     JoggingDataValidationError,
@@ -88,6 +92,7 @@ from .exceptions import (
     RouteInUseError,
     RouteNotFoundError,
     RouteValidationError,
+    SnorkellingDataValidationError,
     TemplatePitchValidationError,
     TravelAccommodationValidationError,
     TravelDataValidationError,
@@ -105,6 +110,7 @@ from .outdoor_activity_data import OutdoorActivityData
 from .photo_album_data import PhotoAlbumData
 from .plan_data import PlanData, PlanDocument
 from .review_item import ReviewItem, ReviewReason
+from .snorkelling_data import SnorkellingData
 from .template_pitch import TemplatePitch
 from .travel_data import (
     TravelAccommodation,
@@ -178,10 +184,13 @@ __all__ = [
     "CanyoningData",
     "CavingData",
     "ClimbingData",
+    "DivingData",
+    "DownhillSkiingData",
     "KayakingData",
     "CrossCountrySkiingData",
     "JoggingData",
     "ReviewItem",
+    "SnorkellingData",
     # Enums
     "AttendeeStatus",
     "ContactEventRole",
@@ -225,8 +234,11 @@ __all__ = [
     "CanyoningDataValidationError",
     "CavingDataValidationError",
     "ClimbingDataValidationError",
+    "DivingDataValidationError",
+    "DownhillSkiingDataValidationError",
     "KayakingDataValidationError",
     "CrossCountrySkiingDataValidationError",
+    "SnorkellingDataValidationError",
     # Value Objects
     "EventDateRange",
 ]

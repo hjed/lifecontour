@@ -80,9 +80,15 @@ describe('JournalTypeSection', () => {
       { type: JournalType.PHOTO_ALBUM, label: 'Photo Album' },
       { type: JournalType.ABSEILING_TRIP, label: 'Abseiling Trip' },
       { type: JournalType.CANYONING, label: 'Canyoning' },
-      { type: JournalType.CLIMBING, label: 'Climbing' },
-      { type: JournalType.KAYAKING, label: 'Kayaking' },
-      { type: JournalType.CROSS_COUNTRY_SKIING, label: 'Cross-Country Skiing' },
+      { type: JournalType.CLIMBING, label: 'Climbing Data' },
+      { type: JournalType.KAYAKING, label: 'Kayaking Data' },
+      {
+        type: JournalType.CROSS_COUNTRY_SKIING,
+        label: 'Cross-Country Skiing Data',
+      },
+      { type: JournalType.SNORKELLING, label: 'Snorkelling Data' },
+      { type: JournalType.DIVING, label: 'Diving Data' },
+      { type: JournalType.DOWNHILL_SKIING, label: 'Downhill Skiing Data' },
     ];
 
     types.forEach(({ type, label }) => {

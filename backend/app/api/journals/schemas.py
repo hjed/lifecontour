@@ -344,6 +344,24 @@ class CanoeingDataSchema(BaseModel):
     )
 
 
+class SnorkellingDataSchema(BaseModel):
+    """Snorkelling data for SNORKELLING type journals."""
+
+    pass
+
+
+class DivingDataSchema(BaseModel):
+    """Diving data for DIVING type journals."""
+
+    pass
+
+
+class DownhillSkiingDataSchema(BaseModel):
+    """Downhill skiing data for DOWNHILL_SKIING type journals."""
+
+    pass
+
+
 class ClimbingDataSchema(BaseModel):
     """Climbing data for CLIMBING type journals."""
 

@@ -62,6 +62,9 @@ const JOURNAL_TYPE_LABELS: Record<JournalType, string> = {
   [JournalType.CLIMBING]: 'Climbing',
   [JournalType.KAYAKING]: 'Kayaking',
   [JournalType.CROSS_COUNTRY_SKIING]: 'Cross-Country Skiing',
+  [JournalType.SNORKELLING]: 'Snorkelling',
+  [JournalType.DIVING]: 'Diving',
+  [JournalType.DOWNHILL_SKIING]: 'Downhill Skiing',
 };
 
 /**

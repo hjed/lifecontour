@@ -1081,4 +1081,71 @@ test.describe('Journal Creation UI Flow', () => {
     // Verify success toast
     await expect(page.getByText('Template created successfully')).toBeVisible();
   });
+
+  test('should create a SNORKELLING journal and verify rendering', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+    await navigateToNewJournal(page);
+
+    await page.getByLabel(/title/i).fill(`Snorkelling Trip ${Date.now()}`);
+    await page.getByLabel(/content/i).fill('Great snorkelling trip.');
+    await page.getByLabel(/^snorkelling$/i).check();
+
+    await expect(page.getByTestId('snorkelling-type-editor')).toBeVisible();
+
+    await page.getByRole('button', { name: /create journal/i }).click();
+
+    await awaitCreationAndAssertBadge(page, 'manage-type-snorkelling');
+    await page.getByTestId('type-section-trigger-snorkelling').click();
+
+    // Verify type section is rendered with correct content
+    await expect(
+      page.getByText('No additional snorkelling data.')
+    ).toBeVisible();
+  });
+
+  test('should create a DIVING journal and verify rendering', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+    await navigateToNewJournal(page);
+
+    await page.getByLabel(/title/i).fill(`Diving Trip ${Date.now()}`);
+    await page.getByLabel(/content/i).fill('Great diving trip.');
+    await page.getByLabel(/^diving$/i).check();
+
+    await expect(page.getByTestId('diving-type-editor')).toBeVisible();
+
+    await page.getByRole('button', { name: /create journal/i }).click();
+
+    await awaitCreationAndAssertBadge(page, 'manage-type-diving');
+    await page.getByTestId('type-section-trigger-diving').click();
+
+    // Verify type section is rendered with correct content
+    await expect(page.getByText('No additional diving data.')).toBeVisible();
+  });
+
+  test('should create a DOWNHILL_SKIING journal and verify rendering', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+    await navigateToNewJournal(page);
+
+    await page.getByLabel(/title/i).fill(`Skiing Trip ${Date.now()}`);
+    await page.getByLabel(/content/i).fill('Great skiing trip.');
+    await page.getByLabel(/^downhill skiing$/i).check();
+
+    await expect(page.getByTestId('downhill-skiing-type-editor')).toBeVisible();
+
+    await page.getByRole('button', { name: /create journal/i }).click();
+
+    await awaitCreationAndAssertBadge(page, 'manage-type-downhill_skiing');
+    await page.getByTestId('type-section-trigger-downhill_skiing').click();
+
+    // Verify type section is rendered with correct content
+    await expect(
+      page.getByText('No additional downhill skiing data.')
+    ).toBeVisible();
+  });
 });

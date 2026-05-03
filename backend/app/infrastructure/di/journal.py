@@ -37,6 +37,12 @@ from app.core.journal.adapters.sql.cross_country_skiing_data_repository import (
 from app.core.journal.adapters.sql.daily_summary_repository import (
     SqlJournalDailySummaryRepository,
 )
+from app.core.journal.adapters.sql.diving_data_repository import (
+    SqlDivingDataRepository,
+)
+from app.core.journal.adapters.sql.downhill_skiing_data_repository import (
+    SqlDownhillSkiingDataRepository,
+)
 from app.core.journal.adapters.sql.fitness_data_repository import (
     SqlFitnessDataRepository,
 )
@@ -63,6 +69,9 @@ from app.core.journal.adapters.sql.review_item_repository import (
     SqlReviewItemRepository,
 )
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
+from app.core.journal.adapters.sql.snorkelling_data_repository import (
+    SqlSnorkellingDataRepository,
+)
 from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRepository
 from app.core.journal.models.repositories import (
     AbseilingDataRepository,
@@ -76,6 +85,8 @@ from app.core.journal.models.repositories import (
     CavingDataRepository,
     ClimbingDataRepository,
     CrossCountrySkiingDataRepository,
+    DivingDataRepository,
+    DownhillSkiingDataRepository,
     FitnessDataRepository,
     JoggingDataRepository,
     JournalContactRelationshipRepository,
@@ -88,6 +99,7 @@ from app.core.journal.models.repositories import (
     PlanDataRepository,
     ReviewItemRepository,
     RouteRepository,
+    SnorkellingDataRepository,
     TravelDataRepository,
 )
 from app.core.journal.services.daily_summary_eligibility import (
@@ -271,6 +283,27 @@ class JournalProvider(Provider):
     ) -> ActivityTemplateRepository:
         """Provide an ActivityTemplateRepository instance."""
         return SqlActivityTemplateRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def downhill_skiing_data_repository(
+        self, connection: AsyncConnection
+    ) -> DownhillSkiingDataRepository:
+        """Provide a DownhillSkiingDataRepository instance."""
+        return SqlDownhillSkiingDataRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def snorkelling_data_repository(
+        self, connection: AsyncConnection
+    ) -> SnorkellingDataRepository:
+        """Provide a SnorkellingDataRepository instance."""
+        return SqlSnorkellingDataRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def diving_data_repository(
+        self, connection: AsyncConnection
+    ) -> DivingDataRepository:
+        """Provide a DivingDataRepository instance."""
+        return SqlDivingDataRepository(connection)
 
     @provide(scope=Scope.REQUEST)
     def journal_service(

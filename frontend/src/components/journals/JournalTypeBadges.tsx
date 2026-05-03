@@ -59,6 +59,9 @@ export const TYPE_ICONS: Record<
   [JournalType.CLIMBING]: TrendingUp,
   [JournalType.KAYAKING]: Waves,
   [JournalType.CROSS_COUNTRY_SKIING]: Snowflake,
+  [JournalType.SNORKELLING]: Waves,
+  [JournalType.DIVING]: ArrowDownToLine,
+  [JournalType.DOWNHILL_SKIING]: Snowflake,
 };
 
 // Display labels for journal types
@@ -80,6 +83,9 @@ export const TYPE_LABELS: Record<JournalType, string> = {
   [JournalType.CLIMBING]: 'Climbing',
   [JournalType.KAYAKING]: 'Kayaking',
   [JournalType.CROSS_COUNTRY_SKIING]: 'Cross-Country Skiing',
+  [JournalType.SNORKELLING]: 'Snorkelling',
+  [JournalType.DIVING]: 'Diving',
+  [JournalType.DOWNHILL_SKIING]: 'Downhill Skiing',
 };
 
 // Color variants for different journal types
@@ -102,8 +108,11 @@ export const TYPE_VARIANTS: Record<
   [JournalType.CAVING]: 'default',
   [JournalType.CANOEING]: 'secondary',
   [JournalType.CLIMBING]: 'default',
-  [JournalType.KAYAKING]: 'secondary',
-  [JournalType.CROSS_COUNTRY_SKIING]: 'secondary',
+  [JournalType.KAYAKING]: 'default',
+  [JournalType.CROSS_COUNTRY_SKIING]: 'default',
+  [JournalType.SNORKELLING]: 'default',
+  [JournalType.DIVING]: 'default',
+  [JournalType.DOWNHILL_SKIING]: 'default',
 };
 
 /**
