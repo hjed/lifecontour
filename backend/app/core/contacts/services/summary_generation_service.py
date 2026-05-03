@@ -400,6 +400,13 @@ class SummaryGenerator:
             logger.warning("Contact %d not found, cannot generate summary", contact_id)
             return None
 
+        # Early exit if no journals will be included in the prompt
+        if not summary_input.recent_journals and not summary_input.future_journals:
+            logger.info(
+                "Contact %d has no journals for prompt, skipping generation", contact_id
+            )
+            return existing
+
         # Set status to GENERATING (only after confirming contact exists)
         await self._summary_repo.update_status(
             contact_id, SummaryStatus.GENERATING.value
@@ -497,13 +504,42 @@ class SummaryGenerator:
             return self._gemini_response_override
 
         # Real Gemini call (same pattern as GeminiTitleSimilarityAssessor)
+        from fastmcp import Client, FastMCP
         from google import genai
+        from google.genai import types
+
+        from app.mcp.server import create_mcp_server
+
+        # Filter to only read-only tools for AI safety during summary generation
+        main_mcp = create_mcp_server()
+        read_only_mcp = FastMCP("Summary Generation Tools")
+
+        read_only_tools = [
+            "get_contact",
+            "search_contacts",
+            "list_contacts",
+            "get_journal",
+            "search_journals",
+            "list_journals",
+            "global_search",
+        ]
+
+        for tool_name in read_only_tools:
+            t = await main_mcp.get_tool(tool_name)
+            if t:
+                read_only_mcp._local_provider.add_tool(t)
 
         client = genai.Client(api_key=self._gemini_api_key)
-        response = await client.aio.models.generate_content(
-            model=self._gemini_model,
-            contents=prompt,
-        )
+
+        async with Client(read_only_mcp) as mcp_client:
+            response = await client.aio.models.generate_content(
+                model=self._gemini_model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    tools=[mcp_client.session],
+                    temperature=0.3,
+                ),
+            )
         return response.text or ""
 
     @staticmethod

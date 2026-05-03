@@ -44,6 +44,7 @@ class TestSummaryConsumerEventMatching:
         return SummaryConsumer(
             stream_client=mock_client,
             stream_name="pms:domain-events",
+            container=MagicMock(),
         )
 
     def test_matches_summary_refresh_event(self, consumer: SummaryConsumer) -> None:
@@ -86,6 +87,7 @@ class TestSummaryConsumerHandleEvent:
         return SummaryConsumer(
             stream_client=mock_stream_client,
             stream_name="pms:domain-events",
+            container=MagicMock(),
         )
 
     @pytest.mark.asyncio

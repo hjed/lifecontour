@@ -59,6 +59,7 @@ class TestSummaryConsumerIntegration:
             stream_name=test_stream_name,
             consumer_name="test-summary-1",
             block_ms=100,
+            container=MagicMock(),
         )
         await stream_client.ensure_consumer_group(test_stream_name, GROUP_NAME)
 

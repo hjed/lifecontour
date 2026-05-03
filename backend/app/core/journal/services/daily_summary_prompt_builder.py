@@ -6,6 +6,8 @@ actual journal content and metadata.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from app.core.journal.services.daily_summary_models import DailySummaryInput
 
 # Truncate content beyond this length to keep prompts bounded
@@ -28,7 +30,10 @@ class DailySummaryPromptBuilder:
         sections: list[str] = []
 
         # 1. System instructions
-        sections.append(self._build_system_instructions())
+        from datetime import UTC, datetime
+
+        now = datetime.now(tz=UTC)
+        sections.append(self._build_system_instructions(now))
 
         # 2. Day overview
         sections.append(self._build_day_overview(summary_input))
@@ -49,9 +54,12 @@ class DailySummaryPromptBuilder:
 
         return "\n\n".join(sections)
 
-    def _build_system_instructions(self) -> str:
+    def _build_system_instructions(self, now: datetime) -> str:
+        current_time = now.strftime("%Y-%m-%d %H:%M:%S UTC")
         return (
             "You are summarising a user's day based on their journal entries.\n"
+            f"Current System Time: {current_time}\n"
+            "Use this time context to differentiate between past events, today's events, and upcoming future events.\n"
             "Be short, practical, and descriptive rather than speculative.\n"
             "Do not invent information not present in the journals.\n"
             "Do not rewrite the journal record — just summarise.\n"
@@ -60,8 +68,19 @@ class DailySummaryPromptBuilder:
 
     def _build_day_overview(self, summary_input: DailySummaryInput) -> str:
         date_str = summary_input.summary_date.isoformat()
+
+        from datetime import UTC, datetime
+
+        now_date = datetime.now(tz=UTC).date()
+        if summary_input.summary_date < now_date:
+            temporal_context = "Past"
+        elif summary_input.summary_date == now_date:
+            temporal_context = "Today"
+        else:
+            temporal_context = "Future"
+
         lines = [
-            f"## Day Overview: {date_str}",
+            f"## Day Overview: {date_str} ({temporal_context})",
             f"- Journal count: {summary_input.journal_count}",
             f"- Event count: {summary_input.event_count}",
         ]
