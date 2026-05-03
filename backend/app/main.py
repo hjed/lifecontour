@@ -53,8 +53,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Setup OpenTelemetry instrumentation
     if settings.enable_telemetry:
+        import logging
+
+        from opentelemetry._logs import set_logger_provider
+        from opentelemetry.exporter.otlp.proto.http._log_exporter import (
+            OTLPLogExporter,
+        )
         from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
             OTLPSpanExporter,
+        )
+        from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+        from opentelemetry.sdk._logs.export import (
+            BatchLogRecordProcessor as LogBatchProcessor,
         )
         from opentelemetry.sdk.resources import Resource
         from opentelemetry.sdk.trace import TracerProvider
@@ -73,6 +83,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         resource = Resource.create(resource_attrs)
         trace.set_tracer_provider(TracerProvider(resource=resource))
 
+        # Set up logger provider
+        logger_provider = LoggerProvider(resource=resource)
+        set_logger_provider(logger_provider)
+
         # Configure OTLP exporter if endpoint is provided
         if settings.otel_exporter_otlp_endpoint:
             otlp_exporter = OTLPSpanExporter(
@@ -83,12 +97,30 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             if hasattr(tracer_provider, "add_span_processor"):
                 tracer_provider.add_span_processor(span_processor)
 
-        # Instrument FastAPI, HTTP clients, and SQLAlchemy
+            otlp_log_exporter = OTLPLogExporter(
+                endpoint=f"{settings.otel_exporter_otlp_endpoint}/v1/logs"
+            )
+            logger_provider.add_log_record_processor(
+                LogBatchProcessor(otlp_log_exporter)
+            )
+            handler = LoggingHandler(
+                level=logging.NOTSET, logger_provider=logger_provider
+            )
+            logging.getLogger().addHandler(handler)
+
+        # Instrument FastAPI, HTTP clients, SQLAlchemy and Redis
         FastAPIInstrumentor.instrument_app(
             app, tracer_provider=trace.get_tracer_provider()
         )
         HTTPXClientInstrumentor().instrument()
         SQLAlchemyInstrumentor().instrument(engine=engine)
+
+        try:
+            from opentelemetry.instrumentation.redis import RedisInstrumentor
+
+            RedisInstrumentor().instrument()
+        except ImportError:
+            logger.warning("Redis instrumentation not available")
 
         logger.info(
             "OpenTelemetry instrumentation enabled",

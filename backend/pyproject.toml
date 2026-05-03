@@ -43,6 +43,8 @@ dependencies = [
     "aiohttp>=3.9.0",
     "gpxpy>=1.6.0",
     "google-genai>=1.0.0",
+    "opentelemetry-instrumentation-logging>=0.62b1",
+    "opentelemetry-instrumentation-redis>=0.62b1",
 ]
 
 [tool.uv.sources]
