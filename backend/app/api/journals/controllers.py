@@ -350,6 +350,11 @@ async def _create_type_specific_data(
 
         skiing_data = CrossCountrySkiingData(journal_id=journal_id)
         await skiing_data_repo.save(skiing_data)
+    elif journal_type == JournalType.CAVING:
+        from core_shared.models.journals import CavingData
+
+        caving_data = CavingData(journal_id=journal_id)
+        await caving_data_repo.save(caving_data)
     # EVENT and PHOTO_ALBUM types require additional data (calendar_id, immich_album_id)
     # These will be created when the user updates the type data
 
