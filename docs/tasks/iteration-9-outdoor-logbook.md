@@ -409,20 +409,20 @@ Deliver OUTDOOR_TRAINING as a complete vertical slice.
 Deliver OUTDOOR_PLANNING as a complete vertical slice. This type extends EVENT rather than OUTDOOR_ACTIVITY.
 
 **Acceptance Criteria:**
-- [ ] Migration creates `journal_outdoor_planning_data` table (journal_id PK/FK, topics text nullable, activity_types JSONB/text[] nullable, timestamps)
-- [ ] OUTDOOR_PLANNING added to `JournalType` enum with dependencies: OUTDOOR_PLANNING → [EVENT]
-- [ ] `OutdoorPlanningData` domain entity with validation (activity_types validated against outdoor activity subtype enum)
-- [ ] `OutdoorPlanningDataRepository` interface and SQL implementation
-- [ ] Type system updated: dependency map, table mapping, NOTE detection JOINs
-- [ ] API schema (`OutdoorPlanningDataSchema`), converter, and controller integration
-- [ ] MCP handles OUTDOOR_PLANNING through existing generic journal tools
-- [ ] Frontend: `OutdoorPlanningTypeEditor` with free-text topics field and multi-select for activity types
-- [ ] DI provider registration
+- [x] Migration creates `journal_outdoor_planning_data` table (journal_id PK/FK, topics text nullable, activity_types JSONB/text[] nullable, timestamps)
+- [x] OUTDOOR_PLANNING added to `JournalType` enum with dependencies: OUTDOOR_PLANNING → [EVENT]
+- [x] `OutdoorPlanningData` domain entity with validation (activity_types validated against outdoor activity subtype enum)
+- [x] `OutdoorPlanningDataRepository` interface and SQL implementation
+- [x] Type system updated: dependency map, table mapping, NOTE detection JOINs
+- [x] API schema (`OutdoorPlanningDataSchema`), converter, and controller integration
+- [x] MCP handles OUTDOOR_PLANNING through existing generic journal tools
+- [x] Frontend: `OutdoorPlanningTypeEditor` with free-text topics field and multi-select for activity types
+- [x] DI provider registration
 
 **Required Test Coverage:**
-- **Unit:** OutdoorPlanningData entity validation, activity_types enum validation.
-- **Integration:** repository CRUD, API test creating planning journal (verify EVENT data auto-created with time fields).
-- **E2E:** create an outdoor planning journal with topics and activity types, verify EVENT fields (time, location) are usable.
+- **Unit:** ✅ OutdoorPlanningData entity validation, activity_types enum validation.
+- **Integration:** ✅ repository CRUD, API test creating planning journal (verify EVENT data auto-created with time fields).
+- **E2E:** ✅ create an outdoor planning journal with topics and activity types, verify EVENT fields (time, location) are usable.
 
 #### Phase 4: GEAR_MAINTENANCE — Full Vertical Slice with Gear Item Selector
 **PR Size:** ~7–9 files

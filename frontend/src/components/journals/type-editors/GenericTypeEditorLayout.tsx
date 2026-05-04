@@ -44,7 +44,7 @@ export function GenericTypeEditorLayout({
   if (!isEditing && !createMode) {
     if (summaryItems.length === 0) {
       return (
-        <div className='flex items-center justify-between'>
+        <div className='flex items-center justify-between' data-testid={testId}>
           <p className='text-muted-foreground text-sm'>{emptyMessage}</p>
           <TypeEditorActions
             isEditing={false}

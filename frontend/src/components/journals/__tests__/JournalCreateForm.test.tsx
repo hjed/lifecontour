@@ -95,7 +95,7 @@ describe('JournalCreateForm', () => {
       expect(screen.getByLabelText(/note/i)).toBeInTheDocument();
       expect(screen.getByLabelText(/event/i)).toBeInTheDocument();
       expect(screen.getByLabelText(/mood rating/i)).toBeInTheDocument();
-      expect(screen.getByLabelText(/plan/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/^plan$/i)).toBeInTheDocument();
       expect(screen.getByLabelText(/travel/i)).toBeInTheDocument();
       expect(screen.getByLabelText(/photo album/i)).toBeInTheDocument();
     });

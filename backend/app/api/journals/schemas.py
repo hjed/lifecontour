@@ -385,6 +385,19 @@ class ClimbingDataSchema(BaseModel):
     )
 
 
+class OutdoorPlanningDataSchema(BaseModel):
+    """Outdoor planning data for OUTDOOR_PLANNING type journals."""
+
+    topics: str | None = Field(
+        default=None,
+        description="Description of the topics discussed",
+    )
+    activity_types: list[str] | None = Field(
+        default=None,
+        description="List of related outdoor activity subtypes",
+    )
+
+
 class KayakingDataSchema(BaseModel):
     """Kayaking data for KAYAKING type journals."""
 

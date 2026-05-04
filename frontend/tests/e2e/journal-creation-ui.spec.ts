@@ -1144,4 +1144,33 @@ test.describe('Journal Creation UI Flow', () => {
     // Verify type section is rendered with correct content
     await expect(page.getByText('Downhill skiing logbook.')).toBeVisible();
   });
+
+  test('should create an OUTDOOR_PLANNING journal and verify rendering', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+    await navigateToNewJournal(page);
+
+    await page.getByLabel(/title/i).fill(`Planning Trip ${Date.now()}`);
+    await page.getByLabel(/content/i).fill('Planning a great trip.');
+    await page.getByLabel(/^outdoor planning$/i).check();
+
+    await expect(
+      page.getByTestId('outdoor-planning-type-editor')
+    ).toBeVisible();
+
+    await page.getByTestId('topics-input').fill('Test logistics');
+    await page.getByTestId('activity-type-bushwalking').check();
+    await page.getByTestId('activity-type-canyoning').check();
+
+    await page.getByRole('button', { name: /create journal/i }).click();
+
+    await awaitCreationAndAssertBadge(page, 'manage-type-outdoor_planning');
+    await page.getByTestId('type-section-trigger-outdoor_planning').click();
+
+    // Verify type section is rendered
+    await expect(
+      page.getByTestId('outdoor-planning-type-editor')
+    ).toBeVisible();
+  });
 });

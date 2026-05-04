@@ -23,6 +23,7 @@ export { CrossCountrySkiingTypeEditor } from './CrossCountrySkiingTypeEditor';
 export { SnorkellingTypeEditor } from './SnorkellingTypeEditor';
 export { DivingTypeEditor } from './DivingTypeEditor';
 export { DownhillSkiingTypeEditor } from './DownhillSkiingTypeEditor';
+export { OutdoorPlanningTypeEditor } from './OutdoorPlanningTypeEditor';
 export { ReadOnlyTypeSummary } from './ReadOnlyTypeSummary';
 export { TypeEditorActions } from './TypeEditorActions';
 export { useTypeEditorState } from './useTypeEditorState';

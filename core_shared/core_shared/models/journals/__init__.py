@@ -89,6 +89,7 @@ from .exceptions import (
     KayakingDataValidationError,
     MoodDataValidationError,
     OutdoorActivityDataValidationError,
+    OutdoorPlanningDataValidationError,
     PhotoAlbumDataValidationError,
     PlanDataValidationError,
     PlanDocumentValidationError,
@@ -111,6 +112,8 @@ from .journal_types import JournalType
 from .kayaking_data import KayakingData
 from .mood_data import MoodData
 from .outdoor_activity_data import OutdoorActivityData
+from .outdoor_activity_subtypes import OutdoorActivitySubtype
+from .outdoor_planning_data import OutdoorPlanningData
 from .photo_album_data import PhotoAlbumData
 from .plan_data import PlanData, PlanDocument
 from .review_item import ReviewItem, ReviewReason
@@ -181,6 +184,8 @@ __all__ = [
     "TravelTransportation",
     "JournalContactRelationship",
     "OutdoorActivityData",
+    "OutdoorActivitySubtype",
+    "OutdoorPlanningData",
     "BushwalkingData",
     "AbseilPitch",
     "AbseilingData",
@@ -231,6 +236,7 @@ __all__ = [
     "GPXParsingError",
     "JournalTypeDependencyError",
     "OutdoorActivityDataValidationError",
+    "OutdoorPlanningDataValidationError",
     "BushwalkingDataValidationError",
     "JoggingDataValidationError",
     "AbseilPitchValidationError",

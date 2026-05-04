@@ -35,6 +35,7 @@ from core_shared.models.journals import (
     KayakingData,
     MoodData,
     OutdoorActivityData,
+    OutdoorPlanningData,
     PhotoAlbumData,
     PlanData,
     PlanDocument,
@@ -2149,5 +2150,53 @@ class GearItemRepository(ABC):
 
         Args:
             gear_item_id: The gear item UUID string to delete
+        """
+        pass
+
+
+class OutdoorPlanningDataRepository(ABC):
+    """
+    Repository interface for outdoor planning data (OUTDOOR_PLANNING type) operations.
+
+    A journal has the OUTDOOR_PLANNING type if a OutdoorPlanningData row exists for its journal_id.
+    """
+
+    @abstractmethod
+    async def find_by_journal_id(self, journal_id: int) -> OutdoorPlanningData | None:
+        """
+        Find outdoor planning data by journal ID.
+
+        Args:
+            journal_id: The journal ID to look up
+
+        Returns:
+            The OutdoorPlanningData if found, None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def save(self, data: OutdoorPlanningData) -> OutdoorPlanningData:
+        """
+        Save outdoor planning data (insert or update).
+
+        This effectively adds or updates the OUTDOOR_PLANNING type for a journal.
+
+        Args:
+            data: The outdoor planning data to save
+
+        Returns:
+            The saved data with updated timestamps
+        """
+        pass
+
+    @abstractmethod
+    async def delete(self, journal_id: int) -> None:
+        """
+        Delete outdoor planning data by journal ID.
+
+        This effectively removes the OUTDOOR_PLANNING type from a journal.
+
+        Args:
+            journal_id: The journal ID to delete outdoor planning data for
         """
         pass

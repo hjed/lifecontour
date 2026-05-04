@@ -84,6 +84,7 @@ import {
   type OutdoorActivityData,
   type JoggingData,
   type BushwalkingData,
+  type OutdoorPlanningData,
   ActivityTemplateResource,
   AbseilPitch,
 } from '@/types/journals';
@@ -107,6 +108,7 @@ import {
   SnorkellingTypeEditor,
   DivingTypeEditor,
   DownhillSkiingTypeEditor,
+  OutdoorPlanningTypeEditor,
 } from './type-editors';
 import { JournalSearchCombobox } from './JournalSearchCombobox';
 
@@ -150,6 +152,7 @@ interface TypeDataState {
   [JournalType.SNORKELLING]?: Record<string, never>;
   [JournalType.DIVING]?: Record<string, never>;
   [JournalType.DOWNHILL_SKIING]?: Record<string, never>;
+  [JournalType.OUTDOOR_PLANNING]?: OutdoorPlanningData;
 }
 
 type TypeDataJournalType = keyof TypeDataState;
@@ -174,6 +177,7 @@ const TYPE_DATA_JOURNAL_TYPES = new Set<TypeDataJournalType>([
   JournalType.SNORKELLING,
   JournalType.DIVING,
   JournalType.DOWNHILL_SKIING,
+  JournalType.OUTDOOR_PLANNING,
 ]);
 
 function hasTypeDataJournalType(
@@ -204,6 +208,7 @@ const typeOptions = [
   { value: JournalType.SNORKELLING, label: 'Snorkelling' },
   { value: JournalType.DIVING, label: 'Diving' },
   { value: JournalType.DOWNHILL_SKIING, label: 'Downhill Skiing' },
+  { value: JournalType.OUTDOOR_PLANNING, label: 'Outdoor Planning' },
 ];
 
 /**
@@ -339,6 +344,7 @@ const TYPE_LABELS: Record<JournalType, string> = {
   [JournalType.SNORKELLING]: 'Snorkelling',
   [JournalType.DIVING]: 'Diving',
   [JournalType.DOWNHILL_SKIING]: 'Downhill Skiing',
+  [JournalType.OUTDOOR_PLANNING]: 'Outdoor Planning',
 };
 
 function getJournalTypeTestId(type: JournalType): string {
@@ -638,6 +644,15 @@ export function JournalCreateForm({
       handleTypeDataChange(
         JournalType.DOWNHILL_SKIING,
         data as Record<string, never>
+      ),
+    [handleTypeDataChange]
+  );
+
+  const handleOutdoorPlanningChange = useCallback(
+    (data: unknown) =>
+      handleTypeDataChange(
+        JournalType.OUTDOOR_PLANNING,
+        data as OutdoorPlanningData
       ),
     [handleTypeDataChange]
   );
@@ -1039,6 +1054,12 @@ export function JournalCreateForm({
                       <DownhillSkiingTypeEditor
                         createMode
                         onChange={handleDownhillSkiingChange}
+                      />
+                    )}
+                    {type === JournalType.OUTDOOR_PLANNING && (
+                      <OutdoorPlanningTypeEditor
+                        createMode
+                        onChange={handleOutdoorPlanningChange}
                       />
                     )}
                   </CardContent>
