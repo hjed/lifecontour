@@ -3,7 +3,7 @@
 import { useId } from 'react';
 import { MapPin, List } from 'lucide-react';
 import { Label } from '@/components/ui/label';
-import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
 import type { OutdoorPlanningData } from '@/types/journals';
 import {
@@ -35,7 +35,6 @@ export function OutdoorPlanningTypeEditor({
 }: OutdoorPlanningTypeEditorProps) {
   const baseId = useId();
   const topicsFieldId = `${baseId}-topics`;
-  const activityTypesFieldId = `${baseId}-activity-types`;
 
   const {
     isEditing,
@@ -104,36 +103,64 @@ export function OutdoorPlanningTypeEditor({
         </div>
 
         <div className='space-y-2'>
-          <Label
-            htmlFor={activityTypesFieldId}
-            className='flex items-center gap-2'
-          >
+          <Label className='mb-2 flex items-center gap-2'>
             <MapPin
               className='text-muted-foreground h-4 w-4'
               aria-hidden='true'
             />
-            Activity Types (comma separated)
+            Activity Types
           </Label>
-          <Input
-            id={activityTypesFieldId}
-            data-testid='activity-types-input'
-            value={editData.activity_types?.join(', ') ?? ''}
-            onChange={e => {
-              const val = e.target.value;
-              const types = val
-                ? val
-                    .split(',')
-                    .map(s => s.trim())
-                    .filter(Boolean)
-                : null;
-              setEditData(previous => ({
-                ...previous,
-                activity_types: types && types.length > 0 ? types : null,
-              }));
-            }}
-            disabled={!isEditing && !createMode}
-            placeholder='canyoning, bushwalking...'
-          />
+          <div className='grid grid-cols-2 gap-3 sm:grid-cols-3'>
+            {[
+              { value: 'abseiling_trip', label: 'Abseiling' },
+              { value: 'bushwalking', label: 'Bushwalking' },
+              { value: 'canoeing', label: 'Canoeing' },
+              { value: 'canyoning', label: 'Canyoning' },
+              { value: 'caving', label: 'Caving' },
+              { value: 'climbing', label: 'Climbing' },
+              { value: 'cross_country_skiing', label: 'Cross-Country Skiing' },
+              { value: 'diving', label: 'Diving' },
+              { value: 'downhill_skiing', label: 'Downhill Skiing' },
+              { value: 'jogging', label: 'Jogging' },
+              { value: 'kayaking', label: 'Kayaking' },
+              { value: 'snorkelling', label: 'Snorkelling' },
+            ].map(subtype => {
+              const isChecked =
+                editData.activity_types?.includes(subtype.value) ?? false;
+              return (
+                <div
+                  key={subtype.value}
+                  className='flex items-center space-x-2'
+                >
+                  <Checkbox
+                    id={`${baseId}-${subtype.value}`}
+                    checked={isChecked}
+                    disabled={!isEditing && !createMode}
+                    onCheckedChange={checked => {
+                      const current = editData.activity_types ?? [];
+                      let next;
+                      if (checked) {
+                        next = [...current, subtype.value];
+                      } else {
+                        next = current.filter(v => v !== subtype.value);
+                      }
+                      setEditData(prev => ({
+                        ...prev,
+                        activity_types: next.length > 0 ? next : null,
+                      }));
+                    }}
+                    data-testid={`activity-type-${subtype.value}`}
+                  />
+                  <Label
+                    htmlFor={`${baseId}-${subtype.value}`}
+                    className='text-sm leading-none font-medium peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
+                  >
+                    {subtype.label}
+                  </Label>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
     </GenericTypeEditorLayout>

@@ -1160,9 +1160,8 @@ test.describe('Journal Creation UI Flow', () => {
     ).toBeVisible();
 
     await page.getByTestId('topics-input').fill('Test logistics');
-    await page
-      .getByTestId('activity-types-input')
-      .fill('bushwalking, canyoning');
+    await page.getByTestId('activity-type-bushwalking').check();
+    await page.getByTestId('activity-type-canyoning').check();
 
     await page.getByRole('button', { name: /create journal/i }).click();
 
