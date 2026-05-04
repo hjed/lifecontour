@@ -664,7 +664,7 @@ test.describe('Journal Detail Page', () => {
         ),
         page.waitForResponse(
           resp =>
-            resp.url().includes(`/api/journals/${journal.id}`) &&
+            resp.url().endsWith(`/api/journals/${journal.id}`) &&
             resp.request().method() === 'GET'
         ),
         page.getByRole('button', { name: 'Add', exact: true }).click(),
@@ -729,7 +729,7 @@ test.describe('Journal Detail Page', () => {
         ),
         page.waitForResponse(
           resp =>
-            resp.url().includes(`/api/journals/${journal.id}`) &&
+            resp.url().endsWith(`/api/journals/${journal.id}`) &&
             resp.request().method() === 'GET'
         ),
         removeContactButton.click(),

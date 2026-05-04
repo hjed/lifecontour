@@ -131,7 +131,15 @@ function CallbackContent() {
         processedCodes.set(code, processingPromise);
 
         await processingPromise;
+        // Clean up the map after a short delay to survive Strict Mode double-mounting,
+        // but prevent unbounded growth over a long-lived SPA session.
+        setTimeout(() => processedCodes.delete(code), 10000);
       } catch (err) {
+        // If we extracted a code before failing, ensure it's removed from the map so the user can retry
+        const code = searchParams.get('code');
+        if (code) {
+          processedCodes.delete(code);
+        }
         console.error('OAuth callback error:', err);
         setError(err instanceof Error ? err.message : 'Authentication failed');
       }
