@@ -1143,3 +1143,40 @@ class TestStravaFitnessDataProcessing:
 
         # Only "fitness" should have been processed (unknown_type_xyz skipped)
         assert mock_journal_service.add_type_to_journal.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_created_event_with_pydantic_validation_error_skips(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Malformed fitness_data dict that fails Pydantic validation should skip, not crash."""
+        event_data = _make_journal_event_data(
+            sync_action="created",
+            external_event_id="strava-malformed",
+        )
+        # distance should be int|None, a string will fail Pydantic validation
+        event_data["journal_data"]["fitness_data"] = {
+            "distance": "not-a-number",
+        }
+
+        event = OutboxEvent(
+            id=uuid4(),
+            event_type="journal_event.created",
+            event_data=event_data,
+            created_at=datetime.now(UTC),
+            retry_count=0,
+        )
+
+        mock_journal_service.create_journal.return_value = _make_journal()
+        mock_connection.execute.side_effect = [
+            _mock_empty_result(),  # _find_external_event_link
+            MagicMock(),  # _save_calendar_info
+            MagicMock(),  # _create_external_event_link
+        ]
+
+        result = await processor.process_event(event)
+        assert result["status"] == "success"
+        # No fitness data UPSERT should have been called
+        assert mock_connection.execute.call_count == 3

@@ -160,6 +160,44 @@ class TestProcessStravaWebhookEvent:
         assert result["status"] == "ignored"
         assert "athlete" in result["reason"]
 
+    @pytest.mark.asyncio
+    async def test_skips_missing_object_id(self, ctx: dict[str, Any]) -> None:
+        """Event with missing object_id is skipped gracefully."""
+        worker_mod = _import_worker()
+
+        event_data = {
+            "aspect_type": "create",
+            "object_type": "activity",
+            "object_id": None,
+            "owner_id": 67890,
+            "subscription_id": 1,
+            "event_time": 1700000000,
+            "updates": None,
+        }
+        result = await worker_mod.process_strava_webhook_event(ctx, event_data)
+
+        assert result["status"] == "skipped"
+        assert result["reason"] == "invalid_object_id"
+
+    @pytest.mark.asyncio
+    async def test_skips_non_int_object_id(self, ctx: dict[str, Any]) -> None:
+        """Event with non-integer object_id is skipped gracefully."""
+        worker_mod = _import_worker()
+
+        event_data = {
+            "aspect_type": "create",
+            "object_type": "activity",
+            "object_id": "not-an-int",
+            "owner_id": 67890,
+            "subscription_id": 1,
+            "event_time": 1700000000,
+            "updates": None,
+        }
+        result = await worker_mod.process_strava_webhook_event(ctx, event_data)
+
+        assert result["status"] == "skipped"
+        assert result["reason"] == "invalid_object_id"
+
 
 class TestOnConsumerTaskDone:
     """Tests for _on_consumer_task_done callback."""

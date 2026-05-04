@@ -266,6 +266,15 @@ async def process_strava_webhook_event(
         )
         return {"status": "skipped", "reason": "missing_owner_id"}
 
+    if object_id is None or not isinstance(object_id, int):
+        logger.warning(
+            "Webhook event missing or invalid object_id",
+            object_id=object_id,
+            aspect_type=aspect_type,
+            owner_id=owner_id,
+        )
+        return {"status": "skipped", "reason": "invalid_object_id"}
+
     # Resolve the user from the athlete_id
     user_info = await _resolve_user_for_athlete(session_factory, int(owner_id))
     if user_info is None:
