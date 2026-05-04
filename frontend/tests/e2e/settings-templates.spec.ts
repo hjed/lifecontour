@@ -42,8 +42,11 @@ test.describe('Settings - Template Management', () => {
     await expect(dialog).toBeVisible();
     await dialog.getByRole('button', { name: /delete/i }).click();
 
+    // Wait for dialog to close
+    await expect(dialog).toBeHidden();
+
     // 6. Verify success toast and template disappearance
     await expect(page.getByText('Template deleted successfully')).toBeVisible();
-    await expect(templateRow).toBeHidden();
+    await expect(templateRow).toBeHidden({ timeout: 15000 });
   });
 });

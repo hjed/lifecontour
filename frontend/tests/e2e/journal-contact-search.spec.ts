@@ -147,8 +147,21 @@ test.describe('Journal Contact Search (Typeahead)', () => {
         page.getByRole('button', { name: `Remove ${contactName}` })
       ).toBeVisible();
 
-      // Confirm the addition
-      await page.getByRole('button', { name: 'Add', exact: true }).click();
+      // Confirm the addition and wait for API and refetch
+      const [addResponse] = await Promise.all([
+        page.waitForResponse(
+          resp =>
+            resp.url().includes(`/api/journals/${journal.id}`) &&
+            resp.request().method() === 'POST'
+        ),
+        page.waitForResponse(
+          resp =>
+            resp.url().endsWith(`/api/journals/${journal.id}`) &&
+            resp.request().method() === 'GET'
+        ),
+        page.getByRole('button', { name: 'Add', exact: true }).click(),
+      ]);
+      expect(addResponse.status()).toBe(200);
 
       // Verify the contact badge appears on the journal
       await expect(

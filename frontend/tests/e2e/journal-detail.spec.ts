@@ -655,12 +655,17 @@ test.describe('Journal Detail Page', () => {
         page.getByText(contactName, { exact: true }).first()
       ).toBeVisible();
 
-      // Wait for the update request to finish
+      // Wait for the POST update request and the subsequent GET refetch
       const [addResponse] = await Promise.all([
         page.waitForResponse(
           resp =>
             resp.url().includes(`/api/journals/${journal.id}`) &&
             resp.request().method() === 'POST'
+        ),
+        page.waitForResponse(
+          resp =>
+            resp.url().endsWith(`/api/journals/${journal.id}`) &&
+            resp.request().method() === 'GET'
         ),
         page.getByRole('button', { name: 'Add', exact: true }).click(),
       ]);
@@ -715,12 +720,17 @@ test.describe('Journal Detail Page', () => {
       );
       await expect(removeContactButton).toBeVisible();
 
-      // Wait for the API call to complete
+      // Wait for the API call to complete and the subsequent GET refetch
       const [removeResponse] = await Promise.all([
         page.waitForResponse(
           resp =>
             resp.url().includes(`/api/journals/${journal.id}`) &&
             resp.request().method() === 'DELETE'
+        ),
+        page.waitForResponse(
+          resp =>
+            resp.url().endsWith(`/api/journals/${journal.id}`) &&
+            resp.request().method() === 'GET'
         ),
         removeContactButton.click(),
       ]);

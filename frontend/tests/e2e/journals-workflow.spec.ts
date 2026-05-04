@@ -33,13 +33,16 @@ test.describe('Journal Complete Workflows', () => {
 
       // Step 4: Click on a journal link to view details
       const firstJournal = journals[0];
-      await Promise.all([
-        page.waitForURL(`**/journals/${firstJournal.id}`),
-        page.getByRole('link', { name: firstJournal.title }).first().click(),
-      ]);
+      await page
+        .getByRole('link', { name: firstJournal.title })
+        .first()
+        .click();
 
       // Step 5: Verify we're on the detail page
-      expect(page.url()).toContain(`/journals/${firstJournal.id}`);
+      await expect(page).toHaveURL(
+        new RegExp(`.*/journals/${firstJournal.id}`)
+      );
+      await expect(page).not.toHaveURL('.*/journals$');
       await expect(
         page.getByRole('heading', { name: firstJournal.title })
       ).toBeVisible();
@@ -112,10 +115,8 @@ test.describe('Journal Complete Workflows', () => {
       await expect(createLink).toBeVisible();
 
       // Wait for navigation to complete
-      await Promise.all([
-        page.waitForURL('**/journals/new'),
-        createLink.click(),
-      ]);
+      await createLink.click();
+      await expect(page).toHaveURL(/.*\/journals\/new/);
 
       // Step 4: Verify we're on the create page
       expect(page.url()).toContain('/journals/new');
@@ -140,7 +141,8 @@ test.describe('Journal Complete Workflows', () => {
       await expect(newLink).toBeVisible();
 
       // Wait for navigation to complete
-      await Promise.all([page.waitForURL('**/journals/new'), newLink.click()]);
+      await newLink.click();
+      await expect(page).toHaveURL(/.*\/journals\/new/);
 
       // Step 3: Verify we're on the create page
       expect(page.url()).toContain('/journals/new');
