@@ -22,7 +22,7 @@ import { useAuth } from '@/lib/auth/AuthProvider';
 import { useGoogleOAuthCallback } from '@/lib/api/integrations';
 
 // Track processed codes to prevent double-execution in React 18 Strict Mode
-const processedCodes = new Set<string>();
+const processedCodes = new Map<string, Promise<void>>();
 
 // Component that uses useSearchParams - needs to be wrapped in Suspense
 function CallbackContent() {
@@ -60,65 +60,77 @@ function CallbackContent() {
 
         // Prevent multiple processing of the same OAuth code across React remounts
         if (processedCodes.has(code)) {
-          return;
-        }
-        processedCodes.add(code);
-
-        // Decode state parameter to extract flow type and provider
-        let isIntegrationCallback = false;
-        let provider = 'generic';
-        try {
-          // Decode the state parameter to check flow type and provider
-          const decodedState = JSON.parse(atob(state));
-          isIntegrationCallback = decodedState.flow_type === 'integration';
-          provider = decodedState.provider || 'generic';
-        } catch {
-          // If state decoding fails, assume it's authentication OAuth with generic provider
-          isIntegrationCallback = false;
-          provider = 'generic';
-        }
-
-        if (isIntegrationCallback) {
-          // Handle integration OAuth callback
-          await oauthCallback.mutateAsync({ code, state });
-
-          // Redirect to integrations page
-          router.replace('/integrations');
+          try {
+            await processedCodes.get(code);
+          } catch (err) {
+            setError(
+              err instanceof Error ? err.message : 'Authentication failed'
+            );
+          }
           return;
         }
 
-        // Send callback data to backend
-        const response = await fetch('/api/auth/callback', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            code,
-            state,
-            provider,
-          }),
-          credentials: 'include',
-        });
+        const processingPromise = (async () => {
+          // Decode state parameter to extract flow type and provider
+          let isIntegrationCallback = false;
+          let provider = 'generic';
+          try {
+            // Decode the state parameter to check flow type and provider
+            const decodedState = JSON.parse(atob(state));
+            isIntegrationCallback = decodedState.flow_type === 'integration';
+            provider = decodedState.provider || 'generic';
+          } catch {
+            // If state decoding fails, assume it's authentication OAuth with generic provider
+            isIntegrationCallback = false;
+            provider = 'generic';
+          }
 
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(
-            errorData.errors?.[0]?.detail ?? 'Authentication failed'
-          );
-        }
+          if (isIntegrationCallback) {
+            // Handle integration OAuth callback
+            await oauthCallback.mutateAsync({ code, state });
 
-        const data = await response.json();
+            // Redirect to integrations page
+            router.replace('/integrations');
+            return;
+          }
 
-        // Small delay to ensure backend session is fully processed
-        await new Promise(resolve => setTimeout(resolve, 100));
+          // Send callback data to backend
+          const response = await fetch('/api/auth/callback', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              code,
+              state,
+              provider,
+            }),
+            credentials: 'include',
+          });
 
-        // Refresh session to get user data
-        await refreshSession();
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(
+              errorData.errors?.[0]?.detail ?? 'Authentication failed'
+            );
+          }
 
-        // Redirect to intended destination or dashboard
-        const redirectTo = data.redirect_url ?? '/';
-        router.replace(redirectTo);
+          const data = await response.json();
+
+          // Small delay to ensure backend session is fully processed
+          await new Promise(resolve => setTimeout(resolve, 100));
+
+          // Refresh session to get user data
+          await refreshSession();
+
+          // Redirect to intended destination or dashboard
+          const redirectTo = data.redirect_url ?? '/';
+          router.replace(redirectTo);
+        })();
+
+        processedCodes.set(code, processingPromise);
+
+        await processingPromise;
       } catch (err) {
         console.error('OAuth callback error:', err);
         setError(err instanceof Error ? err.message : 'Authentication failed');
