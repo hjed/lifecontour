@@ -121,8 +121,8 @@ export function OutdoorPlanningTypeEditor({
               { value: 'cross_country_skiing', label: 'Cross-Country Skiing' },
               { value: 'diving', label: 'Diving' },
               { value: 'downhill_skiing', label: 'Downhill Skiing' },
-              { value: 'jogging', label: 'Jogging' },
               { value: 'kayaking', label: 'Kayaking' },
+              { value: 'outdoor_training', label: 'Outdoor Training' },
               { value: 'snorkelling', label: 'Snorkelling' },
             ].map(subtype => {
               const isChecked =
