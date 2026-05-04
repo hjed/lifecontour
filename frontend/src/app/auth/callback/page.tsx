@@ -21,6 +21,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useAuth } from '@/lib/auth/AuthProvider';
 import { useGoogleOAuthCallback } from '@/lib/api/integrations';
 
+// Track processed codes to prevent double-execution in React 18 Strict Mode
+const processedCodes = new Set<string>();
+
 // Component that uses useSearchParams - needs to be wrapped in Suspense
 function CallbackContent() {
   const router = useRouter();
@@ -54,6 +57,12 @@ function CallbackContent() {
         if (!code || !state) {
           throw new Error('Missing required OAuth parameters');
         }
+
+        // Prevent multiple processing of the same OAuth code across React remounts
+        if (processedCodes.has(code)) {
+          return;
+        }
+        processedCodes.add(code);
 
         // Decode state parameter to extract flow type and provider
         let isIntegrationCallback = false;
