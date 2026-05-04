@@ -15,6 +15,7 @@ from core_shared.models.journals import (
     AttendeeStatus,
     ContactEventRole,
     EventDateRange,
+    FitnessData,
     Journal,
 )
 from core_shared.models.journals.journal_contact_relationship import (
@@ -23,10 +24,13 @@ from core_shared.models.journals.journal_contact_relationship import (
 from core_shared.models.journals.journal_relationship_types import (
     JournalContactRelationshipType,
 )
+from core_shared.models.journals.journal_types import JournalType
 from core_shared.models.outbox import OutboxEvent
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.journal.adapters.sql import SqlFitnessDataRepository
 from app.core.journal.services.journal_service import JournalService
 
 logger = structlog.get_logger()
@@ -41,6 +45,31 @@ EVENT_TYPE_JOURNAL_REVIEW_DETECT_MATCHES = "journal_review.detect_matches"
 
 class JournalOutboxEventProcessingError(Exception):
     """Raised when journal outbox event processing fails."""
+
+
+class OutboxFitnessData(BaseModel):
+    """Strongly-typed Pydantic model for fitness data in outbox event payloads.
+
+    Validates the shape of ``fitness_data`` dicts from integration workers
+    before persisting through the repository layer.
+    """
+
+    distance: int | None = Field(default=None, description="Distance in metres")
+    elevation_gain: int | None = Field(
+        default=None, description="Elevation gain in metres"
+    )
+    elevation_loss: int | None = Field(
+        default=None, description="Elevation loss in metres"
+    )
+    duration: int | None = Field(default=None, description="Duration in seconds")
+    calories: int | None = Field(default=None, description="Calories burned")
+    heart_rate_avg: int | None = Field(
+        default=None, description="Average heart rate BPM"
+    )
+    heart_rate_max: int | None = Field(default=None, description="Max heart rate BPM")
+    strava_activity_id: str | None = Field(
+        default=None, description="Strava activity ID"
+    )
 
 
 class ContactResolver:
@@ -196,6 +225,9 @@ class JournalOutboxEventProcessor:
             journal_id=created_journal.id,
             contact_relationships=contact_relationships,
         )
+
+        # Save fitness data and journal types if present (Strava-sourced events)
+        await self._persist_fitness_and_types(created_journal.id, journal_data)
 
         # Emit match detection event for the outbox to process asynchronously.
         # We only do this if the match detection dependency is wired (i.e., Gemini is configured).
@@ -378,6 +410,9 @@ class JournalOutboxEventProcessor:
             journal_id=existing_journal_id,
             contact_relationships=contact_relationships,
         )
+
+        # Update fitness data and journal types if present (Strava-sourced events)
+        await self._persist_fitness_and_types(existing_journal_id, journal_data)
 
         logger.info(
             "Updated journal from inbound sync event",
@@ -569,6 +604,73 @@ class JournalOutboxEventProcessor:
                 merged[key] = value
 
         return merged
+
+    async def _persist_fitness_and_types(
+        self, journal_id: int, journal_data: dict[str, Any]
+    ) -> None:
+        """Persist fitness data and journal types from outbox event payload.
+
+        Shared by both ``_process_journal_created`` and
+        ``_process_journal_updated`` to ensure Strava-sourced events always
+        refresh fitness metrics and types regardless of create/update path.
+
+        Safely skips malformed payloads (non-dict ``fitness_data``, non-list
+        ``journal_types``) and logs validation errors rather than raising,
+        preventing poison-pill retry loops.
+
+        Args:
+            journal_id: ID of the journal to persist data for.
+            journal_data: The ``journal_data`` dict from the outbox event.
+        """
+        # Save fitness data if present (Strava-sourced events)
+        raw_fitness = journal_data.get("fitness_data")
+        if raw_fitness and isinstance(raw_fitness, dict):
+            try:
+                validated = OutboxFitnessData.model_validate(raw_fitness)
+            except ValidationError:
+                logger.warning(
+                    "Malformed fitness_data in outbox event, skipping",
+                    journal_id=journal_id,
+                    fitness_data_keys=list(raw_fitness.keys()),
+                )
+                return
+            fitness_repo = SqlFitnessDataRepository(self.connection)
+            await fitness_repo.save(
+                FitnessData(
+                    journal_id=journal_id,
+                    distance=validated.distance,
+                    elevation_gain=validated.elevation_gain,
+                    elevation_loss=validated.elevation_loss,
+                    duration=validated.duration,
+                    calories=validated.calories,
+                    heart_rate_avg=validated.heart_rate_avg,
+                    heart_rate_max=validated.heart_rate_max,
+                    strava_activity_id=validated.strava_activity_id,
+                )
+            )
+            logger.info(
+                "Saved fitness data for journal via repository",
+                journal_id=journal_id,
+                strava_activity_id=validated.strava_activity_id,
+            )
+
+        # Add journal types if present (Strava-sourced events)
+        raw_types = journal_data.get("journal_types")
+        if raw_types and isinstance(raw_types, list):
+            for type_str in raw_types:
+                try:
+                    journal_type = JournalType(type_str)
+                    await self.journal_service.add_type_to_journal(
+                        journal_id=journal_id,
+                        journal_type=journal_type,
+                        transaction=self.connection,
+                    )
+                except ValueError:
+                    logger.warning(
+                        "Unknown journal type in outbox event, skipping",
+                        journal_type=type_str,
+                        journal_id=journal_id,
+                    )
 
     async def _save_calendar_info(
         self, journal_id: int, calendar_info_data: dict[str, Any]

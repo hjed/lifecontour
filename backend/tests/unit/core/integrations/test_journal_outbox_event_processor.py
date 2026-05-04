@@ -881,3 +881,302 @@ class TestJournalOutboxEventProcessorCancelled:
         assert result["reason"] == "no_existing_journal_id"
         # Should not have called execute at all
         mock_connection.execute.assert_not_called()
+
+
+class TestStravaFitnessDataProcessing:
+    """Tests for Strava-specific fitness data and journal type handling."""
+
+    @pytest.fixture
+    def mock_connection(self) -> AsyncMock:
+        """Create mock database connection."""
+        conn = AsyncMock(spec=AsyncConnection)
+        conn.execute = AsyncMock()
+        return conn
+
+    @pytest.fixture
+    def mock_journal_service(self) -> AsyncMock:
+        """Create mock journal service."""
+        from app.core.journal.services.journal_service import JournalService
+
+        return AsyncMock(spec=JournalService)
+
+    @pytest.fixture
+    def processor(
+        self, mock_journal_service: AsyncMock, mock_connection: AsyncMock
+    ) -> JournalOutboxEventProcessor:
+        return JournalOutboxEventProcessor(
+            journal_service=mock_journal_service,
+            connection=mock_connection,
+        )
+
+    @pytest.mark.asyncio
+    async def test_created_event_saves_fitness_data(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Strava-sourced created event should persist fitness data via repository."""
+        event_data = _make_journal_event_data(
+            sync_action="created",
+            external_event_id="strava-12345",
+        )
+        event_data["journal_data"]["fitness_data"] = {
+            "distance": 10000,
+            "elevation_gain": 200,
+            "elevation_loss": 180,
+            "duration": 3600,
+            "calories": 500,
+            "heart_rate_avg": 145,
+            "heart_rate_max": 175,
+            "strava_activity_id": "12345",
+        }
+        event_data["journal_data"]["journal_types"] = [
+            "jogging",
+            "fitness",
+        ]
+
+        event = OutboxEvent(
+            id=uuid4(),
+            event_type="journal_event.created",
+            event_data=event_data,
+            created_at=datetime.now(UTC),
+            retry_count=0,
+        )
+
+        mock_journal_service.create_journal.return_value = _make_journal()
+
+        mock_connection.execute.side_effect = [
+            _mock_empty_result(),  # _find_external_event_link
+            MagicMock(),  # _save_calendar_info
+            MagicMock(),  # _create_external_event_link
+        ]
+
+        # Mock the fitness data repository save via the connection
+        # The repository uses connection.execute internally with UPSERT SQL
+        fitness_upsert_result = MagicMock()
+        fitness_upsert_result.fetchone.return_value = MagicMock(
+            journal_id=1,
+            heart_rate_avg=145,
+            heart_rate_max=175,
+            distance=10000,
+            elevation_gain=200,
+            elevation_loss=180,
+            duration=3600,
+            calories=500,
+            strava_activity_id="12345",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        mock_connection.execute.side_effect = [
+            _mock_empty_result(),  # _find_external_event_link
+            MagicMock(),  # _save_calendar_info
+            MagicMock(),  # _create_external_event_link
+            fitness_upsert_result,  # SqlFitnessDataRepository.save UPSERT
+        ]
+
+        result = await processor.process_event(event)
+
+        assert result["status"] == "success"
+
+        # Verify the fitness data repository was called (the UPSERT SQL)
+        fitness_calls = [
+            c
+            for c in mock_connection.execute.call_args_list
+            if "journal_fitness_data" in str(c[0][0].text)
+        ]
+        assert len(fitness_calls) >= 1, "Expected fitness data UPSERT call"
+        params = fitness_calls[0][0][1]
+        assert params["distance"] == 10000
+        assert params["strava_activity_id"] == "12345"
+        assert params["heart_rate_avg"] == 145
+
+        # Verify journal types were added via the service
+        assert mock_journal_service.add_type_to_journal.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_created_event_saves_journal_types_via_service(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Strava-sourced created event should add types via JournalService."""
+        from core_shared.models.journals.journal_types import JournalType
+
+        event_data = _make_journal_event_data(
+            sync_action="created",
+            external_event_id="strava-67890",
+        )
+        event_data["journal_data"]["journal_types"] = [
+            "bushwalking",
+            "outdoor_activity",
+            "fitness",
+        ]
+
+        event = OutboxEvent(
+            id=uuid4(),
+            event_type="journal_event.created",
+            event_data=event_data,
+            created_at=datetime.now(UTC),
+            retry_count=0,
+        )
+
+        mock_journal_service.create_journal.return_value = _make_journal()
+
+        mock_connection.execute.side_effect = [
+            _mock_empty_result(),  # _find_external_event_link
+            MagicMock(),  # _save_calendar_info
+            MagicMock(),  # _create_external_event_link
+        ]
+
+        result = await processor.process_event(event)
+        assert result["status"] == "success"
+
+        # Verify add_type_to_journal was called for each type
+        assert mock_journal_service.add_type_to_journal.call_count == 3
+
+        added_types = [
+            call.kwargs["journal_type"]
+            for call in mock_journal_service.add_type_to_journal.call_args_list
+        ]
+        assert JournalType.BUSHWALKING in added_types
+        assert JournalType.OUTDOOR_ACTIVITY in added_types
+        assert JournalType.FITNESS in added_types
+
+    @pytest.mark.asyncio
+    async def test_created_event_without_fitness_data_skips(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Google Calendar events (no fitness_data) should not attempt to save fitness data."""
+        event = _make_outbox_event(
+            event_type="journal_event.created",
+            sync_action="created",
+            contact_relationships=[],
+        )
+
+        mock_journal_service.create_journal.return_value = _make_journal()
+        mock_connection.execute.side_effect = [
+            _mock_empty_result(),  # _find_external_event_link
+            MagicMock(),  # _save_calendar_info
+            MagicMock(),  # _create_external_event_link
+        ]
+
+        result = await processor.process_event(event)
+        assert result["status"] == "success"
+
+        # No fitness data or type calls expected
+        assert mock_connection.execute.call_count == 3
+        mock_journal_service.add_type_to_journal.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_created_event_with_invalid_fitness_data_type_skips(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Non-dict fitness_data should be safely skipped."""
+        event_data = _make_journal_event_data(
+            sync_action="created",
+            external_event_id="strava-bad",
+        )
+        event_data["journal_data"]["fitness_data"] = "not a dict"
+
+        event = OutboxEvent(
+            id=uuid4(),
+            event_type="journal_event.created",
+            event_data=event_data,
+            created_at=datetime.now(UTC),
+            retry_count=0,
+        )
+
+        mock_journal_service.create_journal.return_value = _make_journal()
+        mock_connection.execute.side_effect = [
+            _mock_empty_result(),  # _find_external_event_link
+            MagicMock(),  # _save_calendar_info
+            MagicMock(),  # _create_external_event_link
+        ]
+
+        result = await processor.process_event(event)
+        assert result["status"] == "success"
+        # No fitness data SQL should have been called
+        assert mock_connection.execute.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_created_event_with_unknown_journal_type_logs_warning(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Unknown journal type strings should be skipped with a warning, not crash."""
+        event_data = _make_journal_event_data(
+            sync_action="created",
+            external_event_id="strava-unknown",
+        )
+        event_data["journal_data"]["journal_types"] = [
+            "fitness",
+            "unknown_type_xyz",
+        ]
+
+        event = OutboxEvent(
+            id=uuid4(),
+            event_type="journal_event.created",
+            event_data=event_data,
+            created_at=datetime.now(UTC),
+            retry_count=0,
+        )
+
+        mock_journal_service.create_journal.return_value = _make_journal()
+        mock_connection.execute.side_effect = [
+            _mock_empty_result(),  # _find_external_event_link
+            MagicMock(),  # _save_calendar_info
+            MagicMock(),  # _create_external_event_link
+        ]
+
+        result = await processor.process_event(event)
+        assert result["status"] == "success"
+
+        # Only "fitness" should have been processed (unknown_type_xyz skipped)
+        assert mock_journal_service.add_type_to_journal.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_created_event_with_pydantic_validation_error_skips(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Malformed fitness_data dict that fails Pydantic validation should skip, not crash."""
+        event_data = _make_journal_event_data(
+            sync_action="created",
+            external_event_id="strava-malformed",
+        )
+        # distance should be int|None, a string will fail Pydantic validation
+        event_data["journal_data"]["fitness_data"] = {
+            "distance": "not-a-number",
+        }
+
+        event = OutboxEvent(
+            id=uuid4(),
+            event_type="journal_event.created",
+            event_data=event_data,
+            created_at=datetime.now(UTC),
+            retry_count=0,
+        )
+
+        mock_journal_service.create_journal.return_value = _make_journal()
+        mock_connection.execute.side_effect = [
+            _mock_empty_result(),  # _find_external_event_link
+            MagicMock(),  # _save_calendar_info
+            MagicMock(),  # _create_external_event_link
+        ]
+
+        result = await processor.process_event(event)
+        assert result["status"] == "success"
+        # No fitness data UPSERT should have been called
+        assert mock_connection.execute.call_count == 3

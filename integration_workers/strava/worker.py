@@ -101,6 +101,114 @@ async def shutdown(ctx: dict[str, Any]) -> None:
     logger.info("Strava worker shutdown complete")
 
 
+async def _resolve_user_for_athlete(
+    session_factory: Any, athlete_id: int
+) -> tuple[str, dict[str, Any]] | None:
+    """Look up user_id and auth data for a Strava athlete_id.
+
+    Args:
+        session_factory: SQLAlchemy async session factory.
+        athlete_id: Strava numeric athlete ID.
+
+    Returns:
+        Tuple of (user_id, auth_dict) or None if not found.
+    """
+    from sqlalchemy import text
+
+    async with session_factory() as session:
+        result = await session.execute(
+            text("""
+                SELECT user_id, encrypted_access_token, encrypted_refresh_token
+                FROM user_strava_auth
+                WHERE athlete_id = :athlete_id
+                LIMIT 1
+            """),
+            {"athlete_id": athlete_id},
+        )
+        row = result.fetchone()
+        if row is None:
+            return None
+
+        return str(row.user_id), {
+            "encrypted_access_token": row.encrypted_access_token,
+            "encrypted_refresh_token": row.encrypted_refresh_token,
+        }
+
+
+async def _resolve_user_by_id(
+    session_factory: Any, user_id: str
+) -> dict[str, Any] | None:
+    """Look up auth data for a given user_id.
+
+    Args:
+        session_factory: SQLAlchemy async session factory.
+        user_id: Internal user ID string.
+
+    Returns:
+        Auth dict with encrypted tokens, or None if not found.
+    """
+    from sqlalchemy import text
+
+    async with session_factory() as session:
+        result = await session.execute(
+            text("""
+                SELECT encrypted_access_token, encrypted_refresh_token
+                FROM user_strava_auth
+                WHERE user_id = :user_id
+                LIMIT 1
+            """),
+            {"user_id": user_id},
+        )
+        row = result.fetchone()
+        if row is None:
+            return None
+
+        return {
+            "encrypted_access_token": row.encrypted_access_token,
+            "encrypted_refresh_token": row.encrypted_refresh_token,
+        }
+
+
+def _create_sync_service(
+    user_id: str,
+    auth_data: dict[str, Any],
+    worker_settings: StravaSettings,
+) -> Any:
+    """Create a StravaSyncService with an authenticated API client.
+
+    Args:
+        user_id: Internal user ID.
+        auth_data: Dict with encrypted_access_token and encrypted_refresh_token.
+        worker_settings: Strava worker settings (contains encryption key, client creds).
+
+    Returns:
+        Ready-to-use StravaSyncService.
+    """
+    from strava_api_client import StravaAPIClient
+    from strava_auth_service import StravaAuthService
+    from strava_sync_service import StravaSyncService
+
+    auth_service = StravaAuthService(
+        encryption_key=worker_settings.encryption_key.get_secret_value(),
+        client_id=worker_settings.strava_client_id,
+        client_secret=worker_settings.strava_client_secret.get_secret_value(),
+    )
+
+    access_token = auth_service.decrypt(auth_data["encrypted_access_token"])
+    refresh_token = auth_service.decrypt(auth_data["encrypted_refresh_token"])
+
+    api_client = StravaAPIClient(
+        access_token=access_token,
+        refresh_token_value=refresh_token,
+        auth_service=auth_service,
+    )
+
+    return StravaSyncService(
+        api_client=api_client,
+        user_id=user_id,
+    )
+
+
 async def process_strava_webhook_event(
     ctx: dict[str, Any],
     event_data: dict[str, Any],
@@ -147,32 +255,82 @@ async def process_strava_webhook_event(
         owner_id=owner_id,
     )
 
-    # Dispatch based on aspect_type
-    # NOTE: Actual activity sync implementation will be added in ITER5-004.
-    # For now, we log the event and return a placeholder result.
-    if aspect_type == "create":
-        logger.info(
-            "Activity created — sync will be implemented in ITER5-004",
-            object_id=object_id,
-            owner_id=owner_id,
-        )
-        return {"status": "processed", "aspect_type": "create", "object_id": object_id}
+    session_factory = ctx["session_factory"]
+    worker_settings: StravaSettings = ctx["settings"]
 
-    elif aspect_type == "update":
-        logger.info(
-            "Activity updated — sync will be implemented in ITER5-004",
+    if owner_id is None:
+        logger.warning(
+            "Webhook event missing owner_id",
             object_id=object_id,
+            aspect_type=aspect_type,
+        )
+        return {"status": "skipped", "reason": "missing_owner_id"}
+
+    if object_id is None or not isinstance(object_id, int):
+        logger.warning(
+            "Webhook event missing or invalid object_id",
+            object_id=object_id,
+            aspect_type=aspect_type,
             owner_id=owner_id,
         )
-        return {"status": "processed", "aspect_type": "update", "object_id": object_id}
+        return {"status": "skipped", "reason": "invalid_object_id"}
+
+    # Resolve the user from the athlete_id
+    user_info = await _resolve_user_for_athlete(session_factory, int(owner_id))
+    if user_info is None:
+        logger.warning(
+            "No user found for Strava athlete_id",
+            owner_id=owner_id,
+            object_id=object_id,
+        )
+        return {"status": "skipped", "reason": "unknown_athlete"}
+
+    user_id, auth_data = user_info
+
+    if aspect_type in ("create", "update"):
+        sync_service = _create_sync_service(user_id, auth_data, worker_settings)
+        try:
+            async with session_factory() as session:
+                async with session.begin():
+                    events = await sync_service.sync_single_activity(
+                        activity_id=object_id, session=session
+                    )
+                    logger.info(
+                        "Webhook activity sync complete",
+                        aspect_type=aspect_type,
+                        object_id=object_id,
+                        events_created=len(events),
+                    )
+                    return {
+                        "status": "processed",
+                        "aspect_type": aspect_type,
+                        "object_id": object_id,
+                        "events_created": len(events),
+                    }
+        finally:
+            await sync_service._api_client.close()
 
     elif aspect_type == "delete":
-        logger.info(
-            "Activity deleted — sync will be implemented in ITER5-004",
-            object_id=object_id,
-            owner_id=owner_id,
-        )
-        return {"status": "processed", "aspect_type": "delete", "object_id": object_id}
+        sync_service = _create_sync_service(user_id, auth_data, worker_settings)
+        try:
+            async with session_factory() as session:
+                async with session.begin():
+                    event = await sync_service.handle_delete(
+                        activity_id=object_id, session=session
+                    )
+                    logger.info(
+                        "Webhook delete handled",
+                        object_id=object_id,
+                        event_created=event is not None,
+                    )
+                    return {
+                        "status": "processed",
+                        "aspect_type": "delete",
+                        "object_id": object_id,
+                        "event_created": event is not None,
+                    }
+        finally:
+            await sync_service._api_client.close()
 
     else:
         logger.warning(
@@ -183,12 +341,76 @@ async def process_strava_webhook_event(
         return {"status": "ignored", "reason": f"unknown aspect_type={aspect_type}"}
 
 
+async def sync_strava_activities(
+    ctx: dict[str, Any],
+    user_id: str,
+    sync_type: str = "full",
+) -> dict[str, Any]:
+    """
+    ARQ task: sync Strava activities for a user.
+
+    Called when the user clicks "Import Activities" in the UI or
+    when a full sync is triggered programmatically.
+
+    Args:
+        ctx: ARQ worker context.
+        user_id: Internal user ID.
+        sync_type: 'full' or 'smart'.
+
+    Returns:
+        Dict with sync result summary.
+    """
+    session_factory = ctx["session_factory"]
+    worker_settings: StravaSettings = ctx["settings"]
+
+    logger.info(
+        "Starting Strava activity sync",
+        user_id=user_id,
+        sync_type=sync_type,
+    )
+
+    auth_data = await _resolve_user_by_id(session_factory, user_id)
+    if auth_data is None:
+        logger.error(
+            "No Strava auth found for user",
+            user_id=user_id,
+        )
+        return {"status": "error", "reason": "no_auth"}
+
+    sync_service = _create_sync_service(user_id, auth_data, worker_settings)
+
+    try:
+        async with session_factory() as session:
+            async with session.begin():
+                # For smart sync, we could use after_timestamp from last sync
+                # For now, full sync imports everything
+                after_ts = None
+                events = await sync_service.sync_full(
+                    session=session,
+                    after_timestamp=after_ts,
+                )
+
+                logger.info(
+                    "Strava activity sync completed",
+                    user_id=user_id,
+                    sync_type=sync_type,
+                    activities_synced=len(events),
+                )
+                return {
+                    "status": "completed",
+                    "sync_type": sync_type,
+                    "activities_synced": len(events),
+                }
+    finally:
+        await sync_service._api_client.close()
+
+
 # ARQ Worker Settings
 class StravaWorkerSettings(WorkerSettingsBase):
     """ARQ worker configuration."""
 
     # Task functions
-    functions = [process_strava_webhook_event]
+    functions = [process_strava_webhook_event, sync_strava_activities]
 
     # Worker lifecycle
     on_startup: StartupShutdown = startup
