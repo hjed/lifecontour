@@ -49,7 +49,6 @@ yarn-error.log*
 pnpm-debug.log*
 .pnpm-debug.log*
 .pnpm-store/
-pnpm-workspace.yaml
 frontend/tsconfig.tsbuildinfo
 
 # Next.js
