@@ -2,7 +2,8 @@
 Strava OAuth and Webhook API controllers.
 
 Provides REST API endpoints for Strava OAuth 2.0 authorization,
-token exchange (callback), disconnection, and webhook event handling.
+token exchange (callback), disconnection, webhook event handling,
+and activity import sync triggers.
 """
 
 import secrets
@@ -15,7 +16,14 @@ from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, field_validator
 
+from app.api.integrations.controllers import _build_sync_job_data
+from app.api.integrations.schemas import (
+    SyncJobJsonApiResponse,
+    SyncJobRequest,
+    SyncType,
+)
 from app.core.integrations.strava.webhook_service import StravaWebhookService
+from app.core.integrations.task_queue_service import TaskQueueService
 from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.auth.strava_token_service import StravaTokenService
 from app.infrastructure.config import Settings
@@ -423,6 +431,84 @@ async def strava_oauth_disconnect(
         raise HTTPException(
             status_code=500,
             detail="Failed to disconnect Strava integration",
+        ) from e
+
+
+# ---------- Sync Trigger Endpoints ----------
+
+
+@router.post(
+    "/activity_import/sync",
+    responses={
+        400: {"description": "Strava not connected or invalid parameters"},
+        503: {"description": "Task queue service unavailable"},
+        500: {"description": "An unexpected error occurred"},
+    },
+)
+@inject
+async def trigger_strava_sync(
+    request: SyncJobRequest,
+    user: FromDishka[SessionUser],
+    strava_token_service: FromDishka[StravaTokenService],
+    task_queue_service: FromDishka[TaskQueueService],
+) -> SyncJobJsonApiResponse:
+    """
+    Trigger a Strava activity import sync job.
+
+    Enqueues a background sync job that fetches activities from Strava
+    and creates journal entries for each. The sync type may be ``full``
+    (all historical activities) or ``smart`` (only changes since last sync).
+    """
+    try:
+        # Verify Strava is connected
+        is_connected = await strava_token_service.is_connected(str(user.id))
+        if not is_connected:
+            raise HTTPException(
+                status_code=400,
+                detail="Strava is not connected. Please connect Strava first.",
+            )
+
+        # Determine sync type
+        sync_type = request.sync_type.value
+        if request.force_full_sync:
+            sync_type = SyncType.FULL.value
+
+        # Enqueue the sync job
+        job_id = await task_queue_service.enqueue_strava_sync(
+            user_id=user.id,
+            sync_type=sync_type,
+        )
+
+        job = await task_queue_service.get_sync_job_details(
+            job_id=job_id, user_id=user.id
+        )
+
+        return SyncJobJsonApiResponse(data=_build_sync_job_data(job))
+
+    except HTTPException:
+        raise
+    except ValueError as e:
+        logger.error("Invalid Strava sync parameters", error=str(e), exc_info=True)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid sync parameters: {str(e)}",
+        ) from e
+    except ConnectionError as e:
+        logger.error("Task queue connection failed", error=str(e), exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail="Task queue service is temporarily unavailable",
+        ) from e
+    except Exception as e:
+        logger.error(
+            "Failed to enqueue Strava sync job",
+            user_id=user.id,
+            error=str(e),
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred while queueing the sync job",
         ) from e
 
 

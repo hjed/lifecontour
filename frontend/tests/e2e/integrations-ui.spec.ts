@@ -561,4 +561,81 @@ test.describe('Strava Integration Panel (mocked API)', () => {
     const body = JSON.parse(authorizeRequest.postData() ?? '{}');
     expect(body.redirect_url).toBe('/integrations');
   });
+
+  test('strava connected: shows sync controls with Import Activities', async ({
+    authenticatedPage,
+  }) => {
+    await setupIntegrationsMocks(authenticatedPage, [stravaConnected]);
+    await authenticatedPage.goto('/integrations');
+
+    const panel = authenticatedPage.locator(
+      '[data-testid="integration-panel-strava"]'
+    );
+    await expect(panel).toBeVisible();
+
+    // The sync button should be visible for connected Strava
+    const syncButton = panel.locator(
+      '[data-testid="trigger-strava-activity_import-sync"]'
+    );
+    await expect(syncButton).toBeVisible();
+    await expect(syncButton).toContainText(/sync/i);
+  });
+
+  test('strava import triggers POST to activity_import/sync endpoint', async ({
+    authenticatedPage,
+  }) => {
+    await setupIntegrationsMocks(authenticatedPage, [stravaConnected]);
+
+    // Mock the sync endpoint to return a job
+    await authenticatedPage.route(
+      '**/api/integrations/strava/activity_import/sync',
+      (route: Route) =>
+        route.fulfill(
+          json({
+            data: {
+              id: 'job-123',
+              type: 'sync-job',
+              attributes: {
+                status: 'queued',
+                syncType: 'smart',
+                createdAt: new Date().toISOString(),
+                startedAt: null,
+                completedAt: null,
+                errorMessage: null,
+                contactsProcessed: null,
+                contactsCreated: null,
+                contactsUpdated: null,
+                contactsDeleted: null,
+                progress: null,
+              },
+            },
+          })
+        )
+    );
+
+    await authenticatedPage.goto('/integrations');
+
+    const panel = authenticatedPage.locator(
+      '[data-testid="integration-panel-strava"]'
+    );
+
+    const syncRequest = authenticatedPage.waitForRequest(
+      request =>
+        request
+          .url()
+          .includes('/api/integrations/strava/activity_import/sync') &&
+        request.method() === 'POST'
+    );
+
+    const syncButton = panel.locator(
+      '[data-testid="trigger-strava-activity_import-sync"]'
+    );
+    await syncButton.click();
+
+    const request = await syncRequest;
+    expect(request.method()).toBe('POST');
+
+    const reqBody = JSON.parse(request.postData() ?? '{}');
+    expect(reqBody.sync_type).toBe('smart');
+  });
 });
