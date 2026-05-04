@@ -3752,8 +3752,13 @@ async def _update_outdoor_planning_type_data(
         updates["topics"] = raw_topics
     if "activity_types" in attrs:
         raw_activity_types = attrs["activity_types"]
-        if raw_activity_types is not None and not isinstance(raw_activity_types, list):
-            raise JournalValidationError("activity_types", "Must be a list or null")
+        if raw_activity_types is not None:
+            if not isinstance(raw_activity_types, list):
+                raise JournalValidationError("activity_types", "Must be a list or null")
+            if not all(isinstance(x, str) for x in raw_activity_types):
+                raise JournalValidationError(
+                    "activity_types", "All items must be strings"
+                )
         updates["activity_types"] = raw_activity_types
 
     validated_data = dataclasses.replace(data, **updates)

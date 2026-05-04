@@ -48,8 +48,11 @@ class OutdoorPlanningData:
         if self.activity_types:
             valid_subtypes = {subtype.value for subtype in OutdoorActivitySubtype}
             for activity_type in self.activity_types:
-                if activity_type not in valid_subtypes:
+                if (
+                    not isinstance(activity_type, str)
+                    or activity_type not in valid_subtypes
+                ):
                     raise OutdoorPlanningDataValidationError(
                         "activity_types",
-                        f"Invalid activity type: {activity_type}. Must be one of: {', '.join(sorted(valid_subtypes))}",
+                        f"Invalid activity type. Must be one of: {', '.join(sorted(valid_subtypes))}",
                     )

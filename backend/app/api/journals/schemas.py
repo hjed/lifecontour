@@ -393,7 +393,7 @@ class OutdoorPlanningDataSchema(BaseModel):
         description="Description of the topics discussed",
     )
     activity_types: list[str] | None = Field(
-        default_factory=list,
+        default=None,
         description="List of related outdoor activity subtypes",
     )
 
