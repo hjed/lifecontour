@@ -2,6 +2,7 @@
 
 import json
 from datetime import date
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -362,3 +363,56 @@ class TestDailySummaryServiceMoodAverage:
 
     def test_average_rounding(self) -> None:
         assert DailySummaryService._compute_mood_average([7, 8]) == 7.5
+
+
+class TestDailySummaryServiceSanitizeSchema:
+    """Test schema sanitization for google-genai bug."""
+
+    def test_sanitize_removes_boolean_additional_properties(self) -> None:
+        schema: dict[str, Any] = {
+            "additionalProperties": False,
+            "type": "object",
+            "properties": {"a": {"type": "string"}},
+        }
+        DailySummaryService._sanitize_schema(schema)
+        assert "additionalProperties" not in schema
+        assert schema["type"] == "object"
+        assert "a" in schema["properties"]
+
+    def test_sanitize_removes_boolean_items(self) -> None:
+        schema: dict[str, Any] = {"items": False, "type": "array"}
+        DailySummaryService._sanitize_schema(schema)
+        assert "items" not in schema
+        assert schema["type"] == "array"
+
+    def test_sanitize_recursively_removes_properties(self) -> None:
+        schema: dict[str, Any] = {
+            "type": "object",
+            "properties": {
+                "nested": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {"deep": {"type": "array", "items": False}},
+                }
+            },
+            "anyOf": [{"type": "object", "additionalProperties": False}],
+        }
+        DailySummaryService._sanitize_schema(schema)
+
+        assert "additionalProperties" not in schema["properties"]["nested"]
+        assert "items" not in schema["properties"]["nested"]["properties"]["deep"]
+        assert "additionalProperties" not in schema["anyOf"][0]
+
+    def test_sanitize_ignores_non_booleans(self) -> None:
+        schema: dict[str, Any] = {
+            "additionalProperties": {"type": "string"},
+            "items": {"type": "integer"},
+        }
+        DailySummaryService._sanitize_schema(schema)
+        assert schema["additionalProperties"] == {"type": "string"}
+        assert schema["items"] == {"type": "integer"}
+
+    def test_sanitize_ignores_non_dicts(self) -> None:
+        # Should not raise any exceptions
+        DailySummaryService._sanitize_schema("not a dict")  # type: ignore
+        DailySummaryService._sanitize_schema(None)  # type: ignore
