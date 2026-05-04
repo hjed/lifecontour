@@ -203,9 +203,26 @@ class DailySummaryService:
             "global_search",
         ]
 
+        def sanitize_schema(schema: dict[str, Any]) -> None:
+            """Recursively remove boolean schema properties that crash google-genai."""
+            if not isinstance(schema, dict):
+                return
+            for key in ["additionalProperties", "items"]:
+                if key in schema and isinstance(schema[key], bool):
+                    del schema[key]
+            for val in schema.values():
+                if isinstance(val, dict):
+                    sanitize_schema(val)
+                elif isinstance(val, list):
+                    for item in val:
+                        sanitize_schema(item)
+
         for tool_name in read_only_tools:
             t = await main_mcp.get_tool(tool_name)
             if t:
+                # Sanitize the tool schema before passing it to Gemini
+                if hasattr(t, "parameters") and isinstance(t.parameters, dict):
+                    sanitize_schema(t.parameters)
                 read_only_mcp._local_provider.add_tool(t)
 
         client = genai.Client(api_key=self._gemini_api_key)
