@@ -84,6 +84,7 @@ from app.core.journal.models.repositories import (
     KayakingDataRepository,
     MoodDataRepository,
     OutdoorActivityDataRepository,
+    OutdoorPlanningDataRepository,
     PhotoAlbumDataRepository,
     PlanDataRepository,
     ReviewItemRepository,
@@ -275,6 +276,7 @@ async def _create_type_specific_data(
     snorkelling_data_repo: SnorkellingDataRepository,
     diving_data_repo: DivingDataRepository,
     downhill_skiing_data_repo: DownhillSkiingDataRepository,
+    outdoor_planning_data_repo: OutdoorPlanningDataRepository,
 ) -> None:
     """
     Create type-specific data row with default values for the given journal type.
@@ -297,6 +299,7 @@ async def _create_type_specific_data(
         snorkelling_data_repo: Repository for snorkelling data
         diving_data_repo: Repository for diving data
         downhill_skiing_data_repo: Repository for downhill skiing data
+        outdoor_planning_data_repo: Repository for outdoor planning data
     """
     from core_shared.models.journals import JournalType
 
@@ -387,6 +390,11 @@ async def _create_type_specific_data(
 
         downhill_skiing_data = DownhillSkiingData(journal_id=journal_id)
         await downhill_skiing_data_repo.save(downhill_skiing_data)
+    elif journal_type == JournalType.OUTDOOR_PLANNING:
+        from core_shared.models.journals import OutdoorPlanningData
+
+        outdoor_planning_data = OutdoorPlanningData(journal_id=journal_id)
+        await outdoor_planning_data_repo.save(outdoor_planning_data)
     # EVENT and PHOTO_ALBUM types require additional data (calendar_id, immich_album_id)
     # These will be created when the user updates the type data
 
@@ -413,6 +421,7 @@ async def _delete_type_specific_data(
     snorkelling_data_repo: SnorkellingDataRepository,
     diving_data_repo: DivingDataRepository,
     downhill_skiing_data_repo: DownhillSkiingDataRepository,
+    outdoor_planning_data_repo: OutdoorPlanningDataRepository,
 ) -> None:
     """
     Delete the type-specific data row for the given journal type.
@@ -439,6 +448,7 @@ async def _delete_type_specific_data(
         snorkelling_data_repo: Repository for snorkelling data
         diving_data_repo: Repository for diving data
         downhill_skiing_data_repo: Repository for downhill skiing data
+        outdoor_planning_data_repo: Repository for outdoor planning data
     """
     from core_shared.models.journals import JournalType
 
@@ -478,6 +488,8 @@ async def _delete_type_specific_data(
         await diving_data_repo.delete(journal_id)
     elif journal_type == JournalType.DOWNHILL_SKIING:
         await downhill_skiing_data_repo.delete(journal_id)
+    elif journal_type == JournalType.OUTDOOR_PLANNING:
+        await outdoor_planning_data_repo.delete(journal_id)
     # EVENT has no dedicated type-specific table (uses calendar_info via CalendarInfo)
     # and is handled by the service layer
 
@@ -508,6 +520,7 @@ async def _enrich_journal_data(
     snorkelling_data_repo: SnorkellingDataRepository,
     diving_data_repo: DivingDataRepository,
     downhill_skiing_data_repo: DownhillSkiingDataRepository,
+    outdoor_planning_data_repo: OutdoorPlanningDataRepository,
     include_routes: bool = False,
 ) -> tuple[
     list[str],
@@ -673,6 +686,15 @@ async def _enrich_journal_data(
         types.append(JournalType.DOWNHILL_SKIING.value)
         type_data[JournalType.DOWNHILL_SKIING.value] = (
             TypeDataConverter.downhill_skiing_data_to_schema(downhill_skiing_data)
+        )
+
+    outdoor_planning_data = await outdoor_planning_data_repo.find_by_journal_id(
+        journal_id
+    )
+    if outdoor_planning_data:
+        types.append(JournalType.OUTDOOR_PLANNING.value)
+        type_data[JournalType.OUTDOOR_PLANNING.value] = (
+            TypeDataConverter.outdoor_planning_data_to_schema(outdoor_planning_data)
         )
 
     # If no types found, it's a NOTE
@@ -938,6 +960,7 @@ async def _fetch_children_types(
     snorkelling_data_repo: SnorkellingDataRepository,
     diving_data_repo: DivingDataRepository,
     downhill_skiing_data_repo: DownhillSkiingDataRepository,
+    outdoor_planning_data_repo: OutdoorPlanningDataRepository,
 ) -> dict[int, list[str]]:
     """Fetch only the type names for each child journal (lightweight).
 
@@ -1027,6 +1050,7 @@ async def _build_journal_list_resources(
     snorkelling_data_repo: SnorkellingDataRepository,
     diving_data_repo: DivingDataRepository,
     downhill_skiing_data_repo: DownhillSkiingDataRepository,
+    outdoor_planning_data_repo: OutdoorPlanningDataRepository,
     contact_relationship_repo: JournalContactRelationshipRepository,
     tag_repo: JournalTagRepository,
     route_repo: RouteRepository,
@@ -1099,6 +1123,7 @@ async def _build_journal_list_resources(
             snorkelling_data_repo,
             diving_data_repo,
             downhill_skiing_data_repo,
+            outdoor_planning_data_repo,
             include_routes=False,
         )
         parent = parent_by_id.get(journal.parent_id) if journal.parent_id else None
@@ -1161,6 +1186,7 @@ async def list_journals(
     snorkelling_data_repo: FromDishka[SnorkellingDataRepository],
     diving_data_repo: FromDishka[DivingDataRepository],
     downhill_skiing_data_repo: FromDishka[DownhillSkiingDataRepository],
+    outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
@@ -1254,6 +1280,7 @@ async def list_journals(
         snorkelling_data_repo=snorkelling_data_repo,
         diving_data_repo=diving_data_repo,
         downhill_skiing_data_repo=downhill_skiing_data_repo,
+        outdoor_planning_data_repo=outdoor_planning_data_repo,
         contact_relationship_repo=contact_relationship_repo,
         tag_repo=tag_repo,
         route_repo=route_repo,
@@ -1705,6 +1732,7 @@ async def get_journal(
     snorkelling_data_repo: FromDishka[SnorkellingDataRepository],
     diving_data_repo: FromDishka[DivingDataRepository],
     downhill_skiing_data_repo: FromDishka[DownhillSkiingDataRepository],
+    outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
@@ -1750,6 +1778,7 @@ async def get_journal(
         snorkelling_data_repo,
         diving_data_repo,
         downhill_skiing_data_repo,
+        outdoor_planning_data_repo,
     )
 
     parent, children, children_count = await _fetch_parent_and_children(
@@ -1777,6 +1806,7 @@ async def get_journal(
         snorkelling_data_repo,
         diving_data_repo,
         downhill_skiing_data_repo,
+        outdoor_planning_data_repo,
     )
 
     # Compute depth for the journal
@@ -1854,6 +1884,7 @@ async def _process_journal_types(
     snorkelling_data_repo: SnorkellingDataRepository,
     diving_data_repo: DivingDataRepository,
     downhill_skiing_data_repo: DownhillSkiingDataRepository,
+    outdoor_planning_data_repo: OutdoorPlanningDataRepository,
     connection: AsyncConnection,
 ) -> None:
     """
@@ -1910,6 +1941,7 @@ async def _process_journal_types(
                     snorkelling_data_repo,
                     diving_data_repo,
                     downhill_skiing_data_repo,
+                    outdoor_planning_data_repo,
                 )
         except (ValueError, KeyError):
             # Invalid type, skip
@@ -1939,6 +1971,7 @@ async def _process_journal_type_data(
     snorkelling_data_repo: SnorkellingDataRepository | None = None,
     diving_data_repo: DivingDataRepository | None = None,
     downhill_skiing_data_repo: DownhillSkiingDataRepository | None = None,
+    outdoor_planning_data_repo: OutdoorPlanningDataRepository | None = None,
     event_publisher: OutboxEventPublisher | None = None,
     connection: AsyncConnection | None = None,
 ) -> None:
@@ -2298,6 +2331,15 @@ async def _process_journal_type_data(
             skiing_data_repo,
         )
 
+    # Process OUTDOOR_PLANNING type data
+    if "outdoor_planning" in normalized_type_data and outdoor_planning_data_repo:
+        await _update_outdoor_planning_type_data(
+            journal_id,
+            "OUTDOOR_PLANNING",
+            normalized_type_data["outdoor_planning"],
+            outdoor_planning_data_repo,
+        )
+
 
 async def _process_journal_contact_relationships(
     journal_id: int,
@@ -2412,6 +2454,7 @@ async def create_journal(
     snorkelling_data_repo: FromDishka[SnorkellingDataRepository],
     diving_data_repo: FromDishka[DivingDataRepository],
     downhill_skiing_data_repo: FromDishka[DownhillSkiingDataRepository],
+    outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
@@ -2459,6 +2502,7 @@ async def create_journal(
             snorkelling_data_repo,
             diving_data_repo,
             downhill_skiing_data_repo,
+            outdoor_planning_data_repo,
             connection,
         )
 
@@ -2487,6 +2531,7 @@ async def create_journal(
             snorkelling_data_repo,
             diving_data_repo,
             downhill_skiing_data_repo,
+            outdoor_planning_data_repo,
             event_publisher=journal_service.event_publisher,
             connection=connection,
         )
@@ -2534,6 +2579,7 @@ async def create_journal(
         snorkelling_data_repo,
         diving_data_repo,
         downhill_skiing_data_repo,
+        outdoor_planning_data_repo,
         include_routes=True,
     )
 
@@ -2591,6 +2637,7 @@ async def update_journal(
     snorkelling_data_repo: FromDishka[SnorkellingDataRepository],
     diving_data_repo: FromDishka[DivingDataRepository],
     downhill_skiing_data_repo: FromDishka[DownhillSkiingDataRepository],
+    outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
@@ -2661,6 +2708,7 @@ async def update_journal(
         snorkelling_data_repo,
         diving_data_repo,
         downhill_skiing_data_repo,
+        outdoor_planning_data_repo,
         include_routes=True,
     )
 
@@ -2689,6 +2737,7 @@ async def update_journal(
         snorkelling_data_repo,
         diving_data_repo,
         downhill_skiing_data_repo,
+        outdoor_planning_data_repo,
     )
 
     # Compute depth for the journal
@@ -2744,6 +2793,7 @@ async def partial_update_journal(
     snorkelling_data_repo: FromDishka[SnorkellingDataRepository],
     diving_data_repo: FromDishka[DivingDataRepository],
     downhill_skiing_data_repo: FromDishka[DownhillSkiingDataRepository],
+    outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
@@ -2860,6 +2910,7 @@ async def partial_update_journal(
         snorkelling_data_repo,
         diving_data_repo,
         downhill_skiing_data_repo,
+        outdoor_planning_data_repo,
         include_routes=True,
     )
 
@@ -2888,6 +2939,7 @@ async def partial_update_journal(
         snorkelling_data_repo,
         diving_data_repo,
         downhill_skiing_data_repo,
+        outdoor_planning_data_repo,
     )
 
     # Compute depth for the journal
@@ -2965,6 +3017,7 @@ async def merge_journal(
     snorkelling_data_repo: FromDishka[SnorkellingDataRepository],
     diving_data_repo: FromDishka[DivingDataRepository],
     downhill_skiing_data_repo: FromDishka[DownhillSkiingDataRepository],
+    outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
@@ -3058,6 +3111,7 @@ async def merge_journal(
         snorkelling_data_repo,
         diving_data_repo,
         downhill_skiing_data_repo,
+        outdoor_planning_data_repo,
         include_routes=False,
     )
 
@@ -3103,6 +3157,7 @@ async def add_type_to_journal(
     snorkelling_data_repo: FromDishka[SnorkellingDataRepository],
     diving_data_repo: FromDishka[DivingDataRepository],
     downhill_skiing_data_repo: FromDishka[DownhillSkiingDataRepository],
+    outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
@@ -3162,6 +3217,7 @@ async def add_type_to_journal(
             snorkelling_data_repo,
             diving_data_repo,
             downhill_skiing_data_repo,
+            outdoor_planning_data_repo,
         )
 
     # Get updated journal
@@ -3196,6 +3252,7 @@ async def add_type_to_journal(
         snorkelling_data_repo,
         diving_data_repo,
         downhill_skiing_data_repo,
+        outdoor_planning_data_repo,
         include_routes=True,
     )
 
@@ -3234,6 +3291,7 @@ async def remove_type_from_journal(
     snorkelling_data_repo: FromDishka[SnorkellingDataRepository],
     diving_data_repo: FromDishka[DivingDataRepository],
     downhill_skiing_data_repo: FromDishka[DownhillSkiingDataRepository],
+    outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
@@ -3290,6 +3348,7 @@ async def remove_type_from_journal(
         snorkelling_data_repo,
         diving_data_repo,
         downhill_skiing_data_repo,
+        outdoor_planning_data_repo,
     )
 
     # Get updated journal
@@ -3324,6 +3383,7 @@ async def remove_type_from_journal(
         snorkelling_data_repo,
         diving_data_repo,
         downhill_skiing_data_repo,
+        outdoor_planning_data_repo,
         include_routes=True,
     )
 
@@ -3669,6 +3729,37 @@ async def _update_canyoning_type_data(
     await canyoning_data_repo.save(validated_data)
 
 
+async def _update_outdoor_planning_type_data(
+    journal_id: int,
+    journal_type: str,
+    attrs: dict[str, Any],
+    outdoor_planning_data_repo: OutdoorPlanningDataRepository,
+) -> None:
+    """Update OUTDOOR_PLANNING type-specific data."""
+    data = await outdoor_planning_data_repo.find_by_journal_id(journal_id)
+    if not data:
+        raise JournalValidationError(
+            "journal_type", f"Journal does not have type {journal_type}"
+        )
+
+    import dataclasses
+
+    updates: dict[str, Any] = {}
+    if "topics" in attrs:
+        raw_topics = attrs["topics"]
+        if raw_topics is not None and not isinstance(raw_topics, str):
+            raise JournalValidationError("topics", "Must be a string or null")
+        updates["topics"] = raw_topics
+    if "activity_types" in attrs:
+        raw_activity_types = attrs["activity_types"]
+        if raw_activity_types is not None and not isinstance(raw_activity_types, list):
+            raise JournalValidationError("activity_types", "Must be a list or null")
+        updates["activity_types"] = raw_activity_types
+
+    validated_data = dataclasses.replace(data, **updates)
+    await outdoor_planning_data_repo.save(validated_data)
+
+
 async def _update_caving_type_data(
     journal_id: int,
     journal_type: str,
@@ -3849,6 +3940,7 @@ async def update_type_data(
     snorkelling_data_repo: FromDishka[SnorkellingDataRepository],
     diving_data_repo: FromDishka[DivingDataRepository],
     downhill_skiing_data_repo: FromDishka[DownhillSkiingDataRepository],
+    outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
@@ -3962,6 +4054,10 @@ async def update_type_data(
             raise JournalValidationError(
                 "journal_type", f"Journal does not have type {journal_type}"
             )
+    elif jtype == JournalType.OUTDOOR_PLANNING:
+        await _update_outdoor_planning_type_data(
+            journal_id, journal_type, attrs, outdoor_planning_data_repo
+        )
     elif jtype in (JournalType.PLAN, JournalType.TRAVEL):
         # PLAN and TRAVEL types have complex nested data structures
         # For now, return an error indicating this is not yet supported
@@ -4008,6 +4104,7 @@ async def update_type_data(
         snorkelling_data_repo,
         diving_data_repo,
         downhill_skiing_data_repo,
+        outdoor_planning_data_repo,
         include_routes=True,
     )
 
@@ -4047,6 +4144,7 @@ async def add_contact_to_journal(
     snorkelling_data_repo: FromDishka[SnorkellingDataRepository],
     diving_data_repo: FromDishka[DivingDataRepository],
     downhill_skiing_data_repo: FromDishka[DownhillSkiingDataRepository],
+    outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
@@ -4153,6 +4251,7 @@ async def add_contact_to_journal(
         snorkelling_data_repo,
         diving_data_repo,
         downhill_skiing_data_repo,
+        outdoor_planning_data_repo,
         include_routes=True,
     )
 
@@ -4193,6 +4292,7 @@ async def update_journal_contact_relationship(
     snorkelling_data_repo: FromDishka[SnorkellingDataRepository],
     diving_data_repo: FromDishka[DivingDataRepository],
     downhill_skiing_data_repo: FromDishka[DownhillSkiingDataRepository],
+    outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
@@ -4311,6 +4411,7 @@ async def update_journal_contact_relationship(
         snorkelling_data_repo,
         diving_data_repo,
         downhill_skiing_data_repo,
+        outdoor_planning_data_repo,
         include_routes=True,
     )
 
@@ -4350,6 +4451,7 @@ async def remove_contact_from_journal(
     snorkelling_data_repo: FromDishka[SnorkellingDataRepository],
     diving_data_repo: FromDishka[DivingDataRepository],
     downhill_skiing_data_repo: FromDishka[DownhillSkiingDataRepository],
+    outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
@@ -4426,6 +4528,7 @@ async def remove_contact_from_journal(
         snorkelling_data_repo,
         diving_data_repo,
         downhill_skiing_data_repo,
+        outdoor_planning_data_repo,
         include_routes=True,
     )
 
@@ -4464,6 +4567,7 @@ async def add_tag_to_journal(
     snorkelling_data_repo: FromDishka[SnorkellingDataRepository],
     diving_data_repo: FromDishka[DivingDataRepository],
     downhill_skiing_data_repo: FromDishka[DownhillSkiingDataRepository],
+    outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
@@ -4531,6 +4635,7 @@ async def add_tag_to_journal(
         snorkelling_data_repo,
         diving_data_repo,
         downhill_skiing_data_repo,
+        outdoor_planning_data_repo,
         include_routes=True,
     )
 
@@ -4569,6 +4674,7 @@ async def remove_tag_from_journal(
     snorkelling_data_repo: FromDishka[SnorkellingDataRepository],
     diving_data_repo: FromDishka[DivingDataRepository],
     downhill_skiing_data_repo: FromDishka[DownhillSkiingDataRepository],
+    outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
@@ -4631,6 +4737,7 @@ async def remove_tag_from_journal(
         snorkelling_data_repo,
         diving_data_repo,
         downhill_skiing_data_repo,
+        outdoor_planning_data_repo,
         include_routes=True,
     )
 

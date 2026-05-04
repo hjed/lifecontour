@@ -29,6 +29,7 @@ import {
   Cloud,
   Ban,
   GitBranch,
+  MapPin,
 } from 'lucide-react';
 import { differenceInCalendarDays, parseISO } from 'date-fns';
 
@@ -73,6 +74,7 @@ const TYPE_ICONS: Record<
   [JournalType.SNORKELLING]: Waves,
   [JournalType.DIVING]: ArrowDownToLine,
   [JournalType.DOWNHILL_SKIING]: Snowflake,
+  [JournalType.OUTDOOR_PLANNING]: MapPin,
 };
 
 /**

@@ -26,6 +26,7 @@ import {
   Waves,
   Ship,
   Snowflake,
+  MapPin,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { JournalType } from '@/types/journals';
@@ -62,6 +63,7 @@ export const TYPE_ICONS: Record<
   [JournalType.SNORKELLING]: Waves,
   [JournalType.DIVING]: ArrowDownToLine,
   [JournalType.DOWNHILL_SKIING]: Snowflake,
+  [JournalType.OUTDOOR_PLANNING]: MapPin,
 };
 
 // Display labels for journal types
@@ -86,6 +88,7 @@ export const TYPE_LABELS: Record<JournalType, string> = {
   [JournalType.SNORKELLING]: 'Snorkelling',
   [JournalType.DIVING]: 'Diving',
   [JournalType.DOWNHILL_SKIING]: 'Downhill Skiing',
+  [JournalType.OUTDOOR_PLANNING]: 'Outdoor Planning',
 };
 
 // Color variants for different journal types
@@ -113,6 +116,7 @@ export const TYPE_VARIANTS: Record<
   [JournalType.SNORKELLING]: 'default',
   [JournalType.DIVING]: 'default',
   [JournalType.DOWNHILL_SKIING]: 'default',
+  [JournalType.OUTDOOR_PLANNING]: 'secondary',
 };
 
 /**

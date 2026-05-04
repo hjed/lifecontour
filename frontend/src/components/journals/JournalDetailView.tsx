@@ -34,6 +34,7 @@ import type {
   OutdoorActivityData,
   BushwalkingData,
   JoggingData,
+  OutdoorPlanningData,
   JournalTypeData,
   ActivityTemplateResource,
 } from '@/types/journals';
@@ -245,6 +246,7 @@ export function JournalDetailView({
         | OutdoorActivityData
         | BushwalkingData
         | JoggingData
+        | OutdoorPlanningData
     ) => {
       await updateTypeData.mutateAsync({
         journalId: journal.id,

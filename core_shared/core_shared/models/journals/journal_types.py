@@ -57,6 +57,7 @@ class JournalType(StrEnum):
     SNORKELLING = "snorkelling"
     DIVING = "diving"
     DOWNHILL_SKIING = "downhill_skiing"  # Iteration 9-003
+    OUTDOOR_PLANNING = "outdoor_planning"  # Iteration 9-004
 
     def __str__(self) -> str:
         """Return string representation of the type."""
@@ -145,6 +146,7 @@ class JournalType(StrEnum):
             cls.SNORKELLING: [cls.OUTDOOR_ACTIVITY, cls.FITNESS],
             cls.DIVING: [cls.OUTDOOR_ACTIVITY, cls.FITNESS],
             cls.DOWNHILL_SKIING: [cls.OUTDOOR_ACTIVITY, cls.FITNESS],
+            cls.OUTDOOR_PLANNING: [cls.EVENT],
         }
 
         return dependencies.get(journal_type, [])

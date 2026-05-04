@@ -31,6 +31,7 @@ from core_shared.models.journals import (
     KayakingData,
     MoodData,
     OutdoorActivityData,
+    OutdoorPlanningData,
     PhotoAlbumData,
     PlanData,
     SnorkellingData,
@@ -66,6 +67,7 @@ from app.api.journals.schemas import (
     KayakingDataSchema,
     MoodDataSchema,
     OutdoorActivityDataSchema,
+    OutdoorPlanningDataSchema,
     PhotoAlbumDataSchema,
     PlanDataSchema,
     PlanDocumentSchema,
@@ -558,6 +560,14 @@ class TypeDataConverter:
         """Convert CrossCountrySkiingData domain entity to API schema."""
         return CrossCountrySkiingDataSchema(
             snow_conditions=data.snow_conditions,
+        ).model_dump(exclude_none=True)
+
+    @staticmethod
+    def outdoor_planning_data_to_schema(data: OutdoorPlanningData) -> dict[str, Any]:
+        """Convert OutdoorPlanningData domain entity to API schema."""
+        return OutdoorPlanningDataSchema(
+            topics=data.topics,
+            activity_types=data.activity_types,
         ).model_dump(exclude_none=True)
 
 
