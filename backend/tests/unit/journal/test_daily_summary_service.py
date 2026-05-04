@@ -365,27 +365,36 @@ class TestDailySummaryServiceMoodAverage:
         assert DailySummaryService._compute_mood_average([7, 8]) == 7.5
 
 
-class TestDailySummaryServiceSanitizeSchema:
-    """Test schema sanitization for google-genai bug."""
+class TestSanitizeSchema:
+    """Test schema sanitization for google-genai bug.
+
+    Tests the shared sanitize_schema function from app.mcp.shared.read_only_tools.
+    """
 
     def test_sanitize_removes_boolean_additional_properties(self) -> None:
+        from app.mcp.shared.read_only_tools import sanitize_schema
+
         schema: dict[str, Any] = {
             "additionalProperties": False,
             "type": "object",
             "properties": {"a": {"type": "string"}},
         }
-        DailySummaryService._sanitize_schema(schema)
+        sanitize_schema(schema)
         assert "additionalProperties" not in schema
         assert schema["type"] == "object"
         assert "a" in schema["properties"]
 
     def test_sanitize_removes_boolean_items(self) -> None:
+        from app.mcp.shared.read_only_tools import sanitize_schema
+
         schema: dict[str, Any] = {"items": False, "type": "array"}
-        DailySummaryService._sanitize_schema(schema)
+        sanitize_schema(schema)
         assert "items" not in schema
         assert schema["type"] == "array"
 
     def test_sanitize_recursively_removes_properties(self) -> None:
+        from app.mcp.shared.read_only_tools import sanitize_schema
+
         schema: dict[str, Any] = {
             "type": "object",
             "properties": {
@@ -397,22 +406,26 @@ class TestDailySummaryServiceSanitizeSchema:
             },
             "anyOf": [{"type": "object", "additionalProperties": False}],
         }
-        DailySummaryService._sanitize_schema(schema)
+        sanitize_schema(schema)
 
         assert "additionalProperties" not in schema["properties"]["nested"]
         assert "items" not in schema["properties"]["nested"]["properties"]["deep"]
         assert "additionalProperties" not in schema["anyOf"][0]
 
     def test_sanitize_ignores_non_booleans(self) -> None:
+        from app.mcp.shared.read_only_tools import sanitize_schema
+
         schema: dict[str, Any] = {
             "additionalProperties": {"type": "string"},
             "items": {"type": "integer"},
         }
-        DailySummaryService._sanitize_schema(schema)
+        sanitize_schema(schema)
         assert schema["additionalProperties"] == {"type": "string"}
         assert schema["items"] == {"type": "integer"}
 
     def test_sanitize_ignores_non_dicts(self) -> None:
+        from app.mcp.shared.read_only_tools import sanitize_schema
+
         # Should not raise any exceptions
-        DailySummaryService._sanitize_schema("not a dict")  # type: ignore
-        DailySummaryService._sanitize_schema(None)  # type: ignore
+        sanitize_schema("not a dict")  # type: ignore
+        sanitize_schema(None)  # type: ignore

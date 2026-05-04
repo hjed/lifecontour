@@ -183,33 +183,15 @@ class DailySummaryService:
         if self._gemini_response_override is not None:
             return self._gemini_response_override
 
-        from fastmcp import Client, FastMCP
+        from fastmcp import Client
         from google import genai
         from google.genai import types
 
-        from app.mcp.server import create_mcp_server
+        from app.mcp.shared.read_only_tools import create_read_only_mcp_server
 
-        # Filter to only read-only tools for AI safety
-        main_mcp = create_mcp_server()
-        read_only_mcp = FastMCP("Daily Summary Generation Tools")
-
-        read_only_tools = [
-            "get_contact",
-            "search_contacts",
-            "list_contacts",
-            "get_journal",
-            "search_journals",
-            "list_journals",
-            "global_search",
-        ]
-
-        for tool_name in read_only_tools:
-            t = await main_mcp.get_tool(tool_name)
-            if t:
-                # Sanitize the tool schema before passing it to Gemini
-                if hasattr(t, "parameters") and isinstance(t.parameters, dict):
-                    self._sanitize_schema(t.parameters)
-                read_only_mcp._local_provider.add_tool(t)
+        read_only_mcp = await create_read_only_mcp_server(
+            "Daily Summary Generation Tools"
+        )
 
         client = genai.Client(api_key=self._gemini_api_key)
 
@@ -223,21 +205,6 @@ class DailySummaryService:
                 ),
             )
         return response.text or ""
-
-    @staticmethod
-    def _sanitize_schema(schema: dict[str, Any]) -> None:
-        """Recursively remove boolean schema properties that crash google-genai."""
-        if not isinstance(schema, dict):
-            return
-        for key in ["additionalProperties", "items"]:
-            if key in schema and isinstance(schema[key], bool):
-                del schema[key]
-        for val in schema.values():
-            if isinstance(val, dict):
-                DailySummaryService._sanitize_schema(val)
-            elif isinstance(val, list):
-                for item in val:
-                    DailySummaryService._sanitize_schema(item)
 
     @staticmethod
     def _parse_response(raw: str) -> dict[str, Any]:
