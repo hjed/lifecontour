@@ -65,6 +65,11 @@ class StravaSyncService:
     ) -> list[OutboxEvent]:
         """Sync a single activity (e.g. from a webhook create/update).
 
+        For new activities, creates a ``journal_event.created`` outbox event.
+        For already-imported activities (webhook update), creates a
+        ``journal_event.updated`` event with the ``existing_journal_id`` so
+        the inbound processor updates rather than duplicates.
+
         Args:
             activity_id: Strava numeric activity ID.
             session: Database session for outbox event persistence and dedup.
@@ -74,13 +79,10 @@ class StravaSyncService:
         """
         activity = await self._api_client.get_activity(activity_id)
 
-        # Deduplication check
-        if await self._check_already_imported(str(activity.id), session):
-            logger.info(
-                "Activity already imported, skipping",
-                strava_activity_id=activity.id,
-            )
-            return []
+        # Check if already imported — if so, emit an update instead of create
+        existing_journal_id = await self._find_existing_journal_id(
+            str(activity.id), session
+        )
 
         # Fetch streams for GPS-equipped activities
         streams: StravaStreamSet | None = None
@@ -88,14 +90,26 @@ class StravaSyncService:
             streams = await self._api_client.get_activity_streams(activity.id)
 
         transformed = self._transformer.transform(activity, streams=streams)
-        event = self._build_outbox_event(transformed)
-        session.add(event)
 
-        logger.info(
-            "Created outbox event for Strava activity",
-            strava_activity_id=activity.id,
-            event_type=event.event_type,
-        )
+        if existing_journal_id is not None:
+            event = self._build_outbox_event(
+                transformed,
+                sync_action="updated",
+                existing_journal_id=existing_journal_id,
+            )
+            logger.info(
+                "Created update outbox event for existing Strava activity",
+                strava_activity_id=activity.id,
+                journal_id=existing_journal_id,
+            )
+        else:
+            event = self._build_outbox_event(transformed)
+            logger.info(
+                "Created outbox event for new Strava activity",
+                strava_activity_id=activity.id,
+            )
+
+        session.add(event)
         return [event]
 
     async def sync_full(
@@ -127,8 +141,11 @@ class StravaSyncService:
                 break
 
             for activity in activities:
-                # Deduplication
-                if await self._check_already_imported(str(activity.id), session):
+                # Deduplication — during full sync, skip already-imported
+                existing_jid = await self._find_existing_journal_id(
+                    str(activity.id), session
+                )
+                if existing_jid is not None:
                     logger.debug(
                         "Skipping already-imported activity during full sync",
                         strava_activity_id=activity.id,
@@ -215,10 +232,10 @@ class StravaSyncService:
 
     # ── Internal helpers ────────────────────────────────────────────────
 
-    async def _check_already_imported(
+    async def _find_existing_journal_id(
         self, strava_activity_id: str, session: AsyncSession
-    ) -> bool:
-        """Check if a Strava activity has already been imported.
+    ) -> int | None:
+        """Find journal ID for an already-imported Strava activity.
 
         Uses the ``strava_activity_id`` column in ``journal_fitness_data``
         for deduplication.
@@ -228,20 +245,26 @@ class StravaSyncService:
             session: Database session.
 
         Returns:
-            True if the activity is already in the database.
+            Journal ID if the activity exists, None otherwise.
         """
         result = await session.execute(
             text("""
-                SELECT 1
+                SELECT journal_id
                 FROM journal_fitness_data
                 WHERE strava_activity_id = :strava_id
                 LIMIT 1
             """),
             {"strava_id": strava_activity_id},
         )
-        return result.fetchone() is not None
+        row = result.fetchone()
+        return row.journal_id if row is not None else None
 
-    def _build_outbox_event(self, transformed: TransformedActivity) -> OutboxEvent:
+    def _build_outbox_event(
+        self,
+        transformed: TransformedActivity,
+        sync_action: str = "created",
+        existing_journal_id: int | None = None,
+    ) -> OutboxEvent:
         """Build an outbox event from a transformed Strava activity.
 
         Constructs the ``journal_data`` and ``calendar_info_data`` payloads
@@ -250,6 +273,9 @@ class StravaSyncService:
 
         Args:
             transformed: Output from ``StravaDataTransformer.transform()``.
+            sync_action: ``'created'`` for new activities, ``'updated'`` for
+                re-imports of already-imported activities.
+            existing_journal_id: Journal ID if updating an existing import.
 
         Returns:
             ``OutboxEvent`` ready to be persisted.
@@ -291,5 +317,6 @@ class StravaSyncService:
             integration_source="strava",
             external_event_id=f"strava:{transformed.fitness_data_strava_activity_id}",
             calendar_id=_STRAVA_SYNTHETIC_CALENDAR_ID,
-            sync_action="created",
+            sync_action=sync_action,
+            existing_journal_id=existing_journal_id,
         )

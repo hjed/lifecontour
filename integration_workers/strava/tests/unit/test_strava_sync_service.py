@@ -113,9 +113,9 @@ class TestSyncSingleActivity:
 
         with patch.object(
             sync_service,
-            "_check_already_imported",
+            "_find_existing_journal_id",
             new_callable=AsyncMock,
-            return_value=False,
+            return_value=None,
         ):
             events = await sync_service.sync_single_activity(
                 activity_id=12345, session=mock_session
@@ -140,9 +140,9 @@ class TestSyncSingleActivity:
 
         with patch.object(
             sync_service,
-            "_check_already_imported",
+            "_find_existing_journal_id",
             new_callable=AsyncMock,
-            return_value=False,
+            return_value=None,
         ):
             await sync_service.sync_single_activity(
                 activity_id=12345, session=mock_session
@@ -163,9 +163,9 @@ class TestSyncSingleActivity:
 
         with patch.object(
             sync_service,
-            "_check_already_imported",
+            "_find_existing_journal_id",
             new_callable=AsyncMock,
-            return_value=False,
+            return_value=None,
         ):
             await sync_service.sync_single_activity(
                 activity_id=12345, session=mock_session
@@ -174,27 +174,30 @@ class TestSyncSingleActivity:
         mock_api_client.get_activity_streams.assert_not_awaited()
 
     @pytest.mark.asyncio()
-    async def test_skips_already_imported_activity(
+    async def test_creates_update_event_for_already_imported_activity(
         self,
         sync_service: StravaSyncService,
         mock_api_client: AsyncMock,
         mock_session: MagicMock,
     ) -> None:
-        """Returns empty list when activity is already imported."""
+        """Creates a journal_event.updated event when activity is already imported."""
         activity = _make_activity()
         mock_api_client.get_activity.return_value = activity
 
         with patch.object(
             sync_service,
-            "_check_already_imported",
+            "_find_existing_journal_id",
             new_callable=AsyncMock,
-            return_value=True,
+            return_value=42,
         ):
             events = await sync_service.sync_single_activity(
                 activity_id=12345, session=mock_session
             )
 
-        assert len(events) == 0
+        assert len(events) == 1
+        event = events[0]
+        assert event.event_type == "journal_event.updated"
+        assert event.event_data["existing_journal_id"] == 42
 
 
 class TestFullSync:
@@ -216,9 +219,9 @@ class TestFullSync:
 
         with patch.object(
             sync_service,
-            "_check_already_imported",
+            "_find_existing_journal_id",
             new_callable=AsyncMock,
-            return_value=False,
+            return_value=None,
         ):
             events = await sync_service.sync_full(session=mock_session)
 
@@ -238,9 +241,9 @@ class TestFullSync:
 
         with patch.object(
             sync_service,
-            "_check_already_imported",
+            "_find_existing_journal_id",
             new_callable=AsyncMock,
-            return_value=False,
+            return_value=None,
         ):
             events = await sync_service.sync_full(session=mock_session)
 
@@ -320,9 +323,9 @@ class TestOutboxEventStructure:
 
         with patch.object(
             sync_service,
-            "_check_already_imported",
+            "_find_existing_journal_id",
             new_callable=AsyncMock,
-            return_value=False,
+            return_value=None,
         ):
             events = await sync_service.sync_single_activity(
                 activity_id=12345, session=mock_session
@@ -357,9 +360,9 @@ class TestOutboxEventStructure:
 
         with patch.object(
             sync_service,
-            "_check_already_imported",
+            "_find_existing_journal_id",
             new_callable=AsyncMock,
-            return_value=False,
+            return_value=None,
         ):
             events = await sync_service.sync_single_activity(
                 activity_id=12345, session=mock_session
@@ -390,9 +393,9 @@ class TestOutboxEventStructure:
 
         with patch.object(
             sync_service,
-            "_check_already_imported",
+            "_find_existing_journal_id",
             new_callable=AsyncMock,
-            return_value=False,
+            return_value=None,
         ):
             events = await sync_service.sync_single_activity(
                 activity_id=12345, session=mock_session
@@ -445,9 +448,9 @@ class TestOutboxEventStructure:
 
         with patch.object(
             sync_service,
-            "_check_already_imported",
+            "_find_existing_journal_id",
             new_callable=AsyncMock,
-            return_value=False,
+            return_value=None,
         ):
             events = await sync_service.sync_single_activity(
                 activity_id=12345, session=mock_session

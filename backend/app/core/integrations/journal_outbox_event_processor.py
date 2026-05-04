@@ -15,6 +15,7 @@ from core_shared.models.journals import (
     AttendeeStatus,
     ContactEventRole,
     EventDateRange,
+    FitnessData,
     Journal,
 )
 from core_shared.models.journals.journal_contact_relationship import (
@@ -23,10 +24,13 @@ from core_shared.models.journals.journal_contact_relationship import (
 from core_shared.models.journals.journal_relationship_types import (
     JournalContactRelationshipType,
 )
+from core_shared.models.journals.journal_types import JournalType
 from core_shared.models.outbox import OutboxEvent
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.journal.adapters.sql import SqlFitnessDataRepository
 from app.core.journal.services.journal_service import JournalService
 
 logger = structlog.get_logger()
@@ -41,6 +45,31 @@ EVENT_TYPE_JOURNAL_REVIEW_DETECT_MATCHES = "journal_review.detect_matches"
 
 class JournalOutboxEventProcessingError(Exception):
     """Raised when journal outbox event processing fails."""
+
+
+class OutboxFitnessData(BaseModel):
+    """Strongly-typed Pydantic model for fitness data in outbox event payloads.
+
+    Validates the shape of ``fitness_data`` dicts from integration workers
+    before persisting through the repository layer.
+    """
+
+    distance: int | None = Field(default=None, description="Distance in metres")
+    elevation_gain: int | None = Field(
+        default=None, description="Elevation gain in metres"
+    )
+    elevation_loss: int | None = Field(
+        default=None, description="Elevation loss in metres"
+    )
+    duration: int | None = Field(default=None, description="Duration in seconds")
+    calories: int | None = Field(default=None, description="Calories burned")
+    heart_rate_avg: int | None = Field(
+        default=None, description="Average heart rate BPM"
+    )
+    heart_rate_max: int | None = Field(default=None, description="Max heart rate BPM")
+    strava_activity_id: str | None = Field(
+        default=None, description="Strava activity ID"
+    )
 
 
 class ContactResolver:
@@ -198,14 +227,46 @@ class JournalOutboxEventProcessor:
         )
 
         # Save fitness data if present (Strava-sourced events)
-        fitness_data = journal_data.get("fitness_data")
-        if fitness_data:
-            await self._save_fitness_data(created_journal.id, fitness_data)
+        raw_fitness = journal_data.get("fitness_data")
+        if raw_fitness and isinstance(raw_fitness, dict):
+            validated = OutboxFitnessData.model_validate(raw_fitness)
+            fitness_repo = SqlFitnessDataRepository(self.connection)
+            await fitness_repo.save(
+                FitnessData(
+                    journal_id=created_journal.id,
+                    distance=validated.distance,
+                    elevation_gain=validated.elevation_gain,
+                    elevation_loss=validated.elevation_loss,
+                    duration=validated.duration,
+                    calories=validated.calories,
+                    heart_rate_avg=validated.heart_rate_avg,
+                    heart_rate_max=validated.heart_rate_max,
+                    strava_activity_id=validated.strava_activity_id,
+                )
+            )
+            logger.info(
+                "Saved fitness data for journal via repository",
+                journal_id=created_journal.id,
+                strava_activity_id=validated.strava_activity_id,
+            )
 
         # Add journal types if present (Strava-sourced events)
-        journal_types = journal_data.get("journal_types")
-        if journal_types:
-            await self._save_journal_types(created_journal.id, journal_types)
+        raw_types = journal_data.get("journal_types")
+        if raw_types and isinstance(raw_types, list):
+            for type_str in raw_types:
+                try:
+                    journal_type = JournalType(type_str)
+                    await self.journal_service.add_type_to_journal(
+                        journal_id=created_journal.id,
+                        journal_type=journal_type,
+                        transaction=self.connection,
+                    )
+                except ValueError:
+                    logger.warning(
+                        "Unknown journal type in outbox event, skipping",
+                        journal_type=type_str,
+                        journal_id=created_journal.id,
+                    )
 
         # Emit match detection event for the outbox to process asynchronously.
         # We only do this if the match detection dependency is wired (i.e., Gemini is configured).
@@ -666,86 +727,6 @@ class JournalOutboxEventProcessor:
                 "etag": etag,
                 "now": now,
             },
-        )
-
-    async def _save_fitness_data(
-        self, journal_id: int, fitness_data: dict[str, Any]
-    ) -> None:
-        """Save fitness data for a journal.
-
-        Uses UPSERT to handle retries: if fitness_data already exists for
-        this journal, it is updated. Called for Strava-sourced events where
-        ``fitness_data`` is present in the outbox event payload.
-
-        Args:
-            journal_id: ID of the journal to link fitness data to.
-            fitness_data: Dictionary with fitness metric fields.
-        """
-        await self.connection.execute(
-            text("""
-                INSERT INTO journal_fitness_data
-                    (journal_id, distance, elevation_gain, elevation_loss,
-                     duration, calories, heart_rate_avg, heart_rate_max,
-                     strava_activity_id)
-                VALUES
-                    (:journal_id, :distance, :elevation_gain, :elevation_loss,
-                     :duration, :calories, :heart_rate_avg, :heart_rate_max,
-                     :strava_activity_id)
-                ON CONFLICT (journal_id) DO UPDATE SET
-                    distance = EXCLUDED.distance,
-                    elevation_gain = EXCLUDED.elevation_gain,
-                    elevation_loss = EXCLUDED.elevation_loss,
-                    duration = EXCLUDED.duration,
-                    calories = EXCLUDED.calories,
-                    heart_rate_avg = EXCLUDED.heart_rate_avg,
-                    heart_rate_max = EXCLUDED.heart_rate_max,
-                    strava_activity_id = EXCLUDED.strava_activity_id
-            """),
-            {
-                "journal_id": journal_id,
-                "distance": fitness_data.get("distance"),
-                "elevation_gain": fitness_data.get("elevation_gain"),
-                "elevation_loss": fitness_data.get("elevation_loss"),
-                "duration": fitness_data.get("duration"),
-                "calories": fitness_data.get("calories"),
-                "heart_rate_avg": fitness_data.get("heart_rate_avg"),
-                "heart_rate_max": fitness_data.get("heart_rate_max"),
-                "strava_activity_id": fitness_data.get("strava_activity_id"),
-            },
-        )
-        logger.info(
-            "Saved fitness data for journal",
-            journal_id=journal_id,
-            strava_activity_id=fitness_data.get("strava_activity_id"),
-        )
-
-    async def _save_journal_types(
-        self, journal_id: int, journal_types: list[str]
-    ) -> None:
-        """Save journal types for a journal.
-
-        Inserts type records into ``journal_types``. Uses ``ON CONFLICT DO
-        NOTHING`` so retries are safe. Called for Strava-sourced events
-        where ``journal_types`` is present in the outbox event payload.
-
-        Args:
-            journal_id: ID of the journal to assign types to.
-            journal_types: List of journal type strings (e.g. ``["fitness",
-                "jogging"]``).
-        """
-        for jtype in journal_types:
-            await self.connection.execute(
-                text("""
-                    INSERT INTO journal_types (journal_id, type_name)
-                    VALUES (:journal_id, :type_name)
-                    ON CONFLICT (journal_id, type_name) DO NOTHING
-                """),
-                {"journal_id": journal_id, "type_name": jtype},
-            )
-        logger.info(
-            "Saved journal types",
-            journal_id=journal_id,
-            types=journal_types,
         )
 
     async def _find_journal_by_id(self, journal_id: int) -> Journal | None:
