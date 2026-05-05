@@ -314,6 +314,7 @@ class TestStravaGPXRouteIntegration:
             retry_count=0,
         )
         result1 = await processor.process_event(event1)
+        assert result1["status"] == "success"
         journal_id = result1["journal_id"]
 
         # Get original route data

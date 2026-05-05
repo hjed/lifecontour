@@ -1238,7 +1238,7 @@ class JournalOutboxEventProcessor:
                 existing_route.name = route_data.title
                 existing_route.gpx_data = route_data.gpx_xml
                 # Manually trigger validation on update since dataclasses don't auto-validate on assignment
-                existing_route._validate_gpx_data(route_data.gpx_xml)
+                existing_route.__post_init__()
                 await route_repo.save(existing_route)
             else:
                 new_route = Route(
