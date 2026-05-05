@@ -347,7 +347,7 @@ export function GearMaintenanceTypeEditor({
                       onCheckedChange={checked => {
                         const current = editData.activity_types ?? [];
                         let next;
-                        if (checked) {
+                        if (checked === true) {
                           next = [...current, subtype.value];
                         } else {
                           next = current.filter(v => v !== subtype.value);

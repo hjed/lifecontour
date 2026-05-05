@@ -19,7 +19,7 @@ import type {
 export async function getGearItems(search?: string): Promise<GearItem[]> {
   const url = new URL('/api/gear-items', window.location.origin);
   if (search) {
-    url.searchParams.set('search', search);
+    url.searchParams.set('name', search);
   }
 
   const response = await fetch(url.toString(), { credentials: 'include' });

@@ -43,7 +43,7 @@ class SqlGearMaintenanceDataRepository(GearMaintenanceDataRepository):
             if isinstance(row.gear_item_id, UUID)
             else UUID(row.gear_item_id),
             maintenance_type=row.maintenance_type,
-            activity_types=activity_types if activity_types else [],
+            activity_types=activity_types,
             retirement_reason=row.retirement_reason,
             created_at=row.created_at,
             updated_at=row.updated_at,
@@ -100,7 +100,7 @@ class SqlGearMaintenanceDataRepository(GearMaintenanceDataRepository):
             data,
             created_at=row.created_at,
             updated_at=row.updated_at,
-            activity_types=activity_types if activity_types else [],
+            activity_types=activity_types,
         )
 
     async def delete(self, journal_id: int) -> None:

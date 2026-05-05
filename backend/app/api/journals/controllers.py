@@ -397,6 +397,13 @@ async def _create_type_specific_data(
 
         outdoor_planning_data = OutdoorPlanningData(journal_id=journal_id)
         await outdoor_planning_data_repo.save(outdoor_planning_data)
+    elif journal_type == JournalType.GEAR_MAINTENANCE:
+        from core_shared.models.journals.exceptions import JournalValidationError
+
+        raise JournalValidationError(
+            "type",
+            "GEAR_MAINTENANCE type requires a gear item reference and cannot be added without initial type data.",
+        )
     # EVENT and PHOTO_ALBUM types require additional data (calendar_id, immich_album_id)
     # These will be created when the user updates the type data
 
