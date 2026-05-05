@@ -17,7 +17,7 @@ from arq.typing import StartupShutdown, WorkerSettingsBase
 from core_shared.database.engine import create_session_factory
 from core_shared.integration_constants import STRAVA_ARQ_QUEUE_NAME
 from core_shared.logging import configure_logging, get_logger
-from core_shared.telemetry import setup_telemetry
+from core_shared.telemetry import setup_telemetry, trace_arq_job
 
 from strava_settings import StravaSettings
 
@@ -209,6 +209,7 @@ def _create_sync_service(
     )
 
 
+@trace_arq_job
 async def process_strava_webhook_event(
     ctx: dict[str, Any],
     event_data: dict[str, Any],
@@ -341,6 +342,7 @@ async def process_strava_webhook_event(
         return {"status": "ignored", "reason": f"unknown aspect_type={aspect_type}"}
 
 
+@trace_arq_job
 async def sync_strava_activities(
     ctx: dict[str, Any],
     user_id: str,

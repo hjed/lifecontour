@@ -132,3 +132,39 @@ def instrument_sqlalchemy_engine(engine: Any) -> None:
             SQLAlchemyInstrumentor().instrument(engine=engine)
     except ImportError:
         pass
+
+
+def trace_arq_job(func: Any) -> Any:
+    """Decorator to instrument ARQ job execution with OpenTelemetry."""
+    from functools import wraps
+
+    @wraps(func)
+    async def wrapper(ctx: dict[str, Any], *args: Any, **kwargs: Any) -> Any:
+        if not _TELEMETRY_SETUP_DONE:
+            return await func(ctx, *args, **kwargs)
+
+        try:
+            from opentelemetry import trace
+            from opentelemetry.propagate import extract
+        except ImportError:
+            return await func(ctx, *args, **kwargs)
+
+        tracer = trace.get_tracer(__name__)
+        otel_carrier = kwargs.get("otel_carrier")
+        otel_ctx = extract(otel_carrier) if otel_carrier else None
+
+        job_id = ctx.get("job_id", "unknown")
+        job_name = ctx.get("job_name", func.__name__)
+
+        with tracer.start_as_current_span(
+            job_name,
+            context=otel_ctx,
+            attributes={
+                "messaging.message_id": job_id,
+                "messaging.system": "arq",
+                "messaging.operation": "process",
+            },
+        ):
+            return await func(ctx, *args, **kwargs)
+
+    return wrapper

@@ -68,6 +68,8 @@ def apply_migrations() -> None:
     env = os.environ.copy()
     env.pop("VIRTUAL_ENV", None)  # Prevent uv warning about mismatched environment
     env.pop("UV_RUN_RECURSION_DEPTH", None)  # Prevent nested uv run limitation
+    # Prevent uv from reading .env and overwriting the DATABASE_URL
+    env["UV_NO_ENV"] = "1"
     # Ensure alembic gets the correct dynamic database URL
     env["DATABASE_URL"] = get_async_database_url()
 

@@ -162,10 +162,25 @@ class StreamConsumer(ABC):
         for event in events:
             if self._matches_event_type(event.event_type):
                 try:
-                    await self._handle_event(event)
-                    await self._stream_client.acknowledge(
-                        self._stream_name, self._group_name, event.message_id
-                    )
+                    from opentelemetry import trace
+                    from opentelemetry.propagate import extract
+
+                    tracer = trace.get_tracer(__name__)
+                    ctx = extract(event.trace_context) if event.trace_context else None
+                    with tracer.start_as_current_span(
+                        f"process_stream_event {event.event_type}",
+                        context=ctx,
+                        attributes={
+                            "messaging.message_id": event.message_id,
+                            "messaging.system": "redis_streams",
+                            "messaging.destination.name": self._stream_name,
+                            "messaging.operation": "process",
+                        },
+                    ):
+                        await self._handle_event(event)
+                        await self._stream_client.acknowledge(
+                            self._stream_name, self._group_name, event.message_id
+                        )
                 except Exception:
                     logger.error(
                         "Failed to handle event, leaving pending for retry",
@@ -227,11 +242,26 @@ class StreamConsumer(ABC):
 
             if self._matches_event_type(event.event_type):
                 try:
-                    await self._handle_event(event)
-                    await self._stream_client.acknowledge(
-                        self._stream_name, self._group_name, event.message_id
-                    )
-                    retried += 1
+                    from opentelemetry import trace
+                    from opentelemetry.propagate import extract
+
+                    tracer = trace.get_tracer(__name__)
+                    ctx = extract(event.trace_context) if event.trace_context else None
+                    with tracer.start_as_current_span(
+                        f"retry_stream_event {event.event_type}",
+                        context=ctx,
+                        attributes={
+                            "messaging.message_id": event.message_id,
+                            "messaging.system": "redis_streams",
+                            "messaging.destination.name": self._stream_name,
+                            "messaging.operation": "process",
+                        },
+                    ):
+                        await self._handle_event(event)
+                        await self._stream_client.acknowledge(
+                            self._stream_name, self._group_name, event.message_id
+                        )
+                        retried += 1
                 except Exception:
                     logger.error(
                         "Failed to retry event, leaving pending",

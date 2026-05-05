@@ -36,6 +36,7 @@ class StreamEvent:
     aggregate_id: int
     event_data: dict[str, Any]
     occurred_at: str
+    trace_context: dict[str, str] | None = None
 
 
 @dataclass
@@ -92,12 +93,22 @@ class StreamClient:
         Returns:
             The stream message ID assigned by Redis
         """
+        from opentelemetry.propagate import inject
+
+        carrier: dict[str, str] = {}
+        try:
+            inject(carrier)
+        except Exception:
+            # Fallback if OTEL is not configured
+            pass
+
         fields = {
             "event_id": event_id,
             "event_type": event_type,
             "aggregate_id": str(aggregate_id),
             "event_data": json.dumps(event_data),
             "occurred_at": occurred_at,
+            "trace_context": json.dumps(carrier),
         }
 
         message_id_raw = await self._redis.xadd(
@@ -343,6 +354,12 @@ class StreamClient:
 
         event_data_raw = _get_field("event_data") or "{}"
         aggregate_id_raw = _get_field("aggregate_id") or "0"
+        trace_context_raw = _get_field("trace_context") or "{}"
+
+        try:
+            trace_context = json.loads(trace_context_raw)
+        except Exception:
+            trace_context = {}
 
         return StreamEvent(
             message_id=decoded_msg_id,
@@ -351,4 +368,5 @@ class StreamClient:
             aggregate_id=int(aggregate_id_raw),
             event_data=json.loads(event_data_raw),
             occurred_at=_get_field("occurred_at"),
+            trace_context=trace_context,
         )

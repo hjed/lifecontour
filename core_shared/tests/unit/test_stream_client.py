@@ -51,6 +51,7 @@ class TestStreamClient:
         assert fields["aggregate_id"] == "42"
         assert "contact_id" in fields["event_data"]
         assert fields["occurred_at"] == "2024-01-01T12:00:00Z"
+        assert "trace_context" in fields
 
     @pytest.mark.asyncio
     async def test_ensure_consumer_group_creates_new_group(
@@ -121,6 +122,7 @@ class TestStreamClient:
                             b"aggregate_id": b"42",
                             b"event_data": b'{"contact_id": 42}',
                             b"occurred_at": b"2024-01-01T12:00:00Z",
+                            b"trace_context": b'{"traceparent": "00-xxx-yyy-01"}',
                         },
                     )
                 ],
@@ -148,6 +150,7 @@ class TestStreamClient:
         assert events[0].aggregate_id == 42
         assert events[0].event_data == {"contact_id": 42}
         assert events[0].message_id == "1234567890-0"
+        assert events[0].trace_context == {"traceparent": "00-xxx-yyy-01"}
 
     @pytest.mark.asyncio
     async def test_read_events_returns_empty_on_none(
@@ -229,6 +232,7 @@ class TestStreamClient:
                     b"aggregate_id": b"42",
                     b"event_data": b'{"contact_id": 42}',
                     b"occurred_at": b"2024-01-01T12:00:00Z",
+                    b"trace_context": b"{}",
                 },
             )
         ]
@@ -264,6 +268,7 @@ class TestStreamEvent:
             aggregate_id=42,
             event_data={"contact_id": 42},
             occurred_at="2024-01-01T12:00:00Z",
+            trace_context={"traceparent": "test"},
         )
         assert event.message_id == "1234567890-0"
         assert event.event_id == "evt-1"
@@ -271,3 +276,4 @@ class TestStreamEvent:
         assert event.aggregate_id == 42
         assert event.event_data == {"contact_id": 42}
         assert event.occurred_at == "2024-01-01T12:00:00Z"
+        assert event.trace_context == {"traceparent": "test"}
