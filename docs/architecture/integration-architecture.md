@@ -1077,10 +1077,14 @@ class OutboxEventProcessor:
 
 #### Why This Architecture?
 
+**Contract Enforcement with Pydantic:**
+- Both the integration worker (producer) and backend `OutboxEventProcessor` (consumer) MUST enforce strict contract boundaries using Pydantic models.
+- When extracting nested event data (like `fitness_data` or `gpx_xml`), use Pydantic `BaseModel.model_validate()` to catch malformed payloads early, skipping or failing gracefully if constraints (like string length or required fields) are violated.
+
 **Separation of Concerns:**
-- Workers focus on external API communication and data fetching
-- Main app handles domain logic, validation, and entity creation
-- Clear boundary between integration layer and domain layer
+- Worker handles API communication, pagination, and transformation.
+- Core handles domain logic, validation, and database persistence.
+- Redis streams handle reliable delivery and retry logic.
 
 **Reliability:**
 - OutboxEvent provides transactional guarantee

@@ -12,6 +12,7 @@ This is pure transformation logic with no I/O or database access.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -131,6 +132,7 @@ class TransformedActivity:
     fitness_data_strava_activity_id: str
     elevation_loss: int | None
     gpx_xml: str | None
+    version_hash: str
 
 
 class StravaDataTransformer:
@@ -211,4 +213,7 @@ class StravaDataTransformer:
             fitness_data_strava_activity_id=str(activity.id),
             elevation_loss=elevation_loss,
             gpx_xml=gpx_xml,
+            version_hash=hashlib.sha256(
+                activity.model_dump_json().encode()
+            ).hexdigest(),
         )

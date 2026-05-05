@@ -65,6 +65,7 @@ def _make_transformed(
         fitness_data_strava_activity_id=strava_activity_id,
         elevation_loss=None,
         gpx_xml=None,
+        version_hash="0" * 64,
     )
 
 
@@ -459,3 +460,29 @@ class TestOutboxEventStructure:
         journal_data = events[0].event_data["journal_data"]
         assert journal_data.get("gpx_xml") is not None
         assert "<gpx" in journal_data["gpx_xml"]
+
+    @pytest.mark.asyncio()
+    async def test_event_includes_version_hash(
+        self,
+        sync_service: StravaSyncService,
+        mock_api_client: AsyncMock,
+        mock_session: MagicMock,
+    ) -> None:
+        """Outbox event journal_data includes version_hash for SyncMetadata."""
+        activity = _make_activity()
+        mock_api_client.get_activity.return_value = activity
+
+        with patch.object(
+            sync_service,
+            "_find_existing_journal_id",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            events = await sync_service.sync_single_activity(
+                activity_id=12345, session=mock_session
+            )
+
+        journal_data = events[0].event_data["journal_data"]
+        assert "version_hash" in journal_data
+        assert isinstance(journal_data["version_hash"], str)
+        assert len(journal_data["version_hash"]) == 64  # SHA-256 hex length

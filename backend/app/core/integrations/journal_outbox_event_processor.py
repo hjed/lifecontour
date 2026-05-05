@@ -26,11 +26,16 @@ from core_shared.models.journals.journal_relationship_types import (
 )
 from core_shared.models.journals.journal_types import JournalType
 from core_shared.models.outbox import OutboxEvent
+from core_shared.models.route import Route
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.integrations.adapters.sql.sync_metadata_repository import (
+    SyncMetadataRepository,
+)
 from app.core.journal.adapters.sql import SqlFitnessDataRepository
+from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 from app.core.journal.services.journal_service import JournalService
 
 logger = structlog.get_logger()
@@ -69,6 +74,30 @@ class OutboxFitnessData(BaseModel):
     heart_rate_max: int | None = Field(default=None, description="Max heart rate BPM")
     strava_activity_id: str | None = Field(
         default=None, description="Strava activity ID"
+    )
+
+
+class OutboxRouteData(BaseModel):
+    """Strongly-typed Pydantic model for GPX route data in outbox event payloads."""
+
+    gpx_xml: str = Field(description="Raw GPX XML string")
+    title: str = Field(
+        default="Imported Route",
+        max_length=200,
+        description="Route name, usually derived from activity title",
+    )
+
+
+class OutboxSyncData(BaseModel):
+    """Strongly-typed Pydantic model for Sync Metadata in outbox event payloads."""
+
+    strava_activity_id: str = Field(
+        min_length=1, description="Strava activity ID used as external_id"
+    )
+    version_hash: str = Field(
+        min_length=64,
+        max_length=64,
+        description="Hash of mutable fields for change detection",
     )
 
 
@@ -228,6 +257,15 @@ class JournalOutboxEventProcessor:
 
         # Save fitness data and journal types if present (Strava-sourced events)
         await self._persist_fitness_and_types(created_journal.id, journal_data)
+
+        # Save GPX route if present (Strava-sourced events with GPS data)
+        await self._persist_route_from_gpx(created_journal.id, journal_data)
+
+        # Save sync metadata for integration tracking (Strava-sourced events)
+        await self._persist_sync_metadata(
+            journal_id=created_journal.id,
+            event_data=event_data,
+        )
 
         # Emit match detection event for the outbox to process asynchronously.
         # We only do this if the match detection dependency is wired (i.e., Gemini is configured).
@@ -413,6 +451,15 @@ class JournalOutboxEventProcessor:
 
         # Update fitness data and journal types if present (Strava-sourced events)
         await self._persist_fitness_and_types(existing_journal_id, journal_data)
+
+        # Update GPX route if present (Strava-sourced events with GPS data)
+        await self._persist_route_from_gpx(existing_journal_id, journal_data)
+
+        # Update sync metadata for integration tracking (Strava-sourced events)
+        await self._persist_sync_metadata(
+            journal_id=existing_journal_id,
+            event_data=event_data,
+        )
 
         logger.info(
             "Updated journal from inbound sync event",
@@ -1145,4 +1192,127 @@ class JournalOutboxEventProcessor:
                 "retry_count": 0,
                 "created_at": now,
             },
+        )
+
+    async def _persist_route_from_gpx(
+        self,
+        journal_id: int,
+        journal_data: dict[str, Any],
+    ) -> None:
+        """Create or update a Route from GPX XML in the outbox event payload.
+
+        When a Strava activity includes GPS track data, the worker generates
+        GPX XML and includes it in the outbox event. This method persists
+        that GPX as a Route entity linked to the journal.
+
+        For Strava-sourced events there is exactly one route per journal.
+        If a route already exists for this journal we update it in-place
+        (including the name, which may change if the activity title was
+        edited on Strava). If no route exists we insert a new one.
+
+        Args:
+            journal_id: ID of the journal to attach the route to.
+            journal_data: The ``journal_data`` dict from the outbox event.
+        """
+        if "gpx_xml" not in journal_data or not journal_data["gpx_xml"]:
+            return
+
+        try:
+            route_data = OutboxRouteData.model_validate(journal_data)
+        except ValidationError as e:
+            logger.warning(
+                "Malformed route data in outbox payload, skipping",
+                journal_id=journal_id,
+                errors=e.errors(),
+            )
+            return
+
+        route_repo = SqlRouteRepository(self.connection)
+
+        try:
+            # Check if a route already exists for this journal
+            existing = await route_repo.find_by_journal_id(journal_id)
+
+            if existing:
+                existing_route = existing[0]
+                existing_route.name = route_data.title
+                existing_route.gpx_data = route_data.gpx_xml
+                # Manually trigger validation on update since dataclasses don't auto-validate on assignment
+                existing_route.__post_init__()
+                await route_repo.save(existing_route)
+            else:
+                new_route = Route(
+                    journal_id=journal_id,
+                    name=route_data.title,
+                    gpx_data=route_data.gpx_xml,
+                )
+                await route_repo.save(new_route)
+
+            logger.info(
+                "Persisted GPX route for journal",
+                journal_id=journal_id,
+                route_name=route_data.title,
+            )
+        except ValueError as e:
+            logger.warning(
+                "Invalid route or GPX data, skipping route persistence",
+                journal_id=journal_id,
+                error=str(e),
+            )
+            return
+
+    async def _persist_sync_metadata(
+        self,
+        journal_id: int,
+        event_data: dict[str, Any],
+    ) -> None:
+        """Create or update SyncMetadata for Strava-sourced events.
+
+        Only applies to events with ``integration_source == 'strava'``.
+        Uses the ``strava_activity_id`` from fitness_data as the external_id
+        and the ``version_hash`` from journal_data for change detection.
+
+        Args:
+            journal_id: ID of the journal linked to this sync record.
+            event_data: The full outbox event data dict.
+        """
+        integration_source = event_data.get("integration_source")
+        if integration_source != "strava":
+            return
+
+        journal_data = event_data.get("journal_data", {})
+        fitness_data = journal_data.get("fitness_data", {})
+
+        # Need strava_activity_id from fitness_data and version_hash from journal_data
+        sync_payload = {
+            "strava_activity_id": fitness_data.get("strava_activity_id")
+            if isinstance(fitness_data, dict)
+            else None,
+            "version_hash": journal_data.get("version_hash", ""),
+        }
+
+        try:
+            sync_data = OutboxSyncData.model_validate(sync_payload)
+        except ValidationError as e:
+            logger.warning(
+                "Strava event missing valid sync data, skipping sync metadata",
+                journal_id=journal_id,
+                errors=e.errors(),
+            )
+            return
+
+        sync_metadata_repo = SyncMetadataRepository(self.connection)
+
+        await sync_metadata_repo.upsert(
+            internal_id=journal_id,
+            integration_source="strava",
+            external_id=sync_data.strava_activity_id,
+            version_hash=sync_data.version_hash,
+        )
+
+        logger.info(
+            "Persisted sync metadata for Strava activity",
+            journal_id=journal_id,
+            strava_activity_id=sync_data.strava_activity_id,
+            version_hash=str(sync_data.version_hash)[:16] + "...",
         )

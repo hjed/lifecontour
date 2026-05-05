@@ -337,3 +337,20 @@ class TestFieldTransformation:
         activity = _make_activity(total_elevation_gain=0.0)
         result = StravaDataTransformer.transform(activity)
         assert result.fitness_data_elevation_gain == 0
+
+    def test_version_hash_computed_from_model_dump(self) -> None:
+        """version_hash is a SHA-256 hex digest of the activity's JSON dump."""
+        import hashlib
+
+        activity = _make_activity(start_date="2026-05-01T06:30:00Z")
+        result = StravaDataTransformer.transform(activity)
+        expected = hashlib.sha256(activity.model_dump_json().encode()).hexdigest()
+        assert result.version_hash == expected
+
+    def test_version_hash_changes_with_activity_edits(self) -> None:
+        """Different fields produce different version hashes."""
+        a1 = _make_activity(name="Morning Run")
+        a2 = _make_activity(name="Evening Run")
+        r1 = StravaDataTransformer.transform(a1)
+        r2 = StravaDataTransformer.transform(a2)
+        assert r1.version_hash != r2.version_hash
