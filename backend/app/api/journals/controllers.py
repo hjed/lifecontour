@@ -398,12 +398,10 @@ async def _create_type_specific_data(
         outdoor_planning_data = OutdoorPlanningData(journal_id=journal_id)
         await outdoor_planning_data_repo.save(outdoor_planning_data)
     elif journal_type == JournalType.GEAR_MAINTENANCE:
-        from core_shared.models.journals.exceptions import JournalValidationError
-
-        raise JournalValidationError(
-            "type",
-            "GEAR_MAINTENANCE type requires a gear item reference and cannot be added without initial type data.",
-        )
+        # GEAR_MAINTENANCE requires initial data and cannot be created with defaults.
+        # Data is either populated by _process_journal_type_data during creation
+        # or required in add_type_to_journal.
+        pass
     # EVENT and PHOTO_ALBUM types require additional data (calendar_id, immich_album_id)
     # These will be created when the user updates the type data
 
@@ -3247,6 +3245,18 @@ async def add_type_to_journal(
             f"Invalid journal type: {type_request.data.attributes.journal_type}",
         ) from e
 
+    # GEAR_MAINTENANCE requires initial type data to be added successfully
+    if (
+        journal_type == JournalType.GEAR_MAINTENANCE
+        and not type_request.data.attributes.type_data
+    ):
+        from core_shared.models.journals.exceptions import JournalValidationError
+
+        raise JournalValidationError(
+            "type_data",
+            "GEAR_MAINTENANCE type requires initial type data (gear_item_id) to be created.",
+        )
+
     # Add type with automatic dependency resolution.
     # Returns all types actually added (requested type + auto-resolved dependencies).
     added_types = await journal_service.add_type_to_journal(
@@ -3261,6 +3271,36 @@ async def add_type_to_journal(
             mood_data_repo,
             plan_data_repo,
             travel_data_repo,
+            fitness_data_repo,
+            outdoor_activity_data_repo,
+            bushwalking_data_repo,
+            jogging_data_repo,
+            abseiling_data_repo,
+            abseil_pitch_repo,
+            canyoning_data_repo,
+            caving_data_repo,
+            canoeing_data_repo,
+            climbing_data_repo,
+            kayaking_data_repo,
+            skiing_data_repo,
+            snorkelling_data_repo,
+            diving_data_repo,
+            downhill_skiing_data_repo,
+            outdoor_planning_data_repo,
+            gear_maintenance_data_repo,
+        )
+
+    # Process initial type data if provided
+    if type_request.data.attributes.type_data:
+        wrapped_type_data = {journal_type.value: type_request.data.attributes.type_data}
+        await _process_journal_type_data(
+            journal_id,
+            wrapped_type_data,
+            calendar_info_repo,
+            photo_album_data_repo,
+            plan_data_repo,
+            travel_data_repo,
+            mood_data_repo,
             fitness_data_repo,
             outdoor_activity_data_repo,
             bushwalking_data_repo,
