@@ -20,7 +20,7 @@ RUN addgroup -g 1001 -S nodejs && \
 WORKDIR /app
 
 # Copy package files for dependency installation
-COPY frontend/package.json frontend/pnpm-lock.yaml* ./
+COPY frontend/package.json frontend/pnpm-lock.yaml* frontend/pnpm-workspace.yaml* ./
 
 # Install dependencies - always install all dependencies for build process
 # Temporarily unset NODE_ENV to ensure dev dependencies are installed
