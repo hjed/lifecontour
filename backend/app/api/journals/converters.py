@@ -25,6 +25,7 @@ from core_shared.models.journals import (
     DownhillSkiingData,
     FitnessData,
     GearItem,
+    GearMaintenanceData,
     JoggingData,
     Journal,
     JournalContactRelationship,
@@ -58,6 +59,7 @@ from app.api.journals.schemas import (
     FitnessDataSchema,
     GearItemAttributes,
     GearItemResource,
+    GearMaintenanceDataSchema,
     JoggingDataSchema,
     JournalAttributes,
     JournalContactRelationshipSchema,
@@ -568,6 +570,16 @@ class TypeDataConverter:
         return OutdoorPlanningDataSchema(
             topics=data.topics,
             activity_types=data.activity_types,
+        ).model_dump(exclude_none=True)
+
+    @staticmethod
+    def gear_maintenance_data_to_schema(data: GearMaintenanceData) -> dict[str, Any]:
+        """Convert GearMaintenanceData domain entity to API schema."""
+        return GearMaintenanceDataSchema(
+            gear_item_id=str(data.gear_item_id),
+            maintenance_type=data.maintenance_type,
+            activity_types=data.activity_types,
+            retirement_reason=data.retirement_reason,
         ).model_dump(exclude_none=True)
 
 

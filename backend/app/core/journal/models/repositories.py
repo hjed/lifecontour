@@ -28,6 +28,7 @@ from core_shared.models.journals import (
     DownhillSkiingData,
     FitnessData,
     GearItem,
+    GearMaintenanceData,
     JoggingData,
     Journal,
     JournalContactRelationship,
@@ -2198,5 +2199,53 @@ class OutdoorPlanningDataRepository(ABC):
 
         Args:
             journal_id: The journal ID to delete outdoor planning data for
+        """
+        pass
+
+
+class GearMaintenanceDataRepository(ABC):
+    """
+    Repository interface for gear maintenance data (GEAR_MAINTENANCE type) operations.
+
+    A journal has the GEAR_MAINTENANCE type if a GearMaintenanceData row exists for its journal_id.
+    """
+
+    @abstractmethod
+    async def find_by_journal_id(self, journal_id: int) -> GearMaintenanceData | None:
+        """
+        Find gear maintenance data by journal ID.
+
+        Args:
+            journal_id: The journal ID to look up
+
+        Returns:
+            The GearMaintenanceData if found, None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def save(self, data: GearMaintenanceData) -> GearMaintenanceData:
+        """
+        Save gear maintenance data (insert or update).
+
+        This effectively adds or updates the GEAR_MAINTENANCE type for a journal.
+
+        Args:
+            data: The gear maintenance data to save
+
+        Returns:
+            The saved data with updated timestamps
+        """
+        pass
+
+    @abstractmethod
+    async def delete(self, journal_id: int) -> None:
+        """
+        Delete gear maintenance data by journal ID.
+
+        This effectively removes the GEAR_MAINTENANCE type from a journal.
+
+        Args:
+            journal_id: The journal ID to delete gear maintenance data for
         """
         pass

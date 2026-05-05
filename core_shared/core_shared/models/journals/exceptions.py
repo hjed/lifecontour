@@ -348,3 +348,11 @@ class OutdoorPlanningDataValidationError(JournalDomainError):
     def __init__(self, field: str, message: str):
         super().__init__(f"{field}: {message}", 400)
         self.field = field
+
+
+class GearMaintenanceDataValidationError(JournalDomainError):
+    """Exception raised when gear maintenance data validation fails."""
+
+    def __init__(self, field: str, message: str):
+        super().__init__(f"{field}: {message}", 400)
+        self.field = field
