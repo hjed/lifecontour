@@ -85,6 +85,7 @@ import {
   type JoggingData,
   type BushwalkingData,
   type OutdoorPlanningData,
+  type GearMaintenanceData,
   ActivityTemplateResource,
   AbseilPitch,
 } from '@/types/journals';
@@ -109,6 +110,7 @@ import {
   DivingTypeEditor,
   DownhillSkiingTypeEditor,
   OutdoorPlanningTypeEditor,
+  GearMaintenanceTypeEditor,
 } from './type-editors';
 import { JournalSearchCombobox } from './JournalSearchCombobox';
 
@@ -153,6 +155,7 @@ interface TypeDataState {
   [JournalType.DIVING]?: Record<string, never>;
   [JournalType.DOWNHILL_SKIING]?: Record<string, never>;
   [JournalType.OUTDOOR_PLANNING]?: OutdoorPlanningData;
+  [JournalType.GEAR_MAINTENANCE]?: GearMaintenanceData;
 }
 
 type TypeDataJournalType = keyof TypeDataState;
@@ -178,6 +181,7 @@ const TYPE_DATA_JOURNAL_TYPES = new Set<TypeDataJournalType>([
   JournalType.DIVING,
   JournalType.DOWNHILL_SKIING,
   JournalType.OUTDOOR_PLANNING,
+  JournalType.GEAR_MAINTENANCE,
 ]);
 
 function hasTypeDataJournalType(
@@ -209,6 +213,7 @@ const typeOptions = [
   { value: JournalType.DIVING, label: 'Diving' },
   { value: JournalType.DOWNHILL_SKIING, label: 'Downhill Skiing' },
   { value: JournalType.OUTDOOR_PLANNING, label: 'Outdoor Planning' },
+  { value: JournalType.GEAR_MAINTENANCE, label: 'Gear Maintenance' },
 ];
 
 /**
@@ -345,6 +350,7 @@ const TYPE_LABELS: Record<JournalType, string> = {
   [JournalType.DIVING]: 'Diving',
   [JournalType.DOWNHILL_SKIING]: 'Downhill Skiing',
   [JournalType.OUTDOOR_PLANNING]: 'Outdoor Planning',
+  [JournalType.GEAR_MAINTENANCE]: 'Gear Maintenance',
 };
 
 function getJournalTypeTestId(type: JournalType): string {
@@ -653,6 +659,15 @@ export function JournalCreateForm({
       handleTypeDataChange(
         JournalType.OUTDOOR_PLANNING,
         data as OutdoorPlanningData
+      ),
+    [handleTypeDataChange]
+  );
+
+  const handleGearMaintenanceChange = useCallback(
+    (data: unknown) =>
+      handleTypeDataChange(
+        JournalType.GEAR_MAINTENANCE,
+        data as GearMaintenanceData
       ),
     [handleTypeDataChange]
   );
@@ -1060,6 +1075,12 @@ export function JournalCreateForm({
                       <OutdoorPlanningTypeEditor
                         createMode
                         onChange={handleOutdoorPlanningChange}
+                      />
+                    )}
+                    {type === JournalType.GEAR_MAINTENANCE && (
+                      <GearMaintenanceTypeEditor
+                        createMode
+                        onChange={handleGearMaintenanceChange}
                       />
                     )}
                   </CardContent>

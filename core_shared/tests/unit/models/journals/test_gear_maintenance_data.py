@@ -13,13 +13,13 @@ def test_gear_maintenance_data_valid() -> None:
         journal_id=1,
         gear_item_id=gear_item_id,
         maintenance_type="routine maintenance",
-        activity_types=["Canyoning", "Abseiling"],
+        activity_types=["canyoning", "abseiling_trip"],
     )
 
     assert data.journal_id == 1
     assert data.gear_item_id == gear_item_id
     assert data.maintenance_type == "routine maintenance"
-    assert data.activity_types == ["Canyoning", "Abseiling"]
+    assert data.activity_types == ["canyoning", "abseiling_trip"]
     assert data.retirement_reason is None
 
 

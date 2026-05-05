@@ -35,6 +35,7 @@ import type {
   TravelData,
   FitnessData,
   OutdoorPlanningData,
+  GearMaintenanceData,
 } from '@/types/journals';
 import { cn } from '@/lib/utils';
 import {
@@ -58,6 +59,7 @@ import {
   DivingTypeEditor,
   DownhillSkiingTypeEditor,
   OutdoorPlanningTypeEditor,
+  GearMaintenanceTypeEditor,
 } from './type-editors';
 
 /** Union of all type-specific data shapes supported by JournalTypeSection. */
@@ -112,11 +114,12 @@ const TYPE_SECTION_LABELS: Record<JournalType, string> = {
   [JournalType.CANOEING]: 'Canoeing',
   [JournalType.CLIMBING]: 'Climbing Data',
   [JournalType.KAYAKING]: 'Kayaking Data',
-  [JournalType.CROSS_COUNTRY_SKIING]: 'Cross-Country Skiing Data',
-  [JournalType.SNORKELLING]: 'Snorkelling Data',
-  [JournalType.DIVING]: 'Diving Data',
-  [JournalType.DOWNHILL_SKIING]: 'Downhill Skiing Data',
+  [JournalType.CROSS_COUNTRY_SKIING]: 'Cross-Country Skiing',
+  [JournalType.SNORKELLING]: 'Snorkelling',
+  [JournalType.DIVING]: 'Diving',
+  [JournalType.DOWNHILL_SKIING]: 'Downhill Skiing',
   [JournalType.OUTDOOR_PLANNING]: 'Outdoor Planning',
+  [JournalType.GEAR_MAINTENANCE]: 'Gear Maintenance',
 };
 
 /**
@@ -380,6 +383,14 @@ function TypeSpecificContent({
           journalId={journalId}
           data={typeData as OutdoorPlanningData | undefined}
           onSave={makeEditorSave<OutdoorPlanningData>(onSave, type)}
+        />
+      );
+    case JournalType.GEAR_MAINTENANCE:
+      return (
+        <GearMaintenanceTypeEditor
+          journalId={journalId}
+          data={typeData as GearMaintenanceData | undefined}
+          onSave={makeEditorSave<GearMaintenanceData>(onSave, type)}
         />
       );
     case JournalType.NOTE:

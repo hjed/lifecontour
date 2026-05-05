@@ -1033,6 +1033,10 @@ async def _fetch_children_types(
             types.append(JournalType.DIVING.value)
         if await downhill_skiing_data_repo.find_by_journal_id(journal_id):
             types.append(JournalType.DOWNHILL_SKIING.value)
+        if await outdoor_planning_data_repo.find_by_journal_id(journal_id):
+            types.append(JournalType.OUTDOOR_PLANNING.value)
+        if await gear_maintenance_data_repo.find_by_journal_id(journal_id):
+            types.append(JournalType.GEAR_MAINTENANCE.value)
 
         result[journal_id] = types
 

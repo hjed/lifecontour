@@ -1,5 +1,6 @@
 import dataclasses
 from collections.abc import Sequence
+from datetime import datetime
 from uuid import UUID
 
 from core_shared.models.journals.constants import (
@@ -8,6 +9,8 @@ from core_shared.models.journals.constants import (
     VALID_MAINTENANCE_TYPES,
 )
 from core_shared.models.journals.exceptions import GearMaintenanceDataValidationError
+
+from .outdoor_activity_subtypes import OutdoorActivitySubtype
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -22,8 +25,8 @@ class GearMaintenanceData:
     maintenance_type: str
     activity_types: list[str] | None = None
     retirement_reason: str | None = None
-    created_at: str | None = None
-    updated_at: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     def __post_init__(self) -> None:
         """Validate data fields upon initialization."""
@@ -60,10 +63,17 @@ class GearMaintenanceData:
                 raise GearMaintenanceDataValidationError(
                     "activity_types", "Must be a list of strings or None"
                 )
+
+            valid_subtypes = {s.value for s in OutdoorActivitySubtype}
             for item in self.activity_types:
                 if not isinstance(item, str):
                     raise GearMaintenanceDataValidationError(
                         "activity_types", "All items must be strings"
+                    )
+                if item not in valid_subtypes:
+                    raise GearMaintenanceDataValidationError(
+                        "activity_types",
+                        f"Invalid activity type. Must be one of: {', '.join(sorted(valid_subtypes))}",
                     )
 
         # Validate retirement_reason
