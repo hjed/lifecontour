@@ -34,7 +34,7 @@ from core_shared.models.contacts.serialization import serialize_contact
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.sync_metadata import SyncStatus
 from core_shared.repositories import SyncJobRepository
-from core_shared.telemetry import setup_telemetry
+from core_shared.telemetry import setup_telemetry, trace_arq_job
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import text
@@ -1578,6 +1578,7 @@ async def _check_job_cancelled(session: AsyncSession, job_id: str) -> bool:
     return False
 
 
+@trace_arq_job
 async def periodic_sync_all_accounts(ctx: dict[str, Any]) -> dict[str, Any]:
     """
     Periodic sync wrapper that syncs all active Google accounts.
@@ -1728,6 +1729,7 @@ async def periodic_sync_all_accounts(ctx: dict[str, Any]) -> dict[str, Any]:
         }
 
 
+@trace_arq_job
 async def sync_google_contacts(
     ctx: dict[str, Any],
     google_account_email: str,
@@ -2564,6 +2566,7 @@ async def process_tag_event(
         raise
 
 
+@trace_arq_job
 async def push_local_contacts_to_google(
     ctx: dict[str, Any], google_account_email: str, user_id: str | int = 1
 ) -> dict[str, Any]:
@@ -2920,6 +2923,7 @@ async def _load_calendar_sync_token(
     return cast(str | None, result.scalar())
 
 
+@trace_arq_job
 async def sync_calendar_events(
     ctx: dict[str, Any],
     google_account_email: str,

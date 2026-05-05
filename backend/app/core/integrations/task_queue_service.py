@@ -102,12 +102,21 @@ class TaskQueueService:
             # Get reusable ARQ pool for job enqueueing
             pool = await self._get_arq_pool()
 
+            from opentelemetry.propagate import inject
+
+            carrier: dict[str, str] = {}
+            try:
+                inject(carrier)
+            except Exception:
+                pass
+
             # Enqueue the sync job
             job = await pool.enqueue_job(
                 "sync_google_contacts",
                 google_account_email,
                 user_id,
                 sync_type,
+                otel_carrier=carrier,
                 _defer_until=None,  # Run immediately
                 _queue_name=ARQ_QUEUE_NAME,
             )
@@ -184,11 +193,20 @@ class TaskQueueService:
         try:
             pool = await self._get_arq_pool()
 
+            from opentelemetry.propagate import inject
+
+            carrier: dict[str, str] = {}
+            try:
+                inject(carrier)
+            except Exception:
+                pass
+
             job = await pool.enqueue_job(
                 "sync_calendar_events",
                 google_account_email,
                 user_id,
                 sync_type,
+                otel_carrier=carrier,
                 _defer_until=None,
                 _queue_name=ARQ_QUEUE_NAME,
             )
@@ -265,10 +283,19 @@ class TaskQueueService:
         try:
             pool = await self._get_arq_pool()
 
+            from opentelemetry.propagate import inject
+
+            carrier: dict[str, str] = {}
+            try:
+                inject(carrier)
+            except Exception:
+                pass
+
             job = await pool.enqueue_job(
                 "sync_strava_activities",
                 str(user_id),
                 sync_type,
+                otel_carrier=carrier,
                 _defer_until=None,
                 _queue_name=STRAVA_ARQ_QUEUE_NAME,
             )

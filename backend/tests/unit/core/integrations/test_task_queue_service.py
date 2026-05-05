@@ -5,7 +5,7 @@ Tests the ARQ task queue integration for enqueueing jobs
 and checking job status.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 from arq.connections import RedisSettings
@@ -107,6 +107,7 @@ class TestTaskQueueService:
                 "test@example.com",
                 123,
                 "smart",
+                otel_carrier=ANY,
                 _defer_until=None,
                 _queue_name=ARQ_QUEUE_NAME,
             )
@@ -466,6 +467,7 @@ class TestTaskQueueService:
                 "test@example.com",
                 123,
                 "smart",
+                otel_carrier=ANY,
                 _defer_until=None,
                 _queue_name=ARQ_QUEUE_NAME,
             )
