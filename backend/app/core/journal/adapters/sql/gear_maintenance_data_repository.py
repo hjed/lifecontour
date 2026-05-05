@@ -53,7 +53,7 @@ class SqlGearMaintenanceDataRepository(GearMaintenanceDataRepository):
         """Save gear maintenance data (insert or update)."""
         # Convert list to JSON string if needed for SQLAlchemy parameterized queries
         activity_types_json = (
-            json.dumps(data.activity_types) if data.activity_types else "[]"
+            json.dumps(data.activity_types) if data.activity_types is not None else None
         )
 
         query = text(

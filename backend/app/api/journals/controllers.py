@@ -3938,7 +3938,12 @@ async def _update_gear_maintenance_type_data(
             new_data = GearMaintenanceData(journal_id=journal_id, **updates)
         await gear_maintenance_data_repo.save(new_data)
     except GearMaintenanceDataValidationError as e:
-        raise JournalValidationError(e.field, str(e)) from e
+        # Extract the original message to prevent "field: field: message" duplication
+        raw_msg = str(e)
+        prefix = f"{e.field}: "
+        if raw_msg.startswith(prefix):
+            raw_msg = raw_msg[len(prefix) :]
+        raise JournalValidationError(e.field, raw_msg) from e
 
 
 async def _update_caving_type_data(
