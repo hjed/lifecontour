@@ -213,5 +213,7 @@ class StravaDataTransformer:
             fitness_data_strava_activity_id=str(activity.id),
             elevation_loss=elevation_loss,
             gpx_xml=gpx_xml,
-            version_hash=hashlib.sha256(activity.start_date.encode()).hexdigest(),
+            version_hash=hashlib.sha256(
+                activity.model_dump_json().encode()
+            ).hexdigest(),
         )
