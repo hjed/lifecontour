@@ -398,6 +398,27 @@ class OutdoorPlanningDataSchema(BaseModel):
     )
 
 
+class GearMaintenanceDataSchema(BaseModel):
+    """Gear maintenance data for GEAR_MAINTENANCE type journals."""
+
+    gear_item_id: str = Field(
+        ...,
+        description="UUID of the gear item being maintained",
+    )
+    maintenance_type: str = Field(
+        ...,
+        description="Type of maintenance performed (e.g. routine inspection, retiring gear)",
+    )
+    activity_types: list[str] | None = Field(
+        default=None,
+        description="List of related outdoor activity subtypes",
+    )
+    retirement_reason: str | None = Field(
+        default=None,
+        description="Reason for retirement (required if maintenance_type is 'retiring gear')",
+    )
+
+
 class KayakingDataSchema(BaseModel):
     """Kayaking data for KAYAKING type journals."""
 

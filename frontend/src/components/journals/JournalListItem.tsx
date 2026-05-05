@@ -30,6 +30,7 @@ import {
   Ban,
   GitBranch,
   MapPin,
+  Wrench,
 } from 'lucide-react';
 import { differenceInCalendarDays, parseISO } from 'date-fns';
 
@@ -75,6 +76,7 @@ const TYPE_ICONS: Record<
   [JournalType.DIVING]: ArrowDownToLine,
   [JournalType.DOWNHILL_SKIING]: Snowflake,
   [JournalType.OUTDOOR_PLANNING]: MapPin,
+  [JournalType.GEAR_MAINTENANCE]: Wrench,
 };
 
 /**

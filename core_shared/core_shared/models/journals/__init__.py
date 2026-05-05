@@ -76,6 +76,7 @@ from .exceptions import (
     DownhillSkiingDataValidationError,
     FitnessDataValidationError,
     GearItemValidationError,
+    GearMaintenanceDataValidationError,
     GPXParsingError,
     JoggingDataValidationError,
     JournalCycleError,
@@ -105,6 +106,7 @@ from .exceptions import (
 )
 from .fitness_data import FitnessData
 from .gear_item import GearItem
+from .gear_maintenance_data import GearMaintenanceData
 from .jogging_data import JoggingData
 from .journal_contact_relationship import JournalContactRelationship
 from .journal_relationship_types import JournalContactRelationshipType
@@ -243,6 +245,7 @@ __all__ = [
     "AbseilingDataValidationError",
     "ActivityTemplateValidationError",
     "GearItemValidationError",
+    "GearMaintenanceDataValidationError",
     "TemplatePitchValidationError",
     "CanoeingDataValidationError",
     "CanyoningDataValidationError",

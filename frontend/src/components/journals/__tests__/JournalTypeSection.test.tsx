@@ -82,13 +82,17 @@ describe('JournalTypeSection', () => {
       { type: JournalType.CANYONING, label: 'Canyoning' },
       { type: JournalType.CLIMBING, label: 'Climbing Data' },
       { type: JournalType.KAYAKING, label: 'Kayaking Data' },
-      {
-        type: JournalType.CROSS_COUNTRY_SKIING,
-        label: 'Cross-Country Skiing Data',
-      },
-      { type: JournalType.SNORKELLING, label: 'Snorkelling Data' },
-      { type: JournalType.DIVING, label: 'Diving Data' },
-      { type: JournalType.DOWNHILL_SKIING, label: 'Downhill Skiing Data' },
+      { type: JournalType.CROSS_COUNTRY_SKIING, label: 'Cross-Country Skiing' },
+      { type: JournalType.SNORKELLING, label: 'Snorkelling' },
+      { type: JournalType.DIVING, label: 'Diving' },
+      { type: JournalType.DOWNHILL_SKIING, label: 'Downhill Skiing' },
+      { type: JournalType.FITNESS, label: 'Fitness Activity' },
+      { type: JournalType.OUTDOOR_ACTIVITY, label: 'Outdoor Activity' },
+      { type: JournalType.BUSHWALKING, label: 'Bushwalking' },
+      { type: JournalType.CAVING, label: 'Caving' },
+      { type: JournalType.CANOEING, label: 'Canoeing' },
+      { type: JournalType.OUTDOOR_PLANNING, label: 'Outdoor Planning' },
+      { type: JournalType.GEAR_MAINTENANCE, label: 'Gear Maintenance' },
     ];
 
     types.forEach(({ type, label }) => {

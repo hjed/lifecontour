@@ -430,20 +430,20 @@ Deliver OUTDOOR_PLANNING as a complete vertical slice. This type extends EVENT r
 Deliver GEAR_MAINTENANCE as a complete vertical slice with inline gear item creation.
 
 **Acceptance Criteria:**
-- [ ] Migration creates `journal_gear_maintenance_data` table (journal_id PK/FK, gear_item_id UUID FK, maintenance_type string, activity_types JSONB/text[] nullable, retirement_reason string nullable, timestamps)
-- [ ] GEAR_MAINTENANCE added to `JournalType` enum with no dependencies (standalone type)
-- [ ] `GearMaintenanceData` domain entity with validation (gear_item_id required, maintenance_type constrained to: "retiring gear", "repairing gear", "routine inspection", "routine maintenance"; retirement_reason required when maintenance_type is "retiring gear")
-- [ ] `GearMaintenanceDataRepository` interface and SQL implementation
-- [ ] Type system updated: dependency map, table mapping, NOTE detection JOINs
-- [ ] API schema (`GearMaintenanceDataSchema`), converter, and controller integration
-- [ ] MCP handles GEAR_MAINTENANCE through existing generic journal tools
-- [ ] Frontend: `GearMaintenanceTypeEditor` with gear item selector (searchable combobox with inline "Create Gear Item" dialog), maintenance type dropdown, activity types multi-select, conditional retirement reason field
-- [ ] DI provider registration
+- [x] Migration creates `journal_gear_maintenance_data` table (journal_id PK/FK, gear_item_id UUID FK, maintenance_type string, activity_types JSONB/text[] nullable, retirement_reason string nullable, timestamps)
+- [x] GEAR_MAINTENANCE added to `JournalType` enum with no dependencies (standalone type)
+- [x] `GearMaintenanceData` domain entity with validation (gear_item_id required, maintenance_type constrained to: "retiring gear", "repairing gear", "routine inspection", "routine maintenance"; retirement_reason required when maintenance_type is "retiring gear")
+- [x] `GearMaintenanceDataRepository` interface and SQL implementation
+- [x] Type system updated: dependency map, table mapping, NOTE detection JOINs
+- [x] API schema (`GearMaintenanceDataSchema`), converter, and controller integration
+- [x] MCP handles GEAR_MAINTENANCE through existing generic journal tools
+- [x] Frontend: `GearMaintenanceTypeEditor` with gear item selector (searchable combobox with inline "Create Gear Item" dialog), maintenance type dropdown, activity types multi-select, conditional retirement reason field
+- [x] DI provider registration
 
 **Required Test Coverage:**
-- **Unit:** GearMaintenanceData entity validation (maintenance_type constraints, retirement_reason conditional requirement).
-- **Integration:** repository CRUD, API test creating gear maintenance journal with gear item reference.
-- **E2E:** create gear item inline from maintenance journal form, select existing gear item, create retirement maintenance with reason.
+- **Unit:** ✅ GearMaintenanceData entity validation (maintenance_type constraints, retirement_reason conditional requirement).
+- **Integration:** ✅ repository CRUD, API test creating gear maintenance journal with gear item reference.
+- **E2E:** ✅ create gear item inline from maintenance journal form, select existing gear item, create retirement maintenance with reason.
 
 ---
 

@@ -117,3 +117,13 @@ VALID_RAPIDS_GRADES: list[str] = ["I", "II", "III", "IV", "V", "VI"]
 # GearItem constants (gear_items table)
 MAX_GEAR_ITEM_NAME_LENGTH: int = 200
 MAX_GEAR_ITEM_FIELD_LENGTH: int = 200  # model, serial_number, manufacturer
+
+# GearMaintenanceData constants (GEAR_MAINTENANCE type)
+VALID_MAINTENANCE_TYPES: list[str] = [
+    "retiring gear",
+    "repairing gear",
+    "routine inspection",
+    "routine maintenance",
+]
+MAX_MAINTENANCE_TYPE_LENGTH: int = 100
+MAX_RETIREMENT_REASON_LENGTH: int = 500

@@ -49,6 +49,9 @@ from app.core.journal.adapters.sql.fitness_data_repository import (
 from app.core.journal.adapters.sql.gear_item_repository import (
     SqlGearItemRepository,
 )
+from app.core.journal.adapters.sql.gear_maintenance_data_repository import (
+    SqlGearMaintenanceDataRepository,
+)
 from app.core.journal.adapters.sql.jogging_data_repository import (
     SqlJoggingDataRepository,
 )
@@ -95,6 +98,7 @@ from app.core.journal.models.repositories import (
     DownhillSkiingDataRepository,
     FitnessDataRepository,
     GearItemRepository,
+    GearMaintenanceDataRepository,
     JoggingDataRepository,
     JournalContactRelationshipRepository,
     JournalRepository,
@@ -209,6 +213,13 @@ class JournalProvider(Provider):
     ) -> OutdoorPlanningDataRepository:
         """Provide an OutdoorPlanningDataRepository instance."""
         return SqlOutdoorPlanningDataRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def gear_maintenance_data_repository(
+        self, connection: AsyncConnection
+    ) -> GearMaintenanceDataRepository:
+        """Provide a GearMaintenanceDataRepository instance."""
+        return SqlGearMaintenanceDataRepository(connection)
 
     @provide(scope=Scope.REQUEST)
     def bushwalking_data_repository(

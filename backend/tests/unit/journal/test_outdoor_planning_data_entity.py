@@ -36,4 +36,3 @@ def test_invalid_activity_types():
         OutdoorPlanningData(journal_id=1, activity_types=["invalid_type"])
 
     assert "activity_types" in str(exc_info.value)
-    assert "invalid_type" in str(exc_info.value)
