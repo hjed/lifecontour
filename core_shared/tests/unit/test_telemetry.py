@@ -30,6 +30,7 @@ async def test_trace_arq_job_decorator_extracts_context_and_starts_span() -> Non
 
             @trace_arq_job
             async def dummy_job(ctx: dict[str, Any], *args: Any, **kwargs: Any) -> str:
+                assert "otel_carrier" not in kwargs
                 return "success"
 
             ctx = {"job_id": "test-job-123", "job_name": "dummy_job"}

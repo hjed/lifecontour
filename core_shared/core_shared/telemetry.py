@@ -140,6 +140,8 @@ def trace_arq_job(func: Any) -> Any:
 
     @wraps(func)
     async def wrapper(ctx: dict[str, Any], *args: Any, **kwargs: Any) -> Any:
+        otel_carrier = kwargs.pop("otel_carrier", None)
+
         if not _TELEMETRY_SETUP_DONE:
             return await func(ctx, *args, **kwargs)
 
@@ -150,7 +152,6 @@ def trace_arq_job(func: Any) -> Any:
             return await func(ctx, *args, **kwargs)
 
         tracer = trace.get_tracer(__name__)
-        otel_carrier = kwargs.get("otel_carrier")
         otel_ctx = extract(otel_carrier) if otel_carrier else None
 
         job_id = ctx.get("job_id", "unknown")
