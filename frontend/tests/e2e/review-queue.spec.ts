@@ -494,4 +494,135 @@ test.describe('Journal Review Queue', () => {
     // The conflicting pair should still be in the queue
     await expect(sidebar).toContainText('Conflict', { timeout: 10000 });
   });
+
+  test('should merge fitness journals via review queue and preserve type data', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const page = authenticatedPage;
+    const dataManager = new (await import('./data-management')).TestDataManager(
+      page
+    );
+    const contactTestHelpers = new ContactTestHelpers(page);
+
+    await dataManager.clearAllJournals();
+
+    const d = new Date();
+    d.setHours(12, 0, 0, 0);
+    const startStr = d.toISOString();
+    d.setHours(13, 0, 0, 0);
+    const endStr = d.toISOString();
+
+    // Create target FITNESS journal (simulating a Strava activity)
+    const targetJournal = await dataManager.createJournal({
+      title: 'Morning Run',
+      content: 'Easy jog around the park',
+      event_date_range: { start: startStr, end: endStr },
+      types: ['fitness'],
+      type_data: {
+        FITNESS: {
+          distance: 5000,
+          elevation_gain: 50,
+          duration: 1800,
+        },
+      },
+      exactTitle: true,
+    });
+
+    // Create candidate FITNESS journal (simulating a second Strava activity)
+    const candidateJournal = await dataManager.createJournal({
+      title: 'Morning Run',
+      content: 'Easy jog around the park',
+      event_date_range: { start: startStr, end: endStr },
+      types: ['fitness'],
+      type_data: {
+        FITNESS: {
+          distance: 5000,
+          elevation_gain: 50,
+          duration: 1800,
+        },
+      },
+      exactTitle: true,
+    });
+
+    // Create review item linking the two
+    await dataManager.createReviewItem({
+      source_journal_id: Number.parseInt(targetJournal.id),
+      candidate_journal_id: Number.parseInt(candidateJournal.id),
+      reason: 'duplicate_journal',
+      confidence_score: 0.92,
+    });
+
+    testCleanup(async () => {
+      await dataManager.clearAllJournals();
+    });
+
+    // Navigate to journals page and open review queue
+    await contactTestHelpers.navigateToAuthenticatedPage('/journals');
+    const queueBtn = page.getByRole('button', { name: /Review Queue/i });
+    await expect(queueBtn).toBeVisible();
+    await queueBtn.click();
+
+    const sidebar = page.locator('[role="dialog"]', {
+      hasText: 'Review Queue',
+    });
+    await expect(sidebar).toBeVisible();
+    await expect(sidebar).toContainText('92% Match');
+
+    // Click "Confirm Match" to start merge flow
+    const confirmBtn = sidebar
+      .getByRole('button', { name: /Confirm Match/i })
+      .first();
+    await confirmBtn.click();
+
+    // Resolution dialog should appear (identical journals → "Confirm Merge" mode)
+    const resolutionDialog = page.locator('[role="dialog"]', {
+      hasText: /Confirm Merge|Resolve Merge/,
+    });
+    await expect(resolutionDialog).toBeVisible({ timeout: 15000 });
+
+    // Click the merge button
+    const mergeBtn = resolutionDialog.getByRole('button', {
+      name: /Merge/i,
+    });
+    await mergeBtn.click();
+
+    // Wait for success toast
+    await expect(page.getByText('Journals merged successfully')).toBeVisible({
+      timeout: 15000,
+    });
+
+    // Verify the target journal still exists and has fitness type data.
+    // In the review queue merge flow, the candidate journal is the merge source
+    // that gets deleted. The source_journal_id in the review item is the target.
+    // We verify whichever journal survived has fitness data.
+    const survivingId = targetJournal.id;
+    const deletedId = candidateJournal.id;
+
+    // Try the target first; if it was deleted, swap
+    const targetResponse = await page.request.get(
+      `/api/journals/${survivingId}`
+    );
+    const candidateResponse = await page.request.get(
+      `/api/journals/${deletedId}`
+    );
+
+    // One must exist, one must be 404
+    const survivorResponse = targetResponse.ok()
+      ? targetResponse
+      : candidateResponse;
+    const deletedResponse = targetResponse.ok()
+      ? candidateResponse
+      : targetResponse;
+
+    expect(survivorResponse.ok()).toBeTruthy();
+    expect(deletedResponse.status()).toBe(404);
+
+    // Verify the surviving journal has fitness type data
+    const survivorData = await survivorResponse.json();
+    const typeData = survivorData.data.attributes.type_data;
+    expect(typeData).toBeDefined();
+    expect(typeData.fitness).toBeDefined();
+    expect(typeData.fitness.distance).toBe(5000);
+  });
 });

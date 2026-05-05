@@ -369,12 +369,12 @@ Implement Strava webhook handling and the ARQ worker container for background pr
 > This task can begin with basic type mapping (FITNESS-only fallback for unmapped types) before ITER9 completes, but the full activity type mapping table requires ITER9-003 and ITER9-002.
 
 **Acceptance Criteria (task-level):**
-- [ ] Strava activities create journals with correct type hierarchy
-- [ ] Fitness data populated (distance, elevation, duration, calories, heart rate)
-- [ ] GPX tracks stored as Route entities when GPS data available
-- [ ] Elevation loss calculated from GPX altitude stream
-- [ ] Deduplication by `strava_activity_id`
-- [ ] Imported journals trigger merge review detection for same-day overlaps
+- [x] Strava activities create journals with correct type hierarchy
+- [x] Fitness data populated (distance, elevation, duration, calories, heart rate)
+- [x] GPX tracks stored as Route entities when GPS data available
+- [x] Elevation loss calculated from GPX altitude stream
+- [x] Deduplication by `strava_activity_id`
+- [x] Imported journals trigger merge review detection for same-day overlaps
 
 #### Phase 1: Data Transformation and Type Mapping ✅ COMPLETE
 **PR Size:** ~5–7 files
@@ -432,23 +432,23 @@ Add GPX track persistence, activity deduplication, and sync state tracking to th
 - **E2E:** import activity with GPS track, verify route visible on journal detail page. ✅ 1 E2E test passes (strava-route-display.spec.ts).
 
 
-#### Phase 4: Merge Review Queue Integration
+#### Phase 4: Merge Review Queue Integration ✅ COMPLETE
 **PR Size:** ~3–5 files
 
 Wire Strava imports into the existing merge detection and review pipeline.
 
 **Acceptance Criteria:**
-- [ ] Imported Strava journals emit `journal_review.detect_matches` events (same pattern as Google Calendar flow)
-- [ ] `MatchCandidateDetector` finds same-day overlapping journals and creates `ReviewItem` entries
-- [ ] Multi-activity scenario: second Strava activity on same day flagged as potential match for first
-- [ ] Cross-integration scenario: Strava activity flagged as match for existing Google Calendar EVENT journal
-- [ ] User resolves via existing review queue UI (merge, dismiss, keep separate)
-- [ ] On merge: fitness data, GPX tracks (routes), and external links preserved on target journal via existing `JournalMergeService._move_routes` and `_merge_type_data`
+- [x] Imported Strava journals emit `journal_review.detect_matches` events (same pattern as Google Calendar flow)
+- [x] `MatchCandidateDetector` finds same-day overlapping journals and creates `ReviewItem` entries
+- [x] Multi-activity scenario: second Strava activity on same day flagged as potential match for first
+- [x] Cross-integration scenario: Strava activity flagged as match for existing Google Calendar EVENT journal
+- [x] User resolves via existing review queue UI (merge, dismiss, keep separate)
+- [x] On merge: fitness data, GPX tracks (routes), and external links preserved on target journal via existing `JournalMergeService._move_routes` and `_merge_type_data`
 
 **Required Test Coverage:**
-- **Unit:** match detection for Strava-sourced journals, cross-integration matching rules.
-- **Integration:** import two overlapping Strava activities → verify review items created. Import activity matching existing calendar event → verify cross-integration review item.
-- **E2E:** import overlapping activity, see review queue item, merge via existing UI, verify combined fitness data and routes.
+- **Unit:** match detection for Strava-sourced journals, cross-integration matching rules. ✅
+- **Integration:** import two overlapping Strava activities → verify review items created. Import activity matching existing calendar event → verify cross-integration review item. ✅
+- **E2E:** import overlapping activity, see review queue item, merge via existing UI, verify combined fitness data and routes. ✅
 
 ---
 

@@ -432,3 +432,167 @@ class TestMatchCandidateDetector:
                 incoming_end=base_end,
                 existing_journals=existing,
             )
+
+
+@pytest.mark.unit
+class TestStravaMatchScenarios:
+    """Cross-integration matching scenarios for Strava-sourced journals.
+
+    Tests the specific scenarios called out in the product specification:
+    - Strava activity vs existing Google Calendar EVENT journal
+    - Multiple Strava activities on the same day (multi-day trip, recording restart)
+    - Strava activity with no same-day existing journals
+    """
+
+    @pytest.fixture
+    def mock_assessor(self) -> AsyncMock:
+        return AsyncMock(spec=TitleSimilarityAssessor)
+
+    @pytest.fixture
+    def detector(self, mock_assessor: AsyncMock) -> MatchCandidateDetector:
+        return MatchCandidateDetector(similarity_assessor=mock_assessor)
+
+    async def test_strava_activity_matches_google_calendar_event(
+        self,
+        detector: MatchCandidateDetector,
+        mock_assessor: AsyncMock,
+    ) -> None:
+        """Strava activity should match a Google Calendar EVENT with similar title.
+
+        Product spec scenario: A Strava activity may correspond to a Google
+        Calendar event (e.g., 'Saturday Bushwalk'). The match detector should
+        flag this as a potential duplicate so the user can merge them.
+        """
+        mock_assessor.assess_similarity.return_value = 0.88
+
+        google_event_journal = CandidateJournalData(
+            id=50,
+            title="Saturday Bushwalk",
+            content="Bushwalk with the hiking group at Blue Mountains",
+            event_date_range_start=datetime(2026, 3, 20, 8, 0, tzinfo=UTC),
+            event_date_range_end=datetime(2026, 3, 20, 16, 0, tzinfo=UTC),
+        )
+
+        candidates = await detector.detect_candidates(
+            incoming_title="Saturday Bushwalk",
+            incoming_content="Trail through Blue Mountains",
+            incoming_start=datetime(2026, 3, 20, 8, 30, tzinfo=UTC),
+            incoming_end=datetime(2026, 3, 20, 14, 0, tzinfo=UTC),
+            existing_journals=[google_event_journal],
+        )
+
+        assert len(candidates) == 1
+        assert candidates[0].journal_id == 50
+        assert candidates[0].reason == ReviewReason.DUPLICATE_JOURNAL
+        assert candidates[0].confidence_score == 0.88
+        assert candidates[0].details["candidate_title"] == "Saturday Bushwalk"
+
+    async def test_multi_strava_activity_same_day_recording_restart(
+        self,
+        detector: MatchCandidateDetector,
+        mock_assessor: AsyncMock,
+    ) -> None:
+        """Multi-part Strava activities on same day should be flagged.
+
+        Product spec scenario: A hike may be recorded as two Strava activities
+        (recording restart). When both import, the second should be flagged as
+        a potential match for the first.
+        """
+        mock_assessor.assess_similarity.return_value = 0.92
+
+        first_part = CandidateJournalData(
+            id=60,
+            title="Blue Mountains Hike",
+            content="Part 1 of the hike",
+            event_date_range_start=datetime(2026, 3, 20, 8, 0, tzinfo=UTC),
+            event_date_range_end=datetime(2026, 3, 20, 12, 0, tzinfo=UTC),
+        )
+
+        candidates = await detector.detect_candidates(
+            incoming_title="Blue Mountains Hike",
+            incoming_content="Part 2 of the hike after restart",
+            incoming_start=datetime(2026, 3, 20, 12, 30, tzinfo=UTC),
+            incoming_end=datetime(2026, 3, 20, 16, 0, tzinfo=UTC),
+            existing_journals=[first_part],
+        )
+
+        assert len(candidates) == 1
+        assert candidates[0].journal_id == 60
+        assert candidates[0].reason == ReviewReason.DUPLICATE_JOURNAL
+
+    async def test_strava_activity_no_same_day_existing_journals(
+        self,
+        detector: MatchCandidateDetector,
+        mock_assessor: AsyncMock,
+    ) -> None:
+        """Strava activity with no same-day journals should return no candidates.
+
+        The common case: a new activity on a day with no existing journals
+        should not create any review items.
+        """
+        yesterday_journal = CandidateJournalData(
+            id=70,
+            title="Yesterday's Run",
+            content="Easy jog",
+            event_date_range_start=datetime(2026, 3, 19, 7, 0, tzinfo=UTC),
+            event_date_range_end=datetime(2026, 3, 19, 8, 0, tzinfo=UTC),
+        )
+
+        candidates = await detector.detect_candidates(
+            incoming_title="Morning Run",
+            incoming_content="Easy jog around the park",
+            incoming_start=datetime(2026, 3, 20, 7, 0, tzinfo=UTC),
+            incoming_end=datetime(2026, 3, 20, 8, 0, tzinfo=UTC),
+            existing_journals=[yesterday_journal],
+        )
+
+        assert candidates == []
+        mock_assessor.assess_similarity.assert_not_called()
+
+    async def test_strava_activity_matches_mixed_sources(
+        self,
+        detector: MatchCandidateDetector,
+        mock_assessor: AsyncMock,
+    ) -> None:
+        """Strava activity should match against journals from multiple sources.
+
+        When there are both Google and Strava journals on the same day,
+        matches should be returned for all similar ones.
+        """
+        mock_assessor.assess_similarity.side_effect = [0.85, 0.3, 0.75]
+
+        google_journal = CandidateJournalData(
+            id=80,
+            title="Hiking Trip",
+            content="Calendar event for the hike",
+            event_date_range_start=datetime(2026, 3, 20, 8, 0, tzinfo=UTC),
+            event_date_range_end=datetime(2026, 3, 20, 14, 0, tzinfo=UTC),
+        )
+        unrelated_journal = CandidateJournalData(
+            id=81,
+            title="Dentist Appointment",
+            content="Checkup at 3pm",
+            event_date_range_start=datetime(2026, 3, 20, 15, 0, tzinfo=UTC),
+            event_date_range_end=datetime(2026, 3, 20, 16, 0, tzinfo=UTC),
+        )
+        strava_journal = CandidateJournalData(
+            id=82,
+            title="Hiking Trip - Part 1",
+            content="First segment",
+            event_date_range_start=datetime(2026, 3, 20, 8, 0, tzinfo=UTC),
+            event_date_range_end=datetime(2026, 3, 20, 11, 0, tzinfo=UTC),
+        )
+
+        candidates = await detector.detect_candidates(
+            incoming_title="Hiking Trip - Part 2",
+            incoming_content="Second segment of the hike",
+            incoming_start=datetime(2026, 3, 20, 11, 30, tzinfo=UTC),
+            incoming_end=datetime(2026, 3, 20, 14, 0, tzinfo=UTC),
+            existing_journals=[google_journal, unrelated_journal, strava_journal],
+        )
+
+        # Should find 2 matches (google + strava), skip 1 (dentist)
+        assert len(candidates) == 2
+        # Sorted by confidence descending
+        assert candidates[0].journal_id == 80  # Google: 0.85
+        assert candidates[1].journal_id == 82  # Strava: 0.75

@@ -1458,3 +1458,242 @@ class TestGPXRouteAndSyncMetadata:
             if "sync_metadata" in str(c[0][0].text)
         ]
         assert len(sync_calls) == 0, "No sync_metadata call expected for Google events"
+
+
+class TestStravaMatchDetectionEmission:
+    """Tests that Strava-sourced journal creation correctly emits match detection events.
+
+    Verifies that when match_candidate_detector is wired (Gemini configured),
+    the processor emits a `journal_review.detect_matches` outbox event for
+    Strava journals, ensuring parity with the Google Calendar flow.
+    """
+
+    @pytest.fixture
+    def mock_connection(self) -> AsyncMock:
+        conn = AsyncMock(spec=AsyncConnection)
+        conn.execute = AsyncMock()
+        return conn
+
+    @pytest.fixture
+    def mock_journal_service(self) -> AsyncMock:
+        from app.core.journal.services.journal_service import JournalService
+
+        return AsyncMock(spec=JournalService)
+
+    @pytest.fixture
+    def mock_match_detector(self) -> MagicMock:
+        """Provide a non-None match_candidate_detector to enable emission."""
+        return MagicMock()
+
+    @pytest.fixture
+    def processor_with_detector(
+        self,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+        mock_match_detector: MagicMock,
+    ) -> JournalOutboxEventProcessor:
+        return JournalOutboxEventProcessor(
+            journal_service=mock_journal_service,
+            connection=mock_connection,
+            match_candidate_detector=mock_match_detector,
+        )
+
+    @pytest.fixture
+    def processor_without_detector(
+        self,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> JournalOutboxEventProcessor:
+        return JournalOutboxEventProcessor(
+            journal_service=mock_journal_service,
+            connection=mock_connection,
+        )
+
+    @pytest.mark.asyncio
+    async def test_strava_created_event_emits_match_detection_when_detector_wired(
+        self,
+        processor_with_detector: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Strava-sourced created event should emit journal_review.detect_matches when detector is wired."""
+        event_data = _make_strava_event_data(sync_action="created")
+        event = OutboxEvent(
+            id=uuid4(),
+            event_type="journal_event.created",
+            event_data=event_data,
+            created_at=datetime.now(UTC),
+            retry_count=0,
+        )
+
+        mock_journal_service.create_journal.return_value = _make_journal(
+            title="Morning Run", content="Easy jog"
+        )
+
+        fitness_upsert = MagicMock()
+        fitness_upsert.fetchone.return_value = MagicMock(
+            journal_id=42,
+            distance=10000,
+            elevation_gain=150,
+            elevation_loss=10,
+            duration=3400,
+            calories=500,
+            heart_rate_avg=145,
+            heart_rate_max=175,
+            strava_activity_id="12345",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+
+        mock_connection.execute.side_effect = [
+            _mock_empty_result(),  # _find_external_event_link
+            MagicMock(),  # _save_calendar_info
+            MagicMock(),  # _create_external_event_link
+            fitness_upsert,  # fitness data save
+            MagicMock(),  # _persist_sync_metadata
+            MagicMock(),  # _save_outbox_event (match detection)
+        ]
+
+        result = await processor_with_detector.process_event(event)
+        assert result["status"] == "success"
+
+        # Find the match detection outbox INSERT call
+        outbox_calls = [
+            c
+            for c in mock_connection.execute.call_args_list
+            if "outbox_events" in str(c[0][0].text)
+            and "INSERT" in str(c[0][0].text).upper()
+        ]
+        assert len(outbox_calls) >= 1, (
+            "Expected outbox INSERT for match detection event"
+        )
+
+        # Verify the event type is correct
+        params = outbox_calls[0][0][1]
+        assert params["event_type"] == "journal_review.detect_matches"
+
+    @pytest.mark.asyncio
+    async def test_strava_created_event_skips_match_detection_when_no_detector(
+        self,
+        processor_without_detector: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Strava-sourced event should NOT emit match detection when detector is None."""
+        event_data = _make_strava_event_data(sync_action="created")
+        event = OutboxEvent(
+            id=uuid4(),
+            event_type="journal_event.created",
+            event_data=event_data,
+            created_at=datetime.now(UTC),
+            retry_count=0,
+        )
+
+        mock_journal_service.create_journal.return_value = _make_journal(
+            title="Morning Run", content="Easy jog"
+        )
+
+        fitness_upsert = MagicMock()
+        fitness_upsert.fetchone.return_value = MagicMock(
+            journal_id=42,
+            distance=10000,
+            elevation_gain=150,
+            elevation_loss=10,
+            duration=3400,
+            calories=500,
+            heart_rate_avg=145,
+            heart_rate_max=175,
+            strava_activity_id="12345",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+
+        mock_connection.execute.side_effect = [
+            _mock_empty_result(),  # _find_external_event_link
+            MagicMock(),  # _save_calendar_info
+            MagicMock(),  # _create_external_event_link
+            fitness_upsert,  # fitness data save
+            MagicMock(),  # _persist_sync_metadata
+        ]
+
+        result = await processor_without_detector.process_event(event)
+        assert result["status"] == "success"
+
+        # No outbox INSERT for match detection
+        outbox_calls = [
+            c
+            for c in mock_connection.execute.call_args_list
+            if "outbox_events" in str(c[0][0].text)
+        ]
+        assert len(outbox_calls) == 0, (
+            "No match detection event should be emitted without detector"
+        )
+
+    @pytest.mark.asyncio
+    async def test_strava_match_detection_event_contains_correct_data(
+        self,
+        processor_with_detector: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Match detection event should contain correct journal metadata from Strava."""
+        event_data = _make_strava_event_data(sync_action="created")
+        event = OutboxEvent(
+            id=uuid4(),
+            event_type="journal_event.created",
+            event_data=event_data,
+            created_at=datetime.now(UTC),
+            retry_count=0,
+        )
+
+        mock_journal_service.create_journal.return_value = _make_journal(
+            journal_id=99, title="Morning Run", content="Easy jog"
+        )
+
+        fitness_upsert = MagicMock()
+        fitness_upsert.fetchone.return_value = MagicMock(
+            journal_id=99,
+            distance=10000,
+            elevation_gain=150,
+            elevation_loss=10,
+            duration=3400,
+            calories=500,
+            heart_rate_avg=145,
+            heart_rate_max=175,
+            strava_activity_id="12345",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+
+        mock_connection.execute.side_effect = [
+            _mock_empty_result(),  # _find_external_event_link
+            MagicMock(),  # _save_calendar_info
+            MagicMock(),  # _create_external_event_link
+            fitness_upsert,  # fitness data save
+            MagicMock(),  # _persist_sync_metadata
+            MagicMock(),  # _save_outbox_event (match detection)
+        ]
+
+        result = await processor_with_detector.process_event(event)
+        assert result["status"] == "success"
+
+        # Find the match detection outbox INSERT call and verify payload
+        import json
+
+        outbox_calls = [
+            c
+            for c in mock_connection.execute.call_args_list
+            if "outbox_events" in str(c[0][0].text)
+            and "INSERT" in str(c[0][0].text).upper()
+        ]
+        assert len(outbox_calls) >= 1
+
+        params = outbox_calls[0][0][1]
+        event_payload = json.loads(params["event_data"])
+
+        assert event_payload["journal_id"] == 99
+        assert event_payload["user_id"] == "1"
+        assert event_payload["journal_title"] == "Morning Run"
+        assert event_payload["journal_content"] == "Easy jog"
+        assert "event_date_range_start" in event_payload
+        assert "event_date_range_end" in event_payload
