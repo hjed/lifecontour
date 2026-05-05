@@ -423,7 +423,7 @@ Add GPX track persistence, activity deduplication, and sync state tracking to th
 - [x] GPS availability check: only fetch streams and create routes when `start_latlng` is non-null
 - [x] Elevation loss from `ElevationCalculator` written to `fitness_data.elevation_loss` during import
 - [x] Deduplication: `strava_activity_id` in `fitness_data` checked before import — existing activity treated as update, not duplicate create
-- [x] `SyncMetadata` records: `integration_source="strava"`, `internal_id`=journal ID, `external_id`=Strava activity ID, `version_hash`=hash of activity's last update timestamp
+- [x] `SyncMetadata` records: `integration_source="strava"`, `internal_id`=journal ID, `external_id`=Strava activity ID, `version_hash`=hash of full activity `model_dump_json()` for robust change detection
 - [x] Update flow: when Strava activity is updated (webhook), fetch latest data and update existing journal + route
 
 **Required Test Coverage:**

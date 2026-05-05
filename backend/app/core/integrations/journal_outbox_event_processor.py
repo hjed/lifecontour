@@ -92,10 +92,12 @@ class OutboxSyncData(BaseModel):
     """Strongly-typed Pydantic model for Sync Metadata in outbox event payloads."""
 
     strava_activity_id: str = Field(
-        description="Strava activity ID used as external_id"
+        min_length=1, description="Strava activity ID used as external_id"
     )
     version_hash: str = Field(
-        default="", description="Hash of mutable fields for change detection"
+        min_length=64,
+        max_length=64,
+        description="Hash of mutable fields for change detection",
     )
 
 
@@ -1227,27 +1229,37 @@ class JournalOutboxEventProcessor:
 
         route_repo = SqlRouteRepository(self.connection)
 
-        # Check if a route already exists for this journal
-        existing = await route_repo.find_by_journal_id(journal_id)
+        try:
+            # Check if a route already exists for this journal
+            existing = await route_repo.find_by_journal_id(journal_id)
 
-        if existing:
-            existing_route = existing[0]
-            existing_route.name = route_data.title
-            existing_route.gpx_data = route_data.gpx_xml
-            await route_repo.save(existing_route)
-        else:
-            new_route = Route(
+            if existing:
+                existing_route = existing[0]
+                existing_route.name = route_data.title
+                existing_route.gpx_data = route_data.gpx_xml
+                # Manually trigger validation on update since dataclasses don't auto-validate on assignment
+                existing_route._validate_gpx_data(route_data.gpx_xml)
+                await route_repo.save(existing_route)
+            else:
+                new_route = Route(
+                    journal_id=journal_id,
+                    name=route_data.title,
+                    gpx_data=route_data.gpx_xml,
+                )
+                await route_repo.save(new_route)
+
+            logger.info(
+                "Persisted GPX route for journal",
                 journal_id=journal_id,
-                name=route_data.title,
-                gpx_data=route_data.gpx_xml,
+                route_name=route_data.title,
             )
-            await route_repo.save(new_route)
-
-        logger.info(
-            "Persisted GPX route for journal",
-            journal_id=journal_id,
-            route_name=route_data.title,
-        )
+        except ValueError as e:
+            logger.warning(
+                "Invalid route or GPX data, skipping route persistence",
+                journal_id=journal_id,
+                error=str(e),
+            )
+            return
 
     async def _persist_sync_metadata(
         self,
