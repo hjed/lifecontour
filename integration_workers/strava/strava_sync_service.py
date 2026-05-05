@@ -298,6 +298,7 @@ class StravaSyncService:
                 "strava_activity_id": transformed.fitness_data_strava_activity_id,
             },
             "gpx_xml": transformed.gpx_xml,
+            "version_hash": transformed.version_hash,
         }
 
         # Strava doesn't use calendars, but the outbox event schema requires

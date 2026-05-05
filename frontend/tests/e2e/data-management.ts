@@ -1105,6 +1105,55 @@ export class TestDataManager {
 
     return journals;
   }
+  /**
+   * Create a GPX route attached to a journal via API.
+   *
+   * Used to set up route test data for verifying route display
+   * on journal detail pages.
+   */
+  async createRoute(
+    journalId: string,
+    routeData: { name: string; gpx_data: string }
+  ): Promise<{ id: string; name: string }> {
+    console.debug(
+      `🗺️ [Data Manager] Creating route "${routeData.name}" for journal ${journalId}`
+    );
+
+    const response = await this.page.request.post(
+      `/api/journals/${journalId}/routes`,
+      {
+        headers: {
+          'Content-Type': 'application/vnd.api+json',
+          Accept: 'application/vnd.api+json',
+        },
+        data: JSON.stringify({
+          data: {
+            type: 'routes',
+            attributes: {
+              name: routeData.name,
+              gpx_data: routeData.gpx_data,
+            },
+          },
+        }),
+      }
+    );
+
+    if (!response.ok()) {
+      const errorText = await response.text();
+      throw new Error(
+        `Failed to create route: ${response.status()} ${errorText}`
+      );
+    }
+
+    const responseData = await response.json();
+    const routeId = responseData.data.id;
+
+    console.debug(
+      `✅ [Data Manager] Created route ${routeId} for journal ${journalId}`
+    );
+
+    return { id: routeId, name: routeData.name };
+  }
 
   /**
    * Create a review item for testing

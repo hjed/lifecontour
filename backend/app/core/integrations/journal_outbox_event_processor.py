@@ -229,6 +229,15 @@ class JournalOutboxEventProcessor:
         # Save fitness data and journal types if present (Strava-sourced events)
         await self._persist_fitness_and_types(created_journal.id, journal_data)
 
+        # Save GPX route if present (Strava-sourced events with GPS data)
+        await self._persist_route_from_gpx(created_journal.id, journal_data)
+
+        # Save sync metadata for integration tracking (Strava-sourced events)
+        await self._persist_sync_metadata(
+            journal_id=created_journal.id,
+            event_data=event_data,
+        )
+
         # Emit match detection event for the outbox to process asynchronously.
         # We only do this if the match detection dependency is wired (i.e., Gemini is configured).
         if (
@@ -413,6 +422,15 @@ class JournalOutboxEventProcessor:
 
         # Update fitness data and journal types if present (Strava-sourced events)
         await self._persist_fitness_and_types(existing_journal_id, journal_data)
+
+        # Update GPX route if present (Strava-sourced events with GPS data)
+        await self._persist_route_from_gpx(existing_journal_id, journal_data)
+
+        # Update sync metadata for integration tracking (Strava-sourced events)
+        await self._persist_sync_metadata(
+            journal_id=existing_journal_id,
+            event_data=event_data,
+        )
 
         logger.info(
             "Updated journal from inbound sync event",
@@ -1145,4 +1163,147 @@ class JournalOutboxEventProcessor:
                 "retry_count": 0,
                 "created_at": now,
             },
+        )
+
+    async def _persist_route_from_gpx(
+        self, journal_id: int, journal_data: dict[str, Any]
+    ) -> None:
+        """Create or update a Route from GPX XML in the outbox event payload.
+
+        When a Strava activity includes GPS track data, the worker generates
+        GPX XML and includes it in the outbox event. This method persists
+        that GPX as a Route entity linked to the journal.
+
+        For Strava-sourced events there is exactly one route per journal.
+        If a route already exists for this journal we update it in-place
+        (including the name, which may change if the activity title was
+        edited on Strava). If no route exists we insert a new one.
+
+        Args:
+            journal_id: ID of the journal to attach the route to.
+            journal_data: The ``journal_data`` dict from the outbox event.
+        """
+        gpx_xml = journal_data.get("gpx_xml")
+        if not gpx_xml or not isinstance(gpx_xml, str):
+            return
+
+        route_name = journal_data.get("title", "Imported Route")
+        now = datetime.now(UTC)
+
+        # Check if a route already exists for this journal
+        existing = await self.connection.execute(
+            text("SELECT id FROM routes WHERE journal_id = :journal_id LIMIT 1"),
+            {"journal_id": journal_id},
+        )
+        existing_row = existing.fetchone()
+
+        if existing_row is not None:
+            await self.connection.execute(
+                text("""
+                    UPDATE routes
+                    SET name = :name,
+                        gpx_data = :gpx_data,
+                        updated_at = :now
+                    WHERE id = :route_id
+                """),
+                {
+                    "route_id": existing_row.id,
+                    "name": route_name,
+                    "gpx_data": gpx_xml,
+                    "now": now,
+                },
+            )
+        else:
+            await self.connection.execute(
+                text("""
+                    INSERT INTO routes (journal_id, name, gpx_data, created_at, updated_at)
+                    VALUES (:journal_id, :name, :gpx_data, :now, :now)
+                """),
+                {
+                    "journal_id": journal_id,
+                    "name": route_name,
+                    "gpx_data": gpx_xml,
+                    "now": now,
+                },
+            )
+
+        logger.info(
+            "Persisted GPX route for journal",
+            journal_id=journal_id,
+            route_name=route_name,
+        )
+
+    async def _persist_sync_metadata(
+        self,
+        journal_id: int,
+        event_data: dict[str, Any],
+    ) -> None:
+        """Create or update SyncMetadata for Strava-sourced events.
+
+        Only applies to events with ``integration_source == 'strava'``.
+        Uses the ``strava_activity_id`` from fitness_data as the external_id
+        and the ``version_hash`` from journal_data for change detection.
+
+        Args:
+            journal_id: ID of the journal linked to this sync record.
+            event_data: The full outbox event data dict.
+        """
+        integration_source = event_data.get("integration_source")
+        if integration_source != "strava":
+            return
+
+        journal_data = event_data.get("journal_data", {})
+        fitness_data = journal_data.get("fitness_data", {})
+        strava_activity_id = (
+            fitness_data.get("strava_activity_id")
+            if isinstance(fitness_data, dict)
+            else None
+        )
+        if not strava_activity_id:
+            logger.warning(
+                "Strava event missing strava_activity_id, skipping sync metadata",
+                journal_id=journal_id,
+            )
+            return
+
+        version_hash = journal_data.get("version_hash", "")
+        now = datetime.now(UTC)
+
+        await self.connection.execute(
+            text("""
+                INSERT INTO sync_metadata
+                    (internal_id, integration_source, external_id,
+                     last_synced_at, version_hash, sync_status,
+                     error_message, retry_count, created_at, updated_at)
+                VALUES
+                    (:internal_id, :integration_source, :external_id,
+                     :last_synced_at, :version_hash, :sync_status,
+                     NULL, 0, :created_at, :updated_at)
+                ON CONFLICT (integration_source, external_id)
+                DO UPDATE SET
+                    internal_id = EXCLUDED.internal_id,
+                    last_synced_at = EXCLUDED.last_synced_at,
+                    version_hash = EXCLUDED.version_hash,
+                    sync_status = EXCLUDED.sync_status,
+                    error_message = NULL,
+                    retry_count = 0,
+                    updated_at = EXCLUDED.updated_at
+            """),
+            {
+                "internal_id": journal_id,
+                "integration_source": "strava",
+                "external_id": strava_activity_id,
+                "last_synced_at": now,
+                "version_hash": version_hash,
+                "sync_status": "success",
+                "created_at": now,
+                "updated_at": now,
+            },
+        )
+
+        logger.info(
+            "Persisted sync metadata for Strava activity",
+            journal_id=journal_id,
+            strava_activity_id=strava_activity_id,
+            version_hash=version_hash[:16] + "...",
         )

@@ -1180,3 +1180,281 @@ class TestStravaFitnessDataProcessing:
         assert result["status"] == "success"
         # No fitness data UPSERT should have been called
         assert mock_connection.execute.call_count == 3
+
+
+def _make_strava_event_data(
+    *,
+    sync_action: str = "created",
+    strava_activity_id: str = "12345",
+    gpx_xml: str | None = None,
+    version_hash: str = "a" * 64,
+    existing_journal_id: int | None = None,
+) -> dict[str, Any]:
+    """Build a sample Strava-sourced journal_event outbox payload."""
+    return {
+        "journal_data": {
+            "title": "Morning Run",
+            "content": "Easy jog",
+            "event_date_range_start": "2026-03-20T08:00:00+00:00",
+            "event_date_range_end": "2026-03-20T09:00:00+00:00",
+            "user_id": "1",
+            "fitness_data": {
+                "distance": 10000,
+                "elevation_gain": 150,
+                "elevation_loss": 10,
+                "duration": 3400,
+                "calories": 500,
+                "heart_rate_avg": 145,
+                "heart_rate_max": 175,
+                "strava_activity_id": strava_activity_id,
+            },
+            "journal_types": ["jogging", "fitness"],
+            "gpx_xml": gpx_xml,
+            "version_hash": version_hash,
+        },
+        "calendar_info_data": {
+            "calendar_id": CALENDAR_ID,
+            "is_all_day": False,
+            "location": None,
+            "start_time": "08:00:00",
+            "end_time": "09:00:00",
+        },
+        "integration_source": "strava",
+        "external_event_id": f"strava:{strava_activity_id}",
+        "calendar_id": CALENDAR_ID,
+        "sync_action": sync_action,
+        "etag": None,
+        "existing_journal_id": existing_journal_id,
+        "contact_relationships": [],
+    }
+
+
+class TestGPXRouteAndSyncMetadata:
+    """Tests for GPX→Route creation and SyncMetadata persistence in the processor."""
+
+    @pytest.fixture
+    def mock_connection(self) -> AsyncMock:
+        conn = AsyncMock(spec=AsyncConnection)
+        conn.execute = AsyncMock()
+        return conn
+
+    @pytest.fixture
+    def mock_journal_service(self) -> AsyncMock:
+        from app.core.journal.services.journal_service import JournalService
+
+        return AsyncMock(spec=JournalService)
+
+    @pytest.fixture
+    def processor(
+        self, mock_journal_service: AsyncMock, mock_connection: AsyncMock
+    ) -> JournalOutboxEventProcessor:
+        return JournalOutboxEventProcessor(
+            journal_service=mock_journal_service,
+            connection=mock_connection,
+        )
+
+    @pytest.mark.asyncio
+    async def test_persist_route_from_gpx_creates_route(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """When gpx_xml is present in journal_data, a Route row is inserted."""
+        gpx_xml = '<?xml version="1.0"?><gpx><trk><trkseg><trkpt lat="-33.8" lon="151.2"></trkpt></trkseg></trk></gpx>'
+        event_data = _make_strava_event_data(gpx_xml=gpx_xml)
+        event = OutboxEvent(
+            id=uuid4(),
+            event_type="journal_event.created",
+            event_data=event_data,
+            created_at=datetime.now(UTC),
+            retry_count=0,
+        )
+
+        mock_journal_service.create_journal.return_value = _make_journal()
+
+        fitness_upsert = MagicMock()
+        fitness_upsert.fetchone.return_value = MagicMock(
+            journal_id=42,
+            distance=10000,
+            elevation_gain=150,
+            elevation_loss=10,
+            duration=3400,
+            calories=500,
+            heart_rate_avg=145,
+            heart_rate_max=175,
+            strava_activity_id="12345",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+
+        mock_connection.execute.side_effect = [
+            _mock_empty_result(),  # _find_external_event_link
+            MagicMock(),  # _save_calendar_info
+            MagicMock(),  # _create_external_event_link
+            fitness_upsert,  # fitness data save
+            _mock_empty_result(),  # _persist_route_from_gpx (SELECT existing)
+            MagicMock(),  # _persist_route_from_gpx (INSERT route)
+            MagicMock(),  # _persist_sync_metadata (UPSERT sync_metadata)
+        ]
+
+        result = await processor.process_event(event)
+        assert result["status"] == "success"
+
+        # Find the route INSERT call
+        route_calls = [
+            c
+            for c in mock_connection.execute.call_args_list
+            if "routes" in str(c[0][0].text) and "INSERT" in str(c[0][0].text).upper()
+        ]
+        assert len(route_calls) >= 1, "Expected route INSERT call"
+        params = route_calls[0][0][1]
+        assert params["gpx_data"] == gpx_xml
+        assert params["journal_id"] == 42
+        assert params["name"] == "Morning Run"
+
+    @pytest.mark.asyncio
+    async def test_persist_route_skips_when_no_gpx(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """When gpx_xml is None, no Route row is created."""
+        event_data = _make_strava_event_data(gpx_xml=None)
+        event = OutboxEvent(
+            id=uuid4(),
+            event_type="journal_event.created",
+            event_data=event_data,
+            created_at=datetime.now(UTC),
+            retry_count=0,
+        )
+
+        mock_journal_service.create_journal.return_value = _make_journal()
+
+        fitness_upsert = MagicMock()
+        fitness_upsert.fetchone.return_value = MagicMock(
+            journal_id=42,
+            distance=10000,
+            elevation_gain=150,
+            elevation_loss=10,
+            duration=3400,
+            calories=500,
+            heart_rate_avg=145,
+            heart_rate_max=175,
+            strava_activity_id="12345",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+
+        mock_connection.execute.side_effect = [
+            _mock_empty_result(),  # _find_external_event_link
+            MagicMock(),  # _save_calendar_info
+            MagicMock(),  # _create_external_event_link
+            fitness_upsert,  # fitness data save
+            MagicMock(),  # _persist_sync_metadata
+        ]
+
+        result = await processor.process_event(event)
+        assert result["status"] == "success"
+
+        # No route INSERT should exist
+        route_calls = [
+            c
+            for c in mock_connection.execute.call_args_list
+            if "routes" in str(c[0][0].text)
+        ]
+        assert len(route_calls) == 0, "No route INSERT expected when gpx_xml is None"
+
+    @pytest.mark.asyncio
+    async def test_persist_sync_metadata_for_strava(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Strava events should create a SyncMetadata record."""
+        version_hash = "b" * 64
+        event_data = _make_strava_event_data(
+            version_hash=version_hash, strava_activity_id="99999"
+        )
+        event = OutboxEvent(
+            id=uuid4(),
+            event_type="journal_event.created",
+            event_data=event_data,
+            created_at=datetime.now(UTC),
+            retry_count=0,
+        )
+
+        mock_journal_service.create_journal.return_value = _make_journal()
+
+        fitness_upsert = MagicMock()
+        fitness_upsert.fetchone.return_value = MagicMock(
+            journal_id=42,
+            distance=10000,
+            elevation_gain=150,
+            elevation_loss=10,
+            duration=3400,
+            calories=500,
+            heart_rate_avg=145,
+            heart_rate_max=175,
+            strava_activity_id="99999",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+
+        mock_connection.execute.side_effect = [
+            _mock_empty_result(),  # _find_external_event_link
+            MagicMock(),  # _save_calendar_info
+            MagicMock(),  # _create_external_event_link
+            fitness_upsert,  # fitness data save
+            MagicMock(),  # _persist_sync_metadata
+        ]
+
+        result = await processor.process_event(event)
+        assert result["status"] == "success"
+
+        # Find SyncMetadata UPSERT call
+        sync_calls = [
+            c
+            for c in mock_connection.execute.call_args_list
+            if "sync_metadata" in str(c[0][0].text)
+        ]
+        assert len(sync_calls) >= 1, "Expected sync_metadata UPSERT call"
+        params = sync_calls[0][0][1]
+        assert params["integration_source"] == "strava"
+        assert params["external_id"] == "99999"
+        assert params["version_hash"] == version_hash
+        assert params["internal_id"] == 42
+
+    @pytest.mark.asyncio
+    async def test_persist_sync_metadata_skips_for_google(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Google Calendar events should NOT create SyncMetadata."""
+        event = _make_outbox_event(
+            event_type="journal_event.created",
+            sync_action="created",
+            contact_relationships=[],
+        )
+
+        mock_journal_service.create_journal.return_value = _make_journal()
+        mock_connection.execute.side_effect = [
+            _mock_empty_result(),  # _find_external_event_link
+            MagicMock(),  # _save_calendar_info
+            MagicMock(),  # _create_external_event_link
+        ]
+
+        result = await processor.process_event(event)
+        assert result["status"] == "success"
+
+        # No sync_metadata calls expected
+        sync_calls = [
+            c
+            for c in mock_connection.execute.call_args_list
+            if "sync_metadata" in str(c[0][0].text)
+        ]
+        assert len(sync_calls) == 0, "No sync_metadata call expected for Google events"
