@@ -11,7 +11,7 @@ env:
   PYTHON_VERSION: "3.11"
   NODE_VERSION: "24"
   UV_VERSION: "0.7.9"
-  PNPM_VERSION: "10.11.0"
+  PNPM_VERSION: "11.0.4"
 
 jobs:
   # Detect which files have changed to conditionally run jobs

@@ -166,15 +166,25 @@ test.describe('Tag Filtering via Main Contacts List', () => {
     const contactData = await contactResp.json();
     const contactId = contactData.data.id;
 
+    // Ensure contact is fully committed before assigning tag
+    await expect(async () => {
+      const verifyResp = await authenticatedPage.request.get(
+        `/api/contacts/${contactId}`
+      );
+      expect(verifyResp.ok()).toBe(true);
+    }).toPass({ timeout: 5000 });
+
     // 4. Assign child tag to contact
-    const assignResp = await authenticatedPage.request.post(
-      `/api/contacts/${contactId}/tags`,
-      {
-        data: { data: { type: 'tags', id: String(childId) } },
-        headers: { 'Content-Type': 'application/json' },
-      }
-    );
-    expect(assignResp.ok() || assignResp.status() === 204).toBe(true);
+    await expect(async () => {
+      const assignResp = await authenticatedPage.request.post(
+        `/api/contacts/${contactId}/tags`,
+        {
+          data: { data: { type: 'tags', id: String(childId) } },
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+      expect(assignResp.ok() || assignResp.status() === 204).toBe(true);
+    }).toPass({ timeout: 5000 });
 
     // 5. Navigate to unified contacts page with parent tag filter
     await authenticatedPage.goto(`/contacts?tag=${parentId}`);
@@ -227,14 +237,31 @@ test.describe('Tag Filtering via Main Contacts List', () => {
     const contactData = await contactResp.json();
     const contactId = contactData.data.id;
 
-    const assignResp = await authenticatedPage.request.post(
-      `/api/contacts/${contactId}/tags`,
-      {
-        data: { data: { type: 'tags', id: String(tagId) } },
-        headers: { 'Content-Type': 'application/json' },
-      }
-    );
-    expect(assignResp.ok() || assignResp.status() === 204).toBe(true);
+    // Ensure both tag and contact are fully committed before assigning
+    await expect(async () => {
+      const verifyTag = await authenticatedPage.request.get(
+        `/api/tags/${tagId}`
+      );
+      expect(verifyTag.ok()).toBe(true);
+    }).toPass({ timeout: 5000 });
+
+    await expect(async () => {
+      const verifyContact = await authenticatedPage.request.get(
+        `/api/contacts/${contactId}`
+      );
+      expect(verifyContact.ok()).toBe(true);
+    }).toPass({ timeout: 5000 });
+
+    await expect(async () => {
+      const assignResp = await authenticatedPage.request.post(
+        `/api/contacts/${contactId}/tags`,
+        {
+          data: { data: { type: 'tags', id: String(tagId) } },
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+      expect(assignResp.ok() || assignResp.status() === 204).toBe(true);
+    }).toPass({ timeout: 5000 });
 
     // 3. Navigate to the unified contacts page with tag filter
     await authenticatedPage.goto(`/contacts?tag=${tagId}`);

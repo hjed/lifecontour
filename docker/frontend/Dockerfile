@@ -1,15 +1,16 @@
 # Unified Frontend Dockerfile - Next.js
 # Supports both development and production builds via build args
 
-FROM node:25-alpine AS base
+FROM node:24-alpine AS base
 
 # Build arguments
 ARG BUILD_ENV=production
 ARG NODE_ENV=production
 
-# Install curl and pnpm
+# Install curl and enable corepack for pnpm (version from packageManager field)
 RUN apk add --no-cache curl && \
-    npm install -g pnpm
+    corepack enable && \
+    corepack prepare pnpm@11.0.4 --activate
 
 # Create app user
 RUN addgroup -g 1001 -S nodejs && \

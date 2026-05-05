@@ -75,7 +75,7 @@ This document outlines the technology choices optimized for AI assistant underst
 - **Framework**: Next.js 14+ with React 18+ (clear separation from Python backend)
 - **Language**: TypeScript with strict mode
 - **Build Tool**: Next.js built-in
-- **Runtime**: Node.js 22.13+ (use `nvm use` to activate — see `.nvmrc`)
+- **Runtime**: Node.js 24+ (use `nvm use` to activate — see `.nvmrc`)
 - **Package Manager**: pnpm 11+ (separate from backend UV setup)
 
 ### Styling and UI
@@ -184,7 +184,7 @@ For detailed testing patterns, implementation guidelines, and examples, see [Tes
 
 ### Development Setup
 - **Backend**: UV for Python dependency management
-- **Frontend**: pnpm 11+ for Node.js dependencies (requires Node.js 22.13+, use `nvm use`)
+- **Frontend**: pnpm 11+ for Node.js dependencies (requires Node.js 24+, use `nvm use`)
 - **Containers**: Docker Compose for local development
 - **Hot Reload**: FastAPI auto-reload, Next.js hot reload
 
