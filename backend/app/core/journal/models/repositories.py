@@ -34,6 +34,7 @@ from core_shared.models.journals import (
     JournalContactRelationship,
     JournalContactRelationshipType,
     KayakingData,
+    LogbookEntryData,
     MoodData,
     OutdoorActivityData,
     OutdoorPlanningData,
@@ -2296,5 +2297,25 @@ class GearMaintenanceDataRepository(ABC):
 
         Args:
             journal_id: The journal ID to delete gear maintenance data for
+        """
+        pass
+
+
+class LogbookExportRepository(ABC):
+    """Repository for fetching bulk data for the logbook export."""
+
+    @abstractmethod
+    async def get_logbook_entries(
+        self,
+        user_id: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        activity_types: list[str] | None = None,
+    ) -> list[LogbookEntryData]:
+        """
+        Get all matching journals for the logbook export with their nested type data.
+
+        Returns a flat list of dicts or partially populated objects that the
+        LogbookDataService will assemble into a hierarchical tree.
         """
         pass
