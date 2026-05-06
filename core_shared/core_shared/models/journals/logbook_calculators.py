@@ -96,27 +96,8 @@ class ParticipantIndexCalculator:
         self, entries: list[LogbookEntryData], min_appearances: int = 3
     ) -> list[ParticipantIndexEntry]:
         """Calculate the participant index for contacts with >= min_appearances."""
-        appearances: dict[int, dict[str, Any]] = {}
-
-        def process_entry(entry: LogbookEntryData) -> None:
-            # unique contacts per entry (to avoid double counting if they appear in sub-entries)
-            # Actually, the requirement usually means appearances across all journals.
-            for contact in entry.contacts:
-                if contact.contact_id not in appearances:
-                    appearances[contact.contact_id] = {
-                        "name": contact.name,
-                        "count": 0,
-                    }
-                appearances[contact.contact_id]["count"] += 1
-
-            for child in entry.children:
-                process_entry(child)
-
-        # Unique contacts per top-level entry tree? Or overall?
         # The spec says "Frequent contacts who appear in more than 3 entries".
-        # Let's count them per root entry or per any entry. We'll count per entry/child separately.
-        # Wait, if a person is in a root journal and its child, is that 1 appearance or 2?
-        # Typically 1 per "trip". We can just track by root entry.
+        # Let's count them per root entry to avoid double counting if they appear in sub-entries.
 
         appearances_by_root: dict[int, dict[str, Any]] = {}
         for entry in entries:
@@ -141,7 +122,7 @@ class ParticipantIndexCalculator:
 
         result = []
         for cid, data in appearances_by_root.items():
-            if data["count"] > min_appearances:
+            if data["count"] >= min_appearances:
                 result.append(
                     ParticipantIndexEntry(
                         contact_id=cid,
