@@ -991,22 +991,31 @@ test.describe('Journal Creation UI Flow', () => {
 
     await page.getByLabel(/title/i).fill(`Template Creation ${Date.now()}`);
     await page.getByLabel(/content/i).fill('Testing inline template creation.');
-    await page.getByLabel(/^canyoning$/i).check();
 
-    await expect(page.getByTestId('canyoning-type-editor')).toBeVisible();
+    // Check the canyoning type and wait for the editor to appear — use
+    // toPass() because Firefox can be slower to render the type editor
+    // after checking the checkbox.
+    await expect(async () => {
+      await page.getByLabel(/^canyoning$/i).check();
+      await expect(page.getByTestId('canyoning-type-editor')).toBeVisible();
+    }).toPass({ timeout: 15000 });
 
-    // Open template selector by typing
-    await page.getByPlaceholder('Select a canyoning template...').click();
-    await page
-      .getByPlaceholder('Select a canyoning template...')
-      .fill('new template');
+    // Open template selector by typing — wrap in toPass() because
+    // Firefox may need the combobox focus cycle to complete before the
+    // options list populates.
+    const templateInput = page.getByPlaceholder(
+      'Select a canyoning template...'
+    );
+    await expect(async () => {
+      await templateInput.click();
+      await templateInput.fill('new template');
+      await expect(
+        page.getByRole('option', { name: /\+ Create new template/i })
+      ).toBeVisible();
+    }).toPass({ timeout: 15000 });
 
     // Click create new
-    const createBtn = page.getByRole('option', {
-      name: /\+ Create new template/i,
-    });
-    await expect(createBtn).toBeVisible();
-    await createBtn.click();
+    await page.getByRole('option', { name: /\+ Create new template/i }).click();
 
     // Verify dialog opens
     const dialog = page.getByRole('dialog');

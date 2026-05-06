@@ -32,17 +32,21 @@ test.describe('Journal Complete Workflows', () => {
       await expect(filtersSection).toBeVisible();
 
       // Step 4: Click on a journal link to view details
+      // Use toPass() to retry click + navigation as a unit — Firefox can be
+      // slower to process navigation events after a click.
       const firstJournal = journals[0];
-      await page
-        .getByRole('link', { name: firstJournal.title })
-        .first()
-        .click();
+      await expect(async () => {
+        await page
+          .getByRole('link', { name: firstJournal.title })
+          .first()
+          .click();
+        await expect(page).toHaveURL(
+          new RegExp(`.*/journals/${firstJournal.id}`)
+        );
+      }).toPass({ timeout: 30000 });
 
       // Step 5: Verify we're on the detail page
-      await expect(page).toHaveURL(
-        new RegExp(`.*/journals/${firstJournal.id}`)
-      );
-      await expect(page).not.toHaveURL('.*/journals$');
+      await expect(page).not.toHaveURL(/.*\/journals$/);
       await expect(
         page.getByRole('heading', { name: firstJournal.title })
       ).toBeVisible();
@@ -51,11 +55,13 @@ test.describe('Journal Complete Workflows', () => {
       // Step 6: Navigate back to list
       const backButton = page.getByRole('button', { name: /back/i });
       await backButton.click();
-      await page.waitForURL('**/journals');
+      await expect(page).toHaveURL(/.*\/journals$/);
 
-      // Step 7: Verify we're back on the list page
-      expect(page.url()).toContain('/journals');
-      expect(page.url()).not.toContain(`/journals/${firstJournal.id}`);
+      // Step 7: Verify we're back on the list page (web-first assertions)
+      await expect(page).toHaveURL(/\/journals$/);
+      await expect(page).not.toHaveURL(
+        new RegExp(`/journals/${firstJournal.id}`)
+      );
     });
   });
 
@@ -119,7 +125,7 @@ test.describe('Journal Complete Workflows', () => {
       await expect(page).toHaveURL(/.*\/journals\/new/);
 
       // Step 4: Verify we're on the create page
-      expect(page.url()).toContain('/journals/new');
+      await expect(page).toHaveURL(/\/journals\/new/);
       await expect(
         page.getByRole('heading', { name: /create new journal/i })
       ).toBeVisible();
@@ -145,7 +151,7 @@ test.describe('Journal Complete Workflows', () => {
       await expect(page).toHaveURL(/.*\/journals\/new/);
 
       // Step 3: Verify we're on the create page
-      expect(page.url()).toContain('/journals/new');
+      await expect(page).toHaveURL(/\/journals\/new/);
       await expect(
         page.getByRole('heading', { name: /create new journal/i })
       ).toBeVisible();
@@ -195,8 +201,7 @@ test.describe('Journal Complete Workflows', () => {
       await responsePromise;
 
       // Step 6: Verify we're redirected to the detail page
-      await page.waitForURL(/\/journals\/\d+/);
-      expect(page.url()).toMatch(/\/journals\/\d+/);
+      await expect(page).toHaveURL(/\/journals\/\d+/);
 
       // Step 7: Verify the journal details are displayed
       await expect(
@@ -227,7 +232,7 @@ test.describe('Journal Complete Workflows', () => {
       await expect(page.getByText(/title is required/i)).toBeVisible();
 
       // Step 4: Verify we're still on the create page
-      expect(page.url()).toContain('/journals/new');
+      await expect(page).toHaveURL(/\/journals\/new/);
     });
 
     test('should cancel and return to journals list', async ({
@@ -245,9 +250,8 @@ test.describe('Journal Complete Workflows', () => {
       await cancelButton.click();
 
       // Step 3: Verify we're redirected to journals list
-      await page.waitForURL('/journals');
-      expect(page.url()).toContain('/journals');
-      expect(page.url()).not.toContain('/journals/new');
+      await expect(page).toHaveURL(/\/journals$/);
+      await expect(page).not.toHaveURL(/\/journals\/new/);
     });
   });
 
