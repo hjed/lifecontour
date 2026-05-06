@@ -1,9 +1,9 @@
-"""Integration tests for Strava merge review queue pipeline.
+"""Integration tests for Strava journal merge logic.
 
-Tests the end-to-end flow:
-1. Two overlapping Strava activities → verify review items created via merge endpoint
+Tests the end-to-end flow of merging journals with Strava data:
+1. Merge of Strava journals preserves fitness data and routes
 2. Strava activity + Google Calendar event → verify cross-integration merge preserves data
-3. Merge of Strava journals preserves fitness data and routes
+3. Validates correct source-to-target data transfer and source deletion
 """
 
 import pytest

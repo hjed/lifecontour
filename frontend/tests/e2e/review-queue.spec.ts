@@ -592,28 +592,19 @@ test.describe('Journal Review Queue', () => {
       timeout: 15000,
     });
 
-    // Verify the target journal still exists and has fitness type data.
-    // In the review queue merge flow, the candidate journal is the merge source
-    // that gets deleted. The source_journal_id in the review item is the target.
-    // We verify whichever journal survived has fitness data.
-    const survivingId = targetJournal.id;
-    const deletedId = candidateJournal.id;
+    // Verify the candidate journal survives and the source journal is deleted.
+    // In ReviewQueueSidebar, `candidate_journal` is passed as the `targetJournalId`
+    // to MergeJournalDialog, meaning the `candidate_journal` is the one that survives
+    // while the `source_journal` is deleted.
+    const survivingId = candidateJournal.id;
+    const deletedId = targetJournal.id;
 
-    // Try the target first; if it was deleted, swap
-    const targetResponse = await page.request.get(
+    const survivorResponse = await page.request.get(
       `/api/journals/${survivingId}`
     );
-    const candidateResponse = await page.request.get(
+    const deletedResponse = await page.request.get(
       `/api/journals/${deletedId}`
     );
-
-    // One must exist, one must be 404
-    const survivorResponse = targetResponse.ok()
-      ? targetResponse
-      : candidateResponse;
-    const deletedResponse = targetResponse.ok()
-      ? candidateResponse
-      : targetResponse;
 
     expect(survivorResponse.ok()).toBeTruthy();
     expect(deletedResponse.status()).toBe(404);
