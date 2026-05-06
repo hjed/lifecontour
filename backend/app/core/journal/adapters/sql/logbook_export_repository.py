@@ -101,29 +101,92 @@ class SqlLogbookExportRepository(LogbookExportRepository):
         # to show the hierarchy context (e.g. "Trip to Blue Mountains" (Event) -> "Bushwalking").
         # The spec says: "Journals ordered chronologically by topmost parent journal date, full hierarchy preserved".
 
-        # To avoid complex CTEs right now, let's just fetch ALL journals for the user
-        # that have the logbook types, and then we will fetch their ancestors and descendants later.
-        # Actually, since it's just Python, we could fetch all journals for the user,
-        # build the tree in Python, and filter out subtrees that don't contain any logbook types!
-        # This is massively simpler for a single user and avoids complex SQL recursion.
+        query_params = {"user_id": user_id}
 
-        fetch_all_journals_sql = """
-            SELECT
-                j.id, j.title, j.content, j.event_date_range_start, j.event_date_range_end, j.parent_id
-            FROM journals j
-            WHERE j.user_id = :user_id
-        """
-        result = await self.connection.execute(
-            text(fetch_all_journals_sql), {"user_id": user_id}
-        )
-        journal_rows = result.fetchall()
+        table_map = {
+            "OUTDOOR_ACTIVITY": "journal_outdoor_activity_data",
+            "BUSHWALKING": "journal_bushwalking_data",
+            "CANYONING": "journal_canyoning_data",
+            "CAVING": "journal_caving_data",
+            "CLIMBING": "journal_climbing_data",
+            "KAYAKING": "journal_kayaking_data",
+            "CROSS_COUNTRY_SKIING": "journal_skiing_data",
+            "CANOEING": "journal_canoeing_data",
+            "SNORKELLING": "journal_snorkelling_data",
+            "DIVING": "journal_diving_data",
+            "DOWNHILL_SKIING": "journal_downhill_skiing_data",
+            "ABSEILING_TRIP": "journal_abseiling_data",
+            "OUTDOOR_PLANNING": "journal_outdoor_planning_data",
+            "GEAR_MAINTENANCE": "journal_gear_maintenance_data",
+            "EVENT": "journal_calendar_info",
+        }
 
-        if not journal_rows:
+        joins = []
+        where_conditions = []
+
+        alias_idx = 0
+        for t in logbook_types:
+            if t in table_map:
+                alias = f"t{alias_idx}"
+                table = table_map[t]
+                joins.append(f"LEFT JOIN {table} {alias} ON j.id = {alias}.journal_id")
+                where_conditions.append(f"{alias}.journal_id IS NOT NULL")
+                alias_idx += 1
+
+        if not where_conditions:
             return []
 
-        journal_ids = [row.id for row in journal_rows]
+        date_filters = ""
+        if start_date:
+            date_filters += " AND j.event_date_range_start >= :start_date"
+            query_params["start_date"] = start_date
+        if end_date:
+            date_filters += " AND j.event_date_range_start <= :end_date"
+            query_params["end_date"] = end_date
 
-        # 2. Fetch all journal types
+        cte_sql = f"""
+            WITH RECURSIVE
+            matching_journals AS (
+                SELECT j.id, j.parent_id
+                FROM journals j
+                {" ".join(joins)}
+                WHERE j.user_id = :user_id
+                AND ( {" OR ".join(where_conditions)} )
+                {date_filters}
+            ),
+            ancestors AS (
+                SELECT id, parent_id FROM matching_journals
+                UNION
+                SELECT j.id, j.parent_id
+                FROM journals j
+                JOIN ancestors a ON j.id = a.parent_id
+            ),
+            descendants AS (
+                SELECT id, parent_id FROM matching_journals
+                UNION
+                SELECT j.id, j.parent_id
+                FROM journals j
+                JOIN descendants d ON j.parent_id = d.id
+            ),
+            final_ids AS (
+                SELECT id FROM ancestors
+                UNION
+                SELECT id FROM descendants
+            )
+            SELECT j.id, j.title, j.content, j.event_date_range_start, j.event_date_range_end, j.parent_id
+            FROM journals j
+            JOIN final_ids f ON j.id = f.id
+        """
+
+        result = await self.connection.execute(text(cte_sql), query_params)
+        final_journal_rows = result.fetchall()
+
+        if not final_journal_rows:
+            return []
+
+        final_journal_ids = [row.id for row in final_journal_rows]
+
+        # 2. Fetch all journal types for the final journal ids
         types_sql = """
             SELECT j.id as journal_id,
                 CASE WHEN jci.journal_id IS NOT NULL THEN 'EVENT' END as event_type,
@@ -172,7 +235,7 @@ class SqlLogbookExportRepository(LogbookExportRepository):
             WHERE j.id = ANY(:journal_ids)
         """
         result = await self.connection.execute(
-            text(types_sql), {"journal_ids": journal_ids}
+            text(types_sql), {"journal_ids": final_journal_ids}
         )
         types_by_journal = defaultdict(list)
         for row in result.fetchall():
@@ -181,58 +244,9 @@ class SqlLogbookExportRepository(LogbookExportRepository):
                     types_by_journal[row.journal_id].append(row[i])
 
         # Determine if 'NOTE' applies to any
-        for jid in journal_ids:
+        for jid in final_journal_ids:
             if not types_by_journal[jid]:
                 types_by_journal[jid].append("NOTE")
-
-        # 3. Filter journal rows based on criteria
-        # A journal matches if it has any of the requested logbook_types
-        # OR if it's an ancestor of a matching journal OR descendant of a matching journal.
-
-        # Let's identify matching journals
-        matching_journal_ids = set()
-        for row in journal_rows:
-            j_types = types_by_journal[row.id]
-            if any(t in logbook_types for t in j_types):
-                # Check date filters for matching journals only
-                match_date = True
-                if start_date and row.event_date_range_start.isoformat() < start_date:
-                    match_date = False
-                if end_date and row.event_date_range_end.isoformat() > end_date:
-                    match_date = False
-
-                if match_date:
-                    matching_journal_ids.add(row.id)
-
-        if not matching_journal_ids:
-            return []
-
-        # Add ancestors of matching journals
-        parent_map = {row.id: row.parent_id for row in journal_rows}
-        journals_to_keep = set(matching_journal_ids)
-
-        for j_id in matching_journal_ids:
-            curr = parent_map.get(j_id)
-            while curr is not None:
-                journals_to_keep.add(curr)
-                curr = parent_map.get(curr)
-
-        # Add descendants of matching journals
-        children_map = defaultdict(list)
-        for row in journal_rows:
-            if row.parent_id:
-                children_map[row.parent_id].append(row.id)
-
-        def add_descendants(j_id: int) -> None:
-            for child_id in children_map[j_id]:
-                journals_to_keep.add(child_id)
-                add_descendants(child_id)
-
-        for j_id in matching_journal_ids:
-            add_descendants(j_id)
-
-        final_journal_ids = list(journals_to_keep)
-        final_journal_rows = [row for row in journal_rows if row.id in journals_to_keep]
 
         # 4. Fetch related data for these final journal IDs
 
@@ -334,11 +348,8 @@ class SqlLogbookExportRepository(LogbookExportRepository):
 
         entries = []
         for row in final_journal_rows:
-            # We don't try to instantiate the actual Domain Models because they do strict validation
-            # and might fail on legacy DB data, plus we don't need their domain methods.
-            # Wait, LogbookEntryData defines the types as OutdoorActivityData, etc.
-            # We should instantiate them but ignore strict validation if possible?
-            # The domain models do strict validation on init.
+            # We instantiate domain models where possible but ignore strict validation if data is legacy/invalid.
+            # This ensures logbook export succeeds even if old data doesn't meet current validation constraints.
 
             def create_if_exists(
                 domain_cls: Any, data_dict: dict[str, Any] | None, **extra: Any
@@ -354,8 +365,6 @@ class SqlLogbookExportRepository(LogbookExportRepository):
                     if hasattr(domain_cls, k) or k in domain_cls.__annotations__
                 }
                 kwargs.update(extra)
-                # Some fields might be enums, but Pydantic/dataclass converts?
-                # OutdoorActivityData.subtype does not exist, it's just 'in_leadership_role'
                 try:
                     return domain_cls(**kwargs)
                 except Exception:
