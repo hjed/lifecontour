@@ -54,6 +54,7 @@ class StravaActivity(BaseModel):
     start_latlng: list[float] | None = None
     end_latlng: list[float] | None = None
     athlete: dict[str, Any] = {}
+    segment_efforts: list[dict[str, Any]] = []
 
 
 class StravaActivityStream(BaseModel):

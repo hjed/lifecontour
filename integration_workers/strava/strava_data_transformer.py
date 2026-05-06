@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Any
 
 from core_shared.models.journals import EventDateRange, JournalType
 
@@ -133,6 +134,7 @@ class TransformedActivity:
     elevation_loss: int | None
     gpx_xml: str | None
     version_hash: str
+    strava_athletes: list[dict[str, Any]]
 
 
 class StravaDataTransformer:
@@ -216,4 +218,49 @@ class StravaDataTransformer:
             version_hash=hashlib.sha256(
                 activity.model_dump_json().encode()
             ).hexdigest(),
+            strava_athletes=StravaDataTransformer._extract_athletes(activity),
         )
+
+    @staticmethod
+    def _extract_athletes(activity: StravaActivity) -> list[dict[str, str | int]]:
+        """Extract all athlete data (including group activity participants) from the activity.
+
+        Args:
+            activity: Strava API activity response.
+
+        Returns:
+            List of athlete dictionaries containing at least an 'id' and optionally a 'name'.
+        """
+        athletes = []
+
+        # Add the main athlete (owner)
+        if activity.athlete and "id" in activity.athlete:
+            athlete_data = {"id": activity.athlete["id"]}
+            # Strava API might not always return firstname/lastname directly in the athlete dict
+            # for GET /activities/{id}, but if it does, we capture it.
+            if "firstname" in activity.athlete and "lastname" in activity.athlete:
+                athlete_data["name"] = (
+                    f"{activity.athlete['firstname']} {activity.athlete['lastname']}"
+                )
+            elif "firstname" in activity.athlete:
+                athlete_data["name"] = activity.athlete["firstname"]
+            athletes.append(athlete_data)
+
+        # Add segment efforts athletes if any
+        for effort in activity.segment_efforts:
+            if "athlete" in effort and "id" in effort["athlete"]:
+                athlete_id = effort["athlete"]["id"]
+                # Skip if already added
+                if any(a["id"] == athlete_id for a in athletes):
+                    continue
+
+                athlete_data = {"id": athlete_id}
+                if "firstname" in effort["athlete"] and "lastname" in effort["athlete"]:
+                    athlete_data["name"] = (
+                        f"{effort['athlete']['firstname']} {effort['athlete']['lastname']}"
+                    )
+                elif "firstname" in effort["athlete"]:
+                    athlete_data["name"] = effort["athlete"]["firstname"]
+                athletes.append(athlete_data)
+
+        return athletes
