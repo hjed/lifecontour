@@ -203,6 +203,49 @@ Simply run `pnpm test:e2e` in `frontend/` or `python scripts/run_integration_tes
 - Test responsive design across different screen sizes
 - Include accessibility testing in E2E flows
 
+### Cross-Browser Reliability Patterns
+
+The E2E suite runs across Chromium, Firefox, and Mobile Chrome. Firefox is notably more sensitive to timing — it processes click events, DOM state changes, and navigations slightly slower than Chromium. The following patterns prevent Firefox-specific flakes.
+
+#### Use `expect.toPass()` for Action + Assertion Sequences
+
+When a test clicks an element and immediately asserts a state change, Firefox may not register the click in time. Wrap the **action + assertion** together inside `expect.toPass()` so the entire sequence retries as a unit:
+
+```typescript
+// ✅ CORRECT: Retryable click + assertion
+await expect(async () => {
+  await button.click();
+  await expect(button).toHaveAttribute('aria-expanded', 'true');
+}).toPass({ timeout: 15000 });
+
+// ❌ WRONG: Non-retryable — if the click is missed, the assertion waits forever
+await button.click();
+await expect(button).toHaveAttribute('aria-expanded', 'true');
+```
+
+This pattern applies to:
+- **Toggle interactions** (click → `aria-expanded`, `aria-checked`)
+- **Navigation after click** (click link → `toHaveURL`)
+- **Dynamic UI rendering** (check checkbox → editor `toBeVisible`)
+- **Combobox interactions** (fill input → option `toBeVisible`)
+
+#### Use Web-First URL Assertions
+
+Always prefer auto-retrying web-first assertions over snapshot-based checks:
+
+```typescript
+// ✅ CORRECT: Web-first, auto-retrying
+await expect(page).toHaveURL(/\/journals$/);
+await expect(page).not.toHaveURL(/\/journals\/new/);
+
+// ❌ WRONG: Non-retrying — can fail if navigation hasn't completed
+expect(page.url()).toContain('/journals');
+```
+
+#### Avoid `page.waitForURL()` When Possible
+
+Prefer `await expect(page).toHaveURL(...)` over `page.waitForURL(...)` — the former is a web-first assertion with built-in retry semantics, while the latter has no retry and can timeout on slow browsers.
+
 ### ⚠️ LEGACY PATTERN - Replaced by Fixture System
 
 **The conditional logic patterns below have been replaced by the advanced fixture-based testing system.**
