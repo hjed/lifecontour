@@ -113,20 +113,22 @@ test.describe('Sidebar Navigation', () => {
         page.getByRole('link', { name: 'All Journals' })
       ).not.toBeVisible();
 
-      // Click to expand
-      // Make retry idempotent by keeping click outside, allowing expect's
-      // built-in polling to wait for the 'aria-expanded' state
-      await journalsButton.click();
-      await expect(journalsButton).toHaveAttribute('aria-expanded', 'true', {
-        timeout: 15000,
-      });
+      // Click to expand — use toPass() so the entire click + assertion retries
+      // as a unit. Firefox can occasionally fail to register a click, so the
+      // click itself must be inside the retry block.
+      await expect(async () => {
+        await journalsButton.click();
+        await expect(journalsButton).toHaveAttribute('aria-expanded', 'true');
+      }).toPass({ timeout: 15000 });
       await expect(
         page.getByRole('link', { name: 'All Journals' })
       ).toBeVisible();
 
-      // Click to collapse
-      await journalsButton.click();
-      await expect(journalsButton).toHaveAttribute('aria-expanded', 'false');
+      // Click to collapse — same retryable pattern
+      await expect(async () => {
+        await journalsButton.click();
+        await expect(journalsButton).toHaveAttribute('aria-expanded', 'false');
+      }).toPass({ timeout: 15000 });
       await expect(
         page.getByRole('link', { name: 'All Journals' })
       ).not.toBeVisible();
@@ -299,25 +301,28 @@ test.describe('Sidebar Navigation', () => {
       // Start with desktop and expand journals
       await page.setViewportSize({ width: 1024, height: 768 });
       await page.goto('/contacts');
-      await page.getByRole('button', { name: /journals/i }).click();
-      await expect(
-        page.getByRole('link', { name: 'All Journals' })
-      ).toBeVisible();
+      await expect(async () => {
+        await page.getByRole('button', { name: /journals/i }).click();
+        await expect(
+          page.getByRole('link', { name: 'All Journals' })
+        ).toBeVisible();
+      }).toPass({ timeout: 15000 });
 
       // Switch to mobile - wait for UI to stabilize after viewport change
       await page.setViewportSize({ width: 375, height: 667 });
       // Wait for desktop sidebar to hide and mobile nav trigger to appear
       await expect(page.getByTestId('sidebar')).not.toBeVisible();
       await expect(page.getByTestId('mobile-nav-trigger')).toBeVisible();
-      await page.getByTestId('mobile-nav-trigger').click();
-
-      // Journals should still be expanded
-      await expect(
-        page.getByRole('button', { name: /journals/i })
-      ).toHaveAttribute('aria-expanded', 'true');
-      await expect(
-        page.getByRole('link', { name: 'All Journals' })
-      ).toBeVisible();
+      await expect(async () => {
+        await page.getByTestId('mobile-nav-trigger').click();
+        // Journals should still be expanded
+        await expect(
+          page.getByRole('button', { name: /journals/i })
+        ).toHaveAttribute('aria-expanded', 'true');
+        await expect(
+          page.getByRole('link', { name: 'All Journals' })
+        ).toBeVisible();
+      }).toPass({ timeout: 15000 });
     });
   });
 
