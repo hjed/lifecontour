@@ -15,12 +15,12 @@ from core_shared.models.outbox import OutboxEvent
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.integrations.journal_outbox_event_processor import (
-    JournalOutboxEventProcessor,
-)
 from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
 from app.core.integrations.adapters.sql.strava_athlete_mapping_repository import (
     SqlStravaAthleteMappingRepository,
+)
+from app.core.integrations.journal_outbox_event_processor import (
+    JournalOutboxEventProcessor,
 )
 
 # Must match _STRAVA_SYNTHETIC_CALENDAR_ID in strava_sync_service.py
