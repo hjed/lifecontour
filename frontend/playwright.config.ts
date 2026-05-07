@@ -112,7 +112,7 @@ export default defineConfig({
     /* Test against mobile viewports. */
     {
       name: 'Mobile Chrome',
-      use: { ...devices['Pixel 6'], timezoneId: 'UTC' },
+      use: { ...devices['Pixel 5'], timezoneId: 'UTC' },
     },
 
     /* Test against branded browsers. */
