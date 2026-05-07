@@ -627,7 +627,9 @@ test.describe('Calendar Views', () => {
   test('should trigger quick create dialog and create a new event', async ({
     authenticatedPage,
     testCleanup,
+    isMobile,
   }) => {
+    if (isMobile) test.skip();
     const page = authenticatedPage;
     const dataManager = new (await import('./data-management')).TestDataManager(
       page

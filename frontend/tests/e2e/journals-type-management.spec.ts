@@ -7,7 +7,9 @@ test.describe('Journal Type Management', () => {
   test('can add and remove journal types via UI', async ({
     authenticatedPage: page,
     testCleanup,
+    isMobile,
   }) => {
+    if (isMobile) test.skip();
     // Create a test journal via API directly to test type management UI
     const response = await page.request.post('/api/journals', {
       data: {

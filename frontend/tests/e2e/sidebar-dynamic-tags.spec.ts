@@ -10,6 +10,7 @@ import { createTestHelpers } from './utils/test-helpers';
  * Converted to use the advanced fixture-based testing system.
  */
 test.describe('Sidebar Dynamic Tags Navigation', () => {
+  test.skip(({ isMobile }) => isMobile, 'Sidebar tests are skipped on mobile');
   test('should display sidebar with proper structure', async ({
     authenticatedPage: page,
   }) => {

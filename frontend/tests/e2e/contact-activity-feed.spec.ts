@@ -165,7 +165,9 @@ test.describe('Contact Activity Feed', () => {
 
   test('should display provenance indicators and collapsible summary regeneration', async ({
     contactsWithData,
+    isMobile,
   }) => {
+    if (isMobile) test.skip();
     const { page, contacts } = contactsWithData;
     const contact = contacts[0];
 

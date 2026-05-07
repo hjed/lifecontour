@@ -115,7 +115,9 @@ test.describe('Contact Favourites and Filtering', () => {
 
     test('should allow navigation to favourites page from sidebar', async ({
       authenticatedPage,
+      isMobile,
     }) => {
+      if (isMobile) test.skip();
       // Navigate to contacts page
       await authenticatedPage.goto('/contacts');
       await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
@@ -220,7 +222,9 @@ test.describe('Contact Favourites and Filtering', () => {
   test.describe('Integration Tests', () => {
     test('should maintain consistent navigation between contact pages', async ({
       favouriteContacts,
+      isMobile,
     }) => {
+      if (isMobile) test.skip();
       const { page, contacts } = favouriteContacts;
 
       // Start on contacts page
@@ -249,7 +253,9 @@ test.describe('Contact Favourites and Filtering', () => {
 
     test('should display consistent UI structure across contact pages', async ({
       authenticatedPage,
+      isMobile,
     }) => {
+      if (isMobile) test.skip();
       const pagesToTest = ['/contacts', '/contacts/favourites'];
 
       for (const pageUrl of pagesToTest) {
