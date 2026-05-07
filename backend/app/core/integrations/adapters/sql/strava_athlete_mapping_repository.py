@@ -46,6 +46,8 @@ class SqlStravaAthleteMappingRepository:
                 """
                 INSERT INTO strava_athlete_mappings (user_id, strava_athlete_id, strava_athlete_name, contact_id)
                 VALUES (:user_id, :strava_athlete_id, :strava_athlete_name, :contact_id)
+                ON CONFLICT (user_id, strava_athlete_id) DO UPDATE
+                SET strava_athlete_name = EXCLUDED.strava_athlete_name, contact_id = EXCLUDED.contact_id, updated_at = now()
                 RETURNING id, created_at, updated_at
                 """
             )
@@ -60,7 +62,7 @@ class SqlStravaAthleteMappingRepository:
             )
             row = result.fetchone()
             if not row:
-                raise RuntimeError("Failed to insert mapping")
+                raise RuntimeError("Failed to insert or update mapping")
 
             return StravaAthleteMapping(
                 id=row.id,

@@ -27,6 +27,7 @@ from core_shared.models.journals.journal_relationship_types import (
 from core_shared.models.journals.journal_types import JournalType
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.route import Route
+from core_shared.models.strava_athlete_mapping import StravaAthleteMapping
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -154,6 +155,8 @@ class JournalOutboxEventProcessor:
         self,
         journal_service: JournalService,
         connection: AsyncConnection,
+        contact_repository: SqlContactRepository,
+        strava_athlete_mapping_repository: SqlStravaAthleteMappingRepository,
         match_candidate_detector: Any = None,
     ) -> None:
         """
@@ -162,10 +165,14 @@ class JournalOutboxEventProcessor:
         Args:
             journal_service: Service for journal operations
             connection: Database connection for transactions
+            contact_repository: Repository for contacts
+            strava_athlete_mapping_repository: Repository for strava mappings
             match_candidate_detector: Optional detector for match candidates
         """
         self.journal_service = journal_service
         self.connection = connection
+        self.contact_repository = contact_repository
+        self.strava_athlete_mapping_repository = strava_athlete_mapping_repository
         self.contact_resolver = ContactResolver(connection)
         self.match_candidate_detector = match_candidate_detector
 
@@ -746,25 +753,30 @@ class JournalOutboxEventProcessor:
         if not strava_athletes or not isinstance(strava_athletes, list):
             return
 
-        mapping_repo = SqlStravaAthleteMappingRepository(self.connection)
-        contact_repo = SqlContactRepository(self.connection)
-
         for athlete in strava_athletes:
-            athlete_id = str(athlete.get("id"))
+            if not isinstance(athlete, dict):
+                continue
+
+            athlete_id = str(athlete.get("id", ""))
             if not athlete_id or athlete_id == "None":
                 continue
 
             athlete_name = athlete.get("name")
+            if not isinstance(athlete_name, str):
+                athlete_name = None
+
             contact_id = None
 
             # 1. Check mapping table
-            mapping = await mapping_repo.get_by_strava_id(user_id, athlete_id)
+            mapping = await self.strava_athlete_mapping_repository.get_by_strava_id(
+                user_id, athlete_id
+            )
             if mapping:
                 contact_id = mapping.contact_id
             elif athlete_name:
                 # 2. Name-based conservative matching
                 # Only use if exactly one match is found
-                contacts = await contact_repo.search(athlete_name, limit=2)
+                contacts = await self.contact_repository.search(athlete_name, limit=2)
 
                 # Check for exact name match (case insensitive)
                 exact_matches = [
@@ -783,17 +795,13 @@ class JournalOutboxEventProcessor:
                 if len(exact_matches) == 1 and exact_matches[0].id is not None:
                     contact_id = exact_matches[0].id
                     # Record the mapping to prevent future searches
-                    from core_shared.models.strava_athlete_mapping import (
-                        StravaAthleteMapping,
-                    )
-
                     new_mapping = StravaAthleteMapping(
                         user_id=user_id,
                         strava_athlete_id=athlete_id,
                         strava_athlete_name=athlete_name,
                         contact_id=contact_id,
                     )
-                    await mapping_repo.save(new_mapping)
+                    await self.strava_athlete_mapping_repository.save(new_mapping)
 
             if contact_id is not None:
                 await self._create_contact_relationship(

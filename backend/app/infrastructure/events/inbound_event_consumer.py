@@ -239,9 +239,23 @@ class InboundEventConsumer(DeadLetterConsumerMixin, StreamConsumer):
                 similarity_assessor=similarity_assessor,
             )
 
+        from app.core.contacts.adapters.sql.contact_repository import (
+            SqlContactRepository,
+        )
+        from app.core.integrations.adapters.sql.strava_athlete_mapping_repository import (
+            SqlStravaAthleteMappingRepository,
+        )
+
+        contact_repository = SqlContactRepository(connection)
+        strava_athlete_mapping_repository = SqlStravaAthleteMappingRepository(
+            connection
+        )
+
         outbox_processor = JournalOutboxEventProcessor(
             journal_service=journal_service,
             connection=connection,
+            contact_repository=contact_repository,
+            strava_athlete_mapping_repository=strava_athlete_mapping_repository,
             match_candidate_detector=match_detector,
         )
         result = await outbox_processor.process_event(event)  # type: ignore[arg-type]

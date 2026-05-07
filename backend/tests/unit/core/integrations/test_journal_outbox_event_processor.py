@@ -194,6 +194,8 @@ class TestJournalOutboxEventProcessor:
         return JournalOutboxEventProcessor(
             journal_service=mock_journal_service,
             connection=mock_connection,
+            contact_repository=MagicMock(),
+            strava_athlete_mapping_repository=MagicMock(),
         )
 
     # ── journal_event.created ──────────────────────────────────────────
@@ -836,6 +838,8 @@ class TestJournalOutboxEventProcessorCancelled:
         return JournalOutboxEventProcessor(
             journal_service=mock_journal_service,
             connection=mock_connection,
+            contact_repository=MagicMock(),
+            strava_athlete_mapping_repository=MagicMock(),
         )
 
     @pytest.mark.asyncio
@@ -907,6 +911,8 @@ class TestStravaFitnessDataProcessing:
         return JournalOutboxEventProcessor(
             journal_service=mock_journal_service,
             connection=mock_connection,
+            contact_repository=MagicMock(),
+            strava_athlete_mapping_repository=MagicMock(),
         )
 
     @pytest.mark.asyncio
@@ -1251,6 +1257,8 @@ class TestGPXRouteAndSyncMetadata:
         return JournalOutboxEventProcessor(
             journal_service=mock_journal_service,
             connection=mock_connection,
+            contact_repository=MagicMock(),
+            strava_athlete_mapping_repository=MagicMock(),
         )
 
     @pytest.mark.asyncio
@@ -1495,6 +1503,8 @@ class TestStravaMatchDetectionEmission:
         return JournalOutboxEventProcessor(
             journal_service=mock_journal_service,
             connection=mock_connection,
+            contact_repository=MagicMock(),
+            strava_athlete_mapping_repository=MagicMock(),
             match_candidate_detector=mock_match_detector,
         )
 
@@ -1507,6 +1517,8 @@ class TestStravaMatchDetectionEmission:
         return JournalOutboxEventProcessor(
             journal_service=mock_journal_service,
             connection=mock_connection,
+            contact_repository=MagicMock(),
+            strava_athlete_mapping_repository=MagicMock(),
         )
 
     @pytest.mark.asyncio

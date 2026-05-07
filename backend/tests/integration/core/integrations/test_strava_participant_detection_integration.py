@@ -37,9 +37,13 @@ async def _create_processor(
         event_publisher=event_publisher,
         contact_relationship_repo=contact_relationship_repo,
     )
+    contact_repo = SqlContactRepository(connection)
+    mapping_repo = SqlStravaAthleteMappingRepository(connection)
     return JournalOutboxEventProcessor(
         journal_service=service,
         connection=connection,
+        contact_repository=contact_repo,
+        strava_athlete_mapping_repository=mapping_repo,
     )
 
 

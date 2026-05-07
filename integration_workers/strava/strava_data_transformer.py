@@ -231,36 +231,28 @@ class StravaDataTransformer:
         Returns:
             List of athlete dictionaries containing at least an 'id' and optionally a 'name'.
         """
-        athletes = []
+        athletes: list[dict[str, str | int]] = []
 
-        # Add the main athlete (owner)
-        if activity.athlete and "id" in activity.athlete:
-            athlete_data = {"id": activity.athlete["id"]}
-            # Strava API might not always return firstname/lastname directly in the athlete dict
-            # for GET /activities/{id}, but if it does, we capture it.
-            if "firstname" in activity.athlete and "lastname" in activity.athlete:
-                athlete_data["name"] = (
-                    f"{activity.athlete['firstname']} {activity.athlete['lastname']}"
-                )
-            elif "firstname" in activity.athlete:
-                athlete_data["name"] = activity.athlete["firstname"]
-            athletes.append(athlete_data)
-
-        # Add segment efforts athletes if any
+        # Extract from segment efforts athletes if any
+        # We explicitly don't extract the main activity.athlete as they are the user
         for effort in activity.segment_efforts:
-            if "athlete" in effort and "id" in effort["athlete"]:
-                athlete_id = effort["athlete"]["id"]
+            athlete_info = effort.get("athlete")
+            if not isinstance(athlete_info, dict):
+                continue
+
+            if "id" in athlete_info:
+                athlete_id = athlete_info["id"]
                 # Skip if already added
                 if any(a["id"] == athlete_id for a in athletes):
                     continue
 
                 athlete_data = {"id": athlete_id}
-                if "firstname" in effort["athlete"] and "lastname" in effort["athlete"]:
+                if "firstname" in athlete_info and "lastname" in athlete_info:
                     athlete_data["name"] = (
-                        f"{effort['athlete']['firstname']} {effort['athlete']['lastname']}"
+                        f"{athlete_info['firstname']} {athlete_info['lastname']}"
                     )
-                elif "firstname" in effort["athlete"]:
-                    athlete_data["name"] = effort["athlete"]["firstname"]
+                elif "firstname" in athlete_info:
+                    athlete_data["name"] = athlete_info["firstname"]
                 athletes.append(athlete_data)
 
         return athletes

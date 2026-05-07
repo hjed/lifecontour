@@ -18,6 +18,10 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.integrations.journal_outbox_event_processor import (
     JournalOutboxEventProcessor,
 )
+from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
+from app.core.integrations.adapters.sql.strava_athlete_mapping_repository import (
+    SqlStravaAthleteMappingRepository,
+)
 
 # Must match _STRAVA_SYNTHETIC_CALENDAR_ID in strava_sync_service.py
 STRAVA_CALENDAR_ID = "00000000-0000-0000-0000-000000000001"
@@ -105,6 +109,8 @@ async def _create_processor(
     return JournalOutboxEventProcessor(
         journal_service=service,
         connection=connection,
+        contact_repository=SqlContactRepository(connection),
+        strava_athlete_mapping_repository=SqlStravaAthleteMappingRepository(connection),
     )
 
 
