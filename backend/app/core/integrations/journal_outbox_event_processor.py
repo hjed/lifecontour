@@ -776,7 +776,7 @@ class JournalOutboxEventProcessor:
             elif athlete_name:
                 # 2. Name-based conservative matching
                 # Only use if exactly one match is found
-                contacts = await self.contact_repository.search(athlete_name, limit=2)
+                contacts = await self.contact_repository.search(athlete_name, limit=10)
 
                 # Check for exact name match (case insensitive)
                 exact_matches = [

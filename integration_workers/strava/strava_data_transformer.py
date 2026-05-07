@@ -247,12 +247,14 @@ class StravaDataTransformer:
                     continue
 
                 athlete_data = {"id": athlete_id}
-                if "firstname" in athlete_info and "lastname" in athlete_info:
-                    athlete_data["name"] = (
-                        f"{athlete_info['firstname']} {athlete_info['lastname']}"
-                    )
-                elif "firstname" in athlete_info:
-                    athlete_data["name"] = athlete_info["firstname"]
+                firstname = athlete_info.get("firstname")
+                lastname = athlete_info.get("lastname")
+                if isinstance(firstname, str) and isinstance(lastname, str):
+                    athlete_data["name"] = f"{firstname} {lastname}"
+                elif isinstance(firstname, str):
+                    athlete_data["name"] = firstname
+                elif isinstance(lastname, str):
+                    athlete_data["name"] = lastname
                 athletes.append(athlete_data)
 
         return athletes

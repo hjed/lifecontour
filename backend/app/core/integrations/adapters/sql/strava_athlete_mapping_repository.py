@@ -78,7 +78,7 @@ class SqlStravaAthleteMappingRepository:
                 """
                 UPDATE strava_athlete_mappings
                 SET strava_athlete_name = :strava_athlete_name, contact_id = :contact_id, updated_at = now()
-                WHERE id = :id
+                WHERE id = :id AND user_id = :user_id AND strava_athlete_id = :strava_athlete_id
                 RETURNING updated_at
                 """
             )
@@ -86,6 +86,8 @@ class SqlStravaAthleteMappingRepository:
                 query,
                 {
                     "id": mapping.id,
+                    "user_id": mapping.user_id,
+                    "strava_athlete_id": mapping.strava_athlete_id,
                     "strava_athlete_name": mapping.strava_athlete_name,
                     "contact_id": mapping.contact_id,
                 },
