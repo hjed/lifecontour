@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Any
 
 from core_shared.models.journals import EventDateRange, JournalType
 
@@ -133,6 +134,7 @@ class TransformedActivity:
     elevation_loss: int | None
     gpx_xml: str | None
     version_hash: str
+    strava_athletes: list[dict[str, Any]]
 
 
 class StravaDataTransformer:
@@ -216,4 +218,43 @@ class StravaDataTransformer:
             version_hash=hashlib.sha256(
                 activity.model_dump_json().encode()
             ).hexdigest(),
+            strava_athletes=StravaDataTransformer._extract_athletes(activity),
         )
+
+    @staticmethod
+    def _extract_athletes(activity: StravaActivity) -> list[dict[str, str | int]]:
+        """Extract all athlete data (including group activity participants) from the activity.
+
+        Args:
+            activity: Strava API activity response.
+
+        Returns:
+            List of athlete dictionaries containing at least an 'id' and optionally a 'name'.
+        """
+        athletes: list[dict[str, str | int]] = []
+
+        # Extract from segment efforts athletes if any
+        # We explicitly don't extract the main activity.athlete as they are the user
+        for effort in activity.segment_efforts:
+            athlete_info = effort.get("athlete")
+            if not isinstance(athlete_info, dict):
+                continue
+
+            if "id" in athlete_info:
+                athlete_id = athlete_info["id"]
+                # Skip if already added
+                if any(a["id"] == athlete_id for a in athletes):
+                    continue
+
+                athlete_data = {"id": athlete_id}
+                firstname = athlete_info.get("firstname")
+                lastname = athlete_info.get("lastname")
+                if isinstance(firstname, str) and isinstance(lastname, str):
+                    athlete_data["name"] = f"{firstname} {lastname}"
+                elif isinstance(firstname, str):
+                    athlete_data["name"] = firstname
+                elif isinstance(lastname, str):
+                    athlete_data["name"] = lastname
+                athletes.append(athlete_data)
+
+        return athletes

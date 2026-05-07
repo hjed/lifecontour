@@ -27,10 +27,15 @@ from core_shared.models.journals.journal_relationship_types import (
 from core_shared.models.journals.journal_types import JournalType
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.route import Route
+from core_shared.models.strava_athlete_mapping import StravaAthleteMapping
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
+from app.core.integrations.adapters.sql.strava_athlete_mapping_repository import (
+    SqlStravaAthleteMappingRepository,
+)
 from app.core.integrations.adapters.sql.sync_metadata_repository import (
     SyncMetadataRepository,
 )
@@ -150,6 +155,8 @@ class JournalOutboxEventProcessor:
         self,
         journal_service: JournalService,
         connection: AsyncConnection,
+        contact_repository: SqlContactRepository,
+        strava_athlete_mapping_repository: SqlStravaAthleteMappingRepository,
         match_candidate_detector: Any = None,
     ) -> None:
         """
@@ -158,10 +165,14 @@ class JournalOutboxEventProcessor:
         Args:
             journal_service: Service for journal operations
             connection: Database connection for transactions
+            contact_repository: Repository for contacts
+            strava_athlete_mapping_repository: Repository for strava mappings
             match_candidate_detector: Optional detector for match candidates
         """
         self.journal_service = journal_service
         self.connection = connection
+        self.contact_repository = contact_repository
+        self.strava_athlete_mapping_repository = strava_athlete_mapping_repository
         self.contact_resolver = ContactResolver(connection)
         self.match_candidate_detector = match_candidate_detector
 
@@ -260,6 +271,11 @@ class JournalOutboxEventProcessor:
 
         # Save GPX route if present (Strava-sourced events with GPS data)
         await self._persist_route_from_gpx(created_journal.id, journal_data)
+
+        # Update Strava athletes if present
+        await self._persist_strava_athletes(
+            created_journal.id, created_journal.user_id, journal_data
+        )
 
         # Save sync metadata for integration tracking (Strava-sourced events)
         await self._persist_sync_metadata(
@@ -454,6 +470,10 @@ class JournalOutboxEventProcessor:
 
         # Update GPX route if present (Strava-sourced events with GPS data)
         await self._persist_route_from_gpx(existing_journal_id, journal_data)
+
+        # Update Strava athletes if present
+        user_id = existing_journal.user_id
+        await self._persist_strava_athletes(existing_journal_id, user_id, journal_data)
 
         # Update sync metadata for integration tracking (Strava-sourced events)
         await self._persist_sync_metadata(
@@ -718,6 +738,78 @@ class JournalOutboxEventProcessor:
                         journal_type=type_str,
                         journal_id=journal_id,
                     )
+
+    async def _persist_strava_athletes(
+        self, journal_id: int, user_id: str, journal_data: dict[str, Any]
+    ) -> None:
+        """Resolve Strava athletes to contacts and add them as PARTICIPANTS.
+
+        Args:
+            journal_id: ID of the journal.
+            user_id: ID of the user.
+            journal_data: The ``journal_data`` dict from the outbox event.
+        """
+        strava_athletes = journal_data.get("strava_athletes")
+        if not strava_athletes or not isinstance(strava_athletes, list):
+            return
+
+        for athlete in strava_athletes:
+            if not isinstance(athlete, dict):
+                continue
+
+            athlete_id = str(athlete.get("id", ""))
+            if not athlete_id or athlete_id == "None":
+                continue
+
+            athlete_name = athlete.get("name")
+            if not isinstance(athlete_name, str):
+                athlete_name = None
+
+            contact_id = None
+
+            # 1. Check mapping table
+            mapping = await self.strava_athlete_mapping_repository.get_by_strava_id(
+                user_id, athlete_id
+            )
+            if mapping:
+                contact_id = mapping.contact_id
+            elif athlete_name:
+                # 2. Name-based conservative matching
+                # Only use if exactly one match is found
+                contacts = await self.contact_repository.search(athlete_name, limit=10)
+
+                # Check for exact name match (case insensitive)
+                exact_matches = [
+                    c
+                    for c in contacts
+                    if c.first_name
+                    and c.last_name
+                    and f"{c.first_name} {c.last_name}".lower() == athlete_name.lower()
+                    or (
+                        c.first_name
+                        and not c.last_name
+                        and c.first_name.lower() == athlete_name.lower()
+                    )
+                ]
+
+                if len(exact_matches) == 1 and exact_matches[0].id is not None:
+                    contact_id = exact_matches[0].id
+                    # Record the mapping to prevent future searches
+                    new_mapping = StravaAthleteMapping(
+                        user_id=user_id,
+                        strava_athlete_id=athlete_id,
+                        strava_athlete_name=athlete_name,
+                        contact_id=contact_id,
+                    )
+                    await self.strava_athlete_mapping_repository.save(new_mapping)
+
+            if contact_id is not None:
+                await self._create_contact_relationship(
+                    journal_id=journal_id,
+                    contact_id=contact_id,
+                    relationship_type=JournalContactRelationshipType.PARTICIPANT,
+                    status=AttendeeStatus.ATTENDED.value,
+                )
 
     async def _save_calendar_info(
         self, journal_id: int, calendar_info_data: dict[str, Any]

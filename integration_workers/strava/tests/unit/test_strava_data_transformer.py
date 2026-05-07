@@ -354,3 +354,35 @@ class TestFieldTransformation:
         r1 = StravaDataTransformer.transform(a1)
         r2 = StravaDataTransformer.transform(a2)
         assert r1.version_hash != r2.version_hash
+
+
+def test_extract_athletes_from_segment_efforts() -> None:
+    """Extracts athletes correctly from segment efforts, deduplicating IDs and skipping the main user."""
+    activity = StravaActivity(
+        id=123,
+        name="Test",
+        type="Run",
+        sport_type="Run",
+        start_date="2026-03-15T08:00:00Z",
+        elapsed_time=100,
+        moving_time=100,
+        distance=100.0,
+        total_elevation_gain=10.0,
+        athlete={"id": 1, "firstname": "Main", "lastname": "User"},
+        segment_efforts=[
+            {"id": 101, "athlete": {"id": 2, "firstname": "John", "lastname": "Doe"}},
+            {
+                "id": 102,
+                "athlete": {"id": 2, "firstname": "John", "lastname": "Doe"},
+            },  # Duplicate ID
+            {"id": 103, "athlete": {"id": 3, "firstname": "Jane"}},
+            {"id": 104, "athlete": None},  # Malformed
+            {"id": 105},  # No athlete
+        ],
+    )
+
+    athletes = StravaDataTransformer._extract_athletes(activity)
+
+    assert len(athletes) == 2
+    assert athletes[0] == {"id": 2, "name": "John Doe"}
+    assert athletes[1] == {"id": 3, "name": "Jane"}

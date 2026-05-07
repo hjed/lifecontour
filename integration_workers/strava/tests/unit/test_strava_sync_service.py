@@ -66,6 +66,7 @@ def _make_transformed(
         elevation_loss=None,
         gpx_xml=None,
         version_hash="0" * 64,
+        strava_athletes=[{"id": "user123", "name": "Test User"}],
     )
 
 

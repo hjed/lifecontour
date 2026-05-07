@@ -297,6 +297,7 @@ class StravaSyncService:
                 "heart_rate_max": transformed.fitness_data_heart_rate_max,
                 "strava_activity_id": transformed.fitness_data_strava_activity_id,
             },
+            "strava_athletes": transformed.strava_athletes,
             "gpx_xml": transformed.gpx_xml,
             "version_hash": transformed.version_hash,
         }

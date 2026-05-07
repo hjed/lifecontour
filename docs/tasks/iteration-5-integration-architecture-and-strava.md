@@ -466,29 +466,29 @@ Wire Strava imports into the existing merge detection and review pipeline.
 **Dependencies:** ITER5-004 (journals must exist to add participants and links to)
 
 **Acceptance Criteria (task-level):**
-- [ ] Strava athlete names auto-matched to contacts during import
+- [x] Strava athlete names auto-matched to contacts during import
 - [ ] Manual Strava athlete → contact mapping UI
 - [ ] External system links displayed on journal and contact detail pages
 - [ ] External links available through MCP
 
-#### Phase 1: Automatic Participant Detection
+#### Phase 1: Automatic Participant Detection ✅ COMPLETE
 **PR Size:** ~5–7 files
 
 Backend-only: detect Strava athletes, match to contacts, add as participants during import.
 
 **Acceptance Criteria:**
-- [ ] Strava sync pipeline extracts athlete names from activity data (`athlete` field, group activity participants)
-- [ ] Name-based contact search using existing contact search infrastructure (MeiliSearch or SQL ILIKE)
-- [ ] Confidence threshold: only add participant when name match is unambiguous (exact or near-exact match)
-- [ ] Matched contacts added as PARTICIPANT on the journal via existing `JournalContactRelationship` system
-- [ ] No participant added if no confident match (conservative — no false positives)
-- [ ] Migration creates `strava_athlete_mappings` table: `user_id`, `strava_athlete_id`, `strava_athlete_name`, `contact_id`, `created_at`
-- [ ] Mapping table checked before name search — manual mappings (Phase 2) take priority over name matching
-- [ ] All future imports for a mapped athlete automatically add the contact as participant
+- [x] Strava sync pipeline extracts athlete names from activity data (`athlete` field, group activity participants)
+- [x] Name-based contact search using existing contact search infrastructure (MeiliSearch or SQL ILIKE)
+- [x] Confidence threshold: only add participant when name match is unambiguous (exact or near-exact match)
+- [x] Matched contacts added as PARTICIPANT on the journal via existing `JournalContactRelationship` system
+- [x] No participant added if no confident match (conservative — no false positives)
+- [x] Migration creates `strava_athlete_mappings` table: `user_id`, `strava_athlete_id`, `strava_athlete_name`, `contact_id`, `created_at`
+- [x] Mapping table checked before name search — manual mappings (Phase 2) take priority over name matching
+- [x] All future imports for a mapped athlete automatically add the contact as participant
 
 **Required Test Coverage:**
-- **Unit:** name matching confidence logic, mapping table lookup priority, athlete name extraction from activity data.
-- **Integration:** import activity with known athlete name → verify PARTICIPANT relationship created. Import with unknown athlete → verify no participant. Import with ambiguous match → verify no participant.
+- **Unit:** name matching confidence logic, mapping table lookup priority, athlete name extraction from activity data. ✅
+- **Integration:** import activity with known athlete name → verify PARTICIPANT relationship created. Import with unknown athlete → verify no participant. Import with ambiguous match → verify no participant. ✅
 
 #### Phase 2: Manual Strava Athlete-to-Contact Mapping UI
 **PR Size:** ~4–6 files
@@ -520,6 +520,7 @@ Show data provenance on journal and contact detail pages with clickable links to
 - [ ] Icons for each system: Google Calendar, Google Contacts, Strava
 - [ ] Clickable link to external record where URL constructable:
   - Strava: `https://www.strava.com/activities/{strava_activity_id}`
+  - Strava Athelete: (Format TBC)
   - Google Calendar: `https://calendar.google.com/calendar/event?eid={base64_encoded_id}`
   - Google Contacts: `https://contacts.google.com/person/{resource_name}`
 - [ ] Icon shown without link when URL cannot be constructed (missing external ID)
