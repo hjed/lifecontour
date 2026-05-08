@@ -81,6 +81,7 @@ def _make_strava_event_data(
         "external_event_id": f"strava:{strava_activity_id}",
         "calendar_id": STRAVA_CALENDAR_ID,
         "sync_action": "created",
+        "sync_timestamp": datetime.now(UTC).isoformat(),
         "etag": None,
         "existing_journal_id": existing_journal_id,
         "contact_relationships": [],

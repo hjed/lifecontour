@@ -11,6 +11,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 import structlog
+from core_shared.models.outbox_events import (
+    OutboxEventData,
+    parse_outbox_event_data,
+)
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -30,6 +34,21 @@ class OutboxEvent:
     retry_count: int
     created_at: datetime
     relayed_at: datetime | None = None
+
+    def parsed_event_data(self) -> OutboxEventData:
+        """Parse ``event_data`` into the typed Pydantic model for this event type.
+
+        Uses the ``event_type`` to dispatch to the correct payload model
+        and validates the raw dict.
+
+        Returns:
+            A validated Pydantic model instance.
+
+        Raises:
+            ValueError: If ``event_type`` doesn't match any known pattern.
+            pydantic.ValidationError: If the payload doesn't match the model.
+        """
+        return parse_outbox_event_data(self.event_type, self.event_data)
 
 
 class OutboxRepository:
