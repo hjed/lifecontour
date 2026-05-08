@@ -9,7 +9,6 @@ test.describe('Journal Type Management', () => {
     testCleanup,
     isMobile,
   }) => {
-    if (isMobile) test.skip();
     // Create a test journal via API directly to test type management UI
     const response = await page.request.post('/api/journals', {
       data: {
@@ -78,7 +77,11 @@ test.describe('Journal Type Management', () => {
 
     // Hover over PLAN to reveal remove button and remove it
     // Wait for tooltip/hovercard
-    await page.getByTestId(`manage-type-${JournalType.PLAN}`).hover();
+    if (isMobile) {
+      await page.getByTestId(`manage-type-${JournalType.PLAN}`).tap();
+    } else {
+      await page.getByTestId(`manage-type-${JournalType.PLAN}`).hover();
+    }
 
     // Wait for the HoverCard to fully appear before clicking
     await expect(

@@ -629,7 +629,6 @@ test.describe('Calendar Views', () => {
     testCleanup,
     isMobile,
   }) => {
-    if (isMobile) test.skip();
     const page = authenticatedPage;
     const dataManager = new (await import('./data-management')).TestDataManager(
       page
@@ -662,7 +661,11 @@ test.describe('Calendar Views', () => {
     // Focus to reveal Add button via group-focus-within
     await todayCell.focus();
     // Also hover just in case
-    await todayCell.hover();
+    if (isMobile) {
+      await todayCell.tap();
+    } else {
+      await todayCell.hover();
+    }
 
     // Click Add button (force: true bypasses strict visibility checks that fail during CSS transitions in Firefox)
     const addButton = todayCell.getByRole('button', { name: /add event on/i });

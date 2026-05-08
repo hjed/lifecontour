@@ -561,6 +561,15 @@ export class SidebarTestHelpers {
    * Wait for sidebar to load.
    */
   async waitForSidebar(): Promise<void> {
+    const hamburgerButton = this.page
+      .locator('button[aria-label*="menu"], button[aria-label*="navigation"]')
+      .first();
+    if (await hamburgerButton.isVisible()) {
+      const sidebar = this.page.locator(SELECTORS.SIDEBAR).first();
+      if (!(await sidebar.isVisible())) {
+        await hamburgerButton.click();
+      }
+    }
     await this.page.waitForSelector(SELECTORS.SIDEBAR);
   }
 
@@ -568,6 +577,7 @@ export class SidebarTestHelpers {
    * Test favourites link in sidebar.
    */
   async testFavouritesLink(): Promise<void> {
+    await this.waitForSidebar();
     const favouritesLink = this.page.locator(SELECTORS.FAVOURITES_LINK);
 
     if ((await favouritesLink.count()) > 0) {
@@ -590,6 +600,7 @@ export class SidebarTestHelpers {
    * Test dynamic tag links in sidebar.
    */
   async testDynamicTagLinks(): Promise<void> {
+    await this.waitForSidebar();
     const tagLinks = this.page.locator(SELECTORS.TAG_LINKS);
     const hardcodedGroup1 = this.page.locator('text="Group 1"');
     const hardcodedGroup2 = this.page.locator('text="Group 2"');
@@ -616,6 +627,8 @@ export class SidebarTestHelpers {
    * Navigate to favourites page from sidebar.
    */
   async navigateToFavourites(): Promise<void> {
+    await this.waitForSidebar();
+
     // Try multiple selectors for the favourites link
     const favouritesSelectors = [
       'a[href="/contacts/favourites"]',
