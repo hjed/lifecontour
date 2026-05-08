@@ -26,6 +26,10 @@ from core_shared.models.journals.journal_relationship_types import (
 )
 from core_shared.models.journals.journal_types import JournalType
 from core_shared.models.outbox import OutboxEvent
+from core_shared.models.outbox_events import (
+    JournalStatusEventData,
+    JournalSyncEventData,
+)
 from core_shared.models.route import Route
 from core_shared.models.strava_athlete_mapping import StravaAthleteMapping
 from pydantic import BaseModel, Field, ValidationError
@@ -216,12 +220,13 @@ class JournalOutboxEventProcessor:
         external event link, and syncs contact relationships.
         """
         event_data: dict[str, Any] = event.event_data  # type: ignore
-        journal_data = event_data["journal_data"]
-        calendar_info_data = event_data["calendar_info_data"]
-        external_event_id = event_data["external_event_id"]
-        calendar_id = event_data["calendar_id"]
-        etag = event_data.get("etag")
-        contact_relationships = event_data.get("contact_relationships", [])
+        payload = JournalSyncEventData.model_validate(event_data)
+        journal_data = payload.journal_data
+        calendar_info_data = payload.calendar_info_data
+        external_event_id = payload.external_event_id
+        calendar_id = payload.calendar_id
+        etag = payload.etag
+        contact_relationships = payload.contact_relationships
 
         # Check for existing link to prevent duplicates (e.g. from retries)
         existing_link = await self._find_external_event_link(
@@ -235,7 +240,7 @@ class JournalOutboxEventProcessor:
                 calendar_id=calendar_id,
                 existing_journal_id=existing_link.journal_id,
             )
-            event_data["existing_journal_id"] = existing_link.journal_id
+            event.event_data["existing_journal_id"] = existing_link.journal_id
             return await self._process_journal_updated(event)
 
         # Build the journal entity
@@ -280,7 +285,7 @@ class JournalOutboxEventProcessor:
         # Save sync metadata for integration tracking (Strava-sourced events)
         await self._persist_sync_metadata(
             journal_id=created_journal.id,
-            event_data=event_data,
+            event_data=payload.model_dump(),
         )
 
         # Emit match detection event for the outbox to process asynchronously.
@@ -325,13 +330,14 @@ class JournalOutboxEventProcessor:
         journal fields, and updates the external event link.
         """
         event_data: dict[str, Any] = event.event_data  # type: ignore
-        journal_data = event_data["journal_data"]
-        calendar_info_data = event_data["calendar_info_data"]
-        external_event_id = event_data["external_event_id"]
-        calendar_id = event_data["calendar_id"]
-        etag = event_data.get("etag")
-        existing_journal_id = event_data.get("existing_journal_id")
-        contact_relationships = event_data.get("contact_relationships", [])
+        payload = JournalSyncEventData.model_validate(event_data)
+        journal_data = payload.journal_data
+        calendar_info_data = payload.calendar_info_data
+        external_event_id = payload.external_event_id
+        calendar_id = payload.calendar_id
+        etag = payload.etag
+        existing_journal_id = payload.existing_journal_id
+        contact_relationships = payload.contact_relationships
 
         if existing_journal_id is None:
             raise JournalOutboxEventProcessingError(
@@ -478,7 +484,7 @@ class JournalOutboxEventProcessor:
         # Update sync metadata for integration tracking (Strava-sourced events)
         await self._persist_sync_metadata(
             journal_id=existing_journal_id,
-            event_data=event_data,
+            event_data=payload.model_dump(),
         )
 
         logger.info(
@@ -502,8 +508,9 @@ class JournalOutboxEventProcessor:
         Marks the external event link as conflicted so users can resolve.
         """
         event_data: dict[str, Any] = event.event_data  # type: ignore
-        external_event_id = event_data["external_event_id"]
-        calendar_id = event_data["calendar_id"]
+        payload = JournalStatusEventData.model_validate(event_data)
+        external_event_id = payload.external_event_id
+        calendar_id = payload.calendar_id
 
         # Mark link as conflicted
         await self.connection.execute(
@@ -542,9 +549,10 @@ class JournalOutboxEventProcessor:
         approach per AC2).
         """
         event_data: dict[str, Any] = event.event_data  # type: ignore
-        external_event_id = event_data["external_event_id"]
-        calendar_id = event_data["calendar_id"]
-        existing_journal_id = event_data.get("existing_journal_id")
+        payload = JournalStatusEventData.model_validate(event_data)
+        external_event_id = payload.external_event_id
+        calendar_id = payload.calendar_id
+        existing_journal_id = payload.existing_journal_id
 
         if existing_journal_id is None:
             logger.warning(

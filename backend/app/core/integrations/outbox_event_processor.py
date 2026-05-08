@@ -23,6 +23,10 @@ from core_shared.models.contacts.serialization import (
 from core_shared.models.contacts.value_objects import Provenance
 from core_shared.models.external_reference import ExternalReference
 from core_shared.models.outbox import OutboxEvent
+from core_shared.models.outbox_events import (
+    ContactSyncEventData,
+    SyncCompletedEventData,
+)
 from core_shared.models.sync_metadata import SyncStatus
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -575,11 +579,12 @@ class OutboxEventProcessor:
     async def _process_contact_created(self, event: OutboxEvent) -> dict[str, Any]:
         """Process a contact.created event."""
         event_data: dict[str, Any] = cast(dict[str, Any], event.event_data)
+        payload = ContactSyncEventData.model_validate(event_data)
         integration_source: str = _normalize_integration_source(
-            event_data["integration_source"]
+            payload.integration_source
         )
-        external_id: str = event_data["external_id"]
-        contact_data = self._normalize_contact_data(event_data["contact_data"])
+        external_id: str = payload.external_id
+        contact_data = self._normalize_contact_data(payload.contact_data)
 
         # IDEMPOTENCY CHECK: Ensure we don't create duplicate contacts
         try:
@@ -723,8 +728,8 @@ class OutboxEventProcessor:
             # remove previously-synced tags on the very first update.
             initial_ref_data: dict[str, Any] = {
                 "resource_name": external_id,
-                "etag": event_data.get("etag"),
-                "sync_timestamp": event_data["sync_timestamp"],
+                "etag": payload.etag,
+                "sync_timestamp": payload.sync_timestamp,
             }
             if contact.tags:
                 initial_ref_data["synced_tags"] = [
@@ -799,11 +804,12 @@ class OutboxEventProcessor:
         3. Updates contact and sync metadata atomically
         """
         event_data: dict[str, Any] = cast(dict[str, Any], event.event_data)
+        payload = ContactSyncEventData.model_validate(event_data)
         integration_source: str = _normalize_integration_source(
-            event_data["integration_source"]
+            payload.integration_source
         )
-        external_id: str = event_data["external_id"]
-        contact_data = self._normalize_contact_data(event_data["contact_data"])
+        external_id: str = payload.external_id
+        contact_data = self._normalize_contact_data(payload.contact_data)
 
         logger.info(
             "Processing contact update with locking",
@@ -1004,11 +1010,10 @@ class OutboxEventProcessor:
     def _process_sync_completed(self, event: OutboxEvent) -> dict[str, Any]:
         """Process a sync.completed event."""
         event_data: dict[str, Any] = cast(dict[str, Any], event.event_data)
-        integration_source = _normalize_integration_source(
-            event_data["integration_source"]
-        )
-        google_account_email = event_data["google_account_email"]
-        metrics = event_data["metrics"]
+        payload = SyncCompletedEventData.model_validate(event_data)
+        integration_source = _normalize_integration_source(payload.integration_source)
+        google_account_email = payload.google_account_email
+        metrics = payload.metrics
 
         logger.info(
             "Processing sync completion",

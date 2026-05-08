@@ -11,6 +11,7 @@ from typing import Any
 import structlog
 from core_shared.models.journals import ReviewItem
 from core_shared.models.outbox import OutboxEvent
+from core_shared.models.outbox_events import MatchDetectionEventData
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -70,15 +71,16 @@ class MatchDetectionEventProcessor:
             }
 
         event_data: dict[str, Any] = event.event_data  # type: ignore
-        journal_id = event_data["journal_id"]
-        user_id = event_data["user_id"]
-        journal_title = event_data["journal_title"]
-        journal_content = event_data.get("journal_content", "")
-        start_str = event_data["event_date_range_start"]
-        end_str = event_data["event_date_range_end"]
+        payload = MatchDetectionEventData.model_validate(event_data)
+        journal_id = payload.journal_id
+        user_id = payload.user_id
+        journal_title = payload.journal_title
+        journal_content = payload.journal_content
+        start_dt = payload.event_date_range_start
+        end_dt = payload.event_date_range_end
 
-        incoming_start = dt.fromisoformat(start_str.replace("Z", "+00:00"))
-        incoming_end = dt.fromisoformat(end_str.replace("Z", "+00:00"))
+        incoming_start = start_dt
+        incoming_end = end_dt
 
         # Use a range predicate instead of DATE() wrapping so the query remains index-friendly.
         day_start = dt(

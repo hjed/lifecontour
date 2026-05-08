@@ -13,6 +13,12 @@ from sqlalchemy import Column, DateTime, Integer, String, text
 from sqlalchemy.dialects.postgresql import JSONB
 
 from .base import Base
+from .outbox_events import (
+    ContactSyncEventData,
+    JournalSyncEventData,
+    MatchDetectionEventData,
+    SyncCompletedEventData,
+)
 
 
 class OutboxEvent(Base):
@@ -110,17 +116,21 @@ class OutboxEvent(Base):
 
         Returns:
             OutboxEvent instance ready to be saved
+
+        Raises:
+            pydantic.ValidationError: If the payload is invalid
         """
+        payload = ContactSyncEventData(
+            integration_source=integration_source,
+            external_id=external_id,
+            contact_data=contact_data,
+            sync_timestamp=datetime.now(UTC).isoformat(),
+            sync_type=sync_type,
+            etag=etag,
+        )
         return cls(
             event_type=f"contact.{sync_type}",
-            event_data={
-                "integration_source": integration_source,
-                "external_id": external_id,
-                "contact_data": contact_data,
-                "sync_timestamp": datetime.now(UTC).isoformat(),
-                "sync_type": sync_type,
-                "etag": etag,
-            },
+            event_data=payload.model_dump(),
             aggregate_id=0,
         )
 
@@ -138,15 +148,19 @@ class OutboxEvent(Base):
 
         Returns:
             OutboxEvent instance ready to be saved
+
+        Raises:
+            pydantic.ValidationError: If the payload is invalid
         """
+        payload = SyncCompletedEventData(
+            integration_source=integration_source,
+            google_account_email=google_account_email,
+            metrics=metrics,
+            completed_at=datetime.now(UTC).isoformat(),
+        )
         return cls(
             event_type="sync.completed",
-            event_data={
-                "integration_source": integration_source,
-                "google_account_email": google_account_email,
-                "metrics": metrics,
-                "completed_at": datetime.now(UTC).isoformat(),
-            },
+            event_data=payload.model_dump(),
             aggregate_id=0,
         )
 
@@ -181,21 +195,25 @@ class OutboxEvent(Base):
 
         Returns:
             OutboxEvent instance ready to be saved
+
+        Raises:
+            pydantic.ValidationError: If the payload is invalid
         """
+        payload = JournalSyncEventData(
+            integration_source=integration_source,
+            external_event_id=external_event_id,
+            calendar_id=calendar_id,
+            journal_data=journal_data,
+            calendar_info_data=calendar_info_data,
+            sync_timestamp=datetime.now(UTC).isoformat(),
+            sync_action=sync_action,
+            etag=etag,
+            existing_journal_id=existing_journal_id,
+            contact_relationships=contact_relationships or [],
+        )
         return cls(
             event_type=f"journal_event.{sync_action}",
-            event_data={
-                "integration_source": integration_source,
-                "external_event_id": external_event_id,
-                "calendar_id": calendar_id,
-                "journal_data": journal_data,
-                "calendar_info_data": calendar_info_data,
-                "sync_timestamp": datetime.now(UTC).isoformat(),
-                "sync_action": sync_action,
-                "etag": etag,
-                "existing_journal_id": existing_journal_id,
-                "contact_relationships": contact_relationships or [],
-            },
+            event_data=payload.model_dump(),
             aggregate_id=existing_journal_id or 0,
         )
 
@@ -206,8 +224,8 @@ class OutboxEvent(Base):
         user_id: str,
         journal_title: str,
         journal_content: str,
-        event_date_range_start: str,
-        event_date_range_end: str,
+        event_date_range_start: str | datetime,
+        event_date_range_end: str | datetime,
     ) -> "OutboxEvent":
         """
         Create an outbox event to trigger match candidate detection.
@@ -226,10 +244,12 @@ class OutboxEvent(Base):
 
         Returns:
             OutboxEvent instance ready to be saved
+
+        Raises:
+            pydantic.ValidationError: If the payload is invalid
         """
-        return cls(
-            event_type="journal_review.detect_matches",
-            event_data={
+        payload = MatchDetectionEventData.model_validate(
+            {
                 "journal_id": journal_id,
                 "user_id": user_id,
                 "journal_title": journal_title,
@@ -237,7 +257,11 @@ class OutboxEvent(Base):
                 "event_date_range_start": event_date_range_start,
                 "event_date_range_end": event_date_range_end,
                 "created_at": datetime.now(UTC).isoformat(),
-            },
+            }
+        )
+        return cls(
+            event_type="journal_review.detect_matches",
+            event_data=payload.model_dump(mode="json"),
             aggregate_id=journal_id,
         )
 
