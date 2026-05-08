@@ -23,7 +23,7 @@ test.describe('Strava Athlete Mappings', () => {
 
     // 1. Setup Test Data
     // Create a contact to link
-    const contact = await dataManager.contacts.createContact({
+    await dataManager.contacts.createContact({
       first_name: 'Strava',
       last_name: 'Runner',
       emails: [{ email: 'runner@strava.test', is_primary: true }],
@@ -46,7 +46,7 @@ test.describe('Strava Athlete Mappings', () => {
         await authenticatedPage.request.delete(
           `/api/integrations/strava/athlete-mappings/test-athlete-123`
         );
-      } catch (e) {
+      } catch {
         // Ignore if already deleted
       }
     });

@@ -23,4 +23,4 @@ For each of these steps the recent run should have been after all file changes w
 
 Only once you've done all of the above should you consider making a commit. Reapt the process if you make changes
 
-DO NOT make commit names such as "fix pr comments", the commit message should reflect what the commit actually changes.
+DO NOT make commit names such as "fix pr comments", the commit message should reflect what the commit actually changes. If you are updating a previous change that hasn't been merged yet its often better to amend the previous commit.
