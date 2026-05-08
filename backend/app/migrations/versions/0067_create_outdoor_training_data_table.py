@@ -1,7 +1,7 @@
 """create outdoor training data table
 
 Revision ID: 0067
-Revises: 0066
+Revises: 1a7db45da3ca
 Create Date: 2026-05-08 19:54:06.947285
 
 """

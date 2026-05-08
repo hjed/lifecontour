@@ -3921,8 +3921,15 @@ async def _update_outdoor_training_type_data(
         field_path = ".".join(str(loc) for loc in error["loc"])
         raise JournalValidationError(field_path, error["msg"]) from e
 
-    if validated_data.focus_areas is not None:
-        entity.focus_areas = validated_data.focus_areas
+    if "focus_areas" in data:
+        from core_shared.models.journals.exceptions import (
+            OutdoorTrainingDataValidationError,
+        )
+
+        try:
+            entity = dataclasses.replace(entity, focus_areas=validated_data.focus_areas)
+        except OutdoorTrainingDataValidationError as e:
+            raise JournalValidationError("focus_areas", e.message) from e
 
     await outdoor_training_data_repo.save(entity)
 
