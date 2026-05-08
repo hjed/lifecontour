@@ -399,9 +399,9 @@ Deliver OUTDOOR_TRAINING as a complete vertical slice.
 - [x] DI provider registration
 
 **Required Test Coverage:**
-- **Unit:** OutdoorTrainingData entity validation, focus_areas enum + "other" handling.
-- **Integration:** repository CRUD, API test creating/updating training journal with focus areas.
-- **E2E:** create an outdoor training journal with multiple focus areas including "other", verify it renders correctly.
+- **Unit:** ✅ OutdoorTrainingData entity validation, focus_areas enum + "other" handling.
+- **Integration:** ✅ repository CRUD, API test creating/updating training journal with focus areas.
+- **E2E:** ✅ create an outdoor training journal with multiple focus areas including "other", verify it renders correctly.
 
 #### Phase 3: OUTDOOR_PLANNING — Full Vertical Slice
 **PR Size:** ~7–9 files
