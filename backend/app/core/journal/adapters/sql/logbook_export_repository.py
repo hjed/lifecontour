@@ -1,5 +1,6 @@
 """SQL-based repository for logbook export operations."""
 
+import json
 from collections import defaultdict
 from datetime import UTC
 from typing import Any
@@ -76,7 +77,8 @@ class SqlLogbookExportRepository(LogbookExportRepository):
 
         if activity_types:
             # Filter the allowed types by the requested ones if provided
-            logbook_types = [t for t in logbook_types if t in activity_types]
+            activity_types_upper = [t.upper() for t in activity_types]
+            logbook_types = [t for t in logbook_types if t in activity_types_upper]
 
         if not logbook_types:
             return []
@@ -86,14 +88,6 @@ class SqlLogbookExportRepository(LogbookExportRepository):
 
         for i, t in enumerate(logbook_types):
             query_params[f"type_{i}"] = t
-
-        date_filters = ""
-        if start_date:
-            date_filters += " AND j.start_time >= :start_date"
-            query_params["start_date"] = start_date
-        if end_date:
-            date_filters += " AND j.end_time <= :end_date"
-            query_params["end_date"] = end_date
 
         # We need all journals that match, AND all their ancestors and descendants
         # to assemble a complete tree. But wait, if we include ancestors/descendants
@@ -160,6 +154,7 @@ class SqlLogbookExportRepository(LogbookExportRepository):
                 SELECT j.id, j.parent_id
                 FROM journals j
                 JOIN ancestors a ON j.id = a.parent_id
+                WHERE j.user_id = :user_id
             ),
             descendants AS (
                 SELECT id, parent_id FROM ancestors
@@ -167,6 +162,7 @@ class SqlLogbookExportRepository(LogbookExportRepository):
                 SELECT j.id, j.parent_id
                 FROM journals j
                 JOIN descendants d ON j.parent_id = d.id
+                WHERE j.user_id = :user_id
             ),
             final_ids AS (
                 SELECT id FROM ancestors
@@ -253,11 +249,12 @@ class SqlLogbookExportRepository(LogbookExportRepository):
         # Contacts
         contacts_sql = """
             SELECT
-                r.journal_id, r.contact_id, r.role,
+                r.journal_id, r.contact_id, r.relationship_type as role,
                 TRIM(c.first_name || ' ' || COALESCE(c.last_name, '')) as name
             FROM journal_contact_relationships r
             JOIN contacts c ON r.contact_id = c.id
             WHERE r.journal_id = ANY(:journal_ids)
+            AND r.relationship_type IN ('PARTICIPANT', 'INVITEE')
         """
         result = await self.connection.execute(
             text(contacts_sql), {"journal_ids": final_journal_ids}
@@ -282,18 +279,21 @@ class SqlLogbookExportRepository(LogbookExportRepository):
         )
         pitches_by_journal = defaultdict(list)
         for row in result.fetchall():
-            pitches_by_journal[row.journal_id].append(
-                AbseilPitch(
-                    id=row.id,
-                    journal_id=row.journal_id,
-                    pitch_number=row.pitch_number,
-                    height=row.height,
-                    anchor_location=row.anchor_location,
-                    anchor_type=row.anchor_type,
-                    did_rescue=row.did_rescue,
-                    did_setup=row.did_setup,
+            try:
+                pitches_by_journal[row.journal_id].append(
+                    AbseilPitch(
+                        id=row.id,
+                        journal_id=row.journal_id,
+                        pitch_number=row.pitch_number,
+                        height=row.height,
+                        anchor_location=row.anchor_location,
+                        anchor_type=row.anchor_type,
+                        did_rescue=row.did_rescue,
+                        did_setup=row.did_setup,
+                    )
                 )
-            )
+            except ValueError:
+                pass
 
         # Type-specific Data
         # Helper to fetch a 1:1 table mapped by journal_id
@@ -360,7 +360,11 @@ class SqlLogbookExportRepository(LogbookExportRepository):
                 # Filter to only attributes that exist in the domain class
                 # taking care of renaming or removing unneeded db columns (like timestamps)
                 kwargs = {
-                    k: v
+                    k: (
+                        json.loads(v)
+                        if k == "activity_types" and isinstance(v, str)
+                        else v
+                    )
                     for k, v in data_dict.items()
                     if hasattr(domain_cls, k) or k in domain_cls.__annotations__
                 }

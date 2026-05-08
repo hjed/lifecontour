@@ -570,7 +570,7 @@ export class SidebarTestHelpers {
         await hamburgerButton.click();
       }
     }
-    await this.page.waitForSelector(SELECTORS.SIDEBAR);
+    await this.page.waitForSelector(SELECTORS.SIDEBAR, { state: 'visible' });
   }
 
   /**

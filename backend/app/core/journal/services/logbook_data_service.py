@@ -47,7 +47,7 @@ class LogbookDataService:
             if entry.parent_id and entry.parent_id in entry_map:
                 parent = entry_map[entry.parent_id]
                 # Avoid duplicates just in case
-                if entry not in parent.children:
+                if entry.id not in {child.id for child in parent.children}:
                     parent.children.append(entry)
             else:
                 root_entries.append(entry)

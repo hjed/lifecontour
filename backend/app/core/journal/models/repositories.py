@@ -2315,7 +2315,7 @@ class LogbookExportRepository(ABC):
         """
         Get all matching journals for the logbook export with their nested type data.
 
-        Returns a flat list of dicts or partially populated objects that the
+        Returns a flat list of `LogbookEntryData` objects that the
         LogbookDataService will assemble into a hierarchical tree.
         """
         pass

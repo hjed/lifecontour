@@ -41,6 +41,7 @@ class LogbookSummaryCalculator:
                 "CROSS_COUNTRY_SKIING",
                 "DOWNHILL_SKIING",
                 "ABSEILING_TRIP",
+                "OUTDOOR_ACTIVITY",
             ]
 
             for o_type in outdoor_types:
@@ -110,8 +111,9 @@ class ParticipantIndexCalculator:
                 e: LogbookEntryData, contacts_set: set[int], names_dict: dict[int, str]
             ) -> None:
                 for c in e.contacts:
-                    contacts_set.add(c.contact_id)
-                    names_dict[c.contact_id] = c.name
+                    if c.role in ("PARTICIPANT", "INVITEE"):
+                        contacts_set.add(c.contact_id)
+                        names_dict[c.contact_id] = c.name
                 for child in e.children:
                     collect_contacts(child, contacts_set, names_dict)
 

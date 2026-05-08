@@ -97,8 +97,7 @@ test.describe('Journal Merge Workflow', () => {
       hasText: actualSourceTitle,
     });
     await expect(sourceOption).toBeVisible();
-    await combobox.press('ArrowDown');
-    await combobox.press('Enter');
+    await sourceOption.click();
     // Ensure we move to the next step, avoiding any dropdown click bounding-box issues on mobile
 
     // Click Next to go to resolution dialog
@@ -266,8 +265,7 @@ test.describe('Journal Merge Workflow', () => {
       hasText: sourceTitle,
     });
     await expect(sourceOption).toBeVisible();
-    await combobox.press('ArrowDown');
-    await combobox.press('Enter');
+    await sourceOption.click();
 
     // Click Next to go to resolution dialog
     const nextBtn = dialog.getByRole('button', { name: /next/i });
