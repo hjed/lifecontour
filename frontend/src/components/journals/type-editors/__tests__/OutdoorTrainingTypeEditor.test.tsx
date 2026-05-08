@@ -84,13 +84,14 @@ describe('OutdoorTrainingTypeEditor', () => {
       setEditData: setEditDataMock,
     });
 
+    const user = userEvent.setup();
     render(<OutdoorTrainingTypeEditor />);
 
     const input = screen.getByTestId('custom-focus-area-input');
-    await userEvent.type(input, 'Navigation');
+    await user.type(input, 'Navigation');
 
     const addBtn = screen.getByTestId('add-focus-area-btn');
-    await userEvent.click(addBtn);
+    await user.click(addBtn);
 
     expect(setEditDataMock).toHaveBeenCalled();
     const updateFn = setEditDataMock.mock.calls[0][0];
@@ -107,10 +108,11 @@ describe('OutdoorTrainingTypeEditor', () => {
       setEditData: setEditDataMock,
     });
 
+    const user = userEvent.setup();
     render(<OutdoorTrainingTypeEditor />);
 
     const checkbox = screen.getByTestId('focus-area-checkbox-canyoning');
-    await userEvent.click(checkbox);
+    await user.click(checkbox);
 
     expect(setEditDataMock).toHaveBeenCalled();
     const updateFn = setEditDataMock.mock.calls[0][0];
@@ -127,10 +129,11 @@ describe('OutdoorTrainingTypeEditor', () => {
       setEditData: setEditDataMock,
     });
 
+    const user = userEvent.setup();
     render(<OutdoorTrainingTypeEditor />);
 
     const removeBtn = screen.getByTestId('remove-focus-area-canyoning');
-    await userEvent.click(removeBtn);
+    await user.click(removeBtn);
 
     expect(setEditDataMock).toHaveBeenCalled();
     const updateFn = setEditDataMock.mock.calls[0][0];

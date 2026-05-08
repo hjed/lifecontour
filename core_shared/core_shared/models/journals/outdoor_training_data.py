@@ -42,7 +42,13 @@ class OutdoorTrainingData:
 
     def _validate_focus_areas(self) -> None:
         """Validate focus_areas are strings."""
-        if self.focus_areas:
+        if self.focus_areas is not None:
+            if not isinstance(self.focus_areas, list):
+                raise OutdoorTrainingDataValidationError(
+                    "focus_areas",
+                    "Focus areas must be a list of strings",
+                )
+            
             # We allow strings. The UI allows selecting from OutdoorActivitySubtype
             # and entering a free-text "other" value. So we just ensure it's a list
             # of non-empty strings.

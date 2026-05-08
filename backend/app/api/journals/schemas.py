@@ -8,7 +8,7 @@ the JSON API specification.
 from datetime import date, datetime, time
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, StrictStr, model_validator
 
 from app.api.common.schemas import (
     JsonApiCollectionResponse,
@@ -392,7 +392,7 @@ class OutdoorPlanningDataSchema(BaseModel):
         default=None,
         description="Description of the topics discussed",
     )
-    activity_types: list[str] | None = Field(
+    activity_types: list[StrictStr] | None = Field(
         default=None,
         description="List of related outdoor activity subtypes",
     )
@@ -401,7 +401,7 @@ class OutdoorPlanningDataSchema(BaseModel):
 class OutdoorTrainingDataSchema(BaseModel):
     """Outdoor training data for OUTDOOR_TRAINING type journals."""
 
-    focus_areas: list[str] | None = Field(
+    focus_areas: list[StrictStr] | None = Field(
         default=None,
         description="List of related outdoor activity subtypes or free-text areas",
     )
@@ -418,7 +418,7 @@ class GearMaintenanceDataSchema(BaseModel):
         ...,
         description="Type of maintenance performed (e.g. routine inspection, retiring gear)",
     )
-    activity_types: list[str] | None = Field(
+    activity_types: list[StrictStr] | None = Field(
         default=None,
         description="List of related outdoor activity subtypes",
     )
