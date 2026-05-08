@@ -86,41 +86,46 @@ export function OutdoorTrainingTypeEditor({
     const trimmed = customFocusArea.trim();
     if (!trimmed) return;
 
-    const current = editData.focus_areas ?? [];
-    if (!current.includes(trimmed)) {
-      setEditData(prev => ({
+    setEditData(prev => {
+      const current = prev.focus_areas ?? [];
+      if (current.includes(trimmed)) return prev;
+      return {
         ...prev,
         focus_areas: [...current, trimmed],
-      }));
-    }
+      };
+    });
     setCustomFocusArea('');
   };
 
   const handleRemoveFocusArea = (areaToRemove: string) => {
-    const current = editData.focus_areas ?? [];
-    const next = current.filter(area => area !== areaToRemove);
-    setEditData(prev => ({
-      ...prev,
-      focus_areas: next.length > 0 ? next : null,
-    }));
+    setEditData(prev => {
+      const current = prev.focus_areas ?? [];
+      const next = current.filter(area => area !== areaToRemove);
+      return {
+        ...prev,
+        focus_areas: next.length > 0 ? next : null,
+      };
+    });
   };
 
   const handleToggleKnownActivity = (value: string, checked: boolean) => {
-    const current = editData.focus_areas ?? [];
-    let next;
-    if (checked) {
-      if (!current.includes(value)) {
-        next = [...current, value];
+    setEditData(prev => {
+      const current = prev.focus_areas ?? [];
+      let next;
+      if (checked) {
+        if (!current.includes(value)) {
+          next = [...current, value];
+        } else {
+          next = current;
+        }
       } else {
-        next = current;
+        next = current.filter(v => v !== value);
       }
-    } else {
-      next = current.filter(v => v !== value);
-    }
-    setEditData(prev => ({
-      ...prev,
-      focus_areas: next.length > 0 ? next : null,
-    }));
+      return {
+        ...prev,
+        focus_areas: next.length > 0 ? next : null,
+      };
+    });
   };
 
   return (

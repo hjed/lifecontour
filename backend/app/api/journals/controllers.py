@@ -3929,7 +3929,9 @@ async def _update_outdoor_training_type_data(
         try:
             entity = dataclasses.replace(entity, focus_areas=validated_data.focus_areas)
         except OutdoorTrainingDataValidationError as e:
-            raise JournalValidationError("focus_areas", e.message) from e
+            # e.message already contains the 'field: ' prefix, so we split it off
+            message_without_prefix = e.message.split(": ", 1)[-1]
+            raise JournalValidationError("focus_areas", message_without_prefix) from e
 
     await outdoor_training_data_repo.save(entity)
 

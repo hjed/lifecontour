@@ -38,7 +38,7 @@ class SqlOutdoorTrainingDataRepository(OutdoorTrainingDataRepository):
 
         return OutdoorTrainingData(
             journal_id=row.journal_id,
-            focus_areas=focus_areas if focus_areas else [],
+            focus_areas=focus_areas,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -46,7 +46,9 @@ class SqlOutdoorTrainingDataRepository(OutdoorTrainingDataRepository):
     async def save(self, data: OutdoorTrainingData) -> OutdoorTrainingData:
         """Save outdoor training data (insert or update)."""
         # Convert list to JSON string if needed for SQLAlchemy parameterized queries
-        focus_areas_json = json.dumps(data.focus_areas) if data.focus_areas else "[]"
+        focus_areas_json = (
+            json.dumps(data.focus_areas) if data.focus_areas is not None else None
+        )
 
         query = text(
             """
@@ -82,7 +84,7 @@ class SqlOutdoorTrainingDataRepository(OutdoorTrainingDataRepository):
 
         data.created_at = row.created_at
         data.updated_at = row.updated_at
-        data.focus_areas = focus_areas if focus_areas else []
+        data.focus_areas = focus_areas
 
         return data
 
