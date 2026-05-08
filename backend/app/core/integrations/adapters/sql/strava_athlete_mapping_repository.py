@@ -105,3 +105,45 @@ class SqlStravaAthleteMappingRepository:
                 created_at=mapping.created_at,
                 updated_at=row.updated_at,
             )
+
+    async def get_all_by_user_id(self, user_id: str) -> list[StravaAthleteMapping]:
+        """Get all mappings for a specific user."""
+        query = text(
+            """
+            SELECT id, user_id, strava_athlete_id, strava_athlete_name, contact_id, created_at, updated_at
+            FROM strava_athlete_mappings
+            WHERE user_id = :user_id
+            ORDER BY created_at DESC
+            """
+        )
+        result = await self.connection.execute(query, {"user_id": user_id})
+        rows = result.fetchall()
+
+        return [
+            StravaAthleteMapping(
+                id=row.id,
+                user_id=row.user_id,
+                strava_athlete_id=row.strava_athlete_id,
+                strava_athlete_name=row.strava_athlete_name,
+                contact_id=row.contact_id,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
+
+    async def delete_by_strava_id(self, user_id: str, strava_athlete_id: str) -> bool:
+        """Delete a mapping by user ID and Strava athlete ID. Returns True if deleted, False if not found."""
+        query = text(
+            """
+            DELETE FROM strava_athlete_mappings
+            WHERE user_id = :user_id AND strava_athlete_id = :strava_athlete_id
+            RETURNING id
+            """
+        )
+        result = await self.connection.execute(
+            query,
+            {"user_id": user_id, "strava_athlete_id": strava_athlete_id},
+        )
+        row = result.fetchone()
+        return row is not None

@@ -818,6 +818,23 @@ class JournalOutboxEventProcessor:
                     relationship_type=JournalContactRelationshipType.PARTICIPANT,
                     status=AttendeeStatus.ATTENDED.value,
                 )
+            else:
+                # Store the unmatched athlete for the journal detail page
+                await self.connection.execute(
+                    text("""
+                        INSERT INTO journal_unmatched_strava_athletes
+                            (journal_id, strava_athlete_id, strava_athlete_name)
+                        VALUES
+                            (:journal_id, :strava_athlete_id, :strava_athlete_name)
+                        ON CONFLICT (journal_id, strava_athlete_id) DO UPDATE SET
+                            strava_athlete_name = EXCLUDED.strava_athlete_name
+                    """),
+                    {
+                        "journal_id": journal_id,
+                        "strava_athlete_id": athlete_id,
+                        "strava_athlete_name": athlete_name,
+                    },
+                )
 
     async def _save_calendar_info(
         self, journal_id: int, calendar_info_data: dict[str, Any]

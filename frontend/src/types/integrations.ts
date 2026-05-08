@@ -292,3 +292,46 @@ export interface IntegrationSettingsFormData {
   syncOnStartup: boolean;
   conflictResolution: 'local' | 'remote' | 'manual';
 }
+
+// Strava Athlete Mappings Types
+export interface StravaAthleteMappingAttributes {
+  strava_athlete_id: string;
+  strava_athlete_name: string;
+  contact_id: number;
+}
+
+export interface StravaAthleteMappingData {
+  id: string;
+  type: 'strava-athlete-mapping';
+  attributes: StravaAthleteMappingAttributes;
+}
+
+export interface StravaAthleteMappingListResponse {
+  data: StravaAthleteMappingData[];
+}
+
+export interface StravaAthleteMappingResponse {
+  data: StravaAthleteMappingData;
+}
+
+export interface StravaAthleteMappingCreateRequest {
+  strava_athlete_id: string;
+  strava_athlete_name: string;
+  contact_id: number;
+}
+
+export interface UnmatchedStravaAthleteAttributes {
+  strava_athlete_id: string;
+  strava_athlete_name: string;
+}
+
+export interface UnmatchedStravaAthleteData {
+  id: string;
+  type: 'unmatched-strava-athlete';
+  attributes: UnmatchedStravaAthleteAttributes;
+}
+
+export interface UnmatchedStravaAthleteListResponse {
+  data: UnmatchedStravaAthleteData[];
+}
+

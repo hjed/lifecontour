@@ -54,6 +54,7 @@ import { InlineEditDateRange } from './InlineEditDateRange';
 import { MergeJournalDialog } from './MergeJournalDialog';
 import { ReviewSuggestions } from './ReviewSuggestions';
 import { validateRequired } from '@/lib/validation';
+import { StravaUnmatchedAthletesBadge } from '@/components/integrations/StravaUnmatchedAthletesBadge';
 import {
   useUpdateJournal,
   useDeleteJournal,
@@ -470,6 +471,7 @@ export function JournalDetailView({
                 onRelationshipUpdate={handleContactUpdate}
                 defaultStatus={defaultStatus}
               />
+              <StravaUnmatchedAthletesBadge journalId={journal.id} />
             </div>
 
             {/* Tags */}

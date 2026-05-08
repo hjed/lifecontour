@@ -24,6 +24,10 @@ import {
   IntegrationStatsResponse,
   IntegrationListResponse,
   DeadLetterListResponse,
+  StravaAthleteMappingListResponse,
+  StravaAthleteMappingResponse,
+  StravaAthleteMappingCreateRequest,
+  UnmatchedStravaAthleteListResponse,
 } from '@/types/integrations';
 import { JsonApiErrorResponse } from '@/types/api';
 
@@ -49,6 +53,9 @@ export const integrationKeys = {
   list: () => [...integrationKeys.all, 'list'] as const,
   deadLetters: (limit: number, offset: number) =>
     [...integrationKeys.all, 'dead-letters', limit, offset] as const,
+  stravaMappings: () => [...integrationKeys.all, 'strava', 'mappings'] as const,
+  stravaJournalUnmatched: (journalId: string) =>
+    [...integrationKeys.all, 'strava', 'unmatched', journalId] as const,
 };
 
 // Error handling helper
@@ -649,3 +656,113 @@ export function useGoogleCalendars(enabled: boolean = true) {
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 }
+
+// Strava Athlete Mappings
+
+export async function fetchStravaMappings(): Promise<StravaAthleteMappingListResponse> {
+  const response = await fetch('/api/integrations/strava/athlete-mappings', {
+    credentials: 'include',
+  });
+  return handleApiResponse<StravaAthleteMappingListResponse>(response);
+}
+
+export function useStravaMappings() {
+  return useQuery({
+    queryKey: integrationKeys.stravaMappings(),
+    queryFn: fetchStravaMappings,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export async function createStravaMapping(
+  request: StravaAthleteMappingCreateRequest
+): Promise<StravaAthleteMappingResponse> {
+  const response = await fetch('/api/integrations/strava/athlete-mappings', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    credentials: 'include',
+    body: JSON.stringify(request),
+  });
+  return handleApiResponse<StravaAthleteMappingResponse>(response);
+}
+
+export function useCreateStravaMapping() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: createStravaMapping,
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: integrationKeys.stravaMappings(),
+      });
+      toast.success('Participant mapped successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to map participant: ${error.message}`);
+    },
+  });
+}
+
+export async function deleteStravaMapping(
+  stravaAthleteId: string
+): Promise<void> {
+  const response = await fetch(
+    `/api/integrations/strava/athlete-mappings/${stravaAthleteId}`,
+    {
+      method: 'DELETE',
+      credentials: 'include',
+    }
+  );
+  if (!response.ok) {
+    try {
+      const errorData = await response.json();
+      throw new Error(errorData.errors?.[0]?.detail || 'Failed to delete mapping');
+    } catch {
+      throw new Error(`HTTP ${response.status}: Failed to delete mapping`);
+    }
+  }
+}
+
+export function useDeleteStravaMapping() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: deleteStravaMapping,
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: integrationKeys.stravaMappings(),
+      });
+      toast.success('Mapping deleted successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to delete mapping: ${error.message}`);
+    },
+  });
+}
+
+export async function fetchJournalUnmatchedStravaAthletes(
+  journalId: string
+): Promise<UnmatchedStravaAthleteListResponse> {
+  const response = await fetch(
+    `/api/integrations/strava/journals/${journalId}/unmatched-athletes`,
+    {
+      credentials: 'include',
+    }
+  );
+  return handleApiResponse<UnmatchedStravaAthleteListResponse>(response);
+}
+
+export function useJournalUnmatchedStravaAthletes(
+  journalId: string,
+  enabled: boolean = true
+) {
+  return useQuery({
+    queryKey: integrationKeys.stravaJournalUnmatched(journalId),
+    queryFn: () => fetchJournalUnmatchedStravaAthletes(journalId),
+    enabled,
+    staleTime: 60 * 1000,
+  });
+}
+

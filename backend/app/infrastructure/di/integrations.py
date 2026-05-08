@@ -10,7 +10,14 @@ from arq.connections import ArqRedis, RedisSettings
 from dishka import Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.contacts.models.repositories import ContactRepository
 from app.core.contacts.services.contact_service import ContactService
+from app.core.integrations.adapters.sql.journal_unmatched_strava_athlete_repository import (
+    SqlJournalUnmatchedStravaAthleteRepository,
+)
+from app.core.integrations.adapters.sql.strava_athlete_mapping_repository import (
+    SqlStravaAthleteMappingRepository,
+)
 from app.core.integrations.database import IntegrationDatabaseManager
 from app.core.integrations.encryption import EncryptionService
 from app.core.integrations.external_reference_service import ExternalReferenceService
@@ -19,8 +26,12 @@ from app.core.integrations.outbox_event_processor import OutboxEventProcessor
 from app.core.integrations.registry.google_provider import GoogleIntegrationProvider
 from app.core.integrations.registry.service import IntegrationRegistryService
 from app.core.integrations.registry.strava_provider import StravaIntegrationProvider
+from app.core.integrations.strava.athlete_mapping_service import (
+    StravaAthleteMappingService,
+)
 from app.core.integrations.task_queue import get_redis_pool, get_redis_settings
 from app.core.integrations.task_queue_service import TaskQueueService
+from app.core.journal.models.repositories import JournalContactRelationshipRepository
 from app.infrastructure.auth.strava_token_service import StravaTokenService
 from app.infrastructure.config import Settings
 
@@ -217,4 +228,48 @@ class IntegrationProvider(Provider):
         return StravaTokenService(
             connection=connection,
             encryption_key=settings.strava_encryption_key,
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def provide_strava_athlete_mapping_repository(
+        self, connection: AsyncConnection
+    ) -> SqlStravaAthleteMappingRepository:
+        """Provide repository for Strava athlete mappings."""
+        from app.core.integrations.adapters.sql.strava_athlete_mapping_repository import (
+            SqlStravaAthleteMappingRepository,
+        )
+
+        return SqlStravaAthleteMappingRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def provide_unmatched_strava_athlete_repository(
+        self, connection: AsyncConnection
+    ) -> SqlJournalUnmatchedStravaAthleteRepository:
+        """Provide repository for unmatched Strava athletes on journals."""
+        from app.core.integrations.adapters.sql.journal_unmatched_strava_athlete_repository import (
+            SqlJournalUnmatchedStravaAthleteRepository,
+        )
+
+        return SqlJournalUnmatchedStravaAthleteRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def provide_strava_athlete_mapping_service(
+        self,
+        connection: AsyncConnection,
+        mapping_repo: SqlStravaAthleteMappingRepository,
+        unmatched_repo: SqlJournalUnmatchedStravaAthleteRepository,
+        contact_repo: ContactRepository,
+        contact_relationship_repo: JournalContactRelationshipRepository,
+    ) -> StravaAthleteMappingService:
+        """Provide Strava athlete mapping service."""
+        from app.core.integrations.strava.athlete_mapping_service import (
+            StravaAthleteMappingService,
+        )
+
+        return StravaAthleteMappingService(
+            connection=connection,
+            mapping_repo=mapping_repo,
+            unmatched_repo=unmatched_repo,
+            contact_repo=contact_repo,
+            contact_relationship_repo=contact_relationship_repo,
         )

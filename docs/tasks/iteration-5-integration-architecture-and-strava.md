@@ -490,19 +490,19 @@ Backend-only: detect Strava athletes, match to contacts, add as participants dur
 - **Unit:** name matching confidence logic, mapping table lookup priority, athlete name extraction from activity data. ✅
 - **Integration:** import activity with known athlete name → verify PARTICIPANT relationship created. Import with unknown athlete → verify no participant. Import with ambiguous match → verify no participant. ✅
 
-#### Phase 2: Manual Strava Athlete-to-Contact Mapping UI
+#### Phase 2: Manual Strava Athlete-to-Contact Mapping UI ✅ COMPLETE
 **PR Size:** ~4–6 files
 
 Add UI for manually mapping a Strava athlete to a contact when automatic detection fails.
 
 **Acceptance Criteria:**
-- [ ] Journal detail page: when a Strava-imported journal has unmatched athletes, show "Link participant" action
-- [ ] Mapping dialog: searchable contact combobox to select a contact for a given Strava athlete
-- [ ] `POST /api/integrations/strava/athlete-mappings` endpoint: create/update mapping
-- [ ] `GET /api/integrations/strava/athlete-mappings` endpoint: list current mappings
-- [ ] `DELETE /api/integrations/strava/athlete-mappings/{id}` endpoint: remove mapping
-- [ ] Integration settings panel: view and manage all Strava athlete mappings
-- [ ] After creating a mapping, retroactively add the contact as PARTICIPANT to existing journals with that athlete
+- [x] Journal detail page: when a Strava-imported journal has unmatched athletes, show "Link participant" action
+- [x] Mapping dialog: searchable contact combobox to select a contact for a given Strava athlete
+- [x] `POST /api/integrations/strava/athlete-mappings` endpoint: create/update mapping
+- [x] `GET /api/integrations/strava/athlete-mappings` endpoint: list current mappings
+- [x] `DELETE /api/integrations/strava/athlete-mappings/{id}` endpoint: remove mapping
+- [x] Integration settings panel: view and manage all Strava athlete mappings
+- [x] After creating a mapping, retroactively add the contact as PARTICIPANT to existing journals with that athlete
 
 **Required Test Coverage:**
 - **Unit:** mapping dialog component, mapping CRUD API schema validation.

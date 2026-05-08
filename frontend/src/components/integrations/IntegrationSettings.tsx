@@ -9,6 +9,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { CalendarSettings } from '@/components/settings/CalendarSettings';
+import { StravaAthleteMappings } from '@/components/integrations/StravaAthleteMappings';
 
 export interface IntegrationSettingsProps {
   integrationId: string;
@@ -53,6 +54,18 @@ export function IntegrationSettings({
               </div>
               {/* Embed the existing Calendar Settings UI directly */}
               <CalendarSettings />
+            </div>
+          ) : integrationId === 'strava' ? (
+            <div className='space-y-4'>
+              <div className='mb-6'>
+                <h3 className='text-lg font-medium'>
+                  Athlete Mappings
+                </h3>
+                <p className='text-muted-foreground text-sm'>
+                  Manage the mappings between Strava athletes and CRM contacts.
+                </p>
+              </div>
+              <StravaAthleteMappings />
             </div>
           ) : (
             <div className='text-muted-foreground py-8 text-center'>
