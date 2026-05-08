@@ -9,6 +9,7 @@ from core_shared.models.journals.journal_relationship_types import (
 from core_shared.models.strava_athlete_mapping import StravaAthleteMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.contacts.models.exceptions import ContactNotFoundError
 from app.core.contacts.models.repositories import ContactRepository
 from app.core.integrations.adapters.sql.journal_unmatched_strava_athlete_repository import (
     SqlJournalUnmatchedStravaAthleteRepository,
@@ -19,12 +20,6 @@ from app.core.integrations.adapters.sql.strava_athlete_mapping_repository import
 from app.core.journal.models.repositories import JournalContactRelationshipRepository
 
 logger = structlog.get_logger()
-
-
-class ContactNotFoundError(Exception):
-    """Raised when a contact cannot be found."""
-
-    pass
 
 
 class StravaAthleteMappingService:
@@ -66,7 +61,7 @@ class StravaAthleteMappingService:
         # Ensure contact exists
         contact = await self.contact_repo.find_by_id(contact_id)
         if not contact:
-            raise ContactNotFoundError(f"Contact with ID {contact_id} not found")
+            raise ContactNotFoundError(contact_id)
 
         mapping = StravaAthleteMapping(
             user_id=user_id,
@@ -87,13 +82,15 @@ class StravaAthleteMappingService:
             # 3. Add contact as participant to each journal
             for journal_id in journal_ids:
                 try:
-                    relationship = JournalContactRelationship(
-                        journal_id=journal_id,
-                        contact_id=contact_id,
-                        relationship_type=JournalContactRelationshipType.PARTICIPANT,
-                        status=AttendeeStatus.ATTENDED,
-                    )
-                    await self.contact_relationship_repo.create(relationship)
+                    # Isolate insert so PK violations don't invalidate the main savepoint
+                    async with self.connection.begin_nested():
+                        relationship = JournalContactRelationship(
+                            journal_id=journal_id,
+                            contact_id=contact_id,
+                            relationship_type=JournalContactRelationshipType.PARTICIPANT,
+                            status=AttendeeStatus.ATTENDED,
+                        )
+                        await self.contact_relationship_repo.create(relationship)
                 except Exception as e:
                     logger.warning(
                         "Failed to add contact to journal retroactively",

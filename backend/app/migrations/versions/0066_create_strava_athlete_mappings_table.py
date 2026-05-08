@@ -1,6 +1,6 @@
 """create_strava_athlete_mappings_table
 
-Revision ID: 1a7db45da3ca
+Revision ID: 0066
 Revises: 0065
 Create Date: 2026-05-06 23:02:19.426555
 

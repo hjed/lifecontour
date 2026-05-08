@@ -13,6 +13,7 @@ from urllib.parse import urlencode, urlparse
 import httpx
 import structlog
 from arq.connections import ArqRedis
+from core_shared.exceptions import DomainError
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, field_validator
@@ -753,19 +754,15 @@ async def create_athlete_mapping(
     user: FromDishka[SessionUser],
     mapping_service: FromDishka[StravaAthleteMappingService],
 ) -> StravaAthleteMappingResponse:
-    from app.core.integrations.strava.athlete_mapping_service import (
-        ContactNotFoundError,
-    )
 
-    try:
-        mapping = await mapping_service.create_mapping(
-            user_id=str(user.id),
-            strava_athlete_id=request_data.strava_athlete_id,
-            strava_athlete_name=request_data.strava_athlete_name,
-            contact_id=request_data.contact_id,
-        )
-    except ContactNotFoundError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    # The ContactNotFoundError inherits from DomainError, so the global
+    # domain_error_handler will convert it to a JSON:API formatted error
+    mapping = await mapping_service.create_mapping(
+        user_id=str(user.id),
+        strava_athlete_id=request_data.strava_athlete_id,
+        strava_athlete_name=request_data.strava_athlete_name,
+        contact_id=request_data.contact_id,
+    )
 
     return StravaAthleteMappingResponse(
         data=StravaAthleteMappingResource(
@@ -793,7 +790,7 @@ async def delete_athlete_mapping(
 ) -> None:
     deleted = await mapping_service.delete_mapping(str(user.id), strava_athlete_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="Mapping not found")
+        raise DomainError("Mapping not found", status_code=404)
 
 
 @router.get(
@@ -806,9 +803,8 @@ async def get_journal_unmatched_athletes(
     user: FromDishka[SessionUser],
     unmatched_repo: FromDishka[SqlJournalUnmatchedStravaAthleteRepository],
 ) -> UnmatchedStravaAthleteListResponse:
-    # We should ideally verify the user owns the journal, but for now we assume they do
-    # based on the current architecture of integration endpoints.
-    athletes = await unmatched_repo.get_by_journal_id(journal_id)
+    # Enforce ownership check via the query scope
+    athletes = await unmatched_repo.get_by_journal_id(str(user.id), journal_id)
     return UnmatchedStravaAthleteListResponse(
         data=[
             UnmatchedStravaAthleteResource(

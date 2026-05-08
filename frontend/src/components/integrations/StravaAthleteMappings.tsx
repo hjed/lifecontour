@@ -70,9 +70,7 @@ export function StravaAthleteMappings() {
                   variant='ghost'
                   size='sm'
                   onClick={() =>
-                    deleteMapping.mutateAsync(
-                      mapping.attributes.strava_athlete_id
-                    )
+                    deleteMapping.mutate(mapping.attributes.strava_athlete_id)
                   }
                   disabled={deleteMapping.isPending}
                   className='text-destructive hover:bg-destructive/10 hover:text-destructive'

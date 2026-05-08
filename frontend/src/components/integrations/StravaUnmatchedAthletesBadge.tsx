@@ -40,24 +40,29 @@ export function StravaUnmatchedAthletesBadge({
     return null;
   }
 
-  const handleLinkParticipant = async (contact: ContactResource) => {
+  const handleLinkParticipant = (contact: ContactResource) => {
     if (!selectedAthlete) return;
 
-    await createMapping.mutateAsync({
-      strava_athlete_id: selectedAthlete.id,
-      strava_athlete_name: selectedAthlete.name,
-      contact_id: Number(contact.id),
-    });
-
-    setSelectedAthlete(null);
-    // Invalidate the unmatched athletes list
-    queryClient.invalidateQueries({
-      queryKey: ['integrations', 'strava', 'unmatched', journalId],
-    });
-    // Invalidate journal details since a participant was likely added
-    queryClient.invalidateQueries({
-      queryKey: journalKeys.detail(journalId),
-    });
+    createMapping.mutate(
+      {
+        strava_athlete_id: selectedAthlete.id,
+        strava_athlete_name: selectedAthlete.name,
+        contact_id: Number(contact.id),
+      },
+      {
+        onSuccess: () => {
+          setSelectedAthlete(null);
+          // Invalidate the unmatched athletes list
+          queryClient.invalidateQueries({
+            queryKey: ['integrations', 'strava', 'unmatched', journalId],
+          });
+          // Invalidate journal details since a participant was likely added
+          queryClient.invalidateQueries({
+            queryKey: journalKeys.detail(journalId),
+          });
+        },
+      }
+    );
   };
 
   return (

@@ -10,16 +10,22 @@ class SqlJournalUnmatchedStravaAthleteRepository:
     def __init__(self, connection: AsyncConnection) -> None:
         self.connection = connection
 
-    async def get_by_journal_id(self, journal_id: int) -> list[dict[str, Any]]:
+    async def get_by_journal_id(
+        self, user_id: str, journal_id: int
+    ) -> list[dict[str, Any]]:
         """Get unmatched athletes for a specific journal."""
         query = text(
             """
-            SELECT strava_athlete_id, strava_athlete_name
-            FROM journal_unmatched_strava_athletes
-            WHERE journal_id = :journal_id
+            SELECT jusa.strava_athlete_id, jusa.strava_athlete_name
+            FROM journal_unmatched_strava_athletes jusa
+            JOIN journals j ON j.id = jusa.journal_id
+            WHERE jusa.journal_id = :journal_id
+              AND j.user_id = :user_id
             """
         )
-        result = await self.connection.execute(query, {"journal_id": journal_id})
+        result = await self.connection.execute(
+            query, {"journal_id": journal_id, "user_id": user_id}
+        )
         return [
             {
                 "strava_athlete_id": row.strava_athlete_id,
