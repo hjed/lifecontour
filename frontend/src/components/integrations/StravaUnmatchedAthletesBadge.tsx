@@ -1,7 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { useJournalUnmatchedStravaAthletes, useCreateStravaMapping } from '@/lib/api/integrations';
+import {
+  useJournalUnmatchedStravaAthletes,
+  useCreateStravaMapping,
+} from '@/lib/api/integrations';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -58,14 +61,16 @@ export function StravaUnmatchedAthletesBadge({
   };
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="text-sm font-medium text-muted-foreground">Unmatched Strava Athletes</div>
-      <div className="flex flex-wrap gap-2">
-        {data.data.map((athlete) => (
+    <div className='flex flex-col gap-2'>
+      <div className='text-muted-foreground text-sm font-medium'>
+        Unmatched Strava Athletes
+      </div>
+      <div className='flex flex-wrap gap-2'>
+        {data.data.map(athlete => (
           <Badge
             key={athlete.id}
-            variant="secondary"
-            className="flex items-center gap-1.5 cursor-pointer hover:bg-secondary/80"
+            variant='secondary'
+            className='hover:bg-secondary/80 flex cursor-pointer items-center gap-1.5'
             onClick={() =>
               setSelectedAthlete({
                 id: athlete.attributes.strava_athlete_id,
@@ -73,9 +78,9 @@ export function StravaUnmatchedAthletesBadge({
               })
             }
           >
-            <Activity className="h-3 w-3" />
+            <Activity className='h-3 w-3' />
             {athlete.attributes.strava_athlete_name}
-            <span className="ml-1 text-xs text-primary underline underline-offset-2">
+            <span className='text-primary ml-1 text-xs underline underline-offset-2'>
               Link
             </span>
           </Badge>
@@ -84,29 +89,27 @@ export function StravaUnmatchedAthletesBadge({
 
       <Dialog
         open={!!selectedAthlete}
-        onOpenChange={(open) => !open && setSelectedAthlete(null)}
+        onOpenChange={open => !open && setSelectedAthlete(null)}
       >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Link Strava Athlete</DialogTitle>
             <DialogDescription>
-              Select a contact to link with Strava athlete &quot;{selectedAthlete?.name}&quot;.
-              This will add the contact to all past and future journals involving this athlete.
+              Select a contact to link with Strava athlete &quot;
+              {selectedAthlete?.name}&quot;. This will add the contact to all
+              past and future journals involving this athlete.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="py-4">
+          <div className='py-4'>
             <ContactSearchCombobox
               onSelect={handleLinkParticipant}
-              placeholder="Search contacts..."
+              placeholder='Search contacts...'
             />
           </div>
 
-          <div className="flex justify-end">
-            <Button
-              variant="outline"
-              onClick={() => setSelectedAthlete(null)}
-            >
+          <div className='flex justify-end'>
+            <Button variant='outline' onClick={() => setSelectedAthlete(null)}>
               Cancel
             </Button>
           </div>

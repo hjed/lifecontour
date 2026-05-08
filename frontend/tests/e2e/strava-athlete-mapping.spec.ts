@@ -23,10 +23,10 @@ test.describe('Strava Athlete Mappings', () => {
 
     // 1. Setup Test Data
     // Create a contact to link
-    await dataManager.contacts.createContact({
-      first_name: 'Strava',
-      last_name: 'Runner',
-      emails: [{ email: 'runner@strava.test', is_primary: true }],
+    await dataManager.createContact({
+      firstName: 'Strava',
+      lastName: 'Runner',
+      email: 'runner@strava.test',
     });
 
     // Create a journal
@@ -54,7 +54,7 @@ test.describe('Strava Athlete Mappings', () => {
     // 2. Intercept unmatched athletes API to simulate an unmatched athlete on this journal
     await authenticatedPage.route(
       `**/api/integrations/strava/journals/${journal.id}/unmatched-athletes`,
-      async (route) => {
+      async route => {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
@@ -107,7 +107,9 @@ test.describe('Strava Athlete Mappings', () => {
 
     // The dialog should close, and the mapping API request should have fired.
     // Wait for the success toast
-    await expect(authenticatedPage.getByText('Participant mapped successfully')).toBeVisible();
+    await expect(
+      authenticatedPage.getByText('Participant mapped successfully')
+    ).toBeVisible();
 
     // The unmatched athlete API will be re-fetched. Since we don't clear the mock,
     // the UI might still show it because our mock is static. That's fine, we move on to settings.
@@ -120,9 +122,14 @@ test.describe('Strava Athlete Mappings', () => {
 
     // Open Strava settings
     // Wait for integration list to load
-    const stravaCard = authenticatedPage.getByText('Strava', { exact: true }).locator('..').locator('..');
+    const stravaCard = authenticatedPage
+      .getByText('Strava', { exact: true })
+      .locator('..')
+      .locator('..');
     // Click the Settings button on the Strava integration card
-    const stravaSettingsBtn = stravaCard.getByRole('button', { name: 'Settings' });
+    const stravaSettingsBtn = stravaCard.getByRole('button', {
+      name: 'Settings',
+    });
     await expect(stravaSettingsBtn).toBeVisible();
     await stravaSettingsBtn.click();
 
@@ -138,11 +145,15 @@ test.describe('Strava Athlete Mappings', () => {
     await expect(athleteIdCell).toBeVisible();
 
     // 9. Delete the mapping
-    const deleteBtn = settingsDialog.getByRole('button', { name: 'Delete mapping' });
+    const deleteBtn = settingsDialog.getByRole('button', {
+      name: 'Delete mapping',
+    });
     await deleteBtn.click();
 
     // Wait for success toast
-    await expect(authenticatedPage.getByText('Mapping deleted successfully')).toBeVisible();
+    await expect(
+      authenticatedPage.getByText('Mapping deleted successfully')
+    ).toBeVisible();
 
     // Verify mapping is removed from table
     await expect(athleteNameCell).not.toBeVisible();

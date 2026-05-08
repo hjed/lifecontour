@@ -7,6 +7,7 @@ and activity import sync triggers.
 """
 
 import secrets
+from typing import Annotated
 from urllib.parse import urlencode, urlparse
 
 import httpx
@@ -572,13 +573,14 @@ class StravaWebhookEvent(BaseModel):
 @router.get(
     "/webhook",
     include_in_schema=False,
+    responses={400: {"description": "Bad Request"}, 403: {"description": "Forbidden"}},
 )
 @inject
 async def strava_webhook_validation(
     strava_token_service: FromDishka[StravaTokenService],
-    hub_mode: str | None = Query(None, alias="hub.mode"),
-    hub_challenge: str | None = Query(None, alias="hub.challenge"),
-    hub_verify_token: str | None = Query(None, alias="hub.verify_token"),
+    hub_mode: Annotated[str | None, Query(alias="hub.mode")] = None,
+    hub_challenge: Annotated[str | None, Query(alias="hub.challenge")] = None,
+    hub_verify_token: Annotated[str | None, Query(alias="hub.verify_token")] = None,
 ) -> dict[str, str]:
     """
     Handle Strava webhook validation handshake.
@@ -705,7 +707,6 @@ async def strava_webhook_event(
 
 @router.get(
     "/athlete-mappings",
-    response_model=StravaAthleteMappingListResponse,
     description="Get all Strava athlete mappings for the authenticated user",
 )
 @inject
@@ -729,7 +730,6 @@ async def get_athlete_mappings(
 
 @router.post(
     "/athlete-mappings",
-    response_model=StravaAthleteMappingResponse,
     description="Create or update a Strava athlete mapping and process retroactively",
 )
 @inject
@@ -756,6 +756,7 @@ async def create_athlete_mapping(
     "/athlete-mappings/{strava_athlete_id}",
     status_code=204,
     description="Delete a Strava athlete mapping",
+    responses={404: {"description": "Mapping not found"}},
 )
 @inject
 async def delete_athlete_mapping(
@@ -770,7 +771,6 @@ async def delete_athlete_mapping(
 
 @router.get(
     "/journals/{journal_id}/unmatched-athletes",
-    response_model=UnmatchedStravaAthleteListResponse,
     description="Get unmatched Strava athletes for a specific journal",
 )
 @inject

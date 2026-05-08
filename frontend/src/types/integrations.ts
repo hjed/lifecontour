@@ -334,4 +334,3 @@ export interface UnmatchedStravaAthleteData {
 export interface UnmatchedStravaAthleteListResponse {
   data: UnmatchedStravaAthleteData[];
 }
-

@@ -1,5 +1,8 @@
 import structlog
 from core_shared.models.journals.attendee_status import AttendeeStatus
+from core_shared.models.journals.journal_contact_relationship import (
+    JournalContactRelationship,
+)
 from core_shared.models.journals.journal_relationship_types import (
     JournalContactRelationshipType,
 )
@@ -78,12 +81,13 @@ class StravaAthleteMappingService:
             # 3. Add contact as participant to each journal
             for journal_id in journal_ids:
                 try:
-                    await self.contact_relationship_repo.add_contact_to_journal(
+                    relationship = JournalContactRelationship(
                         journal_id=journal_id,
                         contact_id=contact_id,
                         relationship_type=JournalContactRelationshipType.PARTICIPANT,
-                        status=AttendeeStatus.ATTENDED.value,
+                        status=AttendeeStatus.ATTENDED,
                     )
+                    await self.contact_relationship_repo.create(relationship)
                 except Exception as e:
                     logger.warning(
                         "Failed to add contact to journal retroactively",
@@ -92,7 +96,6 @@ class StravaAthleteMappingService:
                         error=str(e),
                     )
                     # Ignore unique constraint violations (already a participant)
-                    pass
 
             # 4. Remove from unmatched athletes
             await self.unmatched_repo.delete_by_strava_id(strava_athlete_id)

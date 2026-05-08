@@ -718,7 +718,9 @@ export async function deleteStravaMapping(
   if (!response.ok) {
     try {
       const errorData = await response.json();
-      throw new Error(errorData.errors?.[0]?.detail || 'Failed to delete mapping');
+      throw new Error(
+        errorData.errors?.[0]?.detail || 'Failed to delete mapping'
+      );
     } catch {
       throw new Error(`HTTP ${response.status}: Failed to delete mapping`);
     }
@@ -765,4 +767,3 @@ export function useJournalUnmatchedStravaAthletes(
     staleTime: 60 * 1000,
   });
 }
-
