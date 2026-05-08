@@ -792,6 +792,7 @@ class JournalOutboxEventProcessor:
     async def _record_unmatched_strava_athlete(
         self, journal_id: int, athlete_id: str, athlete_name: str | None
     ) -> None:
+        safe_athlete_name = athlete_name or ""
         await self.connection.execute(
             text("""
                 INSERT INTO journal_unmatched_strava_athletes
@@ -804,7 +805,7 @@ class JournalOutboxEventProcessor:
             {
                 "journal_id": journal_id,
                 "strava_athlete_id": athlete_id,
-                "strava_athlete_name": athlete_name,
+                "strava_athlete_name": safe_athlete_name,
             },
         )
 

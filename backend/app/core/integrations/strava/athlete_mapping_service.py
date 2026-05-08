@@ -21,6 +21,12 @@ from app.core.journal.models.repositories import JournalContactRelationshipRepos
 logger = structlog.get_logger()
 
 
+class ContactNotFoundError(Exception):
+    """Raised when a contact cannot be found."""
+
+    pass
+
+
 class StravaAthleteMappingService:
     """Service for managing Strava athlete mappings and retroactive journaling."""
 
@@ -60,7 +66,7 @@ class StravaAthleteMappingService:
         # Ensure contact exists
         contact = await self.contact_repo.find_by_id(contact_id)
         if not contact:
-            raise ValueError(f"Contact with ID {contact_id} not found")
+            raise ContactNotFoundError(f"Contact with ID {contact_id} not found")
 
         mapping = StravaAthleteMapping(
             user_id=user_id,
@@ -75,7 +81,7 @@ class StravaAthleteMappingService:
 
             # 2. Find unmatched journals for this athlete
             journal_ids = await self.unmatched_repo.get_journal_ids_by_strava_id(
-                strava_athlete_id
+                user_id, strava_athlete_id
             )
 
             # 3. Add contact as participant to each journal
@@ -98,6 +104,6 @@ class StravaAthleteMappingService:
                     # Ignore unique constraint violations (already a participant)
 
             # 4. Remove from unmatched athletes
-            await self.unmatched_repo.delete_by_strava_id(strava_athlete_id)
+            await self.unmatched_repo.delete_by_strava_id(user_id, strava_athlete_id)
 
         return saved_mapping

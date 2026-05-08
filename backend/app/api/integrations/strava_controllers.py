@@ -95,19 +95,28 @@ class StravaOAuthDisconnectResponse(BaseModel):
     message: str
 
 
-class StravaAthleteMappingResponse(BaseModel):
-    """Response schema for a Strava athlete mapping."""
-
-    id: int
+class StravaAthleteMappingAttributes(BaseModel):
     strava_athlete_id: str
     strava_athlete_name: str
     contact_id: int
 
 
+class StravaAthleteMappingResource(BaseModel):
+    type: str = "strava-athlete-mapping"
+    id: str
+    attributes: StravaAthleteMappingAttributes
+
+
+class StravaAthleteMappingResponse(BaseModel):
+    """Response schema for a single Strava athlete mapping."""
+
+    data: StravaAthleteMappingResource
+
+
 class StravaAthleteMappingListResponse(BaseModel):
     """Response schema for a list of Strava athlete mappings."""
 
-    data: list[StravaAthleteMappingResponse]
+    data: list[StravaAthleteMappingResource]
 
 
 class StravaAthleteMappingCreateRequest(BaseModel):
@@ -118,17 +127,21 @@ class StravaAthleteMappingCreateRequest(BaseModel):
     contact_id: int
 
 
-class UnmatchedStravaAthleteResponse(BaseModel):
-    """Response schema for an unmatched Strava athlete."""
-
+class UnmatchedStravaAthleteAttributes(BaseModel):
     strava_athlete_id: str
     strava_athlete_name: str
+
+
+class UnmatchedStravaAthleteResource(BaseModel):
+    type: str = "unmatched-strava-athlete"
+    id: str  # Use strava_athlete_id as the ID
+    attributes: UnmatchedStravaAthleteAttributes
 
 
 class UnmatchedStravaAthleteListResponse(BaseModel):
     """Response schema for a list of unmatched Strava athletes."""
 
-    data: list[UnmatchedStravaAthleteResponse]
+    data: list[UnmatchedStravaAthleteResource]
 
 
 # ---------- Endpoints ----------
@@ -717,11 +730,13 @@ async def get_athlete_mappings(
     mappings = await mapping_service.get_all_mappings(str(user.id))
     return StravaAthleteMappingListResponse(
         data=[
-            StravaAthleteMappingResponse(
-                id=m.id,  # type: ignore[arg-type]
-                strava_athlete_id=m.strava_athlete_id,
-                strava_athlete_name=m.strava_athlete_name,
-                contact_id=m.contact_id,
+            StravaAthleteMappingResource(
+                id=str(m.id),
+                attributes=StravaAthleteMappingAttributes(
+                    strava_athlete_id=m.strava_athlete_id,
+                    strava_athlete_name=m.strava_athlete_name,
+                    contact_id=m.contact_id,
+                ),
             )
             for m in mappings
         ]
@@ -738,17 +753,29 @@ async def create_athlete_mapping(
     user: FromDishka[SessionUser],
     mapping_service: FromDishka[StravaAthleteMappingService],
 ) -> StravaAthleteMappingResponse:
-    mapping = await mapping_service.create_mapping(
-        user_id=str(user.id),
-        strava_athlete_id=request_data.strava_athlete_id,
-        strava_athlete_name=request_data.strava_athlete_name,
-        contact_id=request_data.contact_id,
+    from app.core.integrations.strava.athlete_mapping_service import (
+        ContactNotFoundError,
     )
+
+    try:
+        mapping = await mapping_service.create_mapping(
+            user_id=str(user.id),
+            strava_athlete_id=request_data.strava_athlete_id,
+            strava_athlete_name=request_data.strava_athlete_name,
+            contact_id=request_data.contact_id,
+        )
+    except ContactNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
     return StravaAthleteMappingResponse(
-        id=mapping.id,  # type: ignore[arg-type]
-        strava_athlete_id=mapping.strava_athlete_id,
-        strava_athlete_name=mapping.strava_athlete_name,
-        contact_id=mapping.contact_id,
+        data=StravaAthleteMappingResource(
+            id=str(mapping.id),
+            attributes=StravaAthleteMappingAttributes(
+                strava_athlete_id=mapping.strava_athlete_id,
+                strava_athlete_name=mapping.strava_athlete_name,
+                contact_id=mapping.contact_id,
+            ),
+        )
     )
 
 
@@ -784,9 +811,12 @@ async def get_journal_unmatched_athletes(
     athletes = await unmatched_repo.get_by_journal_id(journal_id)
     return UnmatchedStravaAthleteListResponse(
         data=[
-            UnmatchedStravaAthleteResponse(
-                strava_athlete_id=a["strava_athlete_id"],
-                strava_athlete_name=a["strava_athlete_name"],
+            UnmatchedStravaAthleteResource(
+                id=a["strava_athlete_id"],
+                attributes=UnmatchedStravaAthleteAttributes(
+                    strava_athlete_id=a["strava_athlete_id"],
+                    strava_athlete_name=a["strava_athlete_name"],
+                ),
             )
             for a in athletes
         ]

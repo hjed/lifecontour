@@ -22,11 +22,14 @@ async def test_create_athlete_mapping(
     )
 
     assert response.status_code == 200
-    data = response.json()
-    assert data["strava_athlete_id"] == "athlete_123"
-    assert data["strava_athlete_name"] == "John Doe"
-    assert data["contact_id"] == int(contact["id"])
-    assert "id" in data
+    res_data = response.json()
+    assert "data" in res_data
+    mapping_data = res_data["data"]
+    assert mapping_data["type"] == "strava-athlete-mapping"
+    assert "id" in mapping_data
+    assert mapping_data["attributes"]["strava_athlete_id"] == "athlete_123"
+    assert mapping_data["attributes"]["strava_athlete_name"] == "John Doe"
+    assert mapping_data["attributes"]["contact_id"] == int(contact["id"])
 
 
 @pytest.mark.asyncio
@@ -54,10 +57,12 @@ async def test_get_athlete_mappings(
     )
 
     assert response.status_code == 200
-    data = response.json()
-    assert "data" in data
-    assert len(data["data"]) == 1
-    assert data["data"][0]["strava_athlete_id"] == "test_athlete_123"
+    res_data = response.json()
+    assert "data" in res_data
+    assert len(res_data["data"]) == 1
+    mapping_data = res_data["data"][0]
+    assert mapping_data["type"] == "strava-athlete-mapping"
+    assert mapping_data["attributes"]["strava_athlete_id"] == "test_athlete_123"
 
 
 @pytest.mark.asyncio
@@ -120,8 +125,11 @@ async def test_get_journal_unmatched_athletes(
     )
 
     assert response.status_code == 200
-    data = response.json()
-    assert "data" in data
-    assert len(data["data"]) == 1
-    assert data["data"][0]["strava_athlete_id"] == "unmatched_1"
-    assert data["data"][0]["strava_athlete_name"] == "Jane Doe"
+    res_data = response.json()
+    assert "data" in res_data
+    assert len(res_data["data"]) == 1
+    athlete_data = res_data["data"][0]
+    assert athlete_data["type"] == "unmatched-strava-athlete"
+    assert athlete_data["id"] == "unmatched_1"
+    assert athlete_data["attributes"]["strava_athlete_id"] == "unmatched_1"
+    assert athlete_data["attributes"]["strava_athlete_name"] == "Jane Doe"

@@ -42,13 +42,10 @@ test.describe('Strava Athlete Mappings', () => {
     testCleanup(async () => {
       await dataManager.cleanup();
       // Clean up the mapping from the backend if it was created
-      try {
-        await authenticatedPage.request.delete(
-          `/api/integrations/strava/athlete-mappings/test-athlete-123`
-        );
-      } catch {
-        // Ignore if already deleted
-      }
+      // APIRequestContext.delete doesn't throw on 404s
+      await authenticatedPage.request.delete(
+        `/api/integrations/strava/athlete-mappings/test-athlete-123`
+      );
     });
 
     // 2. Intercept unmatched athletes API to simulate an unmatched athlete on this journal
