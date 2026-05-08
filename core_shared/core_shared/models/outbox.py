@@ -224,8 +224,8 @@ class OutboxEvent(Base):
         user_id: str,
         journal_title: str,
         journal_content: str,
-        event_date_range_start: str,
-        event_date_range_end: str,
+        event_date_range_start: str | datetime,
+        event_date_range_end: str | datetime,
     ) -> "OutboxEvent":
         """
         Create an outbox event to trigger match candidate detection.
@@ -248,18 +248,20 @@ class OutboxEvent(Base):
         Raises:
             pydantic.ValidationError: If the payload is invalid
         """
-        payload = MatchDetectionEventData(
-            journal_id=journal_id,
-            user_id=user_id,
-            journal_title=journal_title,
-            journal_content=journal_content,
-            event_date_range_start=event_date_range_start,
-            event_date_range_end=event_date_range_end,
-            created_at=datetime.now(UTC).isoformat(),
+        payload = MatchDetectionEventData.model_validate(
+            {
+                "journal_id": journal_id,
+                "user_id": user_id,
+                "journal_title": journal_title,
+                "journal_content": journal_content,
+                "event_date_range_start": event_date_range_start,
+                "event_date_range_end": event_date_range_end,
+                "created_at": datetime.now(UTC).isoformat(),
+            }
         )
         return cls(
             event_type="journal_review.detect_matches",
-            event_data=payload.model_dump(),
+            event_data=payload.model_dump(mode="json"),
             aggregate_id=journal_id,
         )
 

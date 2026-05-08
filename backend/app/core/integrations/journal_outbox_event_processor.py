@@ -26,7 +26,10 @@ from core_shared.models.journals.journal_relationship_types import (
 )
 from core_shared.models.journals.journal_types import JournalType
 from core_shared.models.outbox import OutboxEvent
-from core_shared.models.outbox_events import JournalSyncEventData
+from core_shared.models.outbox_events import (
+    JournalStatusEventData,
+    JournalSyncEventData,
+)
 from core_shared.models.route import Route
 from core_shared.models.strava_athlete_mapping import StravaAthleteMapping
 from pydantic import BaseModel, Field, ValidationError
@@ -505,7 +508,7 @@ class JournalOutboxEventProcessor:
         Marks the external event link as conflicted so users can resolve.
         """
         event_data: dict[str, Any] = event.event_data  # type: ignore
-        payload = JournalSyncEventData.model_validate(event_data)
+        payload = JournalStatusEventData.model_validate(event_data)
         external_event_id = payload.external_event_id
         calendar_id = payload.calendar_id
 
@@ -546,7 +549,7 @@ class JournalOutboxEventProcessor:
         approach per AC2).
         """
         event_data: dict[str, Any] = event.event_data  # type: ignore
-        payload = JournalSyncEventData.model_validate(event_data)
+        payload = JournalStatusEventData.model_validate(event_data)
         external_event_id = payload.external_event_id
         calendar_id = payload.calendar_id
         existing_journal_id = payload.existing_journal_id

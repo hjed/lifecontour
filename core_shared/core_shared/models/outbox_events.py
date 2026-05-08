@@ -12,7 +12,7 @@ backend and integration workers.
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field
 
 # ── Contact Sync ──────────────────────────────────────────────────────
 
@@ -62,7 +62,7 @@ class SyncCompletedEventData(BaseModel):
 
 
 class JournalSyncEventData(BaseModel):
-    """Payload for ``journal_event.*`` events (created/updated/conflicted/cancelled).
+    """Payload for ``journal_event.created`` and ``journal_event.updated`` events.
 
     Published by integration workers (Google Calendar, Strava) when a
     journal-relevant external event is synced.
@@ -104,6 +104,25 @@ class JournalSyncEventData(BaseModel):
     )
 
 
+class JournalStatusEventData(BaseModel):
+    """Lightweight payload for ``journal_event.conflicted`` and ``journal_event.cancelled``.
+
+    These events only need identifying fields — they don't carry
+    full journal/calendar data.  Using this model instead of the full
+    ``JournalSyncEventData`` avoids hard-failing on payloads that
+    legitimately omit ``journal_data`` / ``calendar_info_data``.
+    """
+
+    external_event_id: str = Field(description="External system's event identifier")
+    calendar_id: str = Field(
+        description="Internal calendar UUID (or synthetic UUID for non-calendar sources)"
+    )
+    existing_journal_id: int | None = Field(
+        default=None,
+        description="ID of existing journal (required for cancellation)",
+    )
+
+
 # ── Match Detection ──────────────────────────────────────────────────
 
 
@@ -121,11 +140,11 @@ class MatchDetectionEventData(BaseModel):
         default="",
         description="Content for similarity comparison",
     )
-    event_date_range_start: str = Field(
-        description="ISO-8601 start datetime for date gating"
+    event_date_range_start: AwareDatetime = Field(
+        description="Start datetime for date gating"
     )
-    event_date_range_end: str = Field(
-        description="ISO-8601 end datetime for date gating"
+    event_date_range_end: AwareDatetime = Field(
+        description="End datetime for date gating"
     )
     created_at: str = Field(description="ISO-8601 timestamp of event creation")
 
@@ -137,17 +156,21 @@ OutboxEventData = (
     ContactSyncEventData
     | SyncCompletedEventData
     | JournalSyncEventData
+    | JournalStatusEventData
     | MatchDetectionEventData
 )
 """Union of all outbox event payload types."""
 
 
-# Prefix-based dispatch map for event_type → payload model.
-# Prefix matches are checked in order; first match wins.
+# Dispatch map for event_type → payload model.
+# Entries use either prefix matching (ending with '.') or exact matching.
 _EVENT_TYPE_DISPATCH: list[tuple[str, type[BaseModel]]] = [
     ("contact.", ContactSyncEventData),
     ("sync.completed", SyncCompletedEventData),
-    ("journal_event.", JournalSyncEventData),
+    ("journal_event.created", JournalSyncEventData),
+    ("journal_event.updated", JournalSyncEventData),
+    ("journal_event.conflicted", JournalStatusEventData),
+    ("journal_event.cancelled", JournalStatusEventData),
     ("journal_review.", MatchDetectionEventData),
 ]
 

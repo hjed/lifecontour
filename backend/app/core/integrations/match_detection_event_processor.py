@@ -76,11 +76,11 @@ class MatchDetectionEventProcessor:
         user_id = payload.user_id
         journal_title = payload.journal_title
         journal_content = payload.journal_content
-        start_str = payload.event_date_range_start
-        end_str = payload.event_date_range_end
+        start_dt = payload.event_date_range_start
+        end_dt = payload.event_date_range_end
 
-        incoming_start = dt.fromisoformat(start_str.replace("Z", "+00:00"))
-        incoming_end = dt.fromisoformat(end_str.replace("Z", "+00:00"))
+        incoming_start = start_dt
+        incoming_end = end_dt
 
         # Use a range predicate instead of DATE() wrapping so the query remains index-friendly.
         day_start = dt(

@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from core_shared.models.outbox_events import (
     ContactSyncEventData,
+    JournalStatusEventData,
     JournalSyncEventData,
     MatchDetectionEventData,
     OutboxEventData,
@@ -85,6 +86,16 @@ def match_detection_data() -> dict[str, Any]:
         "event_date_range_start": "2024-01-15T09:00:00+00:00",
         "event_date_range_end": "2024-01-15T09:15:00+00:00",
         "created_at": datetime.now(UTC).isoformat(),
+    }
+
+
+@pytest.fixture
+def journal_status_data() -> dict[str, Any]:
+    """Minimal valid JournalStatusEventData payload."""
+    return {
+        "external_event_id": "google:evt-456",
+        "calendar_id": "00000000-0000-0000-0000-000000000001",
+        "existing_journal_id": 10,
     }
 
 
@@ -349,6 +360,85 @@ class TestMatchDetectionEventData:
         model = MatchDetectionEventData.model_validate(match_detection_data)
         assert model.journal_content == ""
 
+    def test_invalid_datetime_rejected(
+        self, match_detection_data: dict[str, Any]
+    ) -> None:
+        """Non-ISO datetime string is rejected by AwareDatetime."""
+        match_detection_data["event_date_range_start"] = "not-a-date"
+        with pytest.raises(ValidationError) as exc_info:
+            MatchDetectionEventData.model_validate(match_detection_data)
+        assert "event_date_range_start" in str(exc_info.value)
+
+    def test_naive_datetime_rejected(
+        self, match_detection_data: dict[str, Any]
+    ) -> None:
+        """Naive datetime (no timezone) is rejected by AwareDatetime."""
+        match_detection_data["event_date_range_start"] = "2024-01-15T09:00:00"
+        with pytest.raises(ValidationError) as exc_info:
+            MatchDetectionEventData.model_validate(match_detection_data)
+        assert "event_date_range_start" in str(exc_info.value)
+
+    def test_parsed_datetime_is_aware(
+        self, match_detection_data: dict[str, Any]
+    ) -> None:
+        """Parsed datetime fields are timezone-aware datetime objects."""
+        model = MatchDetectionEventData.model_validate(match_detection_data)
+        assert isinstance(model.event_date_range_start, datetime)
+        assert model.event_date_range_start.tzinfo is not None
+        assert isinstance(model.event_date_range_end, datetime)
+        assert model.event_date_range_end.tzinfo is not None
+
+
+# ── JournalStatusEventData Tests ──────────────────────────────────────
+
+
+class TestJournalStatusEventData:
+    """Tests for journal_event.conflicted / journal_event.cancelled payload."""
+
+    def test_valid_payload_parses(self, journal_status_data: dict[str, Any]) -> None:
+        """Valid dict is accepted and all fields are accessible."""
+        model = JournalStatusEventData.model_validate(journal_status_data)
+        assert model.external_event_id == "google:evt-456"
+        assert model.calendar_id == "00000000-0000-0000-0000-000000000001"
+        assert model.existing_journal_id == 10
+
+    def test_existing_journal_id_optional(
+        self, journal_status_data: dict[str, Any]
+    ) -> None:
+        """existing_journal_id can be None."""
+        journal_status_data["existing_journal_id"] = None
+        model = JournalStatusEventData.model_validate(journal_status_data)
+        assert model.existing_journal_id is None
+
+    def test_missing_external_event_id_rejected(
+        self, journal_status_data: dict[str, Any]
+    ) -> None:
+        """Missing required field raises ValidationError."""
+        del journal_status_data["external_event_id"]
+        with pytest.raises(ValidationError) as exc_info:
+            JournalStatusEventData.model_validate(journal_status_data)
+        assert "external_event_id" in str(exc_info.value)
+
+    def test_missing_calendar_id_rejected(
+        self, journal_status_data: dict[str, Any]
+    ) -> None:
+        """Missing required field raises ValidationError."""
+        del journal_status_data["calendar_id"]
+        with pytest.raises(ValidationError) as exc_info:
+            JournalStatusEventData.model_validate(journal_status_data)
+        assert "calendar_id" in str(exc_info.value)
+
+    def test_accepts_full_journal_sync_payload(
+        self, journal_sync_data: dict[str, Any]
+    ) -> None:
+        """Full JournalSyncEventData dict validates against the lightweight model.
+
+        Publishers always send the full payload, so the status model must
+        accept (and ignore) the extra fields.
+        """
+        model = JournalStatusEventData.model_validate(journal_sync_data)
+        assert model.external_event_id == "google:evt-123"
+
 
 # ── parse_outbox_event_data Tests ─────────────────────────────────────
 
@@ -392,18 +482,20 @@ class TestParseOutboxEventData:
         assert isinstance(result, JournalSyncEventData)
 
     def test_journal_event_conflicted_dispatches(
-        self, journal_sync_data: dict[str, Any]
+        self, journal_status_data: dict[str, Any]
     ) -> None:
-        """journal_event.conflicted dispatches to JournalSyncEventData."""
-        result = parse_outbox_event_data("journal_event.conflicted", journal_sync_data)
-        assert isinstance(result, JournalSyncEventData)
+        """journal_event.conflicted dispatches to JournalStatusEventData."""
+        result = parse_outbox_event_data(
+            "journal_event.conflicted", journal_status_data
+        )
+        assert isinstance(result, JournalStatusEventData)
 
     def test_journal_event_cancelled_dispatches(
-        self, journal_sync_data: dict[str, Any]
+        self, journal_status_data: dict[str, Any]
     ) -> None:
-        """journal_event.cancelled dispatches to JournalSyncEventData."""
-        result = parse_outbox_event_data("journal_event.cancelled", journal_sync_data)
-        assert isinstance(result, JournalSyncEventData)
+        """journal_event.cancelled dispatches to JournalStatusEventData."""
+        result = parse_outbox_event_data("journal_event.cancelled", journal_status_data)
+        assert isinstance(result, JournalStatusEventData)
 
     def test_journal_review_detect_matches_dispatches(
         self, match_detection_data: dict[str, Any]
