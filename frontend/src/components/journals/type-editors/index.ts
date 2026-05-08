@@ -24,6 +24,7 @@ export { SnorkellingTypeEditor } from './SnorkellingTypeEditor';
 export { DivingTypeEditor } from './DivingTypeEditor';
 export { DownhillSkiingTypeEditor } from './DownhillSkiingTypeEditor';
 export { OutdoorPlanningTypeEditor } from './OutdoorPlanningTypeEditor';
+export { OutdoorTrainingTypeEditor } from './OutdoorTrainingTypeEditor';
 export { GearMaintenanceTypeEditor } from './GearMaintenanceTypeEditor';
 export { ReadOnlyTypeSummary } from './ReadOnlyTypeSummary';
 export { TypeEditorActions } from './TypeEditorActions';

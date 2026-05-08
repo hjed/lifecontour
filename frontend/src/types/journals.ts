@@ -32,6 +32,7 @@ export enum JournalType {
   DIVING = 'diving',
   DOWNHILL_SKIING = 'downhill_skiing',
   OUTDOOR_PLANNING = 'outdoor_planning',
+  OUTDOOR_TRAINING = 'outdoor_training',
   GEAR_MAINTENANCE = 'gear_maintenance',
 }
 
@@ -315,6 +316,10 @@ export interface OutdoorPlanningData {
   activity_types?: string[] | null;
 }
 
+export interface OutdoorTrainingData {
+  focus_areas?: string[] | null;
+}
+
 export interface GearMaintenanceData {
   gear_item_id?: string | null;
   maintenance_type?: string | null;
@@ -341,6 +346,7 @@ export type JournalTypeData =
   | KayakingData
   | CrossCountrySkiingData
   | OutdoorPlanningData
+  | OutdoorTrainingData
   | GearMaintenanceData;
 
 // Contact Relationship

@@ -70,6 +70,9 @@ from app.core.journal.adapters.sql.outdoor_activity_data_repository import (
 from app.core.journal.adapters.sql.outdoor_planning_data_repository import (
     SqlOutdoorPlanningDataRepository,
 )
+from app.core.journal.adapters.sql.outdoor_training_data_repository import (
+    SqlOutdoorTrainingDataRepository,
+)
 from app.core.journal.adapters.sql.photo_album_data_repository import (
     SqlPhotoAlbumDataRepository,
 )
@@ -107,6 +110,7 @@ from app.core.journal.models.repositories import (
     MoodDataRepository,
     OutdoorActivityDataRepository,
     OutdoorPlanningDataRepository,
+    OutdoorTrainingDataRepository,
     PhotoAlbumDataRepository,
     PlanDataRepository,
     ReviewItemRepository,
@@ -208,11 +212,18 @@ class JournalProvider(Provider):
         return SqlOutdoorActivityDataRepository(connection)
 
     @provide(scope=Scope.REQUEST)
-    def outdoor_planning_data_repository(
+    def provide_outdoor_planning_data_repository(
         self, connection: AsyncConnection
     ) -> OutdoorPlanningDataRepository:
         """Provide an OutdoorPlanningDataRepository instance."""
         return SqlOutdoorPlanningDataRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def provide_outdoor_training_data_repository(
+        self, connection: AsyncConnection
+    ) -> OutdoorTrainingDataRepository:
+        """Provide an OutdoorTrainingDataRepository instance."""
+        return SqlOutdoorTrainingDataRepository(connection)
 
     @provide(scope=Scope.REQUEST)
     def gear_maintenance_data_repository(

@@ -60,6 +60,7 @@ class JournalType(StrEnum):
 
     # Supporting Types
     OUTDOOR_PLANNING = "outdoor_planning"  # Iteration 9-004
+    OUTDOOR_TRAINING = "outdoor_training"  # Iteration 9-004
     GEAR_MAINTENANCE = "gear_maintenance"  # Iteration 9-004
 
     def __str__(self) -> str:
@@ -149,6 +150,7 @@ class JournalType(StrEnum):
             cls.SNORKELLING: [cls.OUTDOOR_ACTIVITY, cls.FITNESS],
             cls.DIVING: [cls.OUTDOOR_ACTIVITY, cls.FITNESS],
             cls.DOWNHILL_SKIING: [cls.OUTDOOR_ACTIVITY, cls.FITNESS],
+            cls.OUTDOOR_TRAINING: [cls.OUTDOOR_ACTIVITY, cls.FITNESS],
             cls.OUTDOOR_PLANNING: [cls.EVENT],
             cls.GEAR_MAINTENANCE: [],
         }

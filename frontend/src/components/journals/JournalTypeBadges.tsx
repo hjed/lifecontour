@@ -28,6 +28,7 @@ import {
   Snowflake,
   MapPin,
   Wrench,
+  Target,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { JournalType } from '@/types/journals';
@@ -65,6 +66,7 @@ export const TYPE_ICONS: Record<
   [JournalType.DIVING]: ArrowDownToLine,
   [JournalType.DOWNHILL_SKIING]: Snowflake,
   [JournalType.OUTDOOR_PLANNING]: MapPin,
+  [JournalType.OUTDOOR_TRAINING]: Target,
   [JournalType.GEAR_MAINTENANCE]: Wrench,
 };
 
@@ -91,6 +93,7 @@ export const TYPE_LABELS: Record<JournalType, string> = {
   [JournalType.DIVING]: 'Diving',
   [JournalType.DOWNHILL_SKIING]: 'Downhill Skiing',
   [JournalType.OUTDOOR_PLANNING]: 'Outdoor Planning',
+  [JournalType.OUTDOOR_TRAINING]: 'Outdoor Training',
   [JournalType.GEAR_MAINTENANCE]: 'Gear Maintenance',
 };
 
@@ -120,6 +123,7 @@ export const TYPE_VARIANTS: Record<
   [JournalType.DIVING]: 'default',
   [JournalType.DOWNHILL_SKIING]: 'default',
   [JournalType.OUTDOOR_PLANNING]: 'secondary',
+  [JournalType.OUTDOOR_TRAINING]: 'secondary',
   [JournalType.GEAR_MAINTENANCE]: 'secondary',
 };
 

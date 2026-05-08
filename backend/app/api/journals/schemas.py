@@ -398,6 +398,15 @@ class OutdoorPlanningDataSchema(BaseModel):
     )
 
 
+class OutdoorTrainingDataSchema(BaseModel):
+    """Outdoor training data for OUTDOOR_TRAINING type journals."""
+
+    focus_areas: list[str] | None = Field(
+        default=None,
+        description="List of related outdoor activity subtypes or free-text areas",
+    )
+
+
 class GearMaintenanceDataSchema(BaseModel):
     """Gear maintenance data for GEAR_MAINTENANCE type journals."""
 
