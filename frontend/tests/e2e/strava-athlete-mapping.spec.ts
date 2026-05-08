@@ -12,6 +12,7 @@
 
 import { expect, test } from './fixtures';
 import { TestDataManager } from './data-management';
+import { waitForContactSearchIndexing } from './utils/test-helpers';
 
 test.describe('Strava Athlete Mappings', () => {
   test('link unmatched athlete to contact and manage in settings', async ({
@@ -23,11 +24,18 @@ test.describe('Strava Athlete Mappings', () => {
 
     // 1. Setup Test Data
     // Create a contact to link
-    await dataManager.createContact({
+    const contact = await dataManager.createContact({
       firstName: 'Strava',
       lastName: 'Runner',
       email: 'runner@strava.test',
     });
+
+    // Wait for the contact to be indexed in MeiliSearch
+    await waitForContactSearchIndexing(
+      authenticatedPage,
+      contact.firstName,
+      `${contact.firstName} ${contact.lastName}`
+    );
 
     // Create a journal
     const journal = await dataManager.createJournal({
@@ -93,10 +101,12 @@ test.describe('Strava Athlete Mappings', () => {
 
     // 6. Search for the contact and link
     const searchInput = dialog.getByPlaceholder('Search contacts...');
-    await searchInput.fill('Strava Runner');
+    await searchInput.fill(`${contact.firstName} ${contact.lastName}`);
 
     // Wait for search results
-    const contactOption = dialog.getByText('Strava Runner');
+    const contactOption = dialog.getByText(
+      `${contact.firstName} ${contact.lastName}`
+    );
     await expect(contactOption).toBeVisible();
 
     // Select the contact
@@ -111,18 +121,14 @@ test.describe('Strava Athlete Mappings', () => {
     // The unmatched athlete API will be re-fetched. Since we don't clear the mock,
     // the UI might still show it because our mock is static. That's fine, we move on to settings.
 
-    // 7. Navigate to settings -> Integrations
-    await authenticatedPage.goto('/settings');
-
-    // Click Integrations tab
-    await authenticatedPage.getByRole('tab', { name: 'Integrations' }).click();
+    // 7. Navigate to integrations
+    await authenticatedPage.goto('/integrations');
 
     // Open Strava settings
     // Wait for integration list to load
-    const stravaCard = authenticatedPage
-      .getByText('Strava', { exact: true })
-      .locator('..')
-      .locator('..');
+    const stravaCard = authenticatedPage.getByTestId(
+      'integration-panel-strava'
+    );
     // Click the Settings button on the Strava integration card
     const stravaSettingsBtn = stravaCard.getByRole('button', {
       name: 'Settings',
