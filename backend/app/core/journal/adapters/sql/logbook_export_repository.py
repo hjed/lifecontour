@@ -2,7 +2,7 @@
 
 import json
 from collections import defaultdict
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import Any
 
 from core_shared.models.journals import (
@@ -86,9 +86,6 @@ class SqlLogbookExportRepository(LogbookExportRepository):
         # Find the root journals that match the criteria
         query_params: dict[str, Any] = {"user_id": user_id}
 
-        for i, t in enumerate(logbook_types):
-            query_params[f"type_{i}"] = t
-
         # We need all journals that match, AND all their ancestors and descendants
         # to assemble a complete tree. But wait, if we include ancestors/descendants
         # that don't match the types, should they be in the logbook? Yes, typically
@@ -132,11 +129,15 @@ class SqlLogbookExportRepository(LogbookExportRepository):
 
         date_filters = ""
         if start_date:
-            date_filters += " AND j.event_date_range_start >= :start_date"
-            query_params["start_date"] = start_date
+            date_filters += " AND j.event_date_range_end >= :start_date"
+            dt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+            query_params["start_date"] = dt if dt.tzinfo else dt.replace(tzinfo=UTC)
         if end_date:
             date_filters += " AND j.event_date_range_start <= :end_date"
-            query_params["end_date"] = end_date
+            dt_end = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+            query_params["end_date"] = (
+                dt_end if dt_end.tzinfo else dt_end.replace(tzinfo=UTC)
+            )
 
         cte_sql = f"""
             WITH RECURSIVE

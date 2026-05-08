@@ -151,7 +151,7 @@ async def test_get_logbook_entries_hierarchy(
     # Test fetch
     entries = await repo.get_logbook_entries(user_id=user_id)
 
-    # Should get Parent, Child1, and Grandchild. But NOT Unrelated Sibling because sibling is not an ancestor/descendant of the matching journal (Child1).
+    # Should get Parent, Child1, Grandchild, AND Sibling. Sibling is included because the query fetches all descendants of all matching ancestors to preserve the full structural context of the event hierarchy.
     entry_ids = {e.id for e in entries}
 
     assert parent.id in entry_ids
@@ -163,3 +163,66 @@ async def test_get_logbook_entries_hierarchy(
     # and the parent is an ancestor of child1, the sibling (being a descendant of the parent)
     # MUST be included in the final results to maintain the complete structural context.
     assert sibling.id in entry_ids
+
+
+@pytest.mark.asyncio
+async def test_get_logbook_entries_date_and_type_filters(
+    repo: SqlLogbookExportRepository,
+    journal_repo: JournalRepository,
+    async_connection: AsyncConnection,
+) -> None:
+    """Test that logbook export correctly filters by date range and activity types."""
+    user_id = "user_logbook_date_type_filters"
+
+    dt2 = datetime.fromisoformat("2024-01-15T10:00:00Z")
+    dt3 = datetime.fromisoformat("2024-02-01T10:00:00Z")
+
+    # Matching type, matching date
+    journal1 = Journal(
+        user_id=user_id,
+        title="Valid Match",
+        content="",
+        event_date_range=EventDateRange(start=dt2, end=dt2),
+    )
+    journal1 = await journal_repo.save(journal1)
+    await async_connection.execute(
+        text("INSERT INTO journal_bushwalking_data (journal_id) VALUES (:id)"),
+        {"id": journal1.id},
+    )
+
+    # Matching type, outside date
+    journal2 = Journal(
+        user_id=user_id,
+        title="Outside Date",
+        content="",
+        event_date_range=EventDateRange(start=dt3, end=dt3),
+    )
+    journal2 = await journal_repo.save(journal2)
+    await async_connection.execute(
+        text("INSERT INTO journal_bushwalking_data (journal_id) VALUES (:id)"),
+        {"id": journal2.id},
+    )
+
+    # Non-matching type, matching date
+    journal3 = Journal(
+        user_id=user_id,
+        title="Wrong Type",
+        content="",
+        event_date_range=EventDateRange(start=dt2, end=dt2),
+    )
+    journal3 = await journal_repo.save(journal3)
+    await async_connection.execute(
+        text("INSERT INTO journal_jogging_data (journal_id) VALUES (:id)"),
+        {"id": journal3.id},
+    )
+
+    # Test fetch with date range that should only catch dt2
+    entries = await repo.get_logbook_entries(
+        user_id=user_id,
+        start_date="2024-01-10T00:00:00Z",
+        end_date="2024-01-20T00:00:00Z",
+        activity_types=["BUSHWALKING"],
+    )
+
+    assert len(entries) == 1
+    assert entries[0].id == journal1.id
