@@ -295,9 +295,7 @@ test.describe('Contact Favourites and Filtering', () => {
               'button[aria-label*="menu"], button[aria-label*="navigation"]'
             )
             .first();
-          const sidebarVisible = await sidebar.isVisible();
-          const hamburgerVisible = await hamburgerButton.isVisible();
-          expect(sidebarVisible || hamburgerVisible).toBe(true);
+          await expect(hamburgerButton).toBeVisible();
         } else {
           await expect(sidebar).toBeVisible();
         }

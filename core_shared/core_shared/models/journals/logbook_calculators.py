@@ -74,10 +74,12 @@ class LogbookSummaryCalculator:
             if entry.abseil_pitches:
                 for pitch in entry.abseil_pitches:
                     summary.total_abseils += 1
-                    if pitch.height:
+                    if pitch.height is not None:
                         summary.total_abseiling_metres += pitch.height
                     if pitch.did_setup:
                         summary.total_setups += 1
+                    if pitch.did_rescue:
+                        summary.total_rescues += 1
 
             # Sub-entries
             for child in entry.children:

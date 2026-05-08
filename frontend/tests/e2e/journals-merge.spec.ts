@@ -97,7 +97,9 @@ test.describe('Journal Merge Workflow', () => {
       hasText: actualSourceTitle,
     });
     await expect(sourceOption).toBeVisible();
-    await sourceOption.click();
+    await combobox.press('ArrowDown');
+    await combobox.press('Enter');
+    // Ensure we move to the next step, avoiding any dropdown click bounding-box issues on mobile
 
     // Click Next to go to resolution dialog
     const nextBtn = dialog.getByRole('button', {
@@ -113,11 +115,11 @@ test.describe('Journal Merge Workflow', () => {
     await expect(resolutionDialog).toBeVisible();
 
     // Choose Source for the content conflict
-    const sourceContentRadio = resolutionDialog.getByTestId(
-      'radio-source-content'
+    const sourceContentLabel = resolutionDialog.locator(
+      'label[for="source-content"]'
     );
-    await expect(sourceContentRadio).toBeVisible();
-    await sourceContentRadio.click();
+    await expect(sourceContentLabel).toBeVisible();
+    await sourceContentLabel.click();
 
     // Confirm merge
     const confirmMergeBtn = resolutionDialog.getByRole('button', {
@@ -264,7 +266,8 @@ test.describe('Journal Merge Workflow', () => {
       hasText: sourceTitle,
     });
     await expect(sourceOption).toBeVisible();
-    await sourceOption.click();
+    await combobox.press('ArrowDown');
+    await combobox.press('Enter');
 
     // Click Next to go to resolution dialog
     const nextBtn = dialog.getByRole('button', { name: /next/i });
@@ -286,18 +289,18 @@ test.describe('Journal Merge Workflow', () => {
     ).toBeVisible();
 
     // Let's resolve mood_value to use Source (value 8)
-    const sourceMoodValueRadio = resolutionDialog.getByTestId(
-      'radio-source-type_data.mood_rating.mood_value'
+    const sourceMoodValueLabel = resolutionDialog.locator(
+      'label[for="source-type_data.mood_rating.mood_value"]'
     );
-    await expect(sourceMoodValueRadio).toBeVisible();
-    await sourceMoodValueRadio.click();
+    await expect(sourceMoodValueLabel).toBeVisible();
+    await sourceMoodValueLabel.click();
 
     // Let's resolve energy_level to use Target (value 5 is the default, but we can explicitly click it)
-    const targetEnergyLevelRadio = resolutionDialog.getByTestId(
-      'radio-target-type_data.mood_rating.energy_level'
+    const targetEnergyLevelLabel = resolutionDialog.locator(
+      'label[for="target-type_data.mood_rating.energy_level"]'
     );
-    await expect(targetEnergyLevelRadio).toBeVisible();
-    await targetEnergyLevelRadio.click();
+    await expect(targetEnergyLevelLabel).toBeVisible();
+    await targetEnergyLevelLabel.click();
 
     // Confirm merge
     const confirmMergeBtn = resolutionDialog.getByRole('button', {

@@ -162,7 +162,7 @@ class SqlLogbookExportRepository(LogbookExportRepository):
                 JOIN ancestors a ON j.id = a.parent_id
             ),
             descendants AS (
-                SELECT id, parent_id FROM matching_journals
+                SELECT id, parent_id FROM ancestors
                 UNION
                 SELECT j.id, j.parent_id
                 FROM journals j

@@ -54,10 +54,25 @@ class TestLogbookSummaryCalculator(TestCase):
                 ),
                 abseil_pitches=[
                     AbseilPitch(
-                        journal_id=2, pitch_number=1, height=10, did_setup=True
+                        journal_id=2,
+                        pitch_number=1,
+                        height=10,
+                        did_setup=True,
+                        did_rescue=False,
                     ),
                     AbseilPitch(
-                        journal_id=2, pitch_number=2, height=20, did_setup=False
+                        journal_id=2,
+                        pitch_number=2,
+                        height=20,
+                        did_setup=False,
+                        did_rescue=True,
+                    ),
+                    AbseilPitch(
+                        journal_id=2,
+                        pitch_number=3,
+                        height=0,
+                        did_setup=False,
+                        did_rescue=False,
                     ),
                 ],
             ),
@@ -74,9 +89,10 @@ class TestLogbookSummaryCalculator(TestCase):
         self.assertEqual(result[0].leadership_activities_by_type["BUSHWALKING"], 1)
         self.assertNotIn("CANYONING", result[0].leadership_activities_by_type)
 
-        self.assertEqual(result[0].total_abseils, 2)
+        self.assertEqual(result[0].total_abseils, 3)
         self.assertEqual(result[0].total_abseiling_metres, 30)
         self.assertEqual(result[0].total_setups, 1)
+        self.assertEqual(result[0].total_rescues, 1)
 
     def test_calculate_with_children(self) -> None:
         calculator = LogbookSummaryCalculator()

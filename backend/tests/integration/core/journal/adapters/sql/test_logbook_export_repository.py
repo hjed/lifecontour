@@ -158,11 +158,8 @@ async def test_get_logbook_entries_hierarchy(
     assert child1.id in entry_ids
     assert grandchild.id in entry_ids
 
-    # Sibling doesn't have a matching type, and isn't a direct descendant or ancestor of child1, but wait!
-    # Ancestor is parent. Descendants of parent includes sibling. Does `add_descendants(parent.id)` run?
-    # Our code matches: "matching_journal_ids" which is just Child1.
-    # Ancestors of Child1 is Parent.
-    # Descendants of Child1 is Grandchild.
-    # We DO NOT add descendants of Parent!
-    # Let's verify this.
-    assert sibling.id not in entry_ids
+    # Sibling doesn't have a matching type, and isn't a direct descendant or ancestor of child1.
+    # However, because we fetch ALL descendants of ALL ancestors to preserve full hierarchy,
+    # and the parent is an ancestor of child1, the sibling (being a descendant of the parent)
+    # MUST be included in the final results to maintain the complete structural context.
+    assert sibling.id in entry_ids
