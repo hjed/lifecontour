@@ -200,6 +200,9 @@ export function TemplateSelector({
                           'hover:bg-muted flex w-full items-center gap-2 p-3 text-left',
                           isSelected && 'bg-muted'
                         )}
+                        onMouseDown={e => {
+                          e.preventDefault();
+                        }}
                         onClick={() => handleSelect(template)}
                       >
                         <Map className='text-muted-foreground h-4 w-4' />
@@ -227,6 +230,9 @@ export function TemplateSelector({
                         'hover:bg-muted text-primary flex w-full items-center gap-2 p-3 text-left font-medium',
                         selectedIndex === templates.length && 'bg-muted'
                       )}
+                      onMouseDown={e => {
+                        e.preventDefault();
+                      }}
                       onClick={() => {
                         setShowResults(false);
                         onCreateTemplate();
