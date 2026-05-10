@@ -240,6 +240,9 @@ export function ContactSearchCombobox({
                           'hover:bg-muted flex w-full items-center gap-2 p-3 text-left',
                           isSelected && 'bg-muted'
                         )}
+                        onMouseDown={e => {
+                          e.preventDefault();
+                        }}
                         onClick={() => handleSelect(contact)}
                       >
                         <User className='text-muted-foreground h-4 w-4' />

@@ -113,6 +113,17 @@ from .journal_contact_relationship import JournalContactRelationship
 from .journal_relationship_types import JournalContactRelationshipType
 from .journal_types import JournalType
 from .kayaking_data import KayakingData
+from .logbook_calculators import (
+    LogbookSummaryCalculator,
+    ParticipantIndexCalculator,
+)
+from .logbook_export import (
+    LogbookEntryContact,
+    LogbookEntryData,
+    LogbookExportData,
+    LogbookYearlySummary,
+    ParticipantIndexEntry,
+)
 from .mood_data import MoodData
 from .outdoor_activity_data import OutdoorActivityData
 from .outdoor_activity_subtypes import OutdoorActivitySubtype
@@ -208,6 +219,13 @@ __all__ = [
     "JoggingData",
     "ReviewItem",
     "SnorkellingData",
+    "LogbookSummaryCalculator",
+    "ParticipantIndexCalculator",
+    "LogbookEntryContact",
+    "LogbookEntryData",
+    "LogbookExportData",
+    "LogbookYearlySummary",
+    "ParticipantIndexEntry",
     # Enums
     "AttendeeStatus",
     "ContactEventRole",

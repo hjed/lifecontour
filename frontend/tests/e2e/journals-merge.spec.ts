@@ -1,7 +1,27 @@
 import { test, expect } from './fixtures';
+import type { Locator } from '@playwright/test';
 import { TestDataManager } from './data-management';
 
 const todayISO = new Date().toISOString();
+
+/**
+ * Helper that fills the combobox, waits for results, and clicks the matching option.
+ * Wrapped in expect().toPass() at the call site so the whole sequence retries
+ * atomically on mobile where touch-blur races can dismiss the dropdown.
+ */
+async function selectJournalInCombobox(dialog: Locator, title: string) {
+  const combobox = dialog.getByRole('combobox');
+  // Clear + fill triggers the debounced search
+  await combobox.clear();
+  await combobox.fill(title);
+
+  // Wait for and click the matching option
+  const sourceOption = dialog.locator('li[role="option"]', {
+    hasText: title,
+  });
+  await expect(sourceOption).toBeVisible({ timeout: 15000 });
+  await sourceOption.click();
+}
 
 test.describe('Journal Merge Workflow', () => {
   test('should merge a source journal into a target journal and delete the source', async ({
@@ -44,31 +64,10 @@ test.describe('Journal Merge Workflow', () => {
       await dataManager.cleanup();
     });
 
-    const source = journals[0];
     const target = journals[1];
-    const actualSourceTitle = sourceTitle;
-    const actualTargetTitle = targetTitle;
 
-    // Wait for the source journal to be indexed in Meilisearch
-    await expect
-      .poll(
-        async () => {
-          const response = await page.request.get(
-            `/api/journals/search?q=${encodeURIComponent(actualSourceTitle)}`
-          );
-          if (!response.ok()) {
-            return false;
-          }
-          const data = await response.json();
-          return data.data?.some(
-            (j: Record<string, unknown>) => j.id === source.id
-          );
-        },
-        {
-          timeout: 30000,
-        }
-      )
-      .toBeTruthy();
+    // No need to wait for MeiliSearch indexing — the combobox uses database ILIKE search,
+    // not MeiliSearch, so the journal is findable immediately after creation.
 
     // Navigate to Target Journal detail page
     await page.goto(`/journals/${target.id}`);
@@ -76,7 +75,7 @@ test.describe('Journal Merge Workflow', () => {
 
     // Ensure we are on the target page
     await expect(
-      page.getByRole('heading', { name: actualTargetTitle })
+      page.getByRole('heading', { name: targetTitle })
     ).toBeVisible();
 
     // Find and click the merge action button
@@ -88,16 +87,16 @@ test.describe('Journal Merge Workflow', () => {
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
     await expect(page.getByText(/Merge Another Journal/i)).toBeVisible();
-    // Select the source journal using the combobox
-    const combobox = dialog.getByRole('combobox');
-    await combobox.fill(actualSourceTitle);
-    await combobox.focus();
-    // Click the matching source journal in the dropdown
-    const sourceOption = dialog.locator('li[role="option"]', {
-      hasText: actualSourceTitle,
-    });
-    await expect(sourceOption).toBeVisible();
-    await sourceOption.click();
+
+    // Select the source journal using the combobox — retry the whole fill+click
+    // sequence atomically to handle mobile touch-blur race conditions
+    await expect(async () => {
+      await selectJournalInCombobox(dialog, sourceTitle);
+      // Verify the selection was registered by checking for the "Selected to merge" text
+      await expect(dialog.getByText(`Selected to merge:`)).toBeVisible({
+        timeout: 2000,
+      });
+    }).toPass({ timeout: 20000 });
 
     // Click Next to go to resolution dialog
     const nextBtn = dialog.getByRole('button', {
@@ -113,11 +112,11 @@ test.describe('Journal Merge Workflow', () => {
     await expect(resolutionDialog).toBeVisible();
 
     // Choose Source for the content conflict
-    const sourceContentRadio = resolutionDialog.getByTestId(
-      'radio-source-content'
+    const sourceContentLabel = resolutionDialog.locator(
+      'label[for="source-content"]'
     );
-    await expect(sourceContentRadio).toBeVisible();
-    await sourceContentRadio.click();
+    await expect(sourceContentLabel).toBeVisible();
+    await sourceContentLabel.click();
 
     // Confirm merge
     const confirmMergeBtn = resolutionDialog.getByRole('button', {
@@ -134,9 +133,9 @@ test.describe('Journal Merge Workflow', () => {
 
     await confirmMergeBtn.click();
     const mergeResponse = await mergeResponsePromise;
-    console.log('Merge Response Status:', mergeResponse.status());
+    console.debug('Merge Response Status:', mergeResponse.status());
     if (!mergeResponse.ok()) {
-      console.log('Merge Error Body:', await mergeResponse.text());
+      console.debug('Merge Error Body:', await mergeResponse.text());
     }
     expect(mergeResponse.status()).toBe(200);
 
@@ -217,29 +216,9 @@ test.describe('Journal Merge Workflow', () => {
       await dataManager.cleanup();
     });
 
-    const source = journals[0];
     const target = journals[1];
 
-    // Wait for the source journal to be indexed in Meilisearch
-    await expect
-      .poll(
-        async () => {
-          const response = await page.request.get(
-            `/api/journals/search?q=${encodeURIComponent(sourceTitle)}`
-          );
-          if (!response.ok()) {
-            return false;
-          }
-          const data = await response.json();
-          return data.data?.some(
-            (j: Record<string, unknown>) => j.id === source.id
-          );
-        },
-        {
-          timeout: 30000,
-        }
-      )
-      .toBeTruthy();
+    // No MeiliSearch wait needed — combobox uses database ILIKE search
 
     // Navigate to Target Journal detail page
     await page.goto(`/journals/${target.id}`);
@@ -256,15 +235,13 @@ test.describe('Journal Merge Workflow', () => {
       .filter({ hasText: 'Merge Another Journal' });
     await expect(dialog).toBeVisible();
 
-    const combobox = dialog.getByRole('combobox');
-    await combobox.fill(sourceTitle);
-    await combobox.focus();
-
-    const sourceOption = dialog.locator('li[role="option"]', {
-      hasText: sourceTitle,
-    });
-    await expect(sourceOption).toBeVisible();
-    await sourceOption.click();
+    // Retry the combobox fill+click atomically for mobile reliability
+    await expect(async () => {
+      await selectJournalInCombobox(dialog, sourceTitle);
+      await expect(dialog.getByText(`Selected to merge:`)).toBeVisible({
+        timeout: 2000,
+      });
+    }).toPass({ timeout: 20000 });
 
     // Click Next to go to resolution dialog
     const nextBtn = dialog.getByRole('button', { name: /next/i });
@@ -286,18 +263,18 @@ test.describe('Journal Merge Workflow', () => {
     ).toBeVisible();
 
     // Let's resolve mood_value to use Source (value 8)
-    const sourceMoodValueRadio = resolutionDialog.getByTestId(
-      'radio-source-type_data.mood_rating.mood_value'
+    const sourceMoodValueLabel = resolutionDialog.locator(
+      'label[for="source-type_data.mood_rating.mood_value"]'
     );
-    await expect(sourceMoodValueRadio).toBeVisible();
-    await sourceMoodValueRadio.click();
+    await expect(sourceMoodValueLabel).toBeVisible();
+    await sourceMoodValueLabel.click();
 
     // Let's resolve energy_level to use Target (value 5 is the default, but we can explicitly click it)
-    const targetEnergyLevelRadio = resolutionDialog.getByTestId(
-      'radio-target-type_data.mood_rating.energy_level'
+    const targetEnergyLevelLabel = resolutionDialog.locator(
+      'label[for="target-type_data.mood_rating.energy_level"]'
     );
-    await expect(targetEnergyLevelRadio).toBeVisible();
-    await targetEnergyLevelRadio.click();
+    await expect(targetEnergyLevelLabel).toBeVisible();
+    await targetEnergyLevelLabel.click();
 
     // Confirm merge
     const confirmMergeBtn = resolutionDialog.getByRole('button', {

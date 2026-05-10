@@ -115,6 +115,7 @@ test.describe('Contact Favourites and Filtering', () => {
 
     test('should allow navigation to favourites page from sidebar', async ({
       authenticatedPage,
+      isMobile,
     }) => {
       // Navigate to contacts page
       await authenticatedPage.goto('/contacts');
@@ -122,9 +123,20 @@ test.describe('Contact Favourites and Filtering', () => {
 
       // Navigate to favourites via sidebar
       // Look for favourites link in sidebar and click it
-      const favouritesLink = authenticatedPage.locator(
-        'a[href="/contacts/favourites"], a:has-text("Favourites")'
-      );
+      if (isMobile) {
+        const hamburgerButton = authenticatedPage
+          .locator(
+            'button[aria-label*="menu"], button[aria-label*="navigation"]'
+          )
+          .first();
+        if (await hamburgerButton.isVisible()) {
+          await hamburgerButton.click();
+        }
+      }
+
+      const favouritesLink = authenticatedPage
+        .locator('a[href="/contacts/favourites"], a:has-text("Favourites")')
+        .first();
       await expect(favouritesLink).toBeVisible();
       await favouritesLink.click();
 
@@ -220,6 +232,7 @@ test.describe('Contact Favourites and Filtering', () => {
   test.describe('Integration Tests', () => {
     test('should maintain consistent navigation between contact pages', async ({
       favouriteContacts,
+      isMobile,
     }) => {
       const { page, contacts } = favouriteContacts;
 
@@ -228,6 +241,17 @@ test.describe('Contact Favourites and Filtering', () => {
       await expect(page).toHaveTitle(/Personal Management System/);
 
       // Navigate to favourites page via sidebar
+      if (isMobile) {
+        const hamburgerButton = page
+          .locator(
+            'button[aria-label*="menu"], button[aria-label*="navigation"]'
+          )
+          .first();
+        if (await hamburgerButton.isVisible()) {
+          await hamburgerButton.click();
+        }
+      }
+
       const favouritesLink = page.locator('a[href="/contacts/favourites"]');
       await expect(favouritesLink).toBeVisible();
 
@@ -249,6 +273,7 @@ test.describe('Contact Favourites and Filtering', () => {
 
     test('should display consistent UI structure across contact pages', async ({
       authenticatedPage,
+      isMobile,
     }) => {
       const pagesToTest = ['/contacts', '/contacts/favourites'];
 
@@ -259,10 +284,21 @@ test.describe('Contact Favourites and Filtering', () => {
         );
 
         // Each page should have sidebar and header
-        const sidebar = authenticatedPage.locator(
-          'aside[role="complementary"]'
-        );
-        await expect(sidebar).toBeVisible();
+        const sidebar = authenticatedPage
+          .locator(
+            'aside[role="complementary"], nav[aria-label="Main Navigation"], [data-testid="sidebar"]'
+          )
+          .first();
+        if (isMobile) {
+          const hamburgerButton = authenticatedPage
+            .locator(
+              'button[aria-label*="menu"], button[aria-label*="navigation"]'
+            )
+            .first();
+          await expect(hamburgerButton).toBeVisible();
+        } else {
+          await expect(sidebar).toBeVisible();
+        }
 
         const header = authenticatedPage
           .locator('h1, [role="heading"]')

@@ -469,13 +469,13 @@ Deliver GEAR_MAINTENANCE as a complete vertical slice with inline gear item crea
 Build the backend service that gathers logbook data, orders it hierarchically, and calculates yearly summaries. No PDF rendering yet — this phase establishes the data contracts.
 
 **Acceptance Criteria:**
-- [ ] `LogbookDataService` gathers all journals matching outdoor logbook export scope (all OUTDOOR_ACTIVITY subtypes, OUTDOOR_TRAINING, OUTDOOR_PLANNING, GEAR_MAINTENANCE)
-- [ ] Journals ordered chronologically by topmost parent journal date, full hierarchy preserved
-- [ ] Per-entry data includes: title, date, content, all type-specific data, fitness data, abseil pitches, template reference names, participant/invitee contacts
-- [ ] `LogbookSummaryCalculator` produces per-calendar-year summaries: leadership counts per type, total abseiling metres, total abseils, total activities per type, total setups, total rescues
-- [ ] `ParticipantIndexCalculator` produces index of contacts appearing as PARTICIPANT or INVITEE in more than three entries
-- [ ] Data service accepts optional filters: date range, activity types
-- [ ] Data contracts are pure Python dataclasses suitable for any rendering backend
+- [x] `LogbookDataService` gathers all journals matching outdoor logbook export scope (all OUTDOOR_ACTIVITY subtypes, OUTDOOR_TRAINING, OUTDOOR_PLANNING, GEAR_MAINTENANCE)
+- [x] Journals ordered chronologically by topmost parent journal date, full hierarchy preserved
+- [x] Per-entry data includes: title, date, content, all type-specific data, fitness data, abseil pitches, template reference names, participant/invitee contacts
+- [x] `LogbookSummaryCalculator` produces per-calendar-year summaries: leadership counts per type, total abseiling metres, total abseils, total activities per type, total setups, total rescues
+- [x] `ParticipantIndexCalculator` produces index of contacts appearing as PARTICIPANT or INVITEE in more than three entries
+- [x] Data service accepts optional filters: date range, activity types
+- [x] Data contracts are pure Python dataclasses suitable for any rendering backend
 
 **Required Test Coverage:**
 - **Unit:** summary calculation logic (leadership counts, abseiling aggregates, per-type counts). Participant index threshold logic. Hierarchy ordering.

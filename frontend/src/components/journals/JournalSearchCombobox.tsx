@@ -251,6 +251,10 @@ export function JournalSearchCombobox({
                             'hover:bg-muted flex w-full flex-col items-start gap-1 p-3 text-left',
                             isSelected && 'bg-muted'
                           )}
+                          onMouseDown={e => {
+                            // Prevent input blur so click event can fire reliably on mobile/desktop
+                            e.preventDefault();
+                          }}
                           onClick={() => handleSelect(journal)}
                         >
                           <div className='flex w-full items-center gap-2'>

@@ -165,6 +165,7 @@ test.describe('Contact Activity Feed', () => {
 
   test('should display provenance indicators and collapsible summary regeneration', async ({
     contactsWithData,
+    isMobile,
   }) => {
     const { page, contacts } = contactsWithData;
     const contact = contacts[0];
@@ -239,7 +240,11 @@ test.describe('Contact Activity Feed', () => {
     const googleIconWrapper = page
       .getByTestId('provenance-trigger-google_contacts')
       .first();
-    await googleIconWrapper.hover();
+    if (isMobile) {
+      await googleIconWrapper.tap();
+    } else {
+      await googleIconWrapper.hover();
+    }
     await expect(
       page.getByRole('tooltip', { name: 'Updated via Google Contacts Sync' })
     ).toBeVisible();

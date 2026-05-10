@@ -1,5 +1,9 @@
 """Dependency injection providers for the journal domain."""
 
+from core_shared.models.journals import (
+    LogbookSummaryCalculator,
+    ParticipantIndexCalculator,
+)
 from dishka import Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -63,6 +67,9 @@ from app.core.journal.adapters.sql.journal_tag_repository import SqlJournalTagRe
 from app.core.journal.adapters.sql.kayaking_data_repository import (
     SqlKayakingDataRepository,
 )
+from app.core.journal.adapters.sql.logbook_export_repository import (
+    SqlLogbookExportRepository,
+)
 from app.core.journal.adapters.sql.mood_data_repository import SqlMoodDataRepository
 from app.core.journal.adapters.sql.outdoor_activity_data_repository import (
     SqlOutdoorActivityDataRepository,
@@ -107,6 +114,7 @@ from app.core.journal.models.repositories import (
     JournalRepository,
     JournalTagRepository,
     KayakingDataRepository,
+    LogbookExportRepository,
     MoodDataRepository,
     OutdoorActivityDataRepository,
     OutdoorPlanningDataRepository,
@@ -134,14 +142,13 @@ from app.core.journal.services.daily_summary_service import DailySummaryService
 from app.core.journal.services.journal_contact_service import JournalContactService
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_service import JournalService
+from app.core.journal.services.logbook_data_service import LogbookDataService
 from app.core.journal.services.route_service import RouteService
 from app.infrastructure.config import Settings
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 
 
 class JournalProvider(Provider):
-    """Dishka provider for journal domain dependencies."""
-
     @provide(scope=Scope.REQUEST)
     def journal_repository(self, connection: AsyncConnection) -> JournalRepository:
         """Provide a JournalRepository instance."""
@@ -447,4 +454,35 @@ class JournalProvider(Provider):
             summary_repo=summary_repo,
             gemini_api_key=settings.gemini_api_key,
             gemini_model=settings.gemini_summary_model,
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def logbook_export_repository(
+        self, connection: AsyncConnection
+    ) -> LogbookExportRepository:
+        """Provide a LogbookExportRepository instance."""
+        return SqlLogbookExportRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def logbook_summary_calculator(self) -> LogbookSummaryCalculator:
+        """Provide a LogbookSummaryCalculator instance."""
+        return LogbookSummaryCalculator()
+
+    @provide(scope=Scope.REQUEST)
+    def participant_index_calculator(self) -> ParticipantIndexCalculator:
+        """Provide a ParticipantIndexCalculator instance."""
+        return ParticipantIndexCalculator()
+
+    @provide(scope=Scope.REQUEST)
+    def logbook_data_service(
+        self,
+        repository: LogbookExportRepository,
+        summary_calculator: LogbookSummaryCalculator,
+        participant_calculator: ParticipantIndexCalculator,
+    ) -> LogbookDataService:
+        """Provide a LogbookDataService instance."""
+        return LogbookDataService(
+            repository=repository,
+            summary_calculator=summary_calculator,
+            participant_calculator=participant_calculator,
         )
