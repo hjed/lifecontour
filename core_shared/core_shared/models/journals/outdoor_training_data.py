@@ -48,7 +48,7 @@ class OutdoorTrainingData:
                     "focus_areas",
                     "Focus areas must be a list of strings",
                 )
-            
+
             # We allow strings. The UI allows selecting from OutdoorActivitySubtype
             # and entering a free-text "other" value. So we just ensure it's a list
             # of non-empty strings.
