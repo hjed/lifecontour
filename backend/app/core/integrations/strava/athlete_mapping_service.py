@@ -7,6 +7,7 @@ from core_shared.models.journals.journal_relationship_types import (
     JournalContactRelationshipType,
 )
 from core_shared.models.strava_athlete_mapping import StravaAthleteMapping
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.exceptions import ContactNotFoundError
@@ -91,9 +92,9 @@ class StravaAthleteMappingService:
                             status=AttendeeStatus.ATTENDED,
                         )
                         await self.contact_relationship_repo.create(relationship)
-                except Exception as e:
-                    logger.warning(
-                        "Failed to add contact to journal retroactively",
+                except IntegrityError as e:
+                    logger.info(
+                        "Contact is already a participant on journal",
                         journal_id=journal_id,
                         contact_id=contact_id,
                         error=str(e),

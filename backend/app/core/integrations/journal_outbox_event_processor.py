@@ -846,10 +846,29 @@ class JournalOutboxEventProcessor:
                     relationship_type=JournalContactRelationshipType.PARTICIPANT,
                     status=AttendeeStatus.ATTENDED.value,
                 )
+                await self._clear_unmatched_strava_athlete(journal_id, athlete_id)
             else:
                 await self._record_unmatched_strava_athlete(
                     journal_id, athlete_id, athlete_name
                 )
+
+    async def _clear_unmatched_strava_athlete(
+        self, journal_id: int, athlete_id: str
+    ) -> None:
+        """Clear an unmatched Strava athlete record for a journal.
+
+        This ensures UI consistency when an athlete is successfully matched to a contact.
+        """
+        await self.connection.execute(
+            text("""
+                DELETE FROM journal_unmatched_strava_athletes
+                WHERE journal_id = :journal_id AND strava_athlete_id = :strava_athlete_id
+            """),
+            {
+                "journal_id": journal_id,
+                "strava_athlete_id": athlete_id,
+            },
+        )
 
     async def _save_calendar_info(
         self, journal_id: int, calendar_info_data: dict[str, Any]
