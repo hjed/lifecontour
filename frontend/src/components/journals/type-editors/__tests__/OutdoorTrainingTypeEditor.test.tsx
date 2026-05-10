@@ -8,6 +8,8 @@ jest.mock('../useTypeEditorState', () => ({
   useTypeEditorState: jest.fn(),
 }));
 
+import type { ReactNode } from 'react';
+
 // Mock GenericTypeEditorLayout to simplify testing
 jest.mock('../GenericTypeEditorLayout', () => ({
   GenericTypeEditorLayout: ({
@@ -18,11 +20,19 @@ jest.mock('../GenericTypeEditorLayout', () => ({
     onCancel,
     testId,
     summaryItems,
-  }: any) => (
+  }: {
+    children?: ReactNode;
+    summaryTestId: string;
+    onEdit: () => void;
+    onSave: () => void;
+    onCancel: () => void;
+    testId: string;
+    summaryItems?: Array<{ label: string; value: ReactNode }>;
+  }) => (
     <div data-testid={testId || 'generic-layout'}>
       <div data-testid={summaryTestId}>
         {summaryItems &&
-          summaryItems.map((item: any, i: number) => (
+          summaryItems.map((item, i: number) => (
             <div key={i}>
               {item.label}: {item.value}
             </div>

@@ -173,7 +173,7 @@ export function OutdoorTrainingTypeEditor({
                         onClick={() => handleRemoveFocusArea(area)}
                         className='text-muted-foreground hover:text-foreground ml-1 outline-none'
                         aria-label={`Remove ${displayLabel}`}
-                        data-testid={`remove-focus-area-${area}`}
+                        data-testid={`remove-focus-area-${area.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
                       >
                         <X className='h-3 w-3' />
                       </button>
