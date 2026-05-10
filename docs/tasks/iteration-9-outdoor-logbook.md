@@ -356,13 +356,13 @@ Deliver three minimal types together. Each has no unique fields beyond journal_i
 - [Gear Items](../product-specifications/outdoor-logbook-product-specification.md#gear-items)
 
 **Acceptance Criteria (task-level):**
-- [ ] OUTDOOR_TRAINING journals can record focus areas from the outdoor activity subtype enum plus custom "other" entries
-- [ ] OUTDOOR_PLANNING journals extend EVENT with topics and activity type references
-- [ ] GEAR_MAINTENANCE journals link to a gear item and record maintenance type, related activity types, and optional retirement reason
-- [ ] Gear items can be created, listed, updated, and searched
-- [ ] Gear items can be created inline during gear maintenance journal creation/editing
-- [ ] All capabilities available through REST API and MCP
-- [ ] Unit, integration, and e2e test coverage
+- [x] OUTDOOR_TRAINING journals can record focus areas from the outdoor activity subtype enum plus custom "other" entries
+- [x] OUTDOOR_PLANNING journals extend EVENT with topics and activity type references
+- [x] GEAR_MAINTENANCE journals link to a gear item and record maintenance type, related activity types, and optional retirement reason
+- [x] Gear items can be created, listed, updated, and searched
+- [x] Gear items can be created inline during gear maintenance journal creation/editing
+- [x] All capabilities available through REST API and MCP
+- [x] Unit, integration, and e2e test coverage
 
 #### Phase 1: Gear Item Entity, API, and MCP Tools
 **PR Size:** ~6–8 files
@@ -388,20 +388,20 @@ Create the gear item supporting entity with full CRUD. No journal type yet — g
 Deliver OUTDOOR_TRAINING as a complete vertical slice.
 
 **Acceptance Criteria:**
-- [ ] Migration creates `journal_outdoor_training_data` table (journal_id PK/FK, focus_areas JSONB/text[] nullable, timestamps)
-- [ ] OUTDOOR_TRAINING added to `JournalType` enum with dependencies: OUTDOOR_TRAINING → [OUTDOOR_ACTIVITY, FITNESS]
-- [ ] `OutdoorTrainingData` domain entity with validation (focus_areas validated against outdoor activity subtype enum + "other" free text)
-- [ ] `OutdoorTrainingDataRepository` interface and SQL implementation
-- [ ] Type system updated: dependency map, table mapping, NOTE detection JOINs
-- [ ] API schema (`OutdoorTrainingDataSchema`), converter, and controller integration
-- [ ] MCP handles OUTDOOR_TRAINING through existing generic journal tools
-- [ ] Frontend: `OutdoorTrainingTypeEditor` with multi-select for focus areas (outdoor activity subtypes) plus free-text "other" input
-- [ ] DI provider registration
+- [x] Migration creates `journal_outdoor_training_data` table (journal_id PK/FK, focus_areas JSONB/text[] nullable, timestamps)
+- [x] OUTDOOR_TRAINING added to `JournalType` enum with dependencies: OUTDOOR_TRAINING → [OUTDOOR_ACTIVITY, FITNESS]
+- [x] `OutdoorTrainingData` domain entity with validation (focus_areas validated against outdoor activity subtype enum + "other" free text)
+- [x] `OutdoorTrainingDataRepository` interface and SQL implementation
+- [x] Type system updated: dependency map, table mapping, NOTE detection JOINs
+- [x] API schema (`OutdoorTrainingDataSchema`), converter, and controller integration
+- [x] MCP handles OUTDOOR_TRAINING through existing generic journal tools
+- [x] Frontend: `OutdoorTrainingTypeEditor` with multi-select for focus areas (outdoor activity subtypes) plus free-text "other" input
+- [x] DI provider registration
 
 **Required Test Coverage:**
-- **Unit:** OutdoorTrainingData entity validation, focus_areas enum + "other" handling.
-- **Integration:** repository CRUD, API test creating/updating training journal with focus areas.
-- **E2E:** create an outdoor training journal with multiple focus areas including "other", verify it renders correctly.
+- **Unit:** ✅ OutdoorTrainingData entity validation, focus_areas enum + "other" handling.
+- **Integration:** ✅ repository CRUD, API test creating/updating training journal with focus areas.
+- **E2E:** ✅ create an outdoor training journal with multiple focus areas including "other", verify it renders correctly.
 
 #### Phase 3: OUTDOOR_PLANNING — Full Vertical Slice
 **PR Size:** ~7–9 files

@@ -85,6 +85,7 @@ import {
   type JoggingData,
   type BushwalkingData,
   type OutdoorPlanningData,
+  OutdoorTrainingData,
   type GearMaintenanceData,
   ActivityTemplateResource,
   AbseilPitch,
@@ -110,6 +111,7 @@ import {
   DivingTypeEditor,
   DownhillSkiingTypeEditor,
   OutdoorPlanningTypeEditor,
+  OutdoorTrainingTypeEditor,
   GearMaintenanceTypeEditor,
 } from './type-editors';
 import { JournalSearchCombobox } from './JournalSearchCombobox';
@@ -155,6 +157,7 @@ interface TypeDataState {
   [JournalType.DIVING]?: Record<string, never>;
   [JournalType.DOWNHILL_SKIING]?: Record<string, never>;
   [JournalType.OUTDOOR_PLANNING]?: OutdoorPlanningData;
+  [JournalType.OUTDOOR_TRAINING]?: OutdoorTrainingData;
   [JournalType.GEAR_MAINTENANCE]?: GearMaintenanceData;
 }
 
@@ -350,6 +353,7 @@ const TYPE_LABELS: Record<JournalType, string> = {
   [JournalType.DIVING]: 'Diving',
   [JournalType.DOWNHILL_SKIING]: 'Downhill Skiing',
   [JournalType.OUTDOOR_PLANNING]: 'Outdoor Planning',
+  [JournalType.OUTDOOR_TRAINING]: 'Outdoor Training',
   [JournalType.GEAR_MAINTENANCE]: 'Gear Maintenance',
 };
 
@@ -659,6 +663,15 @@ export function JournalCreateForm({
       handleTypeDataChange(
         JournalType.OUTDOOR_PLANNING,
         data as OutdoorPlanningData
+      ),
+    [handleTypeDataChange]
+  );
+
+  const handleOutdoorTrainingChange = useCallback(
+    (data: unknown) =>
+      handleTypeDataChange(
+        JournalType.OUTDOOR_TRAINING,
+        data as OutdoorTrainingData
       ),
     [handleTypeDataChange]
   );
@@ -1075,6 +1088,12 @@ export function JournalCreateForm({
                       <OutdoorPlanningTypeEditor
                         createMode
                         onChange={handleOutdoorPlanningChange}
+                      />
+                    )}
+                    {type === JournalType.OUTDOOR_TRAINING && (
+                      <OutdoorTrainingTypeEditor
+                        createMode
+                        onChange={handleOutdoorTrainingChange}
                       />
                     )}
                     {type === JournalType.GEAR_MAINTENANCE && (

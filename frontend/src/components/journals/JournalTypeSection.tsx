@@ -35,6 +35,7 @@ import type {
   TravelData,
   FitnessData,
   OutdoorPlanningData,
+  OutdoorTrainingData,
   GearMaintenanceData,
 } from '@/types/journals';
 import { cn } from '@/lib/utils';
@@ -59,6 +60,7 @@ import {
   DivingTypeEditor,
   DownhillSkiingTypeEditor,
   OutdoorPlanningTypeEditor,
+  OutdoorTrainingTypeEditor,
   GearMaintenanceTypeEditor,
 } from './type-editors';
 
@@ -80,7 +82,9 @@ type TypeSectionData =
   | ClimbingData
   | KayakingData
   | CrossCountrySkiingData
-  | OutdoorPlanningData;
+  | OutdoorPlanningData
+  | OutdoorTrainingData
+  | GearMaintenanceData;
 
 /** Callback invoked when the user saves type-specific data. */
 type OnSaveFn = (type: JournalType, data: TypeSectionData) => Promise<void>;
@@ -119,6 +123,7 @@ const TYPE_SECTION_LABELS: Record<JournalType, string> = {
   [JournalType.DIVING]: 'Diving',
   [JournalType.DOWNHILL_SKIING]: 'Downhill Skiing',
   [JournalType.OUTDOOR_PLANNING]: 'Outdoor Planning',
+  [JournalType.OUTDOOR_TRAINING]: 'Outdoor Training',
   [JournalType.GEAR_MAINTENANCE]: 'Gear Maintenance',
 };
 
@@ -383,6 +388,14 @@ function TypeSpecificContent({
           journalId={journalId}
           data={typeData as OutdoorPlanningData | undefined}
           onSave={makeEditorSave<OutdoorPlanningData>(onSave, type)}
+        />
+      );
+    case JournalType.OUTDOOR_TRAINING:
+      return (
+        <OutdoorTrainingTypeEditor
+          journalId={journalId}
+          data={typeData as OutdoorTrainingData | undefined}
+          onSave={makeEditorSave<OutdoorTrainingData>(onSave, type)}
         />
       );
     case JournalType.GEAR_MAINTENANCE:

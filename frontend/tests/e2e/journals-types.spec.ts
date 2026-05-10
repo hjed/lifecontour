@@ -191,6 +191,51 @@ test.describe('Journal Types', () => {
       expect(data.data.attributes.types).toContain('bushwalking');
       expect(data.data.attributes.type_data).toHaveProperty('bushwalking');
     });
+
+    test('should create a journal with outdoor_training type', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      // Test creating an outdoor training journal with focus areas including "other"
+      const response = await authenticatedPage.request.post('/api/journals', {
+        headers: {
+          'Content-Type': 'application/vnd.api+json',
+        },
+        data: JSON.stringify({
+          data: {
+            type: 'journals',
+            attributes: {
+              title: 'Training Journal',
+              content: 'Practicing skills',
+              event_date_range: DEFAULT_DATE_RANGE,
+              types: ['outdoor_training'],
+              type_data: {
+                outdoor_training: {
+                  focus_areas: ['canyoning', 'Wilderness First Aid'],
+                },
+              },
+            },
+          },
+        }),
+      });
+
+      expect(response.ok()).toBeTruthy();
+      const data = await response.json();
+      const journalId = data.data.id;
+
+      testCleanup(async () => {
+        await authenticatedPage.request.delete(`/api/journals/${journalId}`);
+      });
+
+      expect(data.data.attributes.types).toContain('outdoor_training');
+      expect(data.data.attributes.type_data).toHaveProperty('outdoor_training');
+      expect(
+        data.data.attributes.type_data.outdoor_training.focus_areas
+      ).toContain('canyoning');
+      expect(
+        data.data.attributes.type_data.outdoor_training.focus_areas
+      ).toContain('Wilderness First Aid');
+    });
   });
 
   test.describe('Type Filtering', () => {
