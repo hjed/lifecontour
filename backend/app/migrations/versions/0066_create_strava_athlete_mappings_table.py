@@ -1,6 +1,6 @@
 """create_strava_athlete_mappings_table
 
-Revision ID: 1a7db45da3ca
+Revision ID: 0066
 Revises: 0065
 Create Date: 2026-05-06 23:02:19.426555
 
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "1a7db45da3ca"
+revision: str = "0066"
 down_revision: str | None = "0065"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

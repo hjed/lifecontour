@@ -40,7 +40,12 @@ import type {
   JournalTypeData,
   ActivityTemplateResource,
 } from '@/types/journals';
-import { JournalContactRelationshipType, JournalType } from '@/types/journals';
+import {
+  JournalContactRelationshipType,
+  JournalType,
+  AttendeeStatus,
+  ContactEventRole,
+} from '@/types/journals';
 import { toast } from 'sonner';
 import { JournalBreadcrumb } from './JournalBreadcrumb';
 import { JournalCalendarBadge } from './JournalCalendarBadge';
@@ -56,6 +61,7 @@ import { InlineEditDateRange } from './InlineEditDateRange';
 import { MergeJournalDialog } from './MergeJournalDialog';
 import { ReviewSuggestions } from './ReviewSuggestions';
 import { validateRequired } from '@/lib/validation';
+import { StravaUnmatchedAthletesBadge } from '@/components/integrations/StravaUnmatchedAthletesBadge';
 import {
   useUpdateJournal,
   useDeleteJournal,
@@ -71,7 +77,6 @@ import {
   useUpdateContactRelationship,
   journalKeys,
 } from '@/lib/api/journals';
-import { AttendeeStatus, ContactEventRole } from '@/types/journals';
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 
@@ -115,11 +120,12 @@ export function JournalDetailView({
       color: c.attributes.color,
     })) || [];
 
-  const defaultStatus = journal.event_date_range?.start
-    ? isPast(parseISO(journal.event_date_range.start))
+  let defaultStatus: AttendeeStatus | undefined;
+  if (journal.event_date_range?.start) {
+    defaultStatus = isPast(parseISO(journal.event_date_range.start))
       ? AttendeeStatus.ATTENDED
-      : AttendeeStatus.ATTENDING
-    : undefined;
+      : AttendeeStatus.ATTENDING;
+  }
 
   // Handlers
   const handleCalendarChange = async (calendarId: string) => {
@@ -474,6 +480,7 @@ export function JournalDetailView({
                 onRelationshipUpdate={handleContactUpdate}
                 defaultStatus={defaultStatus}
               />
+              <StravaUnmatchedAthletesBadge journalId={journal.id} />
             </div>
 
             {/* Tags */}

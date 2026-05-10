@@ -747,6 +747,68 @@ class JournalOutboxEventProcessor:
                         journal_id=journal_id,
                     )
 
+    async def _resolve_strava_athlete_to_contact(
+        self, user_id: str, athlete_id: str, athlete_name: str | None
+    ) -> int | None:
+        """Resolve a Strava athlete to a contact ID using mappings or exact name match."""
+        mapping = await self.strava_athlete_mapping_repository.get_by_strava_id(
+            user_id, athlete_id
+        )
+        if mapping:
+            return mapping.contact_id
+
+        if not athlete_name:
+            return None
+
+        contacts = await self.contact_repository.search(athlete_name, limit=10)
+        exact_matches = [
+            c
+            for c in contacts
+            if (
+                c.first_name
+                and c.last_name
+                and f"{c.first_name} {c.last_name}".lower() == athlete_name.lower()
+            )
+            or (
+                c.first_name
+                and not c.last_name
+                and c.first_name.lower() == athlete_name.lower()
+            )
+        ]
+
+        if len(exact_matches) == 1 and exact_matches[0].id is not None:
+            contact_id = exact_matches[0].id
+            new_mapping = StravaAthleteMapping(
+                user_id=user_id,
+                strava_athlete_id=athlete_id,
+                strava_athlete_name=athlete_name,
+                contact_id=contact_id,
+            )
+            await self.strava_athlete_mapping_repository.save(new_mapping)
+            return contact_id
+
+        return None
+
+    async def _record_unmatched_strava_athlete(
+        self, journal_id: int, athlete_id: str, athlete_name: str | None
+    ) -> None:
+        safe_athlete_name = athlete_name or ""
+        await self.connection.execute(
+            text("""
+                INSERT INTO journal_unmatched_strava_athletes
+                    (journal_id, strava_athlete_id, strava_athlete_name)
+                VALUES
+                    (:journal_id, :strava_athlete_id, :strava_athlete_name)
+                ON CONFLICT (journal_id, strava_athlete_id) DO UPDATE SET
+                    strava_athlete_name = EXCLUDED.strava_athlete_name
+            """),
+            {
+                "journal_id": journal_id,
+                "strava_athlete_id": athlete_id,
+                "strava_athlete_name": safe_athlete_name,
+            },
+        )
+
     async def _persist_strava_athletes(
         self, journal_id: int, user_id: str, journal_data: dict[str, Any]
     ) -> None:
@@ -773,43 +835,9 @@ class JournalOutboxEventProcessor:
             if not isinstance(athlete_name, str):
                 athlete_name = None
 
-            contact_id = None
-
-            # 1. Check mapping table
-            mapping = await self.strava_athlete_mapping_repository.get_by_strava_id(
-                user_id, athlete_id
+            contact_id = await self._resolve_strava_athlete_to_contact(
+                user_id, athlete_id, athlete_name
             )
-            if mapping:
-                contact_id = mapping.contact_id
-            elif athlete_name:
-                # 2. Name-based conservative matching
-                # Only use if exactly one match is found
-                contacts = await self.contact_repository.search(athlete_name, limit=10)
-
-                # Check for exact name match (case insensitive)
-                exact_matches = [
-                    c
-                    for c in contacts
-                    if c.first_name
-                    and c.last_name
-                    and f"{c.first_name} {c.last_name}".lower() == athlete_name.lower()
-                    or (
-                        c.first_name
-                        and not c.last_name
-                        and c.first_name.lower() == athlete_name.lower()
-                    )
-                ]
-
-                if len(exact_matches) == 1 and exact_matches[0].id is not None:
-                    contact_id = exact_matches[0].id
-                    # Record the mapping to prevent future searches
-                    new_mapping = StravaAthleteMapping(
-                        user_id=user_id,
-                        strava_athlete_id=athlete_id,
-                        strava_athlete_name=athlete_name,
-                        contact_id=contact_id,
-                    )
-                    await self.strava_athlete_mapping_repository.save(new_mapping)
 
             if contact_id is not None:
                 await self._create_contact_relationship(
@@ -818,6 +846,29 @@ class JournalOutboxEventProcessor:
                     relationship_type=JournalContactRelationshipType.PARTICIPANT,
                     status=AttendeeStatus.ATTENDED.value,
                 )
+                await self._clear_unmatched_strava_athlete(journal_id, athlete_id)
+            else:
+                await self._record_unmatched_strava_athlete(
+                    journal_id, athlete_id, athlete_name
+                )
+
+    async def _clear_unmatched_strava_athlete(
+        self, journal_id: int, athlete_id: str
+    ) -> None:
+        """Clear an unmatched Strava athlete record for a journal.
+
+        This ensures UI consistency when an athlete is successfully matched to a contact.
+        """
+        await self.connection.execute(
+            text("""
+                DELETE FROM journal_unmatched_strava_athletes
+                WHERE journal_id = :journal_id AND strava_athlete_id = :strava_athlete_id
+            """),
+            {
+                "journal_id": journal_id,
+                "strava_athlete_id": athlete_id,
+            },
+        )
 
     async def _save_calendar_info(
         self, journal_id: int, calendar_info_data: dict[str, Any]
@@ -1015,25 +1066,67 @@ class JournalOutboxEventProcessor:
                 )
         return resolved
 
+    def _parse_inbound_status(
+        self, raw_status: str | None, journal_id: int
+    ) -> str | None:
+        if not raw_status:
+            return None
+        try:
+            return AttendeeStatus(raw_status).value
+        except ValueError:
+            logger.warning(
+                "Invalid inbound status in sync, treating as None",
+                status=raw_status,
+                journal_id=journal_id,
+            )
+            return None
+
+    def _parse_inbound_role(self, raw_role: str | None, journal_id: int) -> str | None:
+        if not raw_role:
+            return None
+        try:
+            return ContactEventRole(raw_role).value
+        except ValueError:
+            logger.warning(
+                "Invalid inbound role in sync, treating as None",
+                role=raw_role,
+                journal_id=journal_id,
+            )
+            return None
+
+    def _compute_updated_relationship(
+        self,
+        existing_rel: Any,
+        valid_inbound_status: str | None,
+        valid_inbound_role: str | None,
+    ) -> tuple[bool, str | None, str | None]:
+        changed = False
+        new_status = existing_rel.status.value if existing_rel.status else None
+        if new_status != AttendeeStatus.ATTENDED.value:
+            if valid_inbound_status and new_status != valid_inbound_status:
+                new_status = valid_inbound_status
+                changed = True
+
+        new_role = existing_rel.role.value if existing_rel.role else None
+        if new_role != ContactEventRole.FACILITATOR_HELPER.value:
+            if valid_inbound_role:
+                if new_role != valid_inbound_role:
+                    new_role = valid_inbound_role
+                    changed = True
+            elif (
+                valid_inbound_role is None
+                and new_role == ContactEventRole.ORGANISER.value
+            ):
+                new_role = None
+                changed = True
+        return changed, new_status, new_role
+
     async def _sync_contact_relationships(
         self,
         journal_id: int,
         contact_relationships: list[dict[str, Any]],
     ) -> None:
-        """Sync contact relationships for a journal from inbound data.
-
-        For each relationship type in the inbound list, resolves emails to
-        contact IDs, then diffs against existing relationships of that type.
-        Creates missing relationships and deletes removed ones. Also updates
-        status and role fields if they have changed, while respecting manual
-        roles. Only mutates the specific relationship_type from the inbound
-        data — other types (e.g. PARTICIPANT) are left intact.
-
-        Args:
-            journal_id: ID of the journal to sync relationships for
-            contact_relationships: List of dicts with 'email',
-                'relationship_type', and optional 'status', 'role'
-        """
+        """Sync contact relationships for a journal from inbound data."""
         if contact_relationships is None:
             return
 
@@ -1055,11 +1148,9 @@ class JournalOutboxEventProcessor:
                 emails, journal_id
             )
 
-            # Diff against existing relationships of this type
             existing = await self._get_relationships_by_type(journal_id, rel_type)
             existing_by_contact_id = {r.contact_id: r for r in existing}
 
-            # Prepare operations
             to_create: list[tuple[int, str | None, str | None]] = []
             to_update: list[tuple[int, str | None, str | None]] = []
 
@@ -1072,64 +1163,20 @@ class JournalOutboxEventProcessor:
                     continue
 
                 contact_id = resolved_contact_ids[email]
-
-                raw_status = inbound_payload.get("status")
-                valid_inbound_status = None
-                if raw_status:
-                    try:
-                        valid_inbound_status = AttendeeStatus(raw_status).value
-                    except ValueError:
-                        logger.warning(
-                            "Invalid inbound status in sync, treating as None",
-                            status=raw_status,
-                            journal_id=journal_id,
-                        )
-
-                raw_role = inbound_payload.get("role")
-                valid_inbound_role = None
-                if raw_role:
-                    try:
-                        valid_inbound_role = ContactEventRole(raw_role).value
-                    except ValueError:
-                        logger.warning(
-                            "Invalid inbound role in sync, treating as None",
-                            role=raw_role,
-                            journal_id=journal_id,
-                        )
+                valid_status = self._parse_inbound_status(
+                    inbound_payload.get("status"), journal_id
+                )
+                valid_role = self._parse_inbound_role(
+                    inbound_payload.get("role"), journal_id
+                )
 
                 existing_rel = existing_by_contact_id.get(contact_id)
                 if not existing_rel:
-                    to_create.append(
-                        (contact_id, valid_inbound_status, valid_inbound_role)
-                    )
+                    to_create.append((contact_id, valid_status, valid_role))
                 else:
-                    changed = False
-
-                    # Compute new status (ignore inbound if already ATTENDED)
-                    new_status = (
-                        existing_rel.status.value if existing_rel.status else None
+                    changed, new_status, new_role = self._compute_updated_relationship(
+                        existing_rel, valid_status, valid_role
                     )
-                    if new_status != AttendeeStatus.ATTENDED.value:
-                        if valid_inbound_status and new_status != valid_inbound_status:
-                            new_status = valid_inbound_status
-                            changed = True
-
-                    # Compute new role (ignore inbound if already FACILITATOR_HELPER)
-                    new_role = existing_rel.role.value if existing_rel.role else None
-                    if new_role != ContactEventRole.FACILITATOR_HELPER.value:
-                        if valid_inbound_role:
-                            if new_role != valid_inbound_role:
-                                new_role = valid_inbound_role
-                                changed = True
-                        elif (
-                            valid_inbound_role is None
-                            and new_role == ContactEventRole.ORGANISER.value
-                        ):
-                            # If inbound has None, but existing has ORGANISER, we demote.
-                            # This ensures that if the Google user is no longer organizer, it resets.
-                            new_role = None
-                            changed = True
-
                     if changed:
                         to_update.append((contact_id, new_status, new_role))
 
@@ -1276,7 +1323,7 @@ class JournalOutboxEventProcessor:
         from datetime import datetime
         from uuid import uuid4
 
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         await self.connection.execute(
             text("""
                 INSERT INTO outbox_events

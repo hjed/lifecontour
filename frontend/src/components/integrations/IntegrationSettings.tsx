@@ -9,9 +9,10 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { CalendarSettings } from '@/components/settings/CalendarSettings';
+import { StravaAthleteMappings } from '@/components/integrations/StravaAthleteMappings';
 
 export interface IntegrationSettingsProps {
-  integrationId: string;
+  readonly integrationId: string;
 }
 
 export function IntegrationSettings({
@@ -41,27 +42,46 @@ export function IntegrationSettings({
         </DialogHeader>
 
         <div className='mt-4'>
-          {integrationId === 'google' ? (
-            <div className='space-y-4'>
-              <div className='mb-6'>
-                <h3 className='text-lg font-medium'>
-                  Calendar Sync Configuration
-                </h3>
-                <p className='text-muted-foreground text-sm'>
-                  Map your local journals to specific Google Calendars here.
-                </p>
-              </div>
-              {/* Embed the existing Calendar Settings UI directly */}
-              <CalendarSettings />
-            </div>
-          ) : (
-            <div className='text-muted-foreground py-8 text-center'>
-              <p>No settings available for this integration.</p>
-              <p className='mt-2 text-sm'>
-                Dynamic schema rendering will be implemented here.
-              </p>
-            </div>
-          )}
+          {(() => {
+            if (integrationId === 'google') {
+              return (
+                <div className='space-y-4'>
+                  <div className='mb-6'>
+                    <h3 className='text-lg font-medium'>
+                      Calendar Sync Configuration
+                    </h3>
+                    <p className='text-muted-foreground text-sm'>
+                      Map your local journals to specific Google Calendars here.
+                    </p>
+                  </div>
+                  {/* Embed the existing Calendar Settings UI directly */}
+                  <CalendarSettings />
+                </div>
+              );
+            } else if (integrationId === 'strava') {
+              return (
+                <div className='space-y-4'>
+                  <div className='mb-6'>
+                    <h3 className='text-lg font-medium'>Athlete Mappings</h3>
+                    <p className='text-muted-foreground text-sm'>
+                      Manage the mappings between Strava athletes and CRM
+                      contacts.
+                    </p>
+                  </div>
+                  <StravaAthleteMappings />
+                </div>
+              );
+            } else {
+              return (
+                <div className='text-muted-foreground py-8 text-center'>
+                  <p>No settings available for this integration.</p>
+                  <p className='mt-2 text-sm'>
+                    Dynamic schema rendering will be implemented here.
+                  </p>
+                </div>
+              );
+            }
+          })()}
         </div>
       </DialogContent>
     </Dialog>

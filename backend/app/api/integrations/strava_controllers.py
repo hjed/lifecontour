@@ -7,11 +7,13 @@ and activity import sync triggers.
 """
 
 import secrets
+from typing import Annotated
 from urllib.parse import urlencode, urlparse
 
 import httpx
 import structlog
 from arq.connections import ArqRedis
+from core_shared.exceptions import DomainError
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, field_validator
@@ -21,6 +23,12 @@ from app.api.integrations.schemas import (
     SyncJobJsonApiResponse,
     SyncJobRequest,
     SyncType,
+)
+from app.core.integrations.adapters.sql.journal_unmatched_strava_athlete_repository import (
+    SqlJournalUnmatchedStravaAthleteRepository,
+)
+from app.core.integrations.strava.athlete_mapping_service import (
+    StravaAthleteMappingService,
 )
 from app.core.integrations.strava.webhook_service import StravaWebhookService
 from app.core.integrations.task_queue_service import TaskQueueService
@@ -86,6 +94,55 @@ class StravaOAuthDisconnectResponse(BaseModel):
 
     success: bool
     message: str
+
+
+class StravaAthleteMappingAttributes(BaseModel):
+    strava_athlete_id: str
+    strava_athlete_name: str
+    contact_id: int
+
+
+class StravaAthleteMappingResource(BaseModel):
+    type: str = "strava-athlete-mapping"
+    id: str
+    attributes: StravaAthleteMappingAttributes
+
+
+class StravaAthleteMappingResponse(BaseModel):
+    """Response schema for a single Strava athlete mapping."""
+
+    data: StravaAthleteMappingResource
+
+
+class StravaAthleteMappingListResponse(BaseModel):
+    """Response schema for a list of Strava athlete mappings."""
+
+    data: list[StravaAthleteMappingResource]
+
+
+class StravaAthleteMappingCreateRequest(BaseModel):
+    """Request schema for creating a Strava athlete mapping."""
+
+    strava_athlete_id: str
+    strava_athlete_name: str
+    contact_id: int
+
+
+class UnmatchedStravaAthleteAttributes(BaseModel):
+    strava_athlete_id: str
+    strava_athlete_name: str
+
+
+class UnmatchedStravaAthleteResource(BaseModel):
+    type: str = "unmatched-strava-athlete"
+    id: str  # Use strava_athlete_id as the ID
+    attributes: UnmatchedStravaAthleteAttributes
+
+
+class UnmatchedStravaAthleteListResponse(BaseModel):
+    """Response schema for a list of unmatched Strava athletes."""
+
+    data: list[UnmatchedStravaAthleteResource]
 
 
 # ---------- Endpoints ----------
@@ -530,13 +587,14 @@ class StravaWebhookEvent(BaseModel):
 @router.get(
     "/webhook",
     include_in_schema=False,
+    responses={400: {"description": "Bad Request"}, 403: {"description": "Forbidden"}},
 )
 @inject
 async def strava_webhook_validation(
     strava_token_service: FromDishka[StravaTokenService],
-    hub_mode: str | None = Query(None, alias="hub.mode"),
-    hub_challenge: str | None = Query(None, alias="hub.challenge"),
-    hub_verify_token: str | None = Query(None, alias="hub.verify_token"),
+    hub_mode: Annotated[str | None, Query(alias="hub.mode")] = None,
+    hub_challenge: Annotated[str | None, Query(alias="hub.challenge")] = None,
+    hub_verify_token: Annotated[str | None, Query(alias="hub.verify_token")] = None,
 ) -> dict[str, str]:
     """
     Handle Strava webhook validation handshake.
@@ -659,3 +717,103 @@ async def strava_webhook_event(
         return Response(status_code=500)
 
     return Response(status_code=200)
+
+
+@router.get(
+    "/athlete-mappings",
+    description="Get all Strava athlete mappings for the authenticated user",
+)
+@inject
+async def get_athlete_mappings(
+    user: FromDishka[SessionUser],
+    mapping_service: FromDishka[StravaAthleteMappingService],
+) -> StravaAthleteMappingListResponse:
+    mappings = await mapping_service.get_all_mappings(str(user.id))
+    return StravaAthleteMappingListResponse(
+        data=[
+            StravaAthleteMappingResource(
+                id=str(m.id),
+                attributes=StravaAthleteMappingAttributes(
+                    strava_athlete_id=m.strava_athlete_id,
+                    strava_athlete_name=m.strava_athlete_name,
+                    contact_id=m.contact_id,
+                ),
+            )
+            for m in mappings
+        ]
+    )
+
+
+@router.post(
+    "/athlete-mappings",
+    description="Create or update a Strava athlete mapping and process retroactively",
+)
+@inject
+async def create_athlete_mapping(
+    request_data: StravaAthleteMappingCreateRequest,
+    user: FromDishka[SessionUser],
+    mapping_service: FromDishka[StravaAthleteMappingService],
+) -> StravaAthleteMappingResponse:
+
+    # The ContactNotFoundError inherits from DomainError, so the global
+    # domain_error_handler will convert it to a JSON:API formatted error
+    mapping = await mapping_service.create_mapping(
+        user_id=str(user.id),
+        strava_athlete_id=request_data.strava_athlete_id,
+        strava_athlete_name=request_data.strava_athlete_name,
+        contact_id=request_data.contact_id,
+    )
+
+    return StravaAthleteMappingResponse(
+        data=StravaAthleteMappingResource(
+            id=str(mapping.id),
+            attributes=StravaAthleteMappingAttributes(
+                strava_athlete_id=mapping.strava_athlete_id,
+                strava_athlete_name=mapping.strava_athlete_name,
+                contact_id=mapping.contact_id,
+            ),
+        )
+    )
+
+
+@router.delete(
+    "/athlete-mappings/{strava_athlete_id}",
+    status_code=204,
+    description="Delete a Strava athlete mapping",
+    responses={404: {"description": "Mapping not found"}},
+)
+@inject
+async def delete_athlete_mapping(
+    strava_athlete_id: str,
+    user: FromDishka[SessionUser],
+    mapping_service: FromDishka[StravaAthleteMappingService],
+) -> None:
+    deleted = await mapping_service.delete_mapping(str(user.id), strava_athlete_id)
+    if not deleted:
+        raise DomainError("Mapping not found", status_code=404)
+
+
+@router.get(
+    "/journals/{journal_id}/unmatched-athletes",
+    description="Get unmatched Strava athletes for a specific journal",
+)
+@inject
+async def get_journal_unmatched_athletes(
+    journal_id: int,
+    user: FromDishka[SessionUser],
+    unmatched_repo: FromDishka[SqlJournalUnmatchedStravaAthleteRepository],
+) -> UnmatchedStravaAthleteListResponse:
+    # Enforce ownership check via the query scope
+    athletes = await unmatched_repo.get_by_journal_id(str(user.id), journal_id)
+    return UnmatchedStravaAthleteListResponse(
+        data=[
+            UnmatchedStravaAthleteResource(
+                id=a["strava_athlete_id"],
+                attributes=UnmatchedStravaAthleteAttributes(
+                    strava_athlete_id=a["strava_athlete_id"],
+                    strava_athlete_name=a["strava_athlete_name"],
+                ),
+            )
+            for a in athletes
+        ]
+    )
