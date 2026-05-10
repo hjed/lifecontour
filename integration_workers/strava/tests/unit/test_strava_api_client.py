@@ -187,22 +187,22 @@ class TestGetActivityStreams:
     @pytest.mark.asyncio
     async def test_returns_stream_set(self, api_client: StravaAPIClient) -> None:
         """get_activity_streams returns a StravaStreamSet."""
-        streams_data = [
-            {
+        streams_data = {
+            "latlng": {
                 "type": "latlng",
                 "data": [[-33.8, 151.2]],
                 "series_type": "distance",
                 "original_size": 1,
                 "resolution": "high",
             },
-            {
+            "altitude": {
                 "type": "altitude",
                 "data": [10.0],
                 "series_type": "distance",
                 "original_size": 1,
                 "resolution": "high",
             },
-        ]
+        }
         mock_resp = _make_response(json_data=streams_data)
 
         with patch.object(api_client._client, "get", return_value=mock_resp):

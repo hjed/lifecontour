@@ -76,9 +76,9 @@ class StravaActivityStream(BaseModel):
 class StravaStreamSet(BaseModel):
     """Container grouping individual streams by type.
 
-    ``from_api_response`` converts the raw Strava array-of-streams response
-    into a structured object with named attributes for each stream type
-    needed by GPX generation.
+    ``from_api_response`` converts the Strava ``key_by_type=true`` dict
+    response into a structured object with named attributes for each
+    stream type needed by GPX generation.
     """
 
     latlng: StravaActivityStream | None = None
@@ -86,19 +86,26 @@ class StravaStreamSet(BaseModel):
     time: StravaActivityStream | None = None
 
     @classmethod
-    def from_api_response(cls, streams: list[dict[str, Any]]) -> StravaStreamSet:
-        """Parse the Strava Streams API array response.
+    def from_api_response(cls, streams: dict[str, Any]) -> StravaStreamSet:
+        """Parse the Strava Streams API ``key_by_type=true`` response.
+
+        The Strava API requires ``key_by_type=true`` and returns a dict
+        keyed by stream type name (e.g. ``latlng``, ``altitude``,
+        ``time``), where each value is a stream object.
+
+        See: https://developers.strava.com/docs/reference/#api-Streams
 
         Args:
-            streams: List of stream objects from Strava's
+            streams: Dict-keyed stream data from Strava's
                 ``GET /activities/{id}/streams`` response.
 
         Returns:
             StravaStreamSet with each stream type mapped by name.
         """
         stream_map: dict[str, StravaActivityStream] = {}
-        for raw in streams:
-            stream = StravaActivityStream.model_validate(raw)
+        for stream_type, stream_body in streams.items():
+            enriched = {**stream_body, "type": stream_body.get("type", stream_type)}
+            stream = StravaActivityStream.model_validate(enriched)
             stream_map[stream.type] = stream
 
         return cls(

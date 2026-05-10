@@ -55,31 +55,31 @@ def _strava_activity_json(activity_id: int = 9876543210) -> dict[str, Any]:
     }
 
 
-def _strava_streams_json() -> list[dict[str, Any]]:
-    """Realistic Strava activity streams response fixture."""
-    return [
-        {
+def _strava_streams_json() -> dict[str, Any]:
+    """Realistic Strava activity streams response fixture (key_by_type=true)."""
+    return {
+        "latlng": {
             "type": "latlng",
             "data": [[-33.6839, 150.3110], [-33.6840, 150.3112], [-33.6842, 150.3115]],
             "series_type": "distance",
             "original_size": 3,
             "resolution": "high",
         },
-        {
+        "altitude": {
             "type": "altitude",
             "data": [800.0, 810.5, 795.0],
             "series_type": "distance",
             "original_size": 3,
             "resolution": "high",
         },
-        {
+        "time": {
             "type": "time",
             "data": [0, 60, 120],
             "series_type": "distance",
             "original_size": 3,
             "resolution": "high",
         },
-    ]
+    }
 
 
 class MockTransport(httpx.AsyncBaseTransport):
