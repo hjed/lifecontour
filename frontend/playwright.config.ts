@@ -112,7 +112,17 @@ export default defineConfig({
     /* Test against mobile viewports. */
     {
       name: 'Mobile Chrome',
-      use: { ...devices['Pixel 5'], timezoneId: 'UTC' },
+      use: {
+        ...devices['Pixel 5'],
+        timezoneId: 'UTC',
+        // Mobile viewport interactions (hamburger menus, touch targets) need
+        // slightly longer action timeouts than desktop browsers.
+        actionTimeout: 30000,
+      },
+      // Mobile Chrome gets fewer retries than the global default (2) because
+      // each retry re-runs the full worker OAuth flow (~30s). With many tests
+      // and 2 retries, the retry cascade exceeds the 30-minute CI job limit.
+      retries: process.env.CI ? 1 : 0,
     },
 
     /* Test against branded browsers. */
