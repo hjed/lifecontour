@@ -1,7 +1,6 @@
 """Domain models for logbook export data contracts."""
 
 from dataclasses import dataclass, field
-from typing import Any
 
 from .abseil_pitch import AbseilPitch
 from .abseiling_data import AbseilingData
@@ -18,6 +17,7 @@ from .gear_maintenance_data import GearMaintenanceData
 from .kayaking_data import KayakingData
 from .outdoor_activity_data import OutdoorActivityData
 from .outdoor_planning_data import OutdoorPlanningData
+from .outdoor_training_data import OutdoorTrainingData
 from .snorkelling_data import SnorkellingData
 from .value_objects import EventDateRange
 
@@ -65,7 +65,7 @@ class LogbookEntryData:
     snorkelling_data: SnorkellingData | None = None
     diving_data: DivingData | None = None
     downhill_skiing_data: DownhillSkiingData | None = None
-    outdoor_training_data: Any | None = None
+    outdoor_training_data: OutdoorTrainingData | None = None
     outdoor_planning_data: OutdoorPlanningData | None = None
     gear_maintenance_data: GearMaintenanceData | None = None
 
