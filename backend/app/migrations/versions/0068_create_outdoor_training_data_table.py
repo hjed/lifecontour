@@ -1,7 +1,7 @@
 """create outdoor training data table
 
-Revision ID: 0067
-Revises: 1a7db45da3ca
+Revision ID: 0068
+Revises: 0067
 Create Date: 2026-05-08 19:54:06.947285
 
 """
@@ -13,8 +13,8 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = "0067"
-down_revision: str | None = "1a7db45da3ca"
+revision: str = "0068"
+down_revision: str | None = "0067"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
