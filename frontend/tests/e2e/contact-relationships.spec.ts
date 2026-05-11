@@ -77,7 +77,10 @@ test.describe('Contact Relationships', () => {
     ).toBeVisible();
 
     // Select the first option
-    await listbox.getByRole('option', { name: 'Parent', exact: true }).click();
+    const parentOption = listbox.getByRole('option', { name: 'Parent', exact: true });
+    await expect(parentOption).toBeVisible();
+    // Use force: true to bypass Playwright mobile bounding box bug on Radix Select portals
+    await parentOption.click({ force: true });
   });
 
   test('should toggle "Relationship with me" and create a user-targeted relationship', async ({
@@ -134,10 +137,12 @@ test.describe('Contact Relationships', () => {
       .filter({ hasText: 'Relationship Type' })
       .getByRole('combobox');
     await typeTrigger.click();
-    await page
+    const option = page
       .getByRole('listbox')
-      .getByRole('option', { name: 'Friend', exact: true })
-      .click();
+      .getByRole('option', { name: 'Friend', exact: true });
+    await expect(option).toBeVisible();
+    // Use force: true to bypass Playwright mobile bounding box bug on Radix Select portals
+    await option.click({ force: true });
 
     // Submit
     const addButton = formContainer.getByRole('button', {

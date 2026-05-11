@@ -146,14 +146,14 @@ test.describe('Favourites Page', () => {
   });
 
   test('should allow navigation back to all contacts', async ({
-    authenticatedPage,
+    emptyContactsPage,
   }) => {
     // Navigate to favourites page
-    await authenticatedPage.goto('/contacts/favourites');
-    await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
+    await emptyContactsPage.goto('/contacts/favourites');
+    await expect(emptyContactsPage).toHaveTitle(/Personal Management System/);
 
     // Should have navigation back to all contacts in the empty state
-    const emptyStateLink = authenticatedPage.locator(
+    const emptyStateLink = emptyContactsPage.locator(
       '[data-testid="empty-state"] a[href="/contacts"]'
     );
 
@@ -162,11 +162,11 @@ test.describe('Favourites Page', () => {
 
     // Click the link and verify navigation
     await Promise.all([
-      authenticatedPage.waitForURL('**/contacts'),
+      emptyContactsPage.waitForURL('**/contacts'),
       emptyStateLink.click(),
     ]);
 
-    const currentUrl = authenticatedPage.url();
+    const currentUrl = emptyContactsPage.url();
     expect(currentUrl).toContain('/contacts');
     // If no link exists, that's also valid - different UI design
   });

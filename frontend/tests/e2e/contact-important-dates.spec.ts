@@ -55,15 +55,19 @@ test.describe('Important Dates', () => {
     await authenticatedPage
       .getByRole('combobox', { name: 'Important Date Type' })
       .click();
-    await authenticatedPage
-      .getByRole('option', { name: 'Marriage Ann.' })
-      .click();
+    const typeOption = authenticatedPage.getByRole('option', { name: 'Marriage Ann.' });
+    await expect(typeOption).toBeVisible();
+    // Use force: true to bypass Playwright mobile bounding box bug on Radix Select portals
+    await typeOption.click({ force: true });
 
     // Select Precision: YEAR
     await authenticatedPage
       .getByRole('combobox', { name: 'Important Date Precision' })
       .click();
-    await authenticatedPage.getByRole('option', { name: 'Year Only' }).click();
+    const precisionOption = authenticatedPage.getByRole('option', { name: 'Year Only' });
+    await expect(precisionOption).toBeVisible();
+    // Use force: true to bypass Playwright mobile bounding box bug on Radix Select portals
+    await precisionOption.click({ force: true });
 
     // Enter Year
     await authenticatedPage.getByPlaceholder('YYYY').fill('2010');
