@@ -1,7 +1,7 @@
 # Unified Frontend Dockerfile - Next.js
 # Supports both development and production builds via build args
 
-FROM node:24-alpine AS base
+FROM node:26-alpine AS base
 
 # Build arguments
 ARG BUILD_ENV=production
