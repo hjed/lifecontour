@@ -2566,6 +2566,300 @@ async def process_tag_event(
         raise
 
 
+async def _push_contact_to_google_for_event(
+    session: AsyncSession,
+    client: GoogleAPIClient,
+    contact_id: int,
+    sync_action: str,
+    google_account_email: str,
+    external_id: str | None,
+    version_hash: str | None,
+) -> dict[str, Any]:
+    """Push a single contact to Google, triggered by a domain event.
+
+    Loads full contact data, transforms to Google Person format, and
+    creates or updates the contact via the Google People API.
+
+    Args:
+        session: Database session
+        client: Google Contacts API client
+        contact_id: Internal contact ID
+        sync_action: "create" or "update"
+        google_account_email: Google account email
+        external_id: Google resource name (for updates)
+        version_hash: ETag for optimistic concurrency (for updates)
+
+    Returns:
+        Result dict with status and resource details
+    """
+    contact: dict[str, Any] = {
+        "id": contact_id,
+        "sync_action": sync_action,
+        "external_id": external_id,
+        "version_hash": version_hash,
+    }
+
+    # Load base contact data from DB
+    base_stmt = text("""
+        SELECT first_name, last_name, middle_name, nick_name, is_favourite,
+               company, job_title
+        FROM contacts
+        WHERE id = :contact_id
+    """)
+    base_result = await session.execute(base_stmt, {"contact_id": contact_id})
+    base_row = base_result.fetchone()
+    if not base_row:
+        logger.warning(
+            "Contact not found in database for push",
+            contact_id=contact_id,
+            google_account_email=google_account_email,
+        )
+        return {"status": "skipped", "reason": "contact_not_found"}
+
+    contact["first_name"] = base_row.first_name
+    contact["last_name"] = base_row.last_name
+    contact["middle_name"] = base_row.middle_name
+    contact["nick_name"] = base_row.nick_name
+    contact["is_favourite"] = base_row.is_favourite
+    contact["company"] = base_row.company if hasattr(base_row, "company") else None
+    contact["job_title"] = (
+        base_row.job_title if hasattr(base_row, "job_title") else None
+    )
+
+    # Load full contact data (methods, addresses, notes, tags, important_dates)
+    full_data = await _load_full_contact(session, contact_id)
+    contact.update(full_data)
+
+    # Transform to Google Person format
+    person_data = _transform_contact_to_google_person(contact)
+
+    if sync_action == "create":
+        result = await client.create_contact(person_data)
+        await _upsert_sync_metadata(
+            session=session,
+            internal_id=contact_id,
+            external_id=result["resourceName"],
+            etag=result.get("etag"),
+            integration_source="google",
+        )
+        logger.info(
+            "Created contact in Google via event",
+            contact_id=contact_id,
+            resource_name=result["resourceName"],
+        )
+        return {"status": "created", "resource_name": result["resourceName"]}
+
+    elif sync_action == "update":
+        result = await client.update_contact(
+            resource_name=external_id,  # type: ignore[arg-type]
+            contact_data=person_data,
+            etag=version_hash,
+        )
+        await _upsert_sync_metadata(
+            session=session,
+            internal_id=contact_id,
+            external_id=result["resourceName"],
+            etag=result.get("etag"),
+            integration_source="google",
+        )
+        logger.info(
+            "Updated contact in Google via event",
+            contact_id=contact_id,
+            resource_name=result["resourceName"],
+        )
+        return {"status": "updated", "resource_name": result["resourceName"]}
+
+    return {"status": "skipped", "reason": f"unknown_sync_action_{sync_action}"}
+
+
+async def _delete_contact_from_google_for_event(
+    session: AsyncSession,
+    client: GoogleAPIClient,
+    contact_id: int,
+    external_id: str,
+    google_account_email: str,
+) -> dict[str, Any]:
+    """Delete a contact from Google, triggered by a domain event.
+
+    Args:
+        session: Database session
+        client: Google Contacts API client
+        contact_id: Internal contact ID
+        external_id: Google resource name
+        google_account_email: Google account email
+
+    Returns:
+        Result dict with status
+    """
+    await client.delete_contact(resource_name=external_id)
+
+    # Clean up sync metadata
+    cleanup_stmt = text("""
+        DELETE FROM sync_metadata
+        WHERE integration_source = :integration_source
+          AND external_id = :external_id
+    """)
+    await session.execute(
+        cleanup_stmt,
+        {"integration_source": "google", "external_id": external_id},
+    )
+
+    logger.info(
+        "Deleted contact from Google via event",
+        contact_id=contact_id,
+        external_id=external_id,
+        google_account_email=google_account_email,
+    )
+    return {"status": "deleted", "external_id": external_id}
+
+
+async def process_contact_event(
+    ctx: dict[str, Any], event_type: str, event_data: dict[str, Any]
+) -> dict[str, Any]:
+    """Process a single contact event for Google Contacts outbound sync.
+
+    Receives domain events (ContactCreated, ContactUpdated, ContactDeleted)
+    and pushes the changes to Google Contacts for all synced Google accounts.
+
+    Args:
+        ctx: ARQ-compatible context dictionary with session_factory
+        event_type: The domain event type
+        event_data: The event payload containing contact_id and changed_fields
+
+    Returns:
+        Task result dictionary with sync status
+    """
+    job_id = ctx.get("job_id", "unknown")
+    set_job_id(job_id)
+    set_worker_id(settings.worker_id)
+
+    contact_id = event_data.get("contact_id")
+    if not contact_id:
+        logger.error(
+            "Contact event missing contact_id",
+            event_type=event_type,
+            job_id=job_id,
+        )
+        return {"status": "error", "error": "Missing contact_id"}
+
+    logger.info(
+        "Processing contact event",
+        job_id=job_id,
+        event_type=event_type,
+        contact_id=contact_id,
+    )
+
+    session_factory = ctx["session_factory"]
+
+    async with session_factory() as session:
+        # Look up sync metadata once — it's keyed by
+        # (integration_source, internal_id) and is independent of which
+        # Google account we push to.
+        sync_stmt = text("""
+            SELECT external_id, version_hash
+            FROM sync_metadata
+            WHERE integration_source = :integration_source
+              AND internal_id = :internal_id
+        """)
+        sync_result = await session.execute(
+            sync_stmt,
+            {"integration_source": "google", "internal_id": contact_id},
+        )
+        sync_row = sync_result.fetchone()
+
+        # Find all Google integrations for all users
+        auth_stmt = text("""
+            SELECT user_id, google_account_email
+            FROM user_google_integration
+        """)
+        auth_result = await session.execute(auth_stmt)
+        users = auth_result.fetchall()
+
+        if not users:
+            logger.info(
+                "No Google integrations found, skipping contact event",
+                contact_id=contact_id,
+                event_type=event_type,
+            )
+            return {"status": "skipped", "reason": "no_google_integrations"}
+
+        results = []
+        for row in users:
+            user_id = row.user_id
+            google_account_email = row.google_account_email
+
+            try:
+                # Create Google API client
+                auth_service = GoogleAuthService(
+                    session=session,
+                    encryption_key=settings.encryption_key.get_secret_value(),
+                    google_client_id=settings.google_client_id,
+                    google_client_secret=settings.google_client_secret.get_secret_value(),
+                )
+                client = GoogleAPIClient(
+                    auth_service=auth_service,
+                    google_account_email=google_account_email,
+                    google_client_id=settings.google_client_id,
+                    google_client_secret=settings.google_client_secret.get_secret_value(),
+                    user_id=user_id,
+                )
+
+                if event_type == "ContactDeleted":
+                    if not sync_row:
+                        logger.info(
+                            "No sync metadata for deleted contact, skipping",
+                            contact_id=contact_id,
+                            google_account_email=google_account_email,
+                        )
+                        results.append(
+                            {"status": "skipped", "reason": "no_sync_metadata"}
+                        )
+                        continue
+
+                    result = await _delete_contact_from_google_for_event(
+                        session=session,
+                        client=client,
+                        contact_id=contact_id,
+                        external_id=sync_row.external_id,
+                        google_account_email=google_account_email,
+                    )
+                else:
+                    # ContactCreated or ContactUpdated
+                    if sync_row:
+                        sync_action = "update"
+                        external_id = sync_row.external_id
+                        version_hash = sync_row.version_hash
+                    else:
+                        sync_action = "create"
+                        external_id = None
+                        version_hash = None
+
+                    result = await _push_contact_to_google_for_event(
+                        session=session,
+                        client=client,
+                        contact_id=contact_id,
+                        sync_action=sync_action,
+                        google_account_email=google_account_email,
+                        external_id=external_id,
+                        version_hash=version_hash,
+                    )
+
+                results.append(result)
+                await session.commit()
+
+            except Exception as e:
+                logger.error(
+                    "Failed to process contact event for Google account",
+                    contact_id=contact_id,
+                    google_account_email=google_account_email,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                )
+                raise
+
+        return {"status": "success", "results": results}
+
+
 @trace_arq_job
 async def push_local_contacts_to_google(
     ctx: dict[str, Any], google_account_email: str, user_id: str | int = 1

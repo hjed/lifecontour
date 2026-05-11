@@ -573,6 +573,52 @@ class GoogleAPIClient:
             )
             raise
 
+    async def delete_contact(self, resource_name: str) -> None:
+        """Delete a contact from Google People API.
+
+        Args:
+            resource_name: Resource name of the contact (e.g., "people/c123456789")
+
+        Raises:
+            HttpError: If API request fails (404 is treated as already-deleted)
+            GoogleAuthTokensNotFoundError: If authentication tokens are missing
+        """
+        try:
+            service = await self._get_people_service()
+
+            logger.info(
+                "Deleting Google contact",
+                google_account_email=self.google_account_email,
+                resource_name=resource_name,
+            )
+
+            service.people().deleteContact(resourceName=resource_name).execute()
+
+            logger.info(
+                "Successfully deleted Google contact",
+                google_account_email=self.google_account_email,
+                resource_name=resource_name,
+            )
+
+        except HttpError as e:
+            if e.resp.status == 404:
+                # Contact already deleted, consider it a success
+                logger.info(
+                    "Contact already deleted or not found in Google",
+                    google_account_email=self.google_account_email,
+                    resource_name=resource_name,
+                )
+                return
+
+            logger.error(
+                "Google API error while deleting contact",
+                google_account_email=self.google_account_email,
+                resource_name=resource_name,
+                error=str(e),
+                status_code=e.resp.status,
+            )
+            raise
+
     # Calendar API Operations
 
     async def list_calendars(
