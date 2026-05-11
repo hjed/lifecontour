@@ -46,9 +46,13 @@ test.describe('External Links Display', () => {
             body: JSON.stringify({
               data: [
                 {
-                  source: 'strava',
-                  url: 'https://www.strava.com/activities/12345678',
-                  external_id: '12345678',
+                  type: 'external_links',
+                  id: 'strava-12345678',
+                  attributes: {
+                    source: 'strava',
+                    url: 'https://www.strava.com/activities/12345678',
+                    external_id: '12345678',
+                  },
                 },
               ],
             }),
@@ -113,14 +117,22 @@ test.describe('External Links Display', () => {
             body: JSON.stringify({
               data: [
                 {
-                  source: 'strava',
-                  url: 'https://www.strava.com/activities/99999',
-                  external_id: '99999',
+                  type: 'external_links',
+                  id: 'strava-99999',
+                  attributes: {
+                    source: 'strava',
+                    url: 'https://www.strava.com/activities/99999',
+                    external_id: '99999',
+                  },
                 },
                 {
-                  source: 'google_calendar',
-                  url: 'https://calendar.google.com/calendar/event?eid=abc123',
-                  external_id: 'google-event-abc',
+                  type: 'external_links',
+                  id: 'google_calendar-google-event-abc',
+                  attributes: {
+                    source: 'google_calendar',
+                    url: 'https://calendar.google.com/calendar/event?eid=abc123',
+                    external_id: 'google-event-abc',
+                  },
                 },
               ],
             }),
@@ -221,9 +233,13 @@ test.describe('External Links Display', () => {
             body: JSON.stringify({
               data: [
                 {
-                  source: 'google_contacts',
-                  url: 'https://contacts.google.com/person/c123456',
-                  external_id: 'people/c123456',
+                  type: 'external_links',
+                  id: 'google_contacts-people/c123456',
+                  attributes: {
+                    source: 'google_contacts',
+                    url: 'https://contacts.google.com/person/c123456',
+                    external_id: 'people/c123456',
+                  },
                 },
               ],
             }),

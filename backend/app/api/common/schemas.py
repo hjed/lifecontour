@@ -127,16 +127,12 @@ class JsonApiUpdateRequest(BaseModel, Generic[T]):
 
 
 # External System Link Schemas
-class ExternalLinkSchema(BaseModel):
-    """External system link for data provenance display.
-
-    Represents a link from an internal entity (journal or contact)
-    to an external system record (Strava, Google Calendar, Google Contacts).
-    """
+class ExternalLinkAttributes(BaseModel):
+    """Attributes of an external system link."""
 
     source: str = Field(
         ...,
-        description="Integration source identifier (e.g. 'strava', 'google_calendar', 'google_contacts')",
+        description="Integration source identifier (e.g. 'strava', 'google_calendar')",
     )
     url: str | None = Field(
         default=None,
@@ -147,10 +143,18 @@ class ExternalLinkSchema(BaseModel):
     )
 
 
+class ExternalLinkResource(BaseModel):
+    """JSON:API resource representing an external link."""
+
+    type: str = Field(default="external_links", description="Resource type")
+    id: str = Field(..., description="Unique identifier for this link")
+    attributes: ExternalLinkAttributes
+
+
 class ExternalLinksResponse(BaseModel):
     """Response model for external system links."""
 
-    data: list[ExternalLinkSchema] = Field(
+    data: list[ExternalLinkResource] = Field(
         ..., description="List of external system links"
     )
 

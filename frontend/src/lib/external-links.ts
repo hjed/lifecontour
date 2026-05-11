@@ -24,7 +24,11 @@ export interface ExternalLink {
  * API response for external links endpoints.
  */
 export interface ExternalLinksResponse {
-  data: ExternalLink[];
+  data: {
+    type: string;
+    id: string;
+    attributes: ExternalLink;
+  }[];
 }
 
 /** Map of source identifiers to Lucide icon components */

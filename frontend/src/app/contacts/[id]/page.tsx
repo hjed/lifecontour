@@ -266,7 +266,9 @@ function ContactDetailPageContent() {
           </Card>
 
           {/* External System Links */}
-          <ExternalLinksDisplay links={externalLinksData?.data ?? []} />
+          <ExternalLinksDisplay
+            links={externalLinksData?.data.map(d => d.attributes) ?? []}
+          />
 
           {/* Activity Feed */}
           <ActivityFeed contactId={contact.id} pageSize={5} />

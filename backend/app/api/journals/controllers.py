@@ -26,7 +26,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.common.schemas import (
-    ExternalLinkSchema,
+    ExternalLinkAttributes,
+    ExternalLinkResource,
     ExternalLinksResponse,
     JsonApiLinks,
     PaginationParams,
@@ -1813,10 +1814,13 @@ async def get_journal_external_links(
 
     return ExternalLinksResponse(
         data=[
-            ExternalLinkSchema(
-                source=link.source,
-                url=link.url,
-                external_id=link.external_id,
+            ExternalLinkResource(
+                id=f"{link.source}-{link.external_id}",
+                attributes=ExternalLinkAttributes(
+                    source=link.source,
+                    url=link.url,
+                    external_id=link.external_id,
+                ),
             )
             for link in links
         ]

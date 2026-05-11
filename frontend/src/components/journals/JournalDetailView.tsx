@@ -498,7 +498,9 @@ export function JournalDetailView({
             </div>
 
             {/* External System Links */}
-            <ExternalLinksDisplay links={externalLinksData?.data ?? []} />
+            <ExternalLinksDisplay
+              links={externalLinksData?.data.map(d => d.attributes) ?? []}
+            />
 
             {/* Parent Journal */}
             <div className='space-y-2'>

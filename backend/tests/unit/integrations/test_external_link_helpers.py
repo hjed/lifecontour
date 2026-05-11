@@ -52,7 +52,7 @@ class TestGoogleCalendarEventUrl:
         event_id = "abc123event"
         url = build_google_calendar_event_url(event_id)
 
-        expected_eid = base64.b64encode(event_id.encode()).decode()
+        expected_eid = base64.urlsafe_b64encode(event_id.encode()).decode().rstrip("=")
         assert url == f"https://calendar.google.com/calendar/event?eid={expected_eid}"
 
     def test_none_returns_none(self) -> None:
@@ -72,7 +72,19 @@ class TestGoogleCalendarEventUrl:
         event_id = "event+with/special=chars"
         url = build_google_calendar_event_url(event_id)
 
-        expected_eid = base64.b64encode(event_id.encode()).decode()
+        expected_eid = base64.urlsafe_b64encode(event_id.encode()).decode().rstrip("=")
+        assert url == f"https://calendar.google.com/calendar/event?eid={expected_eid}"
+
+    def test_with_calendar_id(self) -> None:
+        """Event ID and Calendar ID are concatenated and base64-encoded."""
+        event_id = "abc123event"
+        calendar_id = "test@group.calendar.google.com"
+        url = build_google_calendar_event_url(event_id, calendar_id)
+
+        expected_content = f"{event_id} {calendar_id}"
+        expected_eid = (
+            base64.urlsafe_b64encode(expected_content.encode()).decode().rstrip("=")
+        )
         assert url == f"https://calendar.google.com/calendar/event?eid={expected_eid}"
 
 

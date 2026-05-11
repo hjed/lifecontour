@@ -16,7 +16,8 @@ from fastapi import APIRouter, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.api.common.schemas import (
-    ExternalLinkSchema,
+    ExternalLinkAttributes,
+    ExternalLinkResource,
     ExternalLinksResponse,
     PaginationParams,
     create_pagination_links,
@@ -215,10 +216,13 @@ async def get_contact_external_links(
 
     return ExternalLinksResponse(
         data=[
-            ExternalLinkSchema(
-                source=link.source,
-                url=link.url,
-                external_id=link.external_id,
+            ExternalLinkResource(
+                id=f"{link.source}-{link.external_id}",
+                attributes=ExternalLinkAttributes(
+                    source=link.source,
+                    url=link.url,
+                    external_id=link.external_id,
+                ),
             )
             for link in links
         ]

@@ -43,20 +43,29 @@ def build_strava_activity_url(strava_activity_id: str | None) -> str | None:
     return f"https://www.strava.com/activities/{strava_activity_id.strip()}"
 
 
-def build_google_calendar_event_url(external_event_id: str | None) -> str | None:
+def build_google_calendar_event_url(
+    external_event_id: str | None, calendar_id: str | None = None
+) -> str | None:
     """Build a Google Calendar event URL from an external event ID.
 
-    The event ID is base64-encoded as required by Google Calendar's URL scheme.
+    The event ID and optional calendar ID are urlsafe base64-encoded
+    as required by Google Calendar's URL scheme.
 
     Args:
         external_event_id: Google Calendar event ID string, or None.
+        calendar_id: Optional Google Calendar ID.
 
     Returns:
         Full Google Calendar event URL, or None if ID is missing/empty.
     """
     if not external_event_id or not external_event_id.strip():
         return None
-    eid = base64.b64encode(external_event_id.strip().encode()).decode()
+
+    eid_content = external_event_id.strip()
+    if calendar_id and calendar_id.strip():
+        eid_content = f"{eid_content} {calendar_id.strip()}"
+
+    eid = base64.urlsafe_b64encode(eid_content.encode()).decode().rstrip("=")
     return f"https://calendar.google.com/calendar/event?eid={eid}"
 
 
@@ -113,10 +122,11 @@ def build_journal_external_links(
     # Google Calendar links from external event links
     for event_link in external_event_links:
         event_id = event_link.get("external_event_id")
+        cal_id = event_link.get("calendar_id")
         links.append(
             ExternalLinkInfo(
                 source="google_calendar",
-                url=build_google_calendar_event_url(event_id),
+                url=build_google_calendar_event_url(event_id, cal_id),
                 external_id=event_id if event_id else "",
             )
         )

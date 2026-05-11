@@ -1,17 +1,13 @@
 """Integration tests for external links API endpoints."""
 
 import pytest
-import pytest_asyncio
 from sqlalchemy import text
 
 
 @pytest.mark.integration
+@pytest.mark.usefixtures("clean_database")
 class TestJournalExternalLinks:
     """Integration tests for GET /api/journals/{id}/external-links."""
-
-    @pytest_asyncio.fixture(autouse=True)
-    async def setup_method(self, clean_database):  # noqa: ARG002
-        """Ensure clean database for each test."""
 
     async def _create_journal(self, client, title="Test Journal"):
         """Helper to create a journal and return its id."""
@@ -80,9 +76,11 @@ class TestJournalExternalLinks:
         data = response.json()
         assert len(data["data"]) == 1
         link = data["data"][0]
-        assert link["source"] == "strava"
-        assert link["external_id"] == "12345678"
-        assert link["url"] == "https://www.strava.com/activities/12345678"
+        assert link["type"] == "external_links"
+        assert "id" in link
+        assert link["attributes"]["source"] == "strava"
+        assert link["attributes"]["external_id"] == "12345678"
+        assert link["attributes"]["url"] == "https://www.strava.com/activities/12345678"
 
     async def test_returns_google_calendar_link_from_external_event_link(
         self, integration_api_client, async_connection
@@ -126,9 +124,11 @@ class TestJournalExternalLinks:
         data = response.json()
         assert len(data["data"]) == 1
         link = data["data"][0]
-        assert link["source"] == "google_calendar"
-        assert link["external_id"] == "google-event-abc"
-        assert "calendar.google.com" in link["url"]
+        assert link["type"] == "external_links"
+        assert "id" in link
+        assert link["attributes"]["source"] == "google_calendar"
+        assert link["attributes"]["external_id"] == "google-event-abc"
+        assert "calendar.google.com" in link["attributes"]["url"]
 
     async def test_returns_both_strava_and_calendar_links(
         self, integration_api_client, async_connection
@@ -188,7 +188,7 @@ class TestJournalExternalLinks:
         assert response.status_code == 200
         data = response.json()
         assert len(data["data"]) == 2
-        sources = {link["source"] for link in data["data"]}
+        sources = {link["attributes"]["source"] for link in data["data"]}
         assert sources == {"strava", "google_calendar"}
 
     async def test_returns_404_for_nonexistent_journal(self, integration_api_client):
@@ -201,12 +201,9 @@ class TestJournalExternalLinks:
 
 
 @pytest.mark.integration
+@pytest.mark.usefixtures("clean_database")
 class TestContactExternalLinks:
     """Integration tests for GET /api/contacts/{id}/external-links."""
-
-    @pytest_asyncio.fixture(autouse=True)
-    async def setup_method(self, clean_database):  # noqa: ARG002
-        """Ensure clean database for each test."""
 
     async def _create_contact(self, client, first_name="Test", last_name="Contact"):
         """Helper to create a contact and return its id."""
@@ -268,9 +265,11 @@ class TestContactExternalLinks:
         data = response.json()
         assert len(data["data"]) == 1
         link = data["data"][0]
-        assert link["source"] == "google_contacts"
-        assert link["external_id"] == "people/c123456"
-        assert "contacts.google.com" in link["url"]
+        assert link["type"] == "external_links"
+        assert "id" in link
+        assert link["attributes"]["source"] == "google_contacts"
+        assert link["attributes"]["external_id"] == "people/c123456"
+        assert "contacts.google.com" in link["attributes"]["url"]
 
     async def test_returns_404_for_nonexistent_contact(self, integration_api_client):
         """External links endpoint returns 404 for a contact that doesn't exist."""
