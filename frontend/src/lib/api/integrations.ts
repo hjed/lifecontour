@@ -780,11 +780,20 @@ export interface SnipeItSettingsRequest {
   snipeit_user_id: string | null;
 }
 
+export interface SnipeItSettingsResponse {
+  data: {
+    id: string;
+    type: string;
+    attributes: SnipeItSettings;
+  };
+}
+
 export async function fetchSnipeItSettings(): Promise<SnipeItSettings> {
   const response = await fetch('/api/integrations/snipeit/settings', {
     credentials: 'include',
   });
-  return handleApiResponse<SnipeItSettings>(response);
+  const jsonApiRes = await handleApiResponse<SnipeItSettingsResponse>(response);
+  return jsonApiRes.data.attributes;
 }
 
 export async function saveSnipeItSettings(
@@ -798,7 +807,8 @@ export async function saveSnipeItSettings(
     credentials: 'include',
     body: JSON.stringify(request),
   });
-  return handleApiResponse<SnipeItSettings>(response);
+  const jsonApiRes = await handleApiResponse<SnipeItSettingsResponse>(response);
+  return jsonApiRes.data.attributes;
 }
 
 export function useSnipeItSettings() {

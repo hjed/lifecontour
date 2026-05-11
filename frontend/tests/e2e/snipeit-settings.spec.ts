@@ -185,8 +185,14 @@ test.describe('Snipe-IT Integration Settings', () => {
           savedPayload = route.request().postDataJSON();
           return route.fulfill(
             json({
-              base_url: savedPayload?.base_url,
-              snipeit_user_id: savedPayload?.snipeit_user_id ?? null,
+              data: {
+                id: '123',
+                type: 'snipeit_settings',
+                attributes: {
+                  base_url: savedPayload?.base_url,
+                  snipeit_user_id: savedPayload?.snipeit_user_id ?? null,
+                },
+              },
             })
           );
         }
@@ -289,8 +295,14 @@ test.describe('Snipe-IT Integration Settings', () => {
       route =>
         route.fulfill(
           json({
-            base_url: 'https://existing-snipeit.example.com',
-            snipeit_user_id: '99',
+            data: {
+              id: '123',
+              type: 'snipeit_settings',
+              attributes: {
+                base_url: 'https://existing-snipeit.example.com',
+                snipeit_user_id: '99',
+              },
+            },
           })
         )
     );

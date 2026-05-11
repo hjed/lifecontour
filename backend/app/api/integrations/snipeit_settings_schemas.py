@@ -5,8 +5,6 @@ These schemas define the request/response shapes for the
 ``GET`` and ``PUT /api/integrations/snipeit/settings`` endpoints.
 """
 
-from __future__ import annotations
-
 from pydantic import BaseModel, Field, HttpUrl
 
 
@@ -23,8 +21,8 @@ class SnipeItSettingsRequest(BaseModel):
     )
 
 
-class SnipeItSettingsResponse(BaseModel):
-    """Response body for Snipe-IT settings."""
+class SnipeItSettingsAttributes(BaseModel):
+    """Attributes for Snipe-IT settings."""
 
     base_url: str = Field(
         ...,
@@ -34,3 +32,20 @@ class SnipeItSettingsResponse(BaseModel):
         default=None,
         description="Snipe-IT user ID mapped to this PMS user",
     )
+
+
+class SnipeItSettingsData(BaseModel):
+    """A single Snipe-IT settings entry in JSON API format."""
+
+    id: str
+    type: str = "snipeit_settings"
+    attributes: SnipeItSettingsAttributes
+
+
+class SnipeItSettingsResponse(BaseModel):
+    """JSON API response for Snipe-IT settings."""
+
+    data: SnipeItSettingsData
+
+
+SnipeItSettingsResponse.model_rebuild()

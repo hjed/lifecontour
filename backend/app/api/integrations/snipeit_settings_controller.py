@@ -5,13 +5,13 @@ Provides REST API endpoints for managing per-user Snipe-IT integration
 configuration (Base URL and user mapping).
 """
 
-from __future__ import annotations
-
 import structlog
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException
 
 from app.api.integrations.snipeit_settings_schemas import (
+    SnipeItSettingsAttributes,
+    SnipeItSettingsData,
     SnipeItSettingsRequest,
     SnipeItSettingsResponse,
 )
@@ -55,8 +55,13 @@ async def get_snipeit_settings(
             )
 
         return SnipeItSettingsResponse(
-            base_url=settings.base_url,
-            snipeit_user_id=settings.snipeit_user_id,
+            data=SnipeItSettingsData(
+                id=str(user.id),
+                attributes=SnipeItSettingsAttributes(
+                    base_url=settings.base_url,
+                    snipeit_user_id=settings.snipeit_user_id,
+                ),
+            )
         )
 
     except HTTPException:
@@ -107,8 +112,13 @@ async def save_snipeit_settings(
         )
 
         return SnipeItSettingsResponse(
-            base_url=saved_settings.base_url,
-            snipeit_user_id=saved_settings.snipeit_user_id,
+            data=SnipeItSettingsData(
+                id=str(user.id),
+                attributes=SnipeItSettingsAttributes(
+                    base_url=saved_settings.base_url,
+                    snipeit_user_id=saved_settings.snipeit_user_id,
+                ),
+            )
         )
 
     except HTTPException:
