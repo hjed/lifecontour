@@ -1,7 +1,7 @@
 # Unified Backend Dockerfile - Python FastAPI
 # Supports both development and production builds via build args
 
-FROM python:3.14.3-slim AS base
+FROM python:3.15.0b1-slim AS base
 
 # Build arguments
 ARG BUILD_ENV=production
