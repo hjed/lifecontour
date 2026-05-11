@@ -195,7 +195,7 @@ test.describe('Snipe-IT Integration Settings', () => {
           status: 404,
           contentType: 'application/json',
           body: JSON.stringify({
-            detail: 'No Snipe-IT settings found for this user',
+            errors: [{ detail: 'No Snipe-IT settings found for this user' }],
           }),
         });
       }
@@ -335,7 +335,7 @@ async function page_mockSnipeItSettingsNotFound(
         status: 404,
         contentType: 'application/json',
         body: JSON.stringify({
-          detail: 'No Snipe-IT settings found for this user',
+          errors: [{ detail: 'No Snipe-IT settings found for this user' }],
         }),
       });
     }

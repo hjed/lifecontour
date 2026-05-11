@@ -42,14 +42,8 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("user_id"),
     )
-    op.create_index(
-        "ix_snipeit_settings_user_id",
-        "snipeit_settings",
-        ["user_id"],
-    )
 
 
 def downgrade() -> None:
     """Drop snipeit_settings table."""
-    op.drop_index("ix_snipeit_settings_user_id", table_name="snipeit_settings")
     op.drop_table("snipeit_settings")

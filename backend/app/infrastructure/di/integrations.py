@@ -15,6 +15,9 @@ from app.core.contacts.services.contact_service import ContactService
 from app.core.integrations.adapters.sql.journal_unmatched_strava_athlete_repository import (
     SqlJournalUnmatchedStravaAthleteRepository,
 )
+from app.core.integrations.adapters.sql.snipeit_settings_repository import (
+    SqlSnipeItSettingsRepository,
+)
 from app.core.integrations.adapters.sql.strava_athlete_mapping_repository import (
     SqlStravaAthleteMappingRepository,
 )
@@ -255,6 +258,17 @@ class IntegrationProvider(Provider):
         )
 
         return SqlStravaAthleteMappingRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def provide_snipeit_settings_repository(
+        self, connection: AsyncConnection
+    ) -> SqlSnipeItSettingsRepository:
+        """Provide repository for Snipe-IT settings."""
+        from app.core.integrations.adapters.sql.snipeit_settings_repository import (
+            SqlSnipeItSettingsRepository,
+        )
+
+        return SqlSnipeItSettingsRepository(connection)
 
     @provide(scope=Scope.REQUEST)
     def provide_unmatched_strava_athlete_repository(

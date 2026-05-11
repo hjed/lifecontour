@@ -9,9 +9,11 @@ Implements the ``IntegrationProvider`` protocol for registration in the
 from __future__ import annotations
 
 import structlog
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.integrations.adapters.sql.snipeit_settings_repository import (
+    SqlSnipeItSettingsRepository,
+)
 from app.core.integrations.registry.models import (
     IntegrationCapability,
     IntegrationInfo,
@@ -48,37 +50,34 @@ class SnipeItIntegrationProvider:
         Returns:
             IntegrationInfo with Snipe-IT status, capabilities, and sync
             summary.
+
+        Note:
+            Phase 1 always returns DISCONNECTED because there are no OAuth
+            endpoints yet.  Returning CONNECTED would cause the UI to render
+            Connect/Disconnect buttons that call non-existent OAuth routes.
+            Phase 2 will add ``user_snipe_it_auth`` and upgrade this logic
+            to derive CONNECTED from actual OAuth tokens.
         """
-        is_configured = False
-
-        # Check whether the user has configured Snipe-IT settings
+        # Phase 1: always DISCONNECTED — no OAuth flow exists yet.
+        # The settings table is checked only for future use / logging.
         try:
-            settings_stmt = text("""
-                SELECT base_url, snipeit_user_id
-                FROM snipeit_settings
-                WHERE user_id = :user_id
-            """)
-            settings_result = await connection.execute(
-                settings_stmt, {"user_id": user_id}
-            )
-            settings_row = settings_result.fetchone()
+            repo = SqlSnipeItSettingsRepository(connection)
+            settings = await repo.get_by_user_id(user_id)
 
-            if settings_row and settings_row.base_url:
-                is_configured = True
+            if settings and settings.base_url:
+                logger.debug(
+                    "Snipe-IT settings exist but OAuth not implemented yet",
+                    user_id=user_id,
+                    base_url=settings.base_url,
+                )
         except Exception:
-            # Table may not exist yet (Phase 1 migration hasn't run) —
-            # treat as disconnected.
-            logger.debug(
+            # Table may not exist yet (migration hasn't run) —
+            # log at warning so unexpected DB failures are visible.
+            logger.warning(
                 "snipeit_settings query failed — table may not exist yet",
                 user_id=user_id,
+                exc_info=True,
             )
-
-        # Derive status
-        status = (
-            IntegrationStatus.DISCONNECTED
-            if not is_configured
-            else IntegrationStatus.CONNECTED
-        )
 
         # Sync summary — populated in later phases when sync jobs exist
         sync_summary = SyncSummary()
@@ -86,7 +85,7 @@ class SnipeItIntegrationProvider:
         return IntegrationInfo(
             id=self.integration_id,
             name="Snipe-IT",
-            status=status,
+            status=IntegrationStatus.DISCONNECTED,
             capabilities=[
                 IntegrationCapability.GEAR_SYNC,
                 IntegrationCapability.MAINTENANCE_SYNC,
