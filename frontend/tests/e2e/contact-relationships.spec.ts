@@ -77,7 +77,10 @@ test.describe('Contact Relationships', () => {
     ).toBeVisible();
 
     // Select the first option
-    const parentOption = listbox.getByRole('option', { name: 'Parent', exact: true });
+    const parentOption = listbox.getByRole('option', {
+      name: 'Parent',
+      exact: true,
+    });
     await expect(parentOption).toBeVisible();
     // Use force: true to bypass Playwright mobile bounding box bug on Radix Select portals
     await parentOption.click({ force: true });
