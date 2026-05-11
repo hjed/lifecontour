@@ -224,6 +224,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from app.api.error_handlers import register_error_handlers
     from app.api.health import router as health_router
     from app.api.integrations.controllers import router as integrations_router
+    from app.api.integrations.snipeit_settings_controller import (
+        router as snipeit_router,
+    )
     from app.api.integrations.strava_controllers import router as strava_router
     from app.api.journals.activity_template_controller import (
         router as activity_template_router,
@@ -283,6 +286,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(tags_router, prefix="/api", tags=["tags"])
     app.include_router(integrations_router, prefix="/api", tags=["integrations"])
     app.include_router(strava_router, prefix="/api", tags=["integrations-strava"])
+    app.include_router(snipeit_router, prefix="/api", tags=["integrations-snipeit"])
 
     # Mount MCP server if enabled (mcp_app was already created above for lifespan)
     if settings.mcp_enabled and mcp_app is not None:

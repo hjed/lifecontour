@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/dialog';
 import { CalendarSettings } from '@/components/settings/CalendarSettings';
 import { StravaAthleteMappings } from '@/components/integrations/StravaAthleteMappings';
+import { SnipeItSettings } from '@/components/integrations/SnipeItSettings';
 
 export interface IntegrationSettingsProps {
   readonly integrationId: string;
@@ -69,6 +70,20 @@ export function IntegrationSettings({
                     </p>
                   </div>
                   <StravaAthleteMappings />
+                </div>
+              );
+            } else if (integrationId === 'snipeit') {
+              return (
+                <div className='space-y-4'>
+                  <div className='mb-6'>
+                    <h3 className='text-lg font-medium'>
+                      Snipe-IT Configuration
+                    </h3>
+                    <p className='text-muted-foreground text-sm'>
+                      Configure your Snipe-IT instance URL and user mapping.
+                    </p>
+                  </div>
+                  <SnipeItSettings />
                 </div>
               );
             } else {

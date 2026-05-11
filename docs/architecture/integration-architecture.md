@@ -1510,10 +1510,12 @@ The same data is exposed via the MCP `list_integrations` tool in `app/mcp/domain
 
 ### Adding a New Integration Provider
 
-1. Create a class implementing `IntegrationProvider` (e.g. `StravaIntegrationProvider`)
+1. Create a class implementing `IntegrationProvider` (e.g. `StravaIntegrationProvider`, `SnipeItIntegrationProvider`)
 2. Register it in the Dishka DI container (`app/infrastructure/di/integrations.py`)
 3. Add it to the `providers` list in `provide_integration_registry_service`
 4. The REST and MCP endpoints automatically include the new integration
+
+Currently registered providers: `GoogleIntegrationProvider`, `StravaIntegrationProvider`, `SnipeItIntegrationProvider`.
 
 ## Future Considerations
 

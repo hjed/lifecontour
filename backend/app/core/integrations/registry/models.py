@@ -28,6 +28,9 @@ class IntegrationCapability(StrEnum):
     CONTACTS_SYNC = "contacts_sync"
     CALENDAR_SYNC = "calendar_sync"
     ACTIVITY_IMPORT = "activity_import"
+    GEAR_SYNC = "gear_sync"
+    MAINTENANCE_SYNC = "maintenance_sync"
+    CHECKOUT_SYNC = "checkout_sync"
 
 
 @dataclass(frozen=True)
