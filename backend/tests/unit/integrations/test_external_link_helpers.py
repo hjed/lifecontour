@@ -123,10 +123,12 @@ class TestExternalLinkInfo:
             source="strava",
             url="https://www.strava.com/activities/123",
             external_id="123",
+            unique_key="123",
         )
         assert link.source == "strava"
         assert link.url == "https://www.strava.com/activities/123"
         assert link.external_id == "123"
+        assert link.unique_key == "123"
 
     def test_creation_with_none_url(self) -> None:
         """ExternalLinkInfo can be created with None URL."""
@@ -134,6 +136,7 @@ class TestExternalLinkInfo:
             source="strava",
             url=None,
             external_id="123",
+            unique_key="123",
         )
         assert link.url is None
 

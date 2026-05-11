@@ -27,6 +27,7 @@ class ExternalLinkInfo:
     source: str
     url: str | None
     external_id: str
+    unique_key: str
 
 
 def build_strava_activity_url(strava_activity_id: str | None) -> str | None:
@@ -116,6 +117,7 @@ def build_journal_external_links(
                 source="strava",
                 url=build_strava_activity_url(strava_activity_id),
                 external_id=strava_activity_id.strip(),
+                unique_key=strava_activity_id.strip(),
             )
         )
 
@@ -123,11 +125,14 @@ def build_journal_external_links(
     for event_link in external_event_links:
         event_id = event_link.get("external_event_id")
         cal_id = event_link.get("calendar_id")
+        internal_cal_id = event_link.get("internal_calendar_id")
+
         links.append(
             ExternalLinkInfo(
                 source="google_calendar",
                 url=build_google_calendar_event_url(event_id, cal_id),
                 external_id=event_id if event_id else "",
+                unique_key=event_id if event_id else (internal_cal_id or ""),
             )
         )
 
@@ -161,6 +166,7 @@ def build_contact_external_links(
                     source="google_contacts",
                     url=build_google_contacts_url(entity_id),
                     external_id=entity_id,
+                    unique_key=entity_id,
                 )
             )
         elif system == "strava":
@@ -170,6 +176,7 @@ def build_contact_external_links(
                     source="strava",
                     url=None,
                     external_id=entity_id,
+                    unique_key=entity_id,
                 )
             )
         else:
@@ -179,6 +186,7 @@ def build_contact_external_links(
                     source=system,
                     url=None,
                     external_id=entity_id,
+                    unique_key=entity_id,
                 )
             )
 

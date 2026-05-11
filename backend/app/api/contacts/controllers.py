@@ -217,7 +217,7 @@ async def get_contact_external_links(
     return ExternalLinksResponse(
         data=[
             ExternalLinkResource(
-                id=f"{link.source}-{link.external_id}",
+                id=f"{link.source}-{link.unique_key}",
                 attributes=ExternalLinkAttributes(
                     source=link.source,
                     url=link.url,

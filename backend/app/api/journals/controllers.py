@@ -1797,14 +1797,20 @@ async def get_journal_external_links(
 
     result = await connection.execute(
         text(
-            "SELECT external_event_id, calendar_id "
-            "FROM journal_external_event_links "
-            "WHERE journal_id = :journal_id"
+            "SELECT l.external_event_id, c.google_calendar_id, l.calendar_id "
+            "FROM journal_external_event_links l "
+            "LEFT JOIN calendars c ON l.calendar_id = c.id "
+            "WHERE l.journal_id = :journal_id"
         ),
         {"journal_id": journal_id},
     )
     external_event_links = [
-        {"external_event_id": row[0], "calendar_id": str(row[1])} for row in result
+        {
+            "external_event_id": row[0],
+            "calendar_id": str(row[1]) if row[1] else None,
+            "internal_calendar_id": str(row[2]) if row[2] else None,
+        }
+        for row in result
     ]
 
     links = build_journal_external_links(
@@ -1815,7 +1821,7 @@ async def get_journal_external_links(
     return ExternalLinksResponse(
         data=[
             ExternalLinkResource(
-                id=f"{link.source}-{link.external_id}",
+                id=f"{link.source}-{link.unique_key}",
                 attributes=ExternalLinkAttributes(
                     source=link.source,
                     url=link.url,
