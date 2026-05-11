@@ -32,7 +32,7 @@ const snipeItSettingsSchema = z.object({
 type SnipeItSettingsFormValues = z.infer<typeof snipeItSettingsSchema>;
 
 export function SnipeItSettings() {
-  const { data: settings, isLoading, isError } = useSnipeItSettings();
+  const { data: settings, isLoading, isError, error } = useSnipeItSettings();
   const saveSettings = useSaveSnipeItSettings();
 
   const form = useForm<SnipeItSettingsFormValues>({
@@ -121,12 +121,23 @@ export function SnipeItSettings() {
           )}
         />
 
-        {isError && !settings && (
-          <p className='text-muted-foreground text-sm'>
-            No settings configured yet. Enter your Snipe-IT details to get
-            started.
-          </p>
-        )}
+        {isError &&
+          !settings &&
+          (error as Error)?.message?.includes('No Snipe-IT settings found') && (
+            <p className='text-muted-foreground text-sm'>
+              No settings configured yet. Enter your Snipe-IT details to get
+              started.
+            </p>
+          )}
+        {isError &&
+          !settings &&
+          !(error as Error)?.message?.includes(
+            'No Snipe-IT settings found'
+          ) && (
+            <p className='text-sm text-red-500'>
+              Failed to load settings. Please try again later.
+            </p>
+          )}
 
         <Button
           type='submit'

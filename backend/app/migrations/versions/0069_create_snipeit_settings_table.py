@@ -23,7 +23,7 @@ def upgrade() -> None:
     op.create_table(
         "snipeit_settings",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column("user_id", sa.String(), nullable=False),
+        sa.Column("user_id", sa.String(length=50), nullable=False),
         sa.Column("base_url", sa.String(), nullable=False),
         sa.Column("snipeit_user_id", sa.String(), nullable=True),
         sa.Column(

@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -40,6 +41,9 @@ export function IntegrationSettings({
             <Settings className='h-5 w-5 text-gray-500' />
             Integration Settings
           </DialogTitle>
+          <DialogDescription className='sr-only'>
+            Configure integration settings
+          </DialogDescription>
         </DialogHeader>
 
         <div className='mt-4'>
