@@ -26,6 +26,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.common.schemas import (
+    ExternalLinkAttributes,
+    ExternalLinkResource,
+    ExternalLinksResponse,
     JsonApiLinks,
     PaginationParams,
     create_pagination_links,
@@ -64,6 +67,7 @@ from app.api.journals.schemas import (
     ReviewSuggestionSchema,
 )
 from app.core.contacts.models.repositories import ContactRepository
+from app.core.integrations.external_link_helpers import build_journal_external_links
 from app.core.journal.models.repositories import (
     AbseilingDataRepository,
     AbseilPitchRepository,
@@ -1761,6 +1765,72 @@ async def create_review_item(
             },
         }
     }
+
+
+@router.get("/{journal_id}/external-links")
+@inject
+async def get_journal_external_links(
+    journal_id: int,
+    journal_service: FromDishka[JournalService],
+    fitness_data_repo: FromDishka[FitnessDataRepository],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],
+) -> ExternalLinksResponse:
+    """
+    Get external system links for a journal.
+
+    Returns links to external systems (Strava, Google Calendar) that
+    are associated with this journal, derived from existing sync data.
+    """
+    journal = await journal_service.get_journal(journal_id)
+    if not journal or journal.user_id != user.id:
+        raise JournalNotFoundError(journal_id)
+
+    # Fetch fitness data for Strava link
+    strava_activity_id: str | None = None
+    fitness_data = await fitness_data_repo.find_by_journal_id(journal_id)
+    if fitness_data and fitness_data.strava_activity_id:
+        strava_activity_id = fitness_data.strava_activity_id
+
+    # Fetch external event links for Google Calendar links
+    from sqlalchemy import text
+
+    result = await connection.execute(
+        text(
+            "SELECT l.external_event_id, c.google_calendar_id, l.calendar_id "
+            "FROM journal_external_event_links l "
+            "LEFT JOIN calendars c ON l.calendar_id = c.id "
+            "WHERE l.journal_id = :journal_id"
+        ),
+        {"journal_id": journal_id},
+    )
+    external_event_links = [
+        {
+            "external_event_id": row[0],
+            "calendar_id": str(row[1]) if row[1] else None,
+            "internal_calendar_id": str(row[2]) if row[2] else None,
+        }
+        for row in result
+    ]
+
+    links = build_journal_external_links(
+        strava_activity_id=strava_activity_id,
+        external_event_links=external_event_links,
+    )
+
+    return ExternalLinksResponse(
+        data=[
+            ExternalLinkResource(
+                id=f"{link.source}-{link.unique_key}",
+                attributes=ExternalLinkAttributes(
+                    source=link.source,
+                    url=link.url,
+                    external_id=link.external_id,
+                ),
+            )
+            for link in links
+        ]
+    )
 
 
 @router.get("/{journal_id}")

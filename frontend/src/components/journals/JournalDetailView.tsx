@@ -62,6 +62,8 @@ import { MergeJournalDialog } from './MergeJournalDialog';
 import { ReviewSuggestions } from './ReviewSuggestions';
 import { validateRequired } from '@/lib/validation';
 import { StravaUnmatchedAthletesBadge } from '@/components/integrations/StravaUnmatchedAthletesBadge';
+import { ExternalLinksDisplay } from '@/components/shared/ExternalLinksDisplay';
+import { useJournalExternalLinks } from '@/lib/api/external-links';
 import {
   useUpdateJournal,
   useDeleteJournal,
@@ -111,6 +113,7 @@ export function JournalDetailView({
   // Data fetching
   const { data: tagsResponse } = useJournalTags();
   const { data: calendarsData } = useCalendars();
+  const { data: externalLinksData } = useJournalExternalLinks(journal.id);
 
   const availableTags = tagsResponse?.data || [];
   const availableCalendars: JournalCalendar[] =
@@ -493,6 +496,11 @@ export function JournalDetailView({
                 availableTags={availableTags}
               />
             </div>
+
+            {/* External System Links */}
+            <ExternalLinksDisplay
+              links={externalLinksData?.data.map(d => d.attributes) ?? []}
+            />
 
             {/* Parent Journal */}
             <div className='space-y-2'>

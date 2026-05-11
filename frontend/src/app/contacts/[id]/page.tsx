@@ -30,8 +30,10 @@ import { ActivityFeed } from '@/components/contacts/ActivityFeed';
 import { ContactJournals } from '@/components/contacts/ContactJournals';
 import { ContactTagsEditor } from '@/components/contacts/ContactTagsEditor';
 import { ContactSummary } from '@/components/contacts/ContactSummary';
+import { ExternalLinksDisplay } from '@/components/shared/ExternalLinksDisplay';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { DATE_FORMATS } from '@/lib/constants';
+import { useContactExternalLinks } from '@/lib/api/external-links';
 
 const MetadataItem = ({ label, value }: { label: string; value: string }) => (
   <div className='flex items-center gap-2 text-sm'>
@@ -59,6 +61,7 @@ function ContactDetailPageContent() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const { data: contactData, isLoading, error } = useContact(contactId);
+  const { data: externalLinksData } = useContactExternalLinks(contactId);
 
   const deleteContactMutation = useDeleteContact();
 
@@ -261,6 +264,11 @@ function ContactDetailPageContent() {
               )}
             </CardContent>
           </Card>
+
+          {/* External System Links */}
+          <ExternalLinksDisplay
+            links={externalLinksData?.data.map(d => d.attributes) ?? []}
+          />
 
           {/* Activity Feed */}
           <ActivityFeed contactId={contact.id} pageSize={5} />

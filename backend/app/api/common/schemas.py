@@ -126,6 +126,39 @@ class JsonApiUpdateRequest(BaseModel, Generic[T]):
     data: T = Field(..., description="Resource data to update")
 
 
+# External System Link Schemas
+class ExternalLinkAttributes(BaseModel):
+    """Attributes of an external system link."""
+
+    source: str = Field(
+        ...,
+        description="Integration source identifier (e.g. 'strava', 'google_calendar')",
+    )
+    url: str | None = Field(
+        default=None,
+        description="Clickable URL to the external record, or null if not constructable",
+    )
+    external_id: str = Field(
+        ..., description="The external system's identifier for the entity"
+    )
+
+
+class ExternalLinkResource(BaseModel):
+    """JSON:API resource representing an external link."""
+
+    type: str = Field(default="external_links", description="Resource type")
+    id: str = Field(..., description="Unique identifier for this link")
+    attributes: ExternalLinkAttributes
+
+
+class ExternalLinksResponse(BaseModel):
+    """Response model for external system links."""
+
+    data: list[ExternalLinkResource] = Field(
+        ..., description="List of external system links"
+    )
+
+
 # Pagination helpers
 class PaginationParams(BaseModel):
     """Standard pagination parameters."""

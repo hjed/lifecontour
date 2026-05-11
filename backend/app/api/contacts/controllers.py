@@ -16,6 +16,9 @@ from fastapi import APIRouter, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.api.common.schemas import (
+    ExternalLinkAttributes,
+    ExternalLinkResource,
+    ExternalLinksResponse,
     PaginationParams,
     create_pagination_links,
     create_pagination_meta,
@@ -60,6 +63,7 @@ from app.core.contacts.models.repositories import (
 )
 from app.core.contacts.services import ContactService
 from app.core.contacts.services.contact_history_service import ContactHistoryService
+from app.core.integrations.external_link_helpers import build_contact_external_links
 from app.core.journal.models.repositories import (
     AbseilingDataRepository,
     AbseilPitchRepository,
@@ -166,6 +170,62 @@ async def list_contacts(
         data=contact_resources,
         meta=meta,
         links=links,
+    )
+
+
+@router.get("/{contact_id}/external-links")
+@inject
+async def get_contact_external_links(
+    contact_id: int,
+    contact_service: FromDishka[ContactService],
+    connection: FromDishka[AsyncConnection],
+    _user: FromDishka[SessionUser],
+) -> ExternalLinksResponse:
+    """
+    Get external system links for a contact.
+
+    Returns links to external systems (Google Contacts, Strava) that
+    are associated with this contact, derived from existing reference data.
+    """
+    contact = await contact_service.get_contact_by_id(contact_id)
+    if not contact:
+        raise ContactNotFoundError(contact_id)
+
+    # Fetch external references for this contact
+    from sqlalchemy import text
+
+    result = await connection.execute(
+        text(
+            "SELECT external_system, external_entity_id, external_entity_type "
+            "FROM external_references "
+            "WHERE internal_entity_type = 'contact' "
+            "AND internal_entity_id = :contact_id"
+        ),
+        {"contact_id": contact_id},
+    )
+    external_references = [
+        {
+            "external_system": row[0],
+            "external_entity_id": row[1],
+            "external_entity_type": row[2],
+        }
+        for row in result
+    ]
+
+    links = build_contact_external_links(external_references=external_references)
+
+    return ExternalLinksResponse(
+        data=[
+            ExternalLinkResource(
+                id=f"{link.source}-{link.unique_key}",
+                attributes=ExternalLinkAttributes(
+                    source=link.source,
+                    url=link.url,
+                    external_id=link.external_id,
+                ),
+            )
+            for link in links
+        ]
     )
 
 
