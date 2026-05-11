@@ -467,8 +467,8 @@ Wire Strava imports into the existing merge detection and review pipeline.
 
 **Acceptance Criteria (task-level):**
 - [x] Strava athlete names auto-matched to contacts during import
-- [ ] Manual Strava athlete → contact mapping UI
-- [ ] External system links displayed on journal and contact detail pages
+- [x] Manual Strava athlete → contact mapping UI
+- [x] External system links displayed on journal and contact detail pages
 - [ ] External links available through MCP
 
 #### Phase 1: Automatic Participant Detection ✅ COMPLETE
@@ -509,24 +509,24 @@ Add UI for manually mapping a Strava athlete to a contact when automatic detecti
 - **Integration:** create mapping → verify participant retroactively added to existing journals. Delete mapping → verify no effect on existing relationships.
 - **E2E:** open Strava journal with unmatched athlete, create manual mapping, verify participant appears.
 
-#### Phase 3: External System Link Display on Journals and Contacts
+#### Phase 3: External System Link Display on Journals and Contacts ✅ COMPLETE
 **PR Size:** ~5–7 files
 
 Show data provenance on journal and contact detail pages with clickable links to external records.
 
 **Acceptance Criteria:**
-- [ ] Journal detail page: secondary metadata area shows external system links
-- [ ] Contact detail page: secondary metadata area shows external system links
-- [ ] Icons for each system: Google Calendar, Google Contacts, Strava
-- [ ] Clickable link to external record where URL constructable:
+- [x] Journal detail page: secondary metadata area shows external system links
+- [x] Contact detail page: secondary metadata area shows external system links
+- [x] Icons for each system: Google Calendar, Google Contacts, Strava
+- [x] Clickable link to external record where URL constructable:
   - Strava: `https://www.strava.com/activities/{strava_activity_id}`
   - Strava Athelete: (Format TBC)
   - Google Calendar: `https://calendar.google.com/calendar/event?eid={base64_encoded_id}`
   - Google Contacts: `https://contacts.google.com/person/{resource_name}`
-- [ ] Icon shown without link when URL cannot be constructed (missing external ID)
-- [ ] Multiple links shown when journal linked to multiple systems (e.g. Google Calendar + Strava after merge)
-- [ ] Data derived from existing records — no new tables: `JournalExternalEventLink`, `fitness_data.strava_activity_id`, `SyncMetadata`
-- [ ] `GET /api/journals/{id}/external-links` and `GET /api/contacts/{id}/external-links` endpoints (or embedded in existing detail responses)
+- [x] Icon shown without link when URL cannot be constructed (missing external ID)
+- [x] Multiple links shown when journal linked to multiple systems (e.g. Google Calendar + Strava after merge)
+- [x] Data derived from existing records — no new tables: `JournalExternalEventLink`, `fitness_data.strava_activity_id`, `SyncMetadata`
+- [x] `GET /api/journals/{id}/external-links` and `GET /api/contacts/{id}/external-links` endpoints (or embedded in existing detail responses)
 
 **Required Test Coverage:**
 - **Unit:** URL construction helpers for each external system (including edge cases: missing ID, malformed resource name).

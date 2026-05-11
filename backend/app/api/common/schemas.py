@@ -126,6 +126,35 @@ class JsonApiUpdateRequest(BaseModel, Generic[T]):
     data: T = Field(..., description="Resource data to update")
 
 
+# External System Link Schemas
+class ExternalLinkSchema(BaseModel):
+    """External system link for data provenance display.
+
+    Represents a link from an internal entity (journal or contact)
+    to an external system record (Strava, Google Calendar, Google Contacts).
+    """
+
+    source: str = Field(
+        ...,
+        description="Integration source identifier (e.g. 'strava', 'google_calendar', 'google_contacts')",
+    )
+    url: str | None = Field(
+        default=None,
+        description="Clickable URL to the external record, or null if not constructable",
+    )
+    external_id: str = Field(
+        ..., description="The external system's identifier for the entity"
+    )
+
+
+class ExternalLinksResponse(BaseModel):
+    """Response model for external system links."""
+
+    data: list[ExternalLinkSchema] = Field(
+        ..., description="List of external system links"
+    )
+
+
 # Pagination helpers
 class PaginationParams(BaseModel):
     """Standard pagination parameters."""
