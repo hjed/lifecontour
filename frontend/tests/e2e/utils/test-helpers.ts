@@ -561,16 +561,32 @@ export class SidebarTestHelpers {
    * Wait for sidebar to load.
    */
   async waitForSidebar(): Promise<void> {
-    const hamburgerButton = this.page
-      .locator('button[aria-label*="menu"], button[aria-label*="navigation"]')
-      .first();
-    if (await hamburgerButton.isVisible()) {
-      const sidebar = this.page.locator(SELECTORS.SIDEBAR).first();
-      if (!(await sidebar.isVisible())) {
+    const isMobile =
+      this.page.viewportSize()?.width && this.page.viewportSize()!.width < 768;
+    if (isMobile) {
+      const hamburgerButton = this.page.getByTestId('mobile-nav-trigger');
+      // Click the hamburger if the mobile nav isn't already open
+      const isMobileSidebarVisible = await this.page
+        .locator('nav[role="navigation"]')
+        .last()
+        .isVisible();
+      if (!isMobileSidebarVisible) {
         await hamburgerButton.click();
       }
+
+      await expect(async () => {
+        const isVisible = await this.page
+          .locator('nav[role="navigation"]')
+          .last()
+          .isVisible();
+        expect(isVisible).toBe(true);
+      }).toPass({ timeout: 5000 });
+    } else {
+      await expect(async () => {
+        const isVisible = await this.page.locator('aside').first().isVisible();
+        expect(isVisible).toBe(true);
+      }).toPass({ timeout: 5000 });
     }
-    await this.page.waitForSelector(SELECTORS.SIDEBAR, { state: 'visible' });
   }
 
   /**
@@ -581,11 +597,21 @@ export class SidebarTestHelpers {
     const favouritesLink = this.page.locator(SELECTORS.FAVOURITES_LINK);
 
     if ((await favouritesLink.count()) > 0) {
-      await expect(favouritesLink.first()).toBeVisible();
-      await expect(favouritesLink.first()).toBeEnabled();
+      // Find the visible one (usually the last one on mobile as it's the Sheet's content)
+      const linkCount = await favouritesLink.count();
+      let visibleLink = favouritesLink.last();
+      for (let i = 0; i < linkCount; i++) {
+        if (await favouritesLink.nth(i).isVisible()) {
+          visibleLink = favouritesLink.nth(i);
+          break;
+        }
+      }
+
+      await expect(visibleLink).toBeVisible();
+      await expect(visibleLink).toBeEnabled();
 
       // Should have star icon or "Favourites" text
-      const linkContent = favouritesLink.first();
+      const linkContent = visibleLink;
       const hasStarIcon = (await linkContent.locator('svg').count()) > 0;
       const linkText = await linkContent.textContent();
 
@@ -612,7 +638,14 @@ export class SidebarTestHelpers {
     // May have dynamic tag links
     const tagCount = await tagLinks.count();
     if (tagCount > 0) {
-      const firstTag = tagLinks.first();
+      let firstTag = tagLinks.last();
+      for (let i = 0; i < tagCount; i++) {
+        if (await tagLinks.nth(i).isVisible()) {
+          firstTag = tagLinks.nth(i);
+          break;
+        }
+      }
+
       await expect(firstTag).toHaveAttribute('href');
 
       const href = await firstTag.getAttribute('href');
@@ -653,19 +686,29 @@ export class SidebarTestHelpers {
     if (favouritesLink && (await favouritesLink.count()) > 0) {
       console.debug(`Using selector: ${usedSelector}`);
 
+      // Find the visible one
+      const linkCount = await favouritesLink.count();
+      let visibleLink = favouritesLink.last();
+      for (let i = 0; i < linkCount; i++) {
+        if (await favouritesLink.nth(i).isVisible()) {
+          visibleLink = favouritesLink.nth(i);
+          break;
+        }
+      }
+
       // Ensure the link is visible and clickable
-      await expect(favouritesLink.first()).toBeVisible();
-      await expect(favouritesLink.first()).toBeEnabled();
+      await expect(visibleLink).toBeVisible();
+      await expect(visibleLink).toBeEnabled();
 
       // Get the href to verify it's correct
-      const href = await favouritesLink.first().getAttribute('href');
+      const href = await visibleLink.getAttribute('href');
       console.debug(`Favourites link href: ${href}`);
 
       // Try clicking with navigation wait
       try {
         await Promise.all([
           this.page.waitForURL('**/contacts/favourites'),
-          favouritesLink.first().click(),
+          visibleLink.click(),
         ]);
         console.debug('Navigation successful via click');
       } catch (error) {
@@ -746,9 +789,18 @@ export class SidebarTestHelpers {
   async testSidebarStructure(): Promise<void> {
     await this.waitForSidebar();
 
-    // Sidebar should be visible
-    const sidebar = this.page.locator(SELECTORS.SIDEBAR).first();
-    await expect(sidebar).toBeVisible();
+    // Sidebar should be visible (check last as desktop one might be hidden on mobile)
+    const sidebars = this.page.locator(SELECTORS.SIDEBAR);
+    const count = await sidebars.count();
+
+    let isAnyVisible = false;
+    for (let i = 0; i < count; i++) {
+      if (await sidebars.nth(i).isVisible()) {
+        isAnyVisible = true;
+        break;
+      }
+    }
+    expect(isAnyVisible).toBe(true);
   }
 
   /**

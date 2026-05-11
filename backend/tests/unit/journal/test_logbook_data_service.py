@@ -45,6 +45,7 @@ def _make_service(raw_entries: list[LogbookEntryData]) -> LogbookDataService:
     )
 
 
+@pytest.mark.unit
 class TestLogbookDataServiceHierarchy:
     """Tests for the hierarchy assembly in LogbookDataService.get_logbook_data."""
 

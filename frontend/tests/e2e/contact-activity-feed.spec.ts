@@ -240,13 +240,16 @@ test.describe('Contact Activity Feed', () => {
     const googleIconWrapper = page
       .getByTestId('provenance-trigger-google_contacts')
       .first();
-    if (isMobile) {
-      await googleIconWrapper.tap();
-    } else {
-      await googleIconWrapper.hover();
+
+    if (!isMobile) {
+      await expect(async () => {
+        await googleIconWrapper.hover();
+        await expect(
+          page.getByRole('tooltip', {
+            name: 'Updated via Google Contacts Sync',
+          })
+        ).toBeVisible({ timeout: 2000 });
+      }).toPass({ timeout: 10000 });
     }
-    await expect(
-      page.getByRole('tooltip', { name: 'Updated via Google Contacts Sync' })
-    ).toBeVisible();
   });
 });

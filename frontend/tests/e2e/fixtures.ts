@@ -200,12 +200,14 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
     await playwrightExpect(oauthButton).toBeEnabled({ timeout: 10000 });
 
     // Step 2: Click OAuth button and wait for navigation away from login page
-    // Use waitForURL to wait for redirect - more reliable than waitForNavigation
+    // Use waitForURL to wait for redirect - more reliable than waitForNavigation.
+    // The click timeout must match waitForURL to avoid the global actionTimeout
+    // (20s) cutting off a slow OAuth redirect before waitForURL's 30s expires.
     await Promise.all([
       page.waitForURL((url: URL) => !url.toString().includes('/auth/login'), {
         timeout: 30000,
       }),
-      oauthButton.click(),
+      oauthButton.click({ timeout: 30000 }),
     ]);
 
     let currentUrl = page.url();

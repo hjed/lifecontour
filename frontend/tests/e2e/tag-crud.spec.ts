@@ -28,14 +28,18 @@ test.describe('Tag CRUD UI Updates', () => {
 
       // Helper to open sidebar on mobile
       const ensureSidebarVisible = async () => {
-        const hamburgerButton = authenticatedPage.locator(
-          'button[aria-label*="menu"], button[aria-label*="navigation"]'
-        );
-        if (
-          (await hamburgerButton.count()) > 0 &&
-          (await hamburgerButton.first().isVisible())
-        ) {
-          await hamburgerButton.first().click();
+        const isMobile =
+          authenticatedPage.viewportSize()?.width &&
+          authenticatedPage.viewportSize()!.width < 768;
+        if (isMobile) {
+          const mobileTrigger =
+            authenticatedPage.getByTestId('mobile-nav-trigger');
+          const isSidebarVisible = await authenticatedPage
+            .getByRole('heading', { name: 'Navigation' })
+            .isVisible();
+          if (!isSidebarVisible) {
+            await mobileTrigger.click();
+          }
         }
       };
 
@@ -46,8 +50,18 @@ test.describe('Tag CRUD UI Updates', () => {
       await expect(async () => {
         await authenticatedPage.reload();
         await ensureSidebarVisible();
-        await expect(tagLink).toBeVisible();
-        await expect(tagLink).toHaveText(new RegExp(tagName, 'i'));
+
+        let visibleLink = tagLink.last();
+        const count = await tagLink.count();
+        for (let i = 0; i < count; i++) {
+          if (await tagLink.nth(i).isVisible()) {
+            visibleLink = tagLink.nth(i);
+            break;
+          }
+        }
+
+        await expect(visibleLink).toBeVisible();
+        await expect(visibleLink).toHaveText(new RegExp(tagName, 'i'));
       }).toPass({ timeout: 15000 });
 
       // Update Tag via API
@@ -71,8 +85,18 @@ test.describe('Tag CRUD UI Updates', () => {
       await expect(async () => {
         await authenticatedPage.reload();
         await ensureSidebarVisible();
-        await expect(tagLink).toBeVisible();
-        await expect(tagLink).toHaveText(new RegExp(newTagName, 'i'));
+
+        let visibleLink = tagLink.last();
+        const count = await tagLink.count();
+        for (let i = 0; i < count; i++) {
+          if (await tagLink.nth(i).isVisible()) {
+            visibleLink = tagLink.nth(i);
+            break;
+          }
+        }
+
+        await expect(visibleLink).toBeVisible();
+        await expect(visibleLink).toHaveText(new RegExp(newTagName, 'i'));
       }).toPass({ timeout: 15000 });
 
       // Delete Tag via API
@@ -86,7 +110,16 @@ test.describe('Tag CRUD UI Updates', () => {
       await expect(async () => {
         await authenticatedPage.reload();
         await ensureSidebarVisible();
-        await expect(tagLink).not.toBeVisible();
+
+        const count = await tagLink.count();
+        let isAnyVisible = false;
+        for (let i = 0; i < count; i++) {
+          if (await tagLink.nth(i).isVisible()) {
+            isAnyVisible = true;
+            break;
+          }
+        }
+        expect(isAnyVisible).toBe(false);
       }).toPass({ timeout: 15000 });
     } finally {
       if (cleanupTagId) {

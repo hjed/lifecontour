@@ -152,25 +152,22 @@ test.describe('Favourites Page', () => {
     await authenticatedPage.goto('/contacts/favourites');
     await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
-    // Should have navigation back to all contacts
-    const allContactsLink = authenticatedPage.locator(
-      'a[href="/contacts"]:has-text("All"), a[href="/contacts"]:has-text("Browse"), a:has-text("All Contacts")'
+    // Should have navigation back to all contacts in the empty state
+    const emptyStateLink = authenticatedPage.locator(
+      '[data-testid="empty-state"] a[href="/contacts"]'
     );
-    const linkCount = await allContactsLink.count();
 
-    if (linkCount > 0) {
-      await expect(allContactsLink.first()).toBeVisible();
-      await expect(allContactsLink.first()).toBeEnabled();
+    await expect(emptyStateLink).toBeVisible();
+    await expect(emptyStateLink).toBeEnabled();
 
-      // Click the link and verify navigation
-      await Promise.all([
-        authenticatedPage.waitForURL('**/contacts'),
-        allContactsLink.first().click(),
-      ]);
+    // Click the link and verify navigation
+    await Promise.all([
+      authenticatedPage.waitForURL('**/contacts'),
+      emptyStateLink.click(),
+    ]);
 
-      const currentUrl = authenticatedPage.url();
-      expect(currentUrl).toContain('/contacts');
-    }
+    const currentUrl = authenticatedPage.url();
+    expect(currentUrl).toContain('/contacts');
     // If no link exists, that's also valid - different UI design
   });
 
@@ -181,16 +178,12 @@ test.describe('Favourites Page', () => {
     await authenticatedPage.goto('/contacts');
     await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
-    // Should show favourites link in sidebar
-    const sidebar = authenticatedPage.getByRole('complementary', {
-      name: 'Desktop navigation sidebar',
-    });
-    await expect(sidebar).toBeVisible();
+    // We just need to use SidebarTestHelpers which handles mobile drawer properly
+    const { SidebarTestHelpers } = await import('./utils/test-helpers');
+    const sidebarHelpers = new SidebarTestHelpers(authenticatedPage);
 
-    const favouritesLink = authenticatedPage.locator(
-      'a[href="/contacts/favourites"]'
-    );
-    await expect(favouritesLink).toBeVisible();
+    // Test favourites link specifically
+    await sidebarHelpers.testFavouritesLink();
   });
 
   test('should maintain consistent UI with main contacts page', async ({
@@ -201,10 +194,9 @@ test.describe('Favourites Page', () => {
     await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
     // Should have consistent navigation elements
-    const sidebar = authenticatedPage.getByRole('complementary', {
-      name: 'Desktop navigation sidebar',
-    });
-    await expect(sidebar).toBeVisible();
+    const { SidebarTestHelpers } = await import('./utils/test-helpers');
+    const sidebarHelpers = new SidebarTestHelpers(authenticatedPage);
+    await sidebarHelpers.waitForSidebar();
 
     // Should have consistent header structure
     const header = authenticatedPage.locator('h1').first();

@@ -7,12 +7,19 @@ import { TestDataManager } from './data-management';
  * On mobile viewports, this opens the hamburger Sheet first.
  */
 async function ensureSidebarOpen(page: Page) {
-  const mobileTrigger = page.getByTestId('mobile-nav-trigger');
-  if (await mobileTrigger.isVisible()) {
-    await mobileTrigger.click();
-    await expect(
-      page.getByRole('heading', { name: 'Navigation' })
-    ).toBeVisible();
+  const isMobile =
+    page.viewportSize()?.width && page.viewportSize()!.width < 768;
+  if (isMobile) {
+    const mobileTrigger = page.getByTestId('mobile-nav-trigger');
+    const isSidebarVisible = await page
+      .getByRole('heading', { name: 'Navigation' })
+      .isVisible();
+    if (!isSidebarVisible) {
+      await mobileTrigger.click();
+      await expect(
+        page.getByRole('heading', { name: 'Navigation' })
+      ).toBeVisible();
+    }
   }
 
   // Expand Contacts section if collapsed

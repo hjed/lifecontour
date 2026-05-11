@@ -57,7 +57,7 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
 
     // Wait for tags to be loaded by checking if tag links are present
     // Tags now link to /contacts?tag=<id> instead of /contacts/tags/<id>
-    const tagLinks = page.locator('a[href*="/contacts?tag="]');
+    const tagLinks = page.locator('a[href*="/contacts?tag="]:visible');
     await expect(tagLinks.first()).toBeVisible();
 
     const tagCount = await tagLinks.count();
@@ -97,7 +97,9 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
     await sidebar.waitForSidebar();
 
     // Should have "All" contacts link
-    const allContactsLink = page.locator('a[href="/contacts"]:has-text("All")');
+    const allContactsLink = page.locator(
+      'a[href="/contacts"]:has-text("All"):visible'
+    );
     await expect(allContactsLink).toBeVisible();
     await expect(allContactsLink).toBeEnabled();
 
@@ -124,7 +126,7 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
 
     // Click on work tag link (now links to /contacts?tag=<id>)
     const workTagLink = page.locator(
-      'a[href*="/contacts?tag="]:has-text("work")'
+      'a[href*="/contacts?tag="]:has-text("work"):visible'
     );
     await expect(workTagLink).toBeVisible();
 
@@ -170,8 +172,10 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
     await sidebar.waitForSidebar();
 
     // Should have basic navigation items
-    const allContactsLink = page.locator('a[href="/contacts"]');
-    const favouritesLink = page.locator('a[href="/contacts/favourites"]');
+    const allContactsLink = page.locator('a[href="/contacts"]:visible').first();
+    const favouritesLink = page
+      .locator('a[href="/contacts/favourites"]:visible')
+      .first();
 
     // At least one of these should be visible
     const allVisible = await allContactsLink.isVisible();
@@ -208,7 +212,9 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
     await sidebar.waitForSidebar();
 
     // Favourites link should have active state indicators
-    const favouritesLink = page.locator('a[href="/contacts/favourites"]');
+    const favouritesLink = page
+      .locator('a[href="/contacts/favourites"]:visible')
+      .first();
     await expect(favouritesLink).toBeVisible();
 
     const linkElement = favouritesLink.first();
