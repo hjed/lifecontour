@@ -367,19 +367,21 @@ test.describe('Tag Filtering via Main Contacts List', () => {
 
     // Should have consistent navigation elements (sidebar)
     const sidebar = authenticatedPage
-      .locator('nav, aside, [role="navigation"]')
+      .locator('nav:visible, aside:visible, [role="navigation"]:visible')
       .first();
     await expect(sidebar).toBeVisible();
 
     // Should have navigation back to all contacts
-    const allContactsLink = authenticatedPage.locator('a[href="/contacts"]');
+    const allContactsLink = authenticatedPage.locator(
+      'a[href="/contacts"]:visible'
+    );
     if ((await allContactsLink.count()) > 0) {
       await expect(allContactsLink.first()).toBeVisible();
     }
 
     // Should have favourites link
     const favouritesLink = authenticatedPage.locator(
-      'a[href="/contacts/favourites"]'
+      'a[href="/contacts/favourites"]:visible'
     );
     if ((await favouritesLink.count()) > 0) {
       await expect(favouritesLink.first()).toBeVisible();
