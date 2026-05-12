@@ -366,25 +366,13 @@ test.describe('Tag Filtering via Main Contacts List', () => {
     await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
     // Should have consistent navigation elements (sidebar)
-    const sidebar = authenticatedPage
-      .locator('nav:visible, aside:visible, [role="navigation"]:visible')
-      .first();
-    await expect(sidebar).toBeVisible();
+    const { SidebarTestHelpers } = await import('./utils/test-helpers');
+    const sidebarHelpers = new SidebarTestHelpers(authenticatedPage);
 
     // Should have navigation back to all contacts
-    const allContactsLink = authenticatedPage.locator(
-      'a[href="/contacts"]:visible'
-    );
-    if ((await allContactsLink.count()) > 0) {
-      await expect(allContactsLink.first()).toBeVisible();
-    }
+    await sidebarHelpers.testAllContactsLink();
 
     // Should have favourites link
-    const favouritesLink = authenticatedPage.locator(
-      'a[href="/contacts/favourites"]:visible'
-    );
-    if ((await favouritesLink.count()) > 0) {
-      await expect(favouritesLink.first()).toBeVisible();
-    }
+    await sidebarHelpers.testFavouritesLink();
   });
 });

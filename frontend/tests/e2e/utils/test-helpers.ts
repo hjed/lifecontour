@@ -590,6 +590,29 @@ export class SidebarTestHelpers {
   }
 
   /**
+   * Test all contacts link in sidebar.
+   */
+  async testAllContactsLink(): Promise<void> {
+    await this.waitForSidebar();
+    const allContactsLink = this.page.locator(SELECTORS.ALL_CONTACTS_LINK);
+
+    const linkCount = await allContactsLink.count();
+    expect(linkCount).toBeGreaterThan(0);
+
+    // Find the visible one (usually the last one on mobile as it's the Sheet's content)
+    let visibleLink = allContactsLink.last();
+    for (let i = 0; i < linkCount; i++) {
+      if (await allContactsLink.nth(i).isVisible()) {
+        visibleLink = allContactsLink.nth(i);
+        break;
+      }
+    }
+
+    await expect(visibleLink).toBeVisible();
+    await expect(visibleLink).toBeEnabled();
+  }
+
+  /**
    * Test favourites link in sidebar.
    */
   async testFavouritesLink(): Promise<void> {

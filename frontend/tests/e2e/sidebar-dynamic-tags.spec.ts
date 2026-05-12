@@ -172,15 +172,8 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
     await sidebar.waitForSidebar();
 
     // Should have basic navigation items
-    const allContactsLink = page.locator('a[href="/contacts"]:visible').first();
-    const favouritesLink = page
-      .locator('a[href="/contacts/favourites"]:visible')
-      .first();
-
-    // At least one of these should be visible
-    const allVisible = await allContactsLink.isVisible();
-    const favVisible = await favouritesLink.isVisible();
-    expect(allVisible || favVisible).toBe(true);
+    await sidebar.testAllContactsLink();
+    await sidebar.testFavouritesLink();
   });
 
   test('should display contacts section in sidebar', async ({
