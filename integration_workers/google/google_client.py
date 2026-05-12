@@ -654,6 +654,8 @@ class GoogleAPIClient:
         sync_token: str | None = None,
         time_min: str | None = None,
         updated_min: str | None = None,
+        time_max: str | None = None,
+        single_events: bool = False,
     ) -> dict[str, Any]:
         """
         List events for a specific calendar.
@@ -664,13 +666,18 @@ class GoogleAPIClient:
                 "calendarId": calendar_id,
                 "maxResults": 2500,
             }
+            if single_events:
+                request_params["singleEvents"] = single_events
             if page_token:
                 request_params["pageToken"] = page_token
+
             if sync_token:
                 request_params["syncToken"] = sync_token
             else:
                 if time_min:
                     request_params["timeMin"] = time_min
+                if time_max:
+                    request_params["timeMax"] = time_max
                 if updated_min:
                     request_params["updatedMin"] = updated_min
 
