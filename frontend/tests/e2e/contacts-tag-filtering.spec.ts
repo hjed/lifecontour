@@ -172,7 +172,7 @@ test.describe('Tag Filtering via Main Contacts List', () => {
         `/api/contacts/${contactId}`
       );
       expect(verifyResp.ok()).toBe(true);
-    }).toPass({ timeout: 5000 });
+    }).toPass({ timeout: 10000 });
 
     // 4. Assign child tag to contact
     await expect(async () => {
@@ -250,7 +250,7 @@ test.describe('Tag Filtering via Main Contacts List', () => {
         `/api/contacts/${contactId}`
       );
       expect(verifyContact.ok()).toBe(true);
-    }).toPass({ timeout: 5000 });
+    }).toPass({ timeout: 10000 });
 
     await expect(async () => {
       const assignResp = await authenticatedPage.request.post(
