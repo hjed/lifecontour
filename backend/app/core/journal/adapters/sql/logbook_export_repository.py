@@ -386,23 +386,29 @@ class SqlLogbookExportRepository(LogbookExportRepository):
                     return None
 
             # Defensively construct EventDateRange — legacy data may have null dates.
-            # Use far-past sentinel for missing start, far-future for missing end
-            # to guarantee start <= end even when only one date is present.
+            # If one bound is missing, collapse it to the known bound so duration is 0
+            # rather than using a 2099 fallback which skews multi-day logic.
             _FALLBACK_START = datetime(2000, 1, 1, tzinfo=UTC)
-            _FALLBACK_END = datetime(2099, 12, 31, tzinfo=UTC)
             try:
                 raw_start = row.event_date_range_start
                 raw_end = row.event_date_range_end
-                start_dt = (
+
+                # First parse whatever dates we have
+                parsed_start = (
                     raw_start.replace(tzinfo=UTC)
                     if raw_start and raw_start.tzinfo is None
-                    else (raw_start or _FALLBACK_START)
+                    else raw_start
                 )
-                end_dt = (
+                parsed_end = (
                     raw_end.replace(tzinfo=UTC)
                     if raw_end and raw_end.tzinfo is None
-                    else (raw_end or _FALLBACK_END)
+                    else raw_end
                 )
+
+                # Collapse missing bounds
+                start_dt = parsed_start or parsed_end or _FALLBACK_START
+                end_dt = parsed_end or start_dt
+
                 event_date_range = EventDateRange(start=start_dt, end=end_dt)
             except (ValueError, AttributeError):
                 # Skip journals with completely invalid date data
