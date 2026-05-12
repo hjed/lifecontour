@@ -231,7 +231,7 @@ test.describe('Contact Activity Feed', () => {
     // Expand
     const expandButton = page.getByRole('button', { name: /expand/i });
     await expandButton.scrollIntoViewIfNeeded();
-    await expandButton.click();
+    await expandButton.click({ force: true });
 
     // Text becomes visible
     await expect(

@@ -127,7 +127,10 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
     // Click on work tag link (now links to /contacts?tag=<id>)
     // Wait for React Query to load the tags in the sidebar
     // Filter for visible since the desktop sidebar is in the DOM but hidden on mobile
-    const workTagLink = page.locator('a[href*="/contacts?tag="]', { hasText: /work/i }).filter({ visible: true }).first();
+    const workTagLink = page
+      .locator('a[href*="/contacts?tag="]', { hasText: /work/i })
+      .filter({ visible: true })
+      .first();
     await expect(workTagLink).toBeVisible({ timeout: 15000 });
 
     // Wait for navigation to complete
