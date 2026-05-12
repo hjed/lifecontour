@@ -43,7 +43,7 @@ export const SELECTORS = {
   ALL_CONTACTS_LINK:
     'a[href="/contacts"]:has-text("All"), a[href="/contacts"]:has-text("Browse"), a:has-text("All Contacts")',
   FAVOURITES_LINK: 'a[href="/contacts/favourites"]',
-  TAG_LINKS: 'a[href*="/contacts/tags/"]',
+  TAG_LINKS: 'a[href*="/contacts?tag="]',
 
   // Empty States
   EMPTY_CONTACTS: 'text=/no contacts/i, text=/create.*contact/i',
@@ -583,7 +583,7 @@ export class SidebarTestHelpers {
       }).toPass({ timeout: 5000 });
     } else {
       await expect(async () => {
-        const isVisible = await this.page.locator('aside').first().isVisible();
+        const isVisible = await this.page.getByTestId('sidebar').isVisible();
         expect(isVisible).toBe(true);
       }).toPass({ timeout: 5000 });
     }
@@ -596,30 +596,29 @@ export class SidebarTestHelpers {
     await this.waitForSidebar();
     const favouritesLink = this.page.locator(SELECTORS.FAVOURITES_LINK);
 
-    if ((await favouritesLink.count()) > 0) {
-      // Find the visible one (usually the last one on mobile as it's the Sheet's content)
-      const linkCount = await favouritesLink.count();
-      let visibleLink = favouritesLink.last();
-      for (let i = 0; i < linkCount; i++) {
-        if (await favouritesLink.nth(i).isVisible()) {
-          visibleLink = favouritesLink.nth(i);
-          break;
-        }
+    const linkCount = await favouritesLink.count();
+    expect(linkCount).toBeGreaterThan(0);
+
+    // Find the visible one (usually the last one on mobile as it's the Sheet's content)
+    let visibleLink = favouritesLink.last();
+    for (let i = 0; i < linkCount; i++) {
+      if (await favouritesLink.nth(i).isVisible()) {
+        visibleLink = favouritesLink.nth(i);
+        break;
       }
-
-      await expect(visibleLink).toBeVisible();
-      await expect(visibleLink).toBeEnabled();
-
-      // Should have star icon or "Favourites" text
-      const linkContent = visibleLink;
-      const hasStarIcon = (await linkContent.locator('svg').count()) > 0;
-      const linkText = await linkContent.textContent();
-
-      expect(
-        hasStarIcon ||
-          (linkText && linkText.toLowerCase().includes('favourite'))
-      ).toBe(true);
     }
+
+    await expect(visibleLink).toBeVisible();
+    await expect(visibleLink).toBeEnabled();
+
+    // Should have star icon or "Favourites" text
+    const linkContent = visibleLink;
+    const hasStarIcon = (await linkContent.locator('svg').count()) > 0;
+    const linkText = await linkContent.textContent();
+
+    expect(
+      hasStarIcon || (linkText && linkText.toLowerCase().includes('favourite'))
+    ).toBe(true);
   }
 
   /**
@@ -637,23 +636,23 @@ export class SidebarTestHelpers {
 
     // May have dynamic tag links
     const tagCount = await tagLinks.count();
-    if (tagCount > 0) {
-      let firstTag = tagLinks.last();
-      for (let i = 0; i < tagCount; i++) {
-        if (await tagLinks.nth(i).isVisible()) {
-          firstTag = tagLinks.nth(i);
-          break;
-        }
+    expect(tagCount).toBeGreaterThan(0);
+
+    let firstTag = tagLinks.last();
+    for (let i = 0; i < tagCount; i++) {
+      if (await tagLinks.nth(i).isVisible()) {
+        firstTag = tagLinks.nth(i);
+        break;
       }
-
-      await expect(firstTag).toHaveAttribute('href');
-
-      const href = await firstTag.getAttribute('href');
-      expect(href).toMatch(/\/contacts\/tags\/\w+/);
-
-      await expect(firstTag).toBeVisible();
-      await expect(firstTag).toBeEnabled();
     }
+
+    await expect(firstTag).toHaveAttribute('href');
+
+    const href = await firstTag.getAttribute('href');
+    expect(href).toMatch(/\/contacts\?tag=[\w-]+/);
+
+    await expect(firstTag).toBeVisible();
+    await expect(firstTag).toBeEnabled();
   }
 
   /**

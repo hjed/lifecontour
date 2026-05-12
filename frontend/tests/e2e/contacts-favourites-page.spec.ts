@@ -55,19 +55,19 @@ test.describe('Favourites Page', () => {
   });
 
   test('should display favourites page header with proper content', async ({
-    authenticatedPage,
+    emptyContactsPage,
   }) => {
     // Navigate to favourites page
-    await authenticatedPage.goto('/contacts/favourites');
-    await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
+    await emptyContactsPage.goto('/contacts/favourites');
+    await expect(emptyContactsPage).toHaveTitle(/Personal Management System/);
 
     // Should have proper heading structure
-    const heading = authenticatedPage.locator('h1');
+    const heading = emptyContactsPage.locator('h1');
     await expect(heading).toBeVisible();
     await expect(heading).toContainText(/favourite/i);
 
     // Should have descriptive content
-    const pageContent = authenticatedPage.locator('body');
+    const pageContent = emptyContactsPage.locator('body');
     const textContent = await pageContent.textContent();
     expect(textContent).toBeTruthy();
     expect(textContent!.length).toBeGreaterThan(50);
@@ -172,38 +172,38 @@ test.describe('Favourites Page', () => {
   });
 
   test('should show favourites link in sidebar navigation', async ({
-    authenticatedPage,
+    emptyContactsPage,
   }) => {
     // Navigate to contacts page
-    await authenticatedPage.goto('/contacts');
-    await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
+    await emptyContactsPage.goto('/contacts');
+    await expect(emptyContactsPage).toHaveTitle(/Personal Management System/);
 
     // We just need to use SidebarTestHelpers which handles mobile drawer properly
     const { SidebarTestHelpers } = await import('./utils/test-helpers');
-    const sidebarHelpers = new SidebarTestHelpers(authenticatedPage);
+    const sidebarHelpers = new SidebarTestHelpers(emptyContactsPage);
 
     // Test favourites link specifically
     await sidebarHelpers.testFavouritesLink();
   });
 
   test('should maintain consistent UI with main contacts page', async ({
-    authenticatedPage,
+    emptyContactsPage,
   }) => {
     // Navigate to favourites page
-    await authenticatedPage.goto('/contacts/favourites');
-    await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
+    await emptyContactsPage.goto('/contacts/favourites');
+    await expect(emptyContactsPage).toHaveTitle(/Personal Management System/);
 
     // Should have consistent navigation elements
     const { SidebarTestHelpers } = await import('./utils/test-helpers');
-    const sidebarHelpers = new SidebarTestHelpers(authenticatedPage);
+    const sidebarHelpers = new SidebarTestHelpers(emptyContactsPage);
     await sidebarHelpers.waitForSidebar();
 
     // Should have consistent header structure
-    const header = authenticatedPage.locator('h1').first();
+    const header = emptyContactsPage.locator('h1').first();
     await expect(header).toBeVisible();
 
     // Should have consistent page layout
-    const mainContent = authenticatedPage.locator('main, [role="main"]');
+    const mainContent = emptyContactsPage.locator('main, [role="main"]');
     await expect(mainContent).toBeVisible();
   });
 

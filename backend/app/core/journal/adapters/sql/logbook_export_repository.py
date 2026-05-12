@@ -19,6 +19,7 @@ from core_shared.models.journals import (
     EventDateRange,
     FitnessData,
     GearMaintenanceData,
+    JournalValidationError,
     KayakingData,
     LogbookEntryContact,
     LogbookEntryData,
@@ -410,7 +411,7 @@ class SqlLogbookExportRepository(LogbookExportRepository):
                 end_dt = parsed_end or start_dt
 
                 event_date_range = EventDateRange(start=start_dt, end=end_dt)
-            except (ValueError, AttributeError):
+            except (ValueError, AttributeError, JournalValidationError):
                 # Skip journals with completely invalid date data
                 continue
 
