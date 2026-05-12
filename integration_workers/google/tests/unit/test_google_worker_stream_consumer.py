@@ -80,9 +80,6 @@ class TestGoogleWorkerStreamConsumerEventMatching:
             "journal_event.updated",
             "journal_review.detect_matches",
             # Search/summary events — handled by other consumers
-            "ContactCreated",
-            "ContactUpdated",
-            "ContactDeleted",
             "ContactSummaryRefreshRequested",
             "TagAssigned",
             "TagRemoved",

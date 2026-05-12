@@ -182,7 +182,7 @@ class TestGoogleWorkerStreamConsumerIntegration:
         unique_stream_name: str,
         cleanup_stream: Any,
     ) -> None:
-        """Publish ContactCreated → consumer ACKs without calling any process function."""
+        """Publish SomethingElse → consumer ACKs without calling any process function."""
         mock_session_factory = AsyncMock()
 
         # Publish a non-matching event
@@ -190,9 +190,9 @@ class TestGoogleWorkerStreamConsumerIntegration:
             unique_stream_name,
             {
                 "event_id": f"evt-{uuid.uuid4().hex[:8]}",
-                "event_type": "ContactCreated",
+                "event_type": "SomethingElse",
                 "aggregate_id": "99",
-                "event_data": json.dumps({"contact_id": 99}),
+                "event_data": json.dumps({"foo": "bar"}),
                 "occurred_at": "2024-06-15T10:30:00+00:00",
             },
         )
@@ -216,13 +216,18 @@ class TestGoogleWorkerStreamConsumerIntegration:
                 "stream_consumer_tasks.process_tag_event",
                 new_callable=AsyncMock,
             ) as mock_tag,
+            patch(
+                "stream_consumer_tasks.process_contact_event",
+                new_callable=AsyncMock,
+            ) as mock_contact,
         ):
             processed = await consumer._process_batch()
 
-        # Event was processed (ACKed) but neither handler was called
+        # Event was processed (ACKed) but no handler was called
         assert processed == 1
         mock_journal.assert_not_called()
         mock_tag.assert_not_called()
+        mock_contact.assert_not_called()
 
         # Verify no pending entries (event was ACKed)
         pending = await stream_client.get_pending_entries(

@@ -1,10 +1,11 @@
 """
 Google Worker Stream Consumer for Redis Streams.
 
-Reads journal and tag domain events directly from the pms:domain-events
-stream using the 'google-worker' consumer group. Routes events to the
-existing process_journal_event and process_tag_event worker functions,
-bypassing ARQ for event fan-out.
+Reads journal, tag, and contact domain events directly from the
+pms:domain-events stream using the 'google-worker' consumer group.
+Routes events to the existing process_journal_event, process_tag_event,
+and process_contact_event worker functions, bypassing ARQ for event
+fan-out.
 
 This replaces the backend's GoogleOutboundConsumer which previously
 enqueued ARQ jobs. The worker now consumes events directly from the
@@ -19,7 +20,7 @@ import structlog
 from core_shared.stream_client import StreamClient, StreamEvent
 from core_shared.stream_consumer import StreamConsumer
 
-from worker import process_journal_event, process_tag_event
+from worker import process_contact_event, process_journal_event, process_tag_event
 
 logger = structlog.get_logger()
 
@@ -29,17 +30,23 @@ _JOURNAL_EVENT_TYPES = frozenset({"JournalCreated", "JournalUpdated", "JournalDe
 # Tag event types that trigger outbound processing.
 _TAG_EVENT_TYPES = frozenset({"TagUpdated", "TagDeleted"})
 
+# Contact event types that trigger outbound push to Google.
+_CONTACT_EVENT_TYPES = frozenset({"ContactCreated", "ContactUpdated", "ContactDeleted"})
+
 # Combined event type list for pattern matching (exact match).
-_OUTBOUND_EVENT_TYPES: list[str] = sorted(_JOURNAL_EVENT_TYPES | _TAG_EVENT_TYPES)
+_OUTBOUND_EVENT_TYPES: list[str] = sorted(
+    _JOURNAL_EVENT_TYPES | _TAG_EVENT_TYPES | _CONTACT_EVENT_TYPES
+)
 
 
 class GoogleWorkerStreamConsumer(StreamConsumer):
     """Stream consumer for Google integration event processing.
 
-    Listens to journal and tag domain events on the ``pms:domain-events``
-    stream using the ``google-worker`` consumer group. Routes events
-    directly to ``process_journal_event`` and ``process_tag_event``
-    worker functions without ARQ enqueue.
+    Listens to journal, tag, and contact domain events on the
+    ``pms:domain-events`` stream using the ``google-worker`` consumer
+    group. Routes events directly to ``process_journal_event``,
+    ``process_tag_event``, and ``process_contact_event`` worker
+    functions without ARQ enqueue.
     """
 
     def __init__(
@@ -99,6 +106,12 @@ class GoogleWorkerStreamConsumer(StreamConsumer):
             )
         elif event.event_type in _TAG_EVENT_TYPES:
             await process_tag_event(
+                ctx=ctx,
+                event_type=event.event_type,
+                event_data=event.event_data,
+            )
+        elif event.event_type in _CONTACT_EVENT_TYPES:
+            await process_contact_event(
                 ctx=ctx,
                 event_type=event.event_type,
                 event_data=event.event_data,
