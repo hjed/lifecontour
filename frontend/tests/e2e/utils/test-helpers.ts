@@ -833,7 +833,7 @@ export class SidebarTestHelpers {
           break;
         }
       }
-      
+
       await expect(firstTag).toHaveAttribute('href');
 
       const firstTagHref = await firstTag.getAttribute('href');
