@@ -29,6 +29,11 @@ export function ConnectionControls({
   const { mutate: disconnectOAuth, isPending: disconnectLoading } =
     useOAuthDisconnect(integrationId);
 
+  // Hide OAuth controls for Snipe-IT in Phase 1
+  if (integrationId === 'snipeit') {
+    return null;
+  }
+
   const handleConnect = () => {
     authorizeOAuth({ redirect_url: '/integrations' });
   };

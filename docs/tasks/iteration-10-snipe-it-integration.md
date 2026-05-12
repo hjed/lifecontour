@@ -1,6 +1,6 @@
 # Iteration 10: Snipe-IT Integration
 
-**Status:** 🟡 NOT STARTED
+**Status:** 🟢 IN PROGRESS
 **Dependencies:** Iteration 5 (Integration Architecture, Generic Dashboard), Iteration 9 (Gear Items, GEAR_MAINTENANCE)
 **Goal:** Deliver a bidirectional integration with a self-hosted Snipe-IT instance for gear and maintenance tracking, establishing Snipe-IT as the authoritative source for equipment data while linking it to journal activities via a new GEAR_USAGE journal type.
 
@@ -44,20 +44,20 @@ The work builds on the existing Redis Streams event bus and pluggable integratio
 - [Integration Architecture — Worker Pattern](../architecture/integration-architecture.md)
 
 **Acceptance Criteria (task-level):**
-- [ ] `integration_workers/snipeit/` package structure created.
+- [x] `integration_workers/snipeit/` package structure created.
 - [ ] `UserSnipeItAuth` model handles tokens and user mapping.
-- [ ] Integration registry includes Snipe-IT.
+- [x] Integration registry includes Snipe-IT.
 
-#### Phase 1: Worker Package and Registry UI
+#### Phase 1: Worker Package and Registry UI ✅ COMPLETE
 **PR Size:** ~5-7 files
 Create the worker scaffold and integrate with the existing pluggable dashboard.
 **Acceptance Criteria:**
-- [ ] `integration_workers/snipeit` package created following standard worker architecture.
-- [ ] `SnipeItIntegrationProvider` implements the integration registry interface.
-- [ ] Settings modal added to the frontend integrations dashboard for configuring Base URL and mapping the user.
+- [x] `integration_workers/snipeit` package created following standard worker architecture.
+- [x] `SnipeItIntegrationProvider` implements the integration registry interface.
+- [x] Settings modal added to the frontend integrations dashboard for configuring Base URL and mapping the user.
 **Required Test Coverage:**
-- **Unit:** Registry returns correct metadata.
-- **E2E:** Settings modal opens and submits Base URL cleanly.
+- **Unit:** Registry returns correct metadata. ✅
+- **E2E:** Settings modal opens and submits Base URL cleanly. ✅
 
 #### Phase 2: Database Models and OAuth Connect Flow
 **PR Size:** ~5-7 files

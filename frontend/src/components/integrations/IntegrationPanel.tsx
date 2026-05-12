@@ -1,4 +1,4 @@
-import { Cloud, Database } from 'lucide-react';
+import { Cloud, Database, Wrench } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { IntegrationData } from '@/types/integrations';
@@ -15,6 +15,8 @@ function getIntegrationIcon(id: string) {
       return <Cloud className='h-5 w-5 text-blue-500' />;
     case 'strava':
       return <Database className='h-5 w-5 text-orange-500' />;
+    case 'snipeit':
+      return <Wrench className='h-5 w-5 text-green-500' />;
     default:
       return <Cloud className='h-5 w-5 text-gray-500' />;
   }
@@ -98,12 +100,14 @@ export function IntegrationPanel({ integration }: IntegrationPanelProps) {
             </div>
           </div>
 
-          <ConnectionControls
-            integrationId={id}
-            connected={connected}
-            needsReauth={needs_reauth}
-            needsReconsent={needs_reconsent}
-          />
+          {id !== 'snipeit' && (
+            <ConnectionControls
+              integrationId={id}
+              connected={connected}
+              needsReauth={needs_reauth}
+              needsReconsent={needs_reconsent}
+            />
+          )}
 
           <SyncControls
             integrationId={id}

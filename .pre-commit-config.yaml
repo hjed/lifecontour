@@ -135,6 +135,28 @@ repos:
         files: ^integration_workers/strava/.*\.py$
         pass_filenames: false
 
+  # Snipe-IT Worker Python hooks
+  - repo: local
+    hooks:
+      - id: ruff-format-snipeit-worker
+        name: ruff format (snipeit-worker)
+        entry: uv run --directory integration_workers/snipeit ruff format .
+        language: system
+        files: ^integration_workers/snipeit/.*\.py$
+        pass_filenames: false
+      - id: ruff-snipeit-worker
+        name: ruff check (snipeit-worker)
+        entry: uv run --directory integration_workers/snipeit ruff check --fix .
+        language: system
+        files: ^integration_workers/snipeit/.*\.py$
+        pass_filenames: false
+      - id: mypy-snipeit-worker
+        name: mypy (snipeit-worker)
+        entry: uv run --directory integration_workers/snipeit mypy .
+        language: system
+        files: ^integration_workers/snipeit/.*\.py$
+        pass_filenames: false
+
   # General hooks
   - repo: local
     hooks:

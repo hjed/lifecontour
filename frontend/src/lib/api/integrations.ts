@@ -767,3 +767,75 @@ export function useJournalUnmatchedStravaAthletes(
     staleTime: 60 * 1000,
   });
 }
+
+// Snipe-IT Settings
+
+export interface SnipeItSettings {
+  base_url: string;
+  snipeit_user_id: string | null;
+}
+
+export interface SnipeItSettingsRequest {
+  base_url: string;
+  snipeit_user_id: string | null;
+}
+
+export interface SnipeItSettingsResponse {
+  data: {
+    id: string;
+    type: string;
+    attributes: SnipeItSettings;
+  };
+}
+
+export async function fetchSnipeItSettings(): Promise<SnipeItSettings> {
+  const response = await fetch('/api/integrations/snipeit/settings', {
+    credentials: 'include',
+  });
+  const jsonApiRes = await handleApiResponse<SnipeItSettingsResponse>(response);
+  return jsonApiRes.data.attributes;
+}
+
+export async function saveSnipeItSettings(
+  request: SnipeItSettingsRequest
+): Promise<SnipeItSettings> {
+  const response = await fetch('/api/integrations/snipeit/settings', {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    credentials: 'include',
+    body: JSON.stringify(request),
+  });
+  const jsonApiRes = await handleApiResponse<SnipeItSettingsResponse>(response);
+  return jsonApiRes.data.attributes;
+}
+
+export function useSnipeItSettings() {
+  return useQuery({
+    queryKey: [...integrationKeys.all, 'snipeit', 'settings'],
+    queryFn: fetchSnipeItSettings,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    retry: false, // Don't retry on 404 (no settings yet)
+  });
+}
+
+export function useSaveSnipeItSettings() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: saveSnipeItSettings,
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: [...integrationKeys.all, 'snipeit', 'settings'],
+      });
+      queryClient.invalidateQueries({
+        queryKey: integrationKeys.list(),
+      });
+      toast.success('Snipe-IT settings saved successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to save Snipe-IT settings: ${error.message}`);
+    },
+  });
+}

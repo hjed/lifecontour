@@ -15,6 +15,9 @@ from app.core.contacts.services.contact_service import ContactService
 from app.core.integrations.adapters.sql.journal_unmatched_strava_athlete_repository import (
     SqlJournalUnmatchedStravaAthleteRepository,
 )
+from app.core.integrations.adapters.sql.snipeit_settings_repository import (
+    SqlSnipeItSettingsRepository,
+)
 from app.core.integrations.adapters.sql.strava_athlete_mapping_repository import (
     SqlStravaAthleteMappingRepository,
 )
@@ -25,6 +28,7 @@ from app.core.integrations.health_service import IntegrationHealthService
 from app.core.integrations.outbox_event_processor import OutboxEventProcessor
 from app.core.integrations.registry.google_provider import GoogleIntegrationProvider
 from app.core.integrations.registry.service import IntegrationRegistryService
+from app.core.integrations.registry.snipeit_provider import SnipeItIntegrationProvider
 from app.core.integrations.registry.strava_provider import StravaIntegrationProvider
 from app.core.integrations.strava.athlete_mapping_service import (
     StravaAthleteMappingService,
@@ -194,10 +198,21 @@ class IntegrationProvider(Provider):
         return StravaIntegrationProvider()
 
     @provide(scope=Scope.APP)
+    def provide_snipeit_integration_provider(self) -> SnipeItIntegrationProvider:
+        """
+        Provide Snipe-IT integration provider (singleton).
+
+        Returns:
+            SnipeItIntegrationProvider: Snipe-IT status/capability provider
+        """
+        return SnipeItIntegrationProvider()
+
+    @provide(scope=Scope.APP)
     def provide_integration_registry_service(
         self,
         google_provider: GoogleIntegrationProvider,
         strava_provider: StravaIntegrationProvider,
+        snipeit_provider: SnipeItIntegrationProvider,
     ) -> IntegrationRegistryService:
         """
         Provide integration registry service with all registered providers.
@@ -205,11 +220,14 @@ class IntegrationProvider(Provider):
         Args:
             google_provider: Google integration provider
             strava_provider: Strava integration provider
+            snipeit_provider: Snipe-IT integration provider
 
         Returns:
             IntegrationRegistryService: Registry aggregating all providers
         """
-        return IntegrationRegistryService(providers=[google_provider, strava_provider])
+        return IntegrationRegistryService(
+            providers=[google_provider, strava_provider, snipeit_provider]
+        )
 
     @provide(scope=Scope.REQUEST)
     def provide_strava_token_service(
@@ -240,6 +258,17 @@ class IntegrationProvider(Provider):
         )
 
         return SqlStravaAthleteMappingRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def provide_snipeit_settings_repository(
+        self, connection: AsyncConnection
+    ) -> SqlSnipeItSettingsRepository:
+        """Provide repository for Snipe-IT settings."""
+        from app.core.integrations.adapters.sql.snipeit_settings_repository import (
+            SqlSnipeItSettingsRepository,
+        )
+
+        return SqlSnipeItSettingsRepository(connection)
 
     @provide(scope=Scope.REQUEST)
     def provide_unmatched_strava_athlete_repository(

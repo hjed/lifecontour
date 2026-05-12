@@ -50,6 +50,17 @@ STRAVA_INFO = IntegrationInfo(
     capabilities=[IntegrationCapability.ACTIVITY_IMPORT],
 )
 
+SNIPEIT_INFO = IntegrationInfo(
+    id="snipeit",
+    name="Snipe-IT",
+    status=IntegrationStatus.DISCONNECTED,
+    capabilities=[
+        IntegrationCapability.GEAR_SYNC,
+        IntegrationCapability.MAINTENANCE_SYNC,
+        IntegrationCapability.CHECKOUT_SYNC,
+    ],
+)
+
 
 class TestIntegrationRegistryService:
     """Tests for the IntegrationRegistryService."""
@@ -148,3 +159,23 @@ class TestIntegrationRegistryService:
         assert result[0] == GOOGLE_INFO
         assert result[1].id == "broken"
         assert result[1].status == IntegrationStatus.ERROR
+
+    @pytest.mark.asyncio
+    async def test_three_providers_returns_all_integrations(self) -> None:
+        """All three providers (Google, Strava, Snipe-IT) produce entries."""
+        google_provider = _make_provider(GOOGLE_INFO)
+        strava_provider = _make_provider(STRAVA_INFO)
+        snipeit_provider = _make_provider(SNIPEIT_INFO)
+        service = IntegrationRegistryService(
+            providers=[google_provider, strava_provider, snipeit_provider]
+        )
+        connection = AsyncMock()
+
+        result = await service.list_integrations(
+            user_id="user-1", connection=connection
+        )
+
+        assert len(result) == 3
+        assert result[0] == GOOGLE_INFO
+        assert result[1] == STRAVA_INFO
+        assert result[2] == SNIPEIT_INFO
