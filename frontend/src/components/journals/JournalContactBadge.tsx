@@ -504,7 +504,7 @@ function ContactBadge({
             <button
               type='button'
               disabled={disabled}
-              className='hover:bg-muted ml-0.5 rounded-sm p-0.5 transition-colors'
+              className='hover:bg-muted relative z-10 ml-0.5 rounded-sm p-0.5 transition-colors'
               aria-label={`Edit ${fallbackDisplayName}`}
               data-testid={`edit-contact-${contact.id}`}
             >
@@ -575,7 +575,7 @@ function ContactBadge({
           type='button'
           onClick={onRemove}
           disabled={disabled}
-          className='hover:bg-muted text-muted-foreground hover:text-destructive ml-0.5 rounded-sm p-0.5 transition-colors'
+          className='hover:bg-muted text-muted-foreground hover:text-destructive relative z-10 ml-0.5 rounded-sm p-0.5 transition-colors'
           aria-label={`Remove ${fallbackDisplayName}`}
           data-testid={`remove-contact-${contact.id}`}
         >

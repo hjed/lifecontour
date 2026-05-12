@@ -627,7 +627,6 @@ test.describe('Calendar Views', () => {
   test('should trigger quick create dialog and create a new event', async ({
     authenticatedPage,
     testCleanup,
-    isMobile,
   }) => {
     const page = authenticatedPage;
     const dataManager = new (await import('./data-management')).TestDataManager(
@@ -658,18 +657,14 @@ test.describe('Calendar Views', () => {
     );
     await expect(todayCell).toBeVisible();
 
-    // Focus to reveal Add button via group-focus-within
+    // Focus the cell to trigger group-focus-within:opacity-100 on the add button
     await todayCell.focus();
-    // Also hover just in case
-    if (isMobile) {
-      await todayCell.tap();
-    } else {
-      await todayCell.hover();
-    }
 
-    // Click Add button (force: true bypasses strict visibility checks that fail during CSS transitions in Firefox)
+    // Click Add button — uses opacity-0/100 instead of hidden/block so it's always
+    // in the DOM and accessible to Playwright once the parent receives focus.
     const addButton = todayCell.getByRole('button', { name: /add event on/i });
-    await addButton.click({ force: true });
+    await expect(addButton).toBeAttached();
+    await addButton.click();
 
     // Verify dialog appears
     const dialog = page.getByRole('dialog');

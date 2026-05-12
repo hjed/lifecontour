@@ -735,7 +735,7 @@ test.describe('Journal Detail Page', () => {
             resp.url().endsWith(`/api/journals/${journal.id}`) &&
             resp.request().method() === 'GET'
         ),
-        contactBadge.hover().then(() => removeContactButton.click()),
+        removeContactButton.click(),
       ]);
       expect(removeResponse.status()).toBe(200);
 
@@ -785,10 +785,8 @@ test.describe('Journal Detail Page', () => {
       const neutralStatus = page.getByTestId(`contact-status-${contact.id}`);
       await expect(neutralStatus).toBeVisible();
 
-      // Click the edit button
+      // Click the edit button (z-10 ensures it's above the link hit area)
       const editButton = page.getByTestId(`edit-contact-${contact.id}`);
-      // Hover the contact badge to reveal the edit button
-      await contactBadge.hover();
       await editButton.click();
 
       // Ensure popover appears

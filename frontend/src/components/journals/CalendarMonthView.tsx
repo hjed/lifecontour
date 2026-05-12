@@ -179,12 +179,12 @@ export function CalendarMonthView({
                       {day.getDate()}
                     </div>
 
-                    {/* Add Event Button overlay (visible on hover) */}
+                    {/* Add Event Button overlay — visible on hover/focus or always on touch devices */}
                     {onSlotClick && isCurrentMonth && (
-                      <div className='absolute top-1 left-1 hidden group-focus-within:block group-hover:block'>
+                      <div className='pointer-events-none absolute top-1 left-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100'>
                         <button
                           type='button'
-                          className='bg-secondary text-secondary-foreground rounded p-1 shadow-sm hover:opacity-80'
+                          className='bg-secondary text-secondary-foreground pointer-events-auto rounded p-1 shadow-sm hover:opacity-80'
                           onClick={e => {
                             e.stopPropagation();
                             onSlotClick(dateKey);
