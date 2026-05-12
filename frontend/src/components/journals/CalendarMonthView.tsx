@@ -151,7 +151,7 @@ export function CalendarMonthView({
                     data-testid={`day-cell-${dateKey}`}
                     data-today={isTodayDate || undefined}
                     className={cn(
-                      'border-border group focus-visible:bg-muted/30 relative min-h-24 border-r border-b p-1 transition-colors',
+                      'border-border group focus-visible:bg-muted/30 ring-offset-background focus-visible:ring-ring relative min-h-24 border-r border-b p-1 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-offset-2',
                       !isCurrentMonth ? 'bg-muted/30' : 'hover:bg-muted/10',
                       isTodayDate && 'bg-primary/5'
                     )}

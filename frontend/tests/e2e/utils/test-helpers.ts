@@ -831,7 +831,7 @@ export class SidebarTestHelpers {
 
       const firstTagHref = await firstTag.getAttribute('href');
       if (firstTagHref) {
-        expect(firstTagHref).toMatch(/\/contacts\/tags\/\w+/);
+        expect(firstTagHref).toMatch(/\/contacts\?tag=[\w-]+/);
       }
 
       await expect(firstTag).toBeVisible();
