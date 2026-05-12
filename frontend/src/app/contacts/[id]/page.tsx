@@ -227,7 +227,7 @@ function ContactDetailPageContent() {
         </div>
 
         {/* Sidebar */}
-        <aside className='space-y-6 overflow-hidden lg:col-span-4'>
+        <aside className='space-y-6 lg:col-span-4'>
           {/* AI Summary */}
           <ContactSummary
             summary={contact.attributes.summary}
