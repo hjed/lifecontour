@@ -660,10 +660,11 @@ test.describe('Calendar Views', () => {
     // Focus the cell to trigger group-focus-within:opacity-100 on the add button
     await todayCell.focus();
 
-    // Click Add button — uses opacity-0/100 instead of hidden/block so it's always
+    // Click Add button — uses invisible/visible so it's
     // in the DOM and accessible to Playwright once the parent receives focus.
     const addButton = todayCell.getByRole('button', { name: /add event on/i });
-    await expect(addButton).toBeAttached();
+    await expect(addButton).toBeVisible();
+    await expect(addButton).toBeEnabled();
     await addButton.click();
 
     // Verify dialog appears

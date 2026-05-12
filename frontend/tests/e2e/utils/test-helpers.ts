@@ -826,7 +826,14 @@ export class SidebarTestHelpers {
     const tagCount = await tagLinks.count();
 
     if (tagCount > 0) {
-      const firstTag = tagLinks.first();
+      let firstTag = tagLinks.last();
+      for (let i = 0; i < tagCount; i++) {
+        if (await tagLinks.nth(i).isVisible()) {
+          firstTag = tagLinks.nth(i);
+          break;
+        }
+      }
+      
       await expect(firstTag).toHaveAttribute('href');
 
       const firstTagHref = await firstTag.getAttribute('href');
