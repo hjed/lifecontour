@@ -16,9 +16,6 @@
 import { test, expect } from './fixtures';
 import { OAUTH_PUBLIC_TEST_PORT } from './utils/frontend-test-config';
 
-/** Common selector for error elements used across OAuth error handling tests */
-const ERROR_SELECTOR = '[role="alert"], .alert, .error, [data-testid="error"]';
-
 test.describe('OAuth Error Handling', () => {
   test('should handle invalid OAuth state parameter', async ({
     unauthenticatedPage: page,
@@ -37,11 +34,9 @@ test.describe('OAuth Error Handling', () => {
       '/auth/callback?code=valid-code&state=invalid-state-that-does-not-match'
     );
 
-    // Wait for either error display or redirect to login
+    // Wait for error handling redirect to login
     await expect(async () => {
-      const hasError = (await page.locator(ERROR_SELECTOR).count()) > 0;
-      const onLoginPage = page.url().includes('/auth/login');
-      expect(hasError || onLoginPage).toBe(true);
+      expect(page.url()).toContain('/auth/login');
     }).toPass({ timeout: 10000 });
   });
 
@@ -96,12 +91,9 @@ test.describe('OAuth Error Handling', () => {
       // when rapidly navigating in a loop
       await page.waitForLoadState('domcontentloaded');
 
-      // Wait for error handling - either error element or redirect to login
+      // Wait for error handling redirect to login
       await expect(async () => {
-        const hasErrorElement =
-          (await page.locator(ERROR_SELECTOR).count()) > 0;
-        const redirectedToLogin = page.url().includes('/auth/login');
-        expect(hasErrorElement || redirectedToLogin).toBe(true);
+        expect(page.url()).toContain('/auth/login');
       }).toPass({ timeout: 10000 });
     }
   });

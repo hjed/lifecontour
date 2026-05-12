@@ -155,26 +155,16 @@ test.describe('Integration Management - Authenticated User', () => {
       '[data-testid="disconnect-google"]'
     );
 
-    // Either connect or disconnect button should be visible
-    const connectVisible = await connectButton.isVisible();
-    const disconnectVisible = await disconnectButton.isVisible();
+    // In a fresh test environment, Google should not be connected yet
+    await expect(connectButton).toBeVisible();
+    await expect(disconnectButton).toBeHidden();
 
-    expect(connectVisible || disconnectVisible).toBeTruthy();
+    // Test connect button functionality
+    expect(await connectButton.textContent()).toContain('Connect Account');
 
-    if (connectVisible) {
-      // Test connect button functionality
-      expect(await connectButton.textContent()).toContain('Connect Account');
-
-      // Click should trigger OAuth flow (but we won't complete it in tests)
-      // Just verify the button is clickable
-      expect(await connectButton.isEnabled()).toBeTruthy();
-    }
-
-    if (disconnectVisible) {
-      // Test disconnect button functionality
-      expect(await disconnectButton.textContent()).toContain('Disconnect');
-      expect(await disconnectButton.isEnabled()).toBeTruthy();
-    }
+    // Click should trigger OAuth flow (but we won't complete it in tests)
+    // Just verify the button is clickable
+    expect(await connectButton.isEnabled()).toBeTruthy();
   });
 
   test('should display and open Sync History, Health Status, and Settings modals', async ({

@@ -33,14 +33,6 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
       .first();
     await expect(oauthButton).toBeVisible({ timeout: 10000 });
 
-    // Track auth requests
-    let authRequestMade = false;
-    page.on('request', request => {
-      if (request.url().includes('/api/auth/')) {
-        authRequestMade = true;
-      }
-    });
-
     // Click OAuth button and wait for navigation away from login
     await Promise.all([
       page.waitForURL(isNotLoginPage, { timeout: 30000 }).catch(() => null),
@@ -49,12 +41,9 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
 
     const currentUrl = page.url();
 
-    // Verify either:
-    // 1. Redirected to OAuth provider (Hydra)
-    // 2. Auth request was made (even if still on login due to error)
     const redirectedToProvider =
       currentUrl.includes('localhost:4444') || currentUrl.includes('hydra');
-    expect(redirectedToProvider || authRequestMade).toBe(true);
+    expect(redirectedToProvider).toBe(true);
   });
 
   test('should handle OAuth callback with proper session state', async ({
@@ -88,23 +77,12 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
   test('should validate OAuth state parameter correctly', async ({
     unauthenticatedPage: page,
   }) => {
-    // Track callback responses
-    let responseReceived = false;
-    page.on('response', response => {
-      if (response.url().includes('/api/auth/callback')) {
-        responseReceived = true;
-      }
-    });
-
     // Test with invalid state (not properly encoded)
     await page.goto('/auth/callback?code=test-code&state=invalid-state');
 
-    // Wait for response and verify error handling
+    // Wait for response and verify error handling redirects to login
     await expect(async () => {
-      const hasError =
-        (await page.locator('[role="alert"], .alert, .error').count()) > 0;
-      const onLoginPage = page.url().includes('/auth/login');
-      expect(hasError || onLoginPage || responseReceived).toBe(true);
+      expect(page.url()).toContain('/auth/login');
     }).toPass({ timeout: 10000 });
   });
 
@@ -161,20 +139,12 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
     // Navigate to protected page without authentication
     await page.goto('/contacts');
 
-    // Should redirect to login or show login prompt
+    // Should redirect to login page
     await expect(async () => {
-      const onLoginPage = page.url().includes('/auth/login');
-      const hasLoginPrompt =
-        (await page
-          .locator('a[href*="/auth/login"], button:has-text("Sign in")')
-          .count()) > 0;
-      expect(onLoginPage || hasLoginPrompt).toBe(true);
+      expect(page.url()).toContain('/auth/login');
     }).toPass({ timeout: 10000 });
 
-    // If redirected to login, verify page content
-    if (page.url().includes('/auth/login')) {
-      await expect(page.locator('h1')).toContainText('Welcome Back');
-    }
+    await expect(page.locator('h1')).toContainText('Welcome Back');
   });
 
   test('should maintain OAuth provider selection through flow', async ({

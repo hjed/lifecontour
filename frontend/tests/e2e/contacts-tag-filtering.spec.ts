@@ -183,7 +183,7 @@ test.describe('Tag Filtering via Main Contacts List', () => {
           headers: { 'Content-Type': 'application/json' },
         }
       );
-      expect(assignResp.ok() || assignResp.status() === 204).toBe(true);
+      expect(assignResp.ok()).toBe(true);
     }).toPass({ timeout: 5000 });
 
     // 5. Navigate to unified contacts page with parent tag filter
@@ -260,7 +260,7 @@ test.describe('Tag Filtering via Main Contacts List', () => {
           headers: { 'Content-Type': 'application/json' },
         }
       );
-      expect(assignResp.ok() || assignResp.status() === 204).toBe(true);
+      expect(assignResp.ok()).toBe(true);
     }).toPass({ timeout: 5000 });
 
     // 3. Navigate to the unified contacts page with tag filter
