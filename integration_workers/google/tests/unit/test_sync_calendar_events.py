@@ -122,7 +122,7 @@ class TestSyncCalendarEvents:
 
         # Sync token query (none found)
         token_result = MagicMock()
-        token_result.scalar.return_value = None
+        token_result.fetchone.return_value = None
 
         # Existing link lookup (none found for new event)
         link_result = MagicMock()
@@ -169,7 +169,7 @@ class TestSyncCalendarEvents:
         cal_result.fetchall.return_value = [synced_cal]
 
         token_result = MagicMock()
-        token_result.scalar.return_value = None
+        token_result.fetchone.return_value = None
 
         # Existing link with same ETag
         existing_link = MagicMock()
@@ -218,7 +218,7 @@ class TestSyncCalendarEvents:
         cal_result.fetchall.return_value = [synced_cal]
 
         token_result = MagicMock()
-        token_result.scalar.return_value = None
+        token_result.fetchone.return_value = None
 
         # Existing link with same ETag
         existing_link = MagicMock()
@@ -275,7 +275,7 @@ class TestSyncCalendarEvents:
         cal_result = MagicMock()
         cal_result.fetchall.return_value = [synced_cal]
         token_result = MagicMock()
-        token_result.scalar.return_value = None
+        token_result.fetchone.return_value = None
 
         # No events to process
         mock_session.execute.side_effect = [
@@ -316,7 +316,7 @@ class TestSyncCalendarEvents:
         cal_result = MagicMock()
         cal_result.fetchall.return_value = [synced_cal]
         token_result = MagicMock()
-        token_result.scalar.return_value = None  # No sync token
+        token_result.fetchone.return_value = None  # No sync token
 
         mock_session.execute.side_effect = [
             cal_result,
@@ -357,7 +357,7 @@ class TestSyncCalendarEvents:
         cal_result = MagicMock()
         cal_result.fetchall.return_value = [synced_cal]
         token_result = MagicMock()
-        token_result.scalar.return_value = None
+        token_result.fetchone.return_value = None
 
         # Existing link lookup (none found) — used per event
         link_result = MagicMock()
@@ -416,7 +416,7 @@ class TestSyncCalendarEvents:
         cal_result.fetchall.return_value = [synced_cal]
 
         token_result = MagicMock()
-        token_result.scalar.return_value = None
+        token_result.fetchone.return_value = None
 
         # Existing link for the cancelled event
         existing_link = MagicMock()
@@ -480,7 +480,7 @@ class TestSyncCalendarEvents:
         cal_result.fetchall.return_value = [synced_cal]
 
         token_result = MagicMock()
-        token_result.scalar.return_value = None
+        token_result.fetchone.return_value = None
 
         # Existing link for the cancelled event
         existing_link = MagicMock()
@@ -547,7 +547,7 @@ class TestSyncCalendarEvents:
         cal_result.fetchall.return_value = [synced_cal]
 
         token_result = MagicMock()
-        token_result.scalar.return_value = None
+        token_result.fetchone.return_value = None
 
         existing_link = MagicMock()
         existing_link.external_version = '"etag-old"'
@@ -612,7 +612,12 @@ class TestSyncCalendarEvents:
 
         # Setup existing sync token
         token_result = MagicMock()
-        token_result.scalar.return_value = "invalid-token"
+        mock_row = MagicMock()
+        mock_row.sync_token = "invalid-token"
+        from datetime import UTC, datetime
+
+        mock_row.created_at = datetime.now(UTC)
+        token_result.fetchone.return_value = mock_row
 
         mock_session.execute.side_effect = [
             cal_result,  # calendars

@@ -3192,13 +3192,13 @@ async def _load_calendar_sync_token(
     user_id: str | int,
     google_account_email: str,
     google_calendar_id: str = "primary",
-) -> str | None:
+) -> Any | None:
     """Load a per-calendar sync token from the calendar_sync_tokens table.
 
     Returns None if no token exists for this calendar.
     """
     token_stmt = text("""
-        SELECT sync_token
+        SELECT sync_token, created_at
         FROM calendar_sync_tokens
         WHERE user_id = :user_id
         AND google_account_email = :email
@@ -3212,9 +3212,7 @@ async def _load_calendar_sync_token(
             "google_calendar_id": google_calendar_id,
         },
     )
-    from typing import cast
-
-    return cast(str | None, result.scalar())
+    return result.fetchone()
 
 
 @trace_arq_job
@@ -3301,9 +3299,19 @@ async def sync_calendar_events(
                 calendar_id = cal_row.calendar_id
 
                 # Get existing per-calendar sync token
-                existing_sync_token = await _load_calendar_sync_token(
+                existing_sync_token_row = await _load_calendar_sync_token(
                     session, user_id, google_account_email, google_calendar_id
                 )
+
+                existing_sync_token = None
+                if existing_sync_token_row:
+                    existing_sync_token = existing_sync_token_row.sync_token
+                    # If sync token is older than 30 days, we do a full sync
+                    # to advance the time_max window.
+                    if existing_sync_token_row.created_at < datetime.now(
+                        UTC
+                    ) - timedelta(days=30):
+                        existing_sync_token = None
 
                 # Decide whether to use sync token or time_min
                 use_sync_token = sync_type != "full" and existing_sync_token is not None
@@ -3331,7 +3339,19 @@ async def sync_calendar_events(
                         client, list_kwargs
                     )
                 except HttpError as e:
-                    if e.resp.status in (400, 410):
+                    is_sync_token_error = e.resp.status == 410
+                    if e.resp.status == 400:
+                        try:
+                            import json
+
+                            error_details = json.loads(e.content.decode())
+                            for err in error_details.get("error", {}).get("errors", []):
+                                if err.get("reason") == "syncTokenInvalid":
+                                    is_sync_token_error = True
+                                    break
+                        except Exception:
+                            pass
+                    if is_sync_token_error:
                         logger.warning(
                             "Sync token invalid, falling back to full sync",
                             calendar_id=google_calendar_id,
