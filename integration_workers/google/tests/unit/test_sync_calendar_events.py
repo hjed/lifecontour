@@ -596,3 +596,62 @@ class TestSyncCalendarEvents:
         # Outbox event SHOULD be created — same-day events must not be skipped
         mock_session.add.assert_called_once()
         assert result.get("events_cancelled", 0) >= 1
+
+    @pytest.mark.asyncio
+    async def test_sync_invalid_sync_token_clears_token(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        """When the API returns 410 Gone for a sync token, it should clear the token and retry."""
+        from googleapiclient.errors import HttpError
+
+        from worker import sync_calendar_events
+
+        synced_cal = _make_calendar_row(is_synced_to_google=True)
+        cal_result = MagicMock()
+        cal_result.fetchall.return_value = [synced_cal]
+
+        # Setup existing sync token
+        token_result = MagicMock()
+        token_result.scalar.return_value = "invalid-token"
+
+        mock_session.execute.side_effect = [
+            cal_result,  # calendars
+            token_result,  # token
+            MagicMock(),  # update token
+            MagicMock(),  # save new token
+        ]
+
+        mock_client = MagicMock()
+
+        # Create mock HttpError
+        mock_resp = MagicMock()
+        mock_resp.status = 410
+        http_error = HttpError(resp=mock_resp, content=b"Sync token is no longer valid")
+
+        # First call raises HttpError, second call succeeds
+        google_events = {
+            "items": [],
+            "nextSyncToken": "new-sync-token",
+        }
+        mock_client.list_events = AsyncMock(side_effect=[http_error, google_events])
+
+        with patch("worker._create_google_client", return_value=mock_client):
+            result = await sync_calendar_events(
+                mock_ctx, "test@example.com", "user-1", "incremental"
+            )
+
+        assert result["status"] == "success"
+
+        # Verify the client was called twice
+        assert mock_client.list_events.call_count == 2
+
+        # First call should have the sync_token
+        first_call_args = mock_client.list_events.call_args_list[0][1]
+        assert first_call_args["sync_token"] == "invalid-token"
+        assert first_call_args["single_events"] is True
+
+        # Second call should not have sync_token, but should have time_min
+        second_call_args = mock_client.list_events.call_args_list[1][1]
+        assert "sync_token" not in second_call_args
+        assert "time_min" in second_call_args
+        assert second_call_args["single_events"] is True

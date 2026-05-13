@@ -74,6 +74,11 @@ class GoogleEvent(BaseModel):
     end: GoogleEventStartEnd | None = Field(
         None, description="The end time of the event"
     )
+    recurring_event_id: str | None = Field(
+        None,
+        alias="recurringEventId",
+        description="The ID of the recurring master event",
+    )
     etag: str | None = Field(None, description="ETag of the resource")
     attendees: list[GoogleEventAttendee] = Field(
         default_factory=list, description="The attendees of the event"

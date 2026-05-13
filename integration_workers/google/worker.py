@@ -3310,18 +3310,68 @@ async def sync_calendar_events(
 
                 list_kwargs: dict[str, Any] = {
                     "calendar_id": google_calendar_id,
+                    "single_events": True,
                 }
+
+                time_min = (datetime.now(UTC) - timedelta(days=3650)).isoformat()
+
                 if use_sync_token:
                     list_kwargs["sync_token"] = existing_sync_token
                 else:
-                    # Full sync: fetch events from 10 years ago
-                    time_min = (datetime.now(UTC) - timedelta(days=3650)).isoformat()
+                    # Full sync: fetch events from 10 years ago indefinitely
                     list_kwargs["time_min"] = time_min
 
                 # Fetch all events with pagination
-                all_raw_events, new_sync_token = await _fetch_all_calendar_events(
-                    client, list_kwargs
-                )
+                from googleapiclient.errors import HttpError
+
+                try:
+                    all_raw_events, new_sync_token = await _fetch_all_calendar_events(
+                        client, list_kwargs
+                    )
+                except HttpError as e:
+                    is_sync_token_error = e.resp.status == 410
+                    if e.resp.status == 400:
+                        try:
+                            import json
+
+                            error_details = json.loads(e.content.decode())
+                            for err in error_details.get("error", {}).get("errors", []):
+                                if err.get("reason") == "syncTokenInvalid":
+                                    is_sync_token_error = True
+                                    break
+                        except Exception:
+                            pass
+                    if is_sync_token_error:
+                        logger.warning(
+                            "Sync token invalid, falling back to full sync",
+                            calendar_id=google_calendar_id,
+                            error=str(e),
+                        )
+                        # Clear existing sync token and fallback to full sync
+                        await session.execute(
+                            text(
+                                "UPDATE calendar_sync_tokens "
+                                "SET sync_token = NULL "
+                                "WHERE user_id = :user_id "
+                                "AND google_account_email = :email "
+                                "AND google_calendar_id = :google_calendar_id"
+                            ),
+                            {
+                                "user_id": str(user_id),
+                                "email": google_account_email,
+                                "google_calendar_id": google_calendar_id,
+                            },
+                        )
+                        await session.commit()
+
+                        list_kwargs.pop("sync_token", None)
+                        list_kwargs["time_min"] = time_min
+                        (
+                            all_raw_events,
+                            new_sync_token,
+                        ) = await _fetch_all_calendar_events(client, list_kwargs)
+                    else:
+                        raise
 
                 # Process each event
                 calendar_errors = 0
