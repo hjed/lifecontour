@@ -103,17 +103,14 @@ class TestLoadCalendarSyncToken:
         from worker import _load_calendar_sync_token
 
         result_mock = MagicMock()
-        mock_row = MagicMock()
-        mock_row.sync_token = "existing-token-123"
-        result_mock.fetchone.return_value = mock_row
+        result_mock.scalar.return_value = "existing-token-123"
         mock_session.execute.return_value = result_mock
 
-        token_row = await _load_calendar_sync_token(
+        token = await _load_calendar_sync_token(
             mock_session, "user-1", "test@example.com", "cal-work"
         )
 
-        assert token_row is not None
-        assert token_row.sync_token == "existing-token-123"
+        assert token == "existing-token-123"
 
     @pytest.mark.asyncio
     async def test_load_returns_none_when_no_token(
@@ -123,7 +120,7 @@ class TestLoadCalendarSyncToken:
         from worker import _load_calendar_sync_token
 
         result_mock = MagicMock()
-        result_mock.fetchone.return_value = None
+        result_mock.scalar.return_value = None
         mock_session.execute.return_value = result_mock
 
         token = await _load_calendar_sync_token(
@@ -138,7 +135,7 @@ class TestLoadCalendarSyncToken:
         from worker import _load_calendar_sync_token
 
         result_mock = MagicMock()
-        result_mock.fetchone.return_value = None
+        result_mock.scalar.return_value = None
         mock_session.execute.return_value = result_mock
 
         await _load_calendar_sync_token(
@@ -156,7 +153,7 @@ class TestLoadCalendarSyncToken:
         from worker import _load_calendar_sync_token
 
         result_mock = MagicMock()
-        result_mock.fetchone.return_value = None
+        result_mock.scalar.return_value = None
         mock_session.execute.return_value = result_mock
 
         await _load_calendar_sync_token(mock_session, "user-1", "test@example.com")
@@ -172,7 +169,7 @@ class TestLoadCalendarSyncToken:
         from worker import _load_calendar_sync_token
 
         result_mock = MagicMock()
-        result_mock.fetchone.return_value = None
+        result_mock.scalar.return_value = None
         mock_session.execute.return_value = result_mock
 
         await _load_calendar_sync_token(

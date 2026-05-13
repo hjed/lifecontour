@@ -3192,13 +3192,13 @@ async def _load_calendar_sync_token(
     user_id: str | int,
     google_account_email: str,
     google_calendar_id: str = "primary",
-) -> Any | None:
+) -> str | None:
     """Load a per-calendar sync token from the calendar_sync_tokens table.
 
     Returns None if no token exists for this calendar.
     """
     token_stmt = text("""
-        SELECT sync_token, created_at
+        SELECT sync_token
         FROM calendar_sync_tokens
         WHERE user_id = :user_id
         AND google_account_email = :email
@@ -3212,7 +3212,9 @@ async def _load_calendar_sync_token(
             "google_calendar_id": google_calendar_id,
         },
     )
-    return result.fetchone()
+    from typing import cast
+
+    return cast(str | None, result.scalar())
 
 
 @trace_arq_job
@@ -3299,19 +3301,9 @@ async def sync_calendar_events(
                 calendar_id = cal_row.calendar_id
 
                 # Get existing per-calendar sync token
-                existing_sync_token_row = await _load_calendar_sync_token(
+                existing_sync_token = await _load_calendar_sync_token(
                     session, user_id, google_account_email, google_calendar_id
                 )
-
-                existing_sync_token = None
-                if existing_sync_token_row:
-                    existing_sync_token = existing_sync_token_row.sync_token
-                    # If sync token is older than 30 days, we do a full sync
-                    # to advance the time_max window.
-                    if existing_sync_token_row.created_at < datetime.now(
-                        UTC
-                    ) - timedelta(days=30):
-                        existing_sync_token = None
 
                 # Decide whether to use sync token or time_min
                 use_sync_token = sync_type != "full" and existing_sync_token is not None
@@ -3322,14 +3314,12 @@ async def sync_calendar_events(
                 }
 
                 time_min = (datetime.now(UTC) - timedelta(days=3650)).isoformat()
-                time_max = (datetime.now(UTC) + timedelta(days=183)).isoformat()
 
                 if use_sync_token:
                     list_kwargs["sync_token"] = existing_sync_token
                 else:
-                    # Full sync: fetch events from 10 years ago to 6 months in future
+                    # Full sync: fetch events from 10 years ago indefinitely
                     list_kwargs["time_min"] = time_min
-                    list_kwargs["time_max"] = time_max
 
                 # Fetch all events with pagination
                 from googleapiclient.errors import HttpError
@@ -3375,7 +3365,6 @@ async def sync_calendar_events(
 
                         list_kwargs.pop("sync_token", None)
                         list_kwargs["time_min"] = time_min
-                        list_kwargs["time_max"] = time_max
                         (
                             all_raw_events,
                             new_sync_token,
