@@ -1,43 +1,16 @@
 # Unified Backend Dockerfile - Python FastAPI
+# Extends the shared python-base image which provides:
+#   - Python 3.14, system deps, uv, core_shared, and the appuser account
 # Supports both development and production builds via build args
 
-FROM python:3.14.3-slim AS base
+FROM pms-python-base AS base
 
 # Build arguments
 ARG BUILD_ENV=production
 ARG INSTALL_DEV_DEPS=false
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    curl \
-    gcc \
-    g++ \
-    libpq-dev \
-    postgresql-client \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install UV for dependency management
-RUN pip install uv
-
-# Create app user with home directory (FastMCP OAuthProxy needs writable home for token storage)
-RUN groupadd -r appuser && useradd -r -m -g appuser appuser
-
-# Set working directory
-WORKDIR /app
-
 # Copy dependency files
 COPY backend/pyproject.toml backend/README.md ./
-COPY core_shared/ /core_shared/
-
-# Install core_shared first
-RUN echo "Installing core_shared..." && \
-    uv pip install --system -e /core_shared
 
 # Install dependencies based on build environment
 RUN if [ "$INSTALL_DEV_DEPS" = "true" ]; then \
