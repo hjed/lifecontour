@@ -164,17 +164,17 @@ class TestTokenResponseParsing:
         expected = datetime.fromtimestamp(1700000000, tz=UTC)
         assert result.expires_at == expected
 
-    def test_parse_token_response_missing_athlete_raises(
+    def test_parse_token_response_missing_athlete_succeeds(
         self, auth_service: StravaAuthService
     ) -> None:
-        """Missing athlete data raises ValueError."""
+        """Missing athlete data succeeds (used during refresh)."""
         data = {
             "access_token": "access",
             "refresh_token": "refresh",
             "expires_at": 1700000000,
         }
-        with pytest.raises((ValueError, KeyError)):
-            auth_service.parse_token_response(data)
+        result = auth_service.parse_token_response(data)
+        assert result.athlete_id is None
 
 
 class TestTokenExchange:
@@ -204,6 +204,23 @@ class TestTokenExchange:
             assert result.athlete_id == 999
 
     @pytest.mark.asyncio
+    async def test_exchange_code_missing_athlete_raises(
+        self, auth_service: StravaAuthService
+    ) -> None:
+        """exchange_code raises ValueError if athlete is missing."""
+        mock_response = _make_httpx_response(
+            {
+                "access_token": "access_123",
+                "refresh_token": "refresh_456",
+                "expires_at": 1700000000,
+            }
+        )
+
+        with patch("httpx.AsyncClient.post", return_value=mock_response):
+            with pytest.raises(ValueError, match="Missing athlete data"):
+                await auth_service.exchange_code("auth_code_abc")
+
+    @pytest.mark.asyncio
     async def test_refresh_token_calls_strava_token_endpoint(
         self, auth_service: StravaAuthService
     ) -> None:
@@ -213,7 +230,6 @@ class TestTokenExchange:
                 "access_token": "new_access",
                 "refresh_token": "new_refresh",
                 "expires_at": 1700003600,
-                "athlete": {"id": 999},
             }
         )
 

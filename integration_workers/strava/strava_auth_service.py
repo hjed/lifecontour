@@ -42,7 +42,7 @@ class StravaTokenData:
     access_token: str
     refresh_token: str
     expires_at: datetime
-    athlete_id: int
+    athlete_id: int | None = None
 
 
 class StravaAuthService:
@@ -135,9 +135,12 @@ class StravaAuthService:
             KeyError: If required fields are missing.
             ValueError: If athlete data is missing or malformed.
         """
+        athlete_id = None
         athlete = data.get("athlete")
-        if not athlete or not isinstance(athlete, dict):
-            raise ValueError("Missing or invalid athlete data in token response")
+        if athlete is not None:
+            if not isinstance(athlete, dict):
+                raise ValueError("Invalid athlete data in token response")
+            athlete_id = int(athlete["id"])
 
         expires_at_epoch = data["expires_at"]
         if not isinstance(expires_at_epoch, (int, float)):
@@ -147,7 +150,7 @@ class StravaAuthService:
             access_token=str(data["access_token"]),
             refresh_token=str(data["refresh_token"]),
             expires_at=datetime.fromtimestamp(float(expires_at_epoch), tz=UTC),
-            athlete_id=int(athlete["id"]),
+            athlete_id=athlete_id,
         )
 
     async def exchange_code(self, code: str) -> StravaTokenData:
@@ -177,6 +180,9 @@ class StravaAuthService:
             token_data = response.json()
 
         result = self.parse_token_response(token_data)
+
+        if result.athlete_id is None:
+            raise ValueError("Missing athlete data in token exchange response")
 
         logger.info(
             "Exchanged Strava authorization code",
