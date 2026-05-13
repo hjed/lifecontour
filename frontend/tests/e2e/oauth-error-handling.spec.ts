@@ -34,7 +34,13 @@ test.describe('OAuth Error Handling', () => {
       '/auth/callback?code=valid-code&state=invalid-state-that-does-not-match'
     );
 
-    // Wait for error handling redirect to login
+    // Wait for error handling UI to appear
+    await expect(page.locator('body')).toContainText('Authentication Failed', {
+      timeout: 10000,
+    });
+
+    // Click retry button and verify redirect
+    await page.getByRole('button', { name: 'Try signing in again' }).click();
     await expect(async () => {
       expect(page.url()).toContain('/auth/login');
     }).toPass({ timeout: 10000 });
@@ -91,7 +97,14 @@ test.describe('OAuth Error Handling', () => {
       // when rapidly navigating in a loop
       await page.waitForLoadState('domcontentloaded');
 
-      // Wait for error handling redirect to login
+      // Wait for error handling UI to appear
+      await expect(page.locator('body')).toContainText(
+        'Authentication Failed',
+        { timeout: 10000 }
+      );
+
+      // Click retry button and verify redirect
+      await page.getByRole('button', { name: 'Try signing in again' }).click();
       await expect(async () => {
         expect(page.url()).toContain('/auth/login');
       }).toPass({ timeout: 10000 });
