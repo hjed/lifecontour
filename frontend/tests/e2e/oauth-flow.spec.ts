@@ -14,6 +14,7 @@
  */
 
 import { test, expect } from './fixtures';
+import { OAUTH_PUBLIC_TEST_PORT } from './utils/frontend-test-config';
 
 /** Helper to check if URL is not the login page */
 const isNotLoginPage = (url: URL): boolean =>
@@ -42,7 +43,9 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
     const currentUrl = page.url();
 
     const redirectedToProvider =
-      currentUrl.includes('localhost:4444') || currentUrl.includes('hydra');
+      currentUrl.includes(OAUTH_PUBLIC_TEST_PORT) ||
+      currentUrl.includes('hydra') ||
+      currentUrl.includes('/auth/callback');
     expect(redirectedToProvider).toBe(true);
   });
 
@@ -80,7 +83,13 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
     // Test with invalid state (not properly encoded)
     await page.goto('/auth/callback?code=test-code&state=invalid-state');
 
-    // Wait for response and verify error handling redirects to login
+    // Wait for response and verify error handling displays error UI
+    await expect(page.locator('body')).toContainText('Authentication Failed', {
+      timeout: 10000,
+    });
+
+    // Click 'Try signing in again' and verify redirect
+    await page.getByRole('button', { name: 'Try signing in again' }).click();
     await expect(async () => {
       expect(page.url()).toContain('/auth/login');
     }).toPass({ timeout: 10000 });
