@@ -617,7 +617,7 @@ class TestSyncCalendarEvents:
         mock_session.execute.side_effect = [
             cal_result,  # calendars
             token_result,  # token
-            MagicMock(),  # delete token
+            MagicMock(),  # update token
             MagicMock(),  # save new token
         ]
 

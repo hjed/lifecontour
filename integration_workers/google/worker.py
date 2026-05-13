@@ -3350,7 +3350,8 @@ async def sync_calendar_events(
                         # Clear existing sync token and fallback to full sync
                         await session.execute(
                             text(
-                                "DELETE FROM calendar_sync_tokens "
+                                "UPDATE calendar_sync_tokens "
+                                "SET sync_token = NULL "
                                 "WHERE user_id = :user_id "
                                 "AND google_account_email = :email "
                                 "AND google_calendar_id = :google_calendar_id"
