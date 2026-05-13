@@ -39,15 +39,37 @@ class LogbookDataService:
             activity_types=activity_types,
         )
 
-        # 2. Assemble hierarchy
+        # 2. Assemble hierarchy (with cycle detection)
         entry_map = {entry.id: entry for entry in raw_entries}
         root_entries = []
+        children_ids: dict[int, set[int]] = {}  # parent_id -> set of child ids
 
         for entry in raw_entries:
             if entry.parent_id and entry.parent_id in entry_map:
+                # Cycle detection: walk the ancestor chain to ensure we don't
+                # create a loop (A -> B -> A). If we detect a cycle, treat
+                # the entry as a root instead.
+                ancestor_id: int | None = entry.parent_id
+                visited: set[int] = {entry.id}
+                is_cycle = False
+                while ancestor_id is not None:
+                    if ancestor_id in visited:
+                        is_cycle = True
+                        break
+                    visited.add(ancestor_id)
+                    ancestor = entry_map.get(ancestor_id)
+                    ancestor_id = ancestor.parent_id if ancestor else None
+
+                if is_cycle:
+                    root_entries.append(entry)
+                    continue
+
                 parent = entry_map[entry.parent_id]
-                # Avoid duplicates just in case
-                if entry.id not in {child.id for child in parent.children}:
+                # Set-based deduplication of children
+                if entry.parent_id not in children_ids:
+                    children_ids[entry.parent_id] = set()
+                if entry.id not in children_ids[entry.parent_id]:
+                    children_ids[entry.parent_id].add(entry.id)
                     parent.children.append(entry)
             else:
                 root_entries.append(entry)

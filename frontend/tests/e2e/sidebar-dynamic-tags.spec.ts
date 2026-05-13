@@ -57,7 +57,7 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
 
     // Wait for tags to be loaded by checking if tag links are present
     // Tags now link to /contacts?tag=<id> instead of /contacts/tags/<id>
-    const tagLinks = page.locator('a[href*="/contacts?tag="]');
+    const tagLinks = page.locator('a[href*="/contacts?tag="]:visible');
     await expect(tagLinks.first()).toBeVisible();
 
     const tagCount = await tagLinks.count();
@@ -97,7 +97,9 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
     await sidebar.waitForSidebar();
 
     // Should have "All" contacts link
-    const allContactsLink = page.locator('a[href="/contacts"]:has-text("All")');
+    const allContactsLink = page.locator(
+      'a[href="/contacts"]:has-text("All"):visible'
+    );
     await expect(allContactsLink).toBeVisible();
     await expect(allContactsLink).toBeEnabled();
 
@@ -123,10 +125,13 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
     await sidebar.waitForSidebar();
 
     // Click on work tag link (now links to /contacts?tag=<id>)
-    const workTagLink = page.locator(
-      'a[href*="/contacts?tag="]:has-text("work")'
-    );
-    await expect(workTagLink).toBeVisible();
+    // Wait for React Query to load the tags in the sidebar
+    // Filter for visible since the desktop sidebar is in the DOM but hidden on mobile
+    const workTagLink = page
+      .locator('a[href*="/contacts?tag="]', { hasText: /work/i })
+      .filter({ visible: true })
+      .first();
+    await expect(workTagLink).toBeVisible({ timeout: 15000 });
 
     // Wait for navigation to complete
     await Promise.all([
@@ -170,13 +175,8 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
     await sidebar.waitForSidebar();
 
     // Should have basic navigation items
-    const allContactsLink = page.locator('a[href="/contacts"]');
-    const favouritesLink = page.locator('a[href="/contacts/favourites"]');
-
-    // At least one of these should be visible
-    const allVisible = await allContactsLink.isVisible();
-    const favVisible = await favouritesLink.isVisible();
-    expect(allVisible || favVisible).toBe(true);
+    await sidebar.testAllContactsLink();
+    await sidebar.testFavouritesLink();
   });
 
   test('should display contacts section in sidebar', async ({
@@ -208,7 +208,9 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
     await sidebar.waitForSidebar();
 
     // Favourites link should have active state indicators
-    const favouritesLink = page.locator('a[href="/contacts/favourites"]');
+    const favouritesLink = page
+      .locator('a[href="/contacts/favourites"]:visible')
+      .first();
     await expect(favouritesLink).toBeVisible();
 
     const linkElement = favouritesLink.first();

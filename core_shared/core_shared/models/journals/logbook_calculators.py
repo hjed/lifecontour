@@ -99,8 +99,8 @@ class ParticipantIndexCalculator:
         self, entries: list[LogbookEntryData], min_appearances: int = 3
     ) -> list[ParticipantIndexEntry]:
         """Calculate the participant index for contacts with >= min_appearances."""
-        # The spec says "Frequent contacts who appear in more than 3 entries".
-        # Let's count them per root entry to avoid double counting if they appear in sub-entries.
+        # Count appearances per root entry to avoid double counting
+        # if a contact appears in both parent and sub-entries.
 
         appearances_by_root: dict[int, dict[str, Any]] = {}
         for entry in entries:

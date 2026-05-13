@@ -172,7 +172,7 @@ test.describe('Tag Filtering via Main Contacts List', () => {
         `/api/contacts/${contactId}`
       );
       expect(verifyResp.ok()).toBe(true);
-    }).toPass({ timeout: 5000 });
+    }).toPass({ timeout: 10000 });
 
     // 4. Assign child tag to contact
     await expect(async () => {
@@ -183,7 +183,7 @@ test.describe('Tag Filtering via Main Contacts List', () => {
           headers: { 'Content-Type': 'application/json' },
         }
       );
-      expect(assignResp.ok() || assignResp.status() === 204).toBe(true);
+      expect(assignResp.ok()).toBe(true);
     }).toPass({ timeout: 5000 });
 
     // 5. Navigate to unified contacts page with parent tag filter
@@ -250,7 +250,7 @@ test.describe('Tag Filtering via Main Contacts List', () => {
         `/api/contacts/${contactId}`
       );
       expect(verifyContact.ok()).toBe(true);
-    }).toPass({ timeout: 5000 });
+    }).toPass({ timeout: 10000 });
 
     await expect(async () => {
       const assignResp = await authenticatedPage.request.post(
@@ -260,7 +260,7 @@ test.describe('Tag Filtering via Main Contacts List', () => {
           headers: { 'Content-Type': 'application/json' },
         }
       );
-      expect(assignResp.ok() || assignResp.status() === 204).toBe(true);
+      expect(assignResp.ok()).toBe(true);
     }).toPass({ timeout: 5000 });
 
     // 3. Navigate to the unified contacts page with tag filter
@@ -366,23 +366,13 @@ test.describe('Tag Filtering via Main Contacts List', () => {
     await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
     // Should have consistent navigation elements (sidebar)
-    const sidebar = authenticatedPage
-      .locator('nav, aside, [role="navigation"]')
-      .first();
-    await expect(sidebar).toBeVisible();
+    const { SidebarTestHelpers } = await import('./utils/test-helpers');
+    const sidebarHelpers = new SidebarTestHelpers(authenticatedPage);
 
     // Should have navigation back to all contacts
-    const allContactsLink = authenticatedPage.locator('a[href="/contacts"]');
-    if ((await allContactsLink.count()) > 0) {
-      await expect(allContactsLink.first()).toBeVisible();
-    }
+    await sidebarHelpers.testAllContactsLink();
 
     // Should have favourites link
-    const favouritesLink = authenticatedPage.locator(
-      'a[href="/contacts/favourites"]'
-    );
-    if ((await favouritesLink.count()) > 0) {
-      await expect(favouritesLink.first()).toBeVisible();
-    }
+    await sidebarHelpers.testFavouritesLink();
   });
 });

@@ -135,7 +135,7 @@ test.describe('Contact Favourites and Filtering', () => {
       }
 
       const favouritesLink = authenticatedPage
-        .locator('a[href="/contacts/favourites"], a:has-text("Favourites")')
+        .locator('a[href="/contacts/favourites"]:visible')
         .first();
       await expect(favouritesLink).toBeVisible();
       await favouritesLink.click();
@@ -252,7 +252,9 @@ test.describe('Contact Favourites and Filtering', () => {
         }
       }
 
-      const favouritesLink = page.locator('a[href="/contacts/favourites"]');
+      const favouritesLink = page
+        .locator('a[href="/contacts/favourites"]:visible')
+        .first();
       await expect(favouritesLink).toBeVisible();
 
       // Wait for navigation to complete

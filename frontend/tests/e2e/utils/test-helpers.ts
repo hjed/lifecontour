@@ -43,7 +43,7 @@ export const SELECTORS = {
   ALL_CONTACTS_LINK:
     'a[href="/contacts"]:has-text("All"), a[href="/contacts"]:has-text("Browse"), a:has-text("All Contacts")',
   FAVOURITES_LINK: 'a[href="/contacts/favourites"]',
-  TAG_LINKS: 'a[href*="/contacts/tags/"]',
+  TAG_LINKS: 'a[href*="/contacts?tag="]',
 
   // Empty States
   EMPTY_CONTACTS: 'text=/no contacts/i, text=/create.*contact/i',
@@ -561,16 +561,47 @@ export class SidebarTestHelpers {
    * Wait for sidebar to load.
    */
   async waitForSidebar(): Promise<void> {
-    const hamburgerButton = this.page
-      .locator('button[aria-label*="menu"], button[aria-label*="navigation"]')
-      .first();
-    if (await hamburgerButton.isVisible()) {
-      const sidebar = this.page.locator(SELECTORS.SIDEBAR).first();
-      if (!(await sidebar.isVisible())) {
+    const isMobile =
+      this.page.viewportSize()?.width && this.page.viewportSize()!.width < 768;
+    if (isMobile) {
+      const hamburgerButton = this.page.getByTestId('mobile-nav-trigger');
+      // Click the hamburger if the mobile nav isn't already open
+      const isMobileSidebarVisible = await this.page
+        .locator('nav[role="navigation"]')
+        .last()
+        .isVisible();
+      if (!isMobileSidebarVisible) {
         await hamburgerButton.click();
       }
+
+      await expect(async () => {
+        const isVisible = await this.page
+          .locator('nav[role="navigation"]')
+          .last()
+          .isVisible();
+        expect(isVisible).toBe(true);
+      }).toPass({ timeout: 5000 });
+    } else {
+      await expect(async () => {
+        const isVisible = await this.page.getByTestId('sidebar').isVisible();
+        expect(isVisible).toBe(true);
+      }).toPass({ timeout: 5000 });
     }
-    await this.page.waitForSelector(SELECTORS.SIDEBAR, { state: 'visible' });
+  }
+
+  /**
+   * Test all contacts link in sidebar.
+   */
+  async testAllContactsLink(): Promise<void> {
+    await this.waitForSidebar();
+
+    // Explicitly target the visible link, avoiding conditional loops
+    const visibleLink = this.page
+      .locator('a[href="/contacts"]:has-text("All"):visible')
+      .first();
+
+    await expect(visibleLink).toBeVisible();
+    await expect(visibleLink).toBeEnabled();
   }
 
   /**
@@ -578,22 +609,21 @@ export class SidebarTestHelpers {
    */
   async testFavouritesLink(): Promise<void> {
     await this.waitForSidebar();
-    const favouritesLink = this.page.locator(SELECTORS.FAVOURITES_LINK);
 
-    if ((await favouritesLink.count()) > 0) {
-      await expect(favouritesLink.first()).toBeVisible();
-      await expect(favouritesLink.first()).toBeEnabled();
+    // Explicitly target the visible link, avoiding conditional loops
+    const visibleLink = this.page
+      .locator('a[href="/contacts/favourites"]:visible')
+      .first();
 
-      // Should have star icon or "Favourites" text
-      const linkContent = favouritesLink.first();
-      const hasStarIcon = (await linkContent.locator('svg').count()) > 0;
-      const linkText = await linkContent.textContent();
+    await expect(visibleLink).toBeVisible();
+    await expect(visibleLink).toBeEnabled();
 
-      expect(
-        hasStarIcon ||
-          (linkText && linkText.toLowerCase().includes('favourite'))
-      ).toBe(true);
-    }
+    const hasStarIcon = (await visibleLink.locator('svg').count()) > 0;
+    const linkText = await visibleLink.textContent();
+
+    expect(
+      hasStarIcon || (linkText && linkText.toLowerCase().includes('favourite'))
+    ).toBe(true);
   }
 
   /**
@@ -601,26 +631,24 @@ export class SidebarTestHelpers {
    */
   async testDynamicTagLinks(): Promise<void> {
     await this.waitForSidebar();
-    const tagLinks = this.page.locator(SELECTORS.TAG_LINKS);
+
     const hardcodedGroup1 = this.page.locator('text="Group 1"');
     const hardcodedGroup2 = this.page.locator('text="Group 2"');
 
     // Should not have hardcoded groups
-    expect(await hardcodedGroup1.count()).toBe(0);
-    expect(await hardcodedGroup2.count()).toBe(0);
+    await expect(hardcodedGroup1).toHaveCount(0);
+    await expect(hardcodedGroup2).toHaveCount(0);
 
-    // May have dynamic tag links
-    const tagCount = await tagLinks.count();
-    if (tagCount > 0) {
-      const firstTag = tagLinks.first();
-      await expect(firstTag).toHaveAttribute('href');
+    // Target the first visible tag link, avoiding conditional loops
+    const firstTag = this.page
+      .locator('a[href*="/contacts?tag="]:visible')
+      .first();
 
-      const href = await firstTag.getAttribute('href');
-      expect(href).toMatch(/\/contacts\/tags\/\w+/);
+    await expect(firstTag).toBeVisible();
+    await expect(firstTag).toBeEnabled();
 
-      await expect(firstTag).toBeVisible();
-      await expect(firstTag).toBeEnabled();
-    }
+    const href = await firstTag.getAttribute('href');
+    expect(href).toMatch(/\/contacts\?tag=[\w-]+/);
   }
 
   /**
@@ -629,85 +657,22 @@ export class SidebarTestHelpers {
   async navigateToFavourites(): Promise<void> {
     await this.waitForSidebar();
 
-    // Try multiple selectors for the favourites link
-    const favouritesSelectors = [
-      'a[href="/contacts/favourites"]',
-      'a:has-text("Favourites")',
-      'nav a[href*="favourites"]',
-      '[data-testid="favourites-link"]',
-    ];
+    // Deterministically target the visible favourites link
+    const visibleLink = this.page
+      .locator('a[href="/contacts/favourites"]:visible')
+      .first();
 
-    let favouritesLink = null;
-    let usedSelector = '';
+    await expect(visibleLink).toBeVisible();
+    await expect(visibleLink).toBeEnabled();
 
-    // Find the first working selector
-    for (const selector of favouritesSelectors) {
-      const link = this.page.locator(selector);
-      if ((await link.count()) > 0) {
-        favouritesLink = link;
-        usedSelector = selector;
-        break;
-      }
-    }
+    // Navigate to favourites via click
+    await Promise.all([
+      this.page.waitForURL('**/contacts/favourites'),
+      visibleLink.click(),
+    ]);
 
-    if (favouritesLink && (await favouritesLink.count()) > 0) {
-      console.debug(`Using selector: ${usedSelector}`);
-
-      // Ensure the link is visible and clickable
-      await expect(favouritesLink.first()).toBeVisible();
-      await expect(favouritesLink.first()).toBeEnabled();
-
-      // Get the href to verify it's correct
-      const href = await favouritesLink.first().getAttribute('href');
-      console.debug(`Favourites link href: ${href}`);
-
-      // Try clicking with navigation wait
-      try {
-        await Promise.all([
-          this.page.waitForURL('**/contacts/favourites'),
-          favouritesLink.first().click(),
-        ]);
-        console.debug('Navigation successful via click');
-      } catch (error) {
-        console.debug(`Click navigation failed: ${error}`);
-
-        // Fallback: direct navigation to the href
-        if (href) {
-          console.debug(`Fallback: navigating directly to ${href}`);
-          await this.page.goto(href);
-          await expect(
-            this.page.locator('main, [role="main"]').first()
-          ).toBeVisible();
-        }
-      }
-
-      const currentUrl = this.page.url();
-      console.debug(`Final URL: ${currentUrl}`);
-
-      // More flexible URL checking with better error message
-      const isOnExpectedPage =
-        currentUrl.includes('/contacts/favourites') ||
-        currentUrl.includes('/auth/login');
-
-      if (!isOnExpectedPage) {
-        console.debug(`Navigation failed. Current URL: ${currentUrl}`);
-        console.debug(
-          `Expected URL to contain '/contacts/favourites' or '/auth/login'`
-        );
-
-        // This might be a real application bug - let's not fail the test for now
-        console.debug(
-          'WARNING: Navigation to favourites failed - this might indicate an application bug'
-        );
-        return; // Don't fail the test
-      }
-
-      expect(isOnExpectedPage).toBe(true);
-    } else {
-      console.debug('No favourites link found with any selector');
-      // If no favourites link is found, the test should still pass
-      // as this might be expected behavior in some states
-    }
+    // Explicitly assert we reached the expected page
+    await expect(this.page).toHaveURL(/.*\/contacts\/favourites/);
   }
 
   /**
@@ -717,27 +682,21 @@ export class SidebarTestHelpers {
     const responsive = new ResponsiveHelpers(this.page);
     await responsive.setMobileViewport();
 
-    const sidebar = this.page.locator(SELECTORS.SIDEBAR);
     const hamburgerButton = this.page.locator(
       'button[aria-label*="menu"], button[aria-label*="navigation"]'
     );
 
-    // Either sidebar is visible or there's a hamburger menu
-    const sidebarVisible = await sidebar.first().isVisible();
-    const hamburgerVisible = (await hamburgerButton.count()) > 0;
+    // Hamburger MUST be visible on mobile viewport
+    await expect(hamburgerButton.first()).toBeVisible();
 
-    expect(sidebarVisible || hamburgerVisible).toBe(true);
+    // Try to open mobile menu
+    await hamburgerButton.first().click();
 
-    if (hamburgerVisible && !sidebarVisible) {
-      // Try to open mobile menu
-      await hamburgerButton.first().click();
-
-      // Mobile navigation should now be visible (as a sheet/modal)
-      const mobileNav = this.page
-        .locator('[role="dialog"]')
-        .or(this.page.getByText('Navigation'));
-      await expect(mobileNav.first()).toBeVisible();
-    }
+    // Mobile navigation should now be visible (as a sheet/modal)
+    const mobileNav = this.page
+      .locator('[role="dialog"]')
+      .or(this.page.getByText('Navigation'));
+    await expect(mobileNav.first()).toBeVisible();
   }
 
   /**
@@ -746,9 +705,11 @@ export class SidebarTestHelpers {
   async testSidebarStructure(): Promise<void> {
     await this.waitForSidebar();
 
-    // Sidebar should be visible
-    const sidebar = this.page.locator(SELECTORS.SIDEBAR).first();
-    await expect(sidebar).toBeVisible();
+    // Ensure at least one sidebar is visible without conditional loop
+    const visibleSidebar = this.page
+      .locator('nav:visible, aside:visible, [role="navigation"]:visible')
+      .first();
+    await expect(visibleSidebar).toBeVisible();
   }
 
   /**
@@ -771,7 +732,7 @@ export class SidebarTestHelpers {
   async testDynamicTagLinksIfPresent(): Promise<void> {
     await this.waitForSidebar();
 
-    const tagLinks = this.page.locator(SELECTORS.TAG_LINKS);
+    const tagLinks = this.page.locator(`${SELECTORS.TAG_LINKS}:visible`);
     const tagCount = await tagLinks.count();
 
     if (tagCount > 0) {
@@ -780,7 +741,7 @@ export class SidebarTestHelpers {
 
       const firstTagHref = await firstTag.getAttribute('href');
       if (firstTagHref) {
-        expect(firstTagHref).toMatch(/\/contacts\/tags\/\w+/);
+        expect(firstTagHref).toMatch(/\/contacts\?tag=[\w-]+/);
       }
 
       await expect(firstTag).toBeVisible();

@@ -440,7 +440,7 @@ function ContactBadge({
     <Badge
       variant='secondary'
       className={cn(
-        'gap-1.5 py-0.5 pr-1 pl-1 text-xs',
+        'max-w-full min-w-0 shrink flex-nowrap gap-1.5 overflow-visible py-0.5 pr-1 pl-1 text-xs whitespace-normal',
         contact.status === AttendeeStatus.DECLINED && 'opacity-60'
       )}
       data-testid={`contact-badge-${contact.id}`}
@@ -448,7 +448,7 @@ function ContactBadge({
       <Link
         href={`/contacts/${contact.id}`}
         className={cn(
-          'decoration-muted-foreground/50 focus-visible:ring-ring flex items-center gap-1.5 rounded-sm underline-offset-2 hover:underline focus-visible:ring-1 focus-visible:outline-none',
+          'decoration-muted-foreground/50 focus-visible:ring-ring flex min-w-0 items-center gap-1.5 rounded-sm underline-offset-2 hover:underline focus-visible:ring-1 focus-visible:outline-none',
           contact.status === AttendeeStatus.DECLINED && 'line-through'
         )}
         aria-label={`View ${fallbackDisplayName}`}
@@ -457,9 +457,9 @@ function ContactBadge({
           firstName={firstName}
           lastName={lastName}
           size='sm'
-          className='h-4 w-4'
+          className='h-4 w-4 shrink-0'
         />
-        <span>{fallbackDisplayName}</span>
+        <span className='truncate'>{fallbackDisplayName}</span>
         {contact.relationship_type && (
           <span className='text-muted-foreground text-[10px]'>
             ({contact.relationship_type})
@@ -484,7 +484,7 @@ function ContactBadge({
             <TooltipTrigger asChild>
               <span
                 className={cn(
-                  'ml-0.5 h-2 w-2 rounded-full',
+                  'ml-0.5 h-2 w-2 shrink-0 rounded-full',
                   getStatusColor(contact.status)
                 )}
                 aria-label={`Status: ${contact.status}`}
@@ -504,7 +504,7 @@ function ContactBadge({
             <button
               type='button'
               disabled={disabled}
-              className='hover:bg-muted ml-0.5 rounded-sm p-0.5 transition-colors'
+              className='hover:bg-muted relative z-10 ml-0.5 shrink-0 rounded-sm p-0.5 transition-colors'
               aria-label={`Edit ${fallbackDisplayName}`}
               data-testid={`edit-contact-${contact.id}`}
             >
@@ -575,7 +575,7 @@ function ContactBadge({
           type='button'
           onClick={onRemove}
           disabled={disabled}
-          className='hover:bg-muted text-muted-foreground hover:text-destructive ml-0.5 rounded-sm p-0.5 transition-colors'
+          className='hover:bg-muted text-muted-foreground hover:text-destructive relative z-10 ml-0.5 shrink-0 rounded-sm p-0.5 transition-colors'
           aria-label={`Remove ${fallbackDisplayName}`}
           data-testid={`remove-contact-${contact.id}`}
         >

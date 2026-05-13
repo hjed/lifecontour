@@ -627,7 +627,6 @@ test.describe('Calendar Views', () => {
   test('should trigger quick create dialog and create a new event', async ({
     authenticatedPage,
     testCleanup,
-    isMobile,
   }) => {
     const page = authenticatedPage;
     const dataManager = new (await import('./data-management')).TestDataManager(
@@ -658,18 +657,15 @@ test.describe('Calendar Views', () => {
     );
     await expect(todayCell).toBeVisible();
 
-    // Focus to reveal Add button via group-focus-within
+    // Focus the cell to trigger group-focus-within:opacity-100 on the add button
     await todayCell.focus();
-    // Also hover just in case
-    if (isMobile) {
-      await todayCell.tap();
-    } else {
-      await todayCell.hover();
-    }
 
-    // Click Add button (force: true bypasses strict visibility checks that fail during CSS transitions in Firefox)
+    // Click Add button — uses invisible/visible so it's
+    // in the DOM and accessible to Playwright once the parent receives focus.
     const addButton = todayCell.getByRole('button', { name: /add event on/i });
-    await addButton.click({ force: true });
+    await expect(addButton).toBeVisible();
+    await expect(addButton).toBeEnabled();
+    await addButton.click();
 
     // Verify dialog appears
     const dialog = page.getByRole('dialog');
@@ -687,7 +683,8 @@ test.describe('Calendar Views', () => {
       .getByRole('option', { name: calendars[0].name, exact: true })
       .first();
     await expect(calendarOption).toBeVisible({ timeout: 10000 });
-    await calendarOption.click();
+    // Use force: true to bypass Playwright mobile bounding box bug on Radix Select portals
+    await calendarOption.click({ force: true });
 
     // Submit form
     // The form contains a button "Create Journal"

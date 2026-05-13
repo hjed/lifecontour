@@ -200,27 +200,15 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
     await playwrightExpect(oauthButton).toBeEnabled({ timeout: 10000 });
 
     // Step 2: Click OAuth button and wait for navigation away from login page
-    // Uses toPass for atomic retry to handle Mobile Chrome touch/blur event races
-    await playwrightExpect(async () => {
-      // If we've already navigated away, success
-      if (!page.url().includes('/auth/login')) {
-        return;
-      }
-
-      // Check if button is still present and enabled before clicking
-      if ((await oauthButton.isVisible()) && (await oauthButton.isEnabled())) {
-        try {
-          await oauthButton.click({ timeout: 2000 });
-        } catch {
-          // Ignore click errors (e.g. element detached or disabled during click)
-        }
-      }
-
-      // Wait for navigation away from the login page
-      await playwrightExpect(page).not.toHaveURL(/.*\/auth\/login.*/, {
-        timeout: 5000,
-      });
-    }).toPass({ timeout: 30000 });
+    // Use waitForURL to wait for redirect - more reliable than waitForNavigation.
+    // The click timeout must match waitForURL to avoid the global actionTimeout
+    // (20s) cutting off a slow OAuth redirect before waitForURL's 30s expires.
+    await Promise.all([
+      page.waitForURL((url: URL) => !url.toString().includes('/auth/login'), {
+        timeout: 30000,
+      }),
+      oauthButton.click({ timeout: 30000 }),
+    ]);
 
     let currentUrl = page.url();
     console.debug(

@@ -151,7 +151,7 @@ export function CalendarMonthView({
                     data-testid={`day-cell-${dateKey}`}
                     data-today={isTodayDate || undefined}
                     className={cn(
-                      'border-border group focus-visible:bg-muted/30 relative min-h-24 border-r border-b p-1 transition-colors',
+                      'border-border group focus-visible:bg-muted/30 ring-offset-background focus-visible:ring-ring relative min-h-24 border-r border-b p-1 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-offset-2',
                       !isCurrentMonth ? 'bg-muted/30' : 'hover:bg-muted/10',
                       isTodayDate && 'bg-primary/5'
                     )}
@@ -179,9 +179,9 @@ export function CalendarMonthView({
                       {day.getDate()}
                     </div>
 
-                    {/* Add Event Button overlay (visible on hover) */}
+                    {/* Add Event Button overlay — visible on hover/focus or always on touch devices */}
                     {onSlotClick && isCurrentMonth && (
-                      <div className='absolute top-1 left-1 hidden group-focus-within:block group-hover:block'>
+                      <div className='invisible absolute top-1 left-1 opacity-0 transition-all group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100 group-focus:visible group-focus:opacity-100'>
                         <button
                           type='button'
                           className='bg-secondary text-secondary-foreground rounded p-1 shadow-sm hover:opacity-80'

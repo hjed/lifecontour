@@ -19,11 +19,13 @@ from core_shared.models.journals import (
     EventDateRange,
     FitnessData,
     GearMaintenanceData,
+    JournalValidationError,
     KayakingData,
     LogbookEntryContact,
     LogbookEntryData,
     OutdoorActivityData,
     OutdoorPlanningData,
+    OutdoorTrainingData,
     SnorkellingData,
 )
 from sqlalchemy import text
@@ -108,6 +110,7 @@ class SqlLogbookExportRepository(LogbookExportRepository):
             "DOWNHILL_SKIING": "journal_downhill_skiing_data",
             "ABSEILING_TRIP": "journal_abseiling_data",
             "OUTDOOR_PLANNING": "journal_outdoor_planning_data",
+            "OUTDOOR_TRAINING": "journal_outdoor_training_data",
             "GEAR_MAINTENANCE": "journal_gear_maintenance_data",
             "EVENT": "journal_calendar_info",
         }
@@ -206,6 +209,7 @@ class SqlLogbookExportRepository(LogbookExportRepository):
                 CASE WHEN jdivd.journal_id IS NOT NULL THEN 'DIVING' END as diving_type,
                 CASE WHEN jdsd.journal_id IS NOT NULL THEN 'DOWNHILL_SKIING' END as downhill_skiing_type,
                 CASE WHEN jopd.journal_id IS NOT NULL THEN 'OUTDOOR_PLANNING' END as outdoor_planning_type,
+                CASE WHEN jotd.journal_id IS NOT NULL THEN 'OUTDOOR_TRAINING' END as outdoor_training_type,
                 CASE WHEN jgmd.journal_id IS NOT NULL THEN 'GEAR_MAINTENANCE' END as gear_maintenance_type
             FROM journals j
             LEFT JOIN journal_calendar_info jci ON j.id = jci.journal_id
@@ -228,6 +232,7 @@ class SqlLogbookExportRepository(LogbookExportRepository):
             LEFT JOIN journal_diving_data jdivd ON j.id = jdivd.journal_id
             LEFT JOIN journal_downhill_skiing_data jdsd ON j.id = jdsd.journal_id
             LEFT JOIN journal_outdoor_planning_data jopd ON j.id = jopd.journal_id
+            LEFT JOIN journal_outdoor_training_data jotd ON j.id = jotd.journal_id
             LEFT JOIN journal_gear_maintenance_data jgmd ON j.id = jgmd.journal_id
             WHERE j.id = ANY(:journal_ids)
         """
@@ -320,6 +325,7 @@ class SqlLogbookExportRepository(LogbookExportRepository):
         diving_data = await fetch_type_data("journal_diving_data")
         dh_skiing_data = await fetch_type_data("journal_downhill_skiing_data")
         outdoor_plan_data = await fetch_type_data("journal_outdoor_planning_data")
+        outdoor_train_data = await fetch_type_data("journal_outdoor_training_data")
         gear_maint_data = await fetch_type_data("journal_gear_maintenance_data")
 
         # Resolve names for activity templates and gear items
@@ -334,8 +340,10 @@ class SqlLogbookExportRepository(LogbookExportRepository):
         ]
         template_names = {}
         if template_ids:
-            sql = "SELECT id, name FROM activity_templates WHERE id = ANY(:ids)"
-            result = await self.connection.execute(text(sql), {"ids": template_ids})
+            sql = "SELECT id, name FROM activity_templates WHERE id = ANY(:ids) AND user_id = :user_id"
+            result = await self.connection.execute(
+                text(sql), {"ids": template_ids, "user_id": user_id}
+            )
             template_names = {row.id: row.name for row in result.fetchall()}
 
         gear_item_ids = [
@@ -343,8 +351,10 @@ class SqlLogbookExportRepository(LogbookExportRepository):
         ]
         gear_item_names = {}
         if gear_item_ids:
-            sql = "SELECT id, name FROM gear_items WHERE id = ANY(:ids)"
-            result = await self.connection.execute(text(sql), {"ids": gear_item_ids})
+            sql = "SELECT id, name FROM gear_items WHERE id = ANY(:ids) AND user_id = :user_id"
+            result = await self.connection.execute(
+                text(sql), {"ids": gear_item_ids, "user_id": user_id}
+            )
             gear_item_names = {row.id: row.name for row in result.fetchall()}
 
         entries = []
@@ -376,18 +386,40 @@ class SqlLogbookExportRepository(LogbookExportRepository):
                     # In logbook export we skip invalid data rather than crashing the whole export
                     return None
 
+            # Defensively construct EventDateRange — legacy data may have null dates.
+            # If one bound is missing, collapse it to the known bound so duration is 0
+            # rather than using a 2099 fallback which skews multi-day logic.
+            _FALLBACK_START = datetime(2000, 1, 1, tzinfo=UTC)
+            try:
+                raw_start = row.event_date_range_start
+                raw_end = row.event_date_range_end
+
+                # First parse whatever dates we have
+                parsed_start = (
+                    raw_start.replace(tzinfo=UTC)
+                    if raw_start and raw_start.tzinfo is None
+                    else raw_start
+                )
+                parsed_end = (
+                    raw_end.replace(tzinfo=UTC)
+                    if raw_end and raw_end.tzinfo is None
+                    else raw_end
+                )
+
+                # Collapse missing bounds
+                start_dt = parsed_start or parsed_end or _FALLBACK_START
+                end_dt = parsed_end or start_dt
+
+                event_date_range = EventDateRange(start=start_dt, end=end_dt)
+            except (ValueError, AttributeError, JournalValidationError):
+                # Skip journals with completely invalid date data
+                continue
+
             entry = LogbookEntryData(
                 id=row.id,
                 title=row.title,
                 content=row.content,
-                event_date_range=EventDateRange(
-                    start=row.event_date_range_start.replace(tzinfo=UTC)
-                    if row.event_date_range_start.tzinfo is None
-                    else row.event_date_range_start,
-                    end=row.event_date_range_end.replace(tzinfo=UTC)
-                    if row.event_date_range_end.tzinfo is None
-                    else row.event_date_range_end,
-                ),
+                event_date_range=event_date_range,
                 parent_id=row.parent_id,
                 journal_types=types_by_journal[row.id],
                 contacts=contacts_by_journal[row.id],
@@ -421,6 +453,9 @@ class SqlLogbookExportRepository(LogbookExportRepository):
                 ),
                 outdoor_planning_data=create_if_exists(
                     OutdoorPlanningData, outdoor_plan_data.get(row.id)
+                ),
+                outdoor_training_data=create_if_exists(
+                    OutdoorTrainingData, outdoor_train_data.get(row.id)
                 ),
                 gear_maintenance_data=create_if_exists(
                     GearMaintenanceData, gear_maint_data.get(row.id)

@@ -720,6 +720,9 @@ test.describe('Journal Detail Page', () => {
       );
       await expect(removeContactButton).toBeVisible();
 
+      // Ensure the button is in view before attempting the click sequence
+      await removeContactButton.scrollIntoViewIfNeeded();
+
       // Wait for the API call to complete and the subsequent GET refetch
       const [removeResponse] = await Promise.all([
         page.waitForResponse(
@@ -782,9 +785,8 @@ test.describe('Journal Detail Page', () => {
       const neutralStatus = page.getByTestId(`contact-status-${contact.id}`);
       await expect(neutralStatus).toBeVisible();
 
-      // Click the edit button
+      // Click the edit button (z-10 ensures it's above the link hit area)
       const editButton = page.getByTestId(`edit-contact-${contact.id}`);
-      await expect(editButton).toBeVisible();
       await editButton.click();
 
       // Ensure popover appears
