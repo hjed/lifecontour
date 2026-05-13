@@ -494,33 +494,6 @@ export class ContactTestHelpers {
   }
 
   /**
-   * Test favourite button functionality if contacts are present.
-   */
-  async testFavouriteButtonsIfPresent(): Promise<void> {
-    const contactCards = this.getContactCards();
-    const cardCount = await contactCards.count();
-
-    if (cardCount > 0) {
-      // If contacts exist, test favourite buttons
-      await this.testFavouriteButtons();
-    }
-    // If no contacts, that's fine - we're just testing the buttons work when present
-  }
-
-  /**
-   * Test that contact cards have proper structure when they exist.
-   */
-  async testContactCardStructureIfPresent(): Promise<void> {
-    const contactCards = this.getContactCards();
-    const cardCount = await contactCards.count();
-
-    if (cardCount > 0) {
-      await this.verifyContactCardStructure();
-    }
-    // If no contacts, that's fine - we're just testing structure when present
-  }
-
-  /**
    * Test responsive design with favourite toggles.
    */
   async testResponsiveFavouriteToggles(): Promise<void> {
@@ -618,37 +591,8 @@ export class SidebarTestHelpers {
     await expect(visibleLink).toBeVisible();
     await expect(visibleLink).toBeEnabled();
 
-    const hasStarIcon = (await visibleLink.locator('svg').count()) > 0;
-    const linkText = await visibleLink.textContent();
-
-    expect(
-      hasStarIcon || (linkText && linkText.toLowerCase().includes('favourite'))
-    ).toBe(true);
-  }
-
-  /**
-   * Test dynamic tag links in sidebar.
-   */
-  async testDynamicTagLinks(): Promise<void> {
-    await this.waitForSidebar();
-
-    const hardcodedGroup1 = this.page.locator('text="Group 1"');
-    const hardcodedGroup2 = this.page.locator('text="Group 2"');
-
-    // Should not have hardcoded groups
-    await expect(hardcodedGroup1).toHaveCount(0);
-    await expect(hardcodedGroup2).toHaveCount(0);
-
-    // Target the first visible tag link, avoiding conditional loops
-    const firstTag = this.page
-      .locator('a[href*="/contacts?tag="]:visible')
-      .first();
-
-    await expect(firstTag).toBeVisible();
-    await expect(firstTag).toBeEnabled();
-
-    const href = await firstTag.getAttribute('href');
-    expect(href).toMatch(/\/contacts\?tag=[\w-]+/);
+    await expect(visibleLink.locator('svg')).toBeVisible();
+    await expect(visibleLink).toContainText(/favourite/i);
   }
 
   /**
@@ -705,11 +649,18 @@ export class SidebarTestHelpers {
   async testSidebarStructure(): Promise<void> {
     await this.waitForSidebar();
 
-    // Ensure at least one sidebar is visible without conditional loop
-    const visibleSidebar = this.page
-      .locator('nav:visible, aside:visible, [role="navigation"]:visible')
-      .first();
-    await expect(visibleSidebar).toBeVisible();
+    const isMobile =
+      this.page.viewportSize()?.width && this.page.viewportSize()!.width < 768;
+
+    if (isMobile) {
+      const visibleSidebar = this.page
+        .locator('nav[role="navigation"]:visible')
+        .last();
+      await expect(visibleSidebar).toBeVisible();
+    } else {
+      const visibleSidebar = this.page.getByTestId('sidebar');
+      await expect(visibleSidebar).toBeVisible();
+    }
   }
 
   /**
@@ -724,30 +675,6 @@ export class SidebarTestHelpers {
 
     expect(await hardcodedGroup1.count()).toBe(0);
     expect(await hardcodedGroup2.count()).toBe(0);
-  }
-
-  /**
-   * Test dynamic tag links if they exist.
-   */
-  async testDynamicTagLinksIfPresent(): Promise<void> {
-    await this.waitForSidebar();
-
-    const tagLinks = this.page.locator(`${SELECTORS.TAG_LINKS}:visible`);
-    const tagCount = await tagLinks.count();
-
-    if (tagCount > 0) {
-      const firstTag = tagLinks.first();
-      await expect(firstTag).toHaveAttribute('href');
-
-      const firstTagHref = await firstTag.getAttribute('href');
-      if (firstTagHref) {
-        expect(firstTagHref).toMatch(/\/contacts\?tag=[\w-]+/);
-      }
-
-      await expect(firstTag).toBeVisible();
-      await expect(firstTag).toBeEnabled();
-    }
-    // If no tags exist, that's fine - we're just testing they work when present
   }
 
   /**
