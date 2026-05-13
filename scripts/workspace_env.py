@@ -8,7 +8,7 @@ from pathlib import Path
 
 def get_workspace_env():
     # Use the absolute path of the workspace (root of the repo)
-    workspace = str(Path(__file__).parent.parent.absolute())
+    workspace = str(Path(__file__).resolve().parent.parent)
 
     is_ci_val = os.environ.get("CI", "").lower()
     is_github_actions_val = os.environ.get("GITHUB_ACTIONS", "").lower()
