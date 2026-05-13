@@ -15,6 +15,22 @@ version: '3.8'
 
 services:
   # ============================================================================
+  # SHARED BASE IMAGE
+  # Automatically built before dependent services via additional_contexts.
+  # ============================================================================
+
+  python-base:
+    build:
+      context: .
+      dockerfile: docker/python-base/Dockerfile
+    image: pms-python-base
+    # Build-only service: produces the pms-python-base image used by backend
+    # and worker Dockerfiles. Not started as a container (replicas: 0).
+    deploy:
+      replicas: 0
+
+
+  # ============================================================================
   # CORE SERVICES (all profiles)
   # ============================================================================
 
@@ -204,6 +220,8 @@ services:
     build:
       context: .
       dockerfile: docker/backend/Dockerfile
+      additional_contexts:
+        pms-python-base: "service:python-base"
       args:
         BUILD_ENV: ${BUILD_ENV:-development}
         INSTALL_DEV_DEPS: ${INSTALL_DEV_DEPS:-true}
@@ -307,6 +325,8 @@ services:
     build:
       context: .
       dockerfile: integration_workers/google/Dockerfile
+      additional_contexts:
+        pms-python-base: "service:python-base"
     container_name: ${CONTAINER_PREFIX:-pms}-google-worker
     profiles: [dev, test, prod]
     environment:
@@ -344,6 +364,8 @@ services:
     build:
       context: .
       dockerfile: integration_workers/strava/Dockerfile
+      additional_contexts:
+        pms-python-base: "service:python-base"
     container_name: ${CONTAINER_PREFIX:-pms}-strava-worker
     profiles: [dev, test, prod]
     environment:

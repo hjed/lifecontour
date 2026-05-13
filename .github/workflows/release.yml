@@ -69,6 +69,16 @@ jobs:
             echo "path=docker/${{ matrix.component }}/Dockerfile" >> $GITHUB_OUTPUT
           fi
 
+      - name: Build shared python-base image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/python-base/Dockerfile
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python-base:latest
+          cache-from: type=gha,scope=python-base
+          cache-to: type=gha,mode=max,scope=python-base
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v7
         with:
@@ -79,6 +89,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          build-contexts: |
+            pms-python-base=docker-image://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python-base:latest
 
   create-release:
     name: Create GitHub Release
