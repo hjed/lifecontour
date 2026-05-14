@@ -360,7 +360,7 @@ export default function JournalsPage() {
                           setIsJumpDateOpen(false);
                         }
                       }}
-                      initialFocus
+                      autoFocus
                     />
                   </PopoverContent>
                 </Popover>

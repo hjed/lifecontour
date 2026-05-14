@@ -51,27 +51,36 @@ test.describe('Important Dates', () => {
     await authenticatedPage.getByLabel('Add important date').click();
 
     // Select ANNIVERSARY_MARK (or any other built-in type)
-    // The type select uses a button under the hood in shadcn/ui select
-    await authenticatedPage
-      .getByRole('combobox', { name: 'Important Date Type' })
-      .click();
-    const typeOption = authenticatedPage.getByRole('option', {
-      name: 'Marriage Ann.',
-    });
-    await expect(typeOption).toBeVisible();
-    // Use force: true to bypass Playwright mobile bounding box bug on Radix Select portals
-    await typeOption.click({ force: true });
+    await expect(async () => {
+      await authenticatedPage
+        .getByRole('combobox', { name: 'Important Date Type' })
+        .click();
+      const typeOption = authenticatedPage.getByRole('option', {
+        name: 'Marriage Ann.',
+      });
+      await expect(typeOption).toBeVisible({ timeout: 1000 });
+      await typeOption.click({ force: true });
+      await expect(
+        authenticatedPage.getByRole('combobox', { name: 'Important Date Type' })
+      ).toHaveText('Marriage Ann.', { timeout: 1000 });
+    }).toPass({ timeout: 10000 });
 
     // Select Precision: YEAR
-    await authenticatedPage
-      .getByRole('combobox', { name: 'Important Date Precision' })
-      .click();
-    const precisionOption = authenticatedPage.getByRole('option', {
-      name: 'Year Only',
-    });
-    await expect(precisionOption).toBeVisible();
-    // Use force: true to bypass Playwright mobile bounding box bug on Radix Select portals
-    await precisionOption.click({ force: true });
+    await expect(async () => {
+      await authenticatedPage
+        .getByRole('combobox', { name: 'Important Date Precision' })
+        .click();
+      const precisionOption = authenticatedPage.getByRole('option', {
+        name: 'Year Only',
+      });
+      await expect(precisionOption).toBeVisible({ timeout: 1000 });
+      await precisionOption.click({ force: true });
+      await expect(
+        authenticatedPage.getByRole('combobox', {
+          name: 'Important Date Precision',
+        })
+      ).toHaveText('Year Only', { timeout: 1000 });
+    }).toPass({ timeout: 10000 });
 
     // Enter Year
     await authenticatedPage.getByPlaceholder('YYYY').fill('2010');
