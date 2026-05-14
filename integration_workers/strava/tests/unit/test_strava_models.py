@@ -190,32 +190,43 @@ class TestStravaActivityStream:
 class TestStravaStreamSet:
     """Parse combined stream responses from ``GET /activities/{id}/streams``.
 
-    The Strava API requires ``key_by_type=true``, so the response is always
-    a dict keyed by stream type name.
+    The Strava Streams API response format depends on the ``key_by_type``
+    parameter:
+    - Without ``key_by_type`` (or ``key_by_type=false``): returns an **array**
+      of stream objects, each with a ``type`` field.
+    - With ``key_by_type=true``: returns a **dict** keyed by stream type name,
+      where each value is a stream object.
+
+    ``from_api_response`` handles both formats defensively.
     """
 
-    def test_parse_full_stream_response(self) -> None:
-        """Parsing Strava's dict-keyed response groups streams by type."""
-        api_response = {
-            "latlng": {
+    # -- Array format (key_by_type=false / official sample response) --
+
+    def test_parse_array_full_response(self) -> None:
+        """Parsing Strava's array response groups streams by type."""
+        api_response = [
+            {
+                "type": "latlng",
                 "data": [[-33.8688, 151.2093], [-33.8690, 151.2095]],
                 "series_type": "distance",
                 "original_size": 2,
                 "resolution": "high",
             },
-            "altitude": {
+            {
+                "type": "altitude",
                 "data": [10.0, 12.5],
                 "series_type": "distance",
                 "original_size": 2,
                 "resolution": "high",
             },
-            "time": {
+            {
+                "type": "time",
                 "data": [0, 10],
                 "series_type": "distance",
                 "original_size": 2,
                 "resolution": "high",
             },
-        }
+        ]
         stream_set = StravaStreamSet.from_api_response(api_response)
 
         assert stream_set.latlng is not None
@@ -228,43 +239,53 @@ class TestStravaStreamSet:
         assert len(stream_set.altitude.data) == 2
         assert len(stream_set.time.data) == 2
 
-    def test_parse_partial_stream_response(self) -> None:
-        """Partial stream responses leave missing streams as None."""
-        api_response = {
-            "latlng": {
-                "data": [[-33.8688, 151.2093]],
-                "series_type": "distance",
-                "original_size": 1,
-                "resolution": "high",
-            },
-        }
-        stream_set = StravaStreamSet.from_api_response(api_response)
-
-        assert stream_set.latlng is not None
-        assert stream_set.latlng.type == "latlng"
-        assert stream_set.altitude is None
-        assert stream_set.time is None
-
-    def test_parse_empty_stream_response(self) -> None:
-        """Empty stream response yields all-None stream set."""
-        stream_set = StravaStreamSet.from_api_response({})
-
-        assert stream_set.latlng is None
-        assert stream_set.altitude is None
-        assert stream_set.time is None
-
-    def test_parse_response_with_type_in_body(self) -> None:
-        """Stream bodies that include a type field use the body's type value."""
-        api_response = {
-            "latlng": {
+    def test_parse_array_partial_response(self) -> None:
+        """Partial array response leaves missing streams as None."""
+        api_response = [
+            {
                 "type": "latlng",
                 "data": [[-33.8688, 151.2093]],
                 "series_type": "distance",
                 "original_size": 1,
                 "resolution": "high",
             },
-        }
+        ]
         stream_set = StravaStreamSet.from_api_response(api_response)
 
         assert stream_set.latlng is not None
         assert stream_set.latlng.type == "latlng"
+        assert stream_set.altitude is None
+        assert stream_set.time is None
+
+    def test_parse_array_empty_response(self) -> None:
+        """Empty array response yields all-None stream set."""
+        stream_set = StravaStreamSet.from_api_response([])
+
+        assert stream_set.latlng is None
+        assert stream_set.altitude is None
+        assert stream_set.time is None
+
+    def test_array_unknown_stream_types_are_ignored(self) -> None:
+        """Stream types not tracked by StravaStreamSet are silently skipped."""
+        api_response = [
+            {
+                "type": "distance",
+                "data": [2.9, 5.8, 8.5],
+                "series_type": "distance",
+                "original_size": 3,
+                "resolution": "high",
+            },
+            {
+                "type": "altitude",
+                "data": [10.0, 12.5, 11.0],
+                "series_type": "distance",
+                "original_size": 3,
+                "resolution": "high",
+            },
+        ]
+        stream_set = StravaStreamSet.from_api_response(api_response)
+
+        assert stream_set.altitude is not None
+        assert stream_set.altitude.type == "altitude"
+        assert stream_set.latlng is None
+        assert stream_set.time is None

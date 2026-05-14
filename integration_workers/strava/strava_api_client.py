@@ -144,7 +144,6 @@ class StravaAPIClient:
 
         stream_params: dict[str, str | int] = {
             "keys": ",".join(keys),
-            "key_by_type": "true",
         }
         data = await self._get(
             f"activities/{activity_id}/streams", params=stream_params
