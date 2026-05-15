@@ -9,12 +9,13 @@ refresh on 401 responses.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
 import structlog
 
-from strava_auth_service import StravaAuthService
+from strava_auth_service import StravaAuthService, StravaTokenData
 from strava_models import (
     StravaActivity,
     StravaAthlete,
@@ -56,10 +57,12 @@ class StravaAPIClient:
         access_token: str,
         refresh_token_value: str,
         auth_service: StravaAuthService,
+        on_token_refresh: Callable[[StravaTokenData], Awaitable[None]] | None = None,
     ) -> None:
         self._access_token = access_token
         self._refresh_token_value = refresh_token_value
         self._auth_service = auth_service
+        self._on_token_refresh = on_token_refresh
         self._rate_limiter = StravaRateLimiter()
         self._client = httpx.AsyncClient(
             base_url=_STRAVA_BASE_URL,
@@ -196,6 +199,8 @@ class StravaAPIClient:
                 self._client.headers["Authorization"] = (
                     f"Bearer {new_tokens.access_token}"
                 )
+                if self._on_token_refresh:
+                    await self._on_token_refresh(new_tokens)
                 return await self._get(path, params=params, _is_retry=True)
             except Exception:
                 logger.error("Token refresh failed", exc_info=True)

@@ -11,7 +11,7 @@ event fan-out.
 import asyncio
 from typing import Any
 
-from arq import run_worker
+from arq import Retry, run_worker
 from arq.connections import RedisSettings
 from arq.typing import StartupShutdown, WorkerSettingsBase
 from core_shared.database.engine import create_session_factory
@@ -19,6 +19,7 @@ from core_shared.integration_constants import STRAVA_ARQ_QUEUE_NAME
 from core_shared.logging import configure_logging, get_logger
 from core_shared.telemetry import setup_telemetry, trace_arq_job
 
+from strava_rate_limiter import StravaRateLimitError
 from strava_settings import StravaSettings
 
 # Global settings instance
@@ -169,10 +170,42 @@ async def _resolve_user_by_id(
         }
 
 
+async def _update_user_tokens(
+    session_factory: Any,
+    user_id: str,
+    tokens: Any,
+    auth_service: Any,
+) -> None:
+    from sqlalchemy import text
+
+    encrypted_access = auth_service.encrypt(tokens.access_token)
+    encrypted_refresh = auth_service.encrypt(tokens.refresh_token)
+
+    async with session_factory() as session:
+        await session.execute(
+            text("""
+                UPDATE user_strava_auth
+                SET encrypted_access_token = :access,
+                    encrypted_refresh_token = :refresh,
+                    expires_at = :expires_at,
+                    updated_at = NOW()
+                WHERE user_id = :user_id
+            """),
+            {
+                "access": encrypted_access,
+                "refresh": encrypted_refresh,
+                "expires_at": tokens.expires_at,
+                "user_id": user_id,
+            },
+        )
+        await session.commit()
+
+
 def _create_sync_service(
     user_id: str,
     auth_data: dict[str, Any],
     worker_settings: StravaSettings,
+    session_factory: Any,
 ) -> Any:
     """Create a StravaSyncService with an authenticated API client.
 
@@ -197,10 +230,14 @@ def _create_sync_service(
     access_token = auth_service.decrypt(auth_data["encrypted_access_token"])
     refresh_token = auth_service.decrypt(auth_data["encrypted_refresh_token"])
 
+    async def on_token_refresh(tokens: Any) -> None:
+        await _update_user_tokens(session_factory, user_id, tokens, auth_service)
+
     api_client = StravaAPIClient(
         access_token=access_token,
         refresh_token_value=refresh_token,
         auth_service=auth_service,
+        on_token_refresh=on_token_refresh,
     )
 
     return StravaSyncService(
@@ -289,7 +326,9 @@ async def process_strava_webhook_event(
     user_id, auth_data = user_info
 
     if aspect_type in ("create", "update"):
-        sync_service = _create_sync_service(user_id, auth_data, worker_settings)
+        sync_service = _create_sync_service(
+            user_id, auth_data, worker_settings, session_factory
+        )
         try:
             async with session_factory() as session:
                 async with session.begin():
@@ -308,11 +347,19 @@ async def process_strava_webhook_event(
                         "object_id": object_id,
                         "events_created": len(events),
                     }
+        except StravaRateLimitError as exc:
+            retry_after = exc.retry_after or 60
+            logger.warning(
+                "Rate limit reached in webhook event, retrying", retry_after=retry_after
+            )
+            raise Retry(defer=max(retry_after, 60)) from exc
         finally:
             await sync_service._api_client.close()
 
     elif aspect_type == "delete":
-        sync_service = _create_sync_service(user_id, auth_data, worker_settings)
+        sync_service = _create_sync_service(
+            user_id, auth_data, worker_settings, session_factory
+        )
         try:
             async with session_factory() as session:
                 async with session.begin():
@@ -330,6 +377,13 @@ async def process_strava_webhook_event(
                         "object_id": object_id,
                         "event_created": event is not None,
                     }
+        except StravaRateLimitError as exc:
+            retry_after = exc.retry_after or 60
+            logger.warning(
+                "Rate limit reached in webhook delete, retrying",
+                retry_after=retry_after,
+            )
+            raise Retry(defer=max(retry_after, 60)) from exc
         finally:
             await sync_service._api_client.close()
 
@@ -385,7 +439,9 @@ async def sync_strava_activities(
         )
         return {"status": "error", "reason": "no_auth"}
 
-    sync_service = _create_sync_service(user_id, auth_data, worker_settings)
+    sync_service = _create_sync_service(
+        user_id, auth_data, worker_settings, session_factory
+    )
 
     try:
         # For smart sync, we could use after_timestamp from last sync
@@ -438,6 +494,12 @@ async def sync_strava_activities(
             "sync_type": sync_type,
             "batches_enqueued": batches_enqueued,
         }
+    except StravaRateLimitError as exc:
+        retry_after = exc.retry_after or 60
+        logger.warning(
+            "Rate limit reached in orchestrator, retrying", retry_after=retry_after
+        )
+        raise Retry(defer=max(retry_after, 60)) from exc
     finally:
         await sync_service._api_client.close()
 
@@ -481,7 +543,9 @@ async def sync_strava_activity_batch(
         )
         return {"status": "error", "reason": "no_auth"}
 
-    sync_service = _create_sync_service(user_id, auth_data, worker_settings)
+    sync_service = _create_sync_service(
+        user_id, auth_data, worker_settings, session_factory
+    )
 
     try:
         async with session_factory() as session:
@@ -500,6 +564,12 @@ async def sync_strava_activity_batch(
                     "status": "completed",
                     **result,
                 }
+    except StravaRateLimitError as exc:
+        retry_after = exc.retry_after or 60
+        logger.warning(
+            "Rate limit reached in batch sync, retrying", retry_after=retry_after
+        )
+        raise Retry(defer=max(retry_after, 60)) from exc
     finally:
         await sync_service._api_client.close()
 
