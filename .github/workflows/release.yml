@@ -56,6 +56,9 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.component }}
           tags: |
             type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Set Dockerfile path
@@ -69,13 +72,26 @@ jobs:
             echo "path=docker/${{ matrix.component }}/Dockerfile" >> $GITHUB_OUTPUT
           fi
 
+      - name: Extract python-base metadata
+        id: meta-base
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python-base
+          tags: |
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
       - name: Build shared python-base image
         uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/python-base/Dockerfile
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python-base:latest
+          tags: ${{ steps.meta-base.outputs.tags }}
+          labels: ${{ steps.meta-base.outputs.labels }}
           cache-from: type=gha,scope=python-base
           cache-to: type=gha,mode=max,scope=python-base
 
@@ -90,7 +106,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-contexts: |
-            pms-python-base=docker-image://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python-base:latest
+            pms-python-base=docker-image://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python-base:${{ steps.meta-base.outputs.version }}
 
   create-release:
     name: Create GitHub Release
