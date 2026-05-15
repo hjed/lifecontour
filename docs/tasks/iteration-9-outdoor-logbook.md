@@ -487,11 +487,11 @@ Build the backend service that gathers logbook data, orders it hierarchically, a
 Render the aggregated logbook data into a PDF document using a Python PDF library (e.g. reportlab or weasyprint).
 
 **Acceptance Criteria:**
-- [ ] `LogbookPdfRenderer` takes the data contracts from Phase 1 and produces a PDF byte stream
-- [ ] PDF layout: cover page, chronological journal entries with hierarchy indentation, type-specific data sections, abseil pitch tables, fitness data blocks
-- [ ] Summary pages rendered per calendar year with all specified statistics in a readable table format
-- [ ] Participant index rendered as a sorted table at the end of the PDF
-- [ ] PDF handles logbooks with up to several hundred entries without excessive memory usage or timeout
+- [x] `LogbookPdfRenderer` takes the data contracts from Phase 1 and produces a PDF byte stream
+- [x] PDF layout: cover page, chronological journal entries with hierarchy indentation, type-specific data sections, abseil pitch tables, fitness data blocks
+- [x] Summary pages rendered per calendar year with all specified statistics in a readable table format
+- [x] Participant index rendered as a sorted table at the end of the PDF
+- [x] PDF handles logbooks with up to several hundred entries without excessive memory usage or timeout
 
 **Required Test Coverage:**
 - **Unit:** PDF structure assertions (page count, section presence) using deterministic fixture data.

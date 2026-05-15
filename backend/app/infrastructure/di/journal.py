@@ -143,6 +143,7 @@ from app.core.journal.services.journal_contact_service import JournalContactServ
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_service import JournalService
 from app.core.journal.services.logbook_data_service import LogbookDataService
+from app.core.journal.services.logbook_pdf_renderer import LogbookPdfRenderer
 from app.core.journal.services.route_service import RouteService
 from app.infrastructure.config import Settings
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
@@ -486,3 +487,8 @@ class JournalProvider(Provider):
             summary_calculator=summary_calculator,
             participant_calculator=participant_calculator,
         )
+
+    @provide(scope=Scope.APP)
+    def logbook_pdf_renderer(self) -> LogbookPdfRenderer:
+        """Provide a LogbookPdfRenderer instance."""
+        return LogbookPdfRenderer()
