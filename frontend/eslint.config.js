@@ -1,5 +1,6 @@
 import nextCoreWebVitals from 'eslint-config-next/core-web-vitals';
 import nextTypescript from 'eslint-config-next/typescript';
+import { fixupConfigRules } from '@eslint/compat';
 
 const eslintConfig = [
   {
@@ -19,8 +20,8 @@ const eslintConfig = [
       'next-env.d.ts',
     ],
   },
-  ...nextCoreWebVitals,
-  ...nextTypescript,
+  ...fixupConfigRules(nextCoreWebVitals),
+  ...fixupConfigRules(nextTypescript),
   {
     rules: {
       // TypeScript rules

@@ -43,6 +43,7 @@ export function TimezoneSettings() {
   useEffect(() => {
     const stored = localStorage.getItem(TIMEZONE_STORAGE_KEY);
     if (stored) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setTimezone(stored);
     }
     return () => {
