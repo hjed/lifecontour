@@ -100,14 +100,12 @@ export function IntegrationPanel({ integration }: IntegrationPanelProps) {
             </div>
           </div>
 
-          {id !== 'snipeit' && (
-            <ConnectionControls
-              integrationId={id}
-              connected={connected}
-              needsReauth={needs_reauth}
-              needsReconsent={needs_reconsent}
-            />
-          )}
+          <ConnectionControls
+            integrationId={id}
+            connected={connected}
+            needsReauth={needs_reauth}
+            needsReconsent={needs_reconsent}
+          />
 
           <SyncControls
             integrationId={id}

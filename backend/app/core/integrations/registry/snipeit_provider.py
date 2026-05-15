@@ -1,7 +1,7 @@
 """
 Snipe-IT integration provider.
 
-Derives Snipe-IT integration status from the ``snipeit_settings`` table.
+Derives Snipe-IT integration status from the ``user_snipe_it_auth`` table.
 Implements the ``IntegrationProvider`` protocol for registration in the
 ``IntegrationRegistryService``.
 """
@@ -9,11 +9,9 @@ Implements the ``IntegrationProvider`` protocol for registration in the
 from __future__ import annotations
 
 import structlog
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.integrations.adapters.sql.snipeit_settings_repository import (
-    SqlSnipeItSettingsRepository,
-)
 from app.core.integrations.registry.models import (
     IntegrationCapability,
     IntegrationInfo,
@@ -26,11 +24,11 @@ logger = structlog.get_logger()
 
 class SnipeItIntegrationProvider:
     """
-    Derives Snipe-IT integration status from configuration settings.
+    Derives Snipe-IT integration status from OAuth tokens and sync jobs.
 
-    Queries ``snipeit_settings`` for connection configuration. In Phase 1
-    the integration is considered "disconnected" when no settings exist.
-    Phase 2 will add the ``user_snipe_it_auth`` table for full OAuth status.
+    Queries ``user_snipe_it_auth`` for connection/reauth state, and
+    ``sync_jobs`` for sync history. Packages the data into the generic
+    ``IntegrationInfo`` model for the pluggable integration registry.
     """
 
     integration_id: str = "snipeit"
@@ -50,48 +48,78 @@ class SnipeItIntegrationProvider:
         Returns:
             IntegrationInfo with Snipe-IT status, capabilities, and sync
             summary.
-
-        Note:
-            Phase 1 always returns DISCONNECTED because there are no OAuth
-            endpoints yet.  Returning CONNECTED would cause the UI to render
-            Connect/Disconnect buttons that call non-existent OAuth routes.
-            Phase 2 will add ``user_snipe_it_auth`` and upgrade this logic
-            to derive CONNECTED from actual OAuth tokens.
         """
-        # Phase 1: always DISCONNECTED — no OAuth flow exists yet.
-        # The settings table is checked only for future use / logging.
-        try:
-            repo = SqlSnipeItSettingsRepository(connection)
-            settings = await repo.get_by_user_id(user_id)
+        # 1. Query OAuth token state
+        is_connected = False
+        needs_reauth = False
 
-            if settings and settings.base_url:
-                logger.debug(
-                    "Snipe-IT settings exist but OAuth not implemented yet",
-                    user_id=user_id,
-                    base_url=settings.base_url,
-                )
-        except Exception:
-            # Table may not exist yet (migration hasn't run) —
-            # log at warning so unexpected DB failures are visible.
+        try:
+            auth_stmt = text("""
+                SELECT needs_reauth
+                FROM user_snipe_it_auth
+                WHERE user_id = :user_id
+            """)
+            auth_result = await connection.execute(auth_stmt, {"user_id": user_id})
+            auth_row = auth_result.fetchone()
+
+            if auth_row:
+                is_connected = True
+                needs_reauth = bool(auth_row.needs_reauth)
+        except Exception as e:
+            # Gracefully degrade if table doesn't exist yet (e.g. during deployment)
             logger.warning(
-                "snipeit_settings query failed — table may not exist yet",
+                "Failed to query user_snipe_it_auth",
                 user_id=user_id,
-                exc_info=True,
+                error=str(e),
             )
 
-        # Sync summary — populated in later phases when sync jobs exist
-        sync_summary = SyncSummary()
+        # 2. Query sync summary from sync_jobs (Snipe-IT uses 'snipeit' source)
+        try:
+            sync_stmt = text("""
+                SELECT
+                    MAX(CASE WHEN status = 'completed' THEN completed_at END)
+                        AS last_sync_time,
+                    COUNT(CASE WHEN status = 'completed' THEN 1 END)
+                        AS completed_count,
+                    COUNT(CASE WHEN status = 'failed' THEN 1 END)
+                        AS failed_count
+                FROM sync_jobs
+                WHERE user_id = :user_id AND integration_source = 'snipeit'
+            """)
+            sync_result = await connection.execute(sync_stmt, {"user_id": user_id})
+            sync_row = sync_result.fetchone()
+        except Exception as e:
+            logger.warning(
+                "Failed to query sync_jobs for Snipe-IT",
+                user_id=user_id,
+                error=str(e),
+            )
+            sync_row = None
+
+        sync_summary = SyncSummary(
+            last_sync_time=sync_row.last_sync_time if sync_row else None,
+            sync_count=sync_row.completed_count if sync_row else 0,
+            error_count=sync_row.failed_count if sync_row else 0,
+        )
+
+        # 3. Derive status
+        if not is_connected:
+            status = IntegrationStatus.DISCONNECTED
+        elif needs_reauth:
+            status = IntegrationStatus.TOKEN_EXPIRED
+        else:
+            status = IntegrationStatus.CONNECTED
 
         return IntegrationInfo(
             id=self.integration_id,
             name="Snipe-IT",
-            status=IntegrationStatus.DISCONNECTED,
+            status=status,
             capabilities=[
                 IntegrationCapability.GEAR_SYNC,
                 IntegrationCapability.MAINTENANCE_SYNC,
                 IntegrationCapability.CHECKOUT_SYNC,
             ],
             sync_summary=sync_summary,
-            needs_reauth=False,
+            needs_reauth=needs_reauth,
             needs_reconsent=False,
         )
