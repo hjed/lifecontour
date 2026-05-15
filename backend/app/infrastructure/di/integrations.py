@@ -36,6 +36,7 @@ from app.core.integrations.strava.athlete_mapping_service import (
 from app.core.integrations.task_queue import get_redis_pool, get_redis_settings
 from app.core.integrations.task_queue_service import TaskQueueService
 from app.core.journal.models.repositories import JournalContactRelationshipRepository
+from app.infrastructure.auth.snipeit_token_service import SnipeItTokenService
 from app.infrastructure.auth.strava_token_service import StravaTokenService
 from app.infrastructure.config import Settings
 
@@ -258,6 +259,24 @@ class IntegrationProvider(Provider):
         )
 
         return SqlStravaAthleteMappingRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def provide_snipeit_token_service(
+        self, connection: AsyncConnection, settings: Settings
+    ) -> SnipeItTokenService:
+        """Provide Snipe-IT token service for request scope.
+
+        Args:
+            connection: Database connection
+            settings: Application settings for encryption key
+
+        Returns:
+            SnipeItTokenService: Service for Snipe-IT token CRUD operations
+        """
+        return SnipeItTokenService(
+            connection=connection,
+            encryption_key=settings.snipeit_encryption_key,
+        )
 
     @provide(scope=Scope.REQUEST)
     def provide_snipeit_settings_repository(

@@ -59,13 +59,13 @@ Create the worker scaffold and integrate with the existing pluggable dashboard.
 - **Unit:** Registry returns correct metadata. ✅
 - **E2E:** Settings modal opens and submits Base URL cleanly. ✅
 
-#### Phase 2: Database Models and OAuth Connect Flow
+#### Phase 2: Database Models and OAuth Connect Flow ✅ COMPLETED
 **PR Size:** ~5-7 files
 Implement the OAuth 2.0 connection using the Base URL from Phase 1.
 **Acceptance Criteria:**
-- [ ] Migration creates `user_snipe_it_auth` table (encrypted tokens, user ID mapping).
-- [ ] OAuth connect/callback endpoints implemented in the main backend, pointing to the dynamic Snipe-IT Base URL.
-- [ ] Disconnect flow removes the database record.
+- [x] Migration creates `user_snipe_it_auth` table (encrypted tokens, user ID mapping).
+- [x] OAuth connect/callback endpoints implemented in the main backend, pointing to the dynamic Snipe-IT Base URL.
+- [x] Disconnect flow removes the database record.
 **Required Test Coverage:**
 - **Unit:** Token encryption and state parameter generation.
 - **Integration:** Auth endpoints handle successful/failed token exchanges.
