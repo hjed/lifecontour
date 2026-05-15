@@ -12,16 +12,21 @@ pipeline handles that.
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import AsyncIterator
 from typing import Any
 
+import httpx
 import structlog
 from core_shared.models.outbox import OutboxEvent
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from strava_api_client import StravaAPIClient
+from strava_api_client import StravaAPIClient, StravaAPIError
 from strava_data_transformer import StravaDataTransformer, TransformedActivity
 from strava_models import StravaStreamSet
+from strava_rate_limiter import StravaRateLimitError
 
 logger = structlog.get_logger(__name__)
 
@@ -32,6 +37,44 @@ _STRAVA_SYNTHETIC_CALENDAR_ID = "00000000-0000-0000-0000-000000000001"
 
 # Maximum activities per Strava API page
 _PAGE_SIZE = 100
+
+# ── Internal signalling exceptions ──────────────────────────────────
+
+
+class _ActivitySkipped(Exception):
+    """Raised when an activity was already imported (dedup)."""
+
+
+class _ActivityFailed(Exception):
+    """Raised when an activity failed after all retries."""
+
+
+# ── Transient error classification ──────────────────────────────────
+
+_TRANSIENT_EXCEPTIONS: tuple[type[BaseException], ...] = (
+    TimeoutError,
+    httpx.TimeoutException,
+    httpx.ConnectError,
+    httpx.ReadError,
+    httpx.WriteError,
+    ConnectionError,
+    OSError,
+)
+
+
+def _is_transient_error(exc: Exception) -> bool:
+    """Return True if *exc* is a transient/retryable error."""
+    if isinstance(exc, _TRANSIENT_EXCEPTIONS):
+        return True
+    # 5xx server errors from Strava are transient
+    if isinstance(exc, StravaAPIError) and exc.status_code >= 500:
+        return True
+    return False
+
+
+# Per-activity retry settings for transient errors
+_MAX_ACTIVITY_RETRIES = 3
+_RETRY_BACKOFF_BASE = 2.0  # seconds — exponential: 2s, 4s, 8s
 
 
 class StravaSyncService:
@@ -112,22 +155,27 @@ class StravaSyncService:
         session.add(event)
         return [event]
 
-    async def sync_full(
+    async def list_activity_batches(
         self,
-        session: AsyncSession,
         after_timestamp: int | None = None,
-    ) -> list[OutboxEvent]:
-        """Paginate through all activities and create outbox events.
+    ) -> AsyncIterator[list[int]]:
+        """Yield pages of Strava activity IDs for batch processing.
+
+        Each yielded list represents one API page of activity IDs. The
+        caller (typically the ARQ orchestrator) should enqueue each batch
+        as a separate job so that:
+
+        - Each batch commits independently (progress is preserved).
+        - ARQ retries handle transient failures per-batch.
+        - The sync can make incremental progress even under timeouts.
 
         Args:
-            session: Database session for outbox event persistence.
-            after_timestamp: Optional epoch timestamp — only sync activities
+            after_timestamp: Optional epoch timestamp — only list activities
                 after this time (for incremental sync).
 
-        Returns:
-            List of all created outbox events.
+        Yields:
+            Lists of Strava activity IDs, one list per API page.
         """
-        all_events: list[OutboxEvent] = []
         page = 1
 
         while True:
@@ -140,17 +188,96 @@ class StravaSyncService:
             if not activities:
                 break
 
-            for activity in activities:
-                # Deduplication — during full sync, skip already-imported
+            activity_ids = [activity.id for activity in activities]
+            logger.info(
+                "Listed activity batch",
+                page=page,
+                batch_size=len(activity_ids),
+            )
+            yield activity_ids
+
+            page += 1
+
+        logger.info(
+            "Finished listing activity batches",
+            pages_fetched=page - 1,
+        )
+
+    async def sync_activity_batch(
+        self,
+        activity_ids: list[int],
+        session: AsyncSession,
+    ) -> dict[str, int]:
+        """Process a batch of activity IDs, creating outbox events.
+
+        Each activity is processed independently — a failure in one
+        activity does not affect others in the batch. This method is
+        designed to be called from an ARQ job so that ARQ's built-in
+        ``max_tries`` provides automatic retries on job-level failures
+        (e.g. full-batch timeouts).
+
+        Args:
+            activity_ids: Strava activity IDs to sync.
+            session: Database session for outbox event persistence.
+
+        Returns:
+            Dict with ``synced``, ``skipped``, and ``failed`` counts.
+        """
+        synced = 0
+        skipped = 0
+        failed = 0
+
+        for activity_id in activity_ids:
+            try:
+                await self._sync_single_activity_with_retry(activity_id, session)
+                synced += 1
+            except _ActivitySkipped:
+                skipped += 1
+            except _ActivityFailed:
+                failed += 1
+
+        logger.info(
+            "Activity batch completed",
+            batch_size=len(activity_ids),
+            synced=synced,
+            skipped=skipped,
+            failed=failed,
+        )
+        return {"synced": synced, "skipped": skipped, "failed": failed}
+
+    async def _sync_single_activity_with_retry(
+        self,
+        activity_id: int,
+        session: AsyncSession,
+    ) -> None:
+        """Fetch, transform, and persist one activity with retry.
+
+        Retries transient errors (network timeouts, 5xx) up to
+        ``_MAX_ACTIVITY_RETRIES`` times with exponential backoff.
+        Non-transient errors (e.g. transformation bugs) fail
+        immediately.  DB/SQLAlchemy errors are *not* caught so they
+        bubble up to ARQ for job-level retry.
+
+        Raises:
+            _ActivitySkipped: Activity already imported (dedup).
+            _ActivityFailed: All retries exhausted.
+        """
+        last_exc: Exception | None = None
+
+        for attempt in range(1, _MAX_ACTIVITY_RETRIES + 1):
+            try:
+                activity = await self._api_client.get_activity(activity_id)
+
+                # Deduplication — skip already-imported activities
                 existing_jid = await self._find_existing_journal_id(
                     str(activity.id), session
                 )
                 if existing_jid is not None:
                     logger.debug(
-                        "Skipping already-imported activity during full sync",
+                        "Skipping already-imported activity",
                         strava_activity_id=activity.id,
                     )
-                    continue
+                    raise _ActivitySkipped
 
                 # Fetch streams for GPS-equipped activities
                 streams: StravaStreamSet | None = None
@@ -160,16 +287,46 @@ class StravaSyncService:
                 transformed = self._transformer.transform(activity, streams=streams)
                 event = self._build_outbox_event(transformed)
                 session.add(event)
-                all_events.append(event)
+                return  # success
 
-            page += 1
+            except _ActivitySkipped:
+                raise  # propagate immediately
+            except (StravaRateLimitError, SQLAlchemyError):
+                # Rate limiting and DB errors affect the whole batch —
+                # let them bubble up to ARQ for job-level retry.
+                raise
+            except Exception as exc:
+                if not _is_transient_error(exc):
+                    # Non-transient (e.g. transform bug) — fail immediately
+                    logger.warning(
+                        "Non-transient error syncing activity, skipping",
+                        strava_activity_id=activity_id,
+                        attempt=attempt,
+                        exc_info=True,
+                    )
+                    raise _ActivityFailed from exc
 
-        logger.info(
-            "Full sync completed",
-            activities_synced=len(all_events),
-            pages_fetched=page - 1,
+                last_exc = exc
+                if attempt < _MAX_ACTIVITY_RETRIES:
+                    backoff = _RETRY_BACKOFF_BASE**attempt
+                    logger.warning(
+                        "Transient error syncing activity, retrying",
+                        strava_activity_id=activity_id,
+                        attempt=attempt,
+                        max_attempts=_MAX_ACTIVITY_RETRIES,
+                        backoff_seconds=backoff,
+                        error=str(exc),
+                    )
+                    await asyncio.sleep(backoff)
+
+        # All retries exhausted
+        logger.error(
+            "Failed to sync activity after all retries",
+            strava_activity_id=activity_id,
+            max_attempts=_MAX_ACTIVITY_RETRIES,
+            error=str(last_exc),
         )
-        return all_events
+        raise _ActivityFailed from last_exc
 
     async def handle_delete(
         self,
