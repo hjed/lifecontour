@@ -198,6 +198,16 @@ async def snipeit_oauth_callback(
                 detail="Invalid OAuth state parameter",
             )
 
+        if (
+            not settings.snipeit_client_id
+            or not settings.snipeit_client_secret
+            or not settings.snipeit_encryption_key
+        ):
+            raise HTTPException(
+                status_code=500,
+                detail="Snipe-IT integration is not fully configured",
+            )
+
         # Look up the user's Snipe-IT Base URL for token exchange
         snipeit_settings = await snipeit_settings_repo.get_by_user_id(str(user.id))
         if not snipeit_settings or not snipeit_settings.base_url:
@@ -211,7 +221,7 @@ async def snipeit_oauth_callback(
         callback_url = f"{settings.frontend_url}/auth/snipeit/callback"
 
         # Exchange code for tokens with Snipe-IT
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(
                 token_url,
                 data={

@@ -155,6 +155,65 @@ class TestSnipeItAuthAPI:
         detail = body.get("detail") or body.get("errors", [{}])[0].get("detail", "")
         assert "state" in detail.lower()
 
+    async def test_callback_exchanges_code_and_saves_tokens(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        respx_mock: object,
+    ) -> None:
+        """POST /oauth/callback exchanges code for tokens and saves them."""
+        # 1. Setup Snipe-IT Base URL
+        await async_connection.execute(
+            text("""
+                INSERT INTO snipeit_settings (user_id, base_url)
+                VALUES (:user_id, :base_url)
+            """),
+            {
+                "user_id": "test-user-123",
+                "base_url": "https://snipeit.example.com",
+            },
+        )
+
+        # 2. Inject state into session
+        response = await authenticated_client.post(
+            "/api/integrations/snipeit/oauth/authorize",
+            json={"redirect_url": "/integrations"},
+        )
+        assert response.status_code == 200
+        state = response.json()["state"]
+
+        # 3. Mock external Snipe-IT request with respx
+        import httpx
+
+        respx_mock.post("https://snipeit.example.com/oauth/token").mock(  # type: ignore[attr-defined]
+            return_value=httpx.Response(
+                200,
+                json={
+                    "access_token": "fake-access-token",
+                    "refresh_token": "fake-refresh-token",
+                    "expires_in": 3600,
+                },
+            )
+        )
+
+        # 4. Trigger callback
+        response = await authenticated_client.post(
+            "/api/integrations/snipeit/oauth/callback",
+            json={"code": "auth-code-123", "state": state},
+        )
+
+        # 5. Verify response
+        assert response.status_code == 200
+        body = response.json()
+        assert body["success"] is True
+
+        # 6. Verify tokens were saved in database
+        check = await async_connection.execute(
+            text("SELECT 1 FROM user_snipe_it_auth WHERE user_id = :uid"),
+            {"uid": "test-user-123"},
+        )
+        assert check.fetchone() is not None
+
     # ------------------------------------------------------------------ #
     # DELETE /api/integrations/snipeit/oauth/disconnect
     # ------------------------------------------------------------------ #

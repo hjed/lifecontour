@@ -53,32 +53,48 @@ class SnipeItIntegrationProvider:
         is_connected = False
         needs_reauth = False
 
-        auth_stmt = text("""
-            SELECT needs_reauth
-            FROM user_snipe_it_auth
-            WHERE user_id = :user_id
-        """)
-        auth_result = await connection.execute(auth_stmt, {"user_id": user_id})
-        auth_row = auth_result.fetchone()
+        try:
+            auth_stmt = text("""
+                SELECT needs_reauth
+                FROM user_snipe_it_auth
+                WHERE user_id = :user_id
+            """)
+            auth_result = await connection.execute(auth_stmt, {"user_id": user_id})
+            auth_row = auth_result.fetchone()
 
-        if auth_row:
-            is_connected = True
-            needs_reauth = bool(auth_row.needs_reauth)
+            if auth_row:
+                is_connected = True
+                needs_reauth = bool(auth_row.needs_reauth)
+        except Exception as e:
+            # Gracefully degrade if table doesn't exist yet (e.g. during deployment)
+            logger.warning(
+                "Failed to query user_snipe_it_auth",
+                user_id=user_id,
+                error=str(e),
+            )
 
         # 2. Query sync summary from sync_jobs (Snipe-IT uses 'snipeit' source)
-        sync_stmt = text("""
-            SELECT
-                MAX(CASE WHEN status = 'completed' THEN completed_at END)
-                    AS last_sync_time,
-                COUNT(CASE WHEN status = 'completed' THEN 1 END)
-                    AS completed_count,
-                COUNT(CASE WHEN status = 'failed' THEN 1 END)
-                    AS failed_count
-            FROM sync_jobs
-            WHERE user_id = :user_id AND integration_source = 'snipeit'
-        """)
-        sync_result = await connection.execute(sync_stmt, {"user_id": user_id})
-        sync_row = sync_result.fetchone()
+        try:
+            sync_stmt = text("""
+                SELECT
+                    MAX(CASE WHEN status = 'completed' THEN completed_at END)
+                        AS last_sync_time,
+                    COUNT(CASE WHEN status = 'completed' THEN 1 END)
+                        AS completed_count,
+                    COUNT(CASE WHEN status = 'failed' THEN 1 END)
+                        AS failed_count
+                FROM sync_jobs
+                WHERE user_id = :user_id AND integration_source = 'snipeit'
+            """)
+            sync_result = await connection.execute(sync_stmt, {"user_id": user_id})
+            sync_row = sync_result.fetchone()
+        except Exception as e:
+            logger.warning(
+                "Failed to query sync_jobs for Snipe-IT",
+                user_id=user_id,
+                error=str(e),
+            )
+            sync_row = None
 
         sync_summary = SyncSummary(
             last_sync_time=sync_row.last_sync_time if sync_row else None,
