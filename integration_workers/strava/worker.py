@@ -349,24 +349,30 @@ async def sync_strava_activities(
     sync_type: str = "full",
 ) -> dict[str, Any]:
     """
-    ARQ task: sync Strava activities for a user.
+    ARQ task: orchestrate Strava activity sync for a user.
+
+    Lists activity pages from Strava and enqueues a
+    ``sync_strava_activity_batch`` job for each page. Each batch
+    commits independently, so progress is preserved even if later
+    batches fail. ARQ's ``max_tries`` provides automatic retries
+    per batch.
 
     Called when the user clicks "Import Activities" in the UI or
     when a full sync is triggered programmatically.
 
     Args:
-        ctx: ARQ worker context.
+        ctx: ARQ worker context (must contain ``redis`` ARQ pool).
         user_id: Internal user ID.
         sync_type: 'full' or 'smart'.
 
     Returns:
-        Dict with sync result summary.
+        Dict with orchestration summary.
     """
-    session_factory = ctx["session_factory"]
     worker_settings: StravaSettings = ctx["settings"]
+    session_factory = ctx["session_factory"]
 
     logger.info(
-        "Starting Strava activity sync",
+        "Starting Strava activity sync orchestrator",
         user_id=user_id,
         sync_type=sync_type,
     )
@@ -382,26 +388,117 @@ async def sync_strava_activities(
     sync_service = _create_sync_service(user_id, auth_data, worker_settings)
 
     try:
+        # For smart sync, we could use after_timestamp from last sync
+        # For now, full sync imports everything
+        after_ts = None
+        batches_enqueued = 0
+        page_number = 0
+
+        async for activity_ids in sync_service.list_activity_batches(
+            after_timestamp=after_ts,
+        ):
+            page_number += 1
+
+            # Deterministic job ID prevents duplicate enqueues if the
+            # orchestrator is retried by ARQ after a partial run.
+            batch_job_id = f"strava-batch-{user_id}-p{page_number}"
+
+            job = await ctx["redis"].enqueue_job(
+                "sync_strava_activity_batch",
+                user_id,
+                activity_ids,
+                _job_id=batch_job_id,
+                _queue_name=STRAVA_ARQ_QUEUE_NAME,
+            )
+            if job:
+                batches_enqueued += 1
+                logger.info(
+                    "Enqueued activity batch job",
+                    job_id=job.job_id,
+                    batch_size=len(activity_ids),
+                    batch_number=page_number,
+                )
+            else:
+                # enqueue_job returns None when a job with the same
+                # _job_id already exists — this is expected on retries.
+                logger.info(
+                    "Activity batch job already enqueued (idempotent)",
+                    batch_job_id=batch_job_id,
+                    batch_number=page_number,
+                )
+
+        logger.info(
+            "Strava sync orchestrator completed",
+            user_id=user_id,
+            batches_enqueued=batches_enqueued,
+            total_pages=page_number,
+        )
+        return {
+            "status": "enqueued",
+            "sync_type": sync_type,
+            "batches_enqueued": batches_enqueued,
+        }
+    finally:
+        await sync_service._api_client.close()
+
+
+@trace_arq_job
+async def sync_strava_activity_batch(
+    ctx: dict[str, Any],
+    user_id: str,
+    activity_ids: list[int],
+) -> dict[str, Any]:
+    """
+    ARQ task: process a batch of Strava activity IDs.
+
+    Fetches full activity details + streams from Strava and creates
+    outbox events. Each activity is processed independently so one
+    failure doesn't block others. ARQ's ``max_tries`` handles
+    automatic retries on job-level failures (e.g. timeout).
+
+    Args:
+        ctx: ARQ worker context.
+        user_id: Internal user ID.
+        activity_ids: Strava activity IDs to process.
+
+    Returns:
+        Dict with batch processing result.
+    """
+    session_factory = ctx["session_factory"]
+    worker_settings: StravaSettings = ctx["settings"]
+
+    logger.info(
+        "Processing Strava activity batch",
+        user_id=user_id,
+        batch_size=len(activity_ids),
+    )
+
+    auth_data = await _resolve_user_by_id(session_factory, user_id)
+    if auth_data is None:
+        logger.error(
+            "No Strava auth found for user",
+            user_id=user_id,
+        )
+        return {"status": "error", "reason": "no_auth"}
+
+    sync_service = _create_sync_service(user_id, auth_data, worker_settings)
+
+    try:
         async with session_factory() as session:
             async with session.begin():
-                # For smart sync, we could use after_timestamp from last sync
-                # For now, full sync imports everything
-                after_ts = None
-                events = await sync_service.sync_full(
+                result = await sync_service.sync_activity_batch(
+                    activity_ids=activity_ids,
                     session=session,
-                    after_timestamp=after_ts,
                 )
 
                 logger.info(
-                    "Strava activity sync completed",
+                    "Strava activity batch completed",
                     user_id=user_id,
-                    sync_type=sync_type,
-                    activities_synced=len(events),
+                    **result,
                 )
                 return {
                     "status": "completed",
-                    "sync_type": sync_type,
-                    "activities_synced": len(events),
+                    **result,
                 }
     finally:
         await sync_service._api_client.close()
@@ -412,7 +509,11 @@ class StravaWorkerSettings(WorkerSettingsBase):
     """ARQ worker configuration."""
 
     # Task functions
-    functions = [process_strava_webhook_event, sync_strava_activities]
+    functions = [
+        process_strava_webhook_event,
+        sync_strava_activities,
+        sync_strava_activity_batch,
+    ]
 
     # Worker lifecycle
     on_startup: StartupShutdown = startup

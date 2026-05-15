@@ -202,33 +202,68 @@ class TestSyncSingleActivity:
         assert event.event_data["existing_journal_id"] == 42
 
 
-class TestFullSync:
-    """Tests for full historical activity sync."""
+class TestListActivityBatches:
+    """Tests for list_activity_batches async generator."""
 
     @pytest.mark.asyncio()
-    async def test_paginates_until_empty(
+    async def test_yields_pages_until_empty(
         self,
         sync_service: StravaSyncService,
         mock_api_client: AsyncMock,
-        mock_session: MagicMock,
     ) -> None:
-        """Iterates pages until an empty response is returned."""
+        """Yields activity ID batches for each page, stops on empty page."""
         page1 = [_make_activity(activity_id=1), _make_activity(activity_id=2)]
         page2 = [_make_activity(activity_id=3)]
         page3: list[StravaActivity] = []
 
         mock_api_client.list_activities.side_effect = [page1, page2, page3]
 
-        with patch.object(
-            sync_service,
-            "_find_existing_journal_id",
-            new_callable=AsyncMock,
-            return_value=None,
-        ):
-            events = await sync_service.sync_full(session=mock_session)
+        batches = []
+        async for batch in sync_service.list_activity_batches():
+            batches.append(batch)
 
         assert mock_api_client.list_activities.await_count == 3
-        assert len(events) == 3
+        assert len(batches) == 2
+        assert batches[0] == [1, 2]
+        assert batches[1] == [3]
+
+    @pytest.mark.asyncio()
+    async def test_passes_after_timestamp(
+        self,
+        sync_service: StravaSyncService,
+        mock_api_client: AsyncMock,
+    ) -> None:
+        """Passes 'after' parameter for incremental sync."""
+        mock_api_client.list_activities.return_value = []
+
+        after_ts = int(datetime(2026, 1, 1, tzinfo=UTC).timestamp())
+        async for _ in sync_service.list_activity_batches(after_timestamp=after_ts):
+            pass  # pragma: no cover
+
+        call_kwargs = mock_api_client.list_activities.call_args
+        assert (
+            call_kwargs.kwargs.get("after") == after_ts
+            or call_kwargs[1].get("after") == after_ts
+        )
+
+    @pytest.mark.asyncio()
+    async def test_yields_nothing_when_no_activities(
+        self,
+        sync_service: StravaSyncService,
+        mock_api_client: AsyncMock,
+    ) -> None:
+        """Yields nothing when first page is empty."""
+        mock_api_client.list_activities.return_value = []
+
+        batches = []
+        async for batch in sync_service.list_activity_batches():
+            batches.append(batch)
+
+        assert batches == []
+
+
+class TestSyncActivityBatch:
+    """Tests for sync_activity_batch (per-batch processing)."""
 
     @pytest.mark.asyncio()
     async def test_creates_outbox_event_for_each_activity(
@@ -237,9 +272,11 @@ class TestFullSync:
         mock_api_client: AsyncMock,
         mock_session: MagicMock,
     ) -> None:
-        """Creates one outbox event per activity."""
-        activities = [_make_activity(activity_id=i) for i in range(5)]
-        mock_api_client.list_activities.side_effect = [activities, []]
+        """Creates one outbox event per activity in the batch."""
+        mock_api_client.get_activity.side_effect = [
+            _make_activity(activity_id=1),
+            _make_activity(activity_id=2),
+        ]
 
         with patch.object(
             sync_service,
@@ -247,30 +284,331 @@ class TestFullSync:
             new_callable=AsyncMock,
             return_value=None,
         ):
-            events = await sync_service.sync_full(session=mock_session)
+            result = await sync_service.sync_activity_batch(
+                activity_ids=[1, 2], session=mock_session
+            )
 
-        assert len(events) == 5
-        for event in events:
-            assert event.event_type == "journal_event.created"
+        assert result["synced"] == 2
+        assert result["skipped"] == 0
+        assert result["failed"] == 0
+        assert mock_session.add.call_count == 2
 
     @pytest.mark.asyncio()
-    async def test_passes_after_timestamp(
+    async def test_skips_already_imported_activities(
         self,
         sync_service: StravaSyncService,
         mock_api_client: AsyncMock,
         mock_session: MagicMock,
     ) -> None:
-        """Passes 'after' parameter for incremental sync."""
-        mock_api_client.list_activities.return_value = []
+        """Skips activities that already have a journal entry."""
+        mock_api_client.get_activity.side_effect = [
+            _make_activity(activity_id=1),
+            _make_activity(activity_id=2),
+        ]
 
-        after_ts = int(datetime(2026, 1, 1, tzinfo=UTC).timestamp())
-        await sync_service.sync_full(session=mock_session, after_timestamp=after_ts)
+        with patch.object(
+            sync_service,
+            "_find_existing_journal_id",
+            new_callable=AsyncMock,
+            side_effect=[42, None],  # first exists, second is new
+        ):
+            result = await sync_service.sync_activity_batch(
+                activity_ids=[1, 2], session=mock_session
+            )
 
-        call_kwargs = mock_api_client.list_activities.call_args
-        assert (
-            call_kwargs.kwargs.get("after") == after_ts
-            or call_kwargs[1].get("after") == after_ts
+        assert result["synced"] == 1
+        assert result["skipped"] == 1
+
+    @pytest.mark.asyncio()
+    async def test_continues_after_stream_fetch_failure(
+        self,
+        sync_service: StravaSyncService,
+        mock_api_client: AsyncMock,
+        mock_session: MagicMock,
+    ) -> None:
+        """Continues processing remaining activities when one stream fetch fails.
+
+        Transient errors (TimeoutError) are retried up to 3 times before
+        counting as failed.
+        """
+        # Activity 2 fails all 3 retry attempts; get_activity is called
+        # once per attempt, so we need 3 copies for activity 2.
+        mock_api_client.get_activity.side_effect = [
+            _make_activity(activity_id=1, start_latlng=[-33.8, 151.2]),
+            _make_activity(activity_id=2, start_latlng=[-33.9, 151.3]),
+            _make_activity(activity_id=2, start_latlng=[-33.9, 151.3]),
+            _make_activity(activity_id=2, start_latlng=[-33.9, 151.3]),
+            _make_activity(activity_id=3, start_latlng=[-34.0, 151.4]),
+        ]
+
+        # Activity 2's stream fetch always times out (3 retries)
+        mock_api_client.get_activity_streams.side_effect = [
+            StravaStreamSet(),
+            TimeoutError("Connection timed out"),
+            TimeoutError("Connection timed out"),
+            TimeoutError("Connection timed out"),
+            StravaStreamSet(),
+        ]
+
+        with (
+            patch.object(
+                sync_service,
+                "_find_existing_journal_id",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch("strava_sync_service.asyncio.sleep", new_callable=AsyncMock),
+        ):
+            result = await sync_service.sync_activity_batch(
+                activity_ids=[1, 2, 3], session=mock_session
+            )
+
+        assert result["synced"] == 2
+        assert result["failed"] == 1
+
+    @pytest.mark.asyncio()
+    async def test_continues_after_transform_failure(
+        self,
+        sync_service: StravaSyncService,
+        mock_api_client: AsyncMock,
+        mock_session: MagicMock,
+    ) -> None:
+        """Continues syncing when transformation raises a non-transient error.
+
+        Non-transient errors (ValueError) fail immediately without retry.
+        """
+        mock_api_client.get_activity.side_effect = [
+            _make_activity(activity_id=1),
+            _make_activity(activity_id=2),
+            _make_activity(activity_id=3),
+        ]
+
+        with (
+            patch.object(
+                sync_service,
+                "_find_existing_journal_id",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch.object(
+                sync_service._transformer,
+                "transform",
+                side_effect=[
+                    _make_transformed(strava_activity_id="1"),
+                    ValueError("Unexpected transform error"),
+                    _make_transformed(strava_activity_id="3"),
+                ],
+            ),
+        ):
+            result = await sync_service.sync_activity_batch(
+                activity_ids=[1, 2, 3], session=mock_session
+            )
+
+        assert result["synced"] == 2
+        assert result["failed"] == 1
+
+    @pytest.mark.asyncio()
+    async def test_continues_after_api_error(
+        self,
+        sync_service: StravaSyncService,
+        mock_api_client: AsyncMock,
+        mock_session: MagicMock,
+    ) -> None:
+        """Continues syncing when a 5xx Strava API error exhausts retries."""
+        from strava_api_client import StravaAPIError
+
+        # Activity 1 fails all 3 retries with 500
+        mock_api_client.get_activity.side_effect = [
+            _make_activity(activity_id=1, start_latlng=[-33.8, 151.2]),
+            _make_activity(activity_id=1, start_latlng=[-33.8, 151.2]),
+            _make_activity(activity_id=1, start_latlng=[-33.8, 151.2]),
+            _make_activity(activity_id=2, start_latlng=[-33.9, 151.3]),
+        ]
+
+        mock_api_client.get_activity_streams.side_effect = [
+            StravaAPIError("Server error", status_code=500),
+            StravaAPIError("Server error", status_code=500),
+            StravaAPIError("Server error", status_code=500),
+            StravaStreamSet(),
+        ]
+
+        with (
+            patch.object(
+                sync_service,
+                "_find_existing_journal_id",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch("strava_sync_service.asyncio.sleep", new_callable=AsyncMock),
+        ):
+            result = await sync_service.sync_activity_batch(
+                activity_ids=[1, 2], session=mock_session
+            )
+
+        assert result["synced"] == 1
+        assert result["failed"] == 1
+
+    @pytest.mark.asyncio()
+    async def test_retries_transient_error_then_succeeds(
+        self,
+        sync_service: StravaSyncService,
+        mock_api_client: AsyncMock,
+        mock_session: MagicMock,
+    ) -> None:
+        """Transient error on first attempt succeeds on retry."""
+        # First attempt times out, second attempt succeeds
+        mock_api_client.get_activity.side_effect = [
+            _make_activity(activity_id=1, start_latlng=[-33.8, 151.2]),
+            _make_activity(activity_id=1, start_latlng=[-33.8, 151.2]),
+        ]
+
+        mock_api_client.get_activity_streams.side_effect = [
+            TimeoutError("Connection timed out"),
+            StravaStreamSet(),
+        ]
+
+        with (
+            patch.object(
+                sync_service,
+                "_find_existing_journal_id",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch("strava_sync_service.asyncio.sleep", new_callable=AsyncMock),
+        ):
+            result = await sync_service.sync_activity_batch(
+                activity_ids=[1], session=mock_session
+            )
+
+        assert result["synced"] == 1
+        assert result["failed"] == 0
+
+    @pytest.mark.asyncio()
+    async def test_non_transient_error_fails_immediately(
+        self,
+        sync_service: StravaSyncService,
+        mock_api_client: AsyncMock,
+        mock_session: MagicMock,
+    ) -> None:
+        """Non-transient errors (e.g. 404) are not retried."""
+        from strava_api_client import StravaAPIError
+
+        mock_api_client.get_activity.side_effect = [
+            _make_activity(activity_id=1, start_latlng=[-33.8, 151.2]),
+        ]
+
+        mock_api_client.get_activity_streams.side_effect = StravaAPIError(
+            "Not found", status_code=404
         )
+
+        with patch.object(
+            sync_service,
+            "_find_existing_journal_id",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            result = await sync_service.sync_activity_batch(
+                activity_ids=[1], session=mock_session
+            )
+
+        assert result["failed"] == 1
+        # Only called once — no retries for 404
+        assert mock_api_client.get_activity.await_count == 1
+
+    @pytest.mark.asyncio()
+    async def test_reports_counts_correctly(
+        self,
+        sync_service: StravaSyncService,
+        mock_api_client: AsyncMock,
+        mock_session: MagicMock,
+    ) -> None:
+        """Result dict reports synced, skipped, and failed accurately."""
+        # Activity 1 (GPS + timeout): retried 3 times
+        mock_api_client.get_activity.side_effect = [
+            _make_activity(activity_id=1, start_latlng=[-33.8, 151.2]),
+            _make_activity(activity_id=1, start_latlng=[-33.8, 151.2]),
+            _make_activity(activity_id=1, start_latlng=[-33.8, 151.2]),
+            _make_activity(activity_id=2),
+            _make_activity(activity_id=3),
+        ]
+
+        mock_api_client.get_activity_streams.side_effect = [
+            TimeoutError("timeout"),
+            TimeoutError("timeout"),
+            TimeoutError("timeout"),
+        ]
+
+        with (
+            patch.object(
+                sync_service,
+                "_find_existing_journal_id",
+                new_callable=AsyncMock,
+                side_effect=[None, None, None, 42, None],  # retries, existing, new
+            ),
+            patch("strava_sync_service.asyncio.sleep", new_callable=AsyncMock),
+        ):
+            result = await sync_service.sync_activity_batch(
+                activity_ids=[1, 2, 3], session=mock_session
+            )
+
+        # Activity 1: fails (GPS + timeout × 3), Activity 2: skipped, Activity 3: synced
+        assert result["synced"] == 1
+        assert result["skipped"] == 1
+        assert result["failed"] == 1
+
+    @pytest.mark.asyncio()
+    async def test_rate_limit_error_bubbles_up(
+        self,
+        sync_service: StravaSyncService,
+        mock_api_client: AsyncMock,
+        mock_session: MagicMock,
+    ) -> None:
+        """Rate limit errors propagate to ARQ for job-level retry."""
+        from strava_rate_limiter import StravaRateLimitError
+
+        mock_api_client.get_activity.side_effect = StravaRateLimitError(
+            "Rate limited", retry_after=900.0
+        )
+
+        with (
+            patch.object(
+                sync_service,
+                "_find_existing_journal_id",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            pytest.raises(StravaRateLimitError),
+        ):
+            await sync_service.sync_activity_batch(
+                activity_ids=[1], session=mock_session
+            )
+
+    @pytest.mark.asyncio()
+    async def test_db_error_bubbles_up(
+        self,
+        sync_service: StravaSyncService,
+        mock_api_client: AsyncMock,
+        mock_session: MagicMock,
+    ) -> None:
+        """SQLAlchemy errors propagate to ARQ for job-level retry."""
+        from sqlalchemy.exc import OperationalError
+
+        mock_api_client.get_activity.return_value = _make_activity(activity_id=1)
+
+        with (
+            patch.object(
+                sync_service,
+                "_find_existing_journal_id",
+                new_callable=AsyncMock,
+                side_effect=OperationalError(
+                    "connection lost", params=None, orig=Exception()
+                ),
+            ),
+            pytest.raises(OperationalError),
+        ):
+            await sync_service.sync_activity_batch(
+                activity_ids=[1], session=mock_session
+            )
 
 
 class TestDeleteHandling:
