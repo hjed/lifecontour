@@ -8,73 +8,20 @@ transaction rollback isolation via savepoints.
 
 from __future__ import annotations
 
-import os
-from collections.abc import AsyncGenerator
-
 import pytest
-import pytest_asyncio
 from cryptography.fernet import Fernet
 from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from tests.integration.conftest import (
-    _authenticated_client_context,
-    get_test_database_url,
-    workspace_env,
-)
-
 
 @pytest.fixture
-def snipeit_test_settings():
-    """Test settings with Snipe-IT OAuth config populated."""
-    from app.infrastructure.config import Settings
-
-    return Settings(
-        debug=True,
-        database_url=get_test_database_url(),
-        redis_url=os.getenv(
-            "REDIS_URL",
-            "redis://localhost:" + workspace_env.get("REDIS_TEST_PORT", "6380"),
-        ),
-        meilisearch_url=os.getenv(
-            "MEILISEARCH_URL",
-            "http://localhost:" + workspace_env.get("MEILI_TEST_PORT", "7701"),
-        ),
-        meilisearch_api_key=os.getenv("MEILISEARCH_API_KEY", "test_master_key"),
-        allowed_hosts=["*"],
-        cors_origins=["*"],
-        snipeit_client_id="test-snipeit-client-id",
-        snipeit_client_secret="test-snipeit-client-secret",
-        snipeit_encryption_key=Fernet.generate_key().decode(),
-    )
-
-
-@pytest.fixture
-def test_user():
-    """Create a test user for authentication."""
-    from app.infrastructure.auth.models import SessionUser
-
-    return SessionUser(
-        id="test-user-123",
-        email="test@example.com",
-        name="Test User",
-        avatar_url="https://example.com/avatar.jpg",
-        provider="test",
-    )
-
-
-@pytest_asyncio.fixture
-async def authenticated_client(
-    async_connection: AsyncConnection,
-    snipeit_test_settings: object,
-    test_user: object,
-) -> AsyncGenerator[AsyncClient, None]:
-    """Authenticated client with Snipe-IT OAuth config enabled."""
-    async with _authenticated_client_context(
-        async_connection, snipeit_test_settings, test_user
-    ) as client:
-        yield client
+def test_settings(test_settings):
+    """Override test_settings with Snipe-IT OAuth config populated."""
+    test_settings.snipeit_client_id = "test-snipeit-client-id"
+    test_settings.snipeit_client_secret = "test-snipeit-client-secret"
+    test_settings.snipeit_encryption_key = Fernet.generate_key().decode()
+    return test_settings
 
 
 @pytest.mark.asyncio

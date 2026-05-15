@@ -240,7 +240,7 @@ async def snipeit_oauth_callback(
         refresh_token = token_data.get("refresh_token")
         expires_in = token_data.get("expires_in")
 
-        if not all([access_token, refresh_token, expires_in]):
+        if access_token is None or refresh_token is None or expires_in is None:
             raise ValueError("Incomplete token response from Snipe-IT")
 
         from datetime import UTC, datetime, timedelta
