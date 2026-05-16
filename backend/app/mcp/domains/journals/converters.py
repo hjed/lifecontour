@@ -11,6 +11,7 @@ from typing import Any
 from core_shared.models.journals import Calendar, GearItem, Journal
 from core_shared.models.journals.activity_template import ActivityTemplate
 
+from app.core.integrations.external_link_helpers import ExternalLinkInfo
 from app.core.journal.models.journal_tag import JournalTag
 from app.mcp.domains.journals.schemas import (
     ActivityTemplateListMCPResponse,
@@ -19,6 +20,7 @@ from app.mcp.domains.journals.schemas import (
     ContactRelationshipSchema,
     ContactRelationshipSummary,
     EventDateRangeSchema,
+    ExternalLinkSchema,
     GearItemListMCPResponse,
     GearItemMCPResponse,
     JournalChildSummary,
@@ -42,6 +44,7 @@ class JournalConverter:
         parent: Journal | None = None,
         children: list[Journal] | None = None,
         additional_context: str = "",
+        external_links: list[ExternalLinkInfo] | None = None,
     ) -> JournalResponse:
         """
         Convert a Journal entity to an AI-friendly JournalResponse.
@@ -115,6 +118,16 @@ class JournalConverter:
             additional_context=additional_context,
         )
 
+        # Build external link schemas
+        external_link_schemas = [
+            ExternalLinkSchema(
+                source=link.source,
+                url=link.url,
+                external_id=link.external_id,
+            )
+            for link in (external_links or [])
+        ]
+
         return JournalResponse(
             id=journal.id or 0,
             title=journal.title,
@@ -130,6 +143,7 @@ class JournalConverter:
             calendar=calendar_schema,
             parent=parent_summary,
             children=children_summaries,
+            external_links=external_link_schemas,
             created_at=journal.created_at or journal.event_date_range.start,
             updated_at=journal.updated_at or journal.event_date_range.start,
         )

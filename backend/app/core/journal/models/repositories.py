@@ -275,6 +275,7 @@ class JournalRepository(ABC):
         calendar_id: str | None = None,
         parent_id: int | None = None,
         search: str | None = None,
+        journal_ids: list[int] | None = None,
     ) -> list[Journal]:
         """
         Get all journals for a user with pagination and filtering.
@@ -339,6 +340,7 @@ class JournalRepository(ABC):
         calendar_id: str | None = None,
         parent_id: int | None = None,
         search: str | None = None,
+        journal_ids: list[int] | None = None,
     ) -> int:
         """
         Count journals for a user with filtering.

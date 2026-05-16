@@ -560,10 +560,18 @@ Show data provenance on journal and contact detail pages with clickable links to
 Extend journal MCP tools to include external links and integration source filtering.
 
 **Acceptance Criteria:**
-- [ ] `get_journal` MCP response includes `external_links` array with `{source, url, external_id}` for each linked system
-- [ ] `search_journals` supports `integration_source` filter parameter (e.g. `integration_source=strava` returns only Strava-imported journals)
-- [ ] Fitness data fields verified complete in MCP journal response (distance, elevation_gain, elevation_loss, duration, calories, heart_rate_avg, heart_rate_max, strava_activity_id)
-- [ ] External links for journals with multiple sources (Google + Strava) correctly returned
+- [x] `get_journal` MCP response includes `external_links` array with `{source, url, external_id}` for each linked system
+- [x] `search_journals` supports `integration_source` filter parameter (e.g. `integration_source=strava` returns only Strava-imported journals)
+- [x] Fitness data fields verified complete in MCP journal response (distance, elevation_gain, elevation_loss, duration, calories, heart_rate_avg, heart_rate_max, strava_activity_id)
+- [x] External links for journals with multiple sources (Google + Strava) correctly returned
+
+**Implementation Notes:**
+- `ExternalLinkSchema` added to `schemas.py` with `source`, `url` (nullable), `external_id` fields
+- `JournalConverter.to_response` extended to accept and convert `ExternalLinkInfo` objects
+- `_fetch_journal_external_links` helper fetches Strava links from `journal_fitness_data` and Google Calendar links from `journal_external_event_links`
+- `_parse_integration_source_filter` validates `strava` and `google_calendar` sources
+- `_fetch_journal_ids_by_integration_source` uses SQL-level filtering for efficient source-based queries
+- Reuses `build_journal_external_links` from `external_link_helpers.py` for URL construction
 
 **Required Test Coverage:**
 - **Unit:** MCP response schema includes external links fields, integration source filter validation.
