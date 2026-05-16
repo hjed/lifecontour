@@ -728,6 +728,7 @@ class SqlJournalRepository(JournalRepository):
         calendar_id: str | None = None,
         parent_id: int | None = None,
         search: str | None = None,
+        journal_ids: list[int] | None = None,
     ) -> list[Journal]:
         """Get all journals for a user with pagination and filtering.
 
@@ -782,6 +783,13 @@ class SqlJournalRepository(JournalRepository):
             where_clauses.append("(j.title ILIKE :search OR j.content ILIKE :search)")
             params["search"] = f"%{search}%"
 
+        # Add journal_ids filter
+        if journal_ids is not None:
+            if not journal_ids:
+                return []
+            where_clauses.append("j.id = ANY(:journal_ids)")
+            params["journal_ids"] = journal_ids
+
         # Assemble the complete query
         distinct_keyword = "DISTINCT " if needs_distinct else ""
         base_query = base_query_select.format(distinct=distinct_keyword)
@@ -808,6 +816,7 @@ class SqlJournalRepository(JournalRepository):
         calendar_id: str | None = None,
         parent_id: int | None = None,
         search: str | None = None,
+        journal_ids: list[int] | None = None,
     ) -> int:
         """Count journals for a user with filtering.
 
@@ -860,6 +869,13 @@ class SqlJournalRepository(JournalRepository):
         if search is not None:
             where_clauses.append("(j.title ILIKE :search OR j.content ILIKE :search)")
             params["search"] = f"%{search}%"
+
+        # Add journal_ids filter
+        if journal_ids is not None:
+            if not journal_ids:
+                return 0
+            where_clauses.append("j.id = ANY(:journal_ids)")
+            params["journal_ids"] = journal_ids
 
         # Assemble the complete query
         if joins:

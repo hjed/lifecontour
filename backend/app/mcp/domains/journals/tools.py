@@ -450,10 +450,11 @@ async def _fetch_journal_external_links(
         text(
             "SELECT l.external_event_id, c.google_calendar_id, l.calendar_id "
             "FROM journal_external_event_links l "
-            "LEFT JOIN calendars c ON l.calendar_id = c.id "
+            "JOIN calendars c ON l.calendar_id = c.id "
             "WHERE l.journal_id = :journal_id "
             "AND l.external_event_id IS NOT NULL "
-            "AND trim(l.external_event_id) != ''"
+            "AND trim(l.external_event_id) != '' "
+            "AND c.google_calendar_id IS NOT NULL"
         ),
         {"journal_id": journal_id},
     )
@@ -505,9 +506,11 @@ async def _fetch_journal_ids_by_integration_source(
                 "SELECT DISTINCT l.journal_id "
                 "FROM journal_external_event_links l "
                 "JOIN journals j ON l.journal_id = j.id "
+                "JOIN calendars c ON l.calendar_id = c.id "
                 "WHERE j.user_id = :user_id "
                 "AND l.external_event_id IS NOT NULL "
-                "AND trim(l.external_event_id) != ''"
+                "AND trim(l.external_event_id) != '' "
+                "AND c.google_calendar_id IS NOT NULL"
             ),
             {"user_id": user_id},
         )
@@ -2911,29 +2914,33 @@ async def search_journals(
 
     if len(type_filters) <= 1:
         journal_type = type_filters[0] if type_filters else None
+
+        journal_ids = (
+            list(source_journal_ids) if source_journal_ids is not None else None
+        )
+
         total_hits = await repos.journal_repo.count_all(
             user_id=user_id,
             journal_type=journal_type,
             search=query,
+            journal_ids=journal_ids,
         )
         journals = await repos.journal_repo.get_all(
             user_id=user_id,
-            limit=total_hits if source_journal_ids is not None else limit,
+            limit=limit,
             offset=0,
             journal_type=journal_type,
             search=query,
+            journal_ids=journal_ids,
         )
-
-        # Apply integration source filter if active
-        if source_journal_ids is not None:
-            journals = [j for j in journals if j.id in source_journal_ids]
-            total_hits = len(journals)
-            journals = journals[:limit]
 
         results = await _build_search_results(journals, repos)
     else:
+        journal_ids = (
+            list(source_journal_ids) if source_journal_ids is not None else None
+        )
         candidate_count = await repos.journal_repo.count_all(
-            user_id=user_id, search=query
+            user_id=user_id, search=query, journal_ids=journal_ids
         )
         if candidate_count == 0:
             journals = []
@@ -2943,6 +2950,7 @@ async def search_journals(
                 limit=candidate_count,
                 offset=0,
                 search=query,
+                journal_ids=journal_ids,
             )
 
         filtered_journals: list[Journal] = []
@@ -2950,9 +2958,6 @@ async def search_journals(
         requested_types = set(type_filters)
         for journal in journals:
             if journal.id is None:
-                continue
-            # Apply integration source filter
-            if source_journal_ids is not None and journal.id not in source_journal_ids:
                 continue
             journal_types, _ = await _fetch_types_for_journal(journal.id, repos)
             if requested_types.isdisjoint(journal_types):
