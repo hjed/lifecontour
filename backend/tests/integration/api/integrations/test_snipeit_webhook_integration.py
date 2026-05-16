@@ -25,18 +25,19 @@ async def test_snipeit_webhook_publishes_to_stream(
     test_settings: Settings,
 ) -> None:
     """Test that a valid webhook POST results in a message in the Redis stream."""
+    from uuid import uuid4
+
     from redis.asyncio import Redis
 
     redis_client = Redis.from_url(test_settings.redis_url, decode_responses=False)
     stream_client = StreamClient(redis_client)
 
-    try:
-        # Clear the stream to ensure isolation for this test
-        await redis_client.delete(test_settings.stream_name)
+    unique_group = f"test-group-{uuid4()}"
 
-        # Ensure consumer group exists to track messages
+    try:
+        # Ensure consumer group exists to track messages starting from now
         await stream_client.ensure_consumer_group(
-            test_settings.stream_name, "test-group"
+            test_settings.stream_name, unique_group
         )
 
         payload = {"action": "checkout", "item": {"id": 123, "name": "Test Asset"}}
@@ -51,7 +52,7 @@ async def test_snipeit_webhook_publishes_to_stream(
         # Read from stream to verify message was published
         events = await stream_client.read_events(
             stream_name=test_settings.stream_name,
-            group_name="test-group",
+            group_name=unique_group,
             consumer_name="test-consumer",
             count=10,
             block_ms=100,
@@ -73,7 +74,11 @@ async def test_snipeit_webhook_publishes_to_stream(
 
         # Clean up
         await stream_client.acknowledge(
-            test_settings.stream_name, "test-group", webhook_event.message_id
+            test_settings.stream_name, unique_group, webhook_event.message_id
         )
     finally:
+        try:
+            await redis_client.xgroup_destroy(test_settings.stream_name, unique_group)
+        except Exception:
+            pass
         await redis_client.close()
