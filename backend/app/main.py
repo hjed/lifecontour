@@ -230,6 +230,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from app.api.integrations.snipeit_settings_controller import (
         router as snipeit_router,
     )
+    from app.api.integrations.snipeit_webhook_controller import (
+        router as snipeit_webhook_router,
+    )
     from app.api.integrations.strava_controllers import router as strava_router
     from app.api.journals.activity_template_controller import (
         router as activity_template_router,
@@ -292,6 +295,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(snipeit_router, prefix="/api", tags=["integrations-snipeit"])
     app.include_router(
         snipeit_auth_router, prefix="/api", tags=["integrations-snipeit"]
+    )
+    app.include_router(
+        snipeit_webhook_router, prefix="/api", tags=["integrations-snipeit"]
     )
 
     # Mount MCP server if enabled (mcp_app was already created above for lifespan)

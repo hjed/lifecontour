@@ -10,6 +10,7 @@ implementations will be added in subsequent phases.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
 
@@ -50,10 +51,38 @@ async def startup(ctx: dict) -> None:  # type: ignore[type-arg]
     """Initialise shared resources on worker startup."""
     logger.info("snipeit-worker starting", worker_id=settings.worker_id)
 
+    from core_shared.database import create_session_factory
+
+    from stream_consumer_tasks import run_snipeit_stream_consumer
+
+    session_factory = create_session_factory(settings.database_url)
+    ctx["session_factory"] = session_factory
+
+    # Start stream consumer for webhooks and domain events
+    consumer_task = asyncio.create_task(
+        run_snipeit_stream_consumer(
+            session_factory=session_factory,
+            redis_url=settings.redis_url,
+            stream_name=settings.stream_name,
+        )
+    )
+    ctx["stream_consumer_task"] = consumer_task
+
 
 async def shutdown(ctx: dict) -> None:  # type: ignore[type-arg]
     """Clean up shared resources on worker shutdown."""
     logger.info("snipeit-worker shutting down", worker_id=settings.worker_id)
+
+    # Stop the stream consumer
+    consumer_task = ctx.get("stream_consumer_task")
+    if consumer_task:
+        consumer_task.cancel()
+        try:
+            await consumer_task
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error("Stream consumer task failed with an exception", error=str(e))
 
 
 # ---------------------------------------------------------------------------

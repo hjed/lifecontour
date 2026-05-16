@@ -15,6 +15,7 @@ class SnipeItWorkerSettings(BaseSettings):
 
     database_url: str
     redis_url: str = "redis://localhost:6379"
+    stream_name: str = "pms:domain-events"
     encryption_key: str = ""
     log_level: str = "INFO"
     worker_id: str = "snipeit-worker"

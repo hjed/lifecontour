@@ -70,16 +70,17 @@ Implement the OAuth 2.0 connection using the Base URL from Phase 1.
 - **Unit:** Token encryption and state parameter generation.
 - **Integration:** Auth endpoints handle successful/failed token exchanges.
 
-#### Phase 3: Webhook Endpoint and Stream Registration
-**PR Size:** ~4-6 files
-Wire up event receiving and consumption infrastructure.
-**Acceptance Criteria:**
-- [ ] Main backend exposes an inbound webhook endpoint for Snipe-IT events.
-- [ ] Webhook endpoint places valid events into an outbox/stream for processing.
-- [ ] Snipe-IT worker registers as `snipeit-worker` consumer group on the Redis stream.
-**Required Test Coverage:**
-- **Unit:** Webhook validation.
-- **Integration:** Valid webhooks result in stream messages.
+#### Phase 3: Webhook Communication & Stream Processing
+- [x] Implement `POST /api/integrations/snipeit/webhook` to accept Snipe-IT webhooks
+  - [x] Fast immediate response to caller
+  - [x] Transform payload and publish to `pms:domain-events` Redis stream
+- [x] Create `SnipeItWorkerStreamConsumer` within the worker container
+  - [x] Register on stream using `snipeit-worker` consumer group
+  - [x] Acknowledge events post-processing
+- [x] Add worker lifecycle hooks to manage the stream consumer task
+- [x] Testing:
+  - [x] Unit test: Webhook endpoint accepts payload and publishes to stream
+  - [x] Integration test: Webhook endpoint successfully publishes to the Redis stream messages.
 
 ### ITER10-002: Gear Item Import & Periodic Sync (Snipe-IT → App)
 **Objective:** Sync assets from Snipe-IT into the personal management system's `gear_items` table. Snipe-IT is the Source of Truth.
