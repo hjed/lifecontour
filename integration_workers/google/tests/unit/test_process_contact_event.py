@@ -23,11 +23,11 @@ def _mock_session_factory(
     sync_row: Any = None,
     users: list[Any] | None = None,
 ) -> tuple[MagicMock, AsyncMock]:
-    """Build a mock session factory with sync_metadata + user_google_integration results.
+    """Build a mock session factory with sync_metadata + user_google_auth results.
 
     The new code executes queries in this order:
       1. sync_metadata lookup (fetchone)
-      2. user_google_integration lookup (fetchall)
+      2. user_google_auth lookup (fetchall)
 
     Returns:
         (factory, mock_session) — the factory to pass to _make_ctx and
@@ -41,13 +41,13 @@ def _mock_session_factory(
     mock_sync_result = MagicMock()
     mock_sync_result.fetchone.return_value = sync_row
 
-    # user_google_integration result
+    # user_google_auth result
     mock_users_result = MagicMock()
     mock_users_result.fetchall.return_value = users or []
 
     mock_session.execute.side_effect = [
         mock_sync_result,  # 1st call: sync_metadata
-        mock_users_result,  # 2nd call: user_google_integration
+        mock_users_result,  # 2nd call: user_google_auth
     ]
 
     mock_factory = MagicMock()

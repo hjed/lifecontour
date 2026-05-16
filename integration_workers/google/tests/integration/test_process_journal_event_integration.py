@@ -14,13 +14,18 @@ from worker import process_journal_event
 async def _setup_journal_event_test_data(
     db_session, user_id, google_email, calendar_id, title, include_existing_link=False
 ):
-    # 1. Setup Data - Insert into user_google_integration
+    # 1. Setup Data - Insert into user_google_auth
     await db_session.execute(
         text("""
-        INSERT INTO user_google_integration (user_id, google_account_email, created_at, updated_at)
-        VALUES (:user_id, :email, now(), now())
+        INSERT INTO user_google_auth (user_id, google_account_email, encrypted_access_token, encrypted_refresh_token, expires_at, created_at, updated_at)
+        VALUES (:user_id, :email, :token, :refresh, now() + interval '1 hour', now(), now())
         """),
-        {"user_id": user_id, "email": google_email},
+        {
+            "user_id": user_id,
+            "email": google_email,
+            "token": b"fake_token",
+            "refresh": b"fake_refresh",
+        },
     )
 
     # 2. Setup Data - Insert into calendars
@@ -225,13 +230,18 @@ class TestProcessJournalEventIntegration:
         google_email = f"test_{uuid.uuid4().hex[:8]}@example.com"
         external_event_id = "to_be_deleted_id_123"
 
-        # 1. Setup Data - Insert into user_google_integration
+        # 1. Setup Data - Insert into user_google_auth
         await db_session.execute(
             text("""
-            INSERT INTO user_google_integration (user_id, google_account_email, created_at, updated_at)
-            VALUES (:user_id, :email, now(), now())
+            INSERT INTO user_google_auth (user_id, google_account_email, encrypted_access_token, encrypted_refresh_token, expires_at, created_at, updated_at)
+            VALUES (:user_id, :email, :token, :refresh, now() + interval '1 hour', now(), now())
             """),
-            {"user_id": user_id, "email": google_email},
+            {
+                "user_id": user_id,
+                "email": google_email,
+                "token": b"fake_token",
+                "refresh": b"fake_refresh",
+            },
         )
 
         from worker import process_journal_event
@@ -285,10 +295,15 @@ class TestProcessJournalEventIntegration:
 
         await db_session.execute(
             text("""
-            INSERT INTO user_google_integration (user_id, google_account_email, created_at, updated_at)
-            VALUES (:user_id, :email, now(), now())
+            INSERT INTO user_google_auth (user_id, google_account_email, encrypted_access_token, encrypted_refresh_token, expires_at, created_at, updated_at)
+            VALUES (:user_id, :email, :token, :refresh, now() + interval '1 hour', now(), now())
             """),
-            {"user_id": user_id, "email": google_email},
+            {
+                "user_id": user_id,
+                "email": google_email,
+                "token": b"fake_token",
+                "refresh": b"fake_refresh",
+            },
         )
 
         from worker import process_journal_event
@@ -341,9 +356,14 @@ class TestProcessJournalEventIntegration:
         # Setup user and both calendars
         await db_session.execute(
             text(
-                "INSERT INTO user_google_integration (user_id, google_account_email, created_at, updated_at) VALUES (:user_id, :email, now(), now())"
+                "INSERT INTO user_google_auth (user_id, google_account_email, encrypted_access_token, encrypted_refresh_token, expires_at, created_at, updated_at) VALUES (:user_id, :email, :token, :refresh, now() + interval '1 hour', now(), now())"
             ),
-            {"user_id": user_id, "email": google_email},
+            {
+                "user_id": user_id,
+                "email": google_email,
+                "token": b"fake_token",
+                "refresh": b"fake_refresh",
+            },
         )
         await db_session.execute(
             text(

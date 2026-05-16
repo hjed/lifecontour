@@ -2002,7 +2002,7 @@ async def _process_journal_deleted_event(
     async with session_factory() as session:
         auth_stmt = text("""
             SELECT google_account_email
-            FROM user_google_integration
+            FROM user_google_auth
             WHERE user_id = :user_id
             LIMIT 1
         """)
@@ -2155,7 +2155,7 @@ async def _process_journal_upsert_event(
 
         auth_stmt = text("""
             SELECT google_account_email
-            FROM user_google_integration
+            FROM user_google_auth
             WHERE user_id = :user_id
             LIMIT 1
         """)
@@ -2488,7 +2488,7 @@ async def process_tag_event(
             # Find all users with Google Integration
             auth_stmt = text("""
                 SELECT user_id, google_account_email
-                FROM user_google_integration
+                FROM user_google_auth
             """)
             auth_result = await session.execute(auth_stmt)
             users = auth_result.fetchall()
@@ -2770,7 +2770,7 @@ async def process_contact_event(
         # Find all Google integrations for all users
         auth_stmt = text("""
             SELECT user_id, google_account_email
-            FROM user_google_integration
+            FROM user_google_auth
         """)
         auth_result = await session.execute(auth_stmt)
         users = auth_result.fetchall()
