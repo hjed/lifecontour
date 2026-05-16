@@ -171,3 +171,22 @@ async def get_integration_registry_service() -> Any:
         IntegrationRegistryService,
         await _resolve_dependency(IntegrationRegistryService),
     )
+
+
+async def get_task_queue_service() -> Any:
+    """Resolve the task queue service for the current MCP request."""
+    from app.core.integrations.task_queue_service import TaskQueueService
+
+    return cast(TaskQueueService, await _resolve_dependency(TaskQueueService))
+
+
+async def get_strava_athlete_mapping_service() -> Any:
+    """Resolve the strava athlete mapping service for the current MCP request."""
+    from app.core.integrations.strava.athlete_mapping_service import (
+        StravaAthleteMappingService,
+    )
+
+    return cast(
+        StravaAthleteMappingService,
+        await _resolve_dependency(StravaAthleteMappingService),
+    )

@@ -1156,3 +1156,53 @@ class TestContactConverterAISummaryIntegration:
         assert response.interaction_summary == "My custom description of Diana"
         assert response.follow_up_suggestions == ["Follow up soon"]
         assert "My custom description of Diana" in response.summary
+
+    @pytest.mark.asyncio
+    async def test_get_contact_with_external_links_via_mounted_http_session(
+        self,
+        authenticated_lifespan_client,
+        contact_service: ContactService,
+        clean_database: AsyncConnection,
+    ):
+        """Mounted MCP HTTP calls should return external_links for get_contact."""
+        from core_shared.models.contacts.entities import Contact
+        from sqlalchemy import text
+
+        c1 = await contact_service.create_contact(
+            Contact(first_name="Jane", last_name="Doe"), clean_database
+        )
+        assert c1.id is not None
+        # Insert a dummy external reference
+        await clean_database.execute(
+            text(
+                "INSERT INTO external_references (internal_entity_id, internal_entity_type, external_system, external_entity_id, external_entity_type) "
+                "VALUES (:internal_id, 'contact', 'google', 'people/c123456789', 'person')"
+            ),
+            {"internal_id": int(c1.id)},
+        )
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+
+            resp = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "get_contact",
+                        "arguments": {"contact_id": c1.id},
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+            assert resp.status_code == 200
+            payload = extract_mcp_json_payload(resp.text)
+
+            assert "external_links" in payload
+            links = payload["external_links"]
+            assert len(links) == 1
+            assert links[0]["source"] == "google_contacts"
+            assert links[0]["external_id"] == "people/c123456789"
+            assert links[0]["url"] == "https://contacts.google.com/person/c123456789"

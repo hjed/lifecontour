@@ -144,6 +144,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             ),
         ] = False,
         contact_service: ContactService = mcp_depends(get_contact_service),
+        connection: AsyncConnection = mcp_depends(get_async_connection),
     ) -> str:
         """
         Get contact details by ID for AI analysis.
@@ -175,8 +176,32 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         if contact is None:
             raise ContactNotFoundError(contact_id)
 
+        # Fetch external references for contact
+        from app.core.integrations.external_link_helpers import (
+            build_contact_external_links,
+        )
+        from app.mcp.domains.journals.schemas import ExternalLinkSchema
+
+        external_references = (
+            await contact_service.contact_repo.get_external_references(contact_id)
+        )
+
+        link_infos = build_contact_external_links(
+            external_references=external_references
+        )
+        external_links = [
+            ExternalLinkSchema(
+                source=link.source,
+                url=link.url,
+                external_id=link.external_id,
+            )
+            for link in link_infos
+        ]
+
         # Convert to AI-friendly response using converter
-        response = ContactConverter.to_contact_response(contact)
+        response = ContactConverter.to_contact_response(
+            contact, external_links=external_links
+        )
 
         # Add history context if requested
         if include_history:

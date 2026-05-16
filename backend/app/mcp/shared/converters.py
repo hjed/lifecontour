@@ -16,6 +16,7 @@ from app.mcp.domains.contacts.schemas import (
     GlobalSearchResponse,
     ImportantDateInfo,
 )
+from app.mcp.domains.journals.schemas import ExternalLinkSchema
 
 
 class ContactConverter:
@@ -43,7 +44,9 @@ class ContactConverter:
 
     @staticmethod
     def to_contact_response(
-        contact: Contact, additional_context: str = ""
+        contact: Contact,
+        additional_context: str = "",
+        external_links: list[ExternalLinkSchema] | None = None,
     ) -> ContactResponse:
         """
         Convert a Contact entity to an AI-friendly ContactResponse.
@@ -146,6 +149,7 @@ class ContactConverter:
             summary=summary,
             interaction_summary=interaction_summary,
             follow_up_suggestions=ai_follow_up_suggestions,
+            external_links=external_links or [],
         )
 
     @staticmethod

@@ -371,6 +371,25 @@ class SqlContactRepository(ContactRepository):
             return await self.find_by_id(row.id)
         return None
 
+    async def get_external_references(self, contact_id: int) -> list[dict[str, str]]:
+        """Get all external references for a contact."""
+        query = text(
+            """
+            SELECT external_system, external_entity_id, external_entity_type
+            FROM external_references
+            WHERE internal_entity_type = 'contact' AND internal_entity_id = :contact_id
+            """
+        )
+        result = await self.conn.execute(query, {"contact_id": contact_id})
+        return [
+            {
+                "external_system": row.external_system,
+                "external_entity_id": row.external_entity_id,
+                "external_entity_type": row.external_entity_type,
+            }
+            for row in result.fetchall()
+        ]
+
     async def search(self, query: str, limit: int = 50) -> list[Contact]:
         """Search contacts by name, email, or notes."""
         search_query = text(

@@ -9,6 +9,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.mcp.domains.journals.schemas import ExternalLinkSchema
+
 # Constants for field descriptions
 _COMPANY_DESC = "Company or organization name"
 _JOB_TITLE_DESC = "Job title or position"
@@ -121,6 +123,11 @@ class ContactResponse(BaseModel):
         description="AI-generated follow-up action suggestions for this contact",
     )
 
+    external_links: list[ExternalLinkSchema] = Field(
+        default_factory=list,
+        description="Links to records in external systems (e.g., Google Contacts)",
+    )
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -147,6 +154,13 @@ class ContactResponse(BaseModel):
                 "follow_up_suggestions": [
                     "Schedule next coffee catch-up",
                     "Follow up on side project progress",
+                ],
+                "external_links": [
+                    {
+                        "source": "google_contacts",
+                        "url": "https://contacts.google.com/person/c1234567890",
+                        "external_id": "people/c1234567890",
+                    }
                 ],
             }
         }

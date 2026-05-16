@@ -548,11 +548,11 @@ Show data provenance on journal and contact detail pages with clickable links to
 **Dependencies:** ITER5-005 (external links and participant data must exist)
 
 **Acceptance Criteria (task-level):**
-- [ ] MCP journal responses include external system links (source, URL)
-- [ ] MCP contact responses include external system links
-- [ ] MCP `search_journals` can filter by integration source
-- [ ] Strava fitness data fully exposed in MCP journal responses
-- [ ] Integration status available via MCP
+- [x] MCP journal responses include external system links (source, URL)
+- [x] MCP contact responses include external system links
+- [x] MCP `search_journals` can filter by integration source
+- [x] Strava fitness data fully exposed in MCP journal responses
+- [x] Integration status available via MCP
 
 #### Phase 1: Journal MCP Extensions
 **PR Size:** ~3–5 files
@@ -583,10 +583,10 @@ Extend journal MCP tools to include external links and integration source filter
 Extend contact MCP tools and add integration management tools.
 
 **Acceptance Criteria:**
-- [ ] `get_contact` MCP response includes `external_links` array with `{source, url, external_id}`
-- [ ] `list_integrations` MCP tool returns same data as `GET /api/integrations` (already added in ITER5-002 Phase 1 — verify Strava data is complete)
-- [ ] `trigger_sync` MCP tool: trigger a sync for a specific integration (e.g. Strava full sync)
-- [ ] Strava athlete-to-contact mappings accessible via MCP (query by contact or by athlete ID)
+- [x] `get_contact` MCP response includes `external_links` array with `{source, url, external_id}`
+- [x] `list_integrations` MCP tool returns same data as `GET /api/integrations` (already added in ITER5-002 Phase 1 — verify Strava data is complete)
+- [x] `trigger_sync` MCP tool: trigger a sync for a specific integration (e.g. Strava full sync)
+- [x] Strava athlete-to-contact mappings accessible via MCP (query by contact or by athlete ID)
 
 **Required Test Coverage:**
 - **Unit:** contact external links schema, trigger_sync parameter validation.
