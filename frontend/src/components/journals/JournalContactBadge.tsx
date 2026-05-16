@@ -7,7 +7,7 @@
 
 'use client';
 
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { X, Plus, Pencil } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -97,16 +97,6 @@ export function JournalContactBadge({
     ContactEventRole | 'NO_ROLE'
   >('NO_ROLE');
   const [isLoading, setIsLoading] = useState(false);
-
-  // Reset form when opened
-  useEffect(() => {
-    if (isAddOpen) {
-      setSelectedContacts([]);
-      setSelectedRelationshipType(JournalContactRelationshipType.PARTICIPANT);
-      setSelectedStatus(defaultStatus || 'NO_STATUS');
-      setSelectedRole('NO_ROLE');
-    }
-  }, [isAddOpen, defaultStatus]);
 
   const existingContactIds = useMemo(() => contacts.map(c => c.id), [contacts]);
   const excludeContactIds = useMemo(
@@ -213,7 +203,20 @@ export function JournalContactBadge({
 
       {/* Add Contact Button */}
       {canEdit && onContactAdd && (
-        <Popover open={isAddOpen} onOpenChange={setIsAddOpen}>
+        <Popover
+          open={isAddOpen}
+          onOpenChange={open => {
+            setIsAddOpen(open);
+            if (open) {
+              setSelectedContacts([]);
+              setSelectedRelationshipType(
+                JournalContactRelationshipType.PARTICIPANT
+              );
+              setSelectedStatus(defaultStatus || 'NO_STATUS');
+              setSelectedRole('NO_ROLE');
+            }
+          }}
+        >
           <PopoverTrigger asChild>
             <Button
               variant='outline'

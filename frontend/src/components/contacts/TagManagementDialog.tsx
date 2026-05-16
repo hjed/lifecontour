@@ -105,10 +105,6 @@ export function TagManagementDialog({
           ? String(tag.attributes.parent_id)
           : 'none',
       });
-
-      setMergeTargetId('');
-      setShowMergeConfirm(false);
-      setShowDeleteConfirm(false);
     }
   }, [tag, open, form]);
 
@@ -154,7 +150,17 @@ export function TagManagementDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={newOpen => {
+        if (!newOpen) {
+          setMergeTargetId('');
+          setShowMergeConfirm(false);
+          setShowDeleteConfirm(false);
+        }
+        onOpenChange(newOpen);
+      }}
+    >
       <DialogContent className='max-h-[90vh] overflow-y-auto sm:max-w-[425px]'>
         <DialogHeader>
           <DialogTitle>Edit Tag</DialogTitle>
