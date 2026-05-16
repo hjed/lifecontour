@@ -21,6 +21,25 @@ TOTAL_DURATION_DESC = "Total duration in seconds"
 TOTAL_ELEVATION_GAIN_DESC = "Total elevation gain in metres"
 
 
+class ExternalLinkSchema(BaseModel):
+    """AI-friendly external system link format.
+
+    Represents a link to an external system (e.g. Strava, Google Calendar)
+    that is associated with a journal entry.
+    """
+
+    source: str = Field(
+        description="Integration source identifier (e.g. 'strava', 'google_calendar')"
+    )
+    url: str | None = Field(
+        default=None,
+        description="Clickable URL to the external record, or null if not constructable",
+    )
+    external_id: str = Field(
+        description="The external system's identifier for the entity"
+    )
+
+
 class EventDateRangeSchema(BaseModel):
     """AI-friendly event date range format."""
 
@@ -118,6 +137,11 @@ class JournalResponse(BaseModel):
 
     children: list[JournalChildSummary] = Field(
         default_factory=list, description="Child journal summaries (if parent journal)"
+    )
+
+    external_links: list[ExternalLinkSchema] = Field(
+        default_factory=list,
+        description="External system links (e.g. Strava activity, Google Calendar event)",
     )
 
     created_at: datetime = Field(description="Creation timestamp (UTC)")

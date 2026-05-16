@@ -45,6 +45,10 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
+from app.core.integrations.external_link_helpers import (
+    ExternalLinkInfo,
+    build_journal_external_links,
+)
 from app.core.journal.adapters.sql.abseiling_data_repository import (
     SqlAbseilingDataRepository,
 )
@@ -304,6 +308,34 @@ def _parse_activity_type_filter(activity_type: str | None) -> str | None:
     return normalized
 
 
+# Valid integration sources for journal filtering
+_VALID_INTEGRATION_SOURCES = {"strava", "google_calendar"}
+
+
+def _parse_integration_source_filter(value: str | None) -> str | None:
+    """Parse and validate an integration source filter.
+
+    Args:
+        value: Integration source string, or None.
+
+    Returns:
+        Normalised integration source string, or None.
+
+    Raises:
+        ValueError: If the value is not a recognised integration source.
+    """
+    if value is None:
+        return None
+
+    normalized = value.strip().lower()
+    if normalized not in _VALID_INTEGRATION_SOURCES:
+        allowed = ", ".join(sorted(_VALID_INTEGRATION_SOURCES))
+        raise ValueError(
+            f"Invalid integration_source '{value}'. Must be one of: {allowed}"
+        )
+    return normalized
+
+
 def _parse_optional_datetime_filter(
     value: str | None, field_name: str, *, is_end: bool = False
 ) -> datetime | None:
@@ -386,6 +418,98 @@ async def _fetch_types_for_journal(
         repos.kayaking_data_repo,
         repos.cross_country_skiing_data_repo,
     )
+
+
+async def _fetch_journal_external_links(
+    journal_id: int,
+    fitness_data_repo: SqlFitnessDataRepository,
+    db_connection: AsyncConnection,
+) -> list[ExternalLinkInfo]:
+    """Fetch external system links for a journal.
+
+    Fetches Strava links from fitness_data and Google Calendar links
+    from journal_external_event_links, then builds ExternalLinkInfo objects
+    using the shared helper.
+
+    Args:
+        journal_id: The journal ID to fetch links for
+        fitness_data_repo: Repository for fitness data (Strava link)
+        db_connection: Database connection for external event link queries
+
+    Returns:
+        List of ExternalLinkInfo objects for the journal.
+    """
+    # Fetch Strava activity ID from fitness data
+    strava_activity_id: str | None = None
+    fitness_data = await fitness_data_repo.find_by_journal_id(journal_id)
+    if fitness_data and fitness_data.strava_activity_id:
+        strava_activity_id = fitness_data.strava_activity_id
+
+    # Fetch Google Calendar external event links
+    result = await db_connection.execute(
+        text(
+            "SELECT l.external_event_id, c.google_calendar_id, l.calendar_id "
+            "FROM journal_external_event_links l "
+            "LEFT JOIN calendars c ON l.calendar_id = c.id "
+            "WHERE l.journal_id = :journal_id"
+        ),
+        {"journal_id": journal_id},
+    )
+    external_event_links = [
+        {
+            "external_event_id": row[0],
+            "calendar_id": str(row[1]) if row[1] else None,
+            "internal_calendar_id": str(row[2]) if row[2] else None,
+        }
+        for row in result
+    ]
+
+    return build_journal_external_links(
+        strava_activity_id=strava_activity_id,
+        external_event_links=external_event_links,
+    )
+
+
+async def _fetch_journal_ids_by_integration_source(
+    db_connection: AsyncConnection,
+    user_id: str,
+    integration_source: str,
+) -> set[int]:
+    """Fetch journal IDs linked to a specific integration source.
+
+    Args:
+        db_connection: Database connection
+        user_id: The user ID to filter by
+        integration_source: 'strava' or 'google_calendar'
+
+    Returns:
+        Set of journal IDs linked to the specified source.
+    """
+    if integration_source == "strava":
+        result = await db_connection.execute(
+            text(
+                "SELECT f.journal_id "
+                "FROM journal_fitness_data f "
+                "JOIN journals j ON f.journal_id = j.id "
+                "WHERE f.strava_activity_id IS NOT NULL "
+                "AND j.user_id = :user_id"
+            ),
+            {"user_id": user_id},
+        )
+    elif integration_source == "google_calendar":
+        result = await db_connection.execute(
+            text(
+                "SELECT DISTINCT l.journal_id "
+                "FROM journal_external_event_links l "
+                "JOIN journals j ON l.journal_id = j.id "
+                "WHERE j.user_id = :user_id"
+            ),
+            {"user_id": user_id},
+        )
+    else:
+        return set()
+
+    return {row[0] for row in result}
 
 
 async def _build_search_results(
@@ -2570,6 +2694,11 @@ async def get_journal(
     # Fetch tags
     journal_tags = await repos.tag_repo.get_tags_for_journal(journal_id)
 
+    # Fetch external links (Strava and Google Calendar)
+    external_links = await _fetch_journal_external_links(
+        journal_id, repos.fitness_data_repo, db_connection
+    )
+
     # Convert to AI-friendly response
     response = JournalConverter.to_response(
         journal=journal,
@@ -2578,6 +2707,7 @@ async def get_journal(
         contacts=contacts,
         tags=journal_tags,
         children=children,
+        external_links=external_links,
     )
 
     return MCPResponseBuilder.success_response(response)
@@ -2713,6 +2843,14 @@ async def search_journals(
             description="Optional: Comma-separated list of journal types to filter by",
         ),
     ] = None,
+    integration_source: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Optional: Filter by integration source (e.g. 'strava', 'google_calendar'). "
+            "Returns only journals linked to the specified external system.",
+        ),
+    ] = None,
     limit: Annotated[
         int,
         Field(
@@ -2725,12 +2863,13 @@ async def search_journals(
     """
     Search journals with filtering options.
 
-    Searches journals by query, types, and other filters.
+    Searches journals by query, types, integration source, and other filters.
     Returns AI-friendly summaries with relevance scores.
 
     Args:
         query: Optional search query for full-text search
         types: Optional comma-separated list of journal types
+        integration_source: Optional integration source filter (strava, google_calendar)
         limit: Maximum number of results to return
 
     Returns:
@@ -2745,6 +2884,25 @@ async def search_journals(
     user_id = await get_current_user_id()
     repos = _create_journal_tool_repositories(db_connection)
     type_filters = _parse_type_filters(types)
+    source_filter = _parse_integration_source_filter(integration_source)
+
+    # When integration_source filter is active, fetch journal IDs matching
+    # the source first, then intersect with other filters.
+    source_journal_ids: set[int] | None = None
+    if source_filter is not None:
+        source_journal_ids = await _fetch_journal_ids_by_integration_source(
+            db_connection, user_id, source_filter
+        )
+        if not source_journal_ids:
+            # No journals match the integration source — return empty
+            response = JournalSearchResponse(
+                results=[],
+                query=query,
+                total_hits=0,
+                processing_time_ms=0,
+                summary=f"Found 0 journal(s) linked to {source_filter}",
+            )
+            return MCPResponseBuilder.success_response(response)
 
     if len(type_filters) <= 1:
         journal_type = type_filters[0] if type_filters else None
@@ -2755,11 +2913,18 @@ async def search_journals(
         )
         journals = await repos.journal_repo.get_all(
             user_id=user_id,
-            limit=limit,
+            limit=total_hits if source_journal_ids is not None else limit,
             offset=0,
             journal_type=journal_type,
             search=query,
         )
+
+        # Apply integration source filter if active
+        if source_journal_ids is not None:
+            journals = [j for j in journals if j.id in source_journal_ids]
+            total_hits = len(journals)
+            journals = journals[:limit]
+
         results = await _build_search_results(journals, repos)
     else:
         candidate_count = await repos.journal_repo.count_all(
@@ -2781,6 +2946,9 @@ async def search_journals(
         for journal in journals:
             if journal.id is None:
                 continue
+            # Apply integration source filter
+            if source_journal_ids is not None and journal.id not in source_journal_ids:
+                continue
             journal_types, _ = await _fetch_types_for_journal(journal.id, repos)
             if requested_types.isdisjoint(journal_types):
                 continue
@@ -2795,12 +2963,13 @@ async def search_journals(
         total_hits = len(filtered_journals)
         results = results[:limit]
 
+    summary_suffix = f" linked to {source_filter}" if source_filter else ""
     response = JournalSearchResponse(
         results=results,
         query=query,
         total_hits=total_hits,
         processing_time_ms=0,
-        summary=f"Found {total_hits} journal(s)",
+        summary=f"Found {total_hits} journal(s){summary_suffix}",
     )
 
     return MCPResponseBuilder.success_response(response)
