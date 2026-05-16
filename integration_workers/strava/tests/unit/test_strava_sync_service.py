@@ -83,11 +83,42 @@ def mock_api_client() -> AsyncMock:
 
 @pytest.fixture()
 def mock_session() -> MagicMock:
-    """Mocked async database session."""
+    """Mocked async database session with begin() async context manager."""
     session = MagicMock()
     session.add = MagicMock()
     session.execute = AsyncMock()
+
+    # Support `async with session.begin():`
+    class AsyncBeginContextManager:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            pass
+
+    session.begin = MagicMock(return_value=AsyncBeginContextManager())
     return session
+
+
+@pytest.fixture()
+def mock_session_factory(mock_session: MagicMock) -> MagicMock:
+    """Mocked async database session factory.
+
+    Returns the same mock_session from each call so test assertions
+    (e.g. ``mock_session.add.call_count``) work as expected.
+    """
+    factory = MagicMock()
+
+    # async with session_factory() returns an async context manager that yields mock_session
+    class AsyncContextManager:
+        async def __aenter__(self):
+            return mock_session
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            pass
+
+    factory.side_effect = lambda: AsyncContextManager()
+    return factory
 
 
 @pytest.fixture()
@@ -108,6 +139,7 @@ class TestSyncSingleActivity:
         sync_service: StravaSyncService,
         mock_api_client: AsyncMock,
         mock_session: MagicMock,
+        mock_session_factory: MagicMock,
     ) -> None:
         """Fetches activity by ID, transforms, and creates outbox event."""
         activity = _make_activity()
@@ -134,6 +166,7 @@ class TestSyncSingleActivity:
         sync_service: StravaSyncService,
         mock_api_client: AsyncMock,
         mock_session: MagicMock,
+        mock_session_factory: MagicMock,
     ) -> None:
         """Fetches activity streams when start_latlng is present."""
         activity = _make_activity(start_latlng=[-33.8, 151.2])
@@ -158,6 +191,7 @@ class TestSyncSingleActivity:
         sync_service: StravaSyncService,
         mock_api_client: AsyncMock,
         mock_session: MagicMock,
+        mock_session_factory: MagicMock,
     ) -> None:
         """Does not fetch streams when start_latlng is None."""
         activity = _make_activity(start_latlng=None)
@@ -181,6 +215,7 @@ class TestSyncSingleActivity:
         sync_service: StravaSyncService,
         mock_api_client: AsyncMock,
         mock_session: MagicMock,
+        mock_session_factory: MagicMock,
     ) -> None:
         """Creates a journal_event.updated event when activity is already imported."""
         activity = _make_activity()
@@ -271,6 +306,7 @@ class TestSyncActivityBatch:
         sync_service: StravaSyncService,
         mock_api_client: AsyncMock,
         mock_session: MagicMock,
+        mock_session_factory: MagicMock,
     ) -> None:
         """Creates one outbox event per activity in the batch."""
         mock_api_client.get_activity.side_effect = [
@@ -285,7 +321,7 @@ class TestSyncActivityBatch:
             return_value=None,
         ):
             result = await sync_service.sync_activity_batch(
-                activity_ids=[1, 2], session=mock_session
+                activity_ids=[1, 2], session_factory=mock_session_factory
             )
 
         assert result["synced"] == 2
@@ -299,10 +335,11 @@ class TestSyncActivityBatch:
         sync_service: StravaSyncService,
         mock_api_client: AsyncMock,
         mock_session: MagicMock,
+        mock_session_factory: MagicMock,
     ) -> None:
         """Skips activities that already have a journal entry."""
+        # Only the second activity will be fetched from API
         mock_api_client.get_activity.side_effect = [
-            _make_activity(activity_id=1),
             _make_activity(activity_id=2),
         ]
 
@@ -313,7 +350,7 @@ class TestSyncActivityBatch:
             side_effect=[42, None],  # first exists, second is new
         ):
             result = await sync_service.sync_activity_batch(
-                activity_ids=[1, 2], session=mock_session
+                activity_ids=[1, 2], session_factory=mock_session_factory
             )
 
         assert result["synced"] == 1
@@ -325,6 +362,7 @@ class TestSyncActivityBatch:
         sync_service: StravaSyncService,
         mock_api_client: AsyncMock,
         mock_session: MagicMock,
+        mock_session_factory: MagicMock,
     ) -> None:
         """Continues processing remaining activities when one stream fetch fails.
 
@@ -360,7 +398,7 @@ class TestSyncActivityBatch:
             patch("strava_sync_service.asyncio.sleep", new_callable=AsyncMock),
         ):
             result = await sync_service.sync_activity_batch(
-                activity_ids=[1, 2, 3], session=mock_session
+                activity_ids=[1, 2, 3], session_factory=mock_session_factory
             )
 
         assert result["synced"] == 2
@@ -372,6 +410,7 @@ class TestSyncActivityBatch:
         sync_service: StravaSyncService,
         mock_api_client: AsyncMock,
         mock_session: MagicMock,
+        mock_session_factory: MagicMock,
     ) -> None:
         """Continues syncing when transformation raises a non-transient error.
 
@@ -401,7 +440,7 @@ class TestSyncActivityBatch:
             ),
         ):
             result = await sync_service.sync_activity_batch(
-                activity_ids=[1, 2, 3], session=mock_session
+                activity_ids=[1, 2, 3], session_factory=mock_session_factory
             )
 
         assert result["synced"] == 2
@@ -413,6 +452,7 @@ class TestSyncActivityBatch:
         sync_service: StravaSyncService,
         mock_api_client: AsyncMock,
         mock_session: MagicMock,
+        mock_session_factory: MagicMock,
     ) -> None:
         """Continues syncing when a 5xx Strava API error exhausts retries."""
         from strava_api_client import StravaAPIError
@@ -442,7 +482,7 @@ class TestSyncActivityBatch:
             patch("strava_sync_service.asyncio.sleep", new_callable=AsyncMock),
         ):
             result = await sync_service.sync_activity_batch(
-                activity_ids=[1, 2], session=mock_session
+                activity_ids=[1, 2], session_factory=mock_session_factory
             )
 
         assert result["synced"] == 1
@@ -454,6 +494,7 @@ class TestSyncActivityBatch:
         sync_service: StravaSyncService,
         mock_api_client: AsyncMock,
         mock_session: MagicMock,
+        mock_session_factory: MagicMock,
     ) -> None:
         """Transient error on first attempt succeeds on retry."""
         # First attempt times out, second attempt succeeds
@@ -477,7 +518,7 @@ class TestSyncActivityBatch:
             patch("strava_sync_service.asyncio.sleep", new_callable=AsyncMock),
         ):
             result = await sync_service.sync_activity_batch(
-                activity_ids=[1], session=mock_session
+                activity_ids=[1], session_factory=mock_session_factory
             )
 
         assert result["synced"] == 1
@@ -489,6 +530,7 @@ class TestSyncActivityBatch:
         sync_service: StravaSyncService,
         mock_api_client: AsyncMock,
         mock_session: MagicMock,
+        mock_session_factory: MagicMock,
     ) -> None:
         """Non-transient errors (e.g. 404) are not retried."""
         from strava_api_client import StravaAPIError
@@ -508,7 +550,7 @@ class TestSyncActivityBatch:
             return_value=None,
         ):
             result = await sync_service.sync_activity_batch(
-                activity_ids=[1], session=mock_session
+                activity_ids=[1], session_factory=mock_session_factory
             )
 
         assert result["failed"] == 1
@@ -521,6 +563,7 @@ class TestSyncActivityBatch:
         sync_service: StravaSyncService,
         mock_api_client: AsyncMock,
         mock_session: MagicMock,
+        mock_session_factory: MagicMock,
     ) -> None:
         """Result dict reports synced, skipped, and failed accurately."""
         # Activity 1 (GPS + timeout): retried 3 times
@@ -548,7 +591,7 @@ class TestSyncActivityBatch:
             patch("strava_sync_service.asyncio.sleep", new_callable=AsyncMock),
         ):
             result = await sync_service.sync_activity_batch(
-                activity_ids=[1, 2, 3], session=mock_session
+                activity_ids=[1, 2, 3], session_factory=mock_session_factory
             )
 
         # Activity 1: fails (GPS + timeout × 3), Activity 2: skipped, Activity 3: synced
@@ -562,6 +605,7 @@ class TestSyncActivityBatch:
         sync_service: StravaSyncService,
         mock_api_client: AsyncMock,
         mock_session: MagicMock,
+        mock_session_factory: MagicMock,
     ) -> None:
         """Rate limit errors propagate to ARQ for job-level retry."""
         from strava_rate_limiter import StravaRateLimitError
@@ -580,7 +624,7 @@ class TestSyncActivityBatch:
             pytest.raises(StravaRateLimitError),
         ):
             await sync_service.sync_activity_batch(
-                activity_ids=[1], session=mock_session
+                activity_ids=[1], session_factory=mock_session_factory
             )
 
     @pytest.mark.asyncio()
@@ -589,6 +633,7 @@ class TestSyncActivityBatch:
         sync_service: StravaSyncService,
         mock_api_client: AsyncMock,
         mock_session: MagicMock,
+        mock_session_factory: MagicMock,
     ) -> None:
         """SQLAlchemy errors propagate to ARQ for job-level retry."""
         from sqlalchemy.exc import OperationalError
@@ -607,7 +652,7 @@ class TestSyncActivityBatch:
             pytest.raises(OperationalError),
         ):
             await sync_service.sync_activity_batch(
-                activity_ids=[1], session=mock_session
+                activity_ids=[1], session_factory=mock_session_factory
             )
 
 
@@ -616,7 +661,10 @@ class TestDeleteHandling:
 
     @pytest.mark.asyncio()
     async def test_creates_cancel_event(
-        self, sync_service: StravaSyncService, mock_session: MagicMock
+        self,
+        sync_service: StravaSyncService,
+        mock_session: MagicMock,
+        mock_session_factory: MagicMock,
     ) -> None:
         """Creates a journal_event.cancelled outbox event for deleted activity."""
         # Mock finding the existing journal
@@ -633,7 +681,10 @@ class TestDeleteHandling:
 
     @pytest.mark.asyncio()
     async def test_returns_none_when_activity_not_found(
-        self, sync_service: StravaSyncService, mock_session: MagicMock
+        self,
+        sync_service: StravaSyncService,
+        mock_session: MagicMock,
+        mock_session_factory: MagicMock,
     ) -> None:
         """Returns None when the deleted activity is not found in the database."""
         mock_result = MagicMock()
@@ -656,6 +707,7 @@ class TestOutboxEventStructure:
         sync_service: StravaSyncService,
         mock_api_client: AsyncMock,
         mock_session: MagicMock,
+        mock_session_factory: MagicMock,
     ) -> None:
         """Outbox event contains required fields for inbound processor."""
         activity = _make_activity()
@@ -689,6 +741,7 @@ class TestOutboxEventStructure:
         sync_service: StravaSyncService,
         mock_api_client: AsyncMock,
         mock_session: MagicMock,
+        mock_session_factory: MagicMock,
     ) -> None:
         """Outbox event journal_data includes fitness_data fields."""
         activity = _make_activity(
@@ -726,6 +779,7 @@ class TestOutboxEventStructure:
         sync_service: StravaSyncService,
         mock_api_client: AsyncMock,
         mock_session: MagicMock,
+        mock_session_factory: MagicMock,
     ) -> None:
         """Outbox event journal_data includes journal_types list."""
         activity = _make_activity(activity_type="Hike")
@@ -754,6 +808,7 @@ class TestOutboxEventStructure:
         sync_service: StravaSyncService,
         mock_api_client: AsyncMock,
         mock_session: MagicMock,
+        mock_session_factory: MagicMock,
     ) -> None:
         """Outbox event includes gpx_xml when streams are available."""
         activity = _make_activity(start_latlng=[-33.8, 151.2])
@@ -806,6 +861,7 @@ class TestOutboxEventStructure:
         sync_service: StravaSyncService,
         mock_api_client: AsyncMock,
         mock_session: MagicMock,
+        mock_session_factory: MagicMock,
     ) -> None:
         """Outbox event journal_data includes version_hash for SyncMetadata."""
         activity = _make_activity()

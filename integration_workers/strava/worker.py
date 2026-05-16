@@ -9,6 +9,7 @@ event fan-out.
 """
 
 import asyncio
+import random
 from typing import Any
 
 from arq import Retry, run_worker
@@ -33,6 +34,27 @@ configure_logging(
 )
 
 logger = get_logger(__name__)
+
+# Default deferral when Strava provides no retry_after hint (daily limit).
+# 1 hour ensures 20 max_tries covers ~20 hours, enough to reach midnight UTC.
+_DEFAULT_RATE_LIMIT_DEFER = 60 * 60  # 1 hour
+
+
+def _rate_limit_defer(exc: StravaRateLimitError) -> int:
+    """Calculate a deferral duration for a rate-limited ARQ retry.
+
+    Uses the server-provided ``retry_after`` when available (e.g. remaining
+    time in the 15-minute window) plus random jitter to avoid thundering
+    herd.  When ``retry_after`` is ``None`` (daily limit), falls back to
+    a conservative 15-minute default.
+    """
+    base = (
+        int(exc.retry_after)
+        if exc.retry_after is not None
+        else _DEFAULT_RATE_LIMIT_DEFER
+    )
+    jitter = random.randint(10, 120)
+    return base + jitter
 
 
 def _on_consumer_task_done(task: asyncio.Task[None]) -> None:
@@ -348,11 +370,13 @@ async def process_strava_webhook_event(
                         "events_created": len(events),
                     }
         except StravaRateLimitError as exc:
-            retry_after = exc.retry_after or 60
+            defer = _rate_limit_defer(exc)
             logger.warning(
-                "Rate limit reached in webhook event, retrying", retry_after=retry_after
+                "Rate limit reached in webhook event, retrying",
+                retry_after=exc.retry_after,
+                defer_seconds=defer,
             )
-            raise Retry(defer=max(retry_after, 60)) from exc
+            raise Retry(defer=defer) from exc
         finally:
             await sync_service._api_client.close()
 
@@ -378,12 +402,13 @@ async def process_strava_webhook_event(
                         "event_created": event is not None,
                     }
         except StravaRateLimitError as exc:
-            retry_after = exc.retry_after or 60
+            defer = _rate_limit_defer(exc)
             logger.warning(
                 "Rate limit reached in webhook delete, retrying",
-                retry_after=retry_after,
+                retry_after=exc.retry_after,
+                defer_seconds=defer,
             )
-            raise Retry(defer=max(retry_after, 60)) from exc
+            raise Retry(defer=defer) from exc
         finally:
             await sync_service._api_client.close()
 
@@ -495,11 +520,13 @@ async def sync_strava_activities(
             "batches_enqueued": batches_enqueued,
         }
     except StravaRateLimitError as exc:
-        retry_after = exc.retry_after or 60
+        defer = _rate_limit_defer(exc)
         logger.warning(
-            "Rate limit reached in orchestrator, retrying", retry_after=retry_after
+            "Rate limit reached in orchestrator, retrying",
+            retry_after=exc.retry_after,
+            defer_seconds=defer,
         )
-        raise Retry(defer=max(retry_after, 60)) from exc
+        raise Retry(defer=defer) from exc
     finally:
         await sync_service._api_client.close()
 
@@ -548,28 +575,28 @@ async def sync_strava_activity_batch(
     )
 
     try:
-        async with session_factory() as session:
-            async with session.begin():
-                result = await sync_service.sync_activity_batch(
-                    activity_ids=activity_ids,
-                    session=session,
-                )
-
-                logger.info(
-                    "Strava activity batch completed",
-                    user_id=user_id,
-                    **result,
-                )
-                return {
-                    "status": "completed",
-                    **result,
-                }
-    except StravaRateLimitError as exc:
-        retry_after = exc.retry_after or 60
-        logger.warning(
-            "Rate limit reached in batch sync, retrying", retry_after=retry_after
+        result = await sync_service.sync_activity_batch(
+            activity_ids=activity_ids,
+            session_factory=session_factory,
         )
-        raise Retry(defer=max(retry_after, 60)) from exc
+
+        logger.info(
+            "Strava activity batch completed",
+            user_id=user_id,
+            **result,
+        )
+        return {
+            "status": "completed",
+            **result,
+        }
+    except StravaRateLimitError as exc:
+        defer = _rate_limit_defer(exc)
+        logger.warning(
+            "Rate limit reached in batch sync, retrying",
+            retry_after=exc.retry_after,
+            defer_seconds=defer,
+        )
+        raise Retry(defer=defer) from exc
     finally:
         await sync_service._api_client.close()
 
@@ -598,7 +625,7 @@ class StravaWorkerSettings(WorkerSettingsBase):
     keep_result = 3600  # Keep results for 1 hour
 
     # Retry configuration
-    max_tries = 3
+    max_tries = 20
 
     # Queue name
     queue_name = STRAVA_ARQ_QUEUE_NAME
