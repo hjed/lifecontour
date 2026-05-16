@@ -206,7 +206,7 @@ class StravaSyncService:
     async def sync_activity_batch(
         self,
         activity_ids: list[int],
-        session: AsyncSession,
+        session_factory: Any,
     ) -> dict[str, int]:
         """Process a batch of activity IDs, creating outbox events.
 
@@ -218,7 +218,8 @@ class StravaSyncService:
 
         Args:
             activity_ids: Strava activity IDs to sync.
-            session: Database session for outbox event persistence.
+            session_factory: Async session factory for per-activity
+                database transactions.
 
         Returns:
             Dict with ``synced``, ``skipped``, and ``failed`` counts.
@@ -229,7 +230,9 @@ class StravaSyncService:
 
         for activity_id in activity_ids:
             try:
-                await self._sync_single_activity_with_retry(activity_id, session)
+                await self._sync_single_activity_with_retry(
+                    activity_id, session_factory
+                )
                 synced += 1
             except _ActivitySkipped:
                 skipped += 1
@@ -248,9 +251,13 @@ class StravaSyncService:
     async def _sync_single_activity_with_retry(
         self,
         activity_id: int,
-        session: AsyncSession,
+        session_factory: Any,
     ) -> None:
         """Fetch, transform, and persist one activity with retry.
+
+        Performs deduplication and API calls *outside* a DB transaction
+        to avoid holding connections during network I/O.  Only opens a
+        short transaction for the final outbox event write.
 
         Retries transient errors (network timeouts, 5xx) up to
         ``_MAX_ACTIVITY_RETRIES`` times with exponential backoff.
@@ -266,18 +273,20 @@ class StravaSyncService:
 
         for attempt in range(1, _MAX_ACTIVITY_RETRIES + 1):
             try:
-                activity = await self._api_client.get_activity(activity_id)
-
-                # Deduplication — skip already-imported activities
-                existing_jid = await self._find_existing_journal_id(
-                    str(activity.id), session
-                )
+                # Deduplication — check outside a long-lived transaction
+                async with session_factory() as dedup_session:
+                    existing_jid = await self._find_existing_journal_id(
+                        str(activity_id), dedup_session
+                    )
                 if existing_jid is not None:
                     logger.debug(
                         "Skipping already-imported activity",
-                        strava_activity_id=activity.id,
+                        strava_activity_id=activity_id,
                     )
                     raise _ActivitySkipped
+
+                # API calls happen outside any DB transaction
+                activity = await self._api_client.get_activity(activity_id)
 
                 # Fetch streams for GPS-equipped activities
                 streams: StravaStreamSet | None = None
@@ -286,7 +295,11 @@ class StravaSyncService:
 
                 transformed = self._transformer.transform(activity, streams=streams)
                 event = self._build_outbox_event(transformed)
-                session.add(event)
+
+                # Short transaction just for the write
+                async with session_factory() as session:
+                    async with session.begin():
+                        session.add(event)
                 return  # success
 
             except _ActivitySkipped:
