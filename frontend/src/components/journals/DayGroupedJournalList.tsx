@@ -78,7 +78,7 @@ export function DayGroupedJournalList({
         stateTimer = setTimeout(() => setHasScrolled(true), 100);
       }, 50);
     } else if (journals.length > 0 || (!isLoadingNext && !isLoadingPrevious)) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- Needed to gate intersection observers
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setHasScrolled(true);
     }
 

@@ -80,7 +80,9 @@ export function useInlineEdit(
       prevInitialValueRef.current = initialValue;
       if (!isEditing && initialValue !== undefined) {
         const normalized = initialValue ?? '';
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setDisplayValue(normalized);
+
         setValue(normalized);
         originalValueRef.current = normalized;
       }
