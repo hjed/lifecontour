@@ -29,8 +29,8 @@ class SnipeItWebhookPayload(BaseModel):
     with at least some expected fields.
     """
 
-    action: str | None = None
-    item: dict[str, Any] | None = None
+    action: str
+    item: dict[str, Any]
 
     model_config = {"extra": "allow"}
 

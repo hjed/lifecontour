@@ -7,7 +7,7 @@ from collections.abc import AsyncGenerator
 import pytest
 import pytest_asyncio
 from core_shared.stream_client import StreamClient
-from fastapi.testclient import TestClient
+from httpx import AsyncClient
 
 from app.infrastructure.config import Settings
 
@@ -21,7 +21,7 @@ async def cleanup_stream(test_settings: Settings) -> AsyncGenerator[None, None]:
 
 @pytest.mark.asyncio
 async def test_snipeit_webhook_publishes_to_stream(
-    integration_test_client: TestClient,
+    authenticated_client: AsyncClient,
     test_settings: Settings,
 ) -> None:
     """Test that a valid webhook POST results in a message in the Redis stream."""
@@ -31,6 +31,9 @@ async def test_snipeit_webhook_publishes_to_stream(
     stream_client = StreamClient(redis_client)
 
     try:
+        # Clear the stream to ensure isolation for this test
+        await redis_client.delete(test_settings.stream_name)
+
         # Ensure consumer group exists to track messages
         await stream_client.ensure_consumer_group(
             test_settings.stream_name, "test-group"
@@ -38,7 +41,7 @@ async def test_snipeit_webhook_publishes_to_stream(
 
         payload = {"action": "checkout", "item": {"id": 123, "name": "Test Asset"}}
 
-        response = integration_test_client.post(
+        response = await authenticated_client.post(
             "/api/integrations/snipeit/webhook",
             json=payload,
         )
