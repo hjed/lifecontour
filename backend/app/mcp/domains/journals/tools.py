@@ -452,7 +452,8 @@ async def _fetch_journal_external_links(
             "FROM journal_external_event_links l "
             "LEFT JOIN calendars c ON l.calendar_id = c.id "
             "WHERE l.journal_id = :journal_id "
-            "AND l.external_event_id IS NOT NULL"
+            "AND l.external_event_id IS NOT NULL "
+            "AND trim(l.external_event_id) != ''"
         ),
         {"journal_id": journal_id},
     )
@@ -493,6 +494,7 @@ async def _fetch_journal_ids_by_integration_source(
                 "FROM journal_fitness_data f "
                 "JOIN journals j ON f.journal_id = j.id "
                 "WHERE f.strava_activity_id IS NOT NULL "
+                "AND trim(f.strava_activity_id) != '' "
                 "AND j.user_id = :user_id"
             ),
             {"user_id": user_id},
@@ -504,7 +506,8 @@ async def _fetch_journal_ids_by_integration_source(
                 "FROM journal_external_event_links l "
                 "JOIN journals j ON l.journal_id = j.id "
                 "WHERE j.user_id = :user_id "
-                "AND l.external_event_id IS NOT NULL"
+                "AND l.external_event_id IS NOT NULL "
+                "AND trim(l.external_event_id) != ''"
             ),
             {"user_id": user_id},
         )

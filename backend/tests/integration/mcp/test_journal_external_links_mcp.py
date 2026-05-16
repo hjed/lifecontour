@@ -648,6 +648,70 @@ class TestSearchJournalsIntegrationSourceFilter:
             {"journal_id": pending_id, "calendar_id": calendar_id},
         )
 
+        # Empty Strava ID
+        result = await clean_database.execute(
+            text("""
+                INSERT INTO journals (user_id, title, content, event_date_range_start, event_date_range_end)
+                VALUES (:user_id, 'Empty Strava Note', 'Empty strava id', :start, :end)
+                RETURNING id
+            """),
+            {
+                "user_id": "test-user-123",
+                "start": now + timedelta(hours=6),
+                "end": now + timedelta(hours=7),
+            },
+        )
+        row = result.fetchone()
+        assert row is not None
+        empty_strava_id = int(row[0])
+        ids["empty_strava"] = empty_strava_id
+
+        await clean_database.execute(
+            text("""
+                INSERT INTO journal_fitness_data (journal_id, strava_activity_id)
+                VALUES (:journal_id, '   ')
+            """),
+            {"journal_id": empty_strava_id},
+        )
+
+        # Empty Google Calendar ID
+        result = await clean_database.execute(
+            text("""
+                INSERT INTO journals (user_id, title, content, event_date_range_start, event_date_range_end)
+                VALUES (:user_id, 'Empty GCal Note', 'Empty gcal id', :start, :end)
+                RETURNING id
+            """),
+            {
+                "user_id": "test-user-123",
+                "start": now + timedelta(hours=8),
+                "end": now + timedelta(hours=9),
+            },
+        )
+        row = result.fetchone()
+        assert row is not None
+        empty_gcal_id = int(row[0])
+        ids["empty_gcal"] = empty_gcal_id
+
+        await clean_database.execute(
+            text("""
+                INSERT INTO journal_calendar_info
+                    (journal_id, calendar_id, is_all_day, event_state)
+                VALUES (:journal_id, :calendar_id, false, 'confirmed')
+            """),
+            {"journal_id": empty_gcal_id, "calendar_id": calendar_id},
+        )
+
+        await clean_database.execute(
+            text("""
+                INSERT INTO journal_external_event_links
+                    (journal_id, calendar_id, external_event_id,
+                     sync_capability, sync_status)
+                VALUES (:journal_id, :calendar_id, '   ',
+                        'outbound', 'synced')
+            """),
+            {"journal_id": empty_gcal_id, "calendar_id": calendar_id},
+        )
+
         return ids
 
     @pytest.mark.asyncio
@@ -712,6 +776,37 @@ class TestSearchJournalsIntegrationSourceFilter:
             assert payload["total_hits"] == 1
             assert len(payload["results"]) == 1
             assert payload["results"][0]["title"] == "Calendar Event"
+
+    @pytest.mark.asyncio
+    async def test_get_journal_with_empty_gcal_link(
+        self,
+        authenticated_lifespan_client,
+        journals_with_mixed_sources: dict[str, int],
+    ) -> None:
+        """get_journal returns empty external_links for empty/whitespace external_event_id."""
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            response = await client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "get_journal",
+                        "arguments": {
+                            "journal_id": journals_with_mixed_sources["empty_gcal"]
+                        },
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+
+            assert response.status_code == 200
+            payload = extract_mcp_json_payload(response.text)
+            assert "error" not in payload
+            assert "external_links" in payload
+            assert payload["external_links"] == []
 
     @pytest.mark.asyncio
     async def test_search_journals_invalid_integration_source(
