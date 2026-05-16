@@ -1372,10 +1372,10 @@ class JournalOutboxEventProcessor:
             event: OutboxEvent to persist
         """
         import json
-        from datetime import datetime
+        from datetime import UTC, datetime
         from uuid import uuid4
 
-        now = datetime.now(UTC)
+        now = datetime.now(UTC).replace(tzinfo=None)
         await self.connection.execute(
             text("""
                 INSERT INTO outbox_events

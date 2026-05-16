@@ -60,9 +60,13 @@ class OutboxEventPublisher(ContactEventPublisher):
                     "event_type": event.event_type,
                     "aggregate_id": event.aggregate_id,
                     "event_data": json.dumps(event.event_data),
-                    "occurred_at": event.occurred_at,
+                    "occurred_at": event.occurred_at.replace(tzinfo=None)
+                    if hasattr(event.occurred_at, "replace")
+                    else event.occurred_at,
                     "retry_count": 0,
-                    "created_at": event.occurred_at,
+                    "created_at": event.occurred_at.replace(tzinfo=None)
+                    if hasattr(event.occurred_at, "replace")
+                    else event.occurred_at,
                 },
             )
 
