@@ -76,10 +76,10 @@ export function LogbookExportDialog({
     const filters: LogbookExportFilters = {};
 
     if (dateRange?.from) {
-      filters.start_date = format(dateRange.from, 'yyyy-MM-dd');
+      filters.start_date = format(dateRange.from, "yyyy-MM-dd'T'00:00:00XXX");
     }
     if (dateRange?.to) {
-      filters.end_date = format(dateRange.to, 'yyyy-MM-dd');
+      filters.end_date = format(dateRange.to, "yyyy-MM-dd'T'23:59:59XXX");
     }
     if (selectedTypes.length > 0) {
       filters.activity_types = selectedTypes;

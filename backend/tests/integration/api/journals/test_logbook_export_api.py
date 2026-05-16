@@ -33,13 +33,38 @@ def _extract_pdf_text(pdf_bytes: bytes) -> str:
 
 
 @pytest_asyncio.fixture
-async def unauthenticated_client(test_settings):
+async def unauthenticated_client(test_settings, async_connection: AsyncConnection):
     """Create async test client without authentication."""
+    from dishka import Provider, Scope, make_async_container, provide
+    from dishka.integrations.fastapi import FastapiProvider, setup_dishka
     from httpx import ASGITransport, AsyncClient
 
+    from app.infrastructure.di.auth import AuthProvider
+    from app.infrastructure.di.contacts import ContactProvider
+    from app.infrastructure.di.infrastructure import InfrastructureProvider
+    from app.infrastructure.di.integrations import IntegrationProvider
+    from app.infrastructure.di.journal import JournalProvider
     from app.main import create_app
 
+    class TestDatabaseProvider(Provider):
+        @provide(scope=Scope.REQUEST)
+        def get_connection(self) -> AsyncConnection:
+            return async_connection
+
     app = create_app(settings=test_settings)
+
+    test_container = make_async_container(
+        TestDatabaseProvider(),
+        InfrastructureProvider(),
+        AuthProvider(),
+        ContactProvider(),
+        JournalProvider(),
+        IntegrationProvider(),
+        FastapiProvider(),
+        context={"settings": test_settings},
+    )
+    setup_dishka(test_container, app)
+
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://testserver"
     ) as client:
@@ -123,6 +148,15 @@ async def seeded_outdoor_journals(
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio
+async def test_export_outdoor_logbook_unauthenticated(unauthenticated_client):
+    """Test that unauthenticated requests to export are rejected."""
+    response = await unauthenticated_client.post(
+        "/api/journals/export/outdoor-logbook", json={}
+    )
+    assert response.status_code == 401
+
+
 @pytest.mark.asyncio
 class TestLogbookExportEndpoint:
     """Tests for POST /api/journals/export/outdoor-logbook."""
