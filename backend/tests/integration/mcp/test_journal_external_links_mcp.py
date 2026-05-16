@@ -235,6 +235,75 @@ class TestJournalExternalLinksMCP:
         assert row is not None
         return int(row[0])
 
+    @pytest_asyncio.fixture
+    async def journal_with_pending_google_link(
+        self, clean_database: AsyncConnection
+    ) -> int:
+        """Create a journal with a pending Google Calendar external event link (NULL external_event_id)."""
+        now = datetime.now(UTC)
+        calendar_id = str(uuid4())
+
+        # Create calendar
+        await clean_database.execute(
+            text("""
+                INSERT INTO calendars (id, name, color, user_id, google_calendar_id)
+                VALUES (:id, :name, :color, :user_id, :google_calendar_id)
+            """),
+            {
+                "id": calendar_id,
+                "name": "Pending Calendar",
+                "color": "#F59E0B",
+                "user_id": "test-user-123",
+                "google_calendar_id": "pending@gmail.com",
+            },
+        )
+
+        # Create journal
+        result = await clean_database.execute(
+            text("""
+                INSERT INTO journals (user_id, title, content, event_date_range_start, event_date_range_end)
+                VALUES (:user_id, :title, :content, :start, :end)
+                RETURNING id
+            """),
+            {
+                "user_id": "test-user-123",
+                "title": "Pending Meeting",
+                "content": "Not yet synced",
+                "start": now,
+                "end": now + timedelta(hours=1),
+            },
+        )
+        row = result.fetchone()
+        assert row is not None
+        journal_id = int(row[0])
+
+        # Add calendar info
+        await clean_database.execute(
+            text("""
+                INSERT INTO journal_calendar_info
+                    (journal_id, calendar_id, is_all_day, event_state)
+                VALUES (:journal_id, :calendar_id, false, 'confirmed')
+            """),
+            {"journal_id": journal_id, "calendar_id": calendar_id},
+        )
+
+        # Add external event link with NULL Google Calendar event ID
+        await clean_database.execute(
+            text("""
+                INSERT INTO journal_external_event_links
+                    (journal_id, calendar_id, external_event_id,
+                     sync_capability, sync_status)
+                VALUES (:journal_id, :calendar_id, NULL,
+                        'outbound', 'pending')
+            """),
+            {
+                "journal_id": journal_id,
+                "calendar_id": calendar_id,
+            },
+        )
+
+        return journal_id
+
     @pytest.mark.asyncio
     async def test_get_journal_with_strava_link(
         self, authenticated_lifespan_client, journal_with_strava: int
@@ -380,6 +449,36 @@ class TestJournalExternalLinksMCP:
             assert payload["external_links"] == []
 
     @pytest.mark.asyncio
+    async def test_get_journal_with_pending_google_link(
+        self,
+        authenticated_lifespan_client,
+        journal_with_pending_google_link: int,
+    ) -> None:
+        """get_journal returns empty external_links for journal with pending google calendar link."""
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            response = await client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "get_journal",
+                        "arguments": {"journal_id": journal_with_pending_google_link},
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+
+            assert response.status_code == 200
+            payload = extract_mcp_json_payload(response.text)
+
+            assert "error" not in payload
+            assert "external_links" in payload
+            assert payload["external_links"] == []
+
+    @pytest.mark.asyncio
     async def test_fitness_data_completeness(
         self,
         authenticated_lifespan_client,
@@ -511,11 +610,11 @@ class TestSearchJournalsIntegrationSourceFilter:
             {"journal_id": gcal_id, "calendar_id": calendar_id},
         )
 
-        # Plain journal (no integration)
+        # Pending journal (NULL external event id)
         result = await clean_database.execute(
             text("""
                 INSERT INTO journals (user_id, title, content, event_date_range_start, event_date_range_end)
-                VALUES (:user_id, 'Plain Note', 'No integration', :start, :end)
+                VALUES (:user_id, 'Pending Note', 'No integration', :start, :end)
                 RETURNING id
             """),
             {
@@ -526,8 +625,28 @@ class TestSearchJournalsIntegrationSourceFilter:
         )
         row = result.fetchone()
         assert row is not None
-        plain_id = int(row[0])
-        ids["plain"] = plain_id
+        pending_id = int(row[0])
+        ids["pending"] = pending_id
+
+        await clean_database.execute(
+            text("""
+                INSERT INTO journal_calendar_info
+                    (journal_id, calendar_id, is_all_day, event_state)
+                VALUES (:journal_id, :calendar_id, false, 'confirmed')
+            """),
+            {"journal_id": pending_id, "calendar_id": calendar_id},
+        )
+
+        await clean_database.execute(
+            text("""
+                INSERT INTO journal_external_event_links
+                    (journal_id, calendar_id, external_event_id,
+                     sync_capability, sync_status)
+                VALUES (:journal_id, :calendar_id, NULL,
+                        'outbound', 'pending')
+            """),
+            {"journal_id": pending_id, "calendar_id": calendar_id},
+        )
 
         return ids
 

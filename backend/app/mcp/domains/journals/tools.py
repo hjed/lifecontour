@@ -451,7 +451,8 @@ async def _fetch_journal_external_links(
             "SELECT l.external_event_id, c.google_calendar_id, l.calendar_id "
             "FROM journal_external_event_links l "
             "LEFT JOIN calendars c ON l.calendar_id = c.id "
-            "WHERE l.journal_id = :journal_id"
+            "WHERE l.journal_id = :journal_id "
+            "AND l.external_event_id IS NOT NULL"
         ),
         {"journal_id": journal_id},
     )
@@ -502,7 +503,8 @@ async def _fetch_journal_ids_by_integration_source(
                 "SELECT DISTINCT l.journal_id "
                 "FROM journal_external_event_links l "
                 "JOIN journals j ON l.journal_id = j.id "
-                "WHERE j.user_id = :user_id"
+                "WHERE j.user_id = :user_id "
+                "AND l.external_event_id IS NOT NULL"
             ),
             {"user_id": user_id},
         )
