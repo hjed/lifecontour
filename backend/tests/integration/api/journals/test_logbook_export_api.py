@@ -8,6 +8,7 @@ import io
 from datetime import UTC, datetime
 
 import pytest
+import pytest_asyncio
 from pypdf import PdfReader
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -29,6 +30,20 @@ def _extract_pdf_text(pdf_bytes: bytes) -> str:
 
 
 # ─── Fixtures ────────────────────────────────────────────────────────
+
+
+@pytest_asyncio.fixture
+async def unauthenticated_client(test_settings):
+    """Create async test client without authentication."""
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import create_app
+
+    app = create_app(settings=test_settings)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        yield client
 
 
 @pytest.fixture
@@ -111,6 +126,14 @@ async def seeded_outdoor_journals(
 @pytest.mark.asyncio
 class TestLogbookExportEndpoint:
     """Tests for POST /api/journals/export/outdoor-logbook."""
+
+    async def test_export_unauthenticated(self, unauthenticated_client) -> None:
+        """Unauthenticated requests are rejected with 401."""
+        response = await unauthenticated_client.post(
+            "/api/journals/export/outdoor-logbook",
+            json={},
+        )
+        assert response.status_code == 401
 
     async def test_export_returns_valid_pdf(
         self,
