@@ -87,15 +87,17 @@ export function JournalSearchCombobox({
   disabled = false,
 }: JournalSearchComboboxProps) {
   const [searchQuery, setSearchQuery] = useState(value);
+  const [prevValue, setPrevValue] = useState(value);
   const [showResults, setShowResults] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const debouncedQuery = useDebounce(searchQuery, SEARCH_DEBOUNCE_MS);
   const blurTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Sync searchQuery when the value prop changes externally (e.g., edit flow)
-  useEffect(() => {
+  if (value !== prevValue) {
+    setPrevValue(value);
     setSearchQuery(value);
-  }, [value]);
+  }
 
   // Search query
   const {

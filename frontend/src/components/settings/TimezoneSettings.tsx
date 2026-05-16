@@ -36,15 +36,17 @@ export function getDefaultTimezone(): string {
 
 export function TimezoneSettings() {
   const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const [timezone, setTimezone] = useState(browserTimezone);
+  const [timezone, setTimezone] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem(TIMEZONE_STORAGE_KEY);
+      if (stored) return stored;
+    }
+    return browserTimezone;
+  });
   const [saved, setSaved] = useState(false);
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    const stored = localStorage.getItem(TIMEZONE_STORAGE_KEY);
-    if (stored) {
-      setTimezone(stored);
-    }
     return () => {
       if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
     };
