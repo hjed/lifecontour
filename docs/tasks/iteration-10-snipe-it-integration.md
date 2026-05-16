@@ -92,20 +92,22 @@ Implement the OAuth 2.0 connection using the Base URL from Phase 1.
 - [ ] Gear items populated in app from Snipe-IT.
 - [ ] Webhooks keep items in sync.
 
-#### Phase 1: API Client and Data Transformation
+#### Phase 1: API Client and Data Transformation ✅ COMPLETE
 **PR Size:** ~5-7 files
 Implement the external API communication layer and map models.
 **Acceptance Criteria:**
-- [ ] `SnipeItAPIClient` configured with OAuth tokens can GET assets by user ID.
-- [ ] Transformer converts a Snipe-IT Asset payload into a `GearItem` entity.
+- [x] `SnipeItAPIClient` configured with OAuth tokens can GET assets by user ID.
+- [x] Transformer converts a Snipe-IT Asset payload into a `GearItem` entity.
+- [x] Rate limiting is handled and transient errors surface appropriately for upstream retry logic
 **Required Test Coverage:**
-- **Unit:** Transformer handles missing optional fields and type coercion correctly.
+- **Unit:** Transformer handles missing optional fields and type coercion correctly. ✅
 
 #### Phase 2: Initial Full Sync Process
 **PR Size:** ~6-8 files
 Handle batch importing when the user connects the integration.
 **Acceptance Criteria:**
 - [ ] Worker ARQ job triggered on successful connection to fetch all relevant assets.
+- [ ] Import is resilient and batched like the Strava and Google Integrations
 - [ ] Fetched assets are upserted into `gear_items`.
 - [ ] `SyncMetadata` tracks the mapping between `gear_item.id` and Snipe-IT Asset ID.
 **Required Test Coverage:**
