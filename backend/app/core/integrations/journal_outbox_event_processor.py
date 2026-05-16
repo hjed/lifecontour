@@ -228,6 +228,13 @@ class JournalOutboxEventProcessor:
         etag = payload.etag
         contact_relationships = payload.contact_relationships
 
+        # Ensure the calendar row exists (e.g. synthetic Strava calendar)
+        await self._ensure_calendar_exists(
+            calendar_id=UUID(calendar_id),
+            user_id=journal_data["user_id"],
+            integration_source=payload.integration_source,
+        )
+
         # Check for existing link to prevent duplicates (e.g. from retries)
         existing_link = await self._find_external_event_link(
             calendar_id=UUID(calendar_id),
@@ -343,6 +350,13 @@ class JournalOutboxEventProcessor:
             raise JournalOutboxEventProcessingError(
                 "journal_event.updated requires existing_journal_id"
             )
+
+        # Ensure the calendar row exists (e.g. synthetic Strava calendar)
+        await self._ensure_calendar_exists(
+            calendar_id=UUID(calendar_id),
+            user_id=journal_data["user_id"],
+            integration_source=payload.integration_source,
+        )
 
         # Fetch existing journal
         existing_journal = await self._find_journal_by_id(existing_journal_id)
@@ -867,6 +881,44 @@ class JournalOutboxEventProcessor:
             {
                 "journal_id": journal_id,
                 "strava_athlete_id": athlete_id,
+            },
+        )
+
+    # ── Integration source → calendar display name/color ────────────
+    _INTEGRATION_CALENDAR_DEFAULTS: dict[str, tuple[str, str]] = {
+        "strava": ("Strava Activities", "#FC4C02"),
+        "google": ("Google Calendar", "#4285F4"),
+    }
+
+    async def _ensure_calendar_exists(
+        self,
+        calendar_id: UUID,
+        user_id: str,
+        integration_source: str,
+    ) -> None:
+        """Ensure the calendar row exists for the given calendar_id.
+
+        Non-calendar integrations (e.g. Strava) use a synthetic
+        calendar_id that may not exist in the ``calendars`` table yet.
+        This creates it on-demand using ``ON CONFLICT DO NOTHING`` so
+        that subsequent FK-dependent inserts into
+        ``journal_calendar_info`` and ``journal_external_event_links``
+        succeed.
+        """
+        name, color = self._INTEGRATION_CALENDAR_DEFAULTS.get(
+            integration_source, (f"{integration_source.title()} Calendar", "#808080")
+        )
+        await self.connection.execute(
+            text("""
+                INSERT INTO calendars (id, user_id, name, color)
+                VALUES (:id, :user_id, :name, :color)
+                ON CONFLICT (id) DO NOTHING
+            """),
+            {
+                "id": calendar_id,
+                "user_id": user_id,
+                "name": name,
+                "color": color,
             },
         )
 
