@@ -42,6 +42,12 @@ class TestIntegrationTools:
             assert "list_integrations" in tool_names, (
                 "list_integrations tool not found in registered tools"
             )
+            assert "trigger_sync" in tool_names, (
+                "trigger_sync tool not found in registered tools"
+            )
+            assert "get_strava_athlete_mappings" in tool_names, (
+                "get_strava_athlete_mappings tool not found in registered tools"
+            )
 
     @pytest.mark.asyncio
     async def test_list_integrations_tool_description(self, mcp_server):
@@ -87,3 +93,46 @@ class TestIntegrationTools:
             assert "user_id" not in required
             assert "connection" not in required
             assert "registry_service" not in required
+
+    @pytest.mark.asyncio
+    async def test_trigger_sync_tool_has_required_inputs(self, mcp_server):
+        """Test that trigger_sync has required inputs."""
+        async with Client(mcp_server) as client:
+            tools_response = await client.list_tools()
+
+            if hasattr(tools_response, "tools"):
+                tools = tools_response.tools
+            else:
+                tools = tools_response
+
+            tool = next((t for t in tools if t.name == "trigger_sync"), None)
+            assert tool is not None
+            assert tool.inputSchema is not None
+
+            required = tool.inputSchema.get("required", [])
+            assert "integration_id" in required
+            assert "user_id" not in required
+            assert "task_queue_service" not in required
+
+    @pytest.mark.asyncio
+    async def test_get_strava_athlete_mappings_tool_inputs(self, mcp_server):
+        """Test that get_strava_athlete_mappings has optional inputs."""
+        async with Client(mcp_server) as client:
+            tools_response = await client.list_tools()
+
+            if hasattr(tools_response, "tools"):
+                tools = tools_response.tools
+            else:
+                tools = tools_response
+
+            tool = next(
+                (t for t in tools if t.name == "get_strava_athlete_mappings"), None
+            )
+            assert tool is not None
+            assert tool.inputSchema is not None
+
+            required = tool.inputSchema.get("required", [])
+            assert "user_id" not in required
+            assert "mapping_service" not in required
+            assert "contact_id" not in required
+            assert "strava_athlete_id" not in required

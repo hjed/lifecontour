@@ -73,6 +73,14 @@ class ContactRepository(ABC):
         pass
 
     @abstractmethod
+    async def get_external_references(self, contact_id: int) -> list[dict[str, str]]:
+        """Get all external references for a contact.
+
+        Returns a list of dicts containing 'external_system', 'external_entity_id', and 'external_entity_type'.
+        """
+        pass
+
+    @abstractmethod
     async def search(self, query: str, limit: int = 50) -> list[Contact]:
         """Search contacts by name, email, or notes."""
         pass
