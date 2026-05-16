@@ -503,15 +503,15 @@ Render the aggregated logbook data into a PDF document using a Python PDF librar
 Wire the export through a REST endpoint and add the frontend UI trigger.
 
 **Acceptance Criteria:**
-- [ ] `POST /api/journals/export/outdoor-logbook` endpoint accepts optional date range and activity type filters, returns PDF as a downloadable file response
-- [ ] Frontend export trigger: button in the journals UI (e.g. toolbar or settings area) that opens a filter dialog (date range picker, activity type multi-select) and initiates download
-- [ ] Loading state shown during PDF generation
-- [ ] Error handling for empty exports (no matching journals) and generation failures
-- [ ] PDF export is UI-only — not exposed through MCP (per spec)
+- [x] `POST /api/journals/export/outdoor-logbook` endpoint accepts optional date range and activity type filters, returns PDF as a downloadable file response
+- [x] Frontend export trigger: button in the journals UI (e.g. toolbar or settings area) that opens a filter dialog (date range picker, activity type multi-select) and initiates download
+- [x] Loading state shown during PDF generation
+- [x] Error handling for empty exports (no matching journals) and generation failures
+- [x] PDF export is UI-only — not exposed through MCP (per spec)
 
 **Required Test Coverage:**
-- **Integration:** API endpoint tests for export with filters, empty export handling, authentication requirement.
-- **E2E:** trigger export from UI with filters, verify PDF file downloads successfully.
+- **Integration:** API endpoint tests for export with filters, empty export handling, authentication requirement. ✅
+- **E2E:** trigger export from UI with filters, verify PDF file downloads successfully. ✅
 
 ---
 

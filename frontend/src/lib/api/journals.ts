@@ -1496,3 +1496,65 @@ export function useAutoMergeReviewItems() {
     },
   });
 }
+
+// ─── Outdoor Logbook Export ─────────────────────────────────────────
+
+export interface LogbookExportFilters {
+  start_date?: string;
+  end_date?: string;
+  activity_types?: string[];
+}
+
+async function exportOutdoorLogbook(
+  filters: LogbookExportFilters = {}
+): Promise<void> {
+  const response = await fetch(API_ENDPOINTS.JOURNALS.EXPORT_OUTDOOR_LOGBOOK, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(filters),
+  });
+
+  if (!response.ok) {
+    let errorMessage = 'Failed to generate logbook export';
+    try {
+      const errorData = await response.json();
+      errorMessage = errorData.errors?.[0]?.detail || errorMessage;
+    } catch {
+      // Response body is not JSON, use default message
+    }
+    throw new Error(errorMessage);
+  }
+
+  // Trigger file download from the PDF blob
+  const blob = await response.blob();
+  const contentDisposition = response.headers.get('content-disposition');
+  const filenameMatch = contentDisposition?.match(/filename="?([^"]+)"?/);
+  const filename = filenameMatch?.[1] || 'outdoor_logbook.pdf';
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Hook to export outdoor logbook as PDF.
+ */
+export function useExportOutdoorLogbook() {
+  return useMutation({
+    mutationFn: exportOutdoorLogbook,
+    onSuccess: () => {
+      toast.success('Logbook exported successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}

@@ -94,7 +94,6 @@ export function JournalSearchCombobox({
 
   // Sync searchQuery when the value prop changes externally (e.g., edit flow)
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSearchQuery(value);
   }, [value]);
 

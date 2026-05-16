@@ -14,6 +14,7 @@ import type { Route } from 'next';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { DayGroupedJournalList } from '@/components/journals/DayGroupedJournalList';
 import { JournalFilters } from '@/components/journals/JournalFilters';
+import { LogbookExportDialog } from '@/components/journals/LogbookExportDialog';
 import {
   CalendarViewToggle,
   CalendarViewMode,
@@ -49,6 +50,7 @@ import {
   Search,
   FileText,
   CalendarIcon,
+  Download,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { Calendar } from '@/components/ui/calendar';
@@ -99,6 +101,7 @@ export default function JournalsPage() {
   const [filters, setFilters] = useState<JournalFiltersType>({});
   const [showFilters, setShowFilters] = useState(true);
   const [queueOpen, setQueueOpen] = useState(false);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [anchorDate, setAnchorDate] = useState<string | undefined>();
   const [viewMode, setViewModeState] = useState<CalendarViewMode>('list');
 
@@ -398,6 +401,16 @@ export default function JournalsPage() {
                 <Button
                   variant='outline'
                   size='sm'
+                  onClick={() => setExportDialogOpen(true)}
+                  className='h-9 gap-2'
+                  data-testid='export-logbook'
+                >
+                  <Download className='h-4 w-4' />
+                  Export Logbook
+                </Button>
+                <Button
+                  variant='outline'
+                  size='sm'
                   onClick={() => setShowFilters(!showFilters)}
                   className='h-9 gap-2'
                   data-testid='toggle-filters'
@@ -597,6 +610,10 @@ export default function JournalsPage() {
       </div>
 
       <ReviewQueueSidebar open={queueOpen} onOpenChange={setQueueOpen} />
+      <LogbookExportDialog
+        open={exportDialogOpen}
+        onOpenChange={setExportDialogOpen}
+      />
     </AuthGuard>
   );
 }

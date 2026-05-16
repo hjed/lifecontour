@@ -105,7 +105,7 @@ export function TagManagementDialog({
           ? String(tag.attributes.parent_id)
           : 'none',
       });
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+
       setMergeTargetId('');
       setShowMergeConfirm(false);
       setShowDeleteConfirm(false);

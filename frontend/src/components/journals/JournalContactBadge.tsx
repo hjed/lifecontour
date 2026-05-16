@@ -101,7 +101,6 @@ export function JournalContactBadge({
   // Reset form when opened
   useEffect(() => {
     if (isAddOpen) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelectedContacts([]);
       setSelectedRelationshipType(JournalContactRelationshipType.PARTICIPANT);
       setSelectedStatus(defaultStatus || 'NO_STATUS');
