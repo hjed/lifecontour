@@ -1041,6 +1041,7 @@ class TestStravaFitnessDataProcessing:
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
             fitness_upsert_result,  # SqlFitnessDataRepository.save UPSERT
+            MagicMock(),  # _ensure_type_data_rows: jogging INSERT
         ]
 
         result = await processor.process_event(event)
@@ -1097,6 +1098,8 @@ class TestStravaFitnessDataProcessing:
             _mock_empty_result(),  # _find_external_event_link
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
+            MagicMock(),  # _ensure_type_data_rows: bushwalking INSERT
+            MagicMock(),  # _ensure_type_data_rows: outdoor_activity INSERT
         ]
 
         result = await processor.process_event(event)
@@ -1215,6 +1218,155 @@ class TestStravaFitnessDataProcessing:
 
         # Only "fitness" should have been processed (unknown_type_xyz skipped)
         assert mock_journal_service.add_type_to_journal.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_created_event_creates_type_data_rows_for_activity_types(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Strava event with bushwalking/outdoor_activity types should INSERT data rows."""
+        event_data = _make_journal_event_data(
+            sync_action="created",
+            external_event_id="strava-hike-001",
+        )
+        event_data["journal_data"]["fitness_data"] = {
+            "distance": 15000,
+            "elevation_gain": 500,
+            "duration": 7200,
+            "strava_activity_id": "hike001",
+        }
+        event_data["journal_data"]["journal_types"] = [
+            "bushwalking",
+            "outdoor_activity",
+            "fitness",
+        ]
+
+        event = OutboxEvent(
+            id=uuid4(),
+            event_type="journal_event.created",
+            event_data=event_data,
+            created_at=datetime.now(UTC),
+            retry_count=0,
+        )
+
+        mock_journal_service.create_journal.return_value = _make_journal()
+
+        fitness_upsert = MagicMock()
+        fitness_upsert.fetchone.return_value = MagicMock(
+            journal_id=42,
+            distance=15000,
+            elevation_gain=500,
+            elevation_loss=None,
+            duration=7200,
+            calories=None,
+            heart_rate_avg=None,
+            heart_rate_max=None,
+            strava_activity_id="hike001",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+
+        mock_connection.execute.side_effect = [
+            _mock_empty_result(),  # _find_external_event_link
+            MagicMock(),  # _save_calendar_info
+            MagicMock(),  # _create_external_event_link
+            fitness_upsert,  # SqlFitnessDataRepository.save
+            MagicMock(),  # _ensure_type_data_rows: bushwalking INSERT
+            MagicMock(),  # _ensure_type_data_rows: outdoor_activity INSERT
+            # fitness is skipped (not in _TYPE_DATA_TABLE_MAP)
+        ]
+
+        result = await processor.process_event(event)
+        assert result["status"] == "success"
+
+        # Find all INSERT calls targeting type-specific data tables
+        type_data_inserts = [
+            c
+            for c in mock_connection.execute.call_args_list
+            if "ON CONFLICT (journal_id) DO NOTHING" in str(c[0][0].text)
+        ]
+        assert len(type_data_inserts) == 2, (
+            f"Expected 2 type data INSERT calls (bushwalking, outdoor_activity), "
+            f"got {len(type_data_inserts)}"
+        )
+
+        # Verify the correct tables were targeted
+        insert_sqls = [str(c[0][0].text) for c in type_data_inserts]
+        assert any("journal_bushwalking_data" in sql for sql in insert_sqls), (
+            "Missing bushwalking data INSERT"
+        )
+        assert any("journal_outdoor_activity_data" in sql for sql in insert_sqls), (
+            "Missing outdoor_activity data INSERT"
+        )
+
+    @pytest.mark.asyncio
+    async def test_created_event_does_not_create_duplicate_fitness_data_row(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """FITNESS type should NOT get a second INSERT via _ensure_type_data_rows."""
+        event_data = _make_journal_event_data(
+            sync_action="created",
+            external_event_id="strava-run-001",
+        )
+        event_data["journal_data"]["fitness_data"] = {
+            "distance": 5000,
+            "elevation_gain": 50,
+            "duration": 1800,
+            "strava_activity_id": "run001",
+        }
+        # Only fitness type — no activity-specific types
+        event_data["journal_data"]["journal_types"] = ["fitness"]
+
+        event = OutboxEvent(
+            id=uuid4(),
+            event_type="journal_event.created",
+            event_data=event_data,
+            created_at=datetime.now(UTC),
+            retry_count=0,
+        )
+
+        mock_journal_service.create_journal.return_value = _make_journal()
+
+        fitness_upsert = MagicMock()
+        fitness_upsert.fetchone.return_value = MagicMock(
+            journal_id=42,
+            distance=5000,
+            elevation_gain=50,
+            elevation_loss=None,
+            duration=1800,
+            calories=None,
+            heart_rate_avg=None,
+            heart_rate_max=None,
+            strava_activity_id="run001",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+
+        mock_connection.execute.side_effect = [
+            _mock_empty_result(),  # _find_external_event_link
+            MagicMock(),  # _save_calendar_info
+            MagicMock(),  # _create_external_event_link
+            fitness_upsert,  # SqlFitnessDataRepository.save
+            # No _ensure_type_data_rows calls expected (fitness not in map)
+        ]
+
+        result = await processor.process_event(event)
+        assert result["status"] == "success"
+
+        # Verify no ON CONFLICT DO NOTHING calls (only the fitness UPSERT via repo)
+        type_data_inserts = [
+            c
+            for c in mock_connection.execute.call_args_list
+            if "ON CONFLICT (journal_id) DO NOTHING" in str(c[0][0].text)
+        ]
+        assert len(type_data_inserts) == 0, (
+            "FITNESS should not produce a type data row INSERT"
+        )
 
     @pytest.mark.asyncio
     async def test_created_event_with_pydantic_validation_error_skips(
@@ -1370,6 +1522,7 @@ class TestGPXRouteAndSyncMetadata:
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
             fitness_upsert,  # fitness data save
+            MagicMock(),  # _ensure_type_data_rows: jogging INSERT
             _mock_empty_result(),  # _persist_route_from_gpx (SELECT existing)
             MagicMock(),  # _persist_route_from_gpx (INSERT route)
             MagicMock(),  # _persist_sync_metadata (UPSERT sync_metadata)
@@ -1430,6 +1583,7 @@ class TestGPXRouteAndSyncMetadata:
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
             fitness_upsert,  # fitness data save
+            MagicMock(),  # _ensure_type_data_rows: jogging INSERT
             MagicMock(),  # _persist_sync_metadata
         ]
 
@@ -1487,6 +1641,7 @@ class TestGPXRouteAndSyncMetadata:
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
             fitness_upsert,  # fitness data save
+            MagicMock(),  # _ensure_type_data_rows: jogging INSERT
             MagicMock(),  # _persist_sync_metadata
         ]
 
@@ -1635,6 +1790,7 @@ class TestStravaMatchDetectionEmission:
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
             fitness_upsert,  # fitness data save
+            MagicMock(),  # _ensure_type_data_rows: jogging INSERT
             MagicMock(),  # _persist_sync_metadata
             MagicMock(),  # _save_outbox_event (match detection)
         ]
@@ -1699,6 +1855,7 @@ class TestStravaMatchDetectionEmission:
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
             fitness_upsert,  # fitness data save
+            MagicMock(),  # _ensure_type_data_rows: jogging INSERT
             MagicMock(),  # _persist_sync_metadata
         ]
 
@@ -1757,6 +1914,7 @@ class TestStravaMatchDetectionEmission:
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
             fitness_upsert,  # fitness data save
+            MagicMock(),  # _ensure_type_data_rows: jogging INSERT
             MagicMock(),  # _persist_sync_metadata
             MagicMock(),  # _save_outbox_event (match detection)
         ]

@@ -278,7 +278,13 @@ class StravaSyncService:
                     existing_jid = await self._find_existing_journal_id(
                         str(activity_id), dedup_session
                     )
-                if existing_jid is not None:
+                    stored_hash = await self._find_stored_version_hash(
+                        str(activity_id), dedup_session
+                    )
+
+                if existing_jid is not None and stored_hash is not None:
+                    # Activity is imported AND has a valid version hash —
+                    # skip unless the hash has changed on re-fetch
                     logger.debug(
                         "Skipping already-imported activity",
                         strava_activity_id=activity_id,
@@ -294,7 +300,23 @@ class StravaSyncService:
                     streams = await self._api_client.get_activity_streams(activity.id)
 
                 transformed = self._transformer.transform(activity, streams=streams)
-                event = self._build_outbox_event(transformed)
+
+                if existing_jid is not None:
+                    # Activity exists but version hash was invalidated
+                    # (e.g. by a data migration) — emit an update to
+                    # re-process types and fitness data
+                    event = self._build_outbox_event(
+                        transformed,
+                        sync_action="updated",
+                        existing_journal_id=existing_jid,
+                    )
+                    logger.info(
+                        "Re-syncing stale activity (version hash invalidated)",
+                        strava_activity_id=activity_id,
+                        journal_id=existing_jid,
+                    )
+                else:
+                    event = self._build_outbox_event(transformed)
 
                 # Short transaction just for the write
                 async with session_factory() as session:
@@ -428,6 +450,39 @@ class StravaSyncService:
         )
         row = result.fetchone()
         return row.journal_id if row is not None else None
+
+    async def _find_stored_version_hash(
+        self, strava_activity_id: str, session: AsyncSession
+    ) -> str | None:
+        """Look up the stored version hash for a Strava activity.
+
+        Queries ``sync_metadata`` for an entry matching the Strava
+        activity ID.  Returns ``None`` if no row exists or if the
+        ``version_hash`` column has been set to ``NULL`` (e.g. by a
+        data migration that invalidates stale entries).
+
+        Args:
+            strava_activity_id: Strava activity ID string.
+            session: Database session.
+
+        Returns:
+            The stored version hash, or None if absent/invalidated.
+        """
+        result = await session.execute(
+            text("""
+                SELECT version_hash
+                FROM sync_metadata
+                WHERE integration_source = 'strava'
+                  AND external_id = :strava_id
+                LIMIT 1
+            """),
+            {"strava_id": strava_activity_id},
+        )
+        row = result.fetchone()
+        if row is None:
+            return None
+        hash_val: str | None = row.version_hash  # may be NULL → None
+        return hash_val
 
     def _build_outbox_event(
         self,
