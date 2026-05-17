@@ -210,6 +210,7 @@ class SnipeItSyncService:
                                     purchase_date = EXCLUDED.purchase_date,
                                     manufacturer = EXCLUDED.manufacturer,
                                     updated_at = now()
+                                WHERE gear_items.user_id = EXCLUDED.user_id
                             """),
                             {
                                 "id": gear_id,

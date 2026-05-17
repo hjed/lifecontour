@@ -279,6 +279,7 @@ async def sync_snipeit_assets(
                 user_id,
                 asset_ids,
                 _job_id=job_id,
+                _queue_name=worker_settings.queue_name,
             )
             batch_count += 1
 
@@ -363,6 +364,8 @@ def _parse_redis_url(url: str) -> RedisSettings:
 
 class WorkerSettings:
     """ARQ worker settings for the Snipe-IT integration worker."""
+
+    queue_name = SnipeItWorkerSettings.model_fields["queue_name"].default
 
     # Task functions — populated as phases are implemented
     functions: list[Any] = [
