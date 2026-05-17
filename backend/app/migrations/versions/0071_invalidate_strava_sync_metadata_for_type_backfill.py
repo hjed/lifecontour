@@ -23,11 +23,11 @@ depends_on: str | None = None
 
 
 def upgrade() -> None:
-    """NULL out version_hash for all Strava sync_metadata entries."""
+    """Set version_hash to 'invalidated_for_type_backfill' for all Strava sync_metadata entries."""
     op.execute(
         """
         UPDATE sync_metadata
-        SET version_hash = NULL
+        SET version_hash = 'invalidated_for_type_backfill'
         WHERE integration_source = 'strava'
         """
     )

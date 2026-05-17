@@ -458,8 +458,8 @@ class StravaSyncService:
 
         Queries ``sync_metadata`` for an entry matching the Strava
         activity ID.  Returns ``None`` if no row exists or if the
-        ``version_hash`` column has been set to ``NULL`` (e.g. by a
-        data migration that invalidates stale entries).
+        ``version_hash`` column has been set to ``'invalidated_for_type_backfill'``
+        (e.g. by a data migration that invalidates stale entries).
 
         Args:
             strava_activity_id: Strava activity ID string.
@@ -481,7 +481,10 @@ class StravaSyncService:
         row = result.fetchone()
         if row is None:
             return None
-        hash_val: str | None = row.version_hash  # may be NULL → None
+        hash_val: str | None = row.version_hash
+        # If the hash was invalidated by the migration, treat it as absent
+        if hash_val == "invalidated_for_type_backfill":
+            return None
         return hash_val
 
     def _build_outbox_event(
