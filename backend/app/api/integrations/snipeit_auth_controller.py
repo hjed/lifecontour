@@ -21,6 +21,7 @@ from pydantic import BaseModel, field_validator
 from app.core.integrations.adapters.sql.snipeit_settings_repository import (
     SqlSnipeItSettingsRepository,
 )
+from app.core.integrations.task_queue_service import TaskQueueService
 from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.auth.snipeit_token_service import SnipeItTokenService
 from app.infrastructure.config import Settings
@@ -181,6 +182,7 @@ async def snipeit_oauth_callback(
     snipeit_token_service: FromDishka[SnipeItTokenService],
     snipeit_settings_repo: FromDishka[SqlSnipeItSettingsRepository],
     settings: FromDishka[Settings],
+    task_queue_service: FromDishka[TaskQueueService],
 ) -> SnipeItOAuthCallbackResponse:
     """
     Handle Snipe-IT OAuth callback and exchange authorization code for tokens.
@@ -257,6 +259,20 @@ async def snipeit_oauth_callback(
 
         # Get redirect URL from session
         redirect_url = request.session.pop("snipeit_redirect_url", "/integrations")
+
+        # Trigger initial full sync of assets
+        try:
+            await task_queue_service.enqueue_snipeit_sync(
+                user_id=user.id,
+                sync_type="full",
+            )
+            logger.info("Triggered initial Snipe-IT full sync", user_id=user.id)
+        except Exception as sync_err:
+            logger.warning(
+                "Failed to enqueue Snipe-IT initial sync during OAuth callback",
+                user_id=user.id,
+                error=str(sync_err),
+            )
 
         logger.info(
             "Snipe-IT OAuth callback successful",

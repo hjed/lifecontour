@@ -489,3 +489,70 @@ class TestTaskQueueService:
             )
 
         assert "Redis connection failed" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_enqueue_snipeit_sync_success(
+        self, service: TaskQueueService, mock_redis_pool: AsyncMock
+    ):
+        """Test successful Snipe-IT sync job enqueueing."""
+        from core_shared.integration_constants import SNIPEIT_ARQ_QUEUE_NAME
+
+        mock_job = MagicMock()
+        mock_job.job_id = "snipeit-job-123"
+        mock_redis_pool.enqueue_job.return_value = mock_job
+
+        # Mock database session and repository
+        mock_session = MagicMock()
+        mock_conn = AsyncMock()
+        mock_session.connection = AsyncMock(return_value=mock_conn)
+
+        mock_begin_ctx = MagicMock()
+        mock_begin_ctx.__aenter__ = AsyncMock(return_value=None)
+        mock_begin_ctx.__aexit__ = AsyncMock(return_value=None)
+        mock_session.begin = MagicMock(return_value=mock_begin_ctx)
+
+        mock_get_session_ctx = MagicMock()
+        mock_get_session_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_get_session_ctx.__aexit__ = AsyncMock(return_value=None)
+
+        service.db_manager.get_session = MagicMock(return_value=mock_get_session_ctx)  # type: ignore[method-assign]
+
+        with patch(
+            "app.core.integrations.task_queue_service.SyncJobRepository"
+        ) as mock_repo_class:
+            mock_repo = AsyncMock()
+            mock_repo_class.return_value = mock_repo
+
+            mock_redis_pool.hset = AsyncMock()
+            mock_redis_pool.expire = AsyncMock()
+
+            job_id = await service.enqueue_snipeit_sync(
+                user_id=123,
+                sync_type="full",
+            )
+
+            mock_redis_pool.enqueue_job.assert_called_once_with(
+                "sync_snipeit_assets",
+                "123",
+                "full",
+                otel_carrier=ANY,
+                _defer_until=None,
+                _queue_name=SNIPEIT_ARQ_QUEUE_NAME,
+            )
+
+            assert job_id == "snipeit-job-123"
+
+    @pytest.mark.asyncio
+    async def test_enqueue_snipeit_sync_failure(
+        self, service: TaskQueueService, mock_redis_pool: AsyncMock
+    ):
+        """Test Snipe-IT sync job enqueueing failure."""
+        mock_redis_pool.enqueue_job.side_effect = Exception("Redis connection failed")
+
+        with pytest.raises(Exception) as exc_info:
+            await service.enqueue_snipeit_sync(
+                user_id=123,
+                sync_type="full",
+            )
+
+        assert "Redis connection failed" in str(exc_info.value)

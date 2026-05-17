@@ -42,8 +42,15 @@ class SyncMetadata(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
     # Core sync tracking fields
-    internal_id: Mapped[int] = mapped_column(
-        Integer, nullable=False, comment="ID of the internal entity being synced"
+    internal_id: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="ID of the internal entity being synced (Integer)",
+    )
+    internal_uuid: Mapped[str | None] = mapped_column(
+        String(36),
+        nullable=True,
+        comment="ID of the internal entity being synced (UUID)",
     )
     integration_source: Mapped[str] = mapped_column(
         String(50),
