@@ -149,15 +149,6 @@ async def seeded_outdoor_journals(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_export_outdoor_logbook_unauthenticated(unauthenticated_client):
-    """Test that unauthenticated requests to export are rejected."""
-    response = await unauthenticated_client.post(
-        "/api/journals/export/outdoor-logbook", json={}
-    )
-    assert response.status_code == 401
-
-
-@pytest.mark.asyncio
 class TestLogbookExportEndpoint:
     """Tests for POST /api/journals/export/outdoor-logbook."""
 

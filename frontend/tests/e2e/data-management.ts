@@ -1331,27 +1331,10 @@ export class TestDataManager {
    * Perform the actual cleanup operations
    */
   private async performCleanup(): Promise<void> {
-    // Use bulk cleanup endpoint for better performance and transaction handling
-    try {
-      const response = await this.page.request.delete(
-        '/api/contacts/test/cleanup'
-      );
-      if (response.ok()) {
-        console.debug(
-          `🗑️ [Data Manager] Bulk deleted all contacts successfully`
-        );
-      } else {
-        console.debug(
-          `⚠️ [Data Manager] Bulk cleanup failed: ${response.status()}`
-        );
-        // Fall back to individual deletion if bulk cleanup fails
-        await this.fallbackIndividualCleanup();
-      }
-    } catch (error) {
-      console.debug(`⚠️ [Data Manager] Bulk cleanup error:`, error);
-      // Fall back to individual deletion if bulk cleanup fails
-      await this.fallbackIndividualCleanup();
-    }
+    // Do NOT use the global /api/contacts/test/cleanup endpoint because it deletes ALL contacts
+    // for the user, which breaks other tests running in parallel workers.
+    // Instead, we explicitly delete the items this DataManager created.
+    await this.fallbackIndividualCleanup();
 
     await this.cleanupSpecificItems(
       this.createdJournalIds,
@@ -1387,62 +1370,73 @@ export class TestDataManager {
 
   /**
    * Fallback cleanup method using individual contact deletion
+   * Uses concurrent batches to speed up deletion of large datasets.
    */
   private async fallbackIndividualCleanup(): Promise<void> {
-    console.debug(`🧹 [Data Manager] Using fallback individual cleanup...`);
+    if (this.createdContactIds.length === 0) return;
+
+    console.debug(
+      `🧹 [Data Manager] Deleting ${this.createdContactIds.length} contacts individually...`
+    );
 
     let successfulDeletes = 0;
     const startTime = Date.now();
-    const maxCleanupTime = 20000; // 20 seconds for individual cleanup
+    const maxCleanupTime = 30000; // 30 seconds for cleanup
+    const batchSize = 10; // Delete up to 10 contacts concurrently
 
-    for (const contactId of this.createdContactIds) {
-      // Check timeout
+    for (let i = 0; i < this.createdContactIds.length; i += batchSize) {
       if (Date.now() - startTime > maxCleanupTime) {
         console.debug(
-          `⚠️ [Data Manager] Individual cleanup timed out after ${maxCleanupTime}ms`
+          `⚠️ [Data Manager] Contact cleanup timed out after ${maxCleanupTime}ms`
         );
         break;
       }
 
-      try {
-        const response = await this.page.request.delete(
-          `/api/contacts/${contactId}`
-        );
-        if (response.ok()) {
-          console.debug(`🗑️ [Data Manager] Deleted contact ${contactId}`);
-          successfulDeletes++;
-        } else if (response.status() === 404) {
-          // Contact already deleted - this is fine
-          console.debug(
-            `🗑️ [Data Manager] Contact ${contactId} already deleted`
-          );
-          successfulDeletes++;
-        } else {
-          // Don't log full error details for 500 errors (known backend transaction issue)
-          if (response.status() === 500) {
-            console.debug(
-              `⚠️ [Data Manager] Failed to delete contact ${contactId}: 500 (backend transaction issue)`
+      const batch = this.createdContactIds.slice(i, i + batchSize);
+
+      await Promise.allSettled(
+        batch.map(async contactId => {
+          try {
+            const response = await this.page.request.delete(
+              `/api/contacts/${contactId}`
             );
-          } else {
-            const errorText = await response.text();
+            if (response.ok()) {
+              console.debug(`🗑️ [Data Manager] Deleted contact ${contactId}`);
+              successfulDeletes++;
+            } else if (response.status() === 404) {
+              // Contact already deleted - this is fine
+              console.debug(
+                `🗑️ [Data Manager] Contact ${contactId} already deleted`
+              );
+              successfulDeletes++;
+            } else {
+              // Don't log full error details for 500 errors (known backend transaction issue)
+              if (response.status() === 500) {
+                console.debug(
+                  `⚠️ [Data Manager] Failed to delete contact ${contactId}: 500 (backend transaction issue)`
+                );
+              } else {
+                const errorText = await response.text();
+                console.debug(
+                  `⚠️ [Data Manager] Failed to delete contact ${contactId}: ${response.status()}`
+                );
+                console.debug(
+                  `⚠️ [Data Manager] Delete error response:`,
+                  errorText
+                );
+              }
+            }
+          } catch (error) {
             console.debug(
-              `⚠️ [Data Manager] Failed to delete contact ${contactId}: ${response.status()}`
-            );
-            console.debug(
-              `⚠️ [Data Manager] Delete error response:`,
-              errorText
+              `⚠️ [Data Manager] Error deleting contact ${contactId}:`,
+              error
             );
           }
-        }
-      } catch (error) {
-        console.debug(
-          `⚠️ [Data Manager] Error deleting contact ${contactId}:`,
-          error
-        );
-      }
 
-      // Small delay to reduce transaction conflicts
-      await new Promise(resolve => setTimeout(resolve, 50));
+          // Small delay to reduce transaction conflicts
+          await new Promise(resolve => setTimeout(resolve, 50));
+        })
+      );
     }
 
     if (successfulDeletes > 0) {

@@ -35,14 +35,20 @@ export function getDefaultTimezone(): string {
 }
 
 export function TimezoneSettings() {
-  const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const [timezone, setTimezone] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem(TIMEZONE_STORAGE_KEY);
-      if (stored) return stored;
-    }
-    return browserTimezone;
-  });
+  const [isMounted, setIsMounted] = useState(false);
+  const [timezone, setTimezone] = useState('UTC');
+
+  useEffect(() => {
+    setIsMounted(true);
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const stored = localStorage.getItem(TIMEZONE_STORAGE_KEY);
+    setTimezone(stored || tz);
+  }, []);
+
+  const browserTimezone = isMounted
+    ? Intl.DateTimeFormat().resolvedOptions().timeZone
+    : 'UTC';
+
   const [saved, setSaved] = useState(false);
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
