@@ -7,7 +7,13 @@
 
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useSyncExternalStore,
+} from 'react';
 import { Globe } from 'lucide-react';
 import {
   Card,
@@ -34,18 +40,48 @@ export function getDefaultTimezone(): string {
   return stored || Intl.DateTimeFormat().resolvedOptions().timeZone;
 }
 
+/** Read stored timezone from localStorage (client snapshot). */
+function getStoredTimezoneSnapshot(): string | null {
+  return localStorage.getItem(TIMEZONE_STORAGE_KEY);
+}
+
+/** Server snapshot always returns null. */
+function getStoredTimezoneServerSnapshot(): null {
+  return null;
+}
+
+/** Subscribe is a no-op — we don't need live storage events for this component. */
+function subscribeToNothing(callback: () => void): () => void {
+  // We don't subscribe to storage events because the component
+  // manages its own writes via handleSave/handleReset.
+  void callback;
+  return () => {};
+}
+
+/**
+ * Resolve the browser's timezone. Safe for SSR (returns 'UTC').
+ */
+function getBrowserTimezone(): string {
+  if (typeof window === 'undefined') return 'UTC';
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
 export function TimezoneSettings() {
-  const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const [timezone, setTimezone] = useState(browserTimezone);
+  // Read stored timezone without useEffect — hydration-safe via useSyncExternalStore
+  const storedTimezone = useSyncExternalStore(
+    subscribeToNothing,
+    getStoredTimezoneSnapshot,
+    getStoredTimezoneServerSnapshot
+  );
+
+  const browserTimezone = getBrowserTimezone();
+  const initialTimezone = storedTimezone ?? browserTimezone;
+
+  const [timezone, setTimezone] = useState(initialTimezone);
   const [saved, setSaved] = useState(false);
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    const stored = localStorage.getItem(TIMEZONE_STORAGE_KEY);
-    if (stored) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setTimezone(stored);
-    }
     return () => {
       if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
     };

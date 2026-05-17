@@ -9,7 +9,7 @@
  * - Loading states and error handling
  */
 
-import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
 
 export interface UseInlineEditOptions {
@@ -71,36 +71,34 @@ export function useInlineEdit(
   const [error, setError] = useState<string | null>(null);
 
   // Keep track of original value for rollback
-  const originalValueRef = useRef(normalizedInitialValue);
-  const prevInitialValueRef = useRef(initialValue);
+  const [originalValue, setOriginalValue] = useState(normalizedInitialValue);
+  const [prevInitialValue, setPrevInitialValue] = useState(initialValue);
 
   // Sync external changes (e.g. from react-query refetches) when not actively editing
-  useEffect(() => {
-    if (initialValue !== prevInitialValueRef.current) {
-      prevInitialValueRef.current = initialValue;
-      if (!isEditing && initialValue !== undefined) {
-        const normalized = initialValue ?? '';
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setDisplayValue(normalized);
+  if (initialValue !== prevInitialValue) {
+    setPrevInitialValue(initialValue);
+    if (!isEditing && initialValue !== undefined) {
+      const normalized = initialValue ?? '';
 
-        setValue(normalized);
-        originalValueRef.current = normalized;
-      }
+      setDisplayValue(normalized);
+
+      setValue(normalized);
+      setOriginalValue(normalized);
     }
-  }, [initialValue, isEditing]);
+  }
 
   const startEdit = useCallback(() => {
     setIsEditing(true);
     setError(null);
-    originalValueRef.current = displayValue;
+    setOriginalValue(displayValue);
   }, [displayValue]);
 
   const cancelEdit = useCallback(() => {
-    setValue(originalValueRef.current);
-    setDisplayValue(originalValueRef.current);
+    setValue(originalValue);
+    setDisplayValue(originalValue);
     setIsEditing(false);
     setError(null);
-  }, []);
+  }, [originalValue]);
 
   const handleSetValue = useCallback(
     (newValue: string) => {
@@ -124,7 +122,7 @@ export function useInlineEdit(
     }
 
     // Don't save if value hasn't changed
-    if (value === originalValueRef.current) {
+    if (value === originalValue) {
       setIsEditing(false);
       return;
     }
@@ -149,15 +147,15 @@ export function useInlineEdit(
       await onSave(value);
 
       // Update original value reference for future edits
-      originalValueRef.current = value;
+      setOriginalValue(value);
 
       if (showSuccessToast) {
         toast.success('Field updated successfully');
       }
     } catch (saveError) {
       // Rollback optimistic update
-      setDisplayValue(originalValueRef.current);
-      setValue(originalValueRef.current);
+      setDisplayValue(originalValue);
+      setValue(originalValue);
       setIsEditing(true);
 
       const errorMessage =
@@ -173,7 +171,15 @@ export function useInlineEdit(
     } finally {
       setIsLoading(false);
     }
-  }, [value, error, validation, onSave, showSuccessToast, showErrorToast]);
+  }, [
+    value,
+    originalValue,
+    error,
+    validation,
+    onSave,
+    showSuccessToast,
+    showErrorToast,
+  ]);
 
   const handleKeyDown = useCallback(
     async (event: React.KeyboardEvent) => {

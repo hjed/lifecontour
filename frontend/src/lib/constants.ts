@@ -23,6 +23,7 @@ export const API_ENDPOINTS = {
     BASE: '/api/journals',
     BY_ID: (id: string) => `/api/journals/${id}`,
     SEARCH: '/api/journals/search',
+    EXPORT_OUTDOOR_LOGBOOK: '/api/journals/export/outdoor-logbook',
   },
   TEMPLATES: {
     BASE: '/api/templates',
