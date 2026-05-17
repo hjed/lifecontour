@@ -56,6 +56,27 @@ EVENT_TYPE_JOURNAL_EVENT_CONFLICTED = "journal_event.conflicted"
 EVENT_TYPE_JOURNAL_EVENT_CANCELLED = "journal_event.cancelled"
 EVENT_TYPE_JOURNAL_REVIEW_DETECT_MATCHES = "journal_review.detect_matches"
 
+# Mapping from JournalType value to the database table name for types that
+# need a default data row.  FITNESS is handled separately via
+# SqlFitnessDataRepository, and EVENT/NOTE have no standalone data table.
+_TYPE_DATA_TABLE_MAP: dict[str, str] = {
+    JournalType.OUTDOOR_ACTIVITY.value: "journal_outdoor_activity_data",
+    JournalType.BUSHWALKING.value: "journal_bushwalking_data",
+    JournalType.JOGGING.value: "journal_jogging_data",
+    JournalType.ABSEILING_TRIP.value: "journal_abseiling_data",
+    JournalType.CANYONING.value: "journal_canyoning_data",
+    JournalType.CLIMBING.value: "journal_climbing_data",
+    JournalType.KAYAKING.value: "journal_kayaking_data",
+    JournalType.CROSS_COUNTRY_SKIING.value: "journal_skiing_data",
+    JournalType.CAVING.value: "journal_caving_data",
+    JournalType.CANOEING.value: "journal_canoeing_data",
+    JournalType.SNORKELLING.value: "journal_snorkelling_data",
+    JournalType.DIVING.value: "journal_diving_data",
+    JournalType.DOWNHILL_SKIING.value: "journal_downhill_skiing_data",
+    JournalType.OUTDOOR_PLANNING.value: "journal_outdoor_planning_data",
+    JournalType.OUTDOOR_TRAINING.value: "journal_outdoor_training_data",
+}
+
 
 class JournalOutboxEventProcessingError(Exception):
     """Raised when journal outbox event processing fails."""
@@ -746,6 +767,50 @@ class JournalOutboxEventProcessor:
                         journal_type=type_str,
                         journal_id=journal_id,
                     )
+
+            # Create type-specific data rows for types that need them.
+            # add_type_to_journal only publishes domain events — the actual
+            # data table rows must be inserted separately.  FITNESS is
+            # already handled above via SqlFitnessDataRepository.
+            await self._ensure_type_data_rows(journal_id, raw_types)
+
+    async def _ensure_type_data_rows(
+        self, journal_id: int, type_strings: list[str]
+    ) -> None:
+        """Create default data-table rows for the given journal types.
+
+        Each journal type that maps to a standalone data table (see
+        ``_TYPE_DATA_TABLE_MAP``) gets an ``INSERT … ON CONFLICT DO NOTHING``
+        so the row is only created if it doesn't already exist.
+
+        FITNESS is **not** covered here because it is persisted with actual
+        field values earlier in ``_persist_fitness_and_types``.  EVENT and
+        NOTE have no standalone data table.
+
+        Args:
+            journal_id: ID of the journal to create rows for.
+            type_strings: Raw type value strings from the outbox event.
+        """
+        for type_str in type_strings:
+            table_name = _TYPE_DATA_TABLE_MAP.get(type_str)
+            if table_name is None:
+                # FITNESS, EVENT, NOTE, or unknown — handled elsewhere or no table
+                continue
+
+            await self.connection.execute(
+                text(
+                    f"INSERT INTO {table_name} (journal_id) "  # noqa: S608
+                    f"VALUES (:journal_id) "
+                    f"ON CONFLICT (journal_id) DO NOTHING"
+                ),
+                {"journal_id": journal_id},
+            )
+            logger.debug(
+                "Ensured type data row exists",
+                journal_id=journal_id,
+                type=type_str,
+                table=table_name,
+            )
 
     async def _resolve_strava_athlete_to_contact(
         self, user_id: str, athlete_id: str, athlete_name: str | None

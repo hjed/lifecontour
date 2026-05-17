@@ -314,11 +314,19 @@ class TestSyncActivityBatch:
             _make_activity(activity_id=2),
         ]
 
-        with patch.object(
-            sync_service,
-            "_find_existing_journal_id",
-            new_callable=AsyncMock,
-            return_value=None,
+        with (
+            patch.object(
+                sync_service,
+                "_find_existing_journal_id",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch.object(
+                sync_service,
+                "_find_stored_version_hash",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
         ):
             result = await sync_service.sync_activity_batch(
                 activity_ids=[1, 2], session_factory=mock_session_factory
@@ -337,17 +345,25 @@ class TestSyncActivityBatch:
         mock_session: MagicMock,
         mock_session_factory: MagicMock,
     ) -> None:
-        """Skips activities that already have a journal entry."""
+        """Skips activities that already have a journal entry and valid hash."""
         # Only the second activity will be fetched from API
         mock_api_client.get_activity.side_effect = [
             _make_activity(activity_id=2),
         ]
 
-        with patch.object(
-            sync_service,
-            "_find_existing_journal_id",
-            new_callable=AsyncMock,
-            side_effect=[42, None],  # first exists, second is new
+        with (
+            patch.object(
+                sync_service,
+                "_find_existing_journal_id",
+                new_callable=AsyncMock,
+                side_effect=[42, None],  # first exists, second is new
+            ),
+            patch.object(
+                sync_service,
+                "_find_stored_version_hash",
+                new_callable=AsyncMock,
+                side_effect=["abc123", None],  # first has hash, second is new
+            ),
         ):
             result = await sync_service.sync_activity_batch(
                 activity_ids=[1, 2], session_factory=mock_session_factory
@@ -355,6 +371,50 @@ class TestSyncActivityBatch:
 
         assert result["synced"] == 1
         assert result["skipped"] == 1
+
+    @pytest.mark.asyncio()
+    async def test_resyncs_stale_activity_with_invalidated_hash(
+        self,
+        sync_service: StravaSyncService,
+        mock_api_client: AsyncMock,
+        mock_session: MagicMock,
+        mock_session_factory: MagicMock,
+    ) -> None:
+        """Re-syncs an existing activity whose version hash was invalidated."""
+        mock_api_client.get_activity.side_effect = [
+            _make_activity(activity_id=1),
+            _make_activity(activity_id=2),
+        ]
+
+        with (
+            patch.object(
+                sync_service,
+                "_find_existing_journal_id",
+                new_callable=AsyncMock,
+                side_effect=[42, None],  # first exists, second is new
+            ),
+            patch.object(
+                sync_service,
+                "_find_stored_version_hash",
+                new_callable=AsyncMock,
+                side_effect=[None, None],  # hash invalidated by migration
+            ),
+        ):
+            result = await sync_service.sync_activity_batch(
+                activity_ids=[1, 2], session_factory=mock_session_factory
+            )
+
+        assert result["synced"] == 2
+        assert result["skipped"] == 0
+
+        # First event should be an update for the stale activity
+        first_event = mock_session.add.call_args_list[0][0][0]
+        assert first_event.event_type == "journal_event.updated"
+        assert first_event.event_data["existing_journal_id"] == 42
+
+        # Second event should be a create for the new activity
+        second_event = mock_session.add.call_args_list[1][0][0]
+        assert second_event.event_type == "journal_event.created"
 
     @pytest.mark.asyncio()
     async def test_continues_after_stream_fetch_failure(
@@ -395,6 +455,12 @@ class TestSyncActivityBatch:
                 new_callable=AsyncMock,
                 return_value=None,
             ),
+            patch.object(
+                sync_service,
+                "_find_stored_version_hash",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
             patch("strava_sync_service.asyncio.sleep", new_callable=AsyncMock),
         ):
             result = await sync_service.sync_activity_batch(
@@ -426,6 +492,12 @@ class TestSyncActivityBatch:
             patch.object(
                 sync_service,
                 "_find_existing_journal_id",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch.object(
+                sync_service,
+                "_find_stored_version_hash",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -479,6 +551,12 @@ class TestSyncActivityBatch:
                 new_callable=AsyncMock,
                 return_value=None,
             ),
+            patch.object(
+                sync_service,
+                "_find_stored_version_hash",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
             patch("strava_sync_service.asyncio.sleep", new_callable=AsyncMock),
         ):
             result = await sync_service.sync_activity_batch(
@@ -515,6 +593,12 @@ class TestSyncActivityBatch:
                 new_callable=AsyncMock,
                 return_value=None,
             ),
+            patch.object(
+                sync_service,
+                "_find_stored_version_hash",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
             patch("strava_sync_service.asyncio.sleep", new_callable=AsyncMock),
         ):
             result = await sync_service.sync_activity_batch(
@@ -543,11 +627,19 @@ class TestSyncActivityBatch:
             "Not found", status_code=404
         )
 
-        with patch.object(
-            sync_service,
-            "_find_existing_journal_id",
-            new_callable=AsyncMock,
-            return_value=None,
+        with (
+            patch.object(
+                sync_service,
+                "_find_existing_journal_id",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch.object(
+                sync_service,
+                "_find_stored_version_hash",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
         ):
             result = await sync_service.sync_activity_batch(
                 activity_ids=[1], session_factory=mock_session_factory
@@ -588,6 +680,12 @@ class TestSyncActivityBatch:
                 new_callable=AsyncMock,
                 side_effect=[None, None, None, 42, None],  # retries, existing, new
             ),
+            patch.object(
+                sync_service,
+                "_find_stored_version_hash",
+                new_callable=AsyncMock,
+                side_effect=[None, None, None, "abc123", None],  # existing has hash
+            ),
             patch("strava_sync_service.asyncio.sleep", new_callable=AsyncMock),
         ):
             result = await sync_service.sync_activity_batch(
@@ -618,6 +716,12 @@ class TestSyncActivityBatch:
             patch.object(
                 sync_service,
                 "_find_existing_journal_id",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch.object(
+                sync_service,
+                "_find_stored_version_hash",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
