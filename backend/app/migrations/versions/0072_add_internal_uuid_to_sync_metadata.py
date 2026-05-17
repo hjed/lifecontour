@@ -39,6 +39,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Delete rows that use internal_uuid (Snipe-IT) or lack an internal_id
+    # to allow internal_id to safely become NOT NULL again.
+    op.execute("DELETE FROM sync_metadata WHERE internal_id IS NULL")
+
     # Revert check constraints
     op.drop_constraint(
         "ck_sync_metadata_integration_source", "sync_metadata", type_="check"

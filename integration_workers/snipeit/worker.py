@@ -175,6 +175,8 @@ def _create_sync_service(
         # Simplistic token refresh logic
         import httpx
 
+        nonlocal refresh_token
+
         token_url = f"{base_url.rstrip('/')}/oauth/token"
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -201,6 +203,7 @@ def _create_sync_service(
             await _update_user_tokens(
                 session_factory, user_id, new_access, new_refresh, DummyAuth()
             )
+            refresh_token = new_refresh
             return str(new_access)
 
     api_client = SnipeItAPIClient.create(
@@ -363,8 +366,8 @@ class WorkerSettings:
 
     # Task functions — populated as phases are implemented
     functions: list[Any] = [
-        "worker.sync_snipeit_assets",
-        "worker.sync_snipeit_asset_batch",
+        sync_snipeit_assets,
+        sync_snipeit_asset_batch,
     ]
 
     on_startup = startup

@@ -1,5 +1,5 @@
 """
-Pytest configuration for Google Contacts worker integration tests.
+Pytest configuration for Snipe-IT worker integration tests.
 
 Contains database session fixtures and migrations.
 """
