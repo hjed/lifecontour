@@ -209,3 +209,28 @@ class RouteDeleted(DomainEvent):
             event_data={"route_id": route_id},
             transaction=transaction,
         )
+
+
+@dataclass(frozen=True)
+class GearItemUpdated(DomainEvent):
+    """Event raised when a gear item is updated."""
+
+    def __init__(
+        self,
+        gear_item_id: str,
+        changed_fields: dict[str, Any],
+        transaction: AsyncConnection | None = None,
+    ):
+        now = datetime.now()
+        # Use UUID.int for deterministic aggregate_id (DomainEvent expects int)
+        from uuid import UUID
+
+        aggregate_id = UUID(gear_item_id).int % (10**9)
+        super().__init__(
+            event_id=f"gear_item_updated_{gear_item_id}_{now.isoformat()}",
+            occurred_at=now,
+            aggregate_id=aggregate_id,
+            event_type="GearItemUpdated",
+            event_data={"gear_item_id": gear_item_id, "changed_fields": changed_fields},
+            transaction=transaction,
+        )

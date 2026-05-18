@@ -2,6 +2,7 @@
 
 from .events import (
     DomainEvent,
+    GearItemUpdated,
     JournalCreated,
     JournalDeleted,
     JournalTypeAdded,
@@ -48,6 +49,7 @@ __all__ = [
     "RouteCreated",
     "RouteUpdated",
     "RouteDeleted",
+    "GearItemUpdated",
     # Repositories
     "JournalRepository",
     "CalendarRepository",
