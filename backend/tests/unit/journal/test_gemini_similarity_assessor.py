@@ -182,3 +182,31 @@ class TestGeminiTitleSimilarityAssessor:
             )
 
             assert score == 0.0
+
+    async def test_call_gemini_retries_on_timeout(
+        self,
+        assessor: GeminiTitleSimilarityAssessor,
+    ) -> None:
+        """Test that _call_gemini retries on TimeoutError before failing."""
+        from unittest.mock import MagicMock
+
+        with patch("google.genai.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client_class.return_value = mock_client
+
+            # Make the async call raise TimeoutError every time
+            # We mock asyncio.wait_for instead, because the TimeoutError is raised by wait_for
+            with patch("asyncio.wait_for", new_callable=AsyncMock) as mock_wait_for:
+                mock_wait_for.side_effect = TimeoutError("Timeout")
+
+                with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+                    with pytest.raises(TimeoutError):
+                        await assessor._call_gemini("test prompt")
+
+                    # Should have been called 3 times (initial + 2 retries)
+                    assert mock_wait_for.call_count == 3
+
+                    # Should have slept twice (1s, 2s)
+                    assert mock_sleep.call_count == 2
+                    mock_sleep.assert_any_call(1.0)
+                    mock_sleep.assert_any_call(2.0)
