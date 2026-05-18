@@ -206,7 +206,7 @@ Confidence score (0.0-1.0):"""
             Parsed float score or None if parsing fails
 
         Raises:
-            asyncio.TimeoutError: If the call exceeds timeout
+            asyncio.TimeoutError: If the call exceeds timeout after retries
             Exception: Transport/API errors are re-raised so the outbox
                        retry mechanism can handle transient outages.
         """
@@ -216,19 +216,36 @@ Confidence score (0.0-1.0):"""
 
         # Let transport / API / auth errors propagate for outbox retry.
         # Only swallow response-shape / parse errors below.
-        response = await asyncio.wait_for(
-            client.aio.models.generate_content(
-                model=self._model,
-                contents=prompt,
-            ),
-            timeout=self.TIMEOUT_SECONDS,
-        )
+        max_attempts = 3
+        base_delay = 1.0
 
-        if response and response.text:
-            return self._parse_score(response.text)
+        for attempt in range(max_attempts):
+            try:
+                response = await asyncio.wait_for(
+                    client.aio.models.generate_content(
+                        model=self._model,
+                        contents=prompt,
+                    ),
+                    timeout=self.TIMEOUT_SECONDS,
+                )
 
-        logger.warning("Gemini returned empty response")
-        return None
+                if response and response.text:
+                    return self._parse_score(response.text)
+
+                logger.warning("Gemini returned empty response")
+                return None
+
+            except TimeoutError:
+                if attempt == max_attempts - 1:
+                    raise
+
+                delay = base_delay * (2**attempt)
+                logger.warning(
+                    f"Gemini API timeout, retrying in {delay}s (attempt {attempt + 1}/{max_attempts})"
+                )
+                await asyncio.sleep(delay)
+
+        raise RuntimeError("Unreachable")
 
     @staticmethod
     def _parse_score(text: str) -> float | None:
