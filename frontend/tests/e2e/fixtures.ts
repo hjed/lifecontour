@@ -19,6 +19,7 @@
 import {
   test as base,
   Page,
+  Browser,
   expect as playwrightExpect,
 } from '@playwright/test';
 import {
@@ -98,19 +99,83 @@ export interface TestFixtures {
   contactsWithTags: { page: Page; contacts: TestContact[]; tags: string[] };
 
   // Advanced data fixtures
-  smallDataSet: { page: Page; contacts: TestContact[]; tags: any[] };
-  mediumDataSet: { page: Page; contacts: TestContact[]; tags: any[] };
-  largeDataSet: { page: Page; contacts: TestContact[]; tags: any[] };
-  searchTestData: { page: Page; contacts: TestContact[]; tags: any[] };
-  favouritesTestData: { page: Page; contacts: TestContact[]; tags: any[] };
-  taggedTestData: { page: Page; contacts: TestContact[]; tags: any[] };
-  performanceTestData: { page: Page; contacts: TestContact[]; tags: any[] };
+  smallDataSet: {
+    page: Page;
+    contacts: TestContact[];
+    tags: Array<{
+      id: string;
+      name: string;
+      attributes?: Record<string, unknown>;
+    }>;
+  };
+  mediumDataSet: {
+    page: Page;
+    contacts: TestContact[];
+    tags: Array<{
+      id: string;
+      name: string;
+      attributes?: Record<string, unknown>;
+    }>;
+  };
+  largeDataSet: {
+    page: Page;
+    contacts: TestContact[];
+    tags: Array<{
+      id: string;
+      name: string;
+      attributes?: Record<string, unknown>;
+    }>;
+  };
+  searchTestData: {
+    page: Page;
+    contacts: TestContact[];
+    tags: Array<{
+      id: string;
+      name: string;
+      attributes?: Record<string, unknown>;
+    }>;
+  };
+  favouritesTestData: {
+    page: Page;
+    contacts: TestContact[];
+    tags: Array<{
+      id: string;
+      name: string;
+      attributes?: Record<string, unknown>;
+    }>;
+  };
+  taggedTestData: {
+    page: Page;
+    contacts: TestContact[];
+    tags: Array<{
+      id: string;
+      name: string;
+      attributes?: Record<string, unknown>;
+    }>;
+  };
+  performanceTestData: {
+    page: Page;
+    contacts: TestContact[];
+    tags: Array<{
+      id: string;
+      name: string;
+      attributes?: Record<string, unknown>;
+    }>;
+  };
 
   // Specialized fixtures
   contactsWithoutTags: { page: Page; contacts: TestContact[] };
   favouriteContacts: { page: Page; contacts: TestContact[] };
   regularContacts: { page: Page; contacts: TestContact[] };
-  taggedContactsData: { page: Page; contacts: TestContact[]; tags: any[] };
+  taggedContactsData: {
+    page: Page;
+    contacts: TestContact[];
+    tags: Array<{
+      id: string;
+      name: string;
+      attributes?: Record<string, unknown>;
+    }>;
+  };
 
   // Journal fixtures
   journalsWithData: { page: Page; journals: TestJournal[] };
@@ -172,7 +237,7 @@ function convertDatasetTags(
  * - Uses waitForResponse for API call completion
  * - Removed all waitForTimeout calls where possible
  */
-async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
+async function completeWorkerOAuthFlow(browser: Browser): Promise<AuthState> {
   // Wait for any ongoing OAuth flow to complete with timeout
   const lockAcquired = await waitForOAuthLock(30000);
   if (!lockAcquired) {
@@ -327,17 +392,36 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
     const cookies = await context.cookies();
 
     const validCookies = cookies
-      .filter((cookie: any) => cookie.name && cookie.value)
-      .map((cookie: any) => ({
-        ...cookie,
-        expires:
-          cookie.expires && cookie.expires > 0
-            ? Math.floor(cookie.expires)
-            : Math.floor((Date.now() + 3600000) / 1000), // Default to 1 hour from now
-        // Firefox is stricter about secure flag on non-HTTPS connections
-        // For localhost testing, we need to set secure: false to allow cookies
-        secure: false,
-      }));
+      .filter(
+        (cookie: { name?: string; value?: string }) =>
+          cookie.name && cookie.value
+      )
+      .map(
+        (cookie: {
+          name?: string;
+          value?: string;
+          domain?: string;
+          path?: string;
+          expires?: number;
+          httpOnly?: boolean;
+          secure?: boolean;
+          sameSite?: 'Strict' | 'Lax' | 'None';
+        }) => ({
+          name: cookie.name as string,
+          value: cookie.value as string,
+          domain: cookie.domain as string,
+          path: cookie.path as string,
+          expires:
+            cookie.expires && cookie.expires > 0
+              ? Math.floor(cookie.expires)
+              : Math.floor(Date.now() / 1000) + 86400,
+          // Firefox is stricter about secure flag on non-HTTPS connections
+          // For localhost testing, we need to set secure: false to allow cookies
+          secure: false,
+          httpOnly: cookie.httpOnly,
+          sameSite: cookie.sameSite,
+        })
+      );
 
     return {
       storageState: {
@@ -361,31 +445,57 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
 async function applyAuthState(page: Page, authState: AuthState): Promise<void> {
   // Add cookies from the stored state
   const validCookies = authState.storageState.cookies
-    .filter((cookie: any) => {
-      // Ensure required fields are present
-      if (!cookie.name || !cookie.value) {
-        return false;
-      }
+    .filter(
+      (cookie: {
+        name?: string;
+        value?: string;
+        domain?: string;
+        path?: string;
+        expires?: number;
+        httpOnly?: boolean;
+        secure?: boolean;
+        sameSite?: string;
+      }) => {
+        // Ensure required fields are present
+        if (!cookie.name || !cookie.value) {
+          return false;
+        }
 
-      // Validate expires field
-      if (
-        cookie.expires !== undefined &&
-        (cookie.expires < -1 || !Number.isInteger(cookie.expires))
-      ) {
-        return false;
-      }
+        // Validate expires field
+        if (
+          cookie.expires !== undefined &&
+          (cookie.expires < -1 || !Number.isInteger(cookie.expires))
+        ) {
+          return false;
+        }
 
-      return true;
-    })
-    .map((cookie: any) => ({
-      ...cookie,
-      // Set default domain and path if not present
-      domain: cookie.domain || 'localhost',
-      path: cookie.path || '/',
-      // Firefox is stricter about secure flag on non-HTTPS connections
-      // For localhost testing, we need to set secure: false to allow cookies
-      secure: false,
-    }));
+        return true;
+      }
+    )
+    .map(
+      (cookie: {
+        name?: string;
+        value?: string;
+        domain?: string;
+        path?: string;
+        expires?: number;
+        httpOnly?: boolean;
+        secure?: boolean;
+        sameSite?: 'Strict' | 'Lax' | 'None';
+      }) => ({
+        name: cookie.name as string,
+        value: cookie.value as string,
+        // Set default domain and path if not present
+        domain: cookie.domain || 'localhost',
+        path: cookie.path || '/',
+        expires: cookie.expires || Math.floor(Date.now() / 1000) + 86400,
+        httpOnly: cookie.httpOnly,
+        // Firefox is stricter about secure flag on non-HTTPS connections
+        // For localhost testing, we need to set secure: false to allow cookies
+        secure: false,
+        sameSite: cookie.sameSite,
+      })
+    );
 
   // Add real authentication cookies to the page context
   if (validCookies.length > 0) {
@@ -395,7 +505,7 @@ async function applyAuthState(page: Page, authState: AuthState): Promise<void> {
     const appliedCookies = await page.context().cookies();
     console.log(
       `🔐 [Auth State] Verified ${appliedCookies.length} cookies in context:`,
-      appliedCookies.map((c: any) => c.name).join(', ')
+      appliedCookies.map((c: { name: string }) => c.name).join(', ')
     );
   } else {
     console.warn(

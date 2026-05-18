@@ -78,7 +78,7 @@ describe('Sidebar Components', () => {
       isFetching: false,
       isInitialLoading: false,
       refetch: jest.fn(),
-    } as any);
+    } as never);
   });
 
   afterEach(() => {

@@ -82,7 +82,15 @@ jest.mock('@/hooks/useTagFilter', () => ({
 
 // Mock the FavouriteToggle component
 jest.mock('@/components/contacts/FavouriteToggle', () => ({
-  FavouriteToggle: ({ contactId, isFavourite, contactName }: any) => (
+  FavouriteToggle: ({
+    contactId,
+    isFavourite,
+    contactName,
+  }: {
+    contactId: string;
+    isFavourite: boolean;
+    contactName: string;
+  }) => (
     <button data-testid={`favourite-toggle-${contactId}`}>
       {isFavourite ? 'Remove from favourites' : 'Add to favourites'} -{' '}
       {contactName}
@@ -140,7 +148,7 @@ describe('ContactsPage - Favourites', () => {
     });
 
     mockUseInfiniteSearchContacts.mockReturnValue(
-      createInfiniteQueryResult() as any
+      createInfiniteQueryResult() as never
     );
 
     // Set up default mock for useToggleContactFavourite
@@ -149,7 +157,7 @@ describe('ContactsPage - Favourites', () => {
       isPending: false,
       isError: false,
       error: null,
-    } as any);
+    } as never);
   });
 
   it('should display favourite toggle for each contact', async () => {
@@ -190,7 +198,7 @@ describe('ContactsPage - Favourites', () => {
     };
 
     mockUseInfiniteContacts.mockReturnValue(
-      createInfiniteQueryResult(mockData) as any
+      createInfiniteQueryResult(mockData) as never
     );
 
     renderWithProviders(<ContactsPage />);
@@ -234,7 +242,7 @@ describe('ContactsPage - Favourites', () => {
     };
 
     mockUseInfiniteContacts.mockReturnValue(
-      createInfiniteQueryResult(mockData) as any
+      createInfiniteQueryResult(mockData) as never
     );
 
     renderWithProviders(<ContactsPage />);

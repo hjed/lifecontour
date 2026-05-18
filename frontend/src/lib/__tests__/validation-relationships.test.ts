@@ -54,8 +54,8 @@ describe('validateContactId', () => {
 
   it('should return null for empty values', () => {
     expect(validateContactId('')).toBeNull();
-    expect(validateContactId(null as any)).toBeNull();
-    expect(validateContactId(undefined as any)).toBeNull();
+    expect(validateContactId(null as never)).toBeNull();
+    expect(validateContactId(undefined as never)).toBeNull();
   });
 
   it('should return error for invalid contact IDs', () => {
@@ -84,7 +84,9 @@ describe('validateNotSelfRelationship', () => {
 
   it('should return null for empty values', () => {
     expect(validateNotSelfRelationship('', '')).toBeNull();
-    expect(validateNotSelfRelationship(null as any, null as any)).toBeNull();
+    expect(
+      validateNotSelfRelationship(null as never, null as never)
+    ).toBeNull();
     expect(validateNotSelfRelationship(1, '')).toBeNull();
     expect(validateNotSelfRelationship('', 1)).toBeNull();
   });
@@ -137,10 +139,10 @@ describe('validateRequiredContactId', () => {
   it('should return error for empty values', () => {
     expect(validateRequiredContactId('')).toBe('This field is required');
     expect(validateRequiredContactId(0)).toBe('This field is required');
-    expect(validateRequiredContactId(null as any)).toBe(
+    expect(validateRequiredContactId(null as never)).toBe(
       'This field is required'
     );
-    expect(validateRequiredContactId(undefined as any)).toBe(
+    expect(validateRequiredContactId(undefined as never)).toBe(
       'This field is required'
     );
   });

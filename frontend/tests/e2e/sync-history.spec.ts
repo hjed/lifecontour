@@ -43,9 +43,13 @@ test.describe('Sync History - Authenticated User', () => {
 
     // If there are results, verify they match the filter
     if (data.data.length > 0) {
-      data.data.forEach((job: any) => {
-        expect(job.attributes.status).toBe('completed');
-      });
+      data.data.forEach(
+        (job: {
+          attributes: { status?: string; syncType?: string; createdAt: string };
+        }) => {
+          expect(job.attributes.status).toBe('completed');
+        }
+      );
     }
   });
 
@@ -64,9 +68,13 @@ test.describe('Sync History - Authenticated User', () => {
 
     // If there are results, verify they match the filter
     if (data.data.length > 0) {
-      data.data.forEach((job: any) => {
-        expect(job.attributes.syncType).toBe('smart');
-      });
+      data.data.forEach(
+        (job: {
+          attributes: { status?: string; syncType?: string; createdAt: string };
+        }) => {
+          expect(job.attributes.syncType).toBe('smart');
+        }
+      );
     }
   });
 
@@ -88,11 +96,15 @@ test.describe('Sync History - Authenticated User', () => {
 
     // If there are results, verify they are within the date range
     if (data.data.length > 0) {
-      data.data.forEach((job: any) => {
-        const createdAt = new Date(job.attributes.createdAt);
-        expect(createdAt >= new Date(dateFrom)).toBeTruthy();
-        expect(createdAt <= new Date(dateTo)).toBeTruthy();
-      });
+      data.data.forEach(
+        (job: {
+          attributes: { status?: string; syncType?: string; createdAt: string };
+        }) => {
+          const createdAt = new Date(job.attributes.createdAt);
+          expect(createdAt >= new Date(dateFrom)).toBeTruthy();
+          expect(createdAt <= new Date(dateTo)).toBeTruthy();
+        }
+      );
     }
   });
 

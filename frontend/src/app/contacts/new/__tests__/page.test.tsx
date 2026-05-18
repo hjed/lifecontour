@@ -159,7 +159,7 @@ describe('NewContactPage', () => {
     mockUseCreateContact.mockReturnValue({
       mutateAsync: jest.fn(),
       isPending: false,
-    } as any);
+    } as never);
 
     renderNewContactPage();
 
@@ -179,7 +179,7 @@ describe('NewContactPage', () => {
     mockUseCreateContact.mockReturnValue({
       mutateAsync: jest.fn(),
       isPending: false,
-    } as any);
+    } as never);
 
     renderNewContactPage();
 
@@ -200,7 +200,7 @@ describe('NewContactPage', () => {
     mockUseCreateContact.mockReturnValue({
       mutateAsync: jest.fn(),
       isPending: false,
-    } as any);
+    } as never);
 
     renderNewContactPage();
 
@@ -219,7 +219,7 @@ describe('NewContactPage', () => {
     mockUseCreateContact.mockReturnValue({
       mutateAsync: jest.fn(),
       isPending: false,
-    } as any);
+    } as never);
 
     renderNewContactPage();
 
@@ -239,7 +239,7 @@ describe('NewContactPage', () => {
     mockUseCreateContact.mockReturnValue({
       mutateAsync: mockCreateMutation,
       isPending: false,
-    } as any);
+    } as never);
 
     renderNewContactPage();
 
@@ -283,7 +283,7 @@ describe('NewContactPage', () => {
     mockUseCreateContact.mockReturnValue({
       mutateAsync: mockCreateMutation,
       isPending: false,
-    } as any);
+    } as never);
 
     renderNewContactPage();
 
@@ -330,7 +330,7 @@ describe('NewContactPage', () => {
     mockUseCreateContact.mockReturnValue({
       mutateAsync: mockCreateMutation,
       isPending: false,
-    } as any);
+    } as never);
 
     renderNewContactPage();
 
@@ -357,7 +357,7 @@ describe('NewContactPage', () => {
     mockUseCreateContact.mockReturnValue({
       mutateAsync: jest.fn(),
       isPending: true,
-    } as any);
+    } as never);
 
     renderNewContactPage();
 
@@ -374,7 +374,7 @@ describe('NewContactPage', () => {
     mockUseCreateContact.mockReturnValue({
       mutateAsync: jest.fn(),
       isPending: false,
-    } as any);
+    } as never);
 
     renderNewContactPage();
 

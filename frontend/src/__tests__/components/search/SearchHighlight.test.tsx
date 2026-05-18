@@ -132,7 +132,7 @@ describe('SearchHighlight Component', () => {
 
     it('shows fallback when text is null/undefined', () => {
       render(
-        <SearchHighlight text={undefined as any} fallback='Fallback text' />
+        <SearchHighlight text={undefined as never} fallback='Fallback text' />
       );
 
       expect(screen.getByText('Fallback text')).toBeInTheDocument();

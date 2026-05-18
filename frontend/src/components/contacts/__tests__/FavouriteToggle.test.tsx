@@ -26,7 +26,7 @@ describe('FavouriteToggle', () => {
       isPending: false,
       isError: false,
       error: null,
-    } as any);
+    } as never);
     mockMutate.mockClear();
   });
 
@@ -91,7 +91,7 @@ describe('FavouriteToggle', () => {
       isPending: true,
       isError: false,
       error: null,
-    } as any);
+    } as never);
 
     render(
       <FavouriteToggle

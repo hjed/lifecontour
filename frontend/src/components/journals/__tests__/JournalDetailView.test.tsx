@@ -97,7 +97,7 @@ const mockUseContacts = jest.mocked(
 
 // Mock child components
 jest.mock('../JournalBreadcrumb', () => ({
-  JournalBreadcrumb: ({ currentTitle }: any) => (
+  JournalBreadcrumb: ({ currentTitle }: { currentTitle?: string }) => (
     <div data-testid='breadcrumb'>{currentTitle}</div>
   ),
 }));
@@ -119,13 +119,13 @@ jest.mock('../JournalChildrenList', () => ({
 }));
 
 jest.mock('../JournalTypeSection', () => ({
-  JournalTypeSection: ({ type }: any) => (
+  JournalTypeSection: ({ type }: { type?: string }) => (
     <div data-testid={`type-section-${type}`}>Type Section: {type}</div>
   ),
 }));
 
 jest.mock('../JournalTypeManager', () => ({
-  JournalTypeManager: ({ currentTypes }: any) => (
+  JournalTypeManager: ({ currentTypes = [] }: { currentTypes?: string[] }) => (
     <div data-testid='type-manager'>
       Type Manager: {currentTypes.join(', ')}
     </div>
@@ -133,19 +133,33 @@ jest.mock('../JournalTypeManager', () => ({
 }));
 
 jest.mock('@/components/contacts/InlineEditField', () => ({
-  InlineEditField: ({ value, 'data-testid': testId }: any) => (
-    <div data-testid={testId}>{value}</div>
-  ),
+  InlineEditField: ({
+    value,
+    'data-testid': testId,
+  }: {
+    value?: string;
+    'data-testid'?: string;
+  }) => <div data-testid={testId}>{value}</div>,
 }));
 
 jest.mock('../JournalContentInline', () => ({
-  JournalContentInline: ({ value, 'data-testid': testId }: any) => (
-    <div data-testid={testId}>{value}</div>
-  ),
+  JournalContentInline: ({
+    value,
+    'data-testid': testId,
+  }: {
+    value?: string;
+    'data-testid'?: string;
+  }) => <div data-testid={testId}>{value}</div>,
 }));
 
 jest.mock('../InlineEditDateRange', () => ({
-  InlineEditDateRange: ({ value, 'data-testid': testId }: any) => (
+  InlineEditDateRange: ({
+    value,
+    'data-testid': testId,
+  }: {
+    value?: { start?: string; end?: string };
+    'data-testid'?: string;
+  }) => (
     <div data-testid={testId}>
       {value?.start} - {value?.end}
     </div>

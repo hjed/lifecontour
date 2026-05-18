@@ -3,7 +3,17 @@ import { ContactHeader } from '../ContactHeader';
 
 // Mock the ContactAvatar component
 jest.mock('../ContactAvatar', () => ({
-  ContactAvatar: ({ firstName, lastName, size, className }: any) => (
+  ContactAvatar: ({
+    firstName,
+    lastName,
+    size,
+    className,
+  }: {
+    firstName: string;
+    lastName: string;
+    size?: string;
+    className?: string;
+  }) => (
     <div
       data-testid='contact-avatar'
       data-first-name={firstName}
@@ -19,7 +29,15 @@ jest.mock('../ContactAvatar', () => ({
 
 // Mock the FavouriteToggle component
 jest.mock('../FavouriteToggle', () => ({
-  FavouriteToggle: ({ contactId, isFavourite, contactName }: any) => (
+  FavouriteToggle: ({
+    contactId,
+    isFavourite,
+    contactName,
+  }: {
+    contactId: string;
+    isFavourite: boolean;
+    contactName: string;
+  }) => (
     <button
       data-testid='favourite-toggle'
       data-contact-id={contactId}

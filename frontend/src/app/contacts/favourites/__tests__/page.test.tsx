@@ -62,7 +62,15 @@ jest.mock('@/lib/constants', () => ({
 
 // Mock the FavouriteToggle component
 jest.mock('@/components/contacts/FavouriteToggle', () => ({
-  FavouriteToggle: ({ contactId, isFavourite, contactName }: any) => (
+  FavouriteToggle: ({
+    contactId,
+    isFavourite,
+    contactName,
+  }: {
+    contactId: string;
+    isFavourite: boolean;
+    contactName: string;
+  }) => (
     <button data-testid={`favourite-toggle-${contactId}`}>
       {isFavourite ? 'Remove from favourites' : 'Add to favourites'} -{' '}
       {contactName}
@@ -132,7 +140,7 @@ describe('FavouritesPage', () => {
       data: mockData,
       isLoading: false,
       error: null,
-    } as any);
+    } as never);
 
     renderWithProviders(<FavouritesPage />);
 
@@ -148,7 +156,7 @@ describe('FavouritesPage', () => {
       data: { data: [], meta: { total: 0, page: 1, limit: 20 } },
       isLoading: false,
       error: null,
-    } as any);
+    } as never);
 
     renderWithProviders(<FavouritesPage />);
 
@@ -163,7 +171,7 @@ describe('FavouritesPage', () => {
       data: { data: [], meta: { total: 0, page: 1, limit: 20 } },
       isLoading: false,
       error: null,
-    } as any);
+    } as never);
 
     renderWithProviders(<FavouritesPage />);
 

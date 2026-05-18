@@ -221,7 +221,7 @@ describe('ContactsPage', () => {
       data: undefined,
       isLoading: false,
       error: null,
-    } as any);
+    } as never);
 
     // Default: no active tag filter
     mockUseTagFilter.mockReturnValue({
@@ -250,14 +250,14 @@ describe('ContactsPage', () => {
       createInfiniteQueryResult({
         ...contactsState,
         pages: contactPages,
-      }) as any
+      }) as never
     );
 
     mockUseInfiniteSearchContacts.mockReturnValue(
       createInfiniteQueryResult({
         ...searchState,
         pages: searchPages,
-      }) as any
+      }) as never
     );
   };
 
@@ -381,7 +381,7 @@ describe('ContactsPage', () => {
         },
         isLoading: false,
         error: null,
-      } as any);
+      } as never);
     };
 
     it('passes tag filter to useInfiniteContacts when tag is active', async () => {
@@ -454,7 +454,7 @@ describe('ContactsPage', () => {
         data: { data: [] },
         isLoading: false,
         error: null,
-      } as any);
+      } as never);
 
       setupContactMocks({ data: mockContactsData });
       renderContactsPage();

@@ -20,7 +20,11 @@ jest.mock('../ContactSearchCombobox', () => ({
     onSelect,
     placeholder,
     inputId,
-  }: any) {
+  }: {
+    onSelect: (contact: unknown) => void;
+    placeholder?: string;
+    inputId?: string;
+  }) {
     return (
       <div>
         <input

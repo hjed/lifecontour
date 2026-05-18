@@ -59,7 +59,7 @@ describe('Sidebar - Dynamic Tags', () => {
       data: mockTagsData,
       isLoading: false,
       error: null,
-    } as any);
+    } as never);
 
     renderWithProviders(<Sidebar />);
 
@@ -114,7 +114,7 @@ describe('Sidebar - Dynamic Tags', () => {
       data: mockTagsData,
       isLoading: false,
       error: null,
-    } as any);
+    } as never);
 
     renderWithProviders(<Sidebar />);
 
@@ -162,7 +162,7 @@ describe('Sidebar - Dynamic Tags', () => {
       data: mockTagsData,
       isLoading: false,
       error: null,
-    } as any);
+    } as never);
 
     renderWithProviders(<Sidebar />);
 
@@ -199,7 +199,7 @@ describe('Sidebar - Dynamic Tags', () => {
       data: mockTagsData,
       isLoading: false,
       error: null,
-    } as any);
+    } as never);
 
     renderWithProviders(<Sidebar />);
 
@@ -212,7 +212,7 @@ describe('Sidebar - Dynamic Tags', () => {
       data: undefined,
       isLoading: true,
       error: null,
-    } as any);
+    } as never);
 
     renderWithProviders(<Sidebar />);
 
@@ -225,7 +225,7 @@ describe('Sidebar - Dynamic Tags', () => {
       data: { data: [] },
       isLoading: false,
       error: null,
-    } as any);
+    } as never);
 
     renderWithProviders(<Sidebar />);
 
@@ -243,7 +243,7 @@ describe('Sidebar - Dynamic Tags', () => {
       data: undefined,
       isLoading: false,
       error: new Error('Failed to load tags'),
-    } as any);
+    } as never);
 
     renderWithProviders(<Sidebar />);
 
@@ -274,7 +274,7 @@ describe('Sidebar - Dynamic Tags', () => {
       data: mockTagsData,
       isLoading: false,
       error: null,
-    } as any);
+    } as never);
 
     renderWithProviders(<Sidebar />);
 

@@ -33,23 +33,41 @@ const createMockUser = (overrides: Partial<SessionUser> = {}): SessionUser => ({
 
 // Mock UI components
 jest.mock('@/components/ui/card', () => ({
-  Card: ({ children, className }: any) => (
-    <div className={className}>{children}</div>
+  Card: ({
+    children,
+    className,
+  }: {
+    children?: React.ReactNode;
+    className?: string;
+  }) => <div className={className}>{children}</div>,
+  CardContent: ({
+    children,
+    className,
+  }: {
+    children?: React.ReactNode;
+    className?: string;
+  }) => <div className={className}>{children}</div>,
+  CardDescription: ({ children }: { children?: React.ReactNode }) => (
+    <div>{children}</div>
   ),
-  CardContent: ({ children, className }: any) => (
-    <div className={className}>{children}</div>
-  ),
-  CardDescription: ({ children }: any) => <div>{children}</div>,
-  CardHeader: ({ children, className }: any) => (
-    <div className={className}>{children}</div>
-  ),
-  CardTitle: ({ children, className }: any) => (
-    <div className={className}>{children}</div>
-  ),
+  CardHeader: ({
+    children,
+    className,
+  }: {
+    children?: React.ReactNode;
+    className?: string;
+  }) => <div className={className}>{children}</div>,
+  CardTitle: ({
+    children,
+    className,
+  }: {
+    children?: React.ReactNode;
+    className?: string;
+  }) => <div className={className}>{children}</div>,
 }));
 
 jest.mock('@/components/ui/skeleton', () => ({
-  Skeleton: ({ className }: any) => (
+  Skeleton: ({ className }: { className?: string }) => (
     <div className={className} data-testid='skeleton' />
   ),
 }));

@@ -3,7 +3,15 @@ import { ContactIdentity } from '../ContactIdentity';
 
 // Mock the FavouriteToggle component
 jest.mock('../FavouriteToggle', () => ({
-  FavouriteToggle: ({ contactId, contactName, isFavourite }: any) => (
+  FavouriteToggle: ({
+    contactId,
+    contactName,
+    isFavourite,
+  }: {
+    contactId: string;
+    contactName: string;
+    isFavourite: boolean;
+  }) => (
     <button
       data-testid='favourite-toggle'
       data-contact-id={contactId}

@@ -96,7 +96,7 @@ test.describe('Integrations Page UI (mocked API)', () => {
     authenticatedPage,
   }) => {
     let connected = true;
-    let syncTriggeredPayload: any = null;
+    let syncTriggeredPayload: Record<string, unknown> | null = null;
     let disconnectCalled = false;
 
     await authenticatedPage.route('**/api/integrations/health', route =>
@@ -256,7 +256,7 @@ test.describe('Integrations Page UI (mocked API)', () => {
   test('connected with needsReconsent: shows scope upgrade banner and triggers re-auth', async ({
     authenticatedPage,
   }) => {
-    let oauthAuthorizePayload: any = null;
+    let oauthAuthorizePayload: Record<string, unknown> | null = null;
 
     await authenticatedPage.route('**/api/integrations/health', route =>
       route.fulfill(

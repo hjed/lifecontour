@@ -99,27 +99,27 @@ describe('ContactTagsEditor', () => {
       data: createTagListResponse(assignedTags),
       isLoading: false,
       isError: false,
-    } as any);
+    } as never);
 
     mockUseTags.mockReturnValue({
       data: createTagListResponse(allTags),
       isLoading: false,
-    } as any);
+    } as never);
 
     mockUseAssignContactTag.mockReturnValue({
       mutate: mockAssignMutate,
       isPending: false,
-    } as any);
+    } as never);
 
     mockUseRemoveContactTag.mockReturnValue({
       mutate: mockRemoveMutate,
       isPending: false,
-    } as any);
+    } as never);
 
     mockUseCreateTag.mockReturnValue({
       mutateAsync: mockCreateMutateAsync,
       isPending: false,
-    } as any);
+    } as never);
   });
 
   it('should render assigned tags as badges', () => {
@@ -200,7 +200,7 @@ describe('ContactTagsEditor', () => {
       data: createTagListResponse([]),
       isLoading: false,
       isError: false,
-    } as any);
+    } as never);
 
     render(<ContactTagsEditor contactId='42' />);
 
@@ -212,7 +212,7 @@ describe('ContactTagsEditor', () => {
       data: undefined,
       isLoading: true,
       isError: false,
-    } as any);
+    } as never);
 
     render(<ContactTagsEditor contactId='42' />);
 
