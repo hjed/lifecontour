@@ -27,7 +27,8 @@ jest.mock('@/components/ui/popover', () => ({
 // Mock Select component
 jest.mock('@/components/ui/select', () => ({
   Select: ({ children, value, onValueChange }: any) => (
-    <div
+    <button
+      type='button'
       data-testid='select'
       data-value={value}
       onClick={() => {
@@ -38,7 +39,7 @@ jest.mock('@/components/ui/select', () => ({
       }}
     >
       {children}
-    </div>
+    </button>
   ),
   SelectTrigger: ({ children }: any) => (
     <div data-testid='select-trigger'>{children}</div>

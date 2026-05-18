@@ -124,11 +124,10 @@ export function CalendarAgendaView({
             </h3>
 
             {/* Event list */}
-            <ul role='list' className='divide-border divide-y'>
+            <ul className='divide-border divide-y'>
               {dayEvents.map(event => (
                 <li
                   key={event.id}
-                  role='listitem'
                   className='hover:bg-muted/50 transition-colors'
                 >
                   <Link

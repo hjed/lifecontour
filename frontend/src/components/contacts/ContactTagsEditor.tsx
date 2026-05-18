@@ -239,7 +239,6 @@ export function ContactTagsEditor({
                   onChange={e => setSearchQuery(e.target.value)}
                   className='h-8 text-sm'
                   data-testid='tag-search-input'
-                  autoFocus
                 />
 
                 {/* Tag list */}
@@ -301,15 +300,14 @@ export function ContactTagsEditor({
                     onChange={e => setSearchQuery(e.target.value)}
                     className='h-8 text-sm'
                     data-testid='new-tag-name-input'
-                    autoFocus
                   />
                 </div>
 
                 <div className='space-y-1'>
-                  <label className='flex items-center gap-1 text-sm font-medium'>
+                  <span className='flex items-center gap-1 text-sm font-medium'>
                     <Palette className='h-3 w-3' />
                     Colour
-                  </label>
+                  </span>
                   <div
                     className='flex flex-wrap gap-1.5'
                     data-testid='colour-picker'

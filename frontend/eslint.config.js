@@ -1,6 +1,7 @@
 import nextCoreWebVitals from 'eslint-config-next/core-web-vitals';
 import nextTypescript from 'eslint-config-next/typescript';
 import { fixupConfigRules } from '@eslint/compat';
+import jsxA11y from 'eslint-plugin-jsx-a11y';
 
 const eslintConfig = [
   {
@@ -22,6 +23,11 @@ const eslintConfig = [
   },
   ...fixupConfigRules(nextCoreWebVitals),
   ...fixupConfigRules(nextTypescript),
+  {
+    rules: {
+      ...jsxA11y.flatConfigs.recommended.rules,
+    },
+  },
   {
     rules: {
       // TypeScript rules

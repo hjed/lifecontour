@@ -577,7 +577,6 @@ export function DesktopSidebar({ className }: SidebarProps) {
         'bg-background border-border border-r',
         className
       )}
-      role='complementary'
       aria-label='Desktop navigation sidebar'
       data-testid='sidebar'
     >
