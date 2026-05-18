@@ -96,7 +96,9 @@ class TestGoogleOAuthProvider:
         # Google OAuth uses the v2 endpoint
         assert auth_url.startswith("https://accounts.google.com/o/oauth2/v2/auth")
         # Verify contacts scope is included in the URL (check for the scope in the URL)
-        assert "contacts.readonly" in auth_url
+        import urllib.parse
+
+        assert "auth/contacts" in urllib.parse.unquote(auth_url)
         assert "oauth_csrf_token" in mock_request.session
         assert "oauth_code_verifier" in mock_request.session
 
@@ -142,7 +144,7 @@ class TestGoogleOAuthCallback:
             "access_token": "test_access_token",
             "refresh_token": "test_refresh_token",
             "expires_in": 3600,
-            "scope": "https://www.googleapis.com/auth/contacts.readonly email profile",
+            "scope": "https://www.googleapis.com/auth/contacts email profile",
         }
 
         mock_response = Mock()
