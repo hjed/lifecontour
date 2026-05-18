@@ -4,23 +4,38 @@ import GPXTrackMap from '../GPXTrackMap';
 
 // Mock react-leaflet
 jest.mock('react-leaflet', () => ({
-  MapContainer: ({ children }: any) => (
+  MapContainer: ({ children }: { children?: React.ReactNode }) => (
     <div data-testid='map-container'>{children}</div>
   ),
   TileLayer: () => <div data-testid='tile-layer' />,
-  Polyline: (props: any) => (
+  Polyline: (
+    props: React.ComponentProps<'div'> & {
+      positions?: [number, number][];
+      color?: string;
+      weight?: number;
+    }
+  ) => (
     <div
       data-testid='polyline'
       data-positions={JSON.stringify(props.positions)}
-      data-pathoptions={JSON.stringify(props.pathOptions)}
-      {...props}
+      data-color={props.color}
+      data-weight={props.weight}
     />
   ),
-  CircleMarker: (props: any) => (
+  CircleMarker: (
+    props: React.ComponentProps<'div'> & {
+      center?: [number, number];
+      color?: string;
+      fillColor?: string;
+      fillOpacity?: number;
+      weight?: number;
+    }
+  ) => (
     <div
       data-testid='circle-marker'
       data-center={JSON.stringify(props.center)}
-      {...props}
+      data-color={props.color}
+      data-fillcolor={props.fillColor}
     />
   ),
   useMap: () => ({ fitBounds: jest.fn() }),
@@ -41,6 +56,11 @@ describe('GPXTrackMap', () => {
 
     render(<GPXTrackMap tracks={tracks} />);
 
-    expect(screen.getByTestId('polyline')).toBeInTheDocument();
+    const polyline = screen.getByTestId('polyline');
+    expect(polyline).toBeInTheDocument();
+
+    // Verify direct style props are passed
+    expect(polyline).toHaveAttribute('data-color', 'hsl(var(--primary))');
+    expect(polyline).toHaveAttribute('data-weight', '4');
   });
 });
