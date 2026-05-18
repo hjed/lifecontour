@@ -102,14 +102,14 @@ Implement the external API communication layer and map models.
 **Required Test Coverage:**
 - **Unit:** Transformer handles missing optional fields and type coercion correctly. ✅
 
-#### Phase 2: Initial Full Sync Process
+#### Phase 2: Initial Full Sync Process ✅ COMPLETED
 **PR Size:** ~6-8 files
 Handle batch importing when the user connects the integration.
 **Acceptance Criteria:**
-- [ ] Worker ARQ job triggered on successful connection to fetch all relevant assets.
-- [ ] Import is resilient and batched like the Strava and Google Integrations
-- [ ] Fetched assets are upserted into `gear_items`.
-- [ ] `SyncMetadata` tracks the mapping between `gear_item.id` and Snipe-IT Asset ID.
+- [x] Worker ARQ job triggered on successful connection to fetch all relevant assets.
+- [x] Import is resilient and batched like the Strava and Google Integrations
+- [x] Fetched assets are upserted into `gear_items`.
+- [x] `SyncMetadata` tracks the mapping between `gear_item.id` and Snipe-IT Asset ID.
 **Required Test Coverage:**
 - **Integration:** API mock returns multiple assets, DB reflects accurate creation/updates.
 

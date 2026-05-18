@@ -43,7 +43,7 @@ class SyncMetadataRepository:
             SyncMetadata if found, None otherwise
         """
         query = text("""
-            SELECT id, internal_id, integration_source, external_id,
+            SELECT id, internal_id, internal_uuid, integration_source, external_id,
                    last_synced_at, version_hash, sync_status,
                    error_message, retry_count, created_at, updated_at
             FROM sync_metadata
@@ -67,6 +67,7 @@ class SyncMetadataRepository:
         return SyncMetadata(
             id=row.id,
             internal_id=row.internal_id,
+            internal_uuid=row.internal_uuid,
             integration_source=row.integration_source,
             external_id=row.external_id,
             last_synced_at=row.last_synced_at,
@@ -92,7 +93,7 @@ class SyncMetadataRepository:
             SyncMetadata if found, None otherwise
         """
         query = text("""
-            SELECT id, internal_id, integration_source, external_id,
+            SELECT id, internal_id, internal_uuid, integration_source, external_id,
                    last_synced_at, version_hash, sync_status,
                    error_message, retry_count, created_at, updated_at
             FROM sync_metadata
@@ -115,6 +116,7 @@ class SyncMetadataRepository:
         return SyncMetadata(
             id=row.id,
             internal_id=row.internal_id,
+            internal_uuid=row.internal_uuid,
             integration_source=row.integration_source,
             external_id=row.external_id,
             last_synced_at=row.last_synced_at,
@@ -128,10 +130,11 @@ class SyncMetadataRepository:
 
     async def upsert(
         self,
-        internal_id: int,
         integration_source: str,
         external_id: str,
         version_hash: str,
+        internal_id: int | None = None,
+        internal_uuid: str | None = None,
         sync_status: SyncStatus = SyncStatus.SUCCESS,
         error_message: str | None = None,
     ) -> SyncMetadata:
@@ -139,10 +142,11 @@ class SyncMetadataRepository:
         Insert or update sync metadata atomically.
 
         Args:
-            internal_id: Internal entity ID
             integration_source: Integration source
             external_id: External entity ID
             version_hash: Version hash for change detection
+            internal_id: Internal entity ID (integer)
+            internal_uuid: Internal entity ID (UUID string)
             sync_status: Sync status
             error_message: Error message if failed
 
@@ -153,16 +157,17 @@ class SyncMetadataRepository:
 
         query = text("""
             INSERT INTO sync_metadata
-                (internal_id, integration_source, external_id, last_synced_at,
+                (internal_id, internal_uuid, integration_source, external_id, last_synced_at,
                  version_hash, sync_status, error_message, retry_count,
                  created_at, updated_at)
             VALUES
-                (:internal_id, :integration_source, :external_id, :last_synced_at,
+                (:internal_id, :internal_uuid, :integration_source, :external_id, :last_synced_at,
                  :version_hash, :sync_status, :error_message, 0,
                  :created_at, :updated_at)
             ON CONFLICT (integration_source, external_id)
             DO UPDATE SET
                 internal_id = EXCLUDED.internal_id,
+                internal_uuid = EXCLUDED.internal_uuid,
                 last_synced_at = EXCLUDED.last_synced_at,
                 version_hash = EXCLUDED.version_hash,
                 sync_status = EXCLUDED.sync_status,
@@ -172,7 +177,7 @@ class SyncMetadataRepository:
                     ELSE sync_metadata.retry_count + 1
                 END,
                 updated_at = EXCLUDED.updated_at
-            RETURNING id, internal_id, integration_source, external_id,
+            RETURNING id, internal_id, internal_uuid, integration_source, external_id,
                       last_synced_at, version_hash, sync_status,
                       error_message, retry_count, created_at, updated_at
         """)
@@ -181,6 +186,7 @@ class SyncMetadataRepository:
             query,
             {
                 "internal_id": internal_id,
+                "internal_uuid": internal_uuid,
                 "integration_source": integration_source,
                 "external_id": external_id,
                 "last_synced_at": now,
@@ -199,6 +205,7 @@ class SyncMetadataRepository:
         return SyncMetadata(
             id=row.id,
             internal_id=row.internal_id,
+            internal_uuid=row.internal_uuid,
             integration_source=row.integration_source,
             external_id=row.external_id,
             last_synced_at=row.last_synced_at,

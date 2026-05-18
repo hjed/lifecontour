@@ -19,5 +19,8 @@ class SnipeItWorkerSettings(BaseSettings):
     encryption_key: str = ""
     log_level: str = "INFO"
     worker_id: str = "snipeit-worker"
+    queue_name: str = "arq:snipeit"
+    snipeit_client_id: str = ""
+    snipeit_client_secret: str = ""
 
     model_config = {"env_file": ".env", "extra": "ignore"}

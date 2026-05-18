@@ -161,6 +161,15 @@ class TestSnipeItAuthAPI:
         )
         assert check.fetchone() is not None
 
+        # 7. Verify an initial full sync job was queued
+        job_check = await async_connection.execute(
+            text(
+                "SELECT 1 FROM sync_jobs WHERE user_id = :uid AND integration_source = 'snipeit' AND sync_type = 'full' AND status = 'queued'"
+            ),
+            {"uid": "test-user-123"},
+        )
+        assert job_check.fetchone() is not None
+
     # ------------------------------------------------------------------ #
     # DELETE /api/integrations/snipeit/oauth/disconnect
     # ------------------------------------------------------------------ #
