@@ -87,32 +87,25 @@ export default function GPXTrackMap({ tracks }: GPXTrackMapProps) {
 
         return (
           <React.Fragment key={id}>
-            <Polyline
-              positions={positions}
-              pathOptions={{ color, weight: 4 }}
-            />
+            <Polyline positions={positions} color={color} weight={4} />
             {startPoint && (
               <CircleMarker
                 center={startPoint}
                 radius={6}
-                pathOptions={{
-                  color: 'white',
-                  fillColor: color,
-                  fillOpacity: 1,
-                  weight: 2,
-                }}
+                color='white'
+                fillColor={color}
+                fillOpacity={1}
+                weight={2}
               />
             )}
             {endPoint && !isLoop && (
               <CircleMarker
                 center={endPoint}
                 radius={6}
-                pathOptions={{
-                  color: 'white',
-                  fillColor: 'hsl(var(--destructive))',
-                  fillOpacity: 1,
-                  weight: 2,
-                }}
+                color='white'
+                fillColor='hsl(var(--destructive))'
+                fillOpacity={1}
+                weight={2}
               />
             )}
           </React.Fragment>
