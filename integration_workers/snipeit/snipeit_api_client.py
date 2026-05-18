@@ -136,6 +136,49 @@ class SnipeItAPIClient:
         data = await self._get(f"hardware/{asset_id}")
         return SnipeItAsset.model_validate(data)
 
+    async def update_asset(
+        self, asset_id: int, payload: dict[str, Any]
+    ) -> SnipeItAsset:
+        """Update an existing hardware asset.
+
+        Snipe-IT PATCH responses are wrapped as
+        ``{"status": "success", "messages": "...", "payload": {...}}``.
+        The API returns HTTP 200 even on validation errors, so we must
+        inspect the ``status`` field before extracting the asset from
+        ``payload``.
+
+        Args:
+            asset_id: Snipe-IT asset numeric ID.
+            payload: Fields to update (e.g. name, serial, notes).
+
+        Returns:
+            SnipeItAsset parsed from the ``payload`` key of a successful
+            response.
+
+        Raises:
+            SnipeItAPIError: If the response ``status`` is not ``"success"``
+                or the ``payload`` key is missing/unparseable.
+        """
+        data = await self._patch(f"hardware/{asset_id}", json_data=payload)
+
+        # Snipe-IT returns HTTP 200 for validation errors; check status.
+        if data.get("status") != "success":
+            messages = data.get("messages", "Unknown error")
+            raise SnipeItAPIError(
+                f"Snipe-IT PATCH /hardware/{asset_id} failed: {messages}",
+                status_code=200,
+            )
+
+        asset_payload = data.get("payload")
+        if not asset_payload or not isinstance(asset_payload, dict):
+            raise SnipeItAPIError(
+                f"Snipe-IT PATCH /hardware/{asset_id} returned success "
+                f"but payload is missing or invalid",
+                status_code=200,
+            )
+
+        return SnipeItAsset.model_validate(asset_payload)
+
     async def close(self) -> None:
         """Close the underlying HTTP client."""
         await self._client.aclose()
@@ -174,6 +217,66 @@ class SnipeItAPIClient:
                     new_token = await self._on_token_refresh()
                     self._client.headers["Authorization"] = f"Bearer {new_token}"
                     return await self._get(path, params=params, _is_retry=True)
+                except Exception:
+                    logger.error("Token refresh failed", exc_info=True)
+                    raise SnipeItAPIError(
+                        "Snipe-IT authentication failed after token refresh",
+                        status_code=401,
+                    ) from None
+
+            raise SnipeItAPIError(
+                "Snipe-IT authentication failed (no refresh callback)",
+                status_code=401,
+            )
+
+        # Handle 429 — rate limited by server
+        if response.status_code == 429:
+            retry_after = _parse_retry_after(response.headers.get("Retry-After"))
+            retry_msg = f"{retry_after}s" if retry_after is not None else "unknown time"
+            raise SnipeItRateLimitError(
+                f"Snipe-IT API rate limited (429). Retry after {retry_msg}.",
+                retry_after=retry_after,
+            )
+
+        # Handle other non-successful responses
+        if response.status_code >= 300:
+            raise SnipeItAPIError(
+                f"Snipe-IT API error: {response.status_code}",
+                status_code=response.status_code,
+            )
+
+        return response.json()
+
+    async def _patch(
+        self,
+        path: str,
+        json_data: dict[str, Any],
+        *,
+        _is_retry: bool = False,
+    ) -> Any:
+        """Execute a PATCH request with rate limiting and 401 refresh.
+
+        Args:
+            path: API path relative to base URL (e.g. ``hardware/1``).
+            json_data: JSON payload for the update.
+            _is_retry: Internal flag to prevent infinite refresh loops.
+
+        Returns:
+            Parsed JSON response body.
+        """
+        # Pre-emptive rate limit check and record
+        self._rate_limiter.acquire()
+
+        response = await self._client.patch(path, json=json_data)
+
+        # Handle 401 — token refresh and retry
+        if response.status_code == 401 and not _is_retry:
+            if self._on_token_refresh is not None:
+                logger.info("Snipe-IT API returned 401 — refreshing token")
+                try:
+                    new_token = await self._on_token_refresh()
+                    self._client.headers["Authorization"] = f"Bearer {new_token}"
+                    return await self._patch(path, json_data=json_data, _is_retry=True)
                 except Exception:
                     logger.error("Token refresh failed", exc_info=True)
                     raise SnipeItAPIError(

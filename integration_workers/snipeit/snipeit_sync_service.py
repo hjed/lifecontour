@@ -314,3 +314,112 @@ class SnipeItSyncService:
             error=str(last_exc),
         )
         raise _AssetFailed from last_exc
+
+    async def push_asset_update(
+        self,
+        gear_item_id: str,
+        changed_fields: dict[str, Any],
+        session_factory: Any,
+    ) -> None:
+        """Push local gear item changes to Snipe-IT.
+
+        Args:
+            gear_item_id: Internal gear item UUID.
+            changed_fields: Dictionary of field name to (old, new) array/tuple.
+            session_factory: Async session factory for DB queries.
+        """
+        async with session_factory() as session:
+            # 1. Get sync metadata for this gear item
+            result = await session.execute(
+                text("""
+                    SELECT external_id, version_hash
+                    FROM sync_metadata
+                    WHERE integration_source = 'snipeit'
+                      AND internal_uuid = :internal_uuid
+                    FOR UPDATE
+                """),
+                {"internal_uuid": gear_item_id},
+            )
+            meta = result.fetchone()
+
+            if not meta:
+                logger.debug(
+                    "Skipping Snipe-IT export, no sync metadata found",
+                    gear_item_id=gear_item_id,
+                )
+                return
+
+            external_id = meta.external_id
+            local_version_hash = meta.version_hash
+
+        # 2. Fetch the current asset from Snipe-IT to verify hash
+        try:
+            asset = await self._api_client.get_asset(int(external_id))
+        except SnipeItAPIError as exc:
+            if exc.status_code == 404:
+                logger.warning(
+                    "Snipe-IT asset not found during export",
+                    gear_item_id=gear_item_id,
+                    external_id=external_id,
+                )
+                return
+            raise
+
+        transformed = self._transformer.transform(asset=asset, user_id=self._user_id)
+
+        # 3. Check for conflict
+        if transformed.version_hash != local_version_hash:
+            logger.info(
+                "Snipe-IT export conflict: remote asset changed since last sync. Skipping update.",
+                gear_item_id=gear_item_id,
+                external_id=external_id,
+            )
+            return
+
+        # 4. Map changed fields to Snipe-IT API payload
+        payload = {}
+        if "name" in changed_fields:
+            payload["name"] = changed_fields["name"][1]
+        if "serial_number" in changed_fields:
+            payload["serial"] = changed_fields["serial_number"][1]
+        if "purchase_date" in changed_fields:
+            new_date = changed_fields["purchase_date"][1]
+            payload["purchase_date"] = new_date if new_date is not None else ""
+
+        if not payload:
+            logger.debug(
+                "No mapped fields changed for Snipe-IT export",
+                gear_item_id=gear_item_id,
+            )
+            return
+
+        # 5. Push the update
+        updated_asset = await self._api_client.update_asset(int(external_id), payload)
+
+        # 6. Update sync metadata with the new version hash
+        updated_transformed = self._transformer.transform(
+            asset=updated_asset, user_id=self._user_id
+        )
+
+        async with session_factory() as session:
+            async with session.begin():
+                await session.execute(
+                    text("""
+                        UPDATE sync_metadata
+                        SET version_hash = :version_hash,
+                            last_synced_at = now(),
+                            updated_at = now()
+                        WHERE integration_source = 'snipeit'
+                          AND external_id = :external_id
+                    """),
+                    {
+                        "version_hash": updated_transformed.version_hash,
+                        "external_id": external_id,
+                    },
+                )
+
+        logger.info(
+            "Successfully pushed gear item update to Snipe-IT",
+            gear_item_id=gear_item_id,
+            external_id=external_id,
+        )

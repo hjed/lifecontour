@@ -90,7 +90,7 @@ Implement the OAuth 2.0 connection using the Base URL from Phase 1.
 
 **Acceptance Criteria (task-level):**
 - [ ] Gear items populated in app from Snipe-IT.
-- [ ] Webhooks keep items in sync.
+- [x] Webhooks keep items in sync.
 
 #### Phase 1: API Client and Data Transformation ✅ COMPLETE
 **PR Size:** ~5-7 files
@@ -117,8 +117,8 @@ Handle batch importing when the user connects the integration.
 **PR Size:** ~5-7 files
 Process incoming webhooks to keep gear items up to date incrementally.
 **Acceptance Criteria:**
-- [ ] Worker processes asset creation/update events from the stream.
-- [ ] Corresponding `GearItem` is upserted or created.
+- [x] Worker processes asset creation/update events from the stream.
+- [x] Corresponding `GearItem` is upserted or created.
 **Required Test Coverage:**
 - **Unit:** Correctly processes webhook payload structure.
 - **Integration:** Stream event results in updated `gear_items` row.
@@ -130,13 +130,13 @@ Process incoming webhooks to keep gear items up to date incrementally.
 - [Part 2: Gear Items Sync](../product-specifications/snipe-it-integration-product-specification.md#part-2-gear-items-sync-two-way)
 
 **Acceptance Criteria (task-level):**
-- [ ] App edits to gear items are sent to Snipe-IT.
+- [x] App edits to gear items are sent to Snipe-IT.
 
 #### Phase 1: Outbox Event Publishing
 **PR Size:** ~4-6 files
 Emit events when gear items change locally.
 **Acceptance Criteria:**
-- [ ] Core backend emits a `GearItemUpdated` domain event when a gear item is modified.
+- [x] Core backend emits a `GearItemUpdated` domain event when a gear item is modified.
 **Required Test Coverage:**
 - **Integration:** Gear Item update endpoint successfully writes to the outbox.
 
@@ -144,9 +144,9 @@ Emit events when gear items change locally.
 **PR Size:** ~6-8 files
 Consume the local event and push it to the remote API.
 **Acceptance Criteria:**
-- [ ] `SnipeItAPIClient` implements the PATCH method for assets.
-- [ ] Worker consumes `GearItemUpdated`, checks `SyncMetadata`, and updates the Snipe-IT asset.
-- [ ] Conflict resolution: If version hash mismatches, Snipe-IT wins and local update is skipped/overwritten on next inbound sync.
+- [x] `SnipeItAPIClient` implements the PATCH method for assets.
+- [x] Worker consumes `GearItemUpdated`, checks `SyncMetadata`, and updates the Snipe-IT asset.
+- [x] Conflict resolution: If version hash mismatches, Snipe-IT wins and local update is skipped/overwritten on next inbound sync.
 **Required Test Coverage:**
 - **Integration:** Consumed event results in correct API mock call.
 
