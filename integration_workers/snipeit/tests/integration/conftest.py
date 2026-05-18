@@ -44,7 +44,8 @@ def get_async_database_url() -> str:
 # Set required environment variables for worker settings before imports happen
 if "DATABASE_URL" not in os.environ:
     os.environ["DATABASE_URL"] = get_async_database_url()
-os.environ["ENCRYPTION_KEY"] = "testkey"
+if "ENCRYPTION_KEY" not in os.environ:
+    os.environ["ENCRYPTION_KEY"] = "testkey"
 
 
 @pytest_asyncio.fixture(scope="function")

@@ -255,7 +255,7 @@ class TestGearItemEndpoints:
         )
         assert event_data["gear_item_id"] == item_id
         assert "name" in event_data["changed_fields"]
-        assert event_data["changed_fields"]["name"] == "Updated Name"
+        assert event_data["changed_fields"]["name"] == ["Original Name", "Updated Name"]
 
     async def test_update_gear_item_clear_field(self, authenticated_client):
         """Test clearing an optional gear item field."""

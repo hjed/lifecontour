@@ -12,7 +12,8 @@ if "DATABASE_URL" not in os.environ:
     os.environ["DATABASE_URL"] = (
         "postgresql+asyncpg://postgres:postgres@localhost:5432/test"
     )
-os.environ["ENCRYPTION_KEY"] = "testkey"
+if "ENCRYPTION_KEY" not in os.environ:
+    os.environ["ENCRYPTION_KEY"] = "testkey"
 
 from stream_consumer_tasks import SnipeItWorkerStreamConsumer
 
