@@ -75,7 +75,7 @@ services:
       - personal-management
 
   meilisearch:
-    image: getmeili/meilisearch:v1.38
+    image: getmeili/meilisearch:v1.44
     container_name: ${CONTAINER_PREFIX:-pms}-meilisearch
     profiles: [dev, test, test-backend, prod]
     environment:
