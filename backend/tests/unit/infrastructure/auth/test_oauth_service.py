@@ -498,7 +498,7 @@ class TestOAuthServiceGoogle:
             assert "code_verifier" in call_args[1]
             assert (
                 call_args[1]["scope"]
-                == "openid email profile https://www.googleapis.com/auth/contacts.readonly https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly"
+                == "openid email profile https://www.googleapis.com/auth/contacts https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly"
             )
             assert call_args[1]["access_type"] == "offline"
             assert call_args[1]["prompt"] == "consent"

@@ -223,7 +223,7 @@ class TestAuthEndpoints:
 
         decoded_location = urllib.parse.unquote(location)
         assert "accounts.google.com/o/oauth2" in decoded_location
-        assert "contacts.readonly" in decoded_location
+        assert "auth/contacts" in decoded_location
         assert "calendar.events" in decoded_location
         assert "calendar.readonly" in decoded_location
 

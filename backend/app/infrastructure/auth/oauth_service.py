@@ -31,7 +31,7 @@ OAUTH_REDIRECT_URI_MISMATCH = "OAuth redirect URI mismatch"
 OAUTH_BASIC_SCOPE = "openid email profile"
 GOOGLE_SCOPE = (
     "openid email profile "
-    "https://www.googleapis.com/auth/contacts.readonly "
+    "https://www.googleapis.com/auth/contacts "
     "https://www.googleapis.com/auth/calendar.events "
     "https://www.googleapis.com/auth/calendar.readonly"
 )
