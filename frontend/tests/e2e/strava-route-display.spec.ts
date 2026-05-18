@@ -94,5 +94,14 @@ test.describe('Strava GPX Route Display', () => {
     const routesEditor = authenticatedPage.getByTestId('journal-routes-editor');
     await expect(routesEditor).toBeVisible({ timeout: 10000 });
     await expect(routesEditor).toContainText('Morning Run Route');
+
+    // Verify that the route Polyline and markers are drawn on the map.
+    // Leaflet renders polylines and circle markers as SVG paths with class 'leaflet-interactive'
+    const mapPaths = authenticatedPage.locator('path.leaflet-interactive');
+    await expect(mapPaths.first()).toBeVisible({ timeout: 5000 });
+
+    // Polyline + Start marker + End marker = at least 3 paths
+    const pathCount = await mapPaths.count();
+    expect(pathCount).toBeGreaterThanOrEqual(3);
   });
 });
