@@ -1,7 +1,10 @@
 """Integration tests for Gear Item API endpoints."""
 
+import json
+
 import pytest
 import pytest_asyncio
+from sqlalchemy import text
 
 
 @pytest.mark.integration
@@ -200,6 +203,59 @@ class TestGearItemEndpoints:
         assert data["data"]["attributes"]["name"] == "Updated Name"
         assert data["data"]["attributes"]["model"] == "Model A"  # Unchanged
         assert data["data"]["attributes"]["manufacturer"] == "DMM"
+
+    async def test_update_gear_item_publishes_event(
+        self, authenticated_client, async_connection
+    ):
+        """Test updating a gear item publishes a GearItemUpdated outbox event."""
+        # 1. Create a gear item
+        create_response = await authenticated_client.post(
+            "/api/gear-items",
+            json={
+                "data": {
+                    "type": "gear-items",
+                    "attributes": {
+                        "name": "Original Name",
+                        "model": "Model A",
+                    },
+                }
+            },
+        )
+        item_id = create_response.json()["data"]["id"]
+
+        # 2. Clear outbox events
+        await async_connection.execute(text("DELETE FROM outbox_events"))
+
+        # 3. Update the gear item
+        update_data = {
+            "data": {
+                "type": "gear-items",
+                "id": item_id,
+                "attributes": {
+                    "name": "Updated Name",
+                },
+            }
+        }
+        response = await authenticated_client.put(
+            f"/api/gear-items/{item_id}", json=update_data
+        )
+        assert response.status_code == 200
+
+        # 4. Verify exactly one GearItemUpdated outbox event
+        result = await async_connection.execute(
+            text(
+                "SELECT event_type, event_data FROM outbox_events WHERE event_type = 'GearItemUpdated'"
+            )
+        )
+        rows = result.fetchall()
+        assert len(rows) == 1
+
+        event_data = (
+            json.loads(rows[0][1]) if isinstance(rows[0][1], str) else rows[0][1]
+        )
+        assert event_data["gear_item_id"] == item_id
+        assert "name" in event_data["changed_fields"]
+        assert event_data["changed_fields"]["name"] == ["Original Name", "Updated Name"]
 
     async def test_update_gear_item_clear_field(self, authenticated_client):
         """Test clearing an optional gear item field."""

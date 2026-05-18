@@ -1269,6 +1269,7 @@ class TestStravaFitnessDataProcessing:
         )
 
         mock_connection.execute.side_effect = [
+            MagicMock(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
@@ -1348,6 +1349,7 @@ class TestStravaFitnessDataProcessing:
         )
 
         mock_connection.execute.side_effect = [
+            MagicMock(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link

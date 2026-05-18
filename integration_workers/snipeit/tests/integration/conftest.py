@@ -41,6 +41,13 @@ def get_async_database_url() -> str:
     return database_url
 
 
+# Set required environment variables for worker settings before imports happen
+if "DATABASE_URL" not in os.environ:
+    os.environ["DATABASE_URL"] = get_async_database_url()
+if "ENCRYPTION_KEY" not in os.environ:
+    os.environ["ENCRYPTION_KEY"] = "testkey"
+
+
 @pytest_asyncio.fixture(scope="function")
 async def async_engine() -> Any:
     """Create async database engine for testing."""

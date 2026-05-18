@@ -7,6 +7,7 @@ import uuid
 from core_shared.models.journals.gear_item import GearItem
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, Query, Request, status
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.journals.converters import GearItemConverter
 from app.api.journals.schemas import (
@@ -15,8 +16,10 @@ from app.api.journals.schemas import (
     GearItemResponse,
     GearItemUpdateRequest,
 )
+from app.core.journal.models.events import GearItemUpdated
 from app.core.journal.models.repositories import GearItemRepository
 from app.infrastructure.auth.models import SessionUser
+from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 
 router = APIRouter(prefix="/gear-items", tags=["Gear Items"])
 
@@ -99,6 +102,8 @@ async def update_gear_item(
     repo: FromDishka[GearItemRepository],
     user: FromDishka[SessionUser],
     req: Request,
+    event_publisher: FromDishka[OutboxEventPublisher],
+    transaction: FromDishka[AsyncConnection],
 ) -> GearItemResponse:
     """Update a specific gear item."""
     gear_item_id_str = str(gear_item_id)
@@ -116,6 +121,12 @@ async def update_gear_item(
 
     attrs = request.data.attributes
     set_fields = attrs.model_fields_set
+
+    # Capture old values
+    old_values = {}
+    for field in set_fields:
+        old_values[field] = getattr(item, field)
+
     if "name" in set_fields:
         if attrs.name is None:
             raise HTTPException(
@@ -141,6 +152,29 @@ async def update_gear_item(
         ) from e
 
     updated = await repo.save(item)
+
+    if set_fields:
+        changed_fields = {}
+        for field in set_fields:
+            old_val = old_values[field]
+            new_val = getattr(updated, field)
+
+            from datetime import date, datetime
+
+            if isinstance(old_val, (date, datetime)):
+                old_val = old_val.isoformat()
+            if isinstance(new_val, (date, datetime)):
+                new_val = new_val.isoformat()
+
+            changed_fields[field] = (old_val, new_val)
+
+        event = GearItemUpdated(
+            gear_item_id=str(updated.id),
+            changed_fields=changed_fields,
+            transaction=transaction,
+        )
+        await event_publisher.publish(event)
+
     resource = GearItemConverter.to_resource(updated, base_url=str(req.base_url))
     return GearItemResponse(data=resource)
 
