@@ -856,7 +856,7 @@ jobs:
 
       # ── Docker image loading ────────────────────────────────────────────
       - name: Download pre-built Docker images
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: e2e-docker-images
           path: /tmp
