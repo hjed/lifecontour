@@ -15,7 +15,12 @@ from core_shared.stream_consumer import StreamConsumer
 
 logger = structlog.get_logger()
 
-_SNIPEIT_EVENT_TYPES = frozenset({"snipeit.webhook_received"})
+_SNIPEIT_EVENT_TYPES = frozenset(
+    {
+        "snipeit.webhook_received",
+        "GearItemUpdated",
+    }
+)
 
 
 class SnipeItWorkerStreamConsumer(StreamConsumer):
@@ -57,6 +62,10 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
             event_type=event.event_type,
             aggregate_id=event.aggregate_id,
         )
+
+        if event.event_type == "GearItemUpdated":
+            await self._handle_gear_item_updated(event)
+            return
 
         if event.event_type != "snipeit.webhook_received":
             return
@@ -146,6 +155,79 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
                 )
             finally:
                 await sync_service._api_client.close()
+
+    async def _handle_gear_item_updated(self, event: StreamEvent) -> None:
+        """Process GearItemUpdated outbox events to push changes to Snipe-IT."""
+        gear_item_id = event.event_data.get("gear_item_id")
+        changed_fields = event.event_data.get("changed_fields")
+
+        if not gear_item_id or not isinstance(changed_fields, dict):
+            logger.debug("Skipping GearItemUpdated: missing or invalid payload")
+            return
+
+        from sqlalchemy import text
+
+        from snipeit_api_client import SnipeItAPIError
+        from snipeit_settings import SnipeItWorkerSettings
+        from worker import _create_sync_service, _get_auth_data
+
+        worker_settings = SnipeItWorkerSettings()  # type: ignore[call-arg]
+
+        async with self._session_factory() as session:
+            # Look up the gear item's user and see if they have Snipe-IT configured
+            result = await session.execute(
+                text("""
+                    SELECT g.user_id, s.base_url, s.snipeit_user_id
+                    FROM gear_items g
+                    JOIN snipeit_settings s ON g.user_id = s.user_id
+                    WHERE g.id = :gear_item_id
+                """),
+                {"gear_item_id": gear_item_id},
+            )
+            row = result.fetchone()
+
+        if not row:
+            logger.debug(
+                "Skipping GearItemUpdated: user has no Snipe-IT settings or gear item missing"
+            )
+            return
+
+        user_id = row.user_id
+        base_url = row.base_url
+        snipeit_user_id = row.snipeit_user_id
+
+        auth_data = await _get_auth_data(self._session_factory, user_id)
+        if not auth_data:
+            logger.debug("Skipping GearItemUpdated: missing auth data")
+            return
+
+        sync_service = _create_sync_service(
+            user_id=user_id,
+            auth_data=auth_data,
+            base_url=base_url,
+            snipeit_user_id=snipeit_user_id,
+            worker_settings=worker_settings,
+            session_factory=self._session_factory,
+        )
+
+        try:
+            await sync_service.push_asset_update(
+                gear_item_id=gear_item_id,
+                changed_fields=changed_fields,
+                session_factory=self._session_factory,
+            )
+        except SnipeItAPIError as exc:
+            if exc.status_code in (403, 404):
+                logger.debug(
+                    "Skipping gear item export (not found/forbidden in Snipe-IT)",
+                    gear_item_id=gear_item_id,
+                    status_code=exc.status_code,
+                )
+            else:
+                # Let it propagate so the stream consumer retries
+                raise
+        finally:
+            await sync_service._api_client.close()
 
 
 async def run_snipeit_stream_consumer(

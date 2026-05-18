@@ -173,6 +173,51 @@ class TestSnipeItAPIClientGetAsset:
         assert path == "hardware/42"
 
 
+class TestSnipeItAPIClientUpdateAsset:
+    """Tests for update_asset method."""
+
+    @pytest.mark.asyncio
+    async def test_successful_patch(self, client_no_refresh: SnipeItAPIClient) -> None:
+        """Successful PATCH returns parsed asset from payload key."""
+        patch_response = {
+            "status": "success",
+            "messages": "Asset updated successfully.",
+            "payload": _asset_json(42, "Updated Name"),
+        }
+        resp = _ok_response(patch_response)
+        with patch.object(client_no_refresh._client, "patch", return_value=resp):
+            result = await client_no_refresh.update_asset(42, {"name": "Updated Name"})
+
+        assert isinstance(result, SnipeItAsset)
+        assert result.id == 42
+        assert result.name == "Updated Name"
+
+    @pytest.mark.asyncio
+    async def test_validation_error_raises(
+        self, client_no_refresh: SnipeItAPIClient
+    ) -> None:
+        """PATCH returning status=error raises SnipeItAPIError."""
+        error_response = {
+            "status": "error",
+            "messages": {"model_id": ["The selected model id is invalid."]},
+        }
+        resp = _ok_response(error_response)
+        with patch.object(client_no_refresh._client, "patch", return_value=resp):
+            with pytest.raises(SnipeItAPIError, match="failed"):
+                await client_no_refresh.update_asset(42, {"model_id": 999})
+
+    @pytest.mark.asyncio
+    async def test_missing_payload_raises(
+        self, client_no_refresh: SnipeItAPIClient
+    ) -> None:
+        """PATCH returning success but no payload raises SnipeItAPIError."""
+        bad_response = {"status": "success", "messages": "OK"}
+        resp = _ok_response(bad_response)
+        with patch.object(client_no_refresh._client, "patch", return_value=resp):
+            with pytest.raises(SnipeItAPIError, match="payload is missing"):
+                await client_no_refresh.update_asset(42, {"name": "Test"})
+
+
 class TestSnipeItAPIClientErrorHandling:
     """Tests for error handling in the API client."""
 
