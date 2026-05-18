@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -6,7 +7,7 @@ from arq.connections import RedisSettings
 
 from worker import _parse_redis_url, sync_snipeit_asset_batch, sync_snipeit_assets
 
-db_port = os.environ.get("WORKSPACE_PORT_POSTGRES", "5432")
+db_port = os.environ.get("DB_TEST_PORT", "5432")
 if "DATABASE_URL" not in os.environ:
     os.environ["DATABASE_URL"] = (
         f"postgresql+asyncpg://postgres:postgres@localhost:{db_port}/personal_management_test"

@@ -35,7 +35,7 @@ def get_async_database_url() -> str:
     db_port = env.get("DB_TEST_PORT", "5433")
     default_url = f"postgresql+asyncpg://postgres:postgres@localhost:{db_port}/personal_management_test"
 
-    database_url = default_url
+    database_url = os.environ.get("DATABASE_URL", default_url)
     if database_url.startswith("postgresql://") and "+asyncpg" not in database_url:
         database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
     return database_url

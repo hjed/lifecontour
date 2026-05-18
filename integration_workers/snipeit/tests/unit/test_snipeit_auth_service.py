@@ -1,10 +1,13 @@
+# ruff: noqa: E402
 """Tests for Snipe-IT auth service (token retrieval and refresh)."""
 
 import os
 
-os.environ["DATABASE_URL"] = (
-    "postgresql+asyncpg://postgres:postgres@localhost:5432/personal_management_test"
-)
+db_port = os.environ.get("DB_TEST_PORT", "5432")
+if "DATABASE_URL" not in os.environ:
+    os.environ["DATABASE_URL"] = (
+        f"postgresql+asyncpg://postgres:postgres@localhost:{db_port}/personal_management_test"
+    )
 os.environ["ENCRYPTION_KEY"] = "testkey"
 
 from datetime import UTC, datetime, timedelta

@@ -171,7 +171,7 @@ class SnipeItSyncService:
                         # Check existing metadata
                         result = await session.execute(
                             text("""
-                                SELECT version_hash
+                                SELECT version_hash, internal_uuid
                                 FROM sync_metadata
                                 WHERE integration_source = 'snipeit'
                                   AND external_id = :external_id
@@ -192,7 +192,11 @@ class SnipeItSyncService:
                             raise _AssetSkipped
 
                         # Upsert gear item
-                        gear_id = transformed.gear_item.id
+                        gear_id = (
+                            existing_meta.internal_uuid
+                            if existing_meta and existing_meta.internal_uuid
+                            else transformed.gear_item.id
+                        )
 
                         await session.execute(
                             text("""

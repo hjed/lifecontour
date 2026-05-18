@@ -382,9 +382,6 @@ class WorkerSettings:
     keep_result = 3600
     health_check_interval = 30
 
-    # Queue name scoped to this worker
-    queue_name = "arq:snipeit"
-
     redis_settings = _parse_redis_url(settings.redis_url)
 
 
