@@ -349,6 +349,136 @@ async def sync_snipeit_asset_batch(
         await sync_service._api_client.close()
 
 
+async def sync_snipeit_maintenances(
+    ctx: dict,  # type: ignore[type-arg]
+    user_id: str,
+) -> None:
+    """Orchestrator job for full sync of Snipe-IT maintenance records."""
+    session_factory = ctx["session_factory"]
+    worker_settings: SnipeItWorkerSettings = settings
+
+    from sqlalchemy import text
+
+    # 1. Fetch settings
+    async with session_factory() as session:
+        result = await session.execute(
+            text("""
+                SELECT base_url, snipeit_user_id
+                FROM snipeit_settings
+                WHERE user_id = :user_id
+            """),
+            {"user_id": user_id},
+        )
+        settings_row = result.fetchone()
+
+    if not settings_row or not settings_row.base_url:
+        logger.error("Snipe-IT settings not found", user_id=user_id)
+        return
+
+    base_url = settings_row.base_url
+    snipeit_user_id = settings_row.snipeit_user_id
+
+    # 2. Fetch auth data
+    auth_data = await _get_auth_data(session_factory, user_id)
+    if not auth_data:
+        logger.error("Snipe-IT auth not found", user_id=user_id)
+        return
+
+    # 3. Create sync service
+    sync_service = _create_sync_service(
+        user_id=user_id,
+        auth_data=auth_data,
+        base_url=base_url,
+        snipeit_user_id=snipeit_user_id,
+        worker_settings=worker_settings,
+        session_factory=session_factory,
+    )
+
+    try:
+        redis = ctx["redis"]
+
+        # Fetch all maintenance IDs and enqueue batch jobs
+        batch_count = 0
+        async for maintenance_ids in sync_service.list_maintenance_batches():
+            if not maintenance_ids:
+                continue
+
+            job_id = f"snipeit_maint_batch:{user_id}:{batch_count}"
+            await redis.enqueue_job(
+                "sync_snipeit_maintenance_batch",
+                user_id,
+                maintenance_ids,
+                _job_id=job_id,
+                _queue_name=worker_settings.queue_name,
+            )
+            batch_count += 1
+
+        logger.info(
+            "Enqueued Snipe-IT maintenance sync batches",
+            user_id=user_id,
+            batch_count=batch_count,
+        )
+
+    finally:
+        await sync_service._api_client.close()
+
+
+async def sync_snipeit_maintenance_batch(
+    ctx: dict,  # type: ignore[type-arg]
+    user_id: str,
+    maintenance_ids: list[int],
+) -> dict[str, int]:
+    """Worker job to process a batch of Snipe-IT maintenance records."""
+    session_factory = ctx["session_factory"]
+    worker_settings: SnipeItWorkerSettings = settings
+
+    from sqlalchemy import text
+
+    # 1. Fetch settings
+    async with session_factory() as session:
+        result = await session.execute(
+            text("""
+                SELECT base_url, snipeit_user_id
+                FROM snipeit_settings
+                WHERE user_id = :user_id
+            """),
+            {"user_id": user_id},
+        )
+        settings_row = result.fetchone()
+
+    if not settings_row or not settings_row.base_url:
+        logger.error("Snipe-IT settings not found", user_id=user_id)
+        return {"synced": 0, "skipped": 0, "failed": len(maintenance_ids)}
+
+    base_url = settings_row.base_url
+    snipeit_user_id = settings_row.snipeit_user_id
+
+    # 2. Fetch auth data
+    auth_data = await _get_auth_data(session_factory, user_id)
+    if not auth_data:
+        logger.error("Snipe-IT auth not found", user_id=user_id)
+        return {"synced": 0, "skipped": 0, "failed": len(maintenance_ids)}
+
+    # 3. Create sync service
+    sync_service = _create_sync_service(
+        user_id=user_id,
+        auth_data=auth_data,
+        base_url=base_url,
+        snipeit_user_id=snipeit_user_id,
+        worker_settings=worker_settings,
+        session_factory=session_factory,
+    )
+
+    try:
+        result = await sync_service.sync_maintenance_batch(
+            maintenance_ids=maintenance_ids,
+            session_factory=session_factory,
+        )
+        return dict(result)
+    finally:
+        await sync_service._api_client.close()
+
+
 def _parse_redis_url(url: str) -> RedisSettings:
     """Convert a ``redis://`` URL into ARQ ``RedisSettings``."""
     from urllib.parse import urlparse
@@ -371,6 +501,8 @@ class WorkerSettings:
     functions: list[Any] = [
         sync_snipeit_assets,
         sync_snipeit_asset_batch,
+        sync_snipeit_maintenances,
+        sync_snipeit_maintenance_batch,
     ]
 
     on_startup = startup

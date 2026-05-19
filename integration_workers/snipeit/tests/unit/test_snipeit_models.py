@@ -8,6 +8,8 @@ from snipeit_models import (
     SnipeItAssetListResponse,
     SnipeItAssignedTo,
     SnipeItDateObject,
+    SnipeItMaintenance,
+    SnipeItMaintenanceListResponse,
     SnipeItNestedObject,
 )
 
@@ -205,3 +207,111 @@ class TestSnipeItAssignedTo:
         """Missing required type field raises ValidationError."""
         with pytest.raises(ValidationError):
             SnipeItAssignedTo.model_validate({"id": 1, "name": "Test"})
+
+
+class TestSnipeItMaintenance:
+    """Tests for the SnipeItMaintenance model."""
+
+    def test_parse_full_maintenance(self) -> None:
+        """Full maintenance payload parses correctly."""
+        data = {
+            "id": 101,
+            "asset_id": 42,
+            "title": "Annual Rope Inspection",
+            "asset_maintenance_type": "Maintenance",
+            "start_date": {"date": "2024-06-01", "formatted": "Jun 01, 2024"},
+            "completion_date": {"date": "2024-06-02", "formatted": "Jun 02, 2024"},
+            "notes": "Inspected rope for damage",
+            "cost": "25.00",
+            "supplier": {"id": 3, "name": "Gear Pro"},
+            "asset": {"id": 42, "name": "Climbing Rope"},
+            "updated_at": {
+                "datetime": "2024-07-01 12:00:00",
+                "formatted": "Jul 01, 2024",
+            },
+        }
+        m = SnipeItMaintenance.model_validate(data)
+
+        assert m.id == 101
+        assert m.asset_id == 42
+        assert m.title == "Annual Rope Inspection"
+        assert m.asset_maintenance_type == "Maintenance"
+        assert m.start_date_str == "2024-06-01"
+        assert m.completion_date_str == "2024-06-02"
+        assert m.notes == "Inspected rope for damage"
+        assert m.cost == "25.00"
+        assert m.supplier is not None
+        assert m.supplier.name == "Gear Pro"
+        assert m.asset is not None
+        assert m.asset.name == "Climbing Rope"
+
+    def test_parse_minimal_maintenance(self) -> None:
+        """Maintenance with only required fields (id, asset_id)."""
+        data = {"id": 1, "asset_id": 10}
+        m = SnipeItMaintenance.model_validate(data)
+
+        assert m.id == 1
+        assert m.asset_id == 10
+        assert m.title is None
+        assert m.asset_maintenance_type is None
+        assert m.start_date is None
+        assert m.completion_date is None
+        assert m.notes is None
+        assert m.cost is None
+        assert m.supplier is None
+        assert m.asset is None
+
+    def test_convenience_properties_with_none_dates(self) -> None:
+        """Convenience properties return None when date objects are None."""
+        m = SnipeItMaintenance.model_validate({"id": 1, "asset_id": 10})
+        assert m.start_date_str is None
+        assert m.completion_date_str is None
+
+    def test_convenience_properties_with_null_date_values(self) -> None:
+        """Convenience properties return None when date objects have null inner date."""
+        data = {
+            "id": 1,
+            "asset_id": 10,
+            "start_date": {"date": None, "formatted": None},
+            "completion_date": {"date": None, "formatted": None},
+        }
+        m = SnipeItMaintenance.model_validate(data)
+        assert m.start_date_str is None
+        assert m.completion_date_str is None
+
+    def test_missing_asset_id_raises_validation_error(self) -> None:
+        """Missing required asset_id field raises ValidationError."""
+        with pytest.raises(ValidationError):
+            SnipeItMaintenance.model_validate({"id": 1})
+
+
+class TestSnipeItMaintenanceListResponse:
+    """Tests for the paginated maintenance list response."""
+
+    def test_parse_list_response(self) -> None:
+        """Paginated response with rows parses correctly."""
+        data = {
+            "total": 2,
+            "rows": [
+                {"id": 1, "asset_id": 10, "title": "Inspection"},
+                {"id": 2, "asset_id": 20, "title": "Repair"},
+            ],
+        }
+        response = SnipeItMaintenanceListResponse.model_validate(data)
+        assert response.total == 2
+        assert len(response.rows) == 2
+        assert response.rows[0].title == "Inspection"
+        assert response.rows[1].title == "Repair"
+
+    def test_parse_empty_list(self) -> None:
+        """Empty rows list."""
+        data = {"total": 0, "rows": []}
+        response = SnipeItMaintenanceListResponse.model_validate(data)
+        assert response.total == 0
+        assert len(response.rows) == 0
+
+    def test_parse_with_missing_rows(self) -> None:
+        """Response with no rows key defaults to empty list."""
+        data = {"total": 0}
+        response = SnipeItMaintenanceListResponse.model_validate(data)
+        assert response.rows == []

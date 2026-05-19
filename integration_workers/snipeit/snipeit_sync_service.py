@@ -1,9 +1,9 @@
 """
-Snipe-IT Sync Service — orchestrates gear item import.
+Snipe-IT Sync Service — orchestrates gear item and maintenance import.
 
-Fetches assets from the Snipe-IT API, transforms them using
-``SnipeItDataTransformer``, and directly upserts them into the
-``gear_items`` table. Sync state is tracked via ``SyncMetadata``.
+Fetches assets and maintenance records from the Snipe-IT API, transforms
+them using ``SnipeItDataTransformer`` / ``SnipeItMaintenanceTransformer``,
+and upserts them into the database. Sync state is tracked via ``SyncMetadata``.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from sqlalchemy import text
 
 from snipeit_api_client import SnipeItAPIClient, SnipeItAPIError
 from snipeit_data_transformer import SnipeItDataTransformer
+from snipeit_maintenance_transformer import SnipeItMaintenanceTransformer
 from snipeit_rate_limiter import SnipeItRateLimitError
 
 logger = structlog.get_logger(__name__)
@@ -33,6 +34,14 @@ class _AssetSkipped(Exception):
 
 class _AssetFailed(Exception):
     """Raised when an asset failed after all retries."""
+
+
+class _MaintenanceSkipped(Exception):
+    """Raised when a maintenance record was already imported (dedup)."""
+
+
+class _MaintenanceFailed(Exception):
+    """Raised when a maintenance record failed after all retries."""
 
 
 _TRANSIENT_EXCEPTIONS: tuple[type[BaseException], ...] = (
@@ -56,6 +65,10 @@ def _is_transient_error(exc: Exception) -> bool:
 
 _MAX_ASSET_RETRIES = 3
 _RETRY_BACKOFF_BASE = 2.0
+
+# Synthetic calendar UUID for Snipe-IT maintenance events.
+# Generated deterministically: uuid5(NAMESPACE_URL, "snipeit:maintenance")
+_SNIPEIT_MAINTENANCE_CALENDAR_ID = "d7e0f8a1-4b2c-5e3d-9a6f-1c8b7d5e4f3a"
 
 
 class SnipeItSyncService:
@@ -422,4 +435,250 @@ class SnipeItSyncService:
             "Successfully pushed gear item update to Snipe-IT",
             gear_item_id=gear_item_id,
             external_id=external_id,
+        )
+
+    # -- Maintenance Sync Methods ------------------------------------------
+
+    async def list_maintenance_batches(self) -> AsyncIterator[list[int]]:
+        """Yield pages of Snipe-IT maintenance IDs for batch processing.
+
+        Yields:
+            Lists of Snipe-IT maintenance IDs, one list per API page.
+        """
+        page = 1
+        while True:
+            response = await self._api_client.list_maintenances(
+                page=page,
+                per_page=_PAGE_SIZE,
+            )
+
+            if not response.rows:
+                break
+
+            maintenance_ids = [m.id for m in response.rows]
+            logger.info(
+                "Listed Snipe-IT maintenance batch",
+                page=page,
+                batch_size=len(maintenance_ids),
+                total_expected=response.total,
+            )
+            yield maintenance_ids
+
+            if page * _PAGE_SIZE >= response.total:
+                break
+
+            page += 1
+
+        logger.info(
+            "Finished listing maintenance batches",
+            pages_fetched=page,
+        )
+
+    async def sync_maintenance_batch(
+        self,
+        maintenance_ids: list[int],
+        session_factory: Any,
+    ) -> dict[str, int]:
+        """Process a batch of maintenance IDs, creating outbox events.
+
+        Args:
+            maintenance_ids: Snipe-IT maintenance IDs to sync.
+            session_factory: Async session factory for transactions.
+
+        Returns:
+            Dict with ``synced``, ``skipped``, and ``failed`` counts.
+        """
+        synced = 0
+        skipped = 0
+        failed = 0
+
+        for maintenance_id in maintenance_ids:
+            try:
+                await self._sync_single_maintenance(maintenance_id, session_factory)
+                synced += 1
+            except _MaintenanceSkipped:
+                skipped += 1
+            except _MaintenanceFailed:
+                failed += 1
+            except Exception:
+                logger.warning(
+                    "Unexpected error syncing maintenance record",
+                    maintenance_id=maintenance_id,
+                    exc_info=True,
+                )
+                failed += 1
+
+        logger.info(
+            "Maintenance batch completed",
+            batch_size=len(maintenance_ids),
+            synced=synced,
+            skipped=skipped,
+            failed=failed,
+        )
+        return {"synced": synced, "skipped": skipped, "failed": failed}
+
+    async def _sync_single_maintenance(
+        self,
+        maintenance_id: int,
+        session_factory: Any,
+    ) -> None:
+        """Fetch, transform, and create an outbox event for a maintenance record.
+
+        1. Fetch maintenance from the API.
+        2. Look up the internal gear_item_id from sync_metadata for the asset.
+        3. Transform into journal data.
+        4. Check for existing sync_metadata (dedup via version_hash).
+        5. Create outbox event (journal_event.created or .updated).
+        6. Update sync_metadata.
+        """
+        external_id = f"snipeit_maint:{maintenance_id}"
+
+        maintenance = await self._api_client.get_maintenance(maintenance_id)
+
+        async with session_factory() as session:
+            async with session.begin():
+                # Look up internal gear_item_id for this asset
+                asset_external_id = str(maintenance.asset_id)
+                asset_result = await session.execute(
+                    text("""
+                        SELECT internal_uuid
+                        FROM sync_metadata
+                        WHERE integration_source = 'snipeit'
+                          AND external_id = :external_id
+                    """),
+                    {"external_id": asset_external_id},
+                )
+                asset_meta = asset_result.fetchone()
+
+                if not asset_meta or not asset_meta.internal_uuid:
+                    logger.warning(
+                        "Skipping maintenance: gear item not yet synced",
+                        maintenance_id=maintenance_id,
+                        asset_id=maintenance.asset_id,
+                    )
+                    raise _MaintenanceSkipped
+
+                gear_item_id = str(asset_meta.internal_uuid)
+
+                # Transform
+                transformer = SnipeItMaintenanceTransformer()
+                transformed = transformer.transform(
+                    maintenance,
+                    user_id=self._user_id,
+                    gear_item_id=gear_item_id,
+                )
+
+                # Check existing metadata for dedup
+                meta_result = await session.execute(
+                    text("""
+                        SELECT version_hash
+                        FROM sync_metadata
+                        WHERE integration_source = 'snipeit_maintenance'
+                          AND external_id = :external_id
+                        FOR UPDATE
+                    """),
+                    {"external_id": external_id},
+                )
+                existing_meta = meta_result.fetchone()
+
+                if (
+                    existing_meta
+                    and existing_meta.version_hash == transformed.version_hash
+                ):
+                    logger.debug(
+                        "Skipping unchanged Snipe-IT maintenance",
+                        maintenance_id=maintenance_id,
+                    )
+                    raise _MaintenanceSkipped
+
+                # Look up existing journal via external event links
+                # (populated by JournalOutboxEventProcessor on creation)
+                existing_journal_id: int | None = None
+                if existing_meta:
+                    link_result = await session.execute(
+                        text("""
+                            SELECT journal_id
+                            FROM journal_external_event_links
+                            WHERE external_event_id = :external_event_id
+                              AND calendar_id = :calendar_id
+                            LIMIT 1
+                        """),
+                        {
+                            "external_event_id": external_id,
+                            "calendar_id": _SNIPEIT_MAINTENANCE_CALENDAR_ID,
+                        },
+                    )
+                    link_row = link_result.fetchone()
+                    existing_journal_id = link_row.journal_id if link_row else None
+
+                if existing_meta and existing_journal_id is None:
+                    # An outbox event for creation was enqueued but hasn't been processed
+                    # by the backend yet, so the external event link doesn't exist.
+                    # We cannot emit an update without the journal ID, and emitting another
+                    # create could duplicate the journal. Fail this record so it retries.
+                    raise RuntimeError(
+                        "Outbox creation event pending, cannot update yet"
+                    )
+
+                # Determine sync action
+                sync_action = "updated" if existing_journal_id else "created"
+
+                # Enrich journal_data with gear_maintenance_data and
+                # journal_types for the outbox event processor
+                journal_data = dict(transformed.journal_data)
+                journal_data["gear_maintenance_data"] = (
+                    transformed.gear_maintenance_data
+                )
+                journal_data["journal_types"] = ["GEAR_MAINTENANCE"]
+                journal_data["version_hash"] = transformed.version_hash
+
+                # Build calendar_info_data
+                calendar_info_data: dict[str, Any] = {
+                    "calendar_id": _SNIPEIT_MAINTENANCE_CALENDAR_ID,
+                }
+
+                # Create outbox event
+                from core_shared.models.outbox import OutboxEvent
+
+                event = OutboxEvent.create_journal_sync_event(
+                    journal_data=journal_data,
+                    calendar_info_data=calendar_info_data,
+                    integration_source="snipeit_maintenance",
+                    external_event_id=external_id,
+                    calendar_id=_SNIPEIT_MAINTENANCE_CALENDAR_ID,
+                    sync_action=sync_action,
+                    existing_journal_id=existing_journal_id,
+                )
+                session.add(event)
+
+                # Upsert sync_metadata
+                await session.execute(
+                    text("""
+                        INSERT INTO sync_metadata
+                            (integration_source, external_id, last_synced_at,
+                             version_hash, sync_status, error_message,
+                             retry_count, created_at, updated_at)
+                        VALUES
+                            ('snipeit_maintenance', :external_id, now(),
+                             :version_hash, 'success', NULL, 0,
+                             now(), now())
+                        ON CONFLICT (integration_source, external_id)
+                        DO UPDATE SET
+                            last_synced_at = EXCLUDED.last_synced_at,
+                            version_hash = EXCLUDED.version_hash,
+                            sync_status = EXCLUDED.sync_status,
+                            error_message = EXCLUDED.error_message,
+                            retry_count = 0,
+                            updated_at = EXCLUDED.updated_at
+                    """),
+                    {
+                        "external_id": external_id,
+                        "version_hash": transformed.version_hash,
+                    },
+                )
+
+        logger.info(
+            "Created outbox event for Snipe-IT maintenance",
+            maintenance_id=maintenance_id,
+            sync_action=sync_action,
         )

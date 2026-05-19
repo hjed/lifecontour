@@ -5,7 +5,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from arq.connections import RedisSettings
 
-from worker import _parse_redis_url, sync_snipeit_asset_batch, sync_snipeit_assets
+from worker import (
+    _parse_redis_url,
+    sync_snipeit_asset_batch,
+    sync_snipeit_assets,
+    sync_snipeit_maintenance_batch,
+    sync_snipeit_maintenances,
+)
 
 db_port = os.environ.get("DB_TEST_PORT", "5432")
 if "DATABASE_URL" not in os.environ:
@@ -131,4 +137,92 @@ async def test_sync_snipeit_asset_batch(mock_ctx):
         assert result == {"synced": 3, "skipped": 0, "failed": 0}
         mock_sync_service.sync_asset_batch.assert_called_once_with(
             asset_ids=asset_ids, session_factory=mock_ctx["session_factory"]
+        )
+
+
+@pytest.mark.asyncio
+async def test_sync_snipeit_maintenances_orchestrator(mock_ctx):
+    """Test the maintenance orchestrator job enqueues batch jobs."""
+    user_id = "user-123"
+
+    with (
+        patch("worker._get_auth_data", new_callable=AsyncMock) as mock_auth_data,
+        patch("worker._create_sync_service") as mock_create_service,
+    ):
+        mock_result = MagicMock()
+        mock_result.fetchone.return_value = type(
+            "Row", (), {"base_url": "https://snipeit.com", "snipeit_user_id": "1"}
+        )()
+
+        mock_session = AsyncMock()
+        mock_session.execute.return_value = mock_result
+        mock_ctx["session_factory"].return_value.__aenter__.return_value = mock_session
+
+        mock_auth_data.return_value = {
+            "encrypted_access_token": b"access",
+            "encrypted_refresh_token": b"refresh",
+        }
+
+        mock_sync_service = MagicMock()
+
+        async def mock_batches():
+            yield [10, 20]
+            yield [30]
+
+        mock_sync_service.list_maintenance_batches.return_value = mock_batches()
+        mock_sync_service._api_client.close = AsyncMock()
+        mock_create_service.return_value = mock_sync_service
+
+        await sync_snipeit_maintenances(mock_ctx, user_id)
+
+        assert len(mock_ctx["redis"].jobs) == 2
+
+        job1 = mock_ctx["redis"].jobs[0]
+        assert job1[0] == "sync_snipeit_maintenance_batch"
+        assert job1[1] == (user_id, [10, 20])
+
+        job2 = mock_ctx["redis"].jobs[1]
+        assert job2[0] == "sync_snipeit_maintenance_batch"
+        assert job2[1] == (user_id, [30])
+
+
+@pytest.mark.asyncio
+async def test_sync_snipeit_maintenance_batch(mock_ctx):
+    """Test the maintenance batch worker job."""
+    user_id = "user-123"
+    maintenance_ids = [10, 20, 30]
+
+    with (
+        patch("worker._get_auth_data", new_callable=AsyncMock) as mock_auth_data,
+        patch("worker._create_sync_service") as mock_create_service,
+    ):
+        mock_result = MagicMock()
+        mock_result.fetchone.return_value = type(
+            "Row", (), {"base_url": "https://snipeit.com", "snipeit_user_id": "1"}
+        )()
+
+        mock_session = AsyncMock()
+        mock_session.execute.return_value = mock_result
+        mock_ctx["session_factory"].return_value.__aenter__.return_value = mock_session
+
+        mock_auth_data.return_value = {
+            "encrypted_access_token": b"access",
+            "encrypted_refresh_token": b"refresh",
+        }
+
+        mock_sync_service = MagicMock()
+        mock_sync_service.sync_maintenance_batch = AsyncMock(
+            return_value={"synced": 2, "skipped": 1, "failed": 0}
+        )
+        mock_sync_service._api_client.close = AsyncMock()
+        mock_create_service.return_value = mock_sync_service
+
+        result = await sync_snipeit_maintenance_batch(
+            mock_ctx, user_id, maintenance_ids
+        )
+
+        assert result == {"synced": 2, "skipped": 1, "failed": 0}
+        mock_sync_service.sync_maintenance_batch.assert_called_once_with(
+            maintenance_ids=maintenance_ids,
+            session_factory=mock_ctx["session_factory"],
         )
