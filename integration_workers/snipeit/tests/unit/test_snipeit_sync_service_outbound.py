@@ -1,15 +1,6 @@
 # ruff: noqa: E402
 """Tests for Snipe-IT sync service outbound maintenance methods."""
 
-import os
-
-db_port = os.environ.get("DB_TEST_PORT", "5432")
-if "DATABASE_URL" not in os.environ:
-    os.environ["DATABASE_URL"] = (
-        f"postgresql+asyncpg://postgres:postgres@localhost:{db_port}/personal_management_test"
-    )
-os.environ["ENCRYPTION_KEY"] = "testkey"
-
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -113,19 +104,30 @@ class TestPushMaintenanceCreate:
         ]
         first_session.execute = AsyncMock(side_effect=fetch_results)
 
-        # Second session_factory() call: save sync metadata (with begin())
-        second_session = MagicMock()
+        # Second session_factory() call: check if already synced
+        second_session = AsyncMock()
         second_session_ctx = MagicMock()
         second_session_ctx.__aenter__ = AsyncMock(return_value=second_session)
         second_session_ctx.__aexit__ = AsyncMock(return_value=False)
+        second_session.execute = AsyncMock(
+            return_value=MagicMock(fetchone=MagicMock(return_value=None))
+        )
+
+        # Third session_factory() call: save sync metadata (with begin())
+        third_session = MagicMock()
+        third_session_ctx = MagicMock()
+        third_session_ctx.__aenter__ = AsyncMock(return_value=third_session)
+        third_session_ctx.__aexit__ = AsyncMock(return_value=False)
 
         mock_begin = MagicMock()
         mock_begin.__aenter__ = AsyncMock(return_value=None)
         mock_begin.__aexit__ = AsyncMock(return_value=False)
-        second_session.begin.return_value = mock_begin
-        second_session.execute = AsyncMock()
+        third_session.begin.return_value = mock_begin
+        third_session.execute = AsyncMock()
 
-        session_factory = MagicMock(side_effect=[first_session_ctx, second_session_ctx])
+        session_factory = MagicMock(
+            side_effect=[first_session_ctx, second_session_ctx, third_session_ctx]
+        )
 
         service = SnipeItSyncService(
             api_client=api_client,

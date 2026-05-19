@@ -771,6 +771,24 @@ class SnipeItSyncService:
 
         journal_row, maintenance_data_row, asset_sync_meta_row = data
 
+        # Check if already synced (prevent duplicates on retries)
+        async with session_factory() as session:
+            maint_meta_result = await session.execute(
+                text("""
+                    SELECT 1
+                    FROM sync_metadata
+                    WHERE integration_source = 'snipeit_maintenance'
+                      AND internal_uuid = :journal_id
+                """),
+                {"journal_id": str(journal_id)},
+            )
+            if maint_meta_result.fetchone():
+                logger.debug(
+                    "Skipping maintenance create: already synced to Snipe-IT",
+                    journal_id=journal_id,
+                )
+                return
+
         # Build Snipe-IT payload via reverse transformer
         payload = SnipeItMaintenanceTransformer.reverse_transform(
             title=journal_row.title or "",

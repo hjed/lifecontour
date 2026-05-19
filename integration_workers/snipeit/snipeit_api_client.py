@@ -244,7 +244,7 @@ class SnipeItAPIClient:
             SnipeItAPIError: If the response ``status`` is not ``"success"``
                 or the ``payload`` key is missing/unparseable.
         """
-        full_payload = {"asset_id": asset_id, **payload}
+        full_payload = {**payload, "asset_id": asset_id}
         data = await self._post("maintenances", json_data=full_payload)
 
         if data.get("status") != "success":
