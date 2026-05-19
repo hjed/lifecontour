@@ -9,8 +9,10 @@ describe('JournalTypeManager', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    // Use globalThis.confirm instead of global.confirm, and cast to any to mock it
-    (globalThis as any).confirm = jest.fn(() => true);
+    // Use globalThis.confirm instead of global.confirm, and cast to unknown to mock it
+    (globalThis as unknown as { confirm: jest.Mock }).confirm = jest.fn(
+      () => true
+    );
   });
 
   const renderComponent = (currentTypes: JournalType[] = []) => {
@@ -84,7 +86,9 @@ describe('JournalTypeManager', () => {
 
     it('does not remove type if confirm is cancelled', async () => {
       const user = userEvent.setup();
-      (globalThis as any).confirm = jest.fn(() => false);
+      (globalThis as unknown as { confirm: jest.Mock }).confirm = jest.fn(
+        () => false
+      );
       renderComponent([JournalType.NOTE]);
 
       await user.hover(screen.getByTestId(`manage-type-${JournalType.NOTE}`));

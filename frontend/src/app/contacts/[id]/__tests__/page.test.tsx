@@ -138,20 +138,20 @@ describe('ContactDetailPage', () => {
       isPending: false,
       isError: false,
       error: null,
-    } as any);
+    } as never);
 
     mockUseContactTags.mockReturnValue({
       data: { data: [] },
       isLoading: false,
       error: null,
-    } as any);
+    } as never);
 
     mockUseUpdateContactField.mockReturnValue({
       mutateAsync: jest.fn().mockResolvedValue({}),
       isPending: false,
       isError: false,
       error: null,
-    } as any);
+    } as never);
   });
 
   const renderContactDetailPage = () => {
@@ -166,24 +166,24 @@ describe('ContactDetailPage', () => {
       data: undefined,
       isLoading: true,
       error: null,
-    } as any);
+    } as never);
 
     mockUseUpdateContact.mockReturnValue({
       mutateAsync: jest.fn(),
       isPending: false,
-    } as any);
+    } as never);
 
     mockUseDeleteContact.mockReturnValue({
       mutateAsync: jest.fn(),
       isPending: false,
-    } as any);
+    } as never);
 
     mockUseUpdateContactField.mockReturnValue({
       mutateAsync: jest.fn().mockResolvedValue({}),
       isPending: false,
       isError: false,
       error: null,
-    } as any);
+    } as never);
 
     renderContactDetailPage();
 
@@ -197,24 +197,24 @@ describe('ContactDetailPage', () => {
       data: undefined,
       isLoading: false,
       error: new Error('Failed to load contact'),
-    } as any);
+    } as never);
 
     mockUseUpdateContact.mockReturnValue({
       mutateAsync: jest.fn(),
       isPending: false,
-    } as any);
+    } as never);
 
     mockUseDeleteContact.mockReturnValue({
       mutateAsync: jest.fn(),
       isPending: false,
-    } as any);
+    } as never);
 
     mockUseUpdateContactField.mockReturnValue({
       mutateAsync: jest.fn().mockResolvedValue({}),
       isPending: false,
       isError: false,
       error: null,
-    } as any);
+    } as never);
 
     renderContactDetailPage();
 
@@ -229,24 +229,24 @@ describe('ContactDetailPage', () => {
       data: mockContactData,
       isLoading: false,
       error: null,
-    } as any);
+    } as never);
 
     mockUseUpdateContact.mockReturnValue({
       mutateAsync: jest.fn(),
       isPending: false,
-    } as any);
+    } as never);
 
     mockUseDeleteContact.mockReturnValue({
       mutateAsync: jest.fn(),
       isPending: false,
-    } as any);
+    } as never);
 
     mockUseUpdateContactField.mockReturnValue({
       mutateAsync: jest.fn().mockResolvedValue({}),
       isPending: false,
       isError: false,
       error: null,
-    } as any);
+    } as never);
 
     renderContactDetailPage();
 
@@ -266,24 +266,24 @@ describe('ContactDetailPage', () => {
       data: mockContactData,
       isLoading: false,
       error: null,
-    } as any);
+    } as never);
 
     mockUseUpdateContact.mockReturnValue({
       mutateAsync: jest.fn(),
       isPending: false,
-    } as any);
+    } as never);
 
     mockUseDeleteContact.mockReturnValue({
       mutateAsync: jest.fn(),
       isPending: false,
-    } as any);
+    } as never);
 
     mockUseUpdateContactField.mockReturnValue({
       mutateAsync: jest.fn().mockResolvedValue({}),
       isPending: false,
       isError: false,
       error: null,
-    } as any);
+    } as never);
 
     renderContactDetailPage();
 
@@ -304,24 +304,24 @@ describe('ContactDetailPage', () => {
       data: mockContactData,
       isLoading: false,
       error: null,
-    } as any);
+    } as never);
 
     mockUseUpdateContact.mockReturnValue({
       mutateAsync: jest.fn(),
       isPending: false,
-    } as any);
+    } as never);
 
     mockUseDeleteContact.mockReturnValue({
       mutateAsync: mockDeleteMutation,
       isPending: false,
-    } as any);
+    } as never);
 
     mockUseUpdateContactField.mockReturnValue({
       mutateAsync: jest.fn().mockResolvedValue({}),
       isPending: false,
       isError: false,
       error: null,
-    } as any);
+    } as never);
 
     renderContactDetailPage();
 
@@ -363,24 +363,24 @@ describe('ContactDetailPage', () => {
       data: contactWithoutNickname,
       isLoading: false,
       error: null,
-    } as any);
+    } as never);
 
     mockUseUpdateContact.mockReturnValue({
       mutateAsync: jest.fn(),
       isPending: false,
-    } as any);
+    } as never);
 
     mockUseDeleteContact.mockReturnValue({
       mutateAsync: jest.fn(),
       isPending: false,
-    } as any);
+    } as never);
 
     mockUseUpdateContactField.mockReturnValue({
       mutateAsync: jest.fn().mockResolvedValue({}),
       isPending: false,
       isError: false,
       error: null,
-    } as any);
+    } as never);
 
     renderContactDetailPage();
 

@@ -17,17 +17,30 @@ import type { ContactResource } from '@/types/contacts';
 
 // Mock Popover component
 jest.mock('@/components/ui/popover', () => ({
-  Popover: ({ children }: any) => <div>{children}</div>,
-  PopoverTrigger: ({ children }: any) => <div>{children}</div>,
-  PopoverContent: ({ children }: any) => (
+  Popover: ({ children }: { children?: React.ReactNode }) => (
+    <div>{children}</div>
+  ),
+  PopoverTrigger: ({ children }: { children?: React.ReactNode }) => (
+    <div>{children}</div>
+  ),
+  PopoverContent: ({ children }: { children?: React.ReactNode }) => (
     <div data-testid='popover-content'>{children}</div>
   ),
 }));
 
 // Mock Select component
 jest.mock('@/components/ui/select', () => ({
-  Select: ({ children, value, onValueChange }: any) => (
-    <div
+  Select: ({
+    children,
+    value,
+    onValueChange,
+  }: {
+    children?: React.ReactNode;
+    value?: string;
+    onValueChange?: (value: string) => void;
+  }) => (
+    <button
+      type='button'
       data-testid='select'
       data-value={value}
       onClick={() => {
@@ -38,14 +51,24 @@ jest.mock('@/components/ui/select', () => ({
       }}
     >
       {children}
-    </div>
+    </button>
   ),
-  SelectTrigger: ({ children }: any) => (
+  SelectTrigger: ({ children }: { children?: React.ReactNode }) => (
     <div data-testid='select-trigger'>{children}</div>
   ),
-  SelectValue: ({ placeholder }: any) => <span>{placeholder}</span>,
-  SelectContent: ({ children }: any) => <div>{children}</div>,
-  SelectItem: ({ children, value }: any) => (
+  SelectValue: ({ placeholder }: { placeholder?: string }) => (
+    <span>{placeholder}</span>
+  ),
+  SelectContent: ({ children }: { children?: React.ReactNode }) => (
+    <div>{children}</div>
+  ),
+  SelectItem: ({
+    children,
+    value,
+  }: {
+    children?: React.ReactNode;
+    value: string;
+  }) => (
     <div data-value={value} data-testid={`select-item-${value}`}>
       {children}
     </div>
@@ -71,7 +94,15 @@ const mockSearchSelectContact: ContactResource = {
 };
 
 jest.mock('@/components/contacts/ContactSearchCombobox', () => ({
-  ContactSearchCombobox: ({ onSelect, disabled, inputId }: any) => (
+  ContactSearchCombobox: ({
+    onSelect,
+    disabled,
+    inputId,
+  }: {
+    onSelect: (contact: unknown) => void;
+    disabled?: boolean;
+    inputId?: string;
+  }) => (
     <div>
       <input id={inputId} placeholder='Search for a contact...' readOnly />
       <button

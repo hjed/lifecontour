@@ -176,7 +176,7 @@ describe('IntegrationsPage', () => {
       data: undefined,
       isLoading: true,
       error: null,
-    } as any);
+    } as never);
 
     const wrapper = createWrapper();
     render(<IntegrationsPage />, { wrapper });

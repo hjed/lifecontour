@@ -12,7 +12,13 @@ jest.mock('@/lib/api/journals', () => ({
 
 // Mock the combobox to simplify testing the dialog state machine
 jest.mock('../JournalSearchCombobox', () => ({
-  JournalSearchCombobox: ({ onSelect, excludeJournalId }: any) => (
+  JournalSearchCombobox: ({
+    onSelect,
+    excludeJournalId,
+  }: {
+    onSelect: (journal: unknown) => void;
+    excludeJournalId?: string;
+  }) => (
     <div data-testid='mock-combobox'>
       <span data-testid='exclude-id'>{excludeJournalId}</span>
       <button

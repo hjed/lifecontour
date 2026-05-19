@@ -40,6 +40,7 @@ export function CalendarViewToggle({
     <div
       role='radiogroup'
       aria-label='View mode'
+      tabIndex={-1}
       className={cn('inline-flex rounded-md border', className)}
       onKeyDown={e => {
         const currentIndex = VIEW_OPTIONS.findIndex(o => o.value === value);

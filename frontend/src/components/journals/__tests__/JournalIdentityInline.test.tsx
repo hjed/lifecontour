@@ -18,15 +18,25 @@ jest.mock('@/lib/api/journals', () => ({
 
 // Mock child components
 jest.mock('@/components/contacts/InlineEditField', () => ({
-  InlineEditField: ({ value, 'data-testid': testId }: any) => (
-    <div data-testid={testId}>{value}</div>
-  ),
+  InlineEditField: ({
+    value,
+    'data-testid': testId,
+  }: {
+    value?: string;
+    'data-testid'?: string;
+  }) => <div data-testid={testId}>{value}</div>,
 }));
 
 jest.mock('@/components/journals/InlineEditDateRange', () => ({
-  InlineEditDateRange: ({ value, 'data-testid': testId }: any) => (
+  InlineEditDateRange: ({
+    value,
+    'data-testid': testId,
+  }: {
+    value?: { start?: string; end?: string };
+    'data-testid'?: string;
+  }) => (
     <div data-testid={testId}>
-      {value.start} - {value.end}
+      {value?.start} - {value?.end}
     </div>
   ),
 }));

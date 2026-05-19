@@ -145,7 +145,14 @@ test.describe('Calendar Google Sync Settings', () => {
   test('enabling sync shows Google Calendar dropdown and submits with google_calendar_id', async ({
     authenticatedPage: page,
   }) => {
-    let createPayload: any = null;
+    let createPayload: {
+      data: {
+        attributes: {
+          is_synced_to_google: boolean;
+          google_calendar_id: string;
+        };
+      };
+    } | null = null;
 
     await page.route('**/api/integrations/google/contacts/status', route =>
       route.fulfill(json(googleStatusConnected))
@@ -162,7 +169,7 @@ test.describe('Calendar Google Sync Settings', () => {
             data: {
               id: 'new-calendar-id',
               type: 'calendars',
-              attributes: createPayload.data?.attributes || {},
+              attributes: createPayload?.data?.attributes || {},
             },
           })
         );
@@ -199,8 +206,8 @@ test.describe('Calendar Google Sync Settings', () => {
     await expect
       .poll(() => createPayload !== null, { timeout: 10000 })
       .toBeTruthy();
-    expect(createPayload.data.attributes.is_synced_to_google).toBe(true);
-    expect(createPayload.data.attributes.google_calendar_id).toBe(
+    expect(createPayload!.data.attributes.is_synced_to_google).toBe(true);
+    expect(createPayload!.data.attributes.google_calendar_id).toBe(
       'work@group.v.calendar.google.com'
     );
   });

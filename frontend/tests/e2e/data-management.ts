@@ -416,11 +416,14 @@ export class TestDataManager {
       const responseData = await response.json();
       const tags = responseData.data || [];
 
-      const existingTag = tags.find((tag: any) => tag.attributes.name === name);
+      const existingTag = tags.find(
+        (tag: { attributes?: { name?: string }; id: string }) =>
+          tag.attributes?.name === name
+      );
       if (existingTag) {
         return {
           id: existingTag.id,
-          name: existingTag.attributes.name,
+          name: existingTag.attributes!.name!,
         };
       }
 

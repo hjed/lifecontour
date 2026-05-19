@@ -240,7 +240,7 @@ describe('ContactForm', () => {
           type: 'contact_methods',
           id: '1',
           attributes: {
-            method_type: 'email' as any,
+            method_type: 'email' as never,
             value: 'john@example.com',
             label: 'Work',
             is_primary: true,

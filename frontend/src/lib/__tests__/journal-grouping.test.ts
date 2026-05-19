@@ -19,14 +19,14 @@ const createMockJournal = (id: string, startDate: string): DisplayJournal => ({
   contacts: [],
 });
 
-function assertIsDayGroup(group: any): asserts group is JournalDayGroup {
-  expect(group.type).toBe('day');
+function assertIsDayGroup(group: unknown): asserts group is JournalDayGroup {
+  expect((group as { type?: unknown }).type).toBe('day');
 }
 
 function assertIsCollapsedGroup(
-  group: any
+  group: unknown
 ): asserts group is CollapsedEmptyGroup {
-  expect(group.type).toBe('collapsed-empty');
+  expect((group as { type?: unknown }).type).toBe('collapsed-empty');
 }
 
 describe('journal-grouping', () => {
