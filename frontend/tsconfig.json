@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "target": "es5",
+    "target": "es2020",
     "lib": ["dom", "dom.iterable", "es6"],
     "types": ["jest", "@testing-library/jest-dom"],
     "allowJs": true,
