@@ -101,7 +101,7 @@ test.describe('Calendar Google Sync Settings', () => {
     // Sync toggle should be enabled
     const toggle = page.getByTestId('google-sync-toggle');
     await expect(toggle).toBeVisible();
-    await expect(toggle).not.toBeDisabled();
+    await expect(toggle).toBeEnabled();
   });
 
   test('sync toggle is disabled when Google is not connected', async ({

@@ -28,8 +28,8 @@ test.describe('Contact Management - Authenticated User', () => {
     await expect(authenticatedPage).toHaveURL(/\/contacts\/new/);
 
     // Should see create contact form
-    const pageContent = await authenticatedPage.textContent('body');
-    expect(pageContent).toBeTruthy();
+    const pageContent = authenticatedPage.locator('body');
+    await expect(pageContent).not.toBeEmpty();
   });
 
   test('should display contact details with tags properly', async ({
@@ -77,8 +77,8 @@ test.describe('Contact Management - Authenticated User', () => {
     await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
     // Page should load (might show 404 for non-existent contact, but that's valid)
-    const pageContent = await authenticatedPage.textContent('body');
-    expect(pageContent).toBeTruthy();
+    const pageContent = authenticatedPage.locator('body');
+    await expect(pageContent).not.toBeEmpty();
   });
 
   test('should handle navigation between contact pages when authenticated', async ({
@@ -97,8 +97,8 @@ test.describe('Contact Management - Authenticated User', () => {
     await expect(authenticatedPage).toHaveURL(/\/contacts/);
 
     // Verify content is present
-    const bodyText = await authenticatedPage.textContent('body');
-    expect(bodyText).toBeTruthy();
+    const bodyText = authenticatedPage.locator('body');
+    await expect(bodyText).not.toBeEmpty();
   });
 
   test('should display tag names (not IDs) on contact cards in the list view', async ({

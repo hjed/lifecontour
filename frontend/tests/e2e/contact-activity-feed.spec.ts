@@ -68,8 +68,8 @@ test.describe('Contact Activity Feed', () => {
 
     // Check for empty state or "No activity" message
     // The empty state should show either "No activity" or similar message
-    const pageContent = await page.textContent('body');
-    expect(pageContent).toBeTruthy();
+    const pageContent = page.locator('body');
+    await expect(pageContent).not.toBeEmpty();
   });
 
   test('should display history entries after contact is updated', async ({
@@ -226,7 +226,7 @@ test.describe('Contact Activity Feed', () => {
     // Initially new summary is hidden
     await expect(
       page.getByText('New summary text that is very long')
-    ).not.toBeVisible();
+    ).toBeHidden();
 
     // Expand
     const expandButton = page.getByRole('button', { name: /expand/i });

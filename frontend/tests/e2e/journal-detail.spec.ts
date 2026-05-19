@@ -208,7 +208,7 @@ test.describe('Journal Detail Page', () => {
       await saveButton.click();
 
       // Wait for the edit mode to close
-      await expect(saveButton).not.toBeVisible();
+      await expect(saveButton).toBeHidden();
 
       // Verify the date range was updated (should be different from original)
       await expect(dateField).not.toHaveText(originalDateRange || '');
@@ -383,7 +383,7 @@ test.describe('Journal Detail Page', () => {
       ).toBe(200);
 
       // Wait for edit mode to finish
-      await expect(saveButton).not.toBeVisible();
+      await expect(saveButton).toBeHidden();
     });
 
     test('should display type-specific editor sections for MOOD_RATING type', async ({
@@ -599,7 +599,7 @@ test.describe('Journal Detail Page', () => {
       await removeButton.click();
 
       // Tag badge should disappear after removal
-      await expect(tagBadge).not.toBeVisible();
+      await expect(tagBadge).toBeHidden();
     });
   });
 
@@ -740,7 +740,7 @@ test.describe('Journal Detail Page', () => {
       expect(removeResponse.status()).toBe(200);
 
       // Contact badge should disappear after removal
-      await expect(contactBadge).not.toBeVisible();
+      await expect(contactBadge).toBeHidden();
     });
 
     test('should edit a contact status and role in a journal', async ({
@@ -827,7 +827,7 @@ test.describe('Journal Detail Page', () => {
       expect(updateResponse.status()).toBe(200);
 
       // Verify the UI updated to new status
-      await expect(popoverContent).not.toBeVisible();
+      await expect(popoverContent).toBeHidden();
 
       const updatedStatus = page.getByTestId(`contact-status-${contact.id}`);
       await expect(updatedStatus).toHaveAttribute(

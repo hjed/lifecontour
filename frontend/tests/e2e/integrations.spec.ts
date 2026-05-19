@@ -164,7 +164,7 @@ test.describe('Integration Management - Authenticated User', () => {
 
     // Click should trigger OAuth flow (but we won't complete it in tests)
     // Just verify the button is clickable
-    expect(await connectButton.isEnabled()).toBeTruthy();
+    await expect(connectButton).toBeEnabled();
   });
 
   test('should display and open Sync History, Health Status, and Settings modals', async ({

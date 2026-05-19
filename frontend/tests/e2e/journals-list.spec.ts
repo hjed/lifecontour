@@ -18,6 +18,7 @@ function relativeDate(dayOffset: number): string {
   d.setDate(d.getDate() + dayOffset);
   return d.toISOString();
 }
+
 test.describe('Journal List Page', () => {
   test.describe('Basic Display', () => {
     test('should display journals when data exists', async ({
@@ -118,7 +119,7 @@ test.describe('Journal List Page', () => {
         page.getByRole('heading', {
           name: /Team Meeting/i,
         })
-      ).not.toBeVisible();
+      ).toBeHidden();
 
       // Clear search
       const clearButton = page.getByTestId('clear-filters');
@@ -182,7 +183,7 @@ test.describe('Journal List Page', () => {
           page.getByRole('heading', {
             name: new RegExp(nonNoteJournal.title, 'i'),
           })
-        ).not.toBeVisible();
+        ).toBeHidden();
       }
     });
 
@@ -321,12 +322,12 @@ test.describe('Journal List Page', () => {
       // "Meeting Notes" should not be visible (NOTE type, not EVENT)
       await expect(
         page.getByRole('heading', { name: /Meeting Notes/i })
-      ).not.toBeVisible();
+      ).toBeHidden();
 
       // "Random Note" should not be visible (doesn't match search)
       await expect(
         page.getByRole('heading', { name: /Random Note/i })
-      ).not.toBeVisible();
+      ).toBeHidden();
     });
 
     test('should filter journals by date range', async ({
@@ -442,15 +443,14 @@ test.describe('Journal List Page', () => {
       const startGrid = page.getByRole('grid', { name: startMonthName });
       // Navigate to the correct month if needed
       while (!(await startGrid.isVisible())) {
-        const currentGrids = await page.getByRole('grid').allInnerTexts();
+        const currentGrids = await page.getByRole('grid').allTextContents();
         await page
           .getByRole('button', { name: 'Go to the Previous Month' })
           .click();
 
-        await expect(async () => {
-          const newGrids = await page.getByRole('grid').allInnerTexts();
-          expect(newGrids).not.toEqual(currentGrids);
-        }).toPass({ timeout: 5000 });
+        await expect(page.getByRole('grid')).not.toHaveText(currentGrids, {
+          timeout: 5000,
+        });
       }
 
       const startLabel = `${rangeStart.getUTCDate()} ${monthNames[rangeStart.getUTCMonth()]} ${rangeStart.getUTCFullYear()}`;
@@ -470,15 +470,14 @@ test.describe('Journal List Page', () => {
       const endMonthName = `${monthNames[rangeEnd.getUTCMonth()]} ${rangeEnd.getUTCFullYear()}`;
       const endGrid = page.getByRole('grid', { name: endMonthName });
       while (!(await endGrid.isVisible())) {
-        const currentGrids = await page.getByRole('grid').allInnerTexts();
+        const currentGrids = await page.getByRole('grid').allTextContents();
         await page
           .getByRole('button', { name: 'Go to the Next Month' })
           .click();
 
-        await expect(async () => {
-          const newGrids = await page.getByRole('grid').allInnerTexts();
-          expect(newGrids).not.toEqual(currentGrids);
-        }).toPass({ timeout: 5000 });
+        await expect(page.getByRole('grid')).not.toHaveText(currentGrids, {
+          timeout: 5000,
+        });
       }
 
       const endLabel = `${rangeEnd.getUTCDate()} ${monthNames[rangeEnd.getUTCMonth()]} ${rangeEnd.getUTCFullYear()}`;
@@ -497,10 +496,10 @@ test.describe('Journal List Page', () => {
       // Verify the other journals are not visible (outside the selected range)
       await expect(
         page.getByRole('heading', { name: /Earlier Journal/i })
-      ).not.toBeVisible();
+      ).toBeHidden();
       await expect(
         page.getByRole('heading', { name: /Later Journal/i })
-      ).not.toBeVisible();
+      ).toBeHidden();
     });
 
     test('should filter journals by contact', async ({
@@ -637,10 +636,10 @@ test.describe('Journal List Page', () => {
       // Verify other journals are not visible
       await expect(
         page.getByRole('heading', { name: /Meeting with Bob/i })
-      ).not.toBeVisible();
+      ).toBeHidden();
       await expect(
         page.getByRole('heading', { name: /Solo Work/i })
-      ).not.toBeVisible();
+      ).toBeHidden();
     });
 
     test('should filter journals by tag', async ({
@@ -748,7 +747,7 @@ test.describe('Journal List Page', () => {
       // Verify Personal Note is not visible
       await expect(
         page.getByRole('heading', { name: /Personal Note/i })
-      ).not.toBeVisible();
+      ).toBeHidden();
 
       // Uncheck Work tag
       await workCheckbox.uncheck();
@@ -782,7 +781,7 @@ test.describe('Journal List Page', () => {
       // Verify Work Meeting is not visible
       await expect(
         page.getByRole('heading', { name: /Work Meeting/i })
-      ).not.toBeVisible();
+      ).toBeHidden();
     });
 
     test('should filter journals with combined filters (date + type + contact)', async ({
@@ -923,15 +922,14 @@ test.describe('Journal List Page', () => {
         name: rangeStartMonthName,
       });
       while (!(await rangeStartGrid.isVisible())) {
-        const currentGrids = await page.getByRole('grid').allInnerTexts();
+        const currentGrids = await page.getByRole('grid').allTextContents();
         await page
           .getByRole('button', { name: 'Go to the Previous Month' })
           .click();
 
-        await expect(async () => {
-          const newGrids = await page.getByRole('grid').allInnerTexts();
-          expect(newGrids).not.toEqual(currentGrids);
-        }).toPass({ timeout: 5000 });
+        await expect(page.getByRole('grid')).not.toHaveText(currentGrids, {
+          timeout: 5000,
+        });
       }
 
       const startLabel = `${day4.getUTCDate()} ${monthNames[day4.getUTCMonth()]} ${day4.getUTCFullYear()}`;
@@ -952,15 +950,14 @@ test.describe('Journal List Page', () => {
         name: rangeEndMonthName,
       });
       while (!(await rangeEndGrid.isVisible())) {
-        const currentGrids = await page.getByRole('grid').allInnerTexts();
+        const currentGrids = await page.getByRole('grid').allTextContents();
         await page
           .getByRole('button', { name: 'Go to the Next Month' })
           .click();
 
-        await expect(async () => {
-          const newGrids = await page.getByRole('grid').allInnerTexts();
-          expect(newGrids).not.toEqual(currentGrids);
-        }).toPass({ timeout: 5000 });
+        await expect(page.getByRole('grid')).not.toHaveText(currentGrids, {
+          timeout: 5000,
+        });
       }
 
       const endLabel = `${today.getUTCDate()} ${monthNames[today.getUTCMonth()]} ${today.getUTCFullYear()}`;
@@ -1014,13 +1011,13 @@ test.describe('Journal List Page', () => {
       // Verify non-matching journals are not visible
       await expect(
         page.getByRole('heading', { name: /Recent Event with Charlie/i })
-      ).not.toBeVisible();
+      ).toBeHidden();
       await expect(
         page.getByRole('heading', { name: /Old Note with Charlie/i })
-      ).not.toBeVisible();
+      ).toBeHidden();
       await expect(
         page.getByRole('heading', { name: /Recent Note Solo/i })
-      ).not.toBeVisible();
+      ).toBeHidden();
     });
 
     test('should filter journals by calendar', async ({
@@ -1138,10 +1135,10 @@ test.describe('Journal List Page', () => {
       // Verify other journals are not visible
       await expect(
         page.getByRole('heading', { name: /Personal Event/i })
-      ).not.toBeVisible();
+      ).toBeHidden();
       await expect(
         page.getByRole('heading', { name: /Note without Calendar/i })
-      ).not.toBeVisible();
+      ).toBeHidden();
 
       // Change to Personal Calendar
       const personalResponsePromise = page.waitForResponse(
@@ -1171,10 +1168,10 @@ test.describe('Journal List Page', () => {
       // Verify other journals are not visible
       await expect(
         page.getByRole('heading', { name: /Work Event/i })
-      ).not.toBeVisible();
+      ).toBeHidden();
       await expect(
         page.getByRole('heading', { name: /Note without Calendar/i })
-      ).not.toBeVisible();
+      ).toBeHidden();
 
       // Select "All calendars" to clear filter
       await calendarSelect.click();
@@ -1506,7 +1503,7 @@ test.describe('Journal List Page', () => {
       await expect(emptyStateText).toBeVisible();
       await expect(
         page.getByRole('heading', { name: targetJournalTitle })
-      ).not.toBeVisible();
+      ).toBeHidden();
 
       // Click Date Jump Calendar
       const dateJumpBtn = page.getByTestId('jump-date-button');
@@ -1531,12 +1528,11 @@ test.describe('Journal List Page', () => {
       const targetGrid = page.getByRole('grid', { name: targetMonthName });
 
       while (!(await targetGrid.isVisible())) {
-        const currentGrids = await page.getByRole('grid').allInnerTexts();
+        const currentGrids = await page.getByRole('grid').allTextContents();
         await page.getByRole('button', { name: /next month/i }).click();
-        await expect(async () => {
-          const newGrids = await page.getByRole('grid').allInnerTexts();
-          expect(newGrids).not.toEqual(currentGrids);
-        }).toPass({ timeout: 5000 });
+        await expect(page.getByRole('grid')).not.toHaveText(currentGrids, {
+          timeout: 5000,
+        });
       }
 
       // 15 is always unique within a calendar grid because outside days can only be up to 6 days
@@ -1558,7 +1554,7 @@ test.describe('Journal List Page', () => {
       await dayLocator.click();
 
       // Wait for the popover to close (confirms the date selection registered)
-      await expect(page.locator('[data-slot="calendar"]')).not.toBeVisible();
+      await expect(page.locator('[data-slot="calendar"]')).toBeHidden();
 
       // Wait for the API to respond with journals for the new anchor date
       await jumpResponsePromise;

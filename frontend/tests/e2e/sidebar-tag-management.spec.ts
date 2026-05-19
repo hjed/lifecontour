@@ -61,7 +61,7 @@ test.describe('Sidebar Tag Management', () => {
     await dialog.getByRole('button', { name: 'Create Tag' }).click();
 
     // Verify dialog closes
-    await expect(dialog).not.toBeVisible();
+    await expect(dialog).toBeHidden();
 
     // Verify Toast appears
     await expect(page.getByText('Tag created successfully')).toBeVisible();

@@ -57,7 +57,7 @@ test.describe('Search Functionality - Authenticated', () => {
     await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
     // Page should load successfully
-    const bodyText = await authenticatedPage.textContent('body');
-    expect(bodyText).toBeTruthy();
+    const bodyText = authenticatedPage.locator('body');
+    await expect(bodyText).not.toBeEmpty();
   });
 });

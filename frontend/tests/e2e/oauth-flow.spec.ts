@@ -62,8 +62,8 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
 
     // Wait for page to process the callback - either shows content or redirects
     await expect(async () => {
-      const bodyText = await page.textContent('body');
-      expect(bodyText).toBeTruthy();
+      const bodyText = page.locator('body');
+      await expect(bodyText).not.toBeEmpty();
     }).toPass({ timeout: 10000 });
 
     // Verify the page handled the callback (either shows error or redirects)
@@ -109,8 +109,8 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
 
       // Wait for either navigation or error display
       await expect(async () => {
-        const bodyText = await page.textContent('body');
-        expect(bodyText).toBeTruthy();
+        const bodyText = page.locator('body');
+        await expect(bodyText).not.toBeEmpty();
       }).toPass({ timeout: 10000 });
     }
   });

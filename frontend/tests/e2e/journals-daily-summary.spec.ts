@@ -129,7 +129,7 @@ test.describe('Journals AI Daily Summary', () => {
     const summaryCard = authenticatedPage.getByTestId(
       `summary-card-${journalDateId}`
     );
-    await expect(summaryCard).not.toBeVisible();
+    await expect(summaryCard).toBeHidden();
   });
 
   test('should auto-generate and display read-only daily summary for populated days', async ({

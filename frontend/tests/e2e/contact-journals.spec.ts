@@ -150,7 +150,7 @@ test.describe('Contact Journals Display', () => {
         journalCard.getByRole('link', {
           name: new RegExp(`View Contact ${contact.id}`, 'i'),
         })
-      ).not.toBeVisible();
+      ).toBeHidden();
     });
 
     test('should group journals by relationship type with collapsible sections', async ({
@@ -442,7 +442,7 @@ test.describe('Contact Journals Display', () => {
       // Verify empty state is gone
       await expect(
         page.getByText(/no journals found for this contact/i)
-      ).not.toBeVisible();
+      ).toBeHidden();
     });
   });
 });

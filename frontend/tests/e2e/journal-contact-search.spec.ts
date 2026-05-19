@@ -82,7 +82,7 @@ test.describe('Journal Contact Search (Typeahead)', () => {
       const barnabyContactName = `${contacts[1].firstName} ${contacts[1].lastName}`;
       await expect(
         page.getByRole('option', { name: barnabyContactName })
-      ).not.toBeVisible();
+      ).toBeHidden();
     });
 
     test('should select a searched contact and add it to the journal', async ({

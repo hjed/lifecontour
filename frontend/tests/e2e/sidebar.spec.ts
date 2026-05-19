@@ -62,12 +62,8 @@ test.describe('Sidebar Navigation', () => {
       ).toBeVisible();
 
       // Should NOT have hardcoded groups
-      await expect(
-        page.getByRole('link', { name: 'Group 1' })
-      ).not.toBeVisible();
-      await expect(
-        page.getByRole('link', { name: 'Group 2' })
-      ).not.toBeVisible();
+      await expect(page.getByRole('link', { name: 'Group 1' })).toBeHidden();
+      await expect(page.getByRole('link', { name: 'Group 2' })).toBeHidden();
 
       // Should have dynamic tag links (wait for React Query to load tags)
       const tagLinks = page.locator('a[href*="/contacts?tag="]');
@@ -92,7 +88,7 @@ test.describe('Sidebar Navigation', () => {
       // Journal navigation items should not be visible
       await expect(
         page.getByRole('link', { name: 'All Journals' })
-      ).not.toBeVisible();
+      ).toBeHidden();
     });
 
     test('can toggle section expansion', async ({
@@ -111,7 +107,7 @@ test.describe('Sidebar Navigation', () => {
       await expect(journalsButton).toHaveAttribute('aria-expanded', 'false');
       await expect(
         page.getByRole('link', { name: 'All Journals' })
-      ).not.toBeVisible();
+      ).toBeHidden();
 
       // Click to expand — use toPass() so the entire click + assertion retries
       // as a unit. Firefox can occasionally fail to register a click, so the
@@ -131,7 +127,7 @@ test.describe('Sidebar Navigation', () => {
       }).toPass({ timeout: 15000 });
       await expect(
         page.getByRole('link', { name: 'All Journals' })
-      ).not.toBeVisible();
+      ).toBeHidden();
     });
 
     test('highlights active navigation item', async ({
@@ -210,7 +206,7 @@ test.describe('Sidebar Navigation', () => {
 
       // Desktop sidebar should be hidden
       const desktopSidebar = page.getByTestId('sidebar');
-      await expect(desktopSidebar).not.toBeVisible();
+      await expect(desktopSidebar).toBeHidden();
 
       // Mobile trigger should be visible
       const mobileTrigger = page.getByTestId('mobile-nav-trigger');
@@ -263,7 +259,7 @@ test.describe('Sidebar Navigation', () => {
       // Should navigate and close sidebar
       await expect(
         page.getByRole('heading', { name: 'Navigation' })
-      ).not.toBeVisible();
+      ).toBeHidden();
     });
 
     // TODO: Re-enable when mobile modal viewport issues are resolved
@@ -282,17 +278,17 @@ test.describe('Sidebar Navigation', () => {
       await page.setViewportSize({ width: 1024, height: 768 });
       await page.goto('/contacts');
       await expect(page.getByTestId('sidebar')).toBeVisible();
-      await expect(page.getByTestId('mobile-nav-trigger')).not.toBeVisible();
+      await expect(page.getByTestId('mobile-nav-trigger')).toBeHidden();
 
       // Switch to mobile
       await page.setViewportSize({ width: 375, height: 667 });
-      await expect(page.getByTestId('sidebar')).not.toBeVisible();
+      await expect(page.getByTestId('sidebar')).toBeHidden();
       await expect(page.getByTestId('mobile-nav-trigger')).toBeVisible();
 
       // Switch back to desktop
       await page.setViewportSize({ width: 1024, height: 768 });
       await expect(page.getByTestId('sidebar')).toBeVisible();
-      await expect(page.getByTestId('mobile-nav-trigger')).not.toBeVisible();
+      await expect(page.getByTestId('mobile-nav-trigger')).toBeHidden();
     });
 
     test('maintains navigation state across viewport changes', async ({
@@ -311,7 +307,7 @@ test.describe('Sidebar Navigation', () => {
       // Switch to mobile - wait for UI to stabilize after viewport change
       await page.setViewportSize({ width: 375, height: 667 });
       // Wait for desktop sidebar to hide and mobile nav trigger to appear
-      await expect(page.getByTestId('sidebar')).not.toBeVisible();
+      await expect(page.getByTestId('sidebar')).toBeHidden();
       await expect(page.getByTestId('mobile-nav-trigger')).toBeVisible();
       await expect(async () => {
         await page.getByTestId('mobile-nav-trigger').click();
@@ -433,7 +429,7 @@ test.describe('Sidebar Navigation', () => {
 
       // 5. Child should NOT be visible initially
       const childLink = page.getByTestId(`nav-link-tag-${childId}`);
-      await expect(childLink).not.toBeVisible();
+      await expect(childLink).toBeHidden();
 
       // 6. Click expand → child becomes visible
       await expandToggle.click();
@@ -443,7 +439,7 @@ test.describe('Sidebar Navigation', () => {
       // 7. Click collapse → child hidden again
       await expandToggle.click();
       await expect(expandToggle).toHaveAttribute('aria-expanded', 'false');
-      await expect(childLink).not.toBeVisible();
+      await expect(childLink).toBeHidden();
     });
 
     test('navigates to child tag page from sidebar tree', async ({

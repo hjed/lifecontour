@@ -3,6 +3,7 @@ import nextTypescript from 'eslint-config-next/typescript';
 import { fixupConfigRules } from '@eslint/compat';
 import jsxA11y from 'eslint-plugin-jsx-a11y';
 import reactHooks from 'eslint-plugin-react-hooks';
+import playwright from 'eslint-plugin-playwright';
 
 const eslintConfig = [
   {
@@ -42,6 +43,22 @@ const eslintConfig = [
         },
       ],
       '@typescript-eslint/no-explicit-any': 'error',
+    },
+  },
+  {
+    ...playwright.configs['flat/recommended'],
+    files: ['tests/e2e/**/*.ts', 'tests/e2e/**/*.tsx'],
+  },
+  {
+    files: ['tests/e2e/**/*.ts', 'tests/e2e/**/*.tsx'],
+    languageOptions: {
+      parserOptions: {
+        project: './tsconfig.json',
+      },
+    },
+    rules: {
+      '@typescript-eslint/no-floating-promises': 'error',
+      'playwright/no-force-option': 'off',
     },
   },
 ];

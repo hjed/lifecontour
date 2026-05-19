@@ -171,8 +171,8 @@ test.describe('Login Page - Unauthenticated Users', () => {
       ).toBeVisible();
 
       // Mock network failure for login endpoint
-      await unauthenticatedPage.route('**/api/auth/login', route => {
-        route.fulfill({
+      await unauthenticatedPage.route('**/api/auth/login', async route => {
+        await route.fulfill({
           status: 500,
           contentType: 'application/json',
           body: JSON.stringify({
@@ -288,8 +288,8 @@ test.describe('Login Page - Unauthenticated Users', () => {
         }
       } else {
         // If no OAuth buttons, just verify page is accessible
-        const bodyText = await unauthenticatedPage.textContent('body');
-        expect(bodyText).toBeTruthy();
+        const bodyText = unauthenticatedPage.locator('body');
+        await expect(bodyText).not.toBeEmpty();
       }
     });
 
@@ -309,8 +309,8 @@ test.describe('Login Page - Unauthenticated Users', () => {
 
       // Prevent the actual navigation to avoid 'Target page, context or browser has been closed'
       // errors when Playwright tears down the context while it's navigating
-      await unauthenticatedPage.route('**/api/auth/login*', route => {
-        route.fulfill({
+      await unauthenticatedPage.route('**/api/auth/login*', async route => {
+        await route.fulfill({
           status: 200,
           contentType: 'application/json',
           body: JSON.stringify({ url: '/mock-redirect' }),
@@ -396,8 +396,8 @@ test.describe('Login Page - Unauthenticated Users', () => {
         }
       } else {
         // If no OAuth buttons, just verify page is usable on mobile
-        const bodyText = await unauthenticatedPage.textContent('body');
-        expect(bodyText).toBeTruthy();
+        const bodyText = unauthenticatedPage.locator('body');
+        await expect(bodyText).not.toBeEmpty();
       }
     });
 
@@ -528,7 +528,7 @@ test.describe('Login Page - Authenticated Users', () => {
     const loginHeading = authenticatedPage.locator(
       'h1:has-text("Welcome Back")'
     );
-    await expect(loginHeading).not.toBeVisible();
+    await expect(loginHeading).toBeHidden();
   });
 
   test('should maintain authentication state when accessing login URL', async ({

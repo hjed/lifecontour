@@ -128,7 +128,7 @@ test.describe('Important Dates', () => {
     await deleteResponsePromise;
 
     // Verify dialog is closed and birthday is removed
-    await expect(deleteDialog).not.toBeVisible();
+    await expect(deleteDialog).toBeHidden();
     await expect(authenticatedPage.getByText(/birthday/i)).not.toBeVisible({
       timeout: 10000,
     });
@@ -197,13 +197,10 @@ test.describe('Important Dates', () => {
 
     // Verify both date types are actually rendered
     // If test IDs don't exist, fall back to checking both types are visible
-    const birthdayVisible = await authenticatedPage
-      .getByText(/birthday/i)
-      .isVisible();
-    const anniversaryVisible = await authenticatedPage
-      .getByText(/marriage anniversary/i)
-      .isVisible();
-    expect(birthdayVisible).toBe(true);
-    expect(anniversaryVisible).toBe(true);
+    const birthdayVisible = authenticatedPage.getByText(/birthday/i);
+    const anniversaryVisible =
+      authenticatedPage.getByText(/marriage anniversary/i);
+    await expect(birthdayVisible).toBeVisible();
+    await expect(anniversaryVisible).toBeVisible();
   });
 });
