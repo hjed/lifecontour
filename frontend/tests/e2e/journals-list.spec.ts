@@ -443,7 +443,7 @@ test.describe('Journal List Page', () => {
       const startGrid = page.getByRole('grid', { name: startMonthName });
       // Navigate to the correct month if needed
       while (!(await startGrid.isVisible())) {
-        const currentGrids = await page.getByRole('grid').allInnerTexts();
+        const currentGrids = await page.getByRole('grid').allTextContents();
         await page
           .getByRole('button', { name: 'Go to the Previous Month' })
           .click();
@@ -470,7 +470,7 @@ test.describe('Journal List Page', () => {
       const endMonthName = `${monthNames[rangeEnd.getUTCMonth()]} ${rangeEnd.getUTCFullYear()}`;
       const endGrid = page.getByRole('grid', { name: endMonthName });
       while (!(await endGrid.isVisible())) {
-        const currentGrids = await page.getByRole('grid').allInnerTexts();
+        const currentGrids = await page.getByRole('grid').allTextContents();
         await page
           .getByRole('button', { name: 'Go to the Next Month' })
           .click();
@@ -922,7 +922,7 @@ test.describe('Journal List Page', () => {
         name: rangeStartMonthName,
       });
       while (!(await rangeStartGrid.isVisible())) {
-        const currentGrids = await page.getByRole('grid').allInnerTexts();
+        const currentGrids = await page.getByRole('grid').allTextContents();
         await page
           .getByRole('button', { name: 'Go to the Previous Month' })
           .click();
@@ -950,7 +950,7 @@ test.describe('Journal List Page', () => {
         name: rangeEndMonthName,
       });
       while (!(await rangeEndGrid.isVisible())) {
-        const currentGrids = await page.getByRole('grid').allInnerTexts();
+        const currentGrids = await page.getByRole('grid').allTextContents();
         await page
           .getByRole('button', { name: 'Go to the Next Month' })
           .click();
@@ -1528,7 +1528,7 @@ test.describe('Journal List Page', () => {
       const targetGrid = page.getByRole('grid', { name: targetMonthName });
 
       while (!(await targetGrid.isVisible())) {
-        const currentGrids = await page.getByRole('grid').allInnerTexts();
+        const currentGrids = await page.getByRole('grid').allTextContents();
         await page.getByRole('button', { name: /next month/i }).click();
         await expect(page.getByRole('grid')).not.toHaveText(currentGrids, {
           timeout: 5000,
