@@ -40,6 +40,15 @@ _MAINTENANCE_TYPE_MAP: dict[str, str] = {
 
 _DEFAULT_MAINTENANCE_TYPE = "routine maintenance"
 
+# Reverse mapping from app maintenance types to Snipe-IT maintenance type strings
+_REVERSE_MAINTENANCE_TYPE_MAP: dict[str, str] = {
+    "routine maintenance": "Maintenance",
+    "repairing gear": "Repair",
+    "routine inspection": "PAT Test",
+}
+
+_DEFAULT_SNIPEIT_MAINTENANCE_TYPE = "Maintenance"
+
 
 @dataclass(frozen=True)
 class MaintenanceTransformResult:
@@ -136,6 +145,48 @@ class SnipeItMaintenanceTransformer:
             version_hash=version_hash,
         )
 
+    @staticmethod
+    def reverse_transform(
+        *,
+        title: str,
+        content: str,
+        maintenance_type: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict[str, Any]:
+        """Transform app journal/maintenance data into a Snipe-IT API payload.
+
+        This is the inverse of ``transform()``: converts local journal fields
+        back into a dict suitable for ``POST /maintenances`` or
+        ``PATCH /maintenances/{id}``.
+
+        Args:
+            title: Journal title.
+            content: Journal content (becomes ``notes``).
+            maintenance_type: App maintenance type string
+                (e.g. ``routine maintenance``).
+            start_date: Optional ISO date string ``YYYY-MM-DD``.
+            end_date: Optional ISO date string ``YYYY-MM-DD``
+                (becomes ``completion_date``).
+
+        Returns:
+            Dict of Snipe-IT API fields ready to be sent as JSON.
+        """
+        snipeit_type = _reverse_map_maintenance_type(maintenance_type)
+
+        payload: dict[str, Any] = {
+            "title": title,
+            "notes": content,
+            "asset_maintenance_type": snipeit_type,
+        }
+
+        if start_date:
+            payload["start_date"] = start_date
+        if end_date:
+            payload["completion_date"] = end_date
+
+        return payload
+
 
 def _map_maintenance_type(snipeit_type: str | None) -> str:
     """Map a Snipe-IT maintenance type string to app VALID_MAINTENANCE_TYPES.
@@ -157,6 +208,22 @@ def _map_maintenance_type(snipeit_type: str | None) -> str:
             default=_DEFAULT_MAINTENANCE_TYPE,
         )
         return _DEFAULT_MAINTENANCE_TYPE
+    return mapped
+
+
+def _reverse_map_maintenance_type(app_type: str) -> str:
+    """Map an app maintenance type string back to a Snipe-IT type.
+
+    Returns the default Snipe-IT type for unknown inputs with a warning log.
+    """
+    mapped = _REVERSE_MAINTENANCE_TYPE_MAP.get(app_type)
+    if mapped is None:
+        logger.warning(
+            "Unknown app maintenance type for reverse mapping, defaulting",
+            app_type=app_type,
+            default=_DEFAULT_SNIPEIT_MAINTENANCE_TYPE,
+        )
+        return _DEFAULT_SNIPEIT_MAINTENANCE_TYPE
     return mapped
 
 

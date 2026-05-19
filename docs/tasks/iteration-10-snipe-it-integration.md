@@ -158,8 +158,8 @@ Consume the local event and push it to the remote API.
 - [Outdoor Logbook: GEAR_MAINTENANCE](../product-specifications/outdoor-logbook-product-specification.md#gear_maintenance)
 
 **Acceptance Criteria (task-level):**
-- [ ] Snipe-IT maintenance records populate as `GEAR_MAINTENANCE` journals.
-- [ ] Local `GEAR_MAINTENANCE` creations push to Snipe-IT.
+- [x] Snipe-IT maintenance records populate as `GEAR_MAINTENANCE` journals.
+- [x] Local `GEAR_MAINTENANCE` creations push to Snipe-IT.
 
 #### Phase 1: Snipe-IT to App Sync (Inbound) ✅ COMPLETE
 **PR Size:** ~8-10 files
@@ -172,14 +172,14 @@ Pull remote maintenance and map to journals.
 **Required Test Coverage:**
 - **Integration:** Simulated worker event successfully creates a `GEAR_MAINTENANCE` journal in the database. ✅
 
-#### Phase 2: App to Snipe-IT Sync (Outbound)
+#### Phase 2: App to Snipe-IT Sync (Outbound) ✅ COMPLETE
 **PR Size:** ~6-8 files
 Push local maintenance to the remote API.
 **Acceptance Criteria:**
-- [ ] Worker listens for `JournalCreated` and `JournalUpdated` where type is `GEAR_MAINTENANCE`.
-- [ ] Worker pushes a new or updated maintenance record to Snipe-IT.
+- [x] Worker listens for `JournalCreated` and `JournalUpdated` where type is `GEAR_MAINTENANCE`.
+- [x] Worker pushes a new or updated maintenance record to Snipe-IT.
 **Required Test Coverage:**
-- **Integration:** Local journal creation results in an API mock call to create the maintenance record in Snipe-IT.
+- **Integration:** Local journal creation results in an API mock call to create the maintenance record in Snipe-IT. ✅
 
 ### ITER10-005: Gear Usage Journal Type and Checkouts
 **Objective:** Introduce the `GEAR_USAGE` journal type to record gear being used, syncing outbound to Snipe-IT as an asset checkout.

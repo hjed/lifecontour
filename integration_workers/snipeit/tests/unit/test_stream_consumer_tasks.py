@@ -239,3 +239,158 @@ async def test_handle_event_processes_maintenance_webhook(
             session_factory=mock_session_factory,
         )
         mock_sync_service._api_client.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_handle_event_processes_journal_created_gear_maintenance(
+    mock_stream_client: AsyncMock,
+    mock_session_factory: MagicMock,
+) -> None:
+    """JournalCreated event for GEAR_MAINTENANCE triggers push_maintenance_create."""
+    consumer = SnipeItWorkerStreamConsumer(
+        stream_client=mock_stream_client,
+        session_factory=mock_session_factory,
+    )
+    event = StreamEvent(
+        message_id="123",
+        event_id="abc",
+        event_type="JournalCreated",
+        aggregate_id=100,
+        event_data={
+            "journal_id": 100,
+            "user_id": "user1",
+            "title": "Rope Inspection",
+        },
+        occurred_at="2024-01-01T00:00:00Z",
+    )
+
+    # Mock DB: user has Snipe-IT settings, journal has GEAR_MAINTENANCE type
+    mock_session = AsyncMock()
+    mock_session_factory.return_value.__aenter__.return_value = mock_session
+
+    # First query: snipeit_settings (user lookup)
+    settings_result = MagicMock()
+    settings_result.fetchone.return_value = MagicMock(
+        user_id="user1", base_url="http://snipeit", snipeit_user_id="s1"
+    )
+    # Second query: journal_gear_maintenance_data check
+    maintenance_check = MagicMock()
+    maintenance_check.fetchone.return_value = MagicMock(journal_id=100)
+
+    mock_session.execute = AsyncMock(side_effect=[settings_result, maintenance_check])
+
+    mock_sync_service = AsyncMock()
+    mock_sync_service.push_maintenance_create = AsyncMock()
+    mock_sync_service._api_client = AsyncMock()
+
+    with (
+        patch("worker._get_auth_data", return_value={"mock": "auth"}),
+        patch("worker._create_sync_service", return_value=mock_sync_service),
+    ):
+        await consumer._handle_event(event)
+
+        mock_sync_service.push_maintenance_create.assert_called_once_with(
+            journal_id=100,
+            session_factory=mock_session_factory,
+        )
+        mock_sync_service._api_client.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_handle_event_skips_journal_created_non_maintenance(
+    mock_stream_client: AsyncMock,
+    mock_session_factory: MagicMock,
+) -> None:
+    """JournalCreated event for non-GEAR_MAINTENANCE journal is skipped."""
+    consumer = SnipeItWorkerStreamConsumer(
+        stream_client=mock_stream_client,
+        session_factory=mock_session_factory,
+    )
+    event = StreamEvent(
+        message_id="123",
+        event_id="abc",
+        event_type="JournalCreated",
+        aggregate_id=100,
+        event_data={
+            "journal_id": 100,
+            "user_id": "user1",
+            "title": "Regular Note",
+        },
+        occurred_at="2024-01-01T00:00:00Z",
+    )
+
+    # Mock DB: user has Snipe-IT settings, but journal has no GEAR_MAINTENANCE data
+    mock_session = AsyncMock()
+    mock_session_factory.return_value.__aenter__.return_value = mock_session
+
+    settings_result = MagicMock()
+    settings_result.fetchone.return_value = MagicMock(
+        user_id="user1", base_url="http://snipeit", snipeit_user_id="s1"
+    )
+    maintenance_check = MagicMock()
+    maintenance_check.fetchone.return_value = None  # No maintenance data
+
+    mock_session.execute = AsyncMock(side_effect=[settings_result, maintenance_check])
+
+    mock_sync_service = AsyncMock()
+    mock_sync_service._api_client = AsyncMock()
+
+    with (
+        patch("worker._get_auth_data", return_value={"mock": "auth"}),
+        patch("worker._create_sync_service", return_value=mock_sync_service),
+    ):
+        await consumer._handle_event(event)
+
+        mock_sync_service.push_maintenance_create.assert_not_called()
+        mock_sync_service._api_client.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_handle_event_processes_journal_updated_gear_maintenance(
+    mock_stream_client: AsyncMock,
+    mock_session_factory: MagicMock,
+) -> None:
+    """JournalUpdated event for GEAR_MAINTENANCE triggers push_maintenance_update."""
+    consumer = SnipeItWorkerStreamConsumer(
+        stream_client=mock_stream_client,
+        session_factory=mock_session_factory,
+    )
+    event = StreamEvent(
+        message_id="123",
+        event_id="abc",
+        event_type="JournalUpdated",
+        aggregate_id=100,
+        event_data={
+            "journal_id": 100,
+            "changed_fields": {"title": ["Old", "New"]},
+        },
+        occurred_at="2024-01-01T00:00:00Z",
+    )
+
+    mock_session = AsyncMock()
+    mock_session_factory.return_value.__aenter__.return_value = mock_session
+
+    settings_result = MagicMock()
+    settings_result.fetchone.return_value = MagicMock(
+        user_id="user1", base_url="http://snipeit", snipeit_user_id="s1"
+    )
+    maintenance_check = MagicMock()
+    maintenance_check.fetchone.return_value = MagicMock(journal_id=100)
+
+    mock_session.execute = AsyncMock(side_effect=[settings_result, maintenance_check])
+
+    mock_sync_service = AsyncMock()
+    mock_sync_service.push_maintenance_update = AsyncMock()
+    mock_sync_service._api_client = AsyncMock()
+
+    with (
+        patch("worker._get_auth_data", return_value={"mock": "auth"}),
+        patch("worker._create_sync_service", return_value=mock_sync_service),
+    ):
+        await consumer._handle_event(event)
+
+        mock_sync_service.push_maintenance_update.assert_called_once_with(
+            journal_id=100,
+            session_factory=mock_session_factory,
+        )
+        mock_sync_service._api_client.close.assert_called_once()

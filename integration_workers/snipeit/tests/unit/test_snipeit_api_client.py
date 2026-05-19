@@ -452,3 +452,168 @@ class TestSnipeItAPIClientGetMaintenance:
 
         path = mock_get.call_args.args[0]
         assert path == "maintenances/101"
+
+
+class TestSnipeItAPIClientCreateMaintenance:
+    """Tests for create_maintenance method."""
+
+    @pytest.mark.asyncio
+    async def test_successful_create(self, client_no_refresh: SnipeItAPIClient) -> None:
+        """Successful POST returns parsed maintenance from payload key."""
+        post_response = {
+            "status": "success",
+            "messages": "Asset Maintenance created successfully.",
+            "payload": _maintenance_json(201, 42, "New Inspection"),
+        }
+        resp = _ok_response(post_response)
+        with patch.object(client_no_refresh._client, "post", return_value=resp):
+            result = await client_no_refresh.create_maintenance(
+                asset_id=42,
+                payload={
+                    "title": "New Inspection",
+                    "asset_maintenance_type": "Maintenance",
+                },
+            )
+
+        assert isinstance(result, SnipeItMaintenance)
+        assert result.id == 201
+        assert result.title == "New Inspection"
+
+    @pytest.mark.asyncio
+    async def test_validation_error_raises(
+        self, client_no_refresh: SnipeItAPIClient
+    ) -> None:
+        """POST returning status=error raises SnipeItAPIError."""
+        error_response = {
+            "status": "error",
+            "messages": {"asset_id": ["The asset id field is required."]},
+        }
+        resp = _ok_response(error_response)
+        with patch.object(client_no_refresh._client, "post", return_value=resp):
+            with pytest.raises(SnipeItAPIError, match="failed"):
+                await client_no_refresh.create_maintenance(
+                    asset_id=42, payload={"title": "Test"}
+                )
+
+    @pytest.mark.asyncio
+    async def test_missing_payload_raises(
+        self, client_no_refresh: SnipeItAPIClient
+    ) -> None:
+        """POST returning success but no payload raises SnipeItAPIError."""
+        bad_response = {"status": "success", "messages": "OK"}
+        resp = _ok_response(bad_response)
+        with patch.object(client_no_refresh._client, "post", return_value=resp):
+            with pytest.raises(SnipeItAPIError, match="payload is missing"):
+                await client_no_refresh.create_maintenance(
+                    asset_id=42, payload={"title": "Test"}
+                )
+
+    @pytest.mark.asyncio
+    async def test_create_maintenance_path(
+        self, client_no_refresh: SnipeItAPIClient
+    ) -> None:
+        """create_maintenance POSTs to the correct relative path."""
+        post_response = {
+            "status": "success",
+            "messages": "OK",
+            "payload": _maintenance_json(201, 42, "Test"),
+        }
+        resp = _ok_response(post_response)
+        with patch.object(
+            client_no_refresh._client, "post", return_value=resp
+        ) as mock_post:
+            await client_no_refresh.create_maintenance(
+                asset_id=42, payload={"title": "Test"}
+            )
+
+        path = mock_post.call_args.args[0]
+        assert path == "maintenances"
+
+    @pytest.mark.asyncio
+    async def test_create_maintenance_includes_asset_id_in_payload(
+        self, client_no_refresh: SnipeItAPIClient
+    ) -> None:
+        """create_maintenance injects asset_id into the JSON payload."""
+        post_response = {
+            "status": "success",
+            "messages": "OK",
+            "payload": _maintenance_json(201, 42, "Test"),
+        }
+        resp = _ok_response(post_response)
+        with patch.object(
+            client_no_refresh._client, "post", return_value=resp
+        ) as mock_post:
+            await client_no_refresh.create_maintenance(
+                asset_id=42, payload={"title": "Test"}
+            )
+
+        call_kwargs = mock_post.call_args.kwargs
+        json_body = call_kwargs.get("json", {})
+        assert json_body["asset_id"] == 42
+        assert json_body["title"] == "Test"
+
+
+class TestSnipeItAPIClientUpdateMaintenance:
+    """Tests for update_maintenance method."""
+
+    @pytest.mark.asyncio
+    async def test_successful_patch(self, client_no_refresh: SnipeItAPIClient) -> None:
+        """Successful PATCH returns parsed maintenance from payload key."""
+        patch_response = {
+            "status": "success",
+            "messages": "Asset Maintenance updated successfully.",
+            "payload": _maintenance_json(101, 42, "Updated Inspection"),
+        }
+        resp = _ok_response(patch_response)
+        with patch.object(client_no_refresh._client, "patch", return_value=resp):
+            result = await client_no_refresh.update_maintenance(
+                101, {"title": "Updated Inspection"}
+            )
+
+        assert isinstance(result, SnipeItMaintenance)
+        assert result.id == 101
+        assert result.title == "Updated Inspection"
+
+    @pytest.mark.asyncio
+    async def test_validation_error_raises(
+        self, client_no_refresh: SnipeItAPIClient
+    ) -> None:
+        """PATCH returning status=error raises SnipeItAPIError."""
+        error_response = {
+            "status": "error",
+            "messages": {"title": ["The title field is required."]},
+        }
+        resp = _ok_response(error_response)
+        with patch.object(client_no_refresh._client, "patch", return_value=resp):
+            with pytest.raises(SnipeItAPIError, match="failed"):
+                await client_no_refresh.update_maintenance(101, {"title": ""})
+
+    @pytest.mark.asyncio
+    async def test_missing_payload_raises(
+        self, client_no_refresh: SnipeItAPIClient
+    ) -> None:
+        """PATCH returning success but no payload raises SnipeItAPIError."""
+        bad_response = {"status": "success", "messages": "OK"}
+        resp = _ok_response(bad_response)
+        with patch.object(client_no_refresh._client, "patch", return_value=resp):
+            with pytest.raises(SnipeItAPIError, match="payload is missing"):
+                await client_no_refresh.update_maintenance(101, {"title": "Test"})
+
+    @pytest.mark.asyncio
+    async def test_update_maintenance_path(
+        self, client_no_refresh: SnipeItAPIClient
+    ) -> None:
+        """update_maintenance uses correct relative path."""
+        patch_response = {
+            "status": "success",
+            "messages": "OK",
+            "payload": _maintenance_json(101, 42, "Test"),
+        }
+        resp = _ok_response(patch_response)
+        with patch.object(
+            client_no_refresh._client, "patch", return_value=resp
+        ) as mock_patch:
+            await client_no_refresh.update_maintenance(101, {"title": "Test"})
+
+        path = mock_patch.call_args.args[0]
+        assert path == "maintenances/101"

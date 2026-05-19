@@ -211,3 +211,80 @@ class TestMaintenanceVersionHash:
             m2, user_id="u1", gear_item_id="00000000-0000-0000-0000-000000000001"
         )
         assert r1.version_hash != r2.version_hash
+
+
+class TestReverseMaintenanceTypeMapping:
+    """Tests for app → Snipe-IT maintenance type mapping."""
+
+    @pytest.mark.parametrize(
+        ("app_type", "expected_snipeit_type"),
+        [
+            ("routine maintenance", "Maintenance"),
+            ("repairing gear", "Repair"),
+            ("routine inspection", "PAT Test"),
+        ],
+    )
+    def test_reverse_known_type_mapping(
+        self, app_type: str, expected_snipeit_type: str
+    ) -> None:
+        """Known app maintenance types map back to Snipe-IT types."""
+        result = SnipeItMaintenanceTransformer.reverse_transform(
+            title="Test Maintenance",
+            content="Some notes",
+            maintenance_type=app_type,
+            start_date="2024-06-01",
+            end_date="2024-06-02",
+        )
+        assert result["asset_maintenance_type"] == expected_snipeit_type
+
+    def test_reverse_unknown_type_defaults(self) -> None:
+        """Unknown app types default to 'Maintenance' in Snipe-IT."""
+        result = SnipeItMaintenanceTransformer.reverse_transform(
+            title="Test",
+            content="",
+            maintenance_type="some unknown type",
+        )
+        assert result["asset_maintenance_type"] == "Maintenance"
+
+
+class TestReverseTransformPayload:
+    """Tests for reverse transform payload structure."""
+
+    def test_full_payload(self) -> None:
+        """Full reverse transform includes title, notes, dates, and type."""
+        result = SnipeItMaintenanceTransformer.reverse_transform(
+            title="Rope Inspection",
+            content="Checked all points",
+            maintenance_type="routine inspection",
+            start_date="2024-06-01",
+            end_date="2024-06-02",
+        )
+        assert result["title"] == "Rope Inspection"
+        assert result["notes"] == "Checked all points"
+        assert result["start_date"] == "2024-06-01"
+        assert result["completion_date"] == "2024-06-02"
+        assert result["asset_maintenance_type"] == "PAT Test"
+
+    def test_minimal_payload(self) -> None:
+        """Minimal reverse transform with only title and type."""
+        result = SnipeItMaintenanceTransformer.reverse_transform(
+            title="Quick Check",
+            content="",
+            maintenance_type="routine maintenance",
+        )
+        assert result["title"] == "Quick Check"
+        assert result["notes"] == ""
+        assert result["asset_maintenance_type"] == "Maintenance"
+        assert "start_date" not in result
+        assert "completion_date" not in result
+
+    def test_start_date_only(self) -> None:
+        """Payload with start_date but no end_date."""
+        result = SnipeItMaintenanceTransformer.reverse_transform(
+            title="Test",
+            content="",
+            maintenance_type="routine maintenance",
+            start_date="2024-06-01",
+        )
+        assert result["start_date"] == "2024-06-01"
+        assert "completion_date" not in result
