@@ -171,8 +171,8 @@ test.describe('Login Page - Unauthenticated Users', () => {
       ).toBeVisible();
 
       // Mock network failure for login endpoint
-      await unauthenticatedPage.route('**/api/auth/login', route => {
-        route.fulfill({
+      await unauthenticatedPage.route('**/api/auth/login', async route => {
+        await route.fulfill({
           status: 500,
           contentType: 'application/json',
           body: JSON.stringify({
@@ -309,8 +309,8 @@ test.describe('Login Page - Unauthenticated Users', () => {
 
       // Prevent the actual navigation to avoid 'Target page, context or browser has been closed'
       // errors when Playwright tears down the context while it's navigating
-      await unauthenticatedPage.route('**/api/auth/login*', route => {
-        route.fulfill({
+      await unauthenticatedPage.route('**/api/auth/login*', async route => {
+        await route.fulfill({
           status: 200,
           contentType: 'application/json',
           body: JSON.stringify({ url: '/mock-redirect' }),

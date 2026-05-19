@@ -44,6 +44,17 @@ const eslintConfig = [
       '@typescript-eslint/no-explicit-any': 'error',
     },
   },
+  {
+    files: ['tests/e2e/**/*.ts', 'tests/e2e/**/*.tsx'],
+    languageOptions: {
+      parserOptions: {
+        project: './tsconfig.json',
+      },
+    },
+    rules: {
+      '@typescript-eslint/no-floating-promises': 'error',
+    },
+  },
 ];
 
 export default eslintConfig;

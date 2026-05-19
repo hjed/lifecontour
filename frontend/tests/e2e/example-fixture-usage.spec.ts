@@ -273,9 +273,9 @@ test.describe('Example: Fixture-Based Testing', () => {
       authenticatedPage,
     }) => {
       // Set up route interception before navigation
-      await authenticatedPage.route('**/api/contacts**', route => {
+      await authenticatedPage.route('**/api/contacts**', async route => {
         console.log('Intercepting API call:', route.request().url());
-        route.abort('failed');
+        await route.abort('failed');
       });
 
       // Navigate to contacts page (this should trigger the API call)
