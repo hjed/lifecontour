@@ -7,7 +7,7 @@ A personal relationship management and journaling system with AI integration thr
 
 ### Prerequisites
 
-- Python 3.11+ with [UV](https://github.com/astral-sh/uv) for dependency management
+- Python 3.14+ with [UV](https://github.com/astral-sh/uv) for dependency management
 - Node.js 22.13+ with [pnpm](https://pnpm.io/) 11+ for frontend dependencies (use `nvm use` to activate — see `.nvmrc`)
 - Docker and Docker Compose
 - PostgreSQL database
@@ -91,7 +91,7 @@ docker compose --profile prod --env-file .env.prod up -d
 
 ### Technology Stack
 
-- **Backend**: Python 3.11+ with FastAPI, SQLAlchemy Core, PostgreSQL
+- **Backend**: Python 3.14+ with FastAPI, SQLAlchemy Core, PostgreSQL
 - **Frontend**: Next.js 14 with TypeScript, Tailwind CSS, shadcn/ui
 - **Database**: PostgreSQL with Alembic migrations
 - **Deployment**: Docker with nginx reverse proxy

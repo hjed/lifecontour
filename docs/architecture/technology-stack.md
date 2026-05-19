@@ -5,7 +5,7 @@ This document outlines the technology choices optimized for AI assistant underst
 ## Backend Technology Stack
 
 ### Runtime and Language
-- **Runtime**: Python 3.11+
+- **Runtime**: Python 3.14+
 - **Language**: Python with type hints
 - **Dependency Management**: UV (modern, fast Python package manager)
 - **Package Configuration**: pyproject.toml with UV
@@ -209,7 +209,7 @@ For detailed testing patterns, implementation guidelines, and examples, see [Tes
 ### Technology Stack Optimized for AI Assistants
 | Component | Choice | AI Benefit |
 |-----------|--------|------------|
-| **Backend Language** | Python 3.11+ | Excellent AI assistant familiarity |
+| **Backend Language** | Python 3.14+ | Excellent AI assistant familiarity |
 | **Backend Framework** | FastAPI | Clear patterns, automatic docs |
 | **Database Queries** | SQLAlchemy Core | Explicit SQL, no ORM magic |
 | **Frontend Framework** | Next.js + TypeScript | Well-established patterns |

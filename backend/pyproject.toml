@@ -7,7 +7,7 @@ authors = [
 ]
 readme = "README.md"
 license = {text = "AGPL-3.0"}
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.136.1",
     "uvicorn[standard]>=0.46.0",
@@ -92,7 +92,7 @@ extend = "../ruff.toml"
 "scripts/**/*" = ["BLE001"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.14"
 check_untyped_defs = true
 disallow_any_generics = true
 disallow_incomplete_defs = true

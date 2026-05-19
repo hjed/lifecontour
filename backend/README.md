@@ -6,7 +6,7 @@ Python FastAPI backend for the Personal CRM & Journal System with PostgreSQL dat
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.14+
 - UV for dependency management
 - PostgreSQL database
 - Docker and Docker Compose (optional)
