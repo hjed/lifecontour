@@ -482,7 +482,7 @@ async def _authenticated_client_context(
     try:
         try:
             await app.state.dishka_container.close()
-        except RuntimeError, AttributeError:
+        except (RuntimeError, AttributeError):
             pass
 
         app.state.dishka_container = test_container

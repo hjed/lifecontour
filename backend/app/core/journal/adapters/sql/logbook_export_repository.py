@@ -411,7 +411,7 @@ class SqlLogbookExportRepository(LogbookExportRepository):
                 end_dt = parsed_end or start_dt
 
                 event_date_range = EventDateRange(start=start_dt, end=end_dt)
-            except ValueError, AttributeError, JournalValidationError:
+            except (ValueError, AttributeError, JournalValidationError):
                 # Skip journals with completely invalid date data
                 continue
 

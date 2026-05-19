@@ -874,7 +874,7 @@ class JournalOutboxEventProcessor:
                 activity_types=raw_maintenance.get("activity_types"),
                 retirement_reason=raw_maintenance.get("retirement_reason"),
             )
-        except ValueError, ValidationError:
+        except (ValueError, ValidationError):
             logger.warning(
                 "Failed to validate gear_maintenance_data, skipping",
                 journal_id=journal_id,

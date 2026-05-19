@@ -36,7 +36,7 @@ class TestMeiliSearchIntegration:
             if health.get("status") != "available":
                 pytest.skip("MeiliSearch is not available")
             return client
-        except MeilisearchError, ConnectionError, OSError:
+        except (MeilisearchError, ConnectionError, OSError):
             pytest.skip("MeiliSearch is not available")
 
     @pytest.fixture(scope="class")

@@ -10,7 +10,7 @@ license = {text = "AGPL-3.0"}
 requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.136.1",
-    "uvicorn[standard]>=0.46.0",
+    "uvicorn>=0.46.0",
     "pydantic>=2.13.4",
     "pydantic-settings>=2.14.1",
     "sqlalchemy>=2.0.0",
