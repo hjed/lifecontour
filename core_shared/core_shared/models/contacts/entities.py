@@ -269,7 +269,7 @@ class Contact:
     addresses: list[ContactAddress] | None = None
     notes: list[ContactNote] | None = None
     tags: list[Tag] | None = None
-    relationships: list["ContactRelationship"] | None = None
+    relationships: list[ContactRelationship] | None = None
     important_dates: list[ImportantDate] | None = None
     summary: ContactSummary | None = None
 
@@ -393,7 +393,7 @@ class RelationshipType(Enum):
         """Return the string value of the enum."""
         return self.value
 
-    def get_inverse_type(self) -> "RelationshipType":
+    def get_inverse_type(self) -> RelationshipType:
         """Get the inverse relationship type for bidirectional relationships."""
         inverse_map = {
             RelationshipType.PARENT: RelationshipType.CHILD,

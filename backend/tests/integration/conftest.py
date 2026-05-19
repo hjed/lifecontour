@@ -57,7 +57,7 @@ class DatabaseConfig:
     name: str
 
     @classmethod
-    def from_environment(cls) -> "DatabaseConfig":
+    def from_environment(cls) -> DatabaseConfig:
         """Create database config from environment variables with defaults."""
         return cls(
             host=os.getenv("TEST_DB_HOST", "localhost"),
@@ -406,12 +406,11 @@ async def _authenticated_client_context(
     test_user: Any,
     *,
     start_lifespan: bool = False,
-) -> AsyncGenerator[Any, None]:
+) -> AsyncGenerator[Any]:
     """Create an authenticated async client for integration tests."""
     from dishka import Provider, Scope, make_async_container, provide
     from dishka.integrations.fastapi import FastapiProvider
     from httpx import ASGITransport, AsyncClient
-    from sqlalchemy.ext.asyncio import AsyncConnection
 
     from app.infrastructure.auth.models import SessionUser
     from app.infrastructure.auth.oauth_service import OAuthService
@@ -494,7 +493,7 @@ async def _authenticated_client_context(
             setup_starlette_dishka(test_container, mcp_app)
 
         @asynccontextmanager
-        async def client_context() -> AsyncGenerator[AsyncClient, None]:
+        async def client_context() -> AsyncGenerator[AsyncClient]:
             transport = ASGITransport(app=app)
             async with AsyncClient(
                 transport=transport, base_url="http://test"
@@ -585,7 +584,7 @@ def setup_test_database():
 
 
 @pytest_asyncio.fixture(scope="function")
-async def async_engine(setup_test_database) -> AsyncGenerator[AsyncEngine, None]:
+async def async_engine(setup_test_database) -> AsyncGenerator[AsyncEngine]:
     """Create async database engine for testing."""
     engine = create_async_engine(
         get_test_database_url(),
@@ -600,7 +599,7 @@ async def async_engine(setup_test_database) -> AsyncGenerator[AsyncEngine, None]
 @pytest_asyncio.fixture(scope="function")
 async def async_connection(
     async_engine: AsyncEngine,
-) -> AsyncGenerator[AsyncConnection, None]:
+) -> AsyncGenerator[AsyncConnection]:
     """Create async database connection with transaction rollback.
 
     Database schema is expected to be prepared (migrated) before tests run.
@@ -621,7 +620,7 @@ async def async_connection(
 @pytest_asyncio.fixture
 async def clean_database(
     async_connection: AsyncConnection,
-) -> AsyncGenerator[AsyncConnection, None]:
+) -> AsyncGenerator[AsyncConnection]:
     """Provide a clean database connection for each test."""
     # Since we're using transaction rollback, each test starts with a clean state
     yield async_connection
@@ -720,7 +719,6 @@ def authenticated_app(test_settings):
 @pytest.fixture
 def mock_search_service():
     """Create a mock search service for testing."""
-    from typing import Any
     from unittest.mock import MagicMock
 
     def _create_mock_service(search_results: dict[str, Any]):
@@ -742,7 +740,7 @@ def authenticated_search_client(
     Returns a tuple of (test_client, setup_search_mock).
     The setup_search_mock can be called with search results to set up the mock.
     """
-    from typing import Any, cast
+    from typing import cast
 
     from dishka import Provider, Scope, make_async_container, provide
     from dishka.integrations.fastapi import setup_dishka
@@ -858,11 +856,11 @@ async def authenticated_client(
 @pytest_asyncio.fixture
 async def authenticated_lifespan_client(
     async_connection: AsyncConnection, test_settings, test_user
-) -> AsyncGenerator[Any, None]:
+) -> AsyncGenerator[Any]:
     """Provide an authenticated client factory that manages app lifespan."""
 
     @asynccontextmanager
-    async def factory() -> AsyncGenerator[Any, None]:
+    async def factory() -> AsyncGenerator[Any]:
         async with _authenticated_client_context(
             async_connection,
             test_settings,

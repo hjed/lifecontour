@@ -68,7 +68,7 @@ class JournalType(StrEnum):
         return self.value
 
     @classmethod
-    def requires_data_table(cls, journal_type: "JournalType") -> bool:
+    def requires_data_table(cls, journal_type: JournalType) -> bool:
         """
         Check if a journal type requires a separate data table.
 
@@ -84,7 +84,7 @@ class JournalType(StrEnum):
         return journal_type != cls.NOTE
 
     @classmethod
-    def get_dependencies(cls, journal_type: "JournalType") -> list["JournalType"]:
+    def get_dependencies(cls, journal_type: JournalType) -> list[JournalType]:
         """
         Get the list of types that must be added when this type is added.
 

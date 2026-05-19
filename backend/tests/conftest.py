@@ -30,7 +30,7 @@ engine = create_engine(SQLALCHEMY_DATABASE_URL)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-def override_get_database_session() -> Generator[Session, None, None]:
+def override_get_database_session() -> Generator[Session]:
     """Override database session for testing."""
     try:
         db = TestingSessionLocal()
@@ -40,7 +40,7 @@ def override_get_database_session() -> Generator[Session, None, None]:
 
 
 @pytest.fixture(scope="function")
-def test_db() -> Generator[None, None, None]:
+def test_db() -> Generator[None]:
     """Create test database tables."""
     # Ensure all table definitions are imported and registered
     from app.infrastructure.contacts import contact_tables  # noqa: F401
@@ -61,7 +61,7 @@ def override_get_settings() -> Settings:
 
 
 @pytest.fixture(scope="function")
-def client(test_db: Generator[None, None, None]) -> Generator[TestClient, None, None]:
+def client(test_db: Generator[None]) -> Generator[TestClient]:
     """Create test client with database override."""
     test_settings = override_get_settings()
     app = create_app(settings=test_settings)
@@ -72,7 +72,7 @@ def client(test_db: Generator[None, None, None]) -> Generator[TestClient, None, 
 
 
 @pytest.fixture(scope="function")
-def db_session(test_db: Generator[None, None, None]) -> Generator[Session, None, None]:
+def db_session(test_db: Generator[None]) -> Generator[Session]:
     """Get test database session."""
     session = TestingSessionLocal()
     try:

@@ -16,7 +16,7 @@ Usage:
 import argparse
 import asyncio
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 
 import httpx
 
@@ -221,7 +221,7 @@ async def main():
 
     print("🔧 Integration Flow Tester")
     print(f"🌐 Testing against: {args.base_url}")
-    print(f"⏰ Started at: {datetime.now().isoformat()}")
+    print(f"⏰ Started at: {datetime.now(UTC).isoformat()}")
 
     async with IntegrationFlowTester(args.base_url) as tester:
         success = await tester.run_all_tests()

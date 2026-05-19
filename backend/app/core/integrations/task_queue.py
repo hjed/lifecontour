@@ -188,7 +188,7 @@ class WorkerSettings:
     @classmethod
     def create_with_settings(
         cls, app_settings: Settings | None = None
-    ) -> "WorkerSettings":
+    ) -> WorkerSettings:
         """
         Create worker settings with Redis configuration from app settings.
 

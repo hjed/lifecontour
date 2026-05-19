@@ -440,7 +440,7 @@ class SearchResponseConverter:
     @staticmethod
     def to_global_search_response(
         search_results: dict[str, Any], additional_context: str = ""
-    ) -> "GlobalSearchResponse":
+    ) -> GlobalSearchResponse:
         """
         Convert global search results to AI-friendly GlobalSearchResponse.
 

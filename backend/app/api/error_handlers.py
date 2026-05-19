@@ -338,7 +338,7 @@ async def generic_exception_handler(request: Request, exc: Exception) -> JSONRes
     )
 
 
-def register_error_handlers(app: "FastAPI") -> None:
+def register_error_handlers(app: FastAPI) -> None:
     """Register all error handlers with the FastAPI application."""
     # Cast handlers to the expected type
     contact_handler: ExceptionHandler = contact_domain_error_handler  # type: ignore[assignment]

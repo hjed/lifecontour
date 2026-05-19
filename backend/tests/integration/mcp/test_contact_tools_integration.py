@@ -92,7 +92,7 @@ class ContactTestProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def get_contact_relationship_service(
         self, connection: AsyncConnection
-    ) -> "ContactRelationshipService":
+    ) -> ContactRelationshipService:
         from app.core.contacts.adapters.sql import (
             SqlContactEventPublisher,
             SqlContactFieldHistoryRepository,

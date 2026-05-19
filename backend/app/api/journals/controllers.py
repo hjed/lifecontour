@@ -262,7 +262,7 @@ def _parse_optional_time(value: Any, field_name: str) -> time | None:
 
 
 async def _create_type_specific_data(
-    journal_type: "JournalType",
+    journal_type: JournalType,
     journal_id: int,
     mood_data_repo: MoodDataRepository,
     plan_data_repo: PlanDataRepository,
@@ -419,7 +419,7 @@ async def _create_type_specific_data(
 
 
 async def _delete_type_specific_data(
-    journal_type: "JournalType",
+    journal_type: JournalType,
     journal_id: int,
     mood_data_repo: MoodDataRepository,
     plan_data_repo: PlanDataRepository,

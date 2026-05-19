@@ -50,14 +50,13 @@ def client(test_app):
 class TestAuthEndpoints:
     """Test authentication API endpoints."""
 
-    def _create_oauth_test_client(self, test_settings: "Settings"):
+    def _create_oauth_test_client(self, test_settings: Settings):
         """Helper to create test client with OAuth service configured."""
         from dishka import Provider, Scope, make_async_container, provide
         from dishka.integrations.fastapi import setup_dishka
 
         from app.infrastructure.auth.models import SessionUser
         from app.infrastructure.auth.oauth_service import OAuthService
-        from app.infrastructure.config import Settings
 
         class TestOAuthProvider(Provider):
             """Test provider for OAuth service."""

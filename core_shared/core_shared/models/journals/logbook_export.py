@@ -42,7 +42,7 @@ class LogbookEntryData:
     parent_id: int | None
 
     # Nested children
-    children: list["LogbookEntryData"] = field(default_factory=list)
+    children: list[LogbookEntryData] = field(default_factory=list)
 
     # Types list
     journal_types: list[str] = field(default_factory=list)
