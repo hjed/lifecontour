@@ -272,5 +272,5 @@ Confidence score (0.0-1.0):"""
                 if 0.0 <= val <= 1.0:
                     return val
             return None
-        except (ValueError, AttributeError):
+        except ValueError, AttributeError:
             return None
