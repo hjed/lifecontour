@@ -330,7 +330,7 @@ test.describe('OAuth Docker Integration', () => {
           // Test that clicking doesn't immediately fail
           // Instead of silent catch delay, we ensure network is quiet or wait for navigation conditionally
           await Promise.all([
-            page.waitForNavigation({ timeout: 5000 }).catch(() => null),
+            page.waitForURL('**/*', { timeout: 5000 }).catch(() => null),
             oauthButtons.first().click(),
           ]);
 

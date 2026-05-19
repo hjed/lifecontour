@@ -273,8 +273,7 @@ export class FormHelpers {
 
     for (const error of errorMessages) {
       await expect(error).toBeVisible();
-      const text = await error.textContent();
-      expect(text).toBeTruthy();
+      await expect(error).not.toBeEmpty();
     }
   }
 }
@@ -548,16 +547,13 @@ export class SidebarTestHelpers {
       }
 
       await expect(async () => {
-        const isVisible = await this.page
-          .locator('nav[role="navigation"]')
-          .last()
-          .isVisible();
-        expect(isVisible).toBe(true);
+        const isVisible = this.page.locator('nav[role="navigation"]').last();
+        await expect(isVisible).toBeVisible();
       }).toPass({ timeout: 5000 });
     } else {
       await expect(async () => {
-        const isVisible = await this.page.getByTestId('sidebar').isVisible();
-        expect(isVisible).toBe(true);
+        const isVisible = this.page.getByTestId('sidebar');
+        await expect(isVisible).toBeVisible();
       }).toPass({ timeout: 5000 });
     }
   }
@@ -673,8 +669,8 @@ export class SidebarTestHelpers {
     const hardcodedGroup1 = this.page.locator('text="Group 1"');
     const hardcodedGroup2 = this.page.locator('text="Group 2"');
 
-    expect(await hardcodedGroup1.count()).toBe(0);
-    expect(await hardcodedGroup2.count()).toBe(0);
+    await expect(hardcodedGroup1).toHaveCount(0);
+    await expect(hardcodedGroup2).toHaveCount(0);
   }
 
   /**
@@ -1169,9 +1165,7 @@ export class AuthHelpers {
  * Verify page loads without crashing and has meaningful content.
  */
 export async function verifyPageHasContent(page: Page): Promise<void> {
-  const bodyText = await page.textContent('body');
-  expect(bodyText).toBeTruthy();
-  expect(bodyText?.trim().length).toBeGreaterThan(0);
+  await expect(page.locator('body')).not.toBeEmpty();
 }
 
 /**

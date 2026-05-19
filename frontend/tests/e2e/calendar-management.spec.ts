@@ -30,7 +30,7 @@ test.describe('Calendar Management', () => {
     ]);
 
     // Verify dialog closed and calendar appears in the list
-    await expect(page.getByRole('dialog')).not.toBeVisible();
+    await expect(page.getByRole('dialog')).toBeHidden();
     await expect(page.getByText(calendarName)).toBeVisible();
 
     // 5. Edit the calendar
@@ -63,11 +63,9 @@ test.describe('Calendar Management', () => {
     ]);
 
     // Verify dialog closed and updated name appears
-    await expect(page.getByRole('dialog')).not.toBeVisible();
+    await expect(page.getByRole('dialog')).toBeHidden();
     await expect(page.getByText(updatedName)).toBeVisible();
-    await expect(
-      page.getByText(calendarName, { exact: true })
-    ).not.toBeVisible();
+    await expect(page.getByText(calendarName, { exact: true })).toBeHidden();
 
     // 6. Delete the calendar
     await page
@@ -91,7 +89,7 @@ test.describe('Calendar Management', () => {
     ]);
 
     // Verify it's gone
-    await expect(page.getByRole('dialog')).not.toBeVisible();
-    await expect(page.getByText(updatedName)).not.toBeVisible();
+    await expect(page.getByRole('dialog')).toBeHidden();
+    await expect(page.getByText(updatedName)).toBeHidden();
   });
 });

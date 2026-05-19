@@ -159,6 +159,6 @@ test.describe('Strava Athlete Mappings', () => {
     ).toBeVisible();
 
     // Verify mapping is removed from table
-    await expect(athleteNameCell).not.toBeVisible();
+    await expect(athleteNameCell).toBeHidden();
   });
 });

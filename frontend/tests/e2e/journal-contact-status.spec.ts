@@ -54,7 +54,7 @@ test.describe('Journal Contact Status & Role API', () => {
 
     const contacts = journalData.data.attributes.contacts;
     expect(contacts).toBeDefined();
-    expect(contacts.length).toBe(1);
+    expect(contacts).toHaveLength(1);
 
     const linkedContact = contacts[0];
     expect(linkedContact.id).toBe(String(contact.id));

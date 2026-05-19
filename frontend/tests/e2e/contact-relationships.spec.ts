@@ -124,9 +124,7 @@ test.describe('Contact Relationships', () => {
     await expect(
       page.getByText('This relationship will be between this contact and')
     ).toBeVisible();
-    await expect(
-      page.getByPlaceholder('Search for a contact...')
-    ).not.toBeVisible();
+    await expect(page.getByPlaceholder('Search for a contact...')).toBeHidden();
 
     // Select relationship type
     const formContainer = page

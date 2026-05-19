@@ -424,9 +424,7 @@ test.describe('Calendar Views', () => {
     await expect(
       page.getByRole('link', { name: /event entry/i })
     ).toBeVisible();
-    await expect(
-      page.getByRole('link', { name: /note entry/i })
-    ).not.toBeVisible();
+    await expect(page.getByRole('link', { name: /note entry/i })).toBeHidden();
   });
 
   test('should persist view mode during filter changes', async ({

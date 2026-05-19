@@ -196,9 +196,7 @@ test.describe('External Links Display', () => {
       await expect(page.getByTestId('journal-title-field')).toBeVisible();
 
       // Section should not exist when there are no links
-      await expect(
-        page.getByTestId('external-links-section')
-      ).not.toBeVisible();
+      await expect(page.getByTestId('external-links-section')).toBeHidden();
     });
   });
 
@@ -320,9 +318,7 @@ test.describe('External Links Display', () => {
       });
 
       // Section should not exist
-      await expect(
-        page.getByTestId('external-links-section')
-      ).not.toBeVisible();
+      await expect(page.getByTestId('external-links-section')).toBeHidden();
     });
   });
 });

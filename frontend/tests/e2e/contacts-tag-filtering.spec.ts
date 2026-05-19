@@ -353,7 +353,7 @@ test.describe('Tag Filtering via Main Contacts List', () => {
     expect(authenticatedPage.url()).not.toContain('tag=');
 
     // Tag badge should no longer be visible
-    await expect(tagBadge).not.toBeVisible();
+    await expect(tagBadge).toBeHidden();
 
     // Cleanup
     await authenticatedPage.request.delete(`/api/tags/${tagId}`);

@@ -216,8 +216,8 @@ test.describe('OAuth Session and State Management Errors', () => {
 
     // Verify page remains stable (either navigated or stayed on login)
     await expect(async () => {
-      const bodyText = await page.textContent('body');
-      expect(bodyText).toBeTruthy();
+      const bodyText = page;
+      await expect(bodyText).toHaveText('body');
     }).toPass({ timeout: 10000 });
   });
 

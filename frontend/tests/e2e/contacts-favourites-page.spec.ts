@@ -68,8 +68,8 @@ test.describe('Favourites Page', () => {
 
     // Should have descriptive content
     const pageContent = emptyContactsPage.locator('body');
-    const textContent = await pageContent.textContent();
-    expect(textContent).toBeTruthy();
+    const textContent = pageContent;
+    await expect(textContent).toHaveText();
     expect(textContent!.length).toBeGreaterThan(50);
   });
 
@@ -122,7 +122,7 @@ test.describe('Favourites Page', () => {
 
     // Should not show any contact cards (exclude empty state card)
     const contactCards = page.locator('[data-testid^="contact-"]');
-    expect(await contactCards.count()).toBe(0);
+    await expect(contactCards).toHaveCount(0);
   });
 
   test('should provide helpful empty state messaging', async ({
@@ -231,8 +231,8 @@ test.describe('Favourites Page', () => {
     const navCount = await navigation.count();
     if (navCount > 0) {
       const firstNav = navigation.first();
-      const ariaLabel = await firstNav.getAttribute('aria-label');
-      expect(ariaLabel).toBeTruthy();
+      const ariaLabel = firstNav;
+      await expect(ariaLabel).toHaveAttribute('aria-label');
     }
 
     // Check favourite buttons have proper labels
@@ -252,8 +252,8 @@ test.describe('Favourites Page', () => {
     expect(buttonCount).toBeGreaterThan(0);
 
     const firstButton = favouriteButtons.first();
-    const ariaLabel = await firstButton.getAttribute('aria-label');
-    expect(ariaLabel).toBeTruthy();
+    const ariaLabel = firstButton;
+    await expect(ariaLabel).toHaveAttribute('aria-label');
     expect(ariaLabel?.toLowerCase()).toContain('favourite');
   });
 });

@@ -73,7 +73,7 @@ test.describe('Contact Inline Editing', () => {
     await page.keyboard.press('Escape');
 
     const input = page.locator('[data-testid="first-name-field"] input');
-    await expect(input).not.toBeVisible();
+    await expect(input).toBeHidden();
   });
 
   test('should edit contact first name inline and save with correct API call', async ({

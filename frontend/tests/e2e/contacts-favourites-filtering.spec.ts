@@ -59,7 +59,7 @@ test.describe('Contact Favourites and Filtering', () => {
 
       // Should not show any contact cards (exclude empty state card)
       const contactCards = page.locator('[data-testid^="contact-"]');
-      expect(await contactCards.count()).toBe(0);
+      await expect(contactCards).toHaveCount(0);
     });
 
     test('should redirect to login when not authenticated', async ({
@@ -209,7 +209,7 @@ test.describe('Contact Favourites and Filtering', () => {
       const contactCards = authenticatedPage.locator(
         '[data-testid^="contact-"]'
       );
-      expect(await contactCards.count()).toBe(0);
+      await expect(contactCards).toHaveCount(0);
 
       // Clean up the tag
       await authenticatedPage.request.delete(`/api/tags/${tagId}`);

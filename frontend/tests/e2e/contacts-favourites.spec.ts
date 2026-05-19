@@ -155,7 +155,7 @@ test.describe('Contacts Page - Favourites Functionality', () => {
 
     // Should not show any contact cards
     const contactCards = emptyContactsPage.locator('[data-testid^="contact-"]');
-    expect(await contactCards.count()).toBe(0);
+    await expect(contactCards).toHaveCount(0);
   });
 
   test('should maintain responsive design with favourite toggles', async ({

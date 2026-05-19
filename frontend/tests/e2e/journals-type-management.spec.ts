@@ -106,6 +106,6 @@ test.describe('Journal Type Management', () => {
     // Verify it was removed successfully
     await expect(
       page.getByTestId(`manage-type-${JournalType.PLAN}`)
-    ).not.toBeVisible();
+    ).toBeHidden();
   });
 });

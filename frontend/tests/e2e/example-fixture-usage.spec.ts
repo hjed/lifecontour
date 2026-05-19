@@ -221,7 +221,7 @@ test.describe('Example: Fixture-Based Testing', () => {
         const otherContactCard = page.locator(
           `[data-testid="contact-${contacts[i].id}"]`
         );
-        await expect(otherContactCard).not.toBeVisible();
+        await expect(otherContactCard).toBeHidden();
       }
 
       // Clear search
@@ -263,7 +263,7 @@ test.describe('Example: Fixture-Based Testing', () => {
         const contactCard = page.locator(
           `[data-testid="contact-${contact.id}"]`
         );
-        await expect(contactCard).not.toBeVisible();
+        await expect(contactCard).toBeHidden();
       }
     });
   });
@@ -484,7 +484,7 @@ test.describe('Advanced Data Fixtures Examples', () => {
         const favouriteIcon = contactCard.locator(
           '[data-testid="favourite-icon"]'
         );
-        await expect(favouriteIcon).not.toBeVisible();
+        await expect(favouriteIcon).toBeHidden();
       }
 
       console.log(`📝 Regular only: ${contacts.length} regular contacts`);

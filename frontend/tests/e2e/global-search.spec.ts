@@ -242,9 +242,10 @@ test.describe('Global Header Search', () => {
 
     // Verify the favourite appears first by comparing DOM order
     const contactCards = page.locator('[data-testid^="search-contact-"]');
-    const firstCardTestId = await contactCards
-      .first()
-      .getAttribute('data-testid');
-    expect(firstCardTestId).toBe(`search-contact-${fav.id}`);
+    const firstCardTestId = contactCards.first();
+    await expect(firstCardTestId).toHaveAttribute(
+      'data-testid',
+      `search-contact-${fav.id}`
+    );
   });
 });

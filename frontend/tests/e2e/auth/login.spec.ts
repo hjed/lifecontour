@@ -288,8 +288,8 @@ test.describe('Login Page - Unauthenticated Users', () => {
         }
       } else {
         // If no OAuth buttons, just verify page is accessible
-        const bodyText = await unauthenticatedPage.textContent('body');
-        expect(bodyText).toBeTruthy();
+        const bodyText = unauthenticatedPage;
+        await expect(bodyText).toHaveText('body');
       }
     });
 
@@ -396,8 +396,8 @@ test.describe('Login Page - Unauthenticated Users', () => {
         }
       } else {
         // If no OAuth buttons, just verify page is usable on mobile
-        const bodyText = await unauthenticatedPage.textContent('body');
-        expect(bodyText).toBeTruthy();
+        const bodyText = unauthenticatedPage;
+        await expect(bodyText).toHaveText('body');
       }
     });
 
@@ -528,7 +528,7 @@ test.describe('Login Page - Authenticated Users', () => {
     const loginHeading = authenticatedPage.locator(
       'h1:has-text("Welcome Back")'
     );
-    await expect(loginHeading).not.toBeVisible();
+    await expect(loginHeading).toBeHidden();
   });
 
   test('should maintain authentication state when accessing login URL', async ({

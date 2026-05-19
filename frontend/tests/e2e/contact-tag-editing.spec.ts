@@ -158,6 +158,6 @@ test.describe('Contact Tag Editing', () => {
     const input = page.locator('[data-testid="first-name-field"] input');
     await expect(input).toBeVisible();
     await page.keyboard.press('Escape');
-    await expect(input).not.toBeVisible();
+    await expect(input).toBeHidden();
   });
 });
