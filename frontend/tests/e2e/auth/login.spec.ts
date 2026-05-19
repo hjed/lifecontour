@@ -288,8 +288,8 @@ test.describe('Login Page - Unauthenticated Users', () => {
         }
       } else {
         // If no OAuth buttons, just verify page is accessible
-        const bodyText = unauthenticatedPage;
-        await expect(bodyText).toHaveText('body');
+        const bodyText = unauthenticatedPage.locator('body');
+        await expect(bodyText).not.toBeEmpty();
       }
     });
 
@@ -396,8 +396,8 @@ test.describe('Login Page - Unauthenticated Users', () => {
         }
       } else {
         // If no OAuth buttons, just verify page is usable on mobile
-        const bodyText = unauthenticatedPage;
-        await expect(bodyText).toHaveText('body');
+        const bodyText = unauthenticatedPage.locator('body');
+        await expect(bodyText).not.toBeEmpty();
       }
     });
 

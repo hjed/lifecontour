@@ -68,9 +68,7 @@ test.describe('Favourites Page', () => {
 
     // Should have descriptive content
     const pageContent = emptyContactsPage.locator('body');
-    const textContent = pageContent;
-    await expect(textContent).toHaveText();
-    expect(textContent!.length).toBeGreaterThan(50);
+    await expect(pageContent).toHaveText(/.{50,}/);
   });
 
   test('should display favourite contacts when they exist', async ({
@@ -252,8 +250,6 @@ test.describe('Favourites Page', () => {
     expect(buttonCount).toBeGreaterThan(0);
 
     const firstButton = favouriteButtons.first();
-    const ariaLabel = firstButton;
-    await expect(ariaLabel).toHaveAttribute('aria-label');
-    expect(ariaLabel?.toLowerCase()).toContain('favourite');
+    await expect(firstButton).toHaveAttribute('aria-label', /favourite/i);
   });
 });

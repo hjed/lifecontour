@@ -68,8 +68,8 @@ test.describe('Contact Activity Feed', () => {
 
     // Check for empty state or "No activity" message
     // The empty state should show either "No activity" or similar message
-    const pageContent = page;
-    await expect(pageContent).toHaveText('body');
+    const pageContent = page.locator('body');
+    await expect(pageContent).not.toBeEmpty();
   });
 
   test('should display history entries after contact is updated', async ({
