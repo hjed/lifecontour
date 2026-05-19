@@ -179,7 +179,7 @@ class DockerManager:
             )
             if "Docker Compose" in result.stdout:
                 return ["docker", "compose"]
-        except (subprocess.CalledProcessError, FileNotFoundError):
+        except subprocess.CalledProcessError, FileNotFoundError:
             pass
 
         # Try docker-compose (standalone version)
@@ -192,7 +192,7 @@ class DockerManager:
             )
             if "docker-compose" in result.stdout:
                 return ["docker-compose"]
-        except (subprocess.CalledProcessError, FileNotFoundError):
+        except subprocess.CalledProcessError, FileNotFoundError:
             pass
 
         # Default to docker compose (newer version)
@@ -482,7 +482,7 @@ async def _authenticated_client_context(
     try:
         try:
             await app.state.dishka_container.close()
-        except (RuntimeError, AttributeError):
+        except RuntimeError, AttributeError:
             pass
 
         app.state.dishka_container = test_container
@@ -549,7 +549,7 @@ def _is_dev_database_available() -> bool:
         )
         conn.close()
         return True
-    except (psycopg2.Error, OSError):
+    except psycopg2.Error, OSError:
         return False
 
 

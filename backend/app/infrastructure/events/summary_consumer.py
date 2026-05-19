@@ -151,7 +151,7 @@ class SummaryConsumer(DeadLetterConsumerMixin, StreamConsumer):
 
         try:
             contact_id = int(contact_id_raw)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             logger.error(
                 "ContactSummaryRefreshRequested event has invalid contact_id",
                 event_id=event.event_id,  # type: ignore[attr-defined]

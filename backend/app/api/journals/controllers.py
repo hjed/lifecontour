@@ -2081,7 +2081,7 @@ async def _process_journal_types(
                     outdoor_training_data_repo,
                     gear_maintenance_data_repo,
                 )
-        except (ValueError, KeyError):
+        except ValueError, KeyError:
             # Invalid type, skip
             pass
 
@@ -2578,7 +2578,7 @@ async def _process_journal_contact_relationships(
                         contact_id=contact_id,
                     )
 
-        except (ValueError, KeyError, AttributeError, TypeError):
+        except ValueError, KeyError, AttributeError, TypeError:
             # Invalid contact relationship payload, skip
             pass
 

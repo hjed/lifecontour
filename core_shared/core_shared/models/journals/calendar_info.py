@@ -138,7 +138,7 @@ class CalendarInfo:
         if not isinstance(self.event_state, EventState):
             try:
                 self.event_state = EventState(self.event_state)
-            except (ValueError, KeyError, TypeError):
+            except ValueError, KeyError, TypeError:
                 raise CalendarInfoValidationError(
                     "event_state",
                     f"Invalid event state: {self.event_state}. "
@@ -157,7 +157,7 @@ class CalendarInfo:
 
             try:
                 ZoneInfo(self.timezone)
-            except (ZoneInfoNotFoundError, KeyError):
+            except ZoneInfoNotFoundError, KeyError:
                 raise CalendarInfoValidationError(
                     "timezone",
                     f"Invalid IANA timezone: {self.timezone}",
