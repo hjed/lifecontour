@@ -109,5 +109,9 @@
       "unrs-resolver"
     ]
   },
-  "packageManager": "pnpm@11.0.4"
+  "packageManager": "pnpm@11.0.4",
+  "browserslist": [
+    "last 3 versions",
+    "node 24"
+  ]
 }
