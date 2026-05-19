@@ -5,7 +5,7 @@ Handles search-related HTTP endpoints including contact search,
 global search, and search suggestions following JSON API specification.
 """
 
-from typing import Literal
+from typing import Annotated, Literal
 
 import structlog
 from dishka.integrations.fastapi import FromDishka, inject
@@ -53,20 +53,20 @@ public_router = APIRouter(prefix="/search", tags=["search"])
 router = APIRouter()
 
 
-@authenticated_router.get("/contacts", response_model=ContactSearchResponse)
+@authenticated_router.get("/contacts")
 @inject
 def search_contacts(
     request: Request,
     search_service: FromDishka[SearchService],
     user: FromDishka[SessionUser],  # Require authentication
-    q: str = Query(..., description="Search query", min_length=1, max_length=500),
-    page: int = Query(default=1, description="Page number", ge=1),
-    limit: int = Query(default=20, description="Results per page", ge=1, le=100),
-    tags: list[str] | None = Query(default=None, description="Filter by tags"),
-    favourite: bool | None = Query(
-        default=None, description="Filter by favourite status"
-    ),
-    sort: list[str] | None = Query(default=None, description="Sort criteria"),
+    q: Annotated[str, Query(description="Search query", min_length=1, max_length=500)],
+    page: Annotated[int, Query(description="Page number", ge=1)] = 1,
+    limit: Annotated[int, Query(description="Results per page", ge=1, le=100)] = 20,
+    tags: Annotated[list[str] | None, Query(description="Filter by tags")] = None,
+    favourite: Annotated[
+        bool | None, Query(description="Filter by favourite status")
+    ] = None,
+    sort: Annotated[list[str] | None, Query(description="Sort criteria")] = None,
 ) -> ContactSearchResponse:
     """
     Search contacts using MeiliSearch.
@@ -140,18 +140,18 @@ def search_contacts(
     )
 
 
-@authenticated_router.get("/global", response_model=GlobalSearchResponse)
+@authenticated_router.get("/global")
 @inject
 def global_search(
     request: Request,
     search_service: FromDishka[SearchService],
     user: FromDishka[SessionUser],  # Require authentication
-    q: str = Query(..., description="Search query", min_length=1, max_length=500),
-    page: int = Query(default=1, description="Page number", ge=1),
-    limit: int = Query(default=20, description="Results per page", ge=1, le=100),
-    entity_types: list[str] | None = Query(
-        default=None, description="Entity types to search"
-    ),
+    q: Annotated[str, Query(description="Search query", min_length=1, max_length=500)],
+    page: Annotated[int, Query(description="Page number", ge=1)] = 1,
+    limit: Annotated[int, Query(description="Results per page", ge=1, le=100)] = 20,
+    entity_types: Annotated[
+        list[str] | None, Query(description="Entity types to search")
+    ] = None,
 ) -> GlobalSearchResponse:
     """
     Perform global search across all entity types.
@@ -252,14 +252,14 @@ def global_search(
     )
 
 
-@authenticated_router.get("/suggestions", response_model=SearchSuggestionsResponse)
+@authenticated_router.get("/suggestions")
 @inject
 def get_search_suggestions(
     search_service: FromDishka[SearchService],
     user: FromDishka[SessionUser],  # Require authentication
-    q: str = Query(..., description="Partial query", min_length=1, max_length=100),
-    entity_type: str = Query(default="contacts", description="Entity type"),
-    limit: int = Query(default=5, description="Max suggestions", ge=1, le=20),
+    q: Annotated[str, Query(description="Partial query", min_length=1, max_length=100)],
+    entity_type: Annotated[str, Query(description="Entity type")] = "contacts",
+    limit: Annotated[int, Query(description="Max suggestions", ge=1, le=20)] = 5,
 ) -> SearchSuggestionsResponse:
     """
     Get search suggestions for autocomplete.
@@ -277,7 +277,7 @@ def get_search_suggestions(
         )
         # For suggestions, we gracefully degrade instead of raising exceptions
         return SearchSuggestionsResponse(suggestions=[], query=q)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(
             "Unexpected error getting search suggestions", error=str(e), query=q
         )
@@ -285,16 +285,18 @@ def get_search_suggestions(
         return SearchSuggestionsResponse(suggestions=[], query=q)
 
 
-@authenticated_router.post("/reindex", response_model=ReindexResponse)
+@authenticated_router.post("/reindex")
 @inject
 async def reindex_search(
     reindex_service: FromDishka[ReindexService],
     settings: FromDishka[Settings],
     user: FromDishka[SessionUser],
-    entity_type: Literal["contacts", "journals"] | None = Query(
-        default=None,
-        description="Entity type to re-index: 'contacts', 'journals', or omit for all",
-    ),
+    entity_type: Annotated[
+        Literal["contacts", "journals"] | None,
+        Query(
+            description="Entity type to re-index: 'contacts', 'journals', or omit for all"
+        ),
+    ] = None,
 ) -> ReindexResponse:
     """
     Trigger a bulk re-index of search data from the database.
@@ -342,7 +344,7 @@ async def reindex_search(
         raise SearchServiceUnavailableError("MeiliSearch", str(e)) from e
 
 
-@public_router.get("/health", response_model=SearchHealthResponse)
+@public_router.get("/health")
 @inject
 def get_search_health(
     search_service: FromDishka[SearchService],
@@ -369,7 +371,7 @@ def get_search_health(
             indices=[],
             error=f"MeiliSearch connection failed: {str(e)}",
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error("Unexpected error checking search health", error=str(e))
         # For health checks, we return error status instead of raising exceptions
         return SearchHealthResponse(

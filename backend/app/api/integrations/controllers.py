@@ -10,7 +10,7 @@ This module provides REST API endpoints for:
 
 import urllib.parse
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Annotated, Any, cast
 
 import aiohttp
 import structlog
@@ -248,16 +248,18 @@ async def list_sync_jobs(
     integration_id: str,
     user: FromDishka[SessionUser],
     task_queue_service: FromDishka[TaskQueueService],
-    status: str | None = Query(None, description="Filter by status"),
-    sync_type: str | None = Query(None, description="Filter by sync type"),
-    date_from: str | None = Query(
-        None, description="Filter by created_at >= date_from (ISO format)"
-    ),
-    date_to: str | None = Query(
-        None, description="Filter by created_at <= date_to (ISO format)"
-    ),
-    limit: int = Query(20, ge=1, le=100, description="Maximum number of results"),
-    offset: int = Query(0, ge=0, description="Number of results to skip"),
+    status: Annotated[str | None, Query(description="Filter by status")] = None,
+    sync_type: Annotated[str | None, Query(description="Filter by sync type")] = None,
+    date_from: Annotated[
+        str | None, Query(description="Filter by created_at >= date_from (ISO format)")
+    ] = None,
+    date_to: Annotated[
+        str | None, Query(description="Filter by created_at <= date_to (ISO format)")
+    ] = None,
+    limit: Annotated[
+        int, Query(ge=1, le=100, description="Maximum number of results")
+    ] = 20,
+    offset: Annotated[int, Query(ge=0, description="Number of results to skip")] = 0,
 ) -> SyncJobListResponse:
     """
     List sync job history for the authenticated user and specified integration.
@@ -826,7 +828,7 @@ async def google_oauth_callback(
                 user_id=user.id,
                 google_email=google_email,
             )
-        except Exception as sync_err:
+        except Exception as sync_err:  # noqa: BLE001
             # Don't fail the OAuth callback if sync enqueueing fails
             logger.warning(
                 "Failed to auto-trigger sync after OAuth relink",
@@ -945,7 +947,6 @@ GOOGLE_CALENDAR_LIST_URL = (
 
 @router.get(
     "/google/calendars",
-    response_model=GoogleCalendarListResponse,
     responses={
         401: {"description": "Not authenticated or Google not connected"},
         502: {"description": "Google Calendar API error"},

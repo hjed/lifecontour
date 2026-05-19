@@ -382,7 +382,7 @@ class SqlLogbookExportRepository(LogbookExportRepository):
                 kwargs.update(extra)
                 try:
                     return domain_cls(**kwargs)
-                except Exception:
+                except Exception:  # noqa: BLE001
                     # In logbook export we skip invalid data rather than crashing the whole export
                     return None
 

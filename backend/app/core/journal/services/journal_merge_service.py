@@ -246,7 +246,9 @@ class JournalMergeService:
                     target.title = default_survivor.title
                     changed_fields["title"] = default_survivor.title
                 logger.debug(
-                    f"Merge title conflict resolved by keeping '{target.title}' vs '{default_loser.title}'"
+                    "Merge title conflict resolved",
+                    kept=target.title,
+                    discarded=default_loser.title,
                 )
             elif source.title and not target.title:
                 target.title = source.title
@@ -296,7 +298,9 @@ class JournalMergeService:
                         "end": target.event_date_range.end.isoformat(),
                     }
                 logger.debug(
-                    f"Merge date conflict resolved by keeping '{target.event_date_range}' vs '{default_loser.event_date_range}'"
+                    "Merge date conflict resolved",
+                    kept=str(target.event_date_range),
+                    discarded=str(default_loser.event_date_range),
                 )
             elif source.event_date_range and not target.event_date_range:
                 target.event_date_range = source.event_date_range

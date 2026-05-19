@@ -31,7 +31,7 @@ def run_migrations() -> None:
         command.upgrade(alembic_cfg, "head")
         print("Migrations completed successfully")
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"Error running migrations: {e}")
         sys.exit(1)
 

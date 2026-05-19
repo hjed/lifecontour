@@ -120,28 +120,37 @@ class MCPLogger:
     @staticmethod
     def log_operation_start(operation: str, **kwargs: Any) -> None:
         """Log the start of an MCP operation."""
-        logger.info(f"MCP: {operation}", **kwargs)
+        logger.info("MCP: Operation started", operation=operation, **kwargs)
 
     @staticmethod
     def log_operation_success(operation: str, **kwargs: Any) -> None:
         """Log successful completion of an MCP operation."""
-        logger.info(f"MCP: {operation} completed successfully", **kwargs)
+        logger.info("MCP: Operation completed", operation=operation, **kwargs)
 
     @staticmethod
     def log_operation_error(operation: str, error: str, **kwargs: Any) -> None:
         """Log an error during an MCP operation."""
-        logger.error(f"MCP: Error in {operation}", error=error, exc_info=True, **kwargs)
+        logger.error(
+            "MCP: Operation error",
+            operation=operation,
+            error=error,
+            exc_info=True,
+            **kwargs,
+        )
 
     @staticmethod
     def log_validation_error(operation: str, error: str, **kwargs: Any) -> None:
         """Log a validation error during an MCP operation."""
-        logger.warning(f"MCP: Validation error in {operation}", error=error, **kwargs)
+        logger.warning(
+            "MCP: Validation error", operation=operation, error=error, **kwargs
+        )
 
     @staticmethod
     def log_not_found_error(operation: str, entity_type: str, entity_id: Any) -> None:
         """Log a not found error during an MCP operation."""
         logger.warning(
-            f"MCP: {entity_type} not found in {operation}",
+            "MCP: Entity not found",
+            operation=operation,
             entity_type=entity_type,
             entity_id=entity_id,
         )

@@ -82,7 +82,7 @@ async def shutdown(ctx: dict) -> None:  # type: ignore[type-arg]
             await consumer_task
         except asyncio.CancelledError:
             pass
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("Stream consumer task failed with an exception", error=str(e))
 
 

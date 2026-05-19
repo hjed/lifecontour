@@ -4,6 +4,8 @@ Authentication API controllers.
 Handles OAuth authentication endpoints including authorization, callback, and logout.
 """
 
+from typing import Annotated
+
 import structlog
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, Query, Request, status
@@ -29,7 +31,7 @@ logger = structlog.get_logger()
 router = APIRouter()
 
 
-@router.get("/providers", response_model=AuthProvidersResponse)
+@router.get("/providers")
 @inject
 async def get_auth_providers(
     oauth_service: FromDishka[OAuthService],
@@ -76,7 +78,7 @@ async def get_auth_providers(
     return AuthProvidersResponse(providers=providers)
 
 
-@router.post("/login", response_model=AuthorizeResponse)
+@router.post("/login")
 @inject
 async def login(
     request_data: AuthorizeRequest,
@@ -129,9 +131,9 @@ async def authorize(
     request: Request,
     oauth_service: FromDishka[OAuthService],
     settings: FromDishka[Settings],
-    redirect_url: str = Query(
-        default="/", description="URL to redirect to after authentication"
-    ),
+    redirect_url: Annotated[
+        str, Query(description="URL to redirect to after authentication")
+    ] = "/",
 ) -> RedirectResponse:
     """
     Initiate OAuth authorization flow.
@@ -161,7 +163,7 @@ async def authorize(
     return RedirectResponse(url=authorization_url)
 
 
-@router.post("/callback", response_model=CallbackResponse)
+@router.post("/callback")
 @inject
 async def auth_callback_json(
     callback_data: CallbackRequest,
@@ -271,14 +273,14 @@ async def auth_callback(
 
         return RedirectResponse(url=redirect_url)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error("OAuth callback failed", provider=provider, error=str(e))
         # Redirect to error page or login page
         error_url = f"/?error=auth_failed&provider={provider}"
         return RedirectResponse(url=error_url)
 
 
-@router.post("/logout", response_model=LogoutResponse)
+@router.post("/logout")
 async def logout(request: Request) -> LogoutResponse:
     """
     Logout current user.
@@ -296,7 +298,7 @@ async def logout(request: Request) -> LogoutResponse:
     return LogoutResponse(message="Successfully logged out")
 
 
-@router.get("/me", response_model=UserResponse)
+@router.get("/me")
 @inject
 async def get_current_user_info(user: FromDishka[SessionUser]) -> UserResponse:
     """
@@ -314,7 +316,7 @@ async def get_current_user_info(user: FromDishka[SessionUser]) -> UserResponse:
     )
 
 
-@router.get("/status", response_model=AuthStatusResponse)
+@router.get("/status")
 @inject
 async def get_auth_status(
     request: Request, user: FromDishka[SessionUser | None]

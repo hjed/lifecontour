@@ -57,7 +57,7 @@ class DetailedHealthResponse(BaseModel):
     services: dict[str, Any]
 
 
-@router.get("/health", response_model=HealthResponse)
+@router.get("/health")
 async def health_check() -> HealthResponse:
     """
     Basic health check endpoint.
@@ -73,7 +73,7 @@ async def health_check() -> HealthResponse:
     )
 
 
-@router.get("/health/detailed", response_model=DetailedHealthResponse)
+@router.get("/health/detailed")
 @inject
 async def detailed_health_check(
     _db: FromDishka[Session],
@@ -97,7 +97,7 @@ async def detailed_health_check(
         }
         if not db_healthy:
             overall_status = "degraded"
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error("Database health check failed", error=str(e))
         services["database"] = {
             "status": "unhealthy",
@@ -116,7 +116,7 @@ async def detailed_health_check(
                 "mount_path": settings.mcp_mount_path,
                 "enabled": "true",
             }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("MCP server health check failed", error=str(e))
             services["mcp_server"] = {
                 "status": "unhealthy",
@@ -181,7 +181,7 @@ async def liveness_check() -> dict[str, str]:
     return {"status": "alive"}
 
 
-@router.get("/health/integrations", response_model=DetailedHealthResponse)
+@router.get("/health/integrations")
 @inject
 async def integration_health_check(
     redis_pool: FromDishka[Redis],
@@ -219,7 +219,7 @@ async def integration_health_check(
                 "error": "Redis ping failed",
             }
             overall_status = "unhealthy"
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error("Redis health check failed", error=str(e))
         services["redis"] = {
             "status": "unhealthy",
@@ -255,7 +255,7 @@ async def integration_health_check(
             "models": available_models,
             "enums_working": True,
         }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error("Core shared package health check failed", error=str(e))
         services["core_shared"] = {
             "status": "unhealthy",
@@ -295,7 +295,7 @@ async def integration_health_check(
             "redis_settings_configured": True,
             "available_components": available_components,
         }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error("Integration domain health check failed", error=str(e))
         services["integration_domain"] = {
             "status": "unhealthy",

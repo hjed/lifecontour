@@ -6,7 +6,7 @@ to ensure consistency across different external system integrations.
 """
 
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Generic, TypeVar
 
@@ -240,8 +240,8 @@ class BaseIntegrationService(ABC, Generic[TExternalEntity, TInternalEntity]):
             "integration_source": self.integration_source,
             "external_id": external_id,
             "metadata": metadata or {},
-            "created_at": datetime.now(),
-            "updated_at": datetime.now(),
+            "created_at": datetime.now(tz=UTC),
+            "updated_at": datetime.now(tz=UTC),
         }
 
 

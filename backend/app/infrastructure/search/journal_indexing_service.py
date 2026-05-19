@@ -305,7 +305,7 @@ class JournalIndexingService:
                 else None,
             }
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(
                 "Failed to fetch complete journal data",
                 journal_id=journal_id,

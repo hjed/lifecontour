@@ -826,7 +826,7 @@ async def _ensure_google_groups_exist(
                     tag_name=tag_name,
                     resource_name=resource_name,
                 )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(
                 "Failed to create Google Contact Group for tag",
                 tag_name=tag_name,
@@ -994,7 +994,7 @@ async def _push_single_contact(
 
     except HttpError as e:
         _handle_http_error(e, contact, metrics)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(
             "Unexpected error pushing contact to Google",
             contact_id=contact["id"],
@@ -1158,7 +1158,7 @@ def _process_contacts_batch(
             contact = transformer.transform_person(person)
             serialized = serialize_contact(contact)
             serialized_contacts.append((person, serialized))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(
                 "Failed to transform/serialize contact in batch",
                 google_account_email=google_account_email,
@@ -1314,7 +1314,7 @@ async def _perform_full_sync(
                     updated_count += 1
                 metrics["contacts_processed"] += 1
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.error(
                     "Failed to create outbox event for contact",
                     google_account_email=google_account_email,
@@ -1429,7 +1429,7 @@ async def _perform_incremental_sync(
             total_processed += 1
             metrics["contacts_processed"] += 1
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(
                 "Failed to create outbox event for contact",
                 google_account_email=google_account_email,
@@ -1652,7 +1652,7 @@ async def periodic_sync_all_accounts(ctx: dict[str, Any]) -> dict[str, Any]:
                             user_id=user_id,
                         )
 
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     error_msg = f"Error enqueueing contacts sync for {google_account_email}: {str(e)}"
                     errors.append(error_msg)
                     logger.error(
@@ -1691,7 +1691,7 @@ async def periodic_sync_all_accounts(ctx: dict[str, Any]) -> dict[str, Any]:
                             user_id=user_id,
                         )
 
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     error_msg = f"Error enqueueing calendar sync for {google_account_email}: {str(e)}"
                     errors.append(error_msg)
                     logger.error(
@@ -1716,7 +1716,7 @@ async def periodic_sync_all_accounts(ctx: dict[str, Any]) -> dict[str, Any]:
             "errors": errors,
         }
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(
             "Periodic sync scheduling failed",
             error=str(e),
@@ -1927,7 +1927,7 @@ async def sync_google_contacts(
             "cancelled_at": datetime.now(UTC).isoformat(),
         }
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         # Calculate duration for error case
         duration = (datetime.now(UTC) - started_at).total_seconds()
 
@@ -1960,7 +1960,7 @@ async def sync_google_contacts(
                     error_message=str(e),
                 )
                 await session.commit()
-        except Exception as update_error:
+        except Exception as update_error:  # noqa: BLE001
             logger.error(
                 "Failed to update job status to failed",
                 job_id=job_id,
@@ -2070,7 +2070,7 @@ async def _process_journal_deleted_event(
                         journal_id=journal_id,
                     )
                     errors.append(str(e))
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.error(
                     "Failed to delete journal event from Google Calendar",
                     error=str(e),
@@ -2247,7 +2247,7 @@ async def _process_journal_upsert_event(
                             error=str(e),
                             journal_id=journal_id,
                         )
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.warning(
                         "Failed to delete orphaned journal event",
                         error=str(e),
@@ -2538,7 +2538,7 @@ async def process_tag_event(
                                 )
 
                     processed_users += 1
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.error(
                         "Error processing tag event for user",
                         google_account_email=google_account_email,
@@ -3018,7 +3018,7 @@ async def push_local_contacts_to_google(
                 **metrics,
             }
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         # Calculate duration for error case
         duration = (datetime.now(UTC) - started_at).total_seconds()
 
@@ -3339,7 +3339,7 @@ async def sync_calendar_events(
                                 if err.get("reason") == "syncTokenInvalid":
                                     is_sync_token_error = True
                                     break
-                        except Exception:
+                        except Exception:  # noqa: BLE001
                             pass
                     if is_sync_token_error:
                         logger.warning(
@@ -3575,7 +3575,7 @@ async def sync_calendar_events(
                         session.add(outbox_event)
                         metrics["events_processed"] += 1
 
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001
                         logger.error(
                             "Failed to process inbound calendar event",
                             event_id=raw_event.get("id"),
@@ -3639,7 +3639,7 @@ async def sync_calendar_events(
 
         return {"status": "success", **metrics}
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         duration = (datetime.now(UTC) - started_at).total_seconds()
         logger.error(
             "Inbound calendar events sync failed",
@@ -3734,7 +3734,7 @@ async def setup_calendar_webhook(
                         "Stopped previous calendar webhook channel",
                         channel_id=existing_row.channel_id,
                     )
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.warning(
                         "Failed to stop previous watch channel",
                         channel_id=existing_row.channel_id,
@@ -3817,7 +3817,7 @@ async def setup_calendar_webhook(
             else None,
         }
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(
             "Failed to setup calendar webhook",
             google_account_email=google_account_email,

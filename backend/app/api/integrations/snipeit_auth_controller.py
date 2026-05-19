@@ -267,7 +267,7 @@ async def snipeit_oauth_callback(
                 sync_type="full",
             )
             logger.info("Triggered initial Snipe-IT full sync", user_id=user.id)
-        except Exception as sync_err:
+        except Exception as sync_err:  # noqa: BLE001
             logger.warning(
                 "Failed to enqueue Snipe-IT initial sync during OAuth callback",
                 user_id=user.id,

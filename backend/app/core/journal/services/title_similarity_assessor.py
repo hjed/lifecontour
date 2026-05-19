@@ -241,7 +241,10 @@ Confidence score (0.0-1.0):"""
 
                 delay = base_delay * (2**attempt)
                 logger.warning(
-                    f"Gemini API timeout, retrying in {delay}s (attempt {attempt + 1}/{max_attempts})"
+                    "Gemini API timeout, retrying",
+                    delay_seconds=delay,
+                    attempt=attempt + 1,
+                    max_attempts=max_attempts,
                 )
                 await asyncio.sleep(delay)
 

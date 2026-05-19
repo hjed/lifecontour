@@ -46,7 +46,7 @@ async def _build_contact_group_mapping(client: GoogleAPIClient) -> dict[str, str
             groups_count=groups_processed_count,
             mapping_entries_count=len(group_mapping),
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(
             "Failed to fetch contact groups for mapping",
             error=str(e),

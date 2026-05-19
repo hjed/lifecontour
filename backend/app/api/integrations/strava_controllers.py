@@ -336,7 +336,7 @@ async def strava_oauth_callback(
                     user_id=user.id,
                     subscription_id=subscription_id,
                 )
-            except Exception as webhook_err:
+            except Exception as webhook_err:  # noqa: BLE001
                 logger.warning(
                     "Strava webhook subscription failed during OAuth "
                     "(connection still active)",
@@ -426,7 +426,7 @@ async def strava_oauth_disconnect(
                             client_secret=settings.strava_client_secret,
                         )
                         await webhook_service.unsubscribe(int(sub_id))
-                    except Exception as unsub_err:
+                    except Exception as unsub_err:  # noqa: BLE001
                         logger.warning(
                             "Strava webhook unsubscribe failed (continuing disconnect)",
                             user_id=user.id,
@@ -441,13 +441,13 @@ async def strava_oauth_disconnect(
                             STRAVA_DEAUTHORIZE_URL,
                             data={"access_token": auth_data["access_token"]},
                         )
-                except Exception as revoke_err:
+                except Exception as revoke_err:  # noqa: BLE001
                     logger.warning(
                         "Strava token revocation failed (continuing disconnect)",
                         user_id=user.id,
                         error=str(revoke_err),
                     )
-        except Exception as auth_err:
+        except Exception as auth_err:  # noqa: BLE001
             # Decryption/retrieval failed — still proceed with DB cleanup
             logger.warning(
                 "Could not retrieve Strava tokens for revocation "

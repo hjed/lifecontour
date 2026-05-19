@@ -3,6 +3,7 @@ Activity Template REST API controller.
 """
 
 import uuid
+from typing import Annotated
 
 from core_shared.models.journals.activity_template import ActivityTemplate
 from core_shared.models.journals.template_pitch import TemplatePitch
@@ -22,7 +23,7 @@ from app.infrastructure.auth.models import SessionUser
 router = APIRouter(prefix="/templates", tags=["Templates"])
 
 
-@router.post("", response_model=ActivityTemplateResponse, status_code=201)
+@router.post("", status_code=201)
 @inject
 async def create_template(
     request: ActivityTemplateCreateRequest,
@@ -76,14 +77,16 @@ async def create_template(
     return ActivityTemplateResponse(data=resource)
 
 
-@router.get("", response_model=ActivityTemplateListResponse)
+@router.get("")
 @inject
 async def get_templates(
     repo: FromDishka[ActivityTemplateRepository],
     user: FromDishka[SessionUser],
     req: Request,
-    name: str | None = Query(None, description="Filter by name"),
-    template_type: str | None = Query(None, description="Filter by template type"),
+    name: Annotated[str | None, Query(description="Filter by name")] = None,
+    template_type: Annotated[
+        str | None, Query(description="Filter by template type")
+    ] = None,
 ) -> ActivityTemplateListResponse:
     """Get list of activity templates."""
     templates = await repo.find_by_user(user_id=user.id, template_type=template_type)
@@ -97,7 +100,7 @@ async def get_templates(
     return ActivityTemplateListResponse(data=resources)
 
 
-@router.get("/{template_id}", response_model=ActivityTemplateResponse)
+@router.get("/{template_id}")
 @inject
 async def get_template(
     template_id: uuid.UUID,
@@ -118,7 +121,7 @@ async def get_template(
     return ActivityTemplateResponse(data=resource)
 
 
-@router.put("/{template_id}", response_model=ActivityTemplateResponse)
+@router.put("/{template_id}")
 @inject
 async def update_template(
     template_id: uuid.UUID,

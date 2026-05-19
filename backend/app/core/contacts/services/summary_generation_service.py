@@ -452,7 +452,7 @@ class SummaryGenerator:
                         changed_by="system",
                         source=Provenance.SUMMARY_REGENERATION,
                     )
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.warning(
                         "Failed to record history for contact %s auto-disable: %s",
                         contact_id,
@@ -503,7 +503,7 @@ class SummaryGenerator:
                     changed_by="system",
                     source=Provenance.SUMMARY_REGENERATION,
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning(
                     "Failed to record history for contact %s summary generation: %s",
                     contact_id,

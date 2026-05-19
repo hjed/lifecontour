@@ -81,7 +81,7 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
             try:
                 tz = ZoneInfo(tz_str)
                 return dt.astimezone(tz).date()
-            except Exception:
+            except Exception:  # noqa: BLE001
                 return dt.date()
 
         if (

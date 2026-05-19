@@ -120,7 +120,8 @@ class SearchService:
             }
 
             logger.debug(
-                f"{entity_type} search completed",
+                "Search completed",
+                entity_type=entity_type,
                 query=query,
                 hits_count=len(results["hits"]),
                 processing_time_ms=results["processingTimeMs"],
@@ -130,14 +131,16 @@ class SearchService:
 
         except MeilisearchError as e:
             logger.error(
-                f"MeiliSearch error during {entity_type.lower()} search",
+                "MeiliSearch error during search",
+                entity_type=entity_type,
                 query=query,
                 error=str(e),
             )
             raise
         except Exception as e:
             logger.error(
-                f"Unexpected error during {entity_type.lower()} search",
+                "Unexpected error during search",
+                entity_type=entity_type,
                 query=query,
                 error=str(e),
             )
@@ -307,7 +310,7 @@ class SearchService:
                     total_processing_time += contact_results.get(
                         "processing_time_ms", 0
                     )
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.warning(
                         "Error searching contacts in global search",
                         query=query,
@@ -324,7 +327,7 @@ class SearchService:
                     total_processing_time += journal_results.get(
                         "processing_time_ms", 0
                     )
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.warning(
                         "Error searching journals in global search",
                         query=query,
@@ -392,7 +395,7 @@ class SearchService:
 
             return []
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(
                 "Error getting search suggestions",
                 query=query,
@@ -439,7 +442,7 @@ class SearchService:
                                 "is_indexing": stats.get("isIndexing", False),
                             }
                         )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("Could not get index information", error=str(e))
 
             return {
@@ -448,6 +451,6 @@ class SearchService:
                 "indices": indices_info,
             }
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("Error getting search health", error=str(e))
             return {"status": "error", "error": str(e), "indices": []}

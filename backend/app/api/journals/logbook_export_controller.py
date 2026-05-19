@@ -4,7 +4,7 @@ Handles the outdoor logbook PDF export endpoint.
 """
 
 import io
-from datetime import datetime
+from datetime import UTC, datetime
 
 import structlog
 from dishka.integrations.fastapi import FromDishka, inject
@@ -72,7 +72,7 @@ async def export_outdoor_logbook(
     pdf_bytes = renderer.render(export_data)
 
     # Generate filename with timestamp
-    timestamp = datetime.now().strftime("%Y%m%d")
+    timestamp = datetime.now(tz=UTC).strftime("%Y%m%d")
     filename = f"outdoor_logbook_{timestamp}.pdf"
 
     logger.info(

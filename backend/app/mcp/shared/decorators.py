@@ -127,7 +127,7 @@ def mcp_unified_error_handler(
                 MCPLogger.log_validation_error(operation_name, str(e))
                 return MCPResponseBuilder.validation_error_response("Input", str(e))
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 # Handle search-specific errors
                 if operation_type == "search":
                     search_context = {

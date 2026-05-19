@@ -8,6 +8,7 @@ import pytest
 import pytest_asyncio
 from core_shared.stream_client import StreamClient
 from httpx import AsyncClient
+from redis.exceptions import ResponseError
 
 from app.infrastructure.config import Settings
 
@@ -79,6 +80,6 @@ async def test_snipeit_webhook_publishes_to_stream(
     finally:
         try:
             await redis_client.xgroup_destroy(test_settings.stream_name, unique_group)
-        except Exception:
+        except ResponseError:
             pass
         await redis_client.close()

@@ -477,7 +477,7 @@ class SearchIndexer:
                 "activity_count_30d": activity_count_30d,
             }
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(
                 "Failed to fetch complete contact data",
                 contact_id=contact_id,

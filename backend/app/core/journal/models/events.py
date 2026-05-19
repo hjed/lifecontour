@@ -1,7 +1,7 @@
 """Domain events for the journal domain."""
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -31,7 +31,7 @@ class JournalCreated(DomainEvent):
         title: str,
         transaction: AsyncConnection | None = None,
     ):
-        now = datetime.now()
+        now = datetime.now(tz=UTC)
         super().__init__(
             event_id=f"journal_created_{journal_id}_{now.isoformat()}",
             occurred_at=now,
@@ -56,7 +56,7 @@ class JournalUpdated(DomainEvent):
         changed_fields: dict[str, Any],
         transaction: AsyncConnection | None = None,
     ):
-        now = datetime.now()
+        now = datetime.now(tz=UTC)
         super().__init__(
             event_id=f"journal_updated_{journal_id}_{now.isoformat()}",
             occurred_at=now,
@@ -78,7 +78,7 @@ class JournalDeleted(DomainEvent):
         external_identifiers: dict[str, list[dict[str, Any]]] | None = None,
         transaction: AsyncConnection | None = None,
     ):
-        now = datetime.now()
+        now = datetime.now(tz=UTC)
         super().__init__(
             event_id=f"journal_deleted_{journal_id}_{now.isoformat()}",
             occurred_at=now,
@@ -103,7 +103,7 @@ class JournalTypeAdded(DomainEvent):
         journal_type: str,
         transaction: AsyncConnection | None = None,
     ):
-        now = datetime.now()
+        now = datetime.now(tz=UTC)
         super().__init__(
             event_id=f"journal_type_added_{journal_id}_{journal_type}_{now.isoformat()}",
             occurred_at=now,
@@ -127,7 +127,7 @@ class JournalTypeRemoved(DomainEvent):
         journal_type: str,
         transaction: AsyncConnection | None = None,
     ):
-        now = datetime.now()
+        now = datetime.now(tz=UTC)
         super().__init__(
             event_id=f"journal_type_removed_{journal_id}_{journal_type}_{now.isoformat()}",
             occurred_at=now,
@@ -152,7 +152,7 @@ class RouteCreated(DomainEvent):
         name: str,
         transaction: AsyncConnection | None = None,
     ):
-        now = datetime.now()
+        now = datetime.now(tz=UTC)
         # Use UUID.int for deterministic aggregate_id (DomainEvent expects int)
         # This is stable across process restarts unlike hash()
         aggregate_id = UUID(route_id).int % (10**9)
@@ -180,7 +180,7 @@ class RouteUpdated(DomainEvent):
         changed_fields: dict[str, Any],
         transaction: AsyncConnection | None = None,
     ):
-        now = datetime.now()
+        now = datetime.now(tz=UTC)
         # Use UUID.int for deterministic aggregate_id (DomainEvent expects int)
         aggregate_id = UUID(route_id).int % (10**9)
         super().__init__(
@@ -198,7 +198,7 @@ class RouteDeleted(DomainEvent):
     """Event raised when a route is deleted."""
 
     def __init__(self, route_id: str, transaction: AsyncConnection | None = None):
-        now = datetime.now()
+        now = datetime.now(tz=UTC)
         # Use UUID.int for deterministic aggregate_id (DomainEvent expects int)
         aggregate_id = UUID(route_id).int % (10**9)
         super().__init__(
@@ -221,7 +221,7 @@ class GearItemUpdated(DomainEvent):
         changed_fields: dict[str, Any],
         transaction: AsyncConnection | None = None,
     ):
-        now = datetime.now()
+        now = datetime.now(tz=UTC)
         # Use UUID.int for deterministic aggregate_id (DomainEvent expects int)
         from uuid import UUID
 

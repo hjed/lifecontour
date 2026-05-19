@@ -4477,7 +4477,7 @@ async def update_template(
 
         try:
             template.__post_init__()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return MCPResponseBuilder.validation_error_response("template", str(e))
 
         saved_template = await repos.activity_template_repo.save(template)
@@ -4653,7 +4653,7 @@ async def update_gear_item(
 
     try:
         item.__post_init__()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return MCPResponseBuilder.validation_error_response("gear_item", str(e))
 
     saved_item = await repos.gear_item_repo.save(item)

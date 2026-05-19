@@ -45,7 +45,7 @@ def check_meilisearch_connection() -> bool:
     except MeilisearchError as e:
         logger.error("MeiliSearch connection check failed", error=str(e))
         return False
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error("Unexpected error checking MeiliSearch connection", error=str(e))
         return False
 

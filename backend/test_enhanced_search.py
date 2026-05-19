@@ -187,7 +187,7 @@ async def test_enhanced_contact_indexing() -> bool:
 
         return True
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"✗ Enhanced indexing test failed: {e}")
         import traceback
 
@@ -257,7 +257,7 @@ async def test_search_index_settings() -> bool:
 
         return True
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"✗ Index settings test failed: {e}")
         import traceback
 

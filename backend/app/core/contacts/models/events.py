@@ -1,7 +1,7 @@
 """Domain events for the contacts domain."""
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -31,8 +31,8 @@ class ContactCreated(DomainEvent):
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
-            event_id=f"contact_created_{contact_id}_{datetime.now().isoformat()}",
-            occurred_at=datetime.now(),
+            event_id=f"contact_created_{contact_id}_{datetime.now(tz=UTC).isoformat()}",
+            occurred_at=datetime.now(tz=UTC),
             aggregate_id=contact_id,
             event_type="ContactCreated",
             event_data={
@@ -55,8 +55,8 @@ class ContactUpdated(DomainEvent):
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
-            event_id=f"contact_updated_{contact_id}_{datetime.now().isoformat()}",
-            occurred_at=datetime.now(),
+            event_id=f"contact_updated_{contact_id}_{datetime.now(tz=UTC).isoformat()}",
+            occurred_at=datetime.now(tz=UTC),
             aggregate_id=contact_id,
             event_type="ContactUpdated",
             event_data={"contact_id": contact_id, "changed_fields": changed_fields},
@@ -70,8 +70,8 @@ class ContactDeleted(DomainEvent):
 
     def __init__(self, contact_id: int, transaction: AsyncConnection | None = None):
         super().__init__(
-            event_id=f"contact_deleted_{contact_id}_{datetime.now().isoformat()}",
-            occurred_at=datetime.now(),
+            event_id=f"contact_deleted_{contact_id}_{datetime.now(tz=UTC).isoformat()}",
+            occurred_at=datetime.now(tz=UTC),
             aggregate_id=contact_id,
             event_type="ContactDeleted",
             event_data={"contact_id": contact_id},
@@ -91,8 +91,8 @@ class TagAssigned(DomainEvent):
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
-            event_id=f"tag_assigned_{contact_id}_{tag_id}_{datetime.now().isoformat()}",
-            occurred_at=datetime.now(),
+            event_id=f"tag_assigned_{contact_id}_{tag_id}_{datetime.now(tz=UTC).isoformat()}",
+            occurred_at=datetime.now(tz=UTC),
             aggregate_id=contact_id,
             event_type="TagAssigned",
             event_data={
@@ -115,7 +115,7 @@ class TagRemoved(DomainEvent):
         tag_name: str,
         transaction: AsyncConnection | None = None,
     ):
-        now = datetime.now()
+        now = datetime.now(tz=UTC)
         super().__init__(
             event_id=f"tag_removed_{contact_id}_{tag_id}_{now.isoformat()}",
             occurred_at=now,
@@ -141,7 +141,7 @@ class TagUpdated(DomainEvent):
         changed_fields: dict[str, Any],
         transaction: AsyncConnection | None = None,
     ):
-        now = datetime.now()
+        now = datetime.now(tz=UTC)
         super().__init__(
             event_id=f"tag_updated_{tag_id}_{now.isoformat()}",
             occurred_at=now,
@@ -166,7 +166,7 @@ class TagDeleted(DomainEvent):
         tag_name: str,
         transaction: AsyncConnection | None = None,
     ):
-        now = datetime.now()
+        now = datetime.now(tz=UTC)
         super().__init__(
             event_id=f"tag_deleted_{tag_id}_{now.isoformat()}",
             occurred_at=now,
@@ -193,8 +193,8 @@ class ContactMethodAdded(DomainEvent):
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
-            event_id=f"contact_method_added_{contact_id}_{method_id}_{datetime.now().isoformat()}",
-            occurred_at=datetime.now(),
+            event_id=f"contact_method_added_{contact_id}_{method_id}_{datetime.now(tz=UTC).isoformat()}",
+            occurred_at=datetime.now(tz=UTC),
             aggregate_id=contact_id,
             event_type="ContactMethodAdded",
             event_data={
@@ -220,8 +220,8 @@ class ContactAddressAdded(DomainEvent):
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
-            event_id=f"contact_address_added_{contact_id}_{address_id}_{datetime.now().isoformat()}",
-            occurred_at=datetime.now(),
+            event_id=f"contact_address_added_{contact_id}_{address_id}_{datetime.now(tz=UTC).isoformat()}",
+            occurred_at=datetime.now(tz=UTC),
             aggregate_id=contact_id,
             event_type="ContactAddressAdded",
             event_data={
@@ -247,8 +247,8 @@ class ContactMethodDeleted(DomainEvent):
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
-            event_id=f"contact_method_deleted_{contact_id}_{method_id}_{datetime.now().isoformat()}",
-            occurred_at=datetime.now(),
+            event_id=f"contact_method_deleted_{contact_id}_{method_id}_{datetime.now(tz=UTC).isoformat()}",
+            occurred_at=datetime.now(tz=UTC),
             aggregate_id=contact_id,
             event_type="ContactMethodDeleted",
             event_data={
@@ -273,8 +273,8 @@ class ContactAddressDeleted(DomainEvent):
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
-            event_id=f"contact_address_deleted_{contact_id}_{address_id}_{datetime.now().isoformat()}",
-            occurred_at=datetime.now(),
+            event_id=f"contact_address_deleted_{contact_id}_{address_id}_{datetime.now(tz=UTC).isoformat()}",
+            occurred_at=datetime.now(tz=UTC),
             aggregate_id=contact_id,
             event_type="ContactAddressDeleted",
             event_data={
@@ -298,8 +298,8 @@ class ContactNoteAdded(DomainEvent):
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
-            event_id=f"contact_note_added_{contact_id}_{note_id}_{datetime.now().isoformat()}",
-            occurred_at=datetime.now(),
+            event_id=f"contact_note_added_{contact_id}_{note_id}_{datetime.now(tz=UTC).isoformat()}",
+            occurred_at=datetime.now(tz=UTC),
             aggregate_id=contact_id,
             event_type="ContactNoteAdded",
             event_data={
@@ -325,8 +325,8 @@ class ImportantDateAdded(DomainEvent):
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
-            event_id=f"contact_important_date_added_{contact_id}_{date_id}_{datetime.now().isoformat()}",
-            occurred_at=datetime.now(),
+            event_id=f"contact_important_date_added_{contact_id}_{date_id}_{datetime.now(tz=UTC).isoformat()}",
+            occurred_at=datetime.now(tz=UTC),
             aggregate_id=contact_id,
             event_type="ImportantDateAdded",
             event_data={
@@ -350,8 +350,8 @@ class ImportantDateDeleted(DomainEvent):
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
-            event_id=f"contact_important_date_deleted_{contact_id}_{date_id}_{datetime.now().isoformat()}",
-            occurred_at=datetime.now(),
+            event_id=f"contact_important_date_deleted_{contact_id}_{date_id}_{datetime.now(tz=UTC).isoformat()}",
+            occurred_at=datetime.now(tz=UTC),
             aggregate_id=contact_id,
             event_type="ImportantDateDeleted",
             event_data={
@@ -377,8 +377,8 @@ class ContactRelationshipCreated(DomainEvent):
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
-            event_id=f"contact_relationship_created_{relationship_id}_{datetime.now().isoformat()}",
-            occurred_at=datetime.now(),
+            event_id=f"contact_relationship_created_{relationship_id}_{datetime.now(tz=UTC).isoformat()}",
+            occurred_at=datetime.now(tz=UTC),
             aggregate_id=from_contact_id,
             event_type="ContactRelationshipCreated",
             event_data={
@@ -406,8 +406,8 @@ class ContactRelationshipUpdated(DomainEvent):
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
-            event_id=f"contact_relationship_updated_{relationship_id}_{datetime.now().isoformat()}",
-            occurred_at=datetime.now(),
+            event_id=f"contact_relationship_updated_{relationship_id}_{datetime.now(tz=UTC).isoformat()}",
+            occurred_at=datetime.now(tz=UTC),
             aggregate_id=from_contact_id,
             event_type="ContactRelationshipUpdated",
             event_data={
@@ -435,8 +435,8 @@ class ContactRelationshipDeleted(DomainEvent):
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
-            event_id=f"contact_relationship_deleted_{relationship_id}_{datetime.now().isoformat()}",
-            occurred_at=datetime.now(),
+            event_id=f"contact_relationship_deleted_{relationship_id}_{datetime.now(tz=UTC).isoformat()}",
+            occurred_at=datetime.now(tz=UTC),
             aggregate_id=from_contact_id,
             event_type="ContactRelationshipDeleted",
             event_data={
@@ -463,8 +463,8 @@ class ContactSummaryRefreshRequested(DomainEvent):
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
-            event_id=f"contact_summary_refresh_{contact_id}_{datetime.now().isoformat()}",
-            occurred_at=datetime.now(),
+            event_id=f"contact_summary_refresh_{contact_id}_{datetime.now(tz=UTC).isoformat()}",
+            occurred_at=datetime.now(tz=UTC),
             aggregate_id=contact_id,
             event_type="ContactSummaryRefreshRequested",
             event_data={"contact_id": contact_id},
