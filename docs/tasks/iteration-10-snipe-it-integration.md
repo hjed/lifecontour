@@ -161,16 +161,16 @@ Consume the local event and push it to the remote API.
 - [ ] Snipe-IT maintenance records populate as `GEAR_MAINTENANCE` journals.
 - [ ] Local `GEAR_MAINTENANCE` creations push to Snipe-IT.
 
-#### Phase 1: Snipe-IT to App Sync (Inbound)
+#### Phase 1: Snipe-IT to App Sync (Inbound) ✅ COMPLETE
 **PR Size:** ~8-10 files
 Pull remote maintenance and map to journals.
 **Acceptance Criteria:**
-- [ ] `SnipeItAPIClient` can fetch maintenance records.
-- [ ] Worker transforms maintenance records into `journal_event.created`/`updated` outbox events for `GEAR_MAINTENANCE`.
-- [ ] Inbound processor handles the events and creates the journals.
-- [ ] Maintenance type string mappings handled gracefully.
+- [x] `SnipeItAPIClient` can fetch maintenance records.
+- [x] Worker transforms maintenance records into `journal_event.created`/`updated` outbox events for `GEAR_MAINTENANCE`.
+- [x] Inbound processor handles the events and creates the journals.
+- [x] Maintenance type string mappings handled gracefully.
 **Required Test Coverage:**
-- **Integration:** Simulated worker event successfully creates a `GEAR_MAINTENANCE` journal in the database.
+- **Integration:** Simulated worker event successfully creates a `GEAR_MAINTENANCE` journal in the database. ✅
 
 #### Phase 2: App to Snipe-IT Sync (Outbound)
 **PR Size:** ~6-8 files

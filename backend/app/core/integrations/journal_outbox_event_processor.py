@@ -18,6 +18,7 @@ from core_shared.models.journals import (
     FitnessData,
     Journal,
 )
+from core_shared.models.journals.gear_maintenance_data import GearMaintenanceData
 from core_shared.models.journals.journal_contact_relationship import (
     JournalContactRelationship,
 )
@@ -44,6 +45,9 @@ from app.core.integrations.adapters.sql.sync_metadata_repository import (
     SyncMetadataRepository,
 )
 from app.core.journal.adapters.sql import SqlFitnessDataRepository
+from app.core.journal.adapters.sql.gear_maintenance_data_repository import (
+    SqlGearMaintenanceDataRepository,
+)
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 from app.core.journal.services.journal_service import JournalService
 
@@ -788,6 +792,9 @@ class JournalOutboxEventProcessor:
             # already handled above via SqlFitnessDataRepository.
             await self._ensure_type_data_rows(journal_id, raw_types)
 
+        # Save gear maintenance data if present (Snipe-IT maintenance events)
+        await self._persist_gear_maintenance_data(journal_id, journal_data)
+
     async def _ensure_type_data_rows(
         self, journal_id: int, type_strings: list[str]
     ) -> None:
@@ -808,7 +815,8 @@ class JournalOutboxEventProcessor:
         for type_str in type_strings:
             table_name = _TYPE_DATA_TABLE_MAP.get(type_str)
             if table_name is None:
-                # FITNESS, EVENT, NOTE, or unknown — handled elsewhere or no table
+                # FITNESS, GEAR_MAINTENANCE, EVENT, NOTE, or unknown — handled
+                # elsewhere or no table
                 continue
 
             await self.connection.execute(
@@ -825,6 +833,63 @@ class JournalOutboxEventProcessor:
                 type=type_str,
                 table=table_name,
             )
+
+    async def _persist_gear_maintenance_data(
+        self, journal_id: int, journal_data: dict[str, Any]
+    ) -> None:
+        """Persist gear maintenance data from outbox event payload.
+
+        Called from ``_persist_fitness_and_types`` when the journal_data
+        contains a ``gear_maintenance_data`` dict (Snipe-IT maintenance sync).
+
+        Safely skips malformed payloads and logs validation errors rather
+        than raising, preventing poison-pill retry loops.
+
+        Args:
+            journal_id: ID of the journal to persist data for.
+            journal_data: The ``journal_data`` dict from the outbox event.
+        """
+        raw_maintenance = journal_data.get("gear_maintenance_data")
+        if not raw_maintenance or not isinstance(raw_maintenance, dict):
+            return
+
+        gear_item_id = raw_maintenance.get("gear_item_id")
+        maintenance_type = raw_maintenance.get("maintenance_type")
+
+        if not gear_item_id or not maintenance_type:
+            logger.warning(
+                "Malformed gear_maintenance_data in outbox event, skipping",
+                journal_id=journal_id,
+                raw_keys=list(raw_maintenance.keys()),
+            )
+            return
+
+        try:
+            from uuid import UUID as _UUID
+
+            gear_maintenance = GearMaintenanceData(
+                journal_id=journal_id,
+                gear_item_id=_UUID(str(gear_item_id)),
+                maintenance_type=maintenance_type,
+                activity_types=raw_maintenance.get("activity_types"),
+                retirement_reason=raw_maintenance.get("retirement_reason"),
+            )
+        except Exception:
+            logger.warning(
+                "Failed to validate gear_maintenance_data, skipping",
+                journal_id=journal_id,
+                exc_info=True,
+            )
+            return
+
+        repo = SqlGearMaintenanceDataRepository(self.connection)
+        await repo.save(gear_maintenance)
+        logger.info(
+            "Saved gear maintenance data for journal",
+            journal_id=journal_id,
+            gear_item_id=str(gear_item_id),
+            maintenance_type=maintenance_type,
+        )
 
     async def _resolve_strava_athlete_to_contact(
         self, user_id: str, athlete_id: str, athlete_name: str | None

@@ -105,3 +105,47 @@ class SnipeItAssetListResponse(BaseModel):
 
     total: int
     rows: list[SnipeItAsset] = Field(default_factory=list)
+
+
+class SnipeItMaintenance(BaseModel):
+    """A single Snipe-IT asset maintenance record.
+
+    Corresponds to responses from ``GET /api/v1/maintenances/{id}`` and
+    individual rows from ``GET /api/v1/maintenances``.
+
+    See: https://snipe-it.readme.io/reference/maintenances
+    """
+
+    id: int
+    asset_id: int
+    title: str | None = None
+    asset_maintenance_type: str | None = None
+    start_date: SnipeItDateObject | None = None
+    completion_date: SnipeItDateObject | None = None
+    notes: str | None = None
+    cost: str | None = None
+    supplier: SnipeItNestedObject | None = None
+    asset: SnipeItNestedObject | None = None
+    updated_at: SnipeItDateObject | None = None
+
+    # -- Convenience accessors ------------------------------------------------
+
+    @property
+    def start_date_str(self) -> str | None:
+        """Return the raw start date string (``YYYY-MM-DD``)."""
+        return self.start_date.date if self.start_date else None
+
+    @property
+    def completion_date_str(self) -> str | None:
+        """Return the raw completion date string (``YYYY-MM-DD``)."""
+        return self.completion_date.date if self.completion_date else None
+
+
+class SnipeItMaintenanceListResponse(BaseModel):
+    """Paginated response from ``GET /api/v1/maintenances``.
+
+    Snipe-IT wraps the list in ``{"total": N, "rows": [...]}``.
+    """
+
+    total: int
+    rows: list[SnipeItMaintenance] = Field(default_factory=list)

@@ -18,7 +18,12 @@ import pytest
 import pytest_asyncio
 
 from snipeit_api_client import SnipeItAPIClient, SnipeItAPIError, _parse_retry_after
-from snipeit_models import SnipeItAsset, SnipeItAssetListResponse
+from snipeit_models import (
+    SnipeItAsset,
+    SnipeItAssetListResponse,
+    SnipeItMaintenance,
+    SnipeItMaintenanceListResponse,
+)
 from snipeit_rate_limiter import SnipeItRateLimitError
 
 
@@ -67,6 +72,25 @@ def _list_json(
 ) -> dict[str, object]:
     """Asset list response JSON for mocking."""
     rows = assets or [_asset_json()]
+    return {"total": total if total is not None else len(rows), "rows": rows}
+
+
+def _maintenance_json(
+    maintenance_id: int = 1, asset_id: int = 10, title: str = "Inspection"
+) -> dict[str, object]:
+    """Minimal maintenance JSON for mocking."""
+    return {
+        "id": maintenance_id,
+        "asset_id": asset_id,
+        "title": title,
+    }
+
+
+def _maintenance_list_json(
+    maintenances: list[dict[str, object]] | None = None, total: int | None = None
+) -> dict[str, object]:
+    """Maintenance list response JSON for mocking."""
+    rows = maintenances or [_maintenance_json()]
     return {"total": total if total is not None else len(rows), "rows": rows}
 
 
@@ -329,3 +353,102 @@ class TestParseRetryAfter:
     def test_non_numeric_returns_none(self) -> None:
         """Non-numeric string (e.g. HTTP-date) returns None gracefully."""
         assert _parse_retry_after("Thu, 01 Jan 2026 00:00:00 GMT") is None
+
+
+class TestSnipeItAPIClientListMaintenances:
+    """Tests for list_maintenances method."""
+
+    @pytest.mark.asyncio
+    async def test_successful_list_fetch(
+        self, client_no_refresh: SnipeItAPIClient
+    ) -> None:
+        """Successful GET maintenances returns parsed list."""
+        resp = _ok_response(
+            _maintenance_list_json(
+                [
+                    _maintenance_json(1, 10, "Inspect"),
+                    _maintenance_json(2, 20, "Repair"),
+                ],
+                total=2,
+            )
+        )
+        with patch.object(client_no_refresh._client, "get", return_value=resp):
+            result = await client_no_refresh.list_maintenances()
+
+        assert isinstance(result, SnipeItMaintenanceListResponse)
+        assert result.total == 2
+        assert len(result.rows) == 2
+        assert result.rows[0].title == "Inspect"
+
+    @pytest.mark.asyncio
+    async def test_pagination_params_passed(
+        self, client_no_refresh: SnipeItAPIClient
+    ) -> None:
+        """Pagination parameters are forwarded to the API call."""
+        resp = _ok_response(_maintenance_list_json())
+        with patch.object(
+            client_no_refresh._client, "get", return_value=resp
+        ) as mock_get:
+            await client_no_refresh.list_maintenances(page=3, per_page=50)
+
+        call_kwargs = mock_get.call_args
+        params = call_kwargs.kwargs.get("params") or call_kwargs.args[1]
+        assert params["offset"] == 100  # (page-1) * per_page = 2*50
+        assert params["limit"] == 50
+
+    @pytest.mark.asyncio
+    async def test_asset_id_filter(self, client_no_refresh: SnipeItAPIClient) -> None:
+        """Asset ID filter is passed as query parameter."""
+        resp = _ok_response(_maintenance_list_json())
+        with patch.object(
+            client_no_refresh._client, "get", return_value=resp
+        ) as mock_get:
+            await client_no_refresh.list_maintenances(asset_id=42)
+
+        call_kwargs = mock_get.call_args
+        params = call_kwargs.kwargs.get("params") or call_kwargs.args[1]
+        assert params["asset_id"] == 42
+
+    @pytest.mark.asyncio
+    async def test_path_has_no_leading_slash(
+        self, client_no_refresh: SnipeItAPIClient
+    ) -> None:
+        """list_maintenances uses relative path without leading /."""
+        resp = _ok_response(_maintenance_list_json())
+        with patch.object(
+            client_no_refresh._client, "get", return_value=resp
+        ) as mock_get:
+            await client_no_refresh.list_maintenances()
+
+        path = mock_get.call_args.args[0]
+        assert not path.startswith("/"), f"Path should not start with /: {path}"
+        assert path == "maintenances"
+
+
+class TestSnipeItAPIClientGetMaintenance:
+    """Tests for get_maintenance method."""
+
+    @pytest.mark.asyncio
+    async def test_successful_get(self, client_no_refresh: SnipeItAPIClient) -> None:
+        """GET maintenances/{id} returns parsed maintenance."""
+        resp = _ok_response(_maintenance_json(101, 42, "Annual Inspection"))
+        with patch.object(client_no_refresh._client, "get", return_value=resp):
+            result = await client_no_refresh.get_maintenance(101)
+
+        assert isinstance(result, SnipeItMaintenance)
+        assert result.id == 101
+        assert result.title == "Annual Inspection"
+
+    @pytest.mark.asyncio
+    async def test_get_maintenance_path(
+        self, client_no_refresh: SnipeItAPIClient
+    ) -> None:
+        """get_maintenance uses correct relative path."""
+        resp = _ok_response(_maintenance_json(101))
+        with patch.object(
+            client_no_refresh._client, "get", return_value=resp
+        ) as mock_get:
+            await client_no_refresh.get_maintenance(101)
+
+        path = mock_get.call_args.args[0]
+        assert path == "maintenances/101"

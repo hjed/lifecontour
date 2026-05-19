@@ -17,7 +17,12 @@ from typing import Any
 import httpx
 import structlog
 
-from snipeit_models import SnipeItAsset, SnipeItAssetListResponse
+from snipeit_models import (
+    SnipeItAsset,
+    SnipeItAssetListResponse,
+    SnipeItMaintenance,
+    SnipeItMaintenanceListResponse,
+)
 from snipeit_rate_limiter import SnipeItRateLimiter, SnipeItRateLimitError
 
 logger = structlog.get_logger()
@@ -135,6 +140,47 @@ class SnipeItAPIClient:
         """
         data = await self._get(f"hardware/{asset_id}")
         return SnipeItAsset.model_validate(data)
+
+    async def list_maintenances(
+        self,
+        *,
+        asset_id: int | None = None,
+        page: int = 1,
+        per_page: int = 50,
+    ) -> SnipeItMaintenanceListResponse:
+        """List asset maintenance records.
+
+        Args:
+            asset_id: Optional Snipe-IT asset ID to filter maintenances
+                for a specific asset.
+            page: Page number (1-based).
+            per_page: Number of records per page.
+
+        Returns:
+            Paginated maintenance list response.
+        """
+        safe_per_page = max(1, per_page)
+        params: dict[str, Any] = {
+            "offset": max(0, page - 1) * safe_per_page,
+            "limit": safe_per_page,
+        }
+        if asset_id is not None:
+            params["asset_id"] = asset_id
+
+        data = await self._get("maintenances", params=params)
+        return SnipeItMaintenanceListResponse.model_validate(data)
+
+    async def get_maintenance(self, maintenance_id: int) -> SnipeItMaintenance:
+        """Fetch a single maintenance record by ID.
+
+        Args:
+            maintenance_id: Snipe-IT maintenance numeric ID.
+
+        Returns:
+            SnipeItMaintenance with full detail.
+        """
+        data = await self._get(f"maintenances/{maintenance_id}")
+        return SnipeItMaintenance.model_validate(data)
 
     async def update_asset(
         self, asset_id: int, payload: dict[str, Any]
