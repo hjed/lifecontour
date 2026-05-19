@@ -132,7 +132,7 @@ class IntegrationHealthService:
                 "last_checked": datetime.now(UTC).isoformat(),
             }
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("Redis health check failed", error=str(e))
             return {
                 "status": "unhealthy",
@@ -171,7 +171,7 @@ class IntegrationHealthService:
                 "note": "Worker health based on queue accessibility - implement heartbeat for better monitoring",
             }
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("Worker health check failed", error=str(e))
             return {
                 "status": "unhealthy",
@@ -225,7 +225,7 @@ class IntegrationHealthService:
                 "error": f"Google API connection failed: {str(e)}",
                 "last_checked": datetime.now(UTC).isoformat(),
             }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("External API health check failed", error=str(e))
             return {
                 "status": "unhealthy",
@@ -245,7 +245,7 @@ class IntegrationHealthService:
             queued_jobs = await self.redis_pool.queued_jobs(queue_name=ARQ_QUEUE_NAME)
             return len(queued_jobs)
 
-        except Exception:
+        except Exception:  # noqa: BLE001
             return 0
 
     async def _get_job_statistics(self) -> dict[str, Any]:
@@ -258,7 +258,7 @@ class IntegrationHealthService:
                     integration_source="google", hours=24
                 )
                 return stats
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("Failed to get job statistics", error=str(e))
             return {
                 "total_jobs": 0,
@@ -296,7 +296,7 @@ class IntegrationHealthService:
                     }
                     for job in failures
                 ]
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("Failed to get recent failures", error=str(e))
             return []
 

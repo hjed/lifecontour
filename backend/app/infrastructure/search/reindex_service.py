@@ -381,7 +381,7 @@ class ReindexService:
                 else None,
             }
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(
                 "Failed to fetch contact for re-indexing",
                 contact_id=contact_id,
@@ -526,7 +526,7 @@ class ReindexService:
                 else None,
             }
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(
                 "Failed to fetch journal for re-indexing",
                 journal_id=journal_id,

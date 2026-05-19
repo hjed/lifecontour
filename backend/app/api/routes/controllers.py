@@ -5,6 +5,7 @@ Handles route-related HTTP endpoints following JSON API specification.
 Controllers act as adapters between HTTP and domain services.
 """
 
+from typing import Annotated
 from uuid import UUID
 
 from core_shared.models.journals import JournalNotFoundError, RouteNotFoundError
@@ -43,12 +44,12 @@ async def list_routes(
     route_service: FromDishka[RouteService],
     journal_service: FromDishka[JournalService],
     user: FromDishka[SessionUser],  # Require authentication
-    page: int = Query(default=1, description="Page number", ge=1),
-    limit: int = Query(default=20, description="Items per page", ge=1, le=100),
-    name: str | None = Query(
-        default=None,
-        description="Optional case-insensitive partial route name filter",
-    ),
+    page: Annotated[int, Query(description="Page number", ge=1)] = 1,
+    limit: Annotated[int, Query(description="Items per page", ge=1, le=100)] = 20,
+    name: Annotated[
+        str | None,
+        Query(description="Optional case-insensitive partial route name filter"),
+    ] = None,
 ) -> RouteListResponse:
     """
     List routes with pagination.

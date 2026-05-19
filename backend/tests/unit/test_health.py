@@ -132,7 +132,7 @@ def test_integration_health_check_components_importable() -> None:
         assert "ExternalReference" in available_models
         assert "BaseIntegrationService" in available_models
 
-    except Exception as e:
+    except (ImportError, AttributeError) as e:
         pytest.fail(f"Core shared package import failed: {e}")
 
     # Test integration domain configuration
@@ -157,5 +157,5 @@ def test_integration_health_check_components_importable() -> None:
         assert "IntegrationError" in available_components
         assert "IntegrationDatabaseManager" in available_components
 
-    except Exception as e:
+    except (ImportError, AttributeError) as e:
         pytest.fail(f"Integration domain import failed: {e}")

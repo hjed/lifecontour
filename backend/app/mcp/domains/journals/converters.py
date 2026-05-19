@@ -5,7 +5,7 @@ Provides utilities for converting journal domain entities to AI-friendly MCP res
 reducing duplication and ensuring consistent response structures.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from core_shared.models.journals import Calendar, GearItem, Journal
@@ -214,9 +214,11 @@ class JournalConverter:
 
         # Ensure start and end are datetime objects
         if not isinstance(start, datetime):
-            start = datetime.fromisoformat(str(start)) if start else datetime.now()
+            start = (
+                datetime.fromisoformat(str(start)) if start else datetime.now(tz=UTC)
+            )
         if not isinstance(end, datetime):
-            end = datetime.fromisoformat(str(end)) if end else datetime.now()
+            end = datetime.fromisoformat(str(end)) if end else datetime.now(tz=UTC)
 
         # Extract types and tags
         types = search_hit.get("types", [])

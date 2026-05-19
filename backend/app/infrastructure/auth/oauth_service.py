@@ -113,7 +113,7 @@ class OAuthService:
                     code_challenge_method="S256",
                 )
                 logger.info("Configured GitHub OAuth provider with PKCE")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning(
                     "Failed to configure GitHub OAuth provider", error=str(e)
                 )
@@ -131,7 +131,7 @@ class OAuthService:
                     code_challenge_method="S256",
                 )
                 logger.info("Configured Microsoft OAuth provider with PKCE")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning(
                     "Failed to configure Microsoft OAuth provider", error=str(e)
                 )
@@ -149,7 +149,7 @@ class OAuthService:
                     code_challenge_method="S256",
                 )
                 logger.info("Configured Discord OAuth provider with PKCE")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning(
                     "Failed to configure Discord OAuth provider", error=str(e)
                 )
@@ -167,7 +167,7 @@ class OAuthService:
                     code_challenge_method="S256",
                 )
                 logger.info("Configured Google OAuth provider with PKCE")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning(
                     "Failed to configure Google OAuth provider", error=str(e)
                 )
@@ -202,7 +202,7 @@ class OAuthService:
                     provider_name=self.settings.oauth_provider_name,
                     userinfo_url=self.settings.oauth_userinfo_url,
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning(
                     "Failed to configure generic OAuth provider",
                     provider_name=self.settings.oauth_provider_name,

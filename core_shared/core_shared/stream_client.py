@@ -98,7 +98,7 @@ class StreamClient:
         carrier: dict[str, str] = {}
         try:
             inject(carrier)
-        except Exception:
+        except Exception:  # noqa: BLE001
             # Fallback if OTEL is not configured
             pass
 
@@ -358,7 +358,7 @@ class StreamClient:
 
         try:
             trace_context = json.loads(trace_context_raw)
-        except Exception:
+        except (ValueError, TypeError, json.JSONDecodeError):
             trace_context = {}
 
         return StreamEvent(

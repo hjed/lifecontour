@@ -29,7 +29,7 @@ def test_table_imports() -> bool:
 
         return True
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"✗ Import failed: {e}")
         import traceback
 
@@ -50,7 +50,7 @@ def test_migration_files() -> bool:
 
         return True
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"✗ Migration import failed: {e}")
         import traceback
 

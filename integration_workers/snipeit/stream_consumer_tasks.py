@@ -164,7 +164,7 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
                         user_id=user_id,
                         exc_info=True,
                     )
-            except Exception:
+            except Exception:  # noqa: BLE001
                 logger.warning(
                     "Failed to sync asset from webhook",
                     asset_id=asset_id,

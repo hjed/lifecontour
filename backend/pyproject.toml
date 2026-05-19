@@ -81,38 +81,15 @@ allow-direct-references = true
 packages = ["app"]
 
 [tool.ruff]
-target-version = "py311"
-line-length = 88
+extend = "../ruff.toml"
 
-[tool.ruff.lint]
-select = [
-    "E",  # pycodestyle errors
-    "W",  # pycodestyle warnings
-    "F",  # pyflakes
-    "I",  # isort
-    "B",  # flake8-bugbear
-    "C4", # flake8-comprehensions
-    "UP", # pyupgrade
-]
-ignore = [
-    "E501",  # line too long, handled by ruff format
-    "B008",  # do not perform function calls in argument defaults
-    "C901",  # too complex
-]
-
-[tool.ruff.lint.per-file-ignores]
-"__init__.py" = ["F401"]
-"tests/**/*" = ["B011"]
-
-[tool.ruff.format]
-# Use double quotes for strings
-quote-style = "double"
-# Use spaces around the equals sign
-indent-style = "space"
-# Respect magic trailing commas
-skip-magic-trailing-comma = false
-# Automatically detect line ending
-line-ending = "auto"
+[tool.ruff.lint.extend-per-file-ignores]
+"tests/**/*" = ["B011", "DTZ"]
+"tests/**/conftest.py" = ["E402"]
+"tests/conftest.py" = ["E402"]
+"test_*.py" = ["DTZ"]
+"verify_*.py" = ["DTZ", "BLE001"]
+"scripts/**/*" = ["BLE001"]
 
 [tool.mypy]
 python_version = "3.11"

@@ -25,7 +25,7 @@ class RelationshipTypesResponse(BaseModel):
     relationship_types: list[EnumValue]
 
 
-@router.get("/relationship-types", response_model=RelationshipTypesResponse)
+@router.get("/relationship-types")
 async def get_relationship_types() -> RelationshipTypesResponse:
     """
     Get all available relationship types with their display names.

@@ -56,7 +56,7 @@ async def run_attendance_transition_loop(
             logger.info("Attendance transition loop cancelled")
             break
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(
                 "Unexpected error in attendance transition loop",
                 error=str(e),

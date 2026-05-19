@@ -5,7 +5,7 @@ Defines Pydantic models for contact-related API endpoints following
 the JSON API specification.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
@@ -484,7 +484,8 @@ class ContactFieldAttributes(BaseModel):
     old_value: str | None = Field(default=None, description="Previous field value")
     new_value: str | None = Field(default=None, description="New field value")
     updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(), description="Timestamp of the update"
+        default_factory=lambda: datetime.now(tz=UTC),
+        description="Timestamp of the update",
     )
 
 

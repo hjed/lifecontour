@@ -1,0 +1,56 @@
+# Shared Ruff configuration for all Python modules
+# (backend, core_shared, integration_workers/*)
+#
+# Each module's pyproject.toml should use `extend = "../../ruff.toml"` (or the
+# appropriate relative path) to inherit this config and override only what
+# differs (e.g. target-version for Python 3.12 workers).
+
+target-version = "py311"
+line-length = 88
+
+[lint]
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # pyflakes
+    "I",     # isort
+    "B",     # flake8-bugbear
+    "C4",    # flake8-comprehensions
+    "UP",    # pyupgrade
+    "G",     # flake8-logging-format — enforce %-style logging over f-strings
+    "FAST",  # fastapi best-practices
+    "DTZ",   # flake8-datetimez — enforce timezone-aware datetime usage
+    "BLE",   # flake8-blind-except — disallow blind `except Exception`
+    "RUF006",    # asyncio dangling task — store references to tasks
+    "ASYNC210",  # async — no blocking HTTP calls (e.g. urllib/requests)
+    "ASYNC212",  # async — no blocking httpx calls in async functions
+    "ASYNC220",  # async — no blocking subprocess calls
+    "ASYNC230",  # async — no blocking file I/O (e.g. open())
+    "ASYNC240",  # async — no blocking os.path calls in async functions
+    "ASYNC251",  # async — no time.sleep in async functions
+]
+ignore = [
+    "E501",  # line too long, handled by ruff format
+    "B008",  # do not perform function calls in argument defaults (used by FastAPI Depends)
+    "C901",  # too complex
+    "G201",  # .error(exc_info=True) is intentional with structlog (equivalent to .exception())
+]
+
+[lint.per-file-ignores]
+"__init__.py" = ["F401"]
+"tests/**/*" = ["B011", "DTZ"]
+"tests/**/conftest.py" = ["E402"]
+"tests/conftest.py" = ["E402"]
+"test_*.py" = ["DTZ"]
+"verify_*.py" = ["DTZ", "BLE001"]
+"scripts/**/*" = ["BLE001"]
+
+[format]
+# Use double quotes for strings
+quote-style = "double"
+# Use spaces around the equals sign
+indent-style = "space"
+# Respect magic trailing commas
+skip-magic-trailing-comma = false
+# Automatically detect line ending
+line-ending = "auto"

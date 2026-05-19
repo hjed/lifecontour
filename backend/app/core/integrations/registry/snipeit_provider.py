@@ -65,7 +65,7 @@ class SnipeItIntegrationProvider:
             if auth_row:
                 is_connected = True
                 needs_reauth = bool(auth_row.needs_reauth)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             # Gracefully degrade if table doesn't exist yet (e.g. during deployment)
             logger.warning(
                 "Failed to query user_snipe_it_auth",
@@ -88,7 +88,7 @@ class SnipeItIntegrationProvider:
             """)
             sync_result = await connection.execute(sync_stmt, {"user_id": user_id})
             sync_row = sync_result.fetchone()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(
                 "Failed to query sync_jobs for Snipe-IT",
                 user_id=user_id,

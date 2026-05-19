@@ -1691,7 +1691,7 @@ async def auto_merge_review_items(
                     transaction=connection,
                 )
             merged_count += 1
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "Auto-merge failed for review item",
                 review_item_id=item.id,

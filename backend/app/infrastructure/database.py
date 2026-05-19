@@ -106,7 +106,7 @@ def check_database_connection() -> bool:
         with engine.connect() as connection:
             result = connection.execute(text("SELECT 1"))
             return result.scalar() == 1
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error("Database connection check failed", error=str(e))
         return False
 

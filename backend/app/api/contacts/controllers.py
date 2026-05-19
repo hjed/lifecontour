@@ -5,7 +5,8 @@ Handles contact-related HTTP endpoints following JSON API specification.
 Controllers act as adapters between HTTP and domain services.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
+from typing import Annotated
 
 import structlog
 from core_shared.models.contacts.exceptions import ContactValidationError
@@ -118,14 +119,14 @@ async def list_contacts(
     request: Request,
     contact_service: FromDishka[ContactService],
     _user: FromDishka[SessionUser],  # Require authentication
-    page: int = Query(default=1, description=PAGE_NUMBER_DESCRIPTION, ge=1),
-    limit: int = Query(
-        default=20, description=ITEMS_PER_PAGE_DESCRIPTION, ge=1, le=100
-    ),
-    favourite: bool | None = Query(
-        default=None, description="Filter by favourite status"
-    ),
-    tag_ids: list[int] | None = Query(default=None, description="Filter by tag IDs"),
+    page: Annotated[int, Query(description=PAGE_NUMBER_DESCRIPTION, ge=1)] = 1,
+    limit: Annotated[
+        int, Query(description=ITEMS_PER_PAGE_DESCRIPTION, ge=1, le=100)
+    ] = 20,
+    favourite: Annotated[
+        bool | None, Query(description="Filter by favourite status")
+    ] = None,
+    tag_ids: Annotated[list[int] | None, Query(description="Filter by tag IDs")] = None,
 ) -> ContactListResponse:
     """
     List contacts with pagination.
@@ -504,7 +505,7 @@ async def update_contact_field(
                 field_type="basic",
                 old_value=old_value,
                 new_value=new_value,
-                updated_at=datetime.now(),
+                updated_at=datetime.now(tz=UTC),
             ),
         )
 
@@ -560,7 +561,7 @@ async def update_contact_method_field(
                 entity_id=method_id,
                 old_value=old_value,
                 new_value=new_value,
-                updated_at=datetime.now(),
+                updated_at=datetime.now(tz=UTC),
             ),
         )
 
@@ -616,7 +617,7 @@ async def update_contact_address_field(
                 entity_id=address_id,
                 old_value=old_value,
                 new_value=new_value,
-                updated_at=datetime.now(),
+                updated_at=datetime.now(tz=UTC),
             ),
         )
 
@@ -672,7 +673,7 @@ async def update_contact_note_field(
                 entity_id=note_id,
                 old_value=old_value,
                 new_value=new_value,
-                updated_at=datetime.now(),
+                updated_at=datetime.now(tz=UTC),
             ),
         )
 
@@ -692,10 +693,10 @@ async def get_contact_history(
     contact_service: FromDishka[ContactService],
     history_service: FromDishka[ContactHistoryService],
     _user: FromDishka[SessionUser],  # Require authentication
-    page: int = Query(default=1, description=PAGE_NUMBER_DESCRIPTION, ge=1),
-    limit: int = Query(
-        default=20, description=ITEMS_PER_PAGE_DESCRIPTION, ge=1, le=100
-    ),
+    page: Annotated[int, Query(description=PAGE_NUMBER_DESCRIPTION, ge=1)] = 1,
+    limit: Annotated[
+        int, Query(description=ITEMS_PER_PAGE_DESCRIPTION, ge=1, le=100)
+    ] = 20,
 ) -> ContactHistoryListResponse:
     """
     Get field change history for a contact.
@@ -925,13 +926,13 @@ async def get_contact_journals(
     route_repo: FromDishka[RouteRepository],
     contact_repo: FromDishka[ContactRepository],
     _user: FromDishka[SessionUser],  # Require authentication
-    page: int = Query(default=1, description=PAGE_NUMBER_DESCRIPTION, ge=1),
-    limit: int = Query(
-        default=20, description=ITEMS_PER_PAGE_DESCRIPTION, ge=1, le=100
-    ),
-    relationship_type: str | None = Query(
-        default=None, description="Filter by relationship type"
-    ),
+    page: Annotated[int, Query(description=PAGE_NUMBER_DESCRIPTION, ge=1)] = 1,
+    limit: Annotated[
+        int, Query(description=ITEMS_PER_PAGE_DESCRIPTION, ge=1, le=100)
+    ] = 20,
+    relationship_type: Annotated[
+        str | None, Query(description="Filter by relationship type")
+    ] = None,
 ) -> JournalListResponse:
     """
     Get all journals associated with a contact.

@@ -147,14 +147,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             )
             for (_, name), result in zip(active_tasks, results, strict=True):
                 if isinstance(result, asyncio.CancelledError):
-                    logger.info(f"{name} background task stopped")
+                    logger.info("Background task stopped", task_name=name)
                 elif isinstance(result, BaseException):
                     logger.error(
-                        f"{name} background task raised during shutdown",
+                        "Background task raised during shutdown",
+                        task_name=name,
                         error=str(result),
                     )
                 else:
-                    logger.info(f"{name} background task stopped")
+                    logger.info("Background task stopped", task_name=name)
 
         # Close Dishka container
         await container.close()

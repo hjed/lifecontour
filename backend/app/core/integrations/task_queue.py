@@ -139,7 +139,11 @@ async def example_integration_task(
         Task result dictionary
     """
     logger = ctx.get("logger", logging.getLogger("arq.worker"))
-    logger.info(f"Processing integration task: {integration_source}:{external_id}")
+    logger.info(
+        "Processing integration task: %s:%s",
+        integration_source,
+        external_id,
+    )
 
     # Simulate some work
     import asyncio

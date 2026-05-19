@@ -5,6 +5,8 @@ Handles tag-related HTTP endpoints following JSON API specification.
 Controllers act as adapters between HTTP and domain services.
 """
 
+from typing import Annotated
+
 import structlog
 from core_shared.models.contacts.entities import Tag
 from core_shared.models.contacts.value_objects import TagName
@@ -39,7 +41,7 @@ async def list_tags(
     request: Request,
     tag_repo: FromDishka[TagRepository],
     user: FromDishka[SessionUser],  # Require authentication
-    limit: int = Query(default=1000, description="Items per page", ge=1, le=1000),
+    limit: Annotated[int, Query(description="Items per page", ge=1, le=1000)] = 1000,
 ) -> TagListResponse:
     """
     List all available tags.

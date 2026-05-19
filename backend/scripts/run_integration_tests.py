@@ -218,7 +218,7 @@ def start_test_services() -> bool:
             if result.returncode == 0:
                 print("  ✓ Test MeiliSearch is ready")
                 break
-        except Exception:
+        except Exception:  # noqa: BLE001
             pass
 
         time.sleep(1)

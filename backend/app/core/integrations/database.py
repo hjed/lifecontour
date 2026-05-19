@@ -101,7 +101,7 @@ class IntegrationDatabaseManager:
             logger.debug("Created new database session for integration task")
             yield session
         except Exception as e:
-            logger.error(f"Database error in integration task: {e}")
+            logger.error("Database error in integration task: %s", e)
             await session.rollback()
             raise
         finally:

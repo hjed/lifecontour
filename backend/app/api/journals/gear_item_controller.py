@@ -3,6 +3,7 @@ Gear Item REST API controller.
 """
 
 import uuid
+from typing import Annotated
 
 from core_shared.models.journals.gear_item import GearItem
 from dishka.integrations.fastapi import FromDishka, inject
@@ -24,7 +25,7 @@ from app.infrastructure.events.outbox_event_publisher import OutboxEventPublishe
 router = APIRouter(prefix="/gear-items", tags=["Gear Items"])
 
 
-@router.post("", response_model=GearItemResponse, status_code=201)
+@router.post("", status_code=201)
 @inject
 async def create_gear_item(
     request: GearItemCreateRequest,
@@ -54,13 +55,13 @@ async def create_gear_item(
     return GearItemResponse(data=resource)
 
 
-@router.get("", response_model=GearItemListResponse)
+@router.get("")
 @inject
 async def get_gear_items(
     repo: FromDishka[GearItemRepository],
     user: FromDishka[SessionUser],
     req: Request,
-    name: str | None = Query(None, description="Filter by name"),
+    name: Annotated[str | None, Query(description="Filter by name")] = None,
 ) -> GearItemListResponse:
     """Get list of gear items for the current user."""
     if name:
@@ -75,7 +76,7 @@ async def get_gear_items(
     return GearItemListResponse(data=resources)
 
 
-@router.get("/{gear_item_id}", response_model=GearItemResponse)
+@router.get("/{gear_item_id}")
 @inject
 async def get_gear_item(
     gear_item_id: uuid.UUID,
@@ -94,7 +95,7 @@ async def get_gear_item(
     return GearItemResponse(data=resource)
 
 
-@router.put("/{gear_item_id}", response_model=GearItemResponse)
+@router.put("/{gear_item_id}")
 @inject
 async def update_gear_item(
     gear_item_id: uuid.UUID,

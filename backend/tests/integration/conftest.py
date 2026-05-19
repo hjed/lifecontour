@@ -550,7 +550,7 @@ def _is_dev_database_available() -> bool:
         )
         conn.close()
         return True
-    except Exception:
+    except (psycopg2.Error, OSError):
         return False
 
 

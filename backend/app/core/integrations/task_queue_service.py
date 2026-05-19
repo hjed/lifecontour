@@ -107,7 +107,7 @@ class TaskQueueService:
             carrier: dict[str, str] = {}
             try:
                 inject(carrier)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 pass
 
             # Enqueue the sync job
@@ -198,7 +198,7 @@ class TaskQueueService:
             carrier: dict[str, str] = {}
             try:
                 inject(carrier)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 pass
 
             job = await pool.enqueue_job(
@@ -288,7 +288,7 @@ class TaskQueueService:
             carrier: dict[str, str] = {}
             try:
                 inject(carrier)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 pass
 
             job = await pool.enqueue_job(
@@ -375,7 +375,7 @@ class TaskQueueService:
             carrier: dict[str, str] = {}
             try:
                 inject(carrier)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 pass
 
             job = await pool.enqueue_job(
@@ -674,7 +674,7 @@ class TaskQueueService:
                 "checked_at": datetime.now(UTC).isoformat(),
             }
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("Queue health check failed", error=str(e))
             return {
                 "status": "unhealthy",
@@ -725,7 +725,7 @@ class TaskQueueService:
             expiry_seconds = self.settings.task_queue_user_job_expiry_hours * 3600
             await pool.expire(key, expiry_seconds)
             logger.debug("Stored user-job association", user_id=user_id, job_id=job_id)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(
                 "Failed to store user-job association",
                 user_id=user_id,
@@ -759,7 +759,7 @@ class TaskQueueService:
                 owns_job=owns_job,
             )
             return owns_job
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(
                 "Failed to verify user-job ownership",
                 user_id=user_id,

@@ -127,7 +127,7 @@ class GoogleEventTransformer:
 
             tz = ZoneInfo(timezone_str)
             return dt_utc.astimezone(tz)
-        except Exception:
+        except Exception:  # noqa: BLE001
             return dt_utc
 
     def _extract_timezone(self, google_event: GoogleEvent) -> str | None:
@@ -197,8 +197,12 @@ class GoogleEventTransformer:
 
     def _parse_all_day_date(self, date_str: str) -> tuple[datetime | None, bool]:
         try:
-            dt_naive = datetime.strptime(date_str, "%Y-%m-%d")
-            dt_utc = dt_naive.replace(tzinfo=UTC)
+            from datetime import date
+
+            parsed_date = date.fromisoformat(date_str)
+            dt_utc = datetime(
+                parsed_date.year, parsed_date.month, parsed_date.day, tzinfo=UTC
+            )
             return dt_utc, True
         except ValueError:
             return None, False
@@ -217,7 +221,7 @@ class GoogleEventTransformer:
 
                         tz = ZoneInfo(time_zone_str)
                         dt = dt.replace(tzinfo=tz)
-                    except Exception:
+                    except Exception:  # noqa: BLE001
                         dt = dt.replace(tzinfo=UTC)
                 else:
                     dt = dt.replace(tzinfo=UTC)
@@ -273,7 +277,7 @@ class GoogleEventTransformer:
                     from zoneinfo import ZoneInfo
 
                     tz = ZoneInfo(calendar_info.timezone)
-                except Exception:
+                except Exception:  # noqa: BLE001
                     pass
 
             if calendar_info.start_time is not None:

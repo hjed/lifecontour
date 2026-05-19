@@ -363,7 +363,7 @@ class OutboxEventProcessor:
                 reference_id=reference_id,
                 reference_data_preview=reference_data[:200],
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(
                 "Unexpected error parsing reference_data",
                 error=str(e),
@@ -743,7 +743,7 @@ class OutboxEventProcessor:
                 external_entity_id=external_id,
                 reference_data=json.dumps(initial_ref_data),
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(
                 "Failed to create external reference",
                 contact_id=created_contact.id,
@@ -765,7 +765,7 @@ class OutboxEventProcessor:
                 version_hash=version_hash,
                 sync_status=SyncStatus.SUCCESS,
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(
                 "Failed to create sync metadata - will be created on first update",
                 contact_id=created_contact.id,
@@ -959,7 +959,7 @@ class OutboxEventProcessor:
         # and synced_tags metadata will self-heal on the next sync cycle.
         try:
             await self._update_synced_tags_reference(existing_ref, contact_data)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(
                 "Failed to update synced_tags reference data after contact update",
                 error=str(e),
@@ -980,7 +980,7 @@ class OutboxEventProcessor:
                 version_hash=new_version_hash,
                 sync_status=SyncStatus.SUCCESS,
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(
                 "Failed to update sync metadata",
                 contact_id=updated_contact.id,

@@ -33,7 +33,7 @@ router = APIRouter(
 )
 
 
-@router.get("", response_model=ContactRelationshipListResponse)
+@router.get("")
 @inject
 async def get_contact_relationships(
     contact_id: int,
@@ -63,7 +63,7 @@ async def get_contact_relationships(
     return ContactRelationshipListResponse(data=relationship_resources)
 
 
-@router.get("/{relationship_id}", response_model=ContactRelationshipResponse)
+@router.get("/{relationship_id}")
 @inject
 async def get_contact_relationship(
     contact_id: int,
@@ -107,9 +107,7 @@ async def get_contact_relationship(
     return ContactRelationshipResponse(data=relationship_resource)
 
 
-@router.post(
-    "", response_model=ContactRelationshipResponse, status_code=status.HTTP_201_CREATED
-)
+@router.post("", status_code=status.HTTP_201_CREATED)
 @inject
 async def create_contact_relationship(
     contact_id: int,
@@ -181,7 +179,7 @@ async def create_contact_relationship(
     return ContactRelationshipResponse(data=relationship_resource)
 
 
-@router.put("/{relationship_id}", response_model=ContactRelationshipResponse)
+@router.put("/{relationship_id}")
 @inject
 async def update_contact_relationship(
     contact_id: int,

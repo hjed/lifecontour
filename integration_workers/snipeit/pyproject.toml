@@ -54,37 +54,13 @@ build-backend = "hatchling.build"
 packages = ["."]
 
 [tool.ruff]
+extend = "../../ruff.toml"
 target-version = "py312"
-line-length = 88
 
-[tool.ruff.lint]
-select = [
-    "E",  # pycodestyle errors
-    "W",  # pycodestyle warnings
-    "F",  # pyflakes
-    "I",  # isort
-    "B",  # flake8-bugbear
-    "C4", # flake8-comprehensions
-    "UP", # pyupgrade
-]
-ignore = [
-    "E501", # line too long, handled by formatter
-]
-
-[tool.ruff.lint.per-file-ignores]
-"__init__.py" = ["F401"]
-"tests/**/*" = ["B011"]
+[tool.ruff.lint.extend-per-file-ignores]
+"tests/**/*" = ["B011", "DTZ"]
 "tests/**/conftest.py" = ["E402"]
-
-[tool.ruff.format]
-# Use double quotes for strings
-quote-style = "double"
-# Use spaces around the equals sign
-indent-style = "space"
-# Respect magic trailing commas
-skip-magic-trailing-comma = false
-# Automatically detect line ending
-line-ending = "auto"
+"tests/conftest.py" = ["E402"]
 
 [tool.mypy]
 python_version = "3.12"

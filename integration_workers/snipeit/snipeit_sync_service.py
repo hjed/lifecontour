@@ -308,7 +308,7 @@ class SnipeItSyncService:
                                         "error_message": str(exc),
                                     },
                                 )
-                    except Exception:
+                    except Exception:  # noqa: BLE001
                         pass
 
                     raise _AssetFailed from exc
@@ -500,7 +500,7 @@ class SnipeItSyncService:
                 skipped += 1
             except _MaintenanceFailed:
                 failed += 1
-            except Exception:
+            except Exception:  # noqa: BLE001
                 logger.warning(
                     "Unexpected error syncing maintenance record",
                     maintenance_id=maintenance_id,
