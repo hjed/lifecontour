@@ -19,6 +19,8 @@ _SNIPEIT_EVENT_TYPES = frozenset(
     {
         "snipeit.webhook_received",
         "GearItemUpdated",
+        "JournalCreated",
+        "JournalUpdated",
     }
 )
 
@@ -65,6 +67,10 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
 
         if event.event_type == "GearItemUpdated":
             await self._handle_gear_item_updated(event)
+            return
+
+        if event.event_type in ("JournalCreated", "JournalUpdated"):
+            await self._handle_journal_maintenance_event(event)
             return
 
         if event.event_type != "snipeit.webhook_received":
@@ -310,6 +316,117 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
                 raise  # Re-raise to prevent ACK and trigger stream consumer retry
             finally:
                 await sync_service._api_client.close()
+
+    async def _handle_journal_maintenance_event(self, event: StreamEvent) -> None:
+        """Process JournalCreated/JournalUpdated events for GEAR_MAINTENANCE outbound sync.
+
+        Checks if the journal has GEAR_MAINTENANCE type data, then pushes
+        the creation or update to Snipe-IT for users with active Snipe-IT settings.
+        """
+        journal_id = event.event_data.get("journal_id")
+        if not journal_id:
+            logger.debug("Skipping journal event: missing journal_id")
+            return
+
+        from sqlalchemy import text
+
+        from snipeit_api_client import SnipeItAPIError
+        from snipeit_settings import SnipeItWorkerSettings
+        from worker import _create_sync_service, _get_auth_data
+
+        worker_settings = SnipeItWorkerSettings()  # type: ignore[call-arg]
+
+        async with self._session_factory() as session:
+            # Look up the journal's user via snipeit_settings
+            # The journal_id's user_id comes from event_data for JournalCreated,
+            # or we can look it up from the journals table
+            user_id = event.event_data.get("user_id")
+            if not user_id:
+                # For JournalUpdated, user_id may not be in event_data;
+                # we'll rely on the journal_id being passed to the sync service
+                # which queries the journal table directly.
+                # For now, look up which user owns this journal.
+                pass
+
+            # Find users with Snipe-IT configured that own this journal
+            result = await session.execute(
+                text("""
+                    SELECT s.user_id, s.base_url, s.snipeit_user_id
+                    FROM snipeit_settings s
+                    JOIN journals j ON j.user_id = s.user_id
+                    WHERE j.id = :journal_id
+                """),
+                {"journal_id": journal_id},
+            )
+            settings_row = result.fetchone()
+
+            if not settings_row:
+                logger.debug(
+                    "Skipping journal event: no Snipe-IT settings for journal owner",
+                    journal_id=journal_id,
+                )
+                return
+
+            # Check if journal has GEAR_MAINTENANCE type data
+            maint_result = await session.execute(
+                text("""
+                    SELECT journal_id
+                    FROM journal_gear_maintenance_data
+                    WHERE journal_id = :journal_id
+                """),
+                {"journal_id": journal_id},
+            )
+            if not maint_result.fetchone():
+                logger.debug(
+                    "Skipping journal event: not a GEAR_MAINTENANCE journal",
+                    journal_id=journal_id,
+                )
+                return
+
+        auth_data = await _get_auth_data(self._session_factory, settings_row.user_id)
+        if not auth_data:
+            logger.debug(
+                "Skipping journal event: missing auth data",
+                journal_id=journal_id,
+            )
+            return
+
+        sync_service = _create_sync_service(
+            user_id=settings_row.user_id,
+            auth_data=auth_data,
+            base_url=settings_row.base_url,
+            snipeit_user_id=settings_row.snipeit_user_id,
+            worker_settings=worker_settings,
+            session_factory=self._session_factory,
+        )
+
+        try:
+            if event.event_type == "JournalCreated":
+                await sync_service.push_maintenance_create(
+                    journal_id=journal_id,
+                    session_factory=self._session_factory,
+                )
+            else:
+                await sync_service.push_maintenance_update(
+                    journal_id=journal_id,
+                    session_factory=self._session_factory,
+                )
+            logger.info(
+                "Successfully processed journal maintenance event",
+                journal_id=journal_id,
+                event_type=event.event_type,
+            )
+        except SnipeItAPIError as exc:
+            if exc.status_code in (403, 404):
+                logger.debug(
+                    "Skipping journal maintenance export (not found/forbidden)",
+                    journal_id=journal_id,
+                    status_code=exc.status_code,
+                )
+            else:
+                raise
+        finally:
+            await sync_service._api_client.close()
 
 
 async def run_snipeit_stream_consumer(

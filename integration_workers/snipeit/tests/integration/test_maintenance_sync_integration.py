@@ -318,3 +318,243 @@ class TestMaintenanceSyncIntegration:
 
         assert result["skipped"] == 1
         assert result["synced"] == 0
+
+
+class TestOutboundMaintenanceSyncIntegration:
+    """Integration tests for outbound maintenance sync (app → Snipe-IT)."""
+
+    @pytest.mark.asyncio
+    async def test_push_maintenance_create_posts_to_snipeit(
+        self,
+        sync_service: SnipeItSyncService,
+        mock_transport: MockTransport,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """Verify push_maintenance_create POSTs a new maintenance record to Snipe-IT.
+
+        Steps:
+        1. Create prerequisite gear item, journal, maintenance data, and
+           asset sync_metadata.
+        2. Mock the Snipe-IT POST /maintenances API response.
+        3. Run push_maintenance_create.
+        4. Assert POST was made (mock consumed).
+        5. Assert sync_metadata was created for the maintenance record.
+        """
+        # Step 1: Insert gear item
+        gear_item_result = await async_connection.execute(
+            text("""
+                INSERT INTO gear_items (name, user_id)
+                VALUES ('Test Rope', 'user-123')
+                RETURNING id
+            """)
+        )
+        gear_item_row = gear_item_result.fetchone()
+        assert gear_item_row is not None
+        gear_item_id = str(gear_item_row.id)
+
+        # Insert asset sync_metadata (gear_item → Snipe-IT asset 42)
+        await async_connection.execute(
+            text("""
+                INSERT INTO sync_metadata
+                    (integration_source, external_id, internal_uuid,
+                     last_synced_at, version_hash, sync_status,
+                     error_message, retry_count, created_at, updated_at)
+                VALUES
+                    ('snipeit', '42', :gear_item_id,
+                     now(), 'test-hash', 'success',
+                     NULL, 0, now(), now())
+            """),
+            {"gear_item_id": gear_item_id},
+        )
+
+        # Insert journal
+        journal_result = await async_connection.execute(
+            text("""
+                INSERT INTO journals (title, content, user_id,
+                    event_date_range_start, event_date_range_end)
+                VALUES ('Rope Inspection', 'All ropes checked', 'user-123',
+                    '2024-06-01', '2024-06-02')
+                RETURNING id
+            """)
+        )
+        journal_row = journal_result.fetchone()
+        assert journal_row is not None
+        journal_id = journal_row.id
+
+        # Insert journal_gear_maintenance_data
+        await async_connection.execute(
+            text("""
+                INSERT INTO journal_gear_maintenance_data
+                    (journal_id, gear_item_id, maintenance_type)
+                VALUES (:journal_id, :gear_item_id, 'routine inspection')
+            """),
+            {"journal_id": journal_id, "gear_item_id": gear_item_id},
+        )
+
+        # Step 2: Mock Snipe-IT POST response
+        mock_transport.add_response(
+            "/maintenances",
+            json_data={
+                "status": "success",
+                "messages": "Asset Maintenance created successfully.",
+                "payload": {
+                    "id": 501,
+                    "asset_id": 42,
+                    "title": "Rope Inspection",
+                    "asset_maintenance_type": "PAT Test",
+                    "start_date": {"date": "2024-06-01"},
+                    "completion_date": {"date": "2024-06-02"},
+                    "notes": "All ropes checked",
+                },
+            },
+        )
+
+        # Step 3: Build session factory joined to test transaction
+        @asynccontextmanager
+        async def mock_session_factory() -> Any:
+            async with AsyncSession(
+                async_connection,
+                expire_on_commit=False,
+                join_transaction_mode="create_savepoint",
+            ) as session:
+                yield session
+
+        await sync_service.push_maintenance_create(
+            journal_id=journal_id,
+            session_factory=mock_session_factory,
+        )
+
+        # Step 4: All mock responses consumed (POST was made)
+        assert len(mock_transport.responses) == 0
+
+        # Step 5: Verify sync_metadata was created
+        meta_result = await async_connection.execute(
+            text("""
+                SELECT internal_uuid, sync_status
+                FROM sync_metadata
+                WHERE integration_source = 'snipeit_maintenance'
+                  AND external_id = 'snipeit_maint:501'
+            """)
+        )
+        meta_row = meta_result.fetchone()
+        assert meta_row is not None
+        assert meta_row.internal_uuid == str(journal_id)
+        assert meta_row.sync_status == "success"
+
+    @pytest.mark.asyncio
+    async def test_push_maintenance_update_patches_snipeit(
+        self,
+        sync_service: SnipeItSyncService,
+        mock_transport: MockTransport,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """Verify push_maintenance_update PATCHes an existing Snipe-IT maintenance record.
+
+        Steps:
+        1. Create gear item, journal, maintenance data, asset + maintenance
+           sync_metadata.
+        2. Mock the Snipe-IT PATCH /maintenances/501 response.
+        3. Run push_maintenance_update.
+        4. Assert PATCH was made (mock consumed).
+        """
+        # Step 1: Insert gear item
+        gear_item_result = await async_connection.execute(
+            text("""
+                INSERT INTO gear_items (name, user_id)
+                VALUES ('Test Harness', 'user-123')
+                RETURNING id
+            """)
+        )
+        gear_item_row = gear_item_result.fetchone()
+        assert gear_item_row is not None
+        gear_item_id = str(gear_item_row.id)
+
+        # Asset sync_metadata
+        await async_connection.execute(
+            text("""
+                INSERT INTO sync_metadata
+                    (integration_source, external_id, internal_uuid,
+                     last_synced_at, version_hash, sync_status,
+                     error_message, retry_count, created_at, updated_at)
+                VALUES
+                    ('snipeit', '55', :gear_item_id,
+                     now(), 'test-hash', 'success',
+                     NULL, 0, now(), now())
+            """),
+            {"gear_item_id": gear_item_id},
+        )
+
+        # Insert journal
+        journal_result = await async_connection.execute(
+            text("""
+                INSERT INTO journals (title, content, user_id,
+                    event_date_range_start, event_date_range_end)
+                VALUES ('Updated Harness Check', 'Updated notes', 'user-123',
+                    '2024-07-01', '2024-07-03')
+                RETURNING id
+            """)
+        )
+        journal_row = journal_result.fetchone()
+        assert journal_row is not None
+        journal_id = journal_row.id
+
+        # Journal gear maintenance data
+        await async_connection.execute(
+            text("""
+                INSERT INTO journal_gear_maintenance_data
+                    (journal_id, gear_item_id, maintenance_type)
+                VALUES (:journal_id, :gear_item_id, 'repairing gear')
+            """),
+            {"journal_id": journal_id, "gear_item_id": gear_item_id},
+        )
+
+        # Maintenance sync_metadata (journal → snipeit_maint:501)
+        await async_connection.execute(
+            text("""
+                INSERT INTO sync_metadata
+                    (integration_source, external_id, internal_uuid,
+                     last_synced_at, version_hash, sync_status,
+                     error_message, retry_count, created_at, updated_at)
+                VALUES
+                    ('snipeit_maintenance', 'snipeit_maint:501', :journal_id,
+                     now(), '', 'success',
+                     NULL, 0, now(), now())
+            """),
+            {"journal_id": str(journal_id)},
+        )
+
+        # Step 2: Mock Snipe-IT PATCH response
+        mock_transport.add_response(
+            "/maintenances/501",
+            json_data={
+                "status": "success",
+                "messages": "Asset Maintenance updated successfully.",
+                "payload": {
+                    "id": 501,
+                    "asset_id": 55,
+                    "title": "Updated Harness Check",
+                    "asset_maintenance_type": "Repair",
+                    "start_date": {"date": "2024-07-01"},
+                    "completion_date": {"date": "2024-07-03"},
+                    "notes": "Updated notes",
+                },
+            },
+        )
+
+        # Step 3
+        @asynccontextmanager
+        async def mock_session_factory() -> Any:
+            async with AsyncSession(
+                async_connection,
+                expire_on_commit=False,
+                join_transaction_mode="create_savepoint",
+            ) as session:
+                yield session
+
+        await sync_service.push_maintenance_update(
+            journal_id=journal_id,
+            session_factory=mock_session_factory,
+        )
+
+        # Step 4: All mock responses consumed (PATCH was made)
+        assert len(mock_transport.responses) == 0

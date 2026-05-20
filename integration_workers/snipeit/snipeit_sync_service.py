@@ -9,7 +9,10 @@ and upserts them into the database. Sync state is tracked via ``SyncMetadata``.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 from collections.abc import AsyncIterator
+from datetime import date, datetime
 from typing import Any
 
 import httpx
@@ -25,6 +28,22 @@ logger = structlog.get_logger(__name__)
 
 # Maximum assets per Snipe-IT API page
 _PAGE_SIZE = 50
+
+
+def _format_date_for_snipeit(value: date | datetime | str | None) -> str | None:
+    """Format a date/datetime value as ``YYYY-MM-DD`` for the Snipe-IT API.
+
+    Handles ``datetime``, ``date``, and ISO-formatted strings.
+    Returns ``None`` for falsy inputs.
+    """
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, date):
+        return value.isoformat()
+    # Already a string — extract just the date portion
+    return str(value)[:10]
 
 
 # Internal signalling exceptions
@@ -681,4 +700,286 @@ class SnipeItSyncService:
             "Created outbox event for Snipe-IT maintenance",
             maintenance_id=maintenance_id,
             sync_action=sync_action,
+        )
+
+    # -- Outbound Maintenance Sync Methods ----------------------------------
+
+    async def _fetch_journal_and_maintenance_data(
+        self,
+        journal_id: int,
+        session_factory: Any,
+    ) -> tuple[Any, Any, Any] | None:
+        """Fetch journal, gear-maintenance, and asset-sync data for outbound push.
+
+        Returns a ``(journal_row, maintenance_data_row, asset_sync_meta_row)``
+        tuple, or ``None`` if any prerequisite is missing (logged and skipped).
+        """
+        async with session_factory() as session:
+            # 1. Get journal data
+            journal_result = await session.execute(
+                text("""
+                    SELECT title, content, event_date_range_start, event_date_range_end
+                    FROM journals
+                    WHERE id = :journal_id
+                """),
+                {"journal_id": journal_id},
+            )
+            journal_row = journal_result.fetchone()
+            if not journal_row:
+                logger.debug(
+                    "Skipping outbound maintenance push: journal not found",
+                    journal_id=journal_id,
+                )
+                return None
+
+            # 2. Get gear maintenance data
+            maint_result = await session.execute(
+                text("""
+                    SELECT gear_item_id, maintenance_type
+                    FROM journal_gear_maintenance_data
+                    WHERE journal_id = :journal_id
+                """),
+                {"journal_id": journal_id},
+            )
+            maintenance_data_row = maint_result.fetchone()
+            if not maintenance_data_row:
+                logger.debug(
+                    "Skipping outbound maintenance push: no gear maintenance data",
+                    journal_id=journal_id,
+                )
+                return None
+
+            # 3. Get asset sync metadata (gear_item → Snipe-IT asset ID)
+            gear_item_id = str(maintenance_data_row.gear_item_id)
+            asset_meta_result = await session.execute(
+                text("""
+                    SELECT external_id
+                    FROM sync_metadata
+                    WHERE integration_source = 'snipeit'
+                      AND internal_uuid = :gear_item_id
+                """),
+                {"gear_item_id": gear_item_id},
+            )
+            asset_sync_meta_row = asset_meta_result.fetchone()
+            if not asset_sync_meta_row:
+                logger.debug(
+                    "Skipping outbound maintenance push: gear item not synced to Snipe-IT",
+                    journal_id=journal_id,
+                    gear_item_id=gear_item_id,
+                )
+                return None
+
+        return journal_row, maintenance_data_row, asset_sync_meta_row
+
+    async def push_maintenance_create(
+        self,
+        journal_id: int,
+        session_factory: Any,
+    ) -> None:
+        """Push a new GEAR_MAINTENANCE journal to Snipe-IT as a maintenance record.
+
+        Args:
+            journal_id: Internal journal ID.
+            session_factory: Async session factory for DB queries.
+        """
+        data = await self._fetch_journal_and_maintenance_data(
+            journal_id, session_factory
+        )
+        if not data:
+            return
+
+        journal_row, maintenance_data_row, asset_sync_meta_row = data
+
+        # Check if already synced (prevent duplicates on retries)
+        async with session_factory() as session:
+            maint_meta_result = await session.execute(
+                text("""
+                    SELECT 1
+                    FROM sync_metadata
+                    WHERE integration_source = 'snipeit_maintenance'
+                      AND internal_uuid = :journal_id
+                """),
+                {"journal_id": str(journal_id)},
+            )
+            if maint_meta_result.fetchone():
+                logger.debug(
+                    "Skipping maintenance create: already synced to Snipe-IT",
+                    journal_id=journal_id,
+                )
+                return
+
+        # Build Snipe-IT payload via reverse transformer
+        payload = SnipeItMaintenanceTransformer.reverse_transform(
+            title=journal_row.title or "",
+            content=journal_row.content or "",
+            maintenance_type=maintenance_data_row.maintenance_type
+            or "routine maintenance",
+            start_date=_format_date_for_snipeit(journal_row.event_date_range_start),
+            end_date=_format_date_for_snipeit(journal_row.event_date_range_end),
+        )
+
+        try:
+            snipeit_asset_id = int(asset_sync_meta_row.external_id)
+        except (ValueError, TypeError):
+            logger.warning(
+                "Invalid asset sync metadata external_id",
+                external_id=asset_sync_meta_row.external_id,
+                journal_id=journal_id,
+            )
+            return
+
+        # POST to Snipe-IT
+        try:
+            created = await self._api_client.create_maintenance(
+                asset_id=snipeit_asset_id,
+                payload=payload,
+            )
+        except SnipeItAPIError as exc:
+            if exc.status_code in (403, 404):
+                logger.warning(
+                    "Snipe-IT maintenance create failed (not found/forbidden)",
+                    journal_id=journal_id,
+                    snipeit_asset_id=snipeit_asset_id,
+                    status_code=exc.status_code,
+                )
+                return
+            raise
+
+        # Save sync metadata: journal_id → snipeit_maint:{id}
+        external_id = f"snipeit_maint:{created.id}"
+        async with session_factory() as session:
+            async with session.begin():
+                version_hash = hashlib.sha256(
+                    json.dumps(payload, sort_keys=True).encode()
+                ).hexdigest()
+                await session.execute(
+                    text("""
+                        INSERT INTO sync_metadata
+                            (internal_uuid, integration_source, external_id,
+                             last_synced_at, version_hash, sync_status,
+                             error_message, retry_count, created_at, updated_at)
+                        VALUES
+                            (:internal_uuid, 'snipeit_maintenance', :external_id,
+                             now(), :version_hash, 'success', NULL, 0, now(), now())
+                        ON CONFLICT (integration_source, external_id)
+                        DO UPDATE SET
+                            internal_uuid = EXCLUDED.internal_uuid,
+                            last_synced_at = EXCLUDED.last_synced_at,
+                            version_hash = EXCLUDED.version_hash,
+                            sync_status = EXCLUDED.sync_status,
+                            updated_at = EXCLUDED.updated_at
+                    """),
+                    {
+                        "internal_uuid": str(journal_id),
+                        "external_id": external_id,
+                        "version_hash": version_hash,
+                    },
+                )
+
+        logger.info(
+            "Successfully pushed new maintenance to Snipe-IT",
+            journal_id=journal_id,
+            snipeit_maintenance_id=created.id,
+        )
+
+    async def push_maintenance_update(
+        self,
+        journal_id: int,
+        session_factory: Any,
+    ) -> None:
+        """Push an updated GEAR_MAINTENANCE journal to Snipe-IT.
+
+        Args:
+            journal_id: Internal journal ID.
+            session_factory: Async session factory for DB queries.
+        """
+        data = await self._fetch_journal_and_maintenance_data(
+            journal_id, session_factory
+        )
+        if not data:
+            return
+
+        journal_row, maintenance_data_row, asset_sync_meta_row = data
+
+        # Look up existing maintenance sync metadata
+        async with session_factory() as session:
+            maint_meta_result = await session.execute(
+                text("""
+                    SELECT external_id
+                    FROM sync_metadata
+                    WHERE integration_source = 'snipeit_maintenance'
+                      AND internal_uuid = :journal_id
+                """),
+                {"journal_id": str(journal_id)},
+            )
+            maint_sync_row = maint_meta_result.fetchone()
+
+        if not maint_sync_row:
+            logger.debug(
+                "Skipping outbound maintenance update: no sync metadata",
+                journal_id=journal_id,
+            )
+            return
+
+        # Extract Snipe-IT maintenance ID from external_id format "snipeit_maint:{id}"
+        external_id = maint_sync_row.external_id
+        try:
+            snipeit_maintenance_id = int(external_id.split(":")[1])
+        except (IndexError, ValueError):
+            logger.warning(
+                "Invalid maintenance sync metadata external_id",
+                external_id=external_id,
+                journal_id=journal_id,
+            )
+            return
+
+        # Build Snipe-IT payload
+        payload = SnipeItMaintenanceTransformer.reverse_transform(
+            title=journal_row.title or "",
+            content=journal_row.content or "",
+            maintenance_type=maintenance_data_row.maintenance_type
+            or "routine maintenance",
+            start_date=_format_date_for_snipeit(journal_row.event_date_range_start),
+            end_date=_format_date_for_snipeit(journal_row.event_date_range_end),
+        )
+
+        # PATCH the Snipe-IT maintenance record
+        try:
+            await self._api_client.update_maintenance(snipeit_maintenance_id, payload)
+        except SnipeItAPIError as exc:
+            if exc.status_code in (403, 404):
+                logger.warning(
+                    "Snipe-IT maintenance update failed (not found/forbidden)",
+                    journal_id=journal_id,
+                    snipeit_maintenance_id=snipeit_maintenance_id,
+                    status_code=exc.status_code,
+                )
+                return
+            raise
+
+        # Update sync metadata with new version hash and sync timestamp
+        version_hash = hashlib.sha256(
+            json.dumps(payload, sort_keys=True).encode()
+        ).hexdigest()
+        async with session_factory() as session:
+            async with session.begin():
+                await session.execute(
+                    text("""
+                        UPDATE sync_metadata
+                        SET version_hash = :version_hash,
+                            last_synced_at = now(),
+                            updated_at = now()
+                        WHERE integration_source = 'snipeit_maintenance'
+                          AND internal_uuid = :journal_id
+                    """),
+                    {
+                        "version_hash": version_hash,
+                        "journal_id": str(journal_id),
+                    },
+                )
+
+        logger.info(
+            "Successfully pushed maintenance update to Snipe-IT",
+            journal_id=journal_id,
+            snipeit_maintenance_id=snipeit_maintenance_id,
         )
