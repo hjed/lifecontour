@@ -8,7 +8,7 @@ to ensure consistency across different external system integrations.
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Generic, TypeVar
+from typing import Any, TypeVar
 
 from core_shared.models.sync_metadata import SyncMetadata
 
@@ -35,7 +35,7 @@ TExternalEntity = TypeVar("TExternalEntity")
 TInternalEntity = TypeVar("TInternalEntity")
 
 
-class BaseIntegrationService(ABC, Generic[TExternalEntity, TInternalEntity]):
+class BaseIntegrationService[TExternalEntity, TInternalEntity](ABC):
     """
     Base class for all integration services.
 

@@ -1024,7 +1024,7 @@ class CalendarUpdateAttributes(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_non_nulls(self) -> "CalendarUpdateAttributes":
+    def validate_non_nulls(self) -> CalendarUpdateAttributes:
         if "name" in self.model_fields_set and self.name is None:
             raise ValueError("name cannot be null when updating")
         if "color" in self.model_fields_set and self.color is None:

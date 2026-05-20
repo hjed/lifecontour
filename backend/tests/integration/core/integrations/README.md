@@ -90,7 +90,7 @@ This pattern:
 
 - Docker and Docker Compose installed
 - PostgreSQL test database (automatically started by test fixtures)
-- Python 3.11+ with dependencies installed
+- Python 3.14+ with dependencies installed
 
 ### Run Tests
 

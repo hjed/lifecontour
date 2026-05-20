@@ -39,7 +39,7 @@ def get_docker_compose_cmd() -> list[str]:
         )
         if "Docker Compose" in result.stdout:
             return ["docker", "compose"]
-    except (subprocess.CalledProcessError, FileNotFoundError):
+    except subprocess.CalledProcessError, FileNotFoundError:
         pass
 
     # Try docker-compose (standalone version)
@@ -49,7 +49,7 @@ def get_docker_compose_cmd() -> list[str]:
         )
         if "docker-compose" in result.stdout:
             return ["docker-compose"]
-    except (subprocess.CalledProcessError, FileNotFoundError):
+    except subprocess.CalledProcessError, FileNotFoundError:
         pass
 
     # Default to docker compose (newer version)
@@ -94,7 +94,7 @@ def check_docker() -> bool:
         else:
             print("✓ Docker and Docker Compose (plugin) are available")
         return True
-    except (subprocess.CalledProcessError, FileNotFoundError):
+    except subprocess.CalledProcessError, FileNotFoundError:
         print("✗ Docker or Docker Compose not found")
         print("Please install Docker and Docker Compose to run integration tests")
         return False

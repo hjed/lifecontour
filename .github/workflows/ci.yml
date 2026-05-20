@@ -8,9 +8,9 @@ on:
   workflow_call:
 
 env:
-  PYTHON_VERSION: "3.11"
+  PYTHON_VERSION: "3.14"
   NODE_VERSION: "24"
-  UV_VERSION: "0.7.9"
+  UV_VERSION: "0.11.15"
   PNPM_VERSION: "11.0.4"
 
 jobs:
@@ -333,7 +333,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
@@ -370,7 +370,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
@@ -426,7 +426,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5

@@ -19,7 +19,7 @@ from app.infrastructure.events.summary_consumer import SummaryConsumer
 
 
 @asynccontextmanager
-async def mock_container_context() -> AsyncGenerator[MagicMock, None]:
+async def mock_container_context() -> AsyncGenerator[MagicMock]:
     yield MagicMock()
 
 

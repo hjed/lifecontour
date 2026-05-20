@@ -435,7 +435,7 @@ def monitor_performance(operation_type: str = "api"):
 ### Container Security (Python Backend)
 ```dockerfile
 # Security-focused Dockerfile additions
-FROM python:3.11-slim
+FROM python:3.14.5-slim
 
 # Create non-root user
 RUN adduser --disabled-password --gecos '' appuser

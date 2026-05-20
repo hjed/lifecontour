@@ -5,7 +5,7 @@ This document describes how to run integration tests for the Personal Management
 ## Prerequisites
 
 - Docker and Docker Compose installed
-- Python 3.11+ with dependencies installed (`uv pip install -e .[dev]`)
+- Python 3.14+ with dependencies installed (`uv pip install -e .[dev]`)
 
 ## Running Integration Tests
 

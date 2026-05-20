@@ -26,7 +26,7 @@ async def route_repository(
 @pytest_asyncio.fixture
 async def journal_repository(
     async_connection: AsyncConnection,
-) -> "SqlJournalRepository":
+) -> SqlJournalRepository:
     """Create a journal repository for testing."""
     from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 
@@ -34,7 +34,7 @@ async def journal_repository(
 
 
 @pytest_asyncio.fixture
-async def test_journal(journal_repository: "SqlJournalRepository") -> "Journal":
+async def test_journal(journal_repository: SqlJournalRepository) -> Journal:
     """Create a test journal."""
     from datetime import UTC, datetime, timedelta
 
@@ -74,7 +74,7 @@ class TestRouteRepositorySave:
     """Test route save operations."""
 
     async def test_save_creates_new_route(
-        self, route_repository: SqlRouteRepository, test_journal: "Journal"
+        self, route_repository: SqlRouteRepository, test_journal: Journal
     ):
         """Test creating a new route."""
         route = create_test_route(journal_id=test_journal.id)
@@ -89,7 +89,7 @@ class TestRouteRepositorySave:
         assert saved.updated_at is not None
 
     async def test_save_updates_existing_route(
-        self, route_repository: SqlRouteRepository, test_journal: "Journal"
+        self, route_repository: SqlRouteRepository, test_journal: Journal
     ):
         """Test updating an existing route."""
         import asyncio
@@ -117,7 +117,7 @@ class TestRouteRepositorySave:
         assert updated.updated_at > original_updated_at
 
     async def test_save_route_with_gpx_data(
-        self, route_repository: SqlRouteRepository, test_journal: "Journal"
+        self, route_repository: SqlRouteRepository, test_journal: Journal
     ):
         """Test saving a route with GPX data."""
         gpx_data = (
@@ -136,7 +136,7 @@ class TestRouteRepositoryFindById:
     """Test route find by ID operations."""
 
     async def test_find_by_id_returns_route(
-        self, route_repository: SqlRouteRepository, test_journal: "Journal"
+        self, route_repository: SqlRouteRepository, test_journal: Journal
     ):
         """Test finding a route by ID."""
         route = create_test_route(journal_id=test_journal.id)
@@ -162,7 +162,7 @@ class TestRouteRepositoryDelete:
     """Test route delete operations."""
 
     async def test_delete_removes_route(
-        self, route_repository: SqlRouteRepository, test_journal: "Journal"
+        self, route_repository: SqlRouteRepository, test_journal: Journal
     ):
         """Test deleting a route."""
         route = create_test_route(journal_id=test_journal.id)

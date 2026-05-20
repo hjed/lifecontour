@@ -90,7 +90,7 @@ class SummaryPromptBuilder:
 
         return prompt
 
-    def _system_instructions(self, now: "datetime") -> str:
+    def _system_instructions(self, now: datetime) -> str:
         current_time = now.strftime("%Y-%m-%d %H:%M:%S UTC")
         return (
             "You are an AI assistant that generates concise, evidence-grounded "

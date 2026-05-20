@@ -31,7 +31,7 @@ from app.mcp.server import create_mcp_app
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Application lifespan manager for startup and shutdown events."""
     settings: Settings = app.state.settings
     logger = structlog.get_logger()

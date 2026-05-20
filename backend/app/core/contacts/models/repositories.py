@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from typing import Any, Protocol, Union
+from typing import Any, Protocol
 
 from core_shared.models.contacts.entities import (
     Contact,
@@ -458,44 +458,38 @@ class ContactRelationshipRepository(ABC):
     """Repository interface for contact relationship operations."""
 
     @abstractmethod
-    async def create(
-        self, relationship: "ContactRelationship"
-    ) -> "ContactRelationship":
+    async def create(self, relationship: ContactRelationship) -> ContactRelationship:
         """Create a new contact relationship."""
         pass
 
     @abstractmethod
-    async def get_by_id(
-        self, relationship_id: int
-    ) -> Union["ContactRelationship", None]:
+    async def get_by_id(self, relationship_id: int) -> ContactRelationship | None:
         """Get a relationship by ID."""
         pass
 
     @abstractmethod
     async def get_relationships_for_contact(
         self, contact_id: int
-    ) -> list["ContactRelationship"]:
+    ) -> list[ContactRelationship]:
         """Get all relationships for a specific contact (both from and to)."""
         pass
 
     @abstractmethod
     async def get_relationships_from_contact(
         self, contact_id: int
-    ) -> list["ContactRelationship"]:
+    ) -> list[ContactRelationship]:
         """Get relationships where the contact is the 'from' contact."""
         pass
 
     @abstractmethod
     async def get_relationships_to_contact(
         self, contact_id: int
-    ) -> list["ContactRelationship"]:
+    ) -> list[ContactRelationship]:
         """Get relationships where the contact is the 'to' contact."""
         pass
 
     @abstractmethod
-    async def update(
-        self, relationship: "ContactRelationship"
-    ) -> "ContactRelationship":
+    async def update(self, relationship: ContactRelationship) -> ContactRelationship:
         """Update an existing relationship."""
         pass
 
@@ -521,18 +515,18 @@ class ContactSummaryRepository(ABC):
     """Repository interface for contact summary operations."""
 
     @abstractmethod
-    async def find_by_contact_id(self, contact_id: int) -> "ContactSummary | None":
+    async def find_by_contact_id(self, contact_id: int) -> ContactSummary | None:
         """Find a summary by contact ID."""
         pass
 
     @abstractmethod
-    async def upsert(self, summary: "ContactSummary") -> "ContactSummary":
+    async def upsert(self, summary: ContactSummary) -> ContactSummary:
         """Create or update a contact summary."""
         pass
 
     @abstractmethod
     async def update_status(
         self, contact_id: int, status: str
-    ) -> "ContactSummary | None":
+    ) -> ContactSummary | None:
         """Update the status of a contact summary."""
         pass

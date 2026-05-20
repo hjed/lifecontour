@@ -191,7 +191,7 @@ class TestJournalOutboxEventProcessor:
         self,
         mock_connection: AsyncMock,
         mock_journal_service: AsyncMock,
-    ) -> "JournalOutboxEventProcessor":
+    ) -> JournalOutboxEventProcessor:
         return JournalOutboxEventProcessor(
             journal_service=mock_journal_service,
             connection=mock_connection,
@@ -204,7 +204,7 @@ class TestJournalOutboxEventProcessor:
     @pytest.mark.asyncio
     async def test_process_journal_event_created(
         self,
-        processor: "JournalOutboxEventProcessor",
+        processor: JournalOutboxEventProcessor,
         mock_journal_service: AsyncMock,
         mock_connection: AsyncMock,
     ) -> None:
@@ -244,7 +244,7 @@ class TestJournalOutboxEventProcessor:
     @pytest.mark.asyncio
     async def test_ensure_calendar_exists_called_with_correct_params(
         self,
-        processor: "JournalOutboxEventProcessor",
+        processor: JournalOutboxEventProcessor,
         mock_journal_service: AsyncMock,
         mock_connection: AsyncMock,
     ) -> None:
@@ -289,7 +289,7 @@ class TestJournalOutboxEventProcessor:
     @pytest.mark.asyncio
     async def test_process_journal_event_created_no_invitees(
         self,
-        processor: "JournalOutboxEventProcessor",
+        processor: JournalOutboxEventProcessor,
         mock_journal_service: AsyncMock,
         mock_connection: AsyncMock,
     ) -> None:
@@ -319,7 +319,7 @@ class TestJournalOutboxEventProcessor:
     @pytest.mark.asyncio
     async def test_process_journal_event_updated(
         self,
-        processor: "JournalOutboxEventProcessor",
+        processor: JournalOutboxEventProcessor,
         mock_journal_service: AsyncMock,
         mock_connection: AsyncMock,
     ) -> None:
@@ -355,7 +355,7 @@ class TestJournalOutboxEventProcessor:
     @pytest.mark.asyncio
     async def test_process_journal_event_updated_preserves_local_edits(
         self,
-        processor: "JournalOutboxEventProcessor",
+        processor: JournalOutboxEventProcessor,
         mock_journal_service: AsyncMock,
         mock_connection: AsyncMock,
     ) -> None:
@@ -406,7 +406,7 @@ class TestJournalOutboxEventProcessor:
     @pytest.mark.asyncio
     async def test_process_journal_event_updated_journal_not_found(
         self,
-        processor: "JournalOutboxEventProcessor",
+        processor: JournalOutboxEventProcessor,
         mock_journal_service: AsyncMock,
         mock_connection: AsyncMock,
     ) -> None:
@@ -427,7 +427,7 @@ class TestJournalOutboxEventProcessor:
     @pytest.mark.asyncio
     async def test_process_journal_event_conflicted(
         self,
-        processor: "JournalOutboxEventProcessor",
+        processor: JournalOutboxEventProcessor,
         mock_connection: AsyncMock,
     ) -> None:
         """Conflicted events should mark the link as conflicted status."""
@@ -448,7 +448,7 @@ class TestJournalOutboxEventProcessor:
     @pytest.mark.asyncio
     async def test_process_unknown_journal_event_type(
         self,
-        processor: "JournalOutboxEventProcessor",
+        processor: JournalOutboxEventProcessor,
     ) -> None:
         """Unknown journal_event subtypes should raise an error."""
         event = _make_outbox_event(event_type="journal_event.unknown")
@@ -463,7 +463,7 @@ class TestJournalOutboxEventProcessor:
     @pytest.mark.asyncio
     async def test_process_journal_event_idempotent_same_etag(
         self,
-        processor: "JournalOutboxEventProcessor",
+        processor: JournalOutboxEventProcessor,
         mock_journal_service: AsyncMock,
         mock_connection: AsyncMock,
     ) -> None:
@@ -490,7 +490,7 @@ class TestJournalOutboxEventProcessor:
     @pytest.mark.asyncio
     async def test_etag_none_does_not_skip(
         self,
-        processor: "JournalOutboxEventProcessor",
+        processor: JournalOutboxEventProcessor,
         mock_journal_service: AsyncMock,
         mock_connection: AsyncMock,
     ) -> None:
@@ -522,7 +522,7 @@ class TestJournalOutboxEventProcessor:
     @pytest.mark.asyncio
     async def test_changed_fields_includes_date_range(
         self,
-        processor: "JournalOutboxEventProcessor",
+        processor: JournalOutboxEventProcessor,
         mock_journal_service: AsyncMock,
         mock_connection: AsyncMock,
     ) -> None:
@@ -551,7 +551,7 @@ class TestJournalOutboxEventProcessor:
     @pytest.mark.asyncio
     async def test_changed_fields_date_range_is_json_serializable(
         self,
-        processor: "JournalOutboxEventProcessor",
+        processor: JournalOutboxEventProcessor,
         mock_journal_service: AsyncMock,
         mock_connection: AsyncMock,
     ) -> None:
@@ -603,7 +603,7 @@ class TestJournalOutboxEventProcessor:
     @pytest.mark.asyncio
     async def test_calendar_info_upsert_updates_timestamp(
         self,
-        processor: "JournalOutboxEventProcessor",
+        processor: JournalOutboxEventProcessor,
         mock_journal_service: AsyncMock,
         mock_connection: AsyncMock,
     ) -> None:
@@ -634,7 +634,7 @@ class TestJournalOutboxEventProcessor:
     @pytest.mark.asyncio
     async def test_invitee_sync_only_mutates_invitee_type(
         self,
-        processor: "JournalOutboxEventProcessor",
+        processor: JournalOutboxEventProcessor,
         mock_journal_service: AsyncMock,
         mock_connection: AsyncMock,
     ) -> None:
@@ -671,7 +671,7 @@ class TestJournalOutboxEventProcessor:
     @pytest.mark.asyncio
     async def test_invitee_sync_with_empty_list_clears_relationships(
         self,
-        processor: "JournalOutboxEventProcessor",
+        processor: JournalOutboxEventProcessor,
         mock_journal_service: AsyncMock,
         mock_connection: AsyncMock,
     ) -> None:
@@ -706,7 +706,7 @@ class TestJournalOutboxEventProcessor:
     @pytest.mark.asyncio
     async def test_invitee_sync_unknown_email_skipped(
         self,
-        processor: "JournalOutboxEventProcessor",
+        processor: JournalOutboxEventProcessor,
         mock_journal_service: AsyncMock,
         mock_connection: AsyncMock,
     ) -> None:
@@ -747,7 +747,7 @@ class TestJournalOutboxEventProcessor:
     @pytest.mark.asyncio
     async def test_invitee_sync_handles_role_and_status_updates(
         self,
-        processor: "JournalOutboxEventProcessor",
+        processor: JournalOutboxEventProcessor,
         mock_journal_service: AsyncMock,
         mock_connection: AsyncMock,
     ) -> None:
@@ -842,7 +842,7 @@ class TestJournalOutboxEventProcessor:
     @pytest.mark.asyncio
     async def test_process_journal_event_updated_uses_field_merger(
         self,
-        processor: "JournalOutboxEventProcessor",
+        processor: JournalOutboxEventProcessor,
         mock_journal_service: AsyncMock,
         mock_connection: AsyncMock,
     ) -> None:

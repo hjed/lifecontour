@@ -9,13 +9,13 @@ on:
     outputs:
       python-version:
         description: "Python version to use"
-        value: "3.11"
+        value: "3.14"
       node-version:
         description: "Node.js version to use"
         value: "24"
       uv-version:
         description: "UV version to use"
-        value: "0.4.18"
+        value: "0.11.15"
       pnpm-version:
         description: "PNPM version to use"
         value: "11.0.4"
@@ -23,8 +23,8 @@ on:
 # Environment variables that can be used across workflows
 env:
   # Python configuration
-  PYTHON_VERSION: "3.11"
-  UV_VERSION: "0.4.18"
+  PYTHON_VERSION: "3.14"
+  UV_VERSION: "0.11.15"
 
   # Node.js configuration
   NODE_VERSION: "24"

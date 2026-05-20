@@ -80,7 +80,7 @@ def get_session_factory() -> sessionmaker[Session]:
     return sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-def get_database_session() -> Generator[Session, None, None]:
+def get_database_session() -> Generator[Session]:
     """
     Dependency for getting database sessions in FastAPI endpoints.
 

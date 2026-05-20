@@ -37,7 +37,7 @@ class SessionUser(BaseModel):
     )
 
     @classmethod
-    def from_oauth_user(cls, oauth_user: OAuthUserInfo) -> "SessionUser":
+    def from_oauth_user(cls, oauth_user: OAuthUserInfo) -> SessionUser:
         """Create SessionUser from OAuthUserInfo."""
         return cls(
             id=oauth_user.id,

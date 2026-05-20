@@ -14,7 +14,7 @@ from app.infrastructure.config import Settings
 
 
 @pytest_asyncio.fixture
-async def cleanup_stream(test_settings: Settings) -> AsyncGenerator[None, None]:
+async def cleanup_stream(test_settings: Settings) -> AsyncGenerator[None]:
     """Cleanup stream after test."""
     yield
     # No standard way to delete stream entirely in test client, but tests use isolated redis DBs usually.

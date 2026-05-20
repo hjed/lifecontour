@@ -9,7 +9,7 @@ Tasks can be found in the [tasks document](docs/tasks.md).
 
 ### Key Technologies
 
-- **Backend**: Python 3.11+ (using uv) with FastAPI, PostgreSQL database, Dishka for dependency injection
+- **Backend**: Python 3.14+ (using uv) with FastAPI, PostgreSQL database, Dishka for dependency injection
 - **Frontend**: Next.js with React, shadcn/ui components, Tailwind CSS
 - **APIs**: JSON API standard for REST endpoints, MCP for AI integration
 - **Authentication**: Session-based authentication with Starlette SessionMiddleware

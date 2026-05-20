@@ -45,79 +45,6 @@ For other OAuth2 providers, configure the following endpoints:
 - Validate OAuth state parameters to prevent CSRF attacks
 - Use minimal required scopes for each provider
 
-## Docker Configuration
-
-### Backend Dockerfile (Python FastAPI)
-
-```dockerfile
-# Backend Dockerfile
-FROM python:3.11-slim AS backend
-
-WORKDIR /app
-
-# Install UV
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
-
-# Copy dependency files
-COPY pyproject.toml uv.lock ./
-
-# Install dependencies
-RUN uv sync --frozen
-
-# Copy application code
-COPY app/ ./app/
-
-# Create non-root user
-RUN adduser --disabled-password --gecos '' appuser
-USER appuser
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:8000/health || exit 1
-
-# Expose port
-EXPOSE 8000
-
-# Start application
-CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-```
-
-### Frontend Dockerfile (Next.js)
-
-```dockerfile
-# Frontend Dockerfile
-FROM node:18-alpine AS frontend
-
-WORKDIR /app
-
-# Copy package files
-COPY package.json pnpm-lock.yaml ./
-
-# Install pnpm and dependencies
-RUN npm install -g pnpm && pnpm install --frozen-lockfile
-
-# Copy source code
-COPY . .
-
-# Build application
-RUN pnpm build
-
-# Create non-root user
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nextjs -u 1001
-
-USER nextjs
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:3000/health || exit 1
-
-# Expose port
-EXPOSE 3000
-
-# Start application
-CMD ["pnpm", "start"]
-```
 
 ### Docker Compose Configuration
 
@@ -631,7 +558,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: '3.14'
 
       - name: Install UV
         run: pip install uv

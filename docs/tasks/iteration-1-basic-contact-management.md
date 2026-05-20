@@ -22,7 +22,7 @@ This iteration delivers the foundational contact management system with:
 
 **Acceptance Criteria:**
 - [x] Initialize Python backend with UV and pyproject.toml
-- [x] Set up FastAPI with Python 3.11+ and type hints
+- [x] Set up FastAPI with Python 3.14+ and type hints
 - [x] Configure PostgreSQL database with Docker Compose
 - [x] Set up Python linting (ruff), formatting (black), type checking (mypy)
 - [x] Initialize Next.js frontend with TypeScript and pnpm

@@ -110,7 +110,7 @@ class ImportantDateAttributes(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_precision_components(self) -> "ImportantDateAttributes":
+    def validate_precision_components(self) -> ImportantDateAttributes:
         """Validate that the given components match the precision requirements."""
         if self.precision == "full":
             if self.year is None or self.month is None or self.day is None:

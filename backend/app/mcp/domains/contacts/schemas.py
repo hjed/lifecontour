@@ -31,7 +31,7 @@ class ImportantDateInfo(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_precision_components(self) -> "ImportantDateInfo":
+    def validate_precision_components(self) -> ImportantDateInfo:
         """Validate that the given components match the precision requirements."""
         if self.precision == "full":
             if self.year is None or self.month is None or self.day is None:

@@ -49,6 +49,6 @@ class EventDateRange:
         """Check if a datetime falls within this date range."""
         return self.start <= dt <= self.end
 
-    def overlaps(self, other: "EventDateRange") -> bool:
+    def overlaps(self, other: EventDateRange) -> bool:
         """Check if this date range overlaps with another."""
         return self.start <= other.end and other.start <= self.end

@@ -5,7 +5,7 @@ Provides reusable Pydantic models that follow the JSON API specification
 for consistent API responses across all domains.
 """
 
-from typing import Any, Generic, TypeVar
+from typing import Any, TypeVar
 from urllib.parse import urlencode
 from uuid import uuid4
 
@@ -92,7 +92,7 @@ class JsonApiResource(BaseModel):
     meta: dict[str, Any] | None = Field(default=None, description="Resource metadata")
 
 
-class JsonApiResponse(BaseModel, Generic[T]):
+class JsonApiResponse[T](BaseModel):
     """Generic JSON API response for single resources."""
 
     data: T = Field(..., description="Primary resource data")
@@ -103,7 +103,7 @@ class JsonApiResponse(BaseModel, Generic[T]):
     )
 
 
-class JsonApiCollectionResponse(BaseModel, Generic[T]):
+class JsonApiCollectionResponse[T](BaseModel):
     """Generic JSON API response for resource collections."""
 
     data: list[T] = Field(..., description="Array of primary resource data")
@@ -114,13 +114,13 @@ class JsonApiCollectionResponse(BaseModel, Generic[T]):
     )
 
 
-class JsonApiCreateRequest(BaseModel, Generic[T]):
+class JsonApiCreateRequest[T](BaseModel):
     """Generic JSON API request for creating resources."""
 
     data: T = Field(..., description="Resource data to create")
 
 
-class JsonApiUpdateRequest(BaseModel, Generic[T]):
+class JsonApiUpdateRequest[T](BaseModel):
     """Generic JSON API request for updating resources."""
 
     data: T = Field(..., description="Resource data to update")

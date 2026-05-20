@@ -358,7 +358,7 @@ class StreamClient:
 
         try:
             trace_context = json.loads(trace_context_raw)
-        except (ValueError, TypeError, json.JSONDecodeError):
+        except ValueError, TypeError, json.JSONDecodeError:
             trace_context = {}
 
         return StreamEvent(

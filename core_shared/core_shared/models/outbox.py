@@ -103,7 +103,7 @@ class OutboxEvent(Base):
         external_id: str,
         sync_type: str = "created",
         etag: str | None = None,
-    ) -> "OutboxEvent":
+    ) -> OutboxEvent:
         """
         Create an outbox event for contact synchronization.
 
@@ -137,7 +137,7 @@ class OutboxEvent(Base):
     @classmethod
     def create_sync_completed_event(
         cls, integration_source: str, google_account_email: str, metrics: dict[str, Any]
-    ) -> "OutboxEvent":
+    ) -> OutboxEvent:
         """
         Create an outbox event for sync completion.
 
@@ -176,7 +176,7 @@ class OutboxEvent(Base):
         etag: str | None = None,
         existing_journal_id: int | None = None,
         contact_relationships: list[dict[str, str]] | None = None,
-    ) -> "OutboxEvent":
+    ) -> OutboxEvent:
         """
         Create an outbox event for journal calendar event synchronization.
 
@@ -226,7 +226,7 @@ class OutboxEvent(Base):
         journal_content: str,
         event_date_range_start: str | datetime,
         event_date_range_end: str | datetime,
-    ) -> "OutboxEvent":
+    ) -> OutboxEvent:
         """
         Create an outbox event to trigger match candidate detection.
 

@@ -171,7 +171,7 @@ class JournalHierarchyNode(JournalSearchResult):
 
     depth: int = Field(description="Nesting level in the hierarchy")
     children_count: int = Field(description="Number of direct children")
-    children: list["JournalHierarchyNode"] = Field(
+    children: list[JournalHierarchyNode] = Field(
         default_factory=list, description="Child journals"
     )
 

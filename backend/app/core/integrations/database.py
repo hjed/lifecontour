@@ -73,7 +73,7 @@ class IntegrationDatabaseManager:
         logger.info("Integration database engine created")
 
     @asynccontextmanager
-    async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
+    async def get_session(self) -> AsyncGenerator[AsyncSession]:
         """
         Get a database session for a single task.
 
@@ -142,7 +142,7 @@ def get_database_manager(
 @asynccontextmanager
 async def get_integration_session(
     settings: Settings | None = None,
-) -> AsyncGenerator[AsyncSession, None]:
+) -> AsyncGenerator[AsyncSession]:
     """
     Convenience function to get a database session for integration tasks.
 
@@ -213,7 +213,7 @@ async def cleanup_database_context(ctx: dict[str, Any]) -> None:
 
 
 @asynccontextmanager
-async def get_task_session(ctx: dict[str, Any]) -> AsyncGenerator[AsyncSession, None]:
+async def get_task_session(ctx: dict[str, Any]) -> AsyncGenerator[AsyncSession]:
     """
     Get a database session from ARQ task context.
 
