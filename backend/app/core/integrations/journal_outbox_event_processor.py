@@ -441,10 +441,12 @@ class JournalOutboxEventProcessor:
         }
 
         # When private_description is enabled, block inbound content changes
-        # to prevent external calendar descriptions overwriting local journal notes
+        # to prevent external calendar descriptions overwriting local journal notes.
+        # We replace the inbound value with the existing journal content (rather than
+        # removing the key) so that merged_data always contains "content".
         existing_calendar_info = await self._find_calendar_info(existing_journal_id)
         if existing_calendar_info and existing_calendar_info.private_description:
-            inbound_data.pop("content", None)
+            inbound_data["content"] = existing_journal.content or ""
             logger.debug(
                 "Blocking inbound content update due to private_description",
                 journal_id=existing_journal_id,

@@ -337,6 +337,7 @@ class TestJournalOutboxEventProcessor:
             MagicMock(),  # _ensure_calendar_exists
             _mock_fetchone(_make_journal_row()),  # _find_journal_by_id
             _mock_fetchone(_make_link_row()),  # _find_external_event_link
+            _mock_empty_result(),  # _find_calendar_info
             _mock_empty_result(),  # _save_calendar_info
             _mock_empty_result(),  # _update_external_event_link_etag
             _mock_resolve_contact(200),  # contact resolver
@@ -381,6 +382,7 @@ class TestJournalOutboxEventProcessor:
             MagicMock(),  # _ensure_calendar_exists
             _mock_fetchone(journal_row),  # _find_journal_by_id
             _mock_fetchone(link_row),  # _find_external_event_link
+            _mock_empty_result(),  # _find_calendar_info
             _mock_empty_result(),  # _save_calendar_info
             _mock_empty_result(),  # _update_external_event_link_etag
         ]
@@ -506,6 +508,7 @@ class TestJournalOutboxEventProcessor:
             MagicMock(),  # _ensure_calendar_exists
             _mock_fetchone(_make_journal_row()),
             _mock_fetchone(_make_link_row(external_version=None)),
+            _mock_empty_result(),  # _find_calendar_info
             _mock_empty_result(),  # _save_calendar_info
             _mock_empty_result(),  # _update_external_event_link_etag
         ]
@@ -537,8 +540,9 @@ class TestJournalOutboxEventProcessor:
             MagicMock(),  # _ensure_calendar_exists
             _mock_fetchone(_make_journal_row()),
             _mock_fetchone(_make_link_row()),
-            _mock_empty_result(),
-            _mock_empty_result(),
+            _mock_empty_result(),  # _find_calendar_info
+            _mock_empty_result(),  # _save_calendar_info
+            _mock_empty_result(),  # _update_external_event_link_etag
         ]
 
         mock_journal_service.update_journal.return_value = _make_journal()
@@ -573,8 +577,9 @@ class TestJournalOutboxEventProcessor:
             MagicMock(),  # _ensure_calendar_exists
             _mock_fetchone(_make_journal_row()),
             _mock_fetchone(_make_link_row()),
-            _mock_empty_result(),
-            _mock_empty_result(),
+            _mock_empty_result(),  # _find_calendar_info
+            _mock_empty_result(),  # _save_calendar_info
+            _mock_empty_result(),  # _update_external_event_link_etag
         ]
 
         mock_journal_service.update_journal.return_value = _make_journal()
@@ -804,6 +809,7 @@ class TestJournalOutboxEventProcessor:
             MagicMock(),  # _ensure_calendar_exists
             _mock_fetchone(_make_journal_row()),  # find journal
             _mock_fetchone(_make_link_row()),  # find link
+            _mock_empty_result(),  # _find_calendar_info
             _mock_empty_result(),  # save calendar info
             _mock_empty_result(),  # update etag
             resolve_match,  # resolve email 1 (update_me)
@@ -865,8 +871,9 @@ class TestJournalOutboxEventProcessor:
             MagicMock(),  # _ensure_calendar_exists
             _mock_fetchone(journal_row),
             _mock_fetchone(link_row),
-            _mock_empty_result(),
-            _mock_empty_result(),
+            _mock_empty_result(),  # _find_calendar_info
+            _mock_empty_result(),  # _save_calendar_info
+            _mock_empty_result(),  # _update_external_event_link_etag
         ]
 
         mock_journal_service.update_journal.return_value = _make_journal()
@@ -878,6 +885,57 @@ class TestJournalOutboxEventProcessor:
         journal_arg = mock_journal_service.update_journal.call_args[0][0]
         assert journal_arg.title == "Team Meeting"
         assert journal_arg.content == "Weekly sync"
+
+    # ── private_description blocks inbound content ────────────────────
+
+    @pytest.mark.asyncio
+    async def test_process_journal_event_updated_private_description_blocks_content(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """When private_description is True, inbound content should be ignored."""
+        event = _make_outbox_event(
+            event_type="journal_event.updated",
+            sync_action="updated",
+            existing_journal_id=42,
+        )
+
+        journal_row = _make_journal_row(
+            title="Old Title",
+            content="My private notes",
+        )
+        link_row = _make_link_row()
+
+        # Mock _find_calendar_info returning a row with private_description=True
+        calendar_info_row = MagicMock()
+        calendar_info_row.private_description = True
+        calendar_info_result = MagicMock()
+        calendar_info_result.fetchone.return_value = calendar_info_row
+
+        mock_connection.execute.side_effect = [
+            MagicMock(),  # _ensure_calendar_exists
+            _mock_fetchone(journal_row),  # _find_journal_by_id
+            _mock_fetchone(link_row),  # _find_external_event_link
+            calendar_info_result,  # _find_calendar_info (private_description=True)
+            _mock_empty_result(),  # _save_calendar_info
+            _mock_empty_result(),  # _update_external_event_link_etag
+        ]
+
+        mock_journal_service.update_journal.return_value = _make_journal(
+            title="Team Meeting",
+            content="My private notes",
+        )
+
+        result = await processor.process_event(event)
+
+        assert result["status"] == "success"
+        journal_arg = mock_journal_service.update_journal.call_args[0][0]
+        # Content should be preserved from existing journal, not overwritten by inbound
+        assert journal_arg.content == "My private notes"
+        # Title should still take inbound value (not protected by private_description)
+        assert journal_arg.title == "Team Meeting"
 
 
 class TestJournalOutboxEventProcessorCancelled:
