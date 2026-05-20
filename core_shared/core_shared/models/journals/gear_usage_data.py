@@ -40,7 +40,19 @@ class GearUsageData:
             )
 
         if self.checkout_date is not None and self.checkin_date is not None:
-            if self.checkout_date > self.checkin_date:
+            chk_out = self.checkout_date
+            chk_in = self.checkin_date
+
+            if chk_out.tzinfo is None and chk_in.tzinfo is not None:
+                from datetime import UTC
+
+                chk_out = chk_out.replace(tzinfo=UTC)
+            elif chk_in.tzinfo is None and chk_out.tzinfo is not None:
+                from datetime import UTC
+
+                chk_in = chk_in.replace(tzinfo=UTC)
+
+            if chk_out > chk_in:
                 raise GearUsageDataValidationError(
                     "checkin_date", "Must be after or equal to checkout_date"
                 )
