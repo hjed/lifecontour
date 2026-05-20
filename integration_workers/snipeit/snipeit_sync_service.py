@@ -12,6 +12,7 @@ import asyncio
 import hashlib
 import json
 from collections.abc import AsyncIterator
+from datetime import date, datetime
 from typing import Any
 
 import httpx
@@ -27,6 +28,22 @@ logger = structlog.get_logger(__name__)
 
 # Maximum assets per Snipe-IT API page
 _PAGE_SIZE = 50
+
+
+def _format_date_for_snipeit(value: date | datetime | str | None) -> str | None:
+    """Format a date/datetime value as ``YYYY-MM-DD`` for the Snipe-IT API.
+
+    Handles ``datetime``, ``date``, and ISO-formatted strings.
+    Returns ``None`` for falsy inputs.
+    """
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, date):
+        return value.isoformat()
+    # Already a string — extract just the date portion
+    return str(value)[:10]
 
 
 # Internal signalling exceptions
@@ -797,15 +814,19 @@ class SnipeItSyncService:
             content=journal_row.content or "",
             maintenance_type=maintenance_data_row.maintenance_type
             or "routine maintenance",
-            start_date=str(journal_row.event_date_range_start)
-            if journal_row.event_date_range_start
-            else None,
-            end_date=str(journal_row.event_date_range_end)
-            if journal_row.event_date_range_end
-            else None,
+            start_date=_format_date_for_snipeit(journal_row.event_date_range_start),
+            end_date=_format_date_for_snipeit(journal_row.event_date_range_end),
         )
 
-        snipeit_asset_id = int(asset_sync_meta_row.external_id)
+        try:
+            snipeit_asset_id = int(asset_sync_meta_row.external_id)
+        except (ValueError, TypeError):
+            logger.warning(
+                "Invalid asset sync metadata external_id",
+                external_id=asset_sync_meta_row.external_id,
+                journal_id=journal_id,
+            )
+            return
 
         # POST to Snipe-IT
         try:
@@ -918,12 +939,8 @@ class SnipeItSyncService:
             content=journal_row.content or "",
             maintenance_type=maintenance_data_row.maintenance_type
             or "routine maintenance",
-            start_date=str(journal_row.event_date_range_start)
-            if journal_row.event_date_range_start
-            else None,
-            end_date=str(journal_row.event_date_range_end)
-            if journal_row.event_date_range_end
-            else None,
+            start_date=_format_date_for_snipeit(journal_row.event_date_range_start),
+            end_date=_format_date_for_snipeit(journal_row.event_date_range_end),
         )
 
         # PATCH the Snipe-IT maintenance record

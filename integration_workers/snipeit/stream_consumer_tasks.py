@@ -381,20 +381,6 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
                     "Skipping journal event: not a GEAR_MAINTENANCE journal",
                     journal_id=journal_id,
                 )
-                # Still need to create/close sync service for cleanup consistency
-                auth_data = await _get_auth_data(
-                    self._session_factory, settings_row.user_id
-                )
-                if auth_data:
-                    sync_service = _create_sync_service(
-                        user_id=settings_row.user_id,
-                        auth_data=auth_data,
-                        base_url=settings_row.base_url,
-                        snipeit_user_id=settings_row.snipeit_user_id,
-                        worker_settings=worker_settings,
-                        session_factory=self._session_factory,
-                    )
-                    await sync_service._api_client.close()
                 return
 
         auth_data = await _get_auth_data(self._session_factory, settings_row.user_id)

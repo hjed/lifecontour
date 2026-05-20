@@ -332,17 +332,17 @@ async def test_handle_event_skips_journal_created_non_maintenance(
 
     mock_session.execute = AsyncMock(side_effect=[settings_result, maintenance_check])
 
-    mock_sync_service = AsyncMock()
-    mock_sync_service._api_client = AsyncMock()
+    mock_get_auth = AsyncMock(return_value={"mock": "auth"})
 
     with (
-        patch("worker._get_auth_data", return_value={"mock": "auth"}),
-        patch("worker._create_sync_service", return_value=mock_sync_service),
+        patch("worker._get_auth_data", mock_get_auth),
+        patch("worker._create_sync_service") as mock_create,
     ):
         await consumer._handle_event(event)
 
-        mock_sync_service.push_maintenance_create.assert_not_called()
-        mock_sync_service._api_client.close.assert_called_once()
+        # Should NOT attempt auth or create sync service for non-maintenance
+        mock_get_auth.assert_not_called()
+        mock_create.assert_not_called()
 
 
 @pytest.mark.asyncio

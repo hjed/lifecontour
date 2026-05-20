@@ -1,6 +1,7 @@
 # ruff: noqa: E402
 """Tests for Snipe-IT sync service outbound maintenance methods."""
 
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -82,8 +83,8 @@ class TestPushMaintenanceCreate:
         journal_row = MagicMock(
             title="Rope Inspection",
             content="All good",
-            event_date_range_start="2024-06-01",
-            event_date_range_end="2024-06-02",
+            event_date_range_start=datetime(2024, 6, 1, tzinfo=UTC),
+            event_date_range_end=datetime(2024, 6, 2, 14, 30, tzinfo=UTC),
         )
         maintenance_data_row = MagicMock(
             gear_item_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
@@ -146,6 +147,9 @@ class TestPushMaintenanceCreate:
         payload = call_args.kwargs["payload"]
         assert payload["title"] == "Rope Inspection"
         assert payload["asset_maintenance_type"] == "PAT Test"  # routine inspection
+        # Dates must be YYYY-MM-DD format for Snipe-IT API
+        assert payload["start_date"] == "2024-06-01"
+        assert payload["completion_date"] == "2024-06-02"
 
     @pytest.mark.asyncio
     async def test_skips_when_no_journal_found(self) -> None:
@@ -221,6 +225,59 @@ class TestPushMaintenanceCreate:
             maintenance_data_row=maintenance_data_row,
             asset_sync_meta_row=None,
         )
+
+        service = SnipeItSyncService(
+            api_client=api_client,
+            user_id="user-1",
+        )
+
+        await service.push_maintenance_create(
+            journal_id=100,
+            session_factory=session_factory,
+        )
+
+        api_client.create_maintenance.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_skips_when_invalid_asset_external_id(self) -> None:
+        """Non-numeric asset external_id is handled gracefully."""
+        api_client = _mock_api_client()
+
+        journal_row = MagicMock(
+            title="Test",
+            content="",
+            event_date_range_start=datetime(2024, 6, 1, tzinfo=UTC),
+            event_date_range_end=datetime(2024, 6, 1, tzinfo=UTC),
+        )
+        maintenance_data_row = MagicMock(
+            gear_item_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            maintenance_type="routine maintenance",
+        )
+        asset_sync_meta_row = MagicMock(external_id="not-a-number")
+
+        # First session: fetch data (3 queries)
+        first_session = AsyncMock()
+        first_session_ctx = MagicMock()
+        first_session_ctx.__aenter__ = AsyncMock(return_value=first_session)
+        first_session_ctx.__aexit__ = AsyncMock(return_value=False)
+        first_session.execute = AsyncMock(
+            side_effect=[
+                MagicMock(fetchone=MagicMock(return_value=journal_row)),
+                MagicMock(fetchone=MagicMock(return_value=maintenance_data_row)),
+                MagicMock(fetchone=MagicMock(return_value=asset_sync_meta_row)),
+            ]
+        )
+
+        # Second session: dedup check
+        second_session = AsyncMock()
+        second_session_ctx = MagicMock()
+        second_session_ctx.__aenter__ = AsyncMock(return_value=second_session)
+        second_session_ctx.__aexit__ = AsyncMock(return_value=False)
+        second_session.execute = AsyncMock(
+            return_value=MagicMock(fetchone=MagicMock(return_value=None))
+        )
+
+        session_factory = MagicMock(side_effect=[first_session_ctx, second_session_ctx])
 
         service = SnipeItSyncService(
             api_client=api_client,
