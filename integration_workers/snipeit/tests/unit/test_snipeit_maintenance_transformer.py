@@ -222,6 +222,7 @@ class TestReverseMaintenanceTypeMapping:
             ("routine maintenance", "Maintenance"),
             ("repairing gear", "Repair"),
             ("routine inspection", "PAT Test"),
+            ("retiring gear", "Maintenance"),
         ],
     )
     def test_reverse_known_type_mapping(

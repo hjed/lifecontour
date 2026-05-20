@@ -13,6 +13,12 @@ Maintenance type mapping (Snipe-IT → App):
 - ``Hardware Support`` → ``repairing gear``
 - ``Software Support`` → ``routine maintenance``
 - Unknown / None → ``routine maintenance``
+
+Reverse mapping (App → Snipe-IT):
+- ``routine maintenance`` → ``Maintenance``
+- ``repairing gear`` → ``Repair``
+- ``routine inspection`` → ``PAT Test``
+- ``retiring gear`` → ``Maintenance`` (no Snipe-IT equivalent)
 """
 
 from __future__ import annotations
@@ -45,6 +51,7 @@ _REVERSE_MAINTENANCE_TYPE_MAP: dict[str, str] = {
     "routine maintenance": "Maintenance",
     "repairing gear": "Repair",
     "routine inspection": "PAT Test",
+    "retiring gear": "Maintenance",
 }
 
 _DEFAULT_SNIPEIT_MAINTENANCE_TYPE = "Maintenance"

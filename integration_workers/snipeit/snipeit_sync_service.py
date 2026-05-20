@@ -9,6 +9,8 @@ and upserts them into the database. Sync state is tracked via ``SyncMetadata``.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -826,6 +828,9 @@ class SnipeItSyncService:
         external_id = f"snipeit_maint:{created.id}"
         async with session_factory() as session:
             async with session.begin():
+                version_hash = hashlib.sha256(
+                    json.dumps(payload, sort_keys=True).encode()
+                ).hexdigest()
                 await session.execute(
                     text("""
                         INSERT INTO sync_metadata
@@ -834,17 +839,19 @@ class SnipeItSyncService:
                              error_message, retry_count, created_at, updated_at)
                         VALUES
                             (:internal_uuid, 'snipeit_maintenance', :external_id,
-                             now(), '', 'success', NULL, 0, now(), now())
+                             now(), :version_hash, 'success', NULL, 0, now(), now())
                         ON CONFLICT (integration_source, external_id)
                         DO UPDATE SET
                             internal_uuid = EXCLUDED.internal_uuid,
                             last_synced_at = EXCLUDED.last_synced_at,
+                            version_hash = EXCLUDED.version_hash,
                             sync_status = EXCLUDED.sync_status,
                             updated_at = EXCLUDED.updated_at
                     """),
                     {
                         "internal_uuid": str(journal_id),
                         "external_id": external_id,
+                        "version_hash": version_hash,
                     },
                 )
 
@@ -932,6 +939,27 @@ class SnipeItSyncService:
                 )
                 return
             raise
+
+        # Update sync metadata with new version hash and sync timestamp
+        version_hash = hashlib.sha256(
+            json.dumps(payload, sort_keys=True).encode()
+        ).hexdigest()
+        async with session_factory() as session:
+            async with session.begin():
+                await session.execute(
+                    text("""
+                        UPDATE sync_metadata
+                        SET version_hash = :version_hash,
+                            last_synced_at = now(),
+                            updated_at = now()
+                        WHERE integration_source = 'snipeit_maintenance'
+                          AND internal_uuid = :journal_id
+                    """),
+                    {
+                        "version_hash": version_hash,
+                        "journal_id": str(journal_id),
+                    },
+                )
 
         logger.info(
             "Successfully pushed maintenance update to Snipe-IT",

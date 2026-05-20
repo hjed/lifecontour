@@ -257,14 +257,14 @@ class TestPushMaintenanceUpdate:
         asset_sync_meta_row = MagicMock(external_id="42")
 
         # For update, we need a 4th query result: maintenance sync metadata
-        mock_session = AsyncMock()
+        mock_session = MagicMock()
         mock_session_ctx = MagicMock()
         mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
 
         maint_sync_row = MagicMock(external_id="snipeit_maint:201")
 
-        # Set up results for the 4 queries
+        # Set up results for the 4 queries + 1 metadata update
         results = [
             MagicMock(fetchone=MagicMock(return_value=journal_row)),  # journal
             MagicMock(
@@ -276,6 +276,7 @@ class TestPushMaintenanceUpdate:
             MagicMock(
                 fetchone=MagicMock(return_value=maint_sync_row)
             ),  # maintenance sync
+            MagicMock(),  # metadata UPDATE result
         ]
         mock_session.execute = AsyncMock(side_effect=results)
 
@@ -303,6 +304,9 @@ class TestPushMaintenanceUpdate:
         payload = call_args.args[1]
         assert payload["title"] == "Updated Inspection"
         assert payload["asset_maintenance_type"] == "Repair"
+
+        # Verify sync metadata was updated (5th execute call)
+        assert mock_session.execute.call_count == 5
 
     @pytest.mark.asyncio
     async def test_skips_when_no_maintenance_sync_metadata(self) -> None:
