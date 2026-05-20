@@ -29,6 +29,7 @@ from core_shared.models.journals import (
     FitnessData,
     GearItem,
     GearMaintenanceData,
+    GearUsageData,
     JoggingData,
     Journal,
     JournalContactRelationship,
@@ -636,6 +637,54 @@ class PhotoAlbumDataRepository(ABC):
 
         Args:
             journal_id: The journal ID to delete photo album data for
+        """
+        pass
+
+
+class GearUsageDataRepository(ABC):
+    """
+    Repository interface for gear usage data (GEAR_USAGE type) operations.
+
+    A journal has the GEAR_USAGE type if a GearUsageData row exists for its journal_id.
+    """
+
+    @abstractmethod
+    async def find_by_journal_id(self, journal_id: int) -> GearUsageData | None:
+        """
+        Find gear usage data by journal ID.
+
+        Args:
+            journal_id: The journal ID to look up
+
+        Returns:
+            The GearUsageData if found (journal has GEAR_USAGE type), None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def save(self, gear_usage_data: GearUsageData) -> GearUsageData:
+        """
+        Save gear usage data (insert or update).
+
+        This effectively adds or updates the GEAR_USAGE type for a journal.
+
+        Args:
+            gear_usage_data: The gear usage data to save
+
+        Returns:
+            The saved gear usage data with updated timestamps
+        """
+        pass
+
+    @abstractmethod
+    async def delete(self, journal_id: int) -> None:
+        """
+        Delete gear usage data by journal ID.
+
+        This effectively removes the GEAR_USAGE type from a journal.
+
+        Args:
+            journal_id: The journal ID to delete gear usage data for
         """
         pass
 

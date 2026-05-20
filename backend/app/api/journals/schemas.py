@@ -428,6 +428,23 @@ class GearMaintenanceDataSchema(BaseModel):
     )
 
 
+class GearUsageDataSchema(BaseModel):
+    """Gear usage data for GEAR_USAGE type journals."""
+
+    gear_item_id: str = Field(
+        ...,
+        description="UUID of the gear item being used",
+    )
+    checkout_date: datetime | None = Field(
+        default=None,
+        description="Optional checkout buffer date",
+    )
+    checkin_date: datetime | None = Field(
+        default=None,
+        description="Optional checkin buffer date",
+    )
+
+
 class KayakingDataSchema(BaseModel):
     """Kayaking data for KAYAKING type journals."""
 
