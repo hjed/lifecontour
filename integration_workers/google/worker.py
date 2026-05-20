@@ -2107,6 +2107,7 @@ async def _process_journal_upsert_event(
                 jci.is_all_day,
                 jci.location,
                 jci.calendar_id,
+                jci.private_description,
                 c.is_synced_to_google,
                 c.google_calendar_id,
                 jeel.external_event_id,
@@ -2188,8 +2189,9 @@ async def _process_journal_upsert_event(
 
         event_payload = {
             "summary": row.title or "Untitled Event",
-            "description": row.content or "",
         }
+        if not row.private_description:
+            event_payload["description"] = row.content or ""
         if row.location:
             event_payload["location"] = row.location
 

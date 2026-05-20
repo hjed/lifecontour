@@ -30,6 +30,7 @@ class TestCalendarInfo:
         assert calendar_info.is_all_day is False
         assert calendar_info.location is None
         assert calendar_info.sync_invitees is False
+        assert calendar_info.private_description is False
 
     def test_create_calendar_info_with_times(self):
         """Test creating calendar info with times."""
@@ -76,6 +77,25 @@ class TestCalendarInfo:
 
         assert calendar_info.location == "Conference Room A"
         assert calendar_info.sync_invitees is True
+
+    def test_private_description_defaults_to_false(self):
+        """Test that private_description defaults to False."""
+        calendar_id = uuid4()
+        calendar_info = CalendarInfo(
+            journal_id=1,
+            calendar_id=calendar_id,
+        )
+        assert calendar_info.private_description is False
+
+    def test_private_description_can_be_set_to_true(self):
+        """Test that private_description can be explicitly set to True."""
+        calendar_id = uuid4()
+        calendar_info = CalendarInfo(
+            journal_id=1,
+            calendar_id=calendar_id,
+            private_description=True,
+        )
+        assert calendar_info.private_description is True
 
 
 @pytest.mark.unit

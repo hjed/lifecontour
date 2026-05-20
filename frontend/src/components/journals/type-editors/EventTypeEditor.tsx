@@ -62,6 +62,7 @@ const DEFAULT_DATA: CalendarInfoData = {
   calendar_id: '',
   is_all_day: false,
   sync_invitees: false,
+  private_description: false,
 };
 
 /**
@@ -350,6 +351,28 @@ export function EventTypeEditor({
           className='cursor-pointer text-sm font-normal'
         >
           Sync invitees to calendar
+        </Label>
+      </div>
+
+      {/* Private description */}
+      <div className='flex items-center space-x-2'>
+        <Checkbox
+          id='private-description'
+          checked={editData.private_description}
+          onCheckedChange={checked =>
+            setEditData(previous => ({
+              ...previous,
+              private_description: checked as boolean,
+            }))
+          }
+          disabled={!isEditing}
+          data-testid='private-description-checkbox'
+        />
+        <Label
+          htmlFor='private-description'
+          className='cursor-pointer text-sm font-normal'
+        >
+          Keep description private (don&apos;t sync to calendar)
         </Label>
       </div>
 

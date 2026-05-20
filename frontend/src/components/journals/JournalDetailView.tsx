@@ -139,6 +139,7 @@ export function JournalDetailView({
         calendar_id: calendarId,
         is_all_day: false,
         sync_invitees: false,
+        private_description: false,
       },
     });
   };

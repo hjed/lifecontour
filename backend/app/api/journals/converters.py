@@ -342,6 +342,7 @@ class TypeDataConverter:
             location=calendar_info.location,
             timezone=calendar_info.timezone,
             sync_invitees=calendar_info.sync_invitees,
+            private_description=calendar_info.private_description,
             event_state=calendar_info.event_state.value,
         ).model_dump(exclude_none=True)
 

@@ -63,6 +63,10 @@ class CalendarInfoDataSchema(BaseModel):
     sync_invitees: bool = Field(
         default=False, description="Whether to sync invitees with calendar"
     )
+    private_description: bool = Field(
+        default=False,
+        description="When true, description is kept private and not synced to external calendars",
+    )
     event_state: str | None = Field(
         default=None,
         description="Event participation state (invited, tentative, confirmed, cancelled)",

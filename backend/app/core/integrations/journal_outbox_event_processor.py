@@ -433,12 +433,22 @@ class JournalOutboxEventProcessor:
             )
 
         # Apply InboundFieldMerger for protected local edits
-        inbound_data = {
+        inbound_data: dict[str, Any] = {
             "title": journal_data.get("title", ""),
             "content": journal_data.get("content", ""),
             "event_date_range_start": journal_data.get("event_date_range_start"),
             "event_date_range_end": journal_data.get("event_date_range_end"),
         }
+
+        # When private_description is enabled, block inbound content changes
+        # to prevent external calendar descriptions overwriting local journal notes
+        existing_calendar_info = await self._find_calendar_info(existing_journal_id)
+        if existing_calendar_info and existing_calendar_info.private_description:
+            inbound_data.pop("content", None)
+            logger.debug(
+                "Blocking inbound content update due to private_description",
+                journal_id=existing_journal_id,
+            )
 
         merged_data = self._merge_fields_with_protection(
             existing_journal=existing_journal,
@@ -1170,6 +1180,22 @@ class JournalOutboxEventProcessor:
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
+
+    async def _find_calendar_info(self, journal_id: int) -> Any | None:
+        """Find calendar info for a journal by its ID.
+
+        Returns the raw row or None if no calendar info exists.
+        Used to check private_description during inbound sync.
+        """
+        result = await self.connection.execute(
+            text("""
+                SELECT private_description
+                FROM journal_calendar_info
+                WHERE journal_id = :journal_id
+            """),
+            {"journal_id": journal_id},
+        )
+        return result.fetchone()
 
     async def _find_external_event_link(
         self,
