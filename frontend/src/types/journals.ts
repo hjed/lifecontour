@@ -83,6 +83,7 @@ export interface CalendarInfoData {
   location?: string | null;
   timezone?: string | null; // IANA timezone (e.g. 'Australia/Sydney')
   sync_invitees: boolean;
+  private_description: boolean;
   event_state?: EventState;
 }
 

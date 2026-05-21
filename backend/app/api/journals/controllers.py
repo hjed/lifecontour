@@ -2181,6 +2181,7 @@ async def _process_journal_type_data(
                 location=event_data.get("location"),
                 timezone=event_data.get("timezone"),
                 sync_invitees=event_data.get("sync_invitees", False),
+                private_description=event_data.get("private_description", False),
             )
             await calendar_info_repo.save(calendar_info)
 
@@ -3667,6 +3668,8 @@ async def _update_event_type_data(
         updates["location"] = attrs["location"]
     if "sync_invitees" in attrs:
         updates["sync_invitees"] = attrs["sync_invitees"]
+    if "private_description" in attrs:
+        updates["private_description"] = attrs["private_description"]
 
     try:
         from core_shared.models.journals.exceptions import CalendarInfoValidationError

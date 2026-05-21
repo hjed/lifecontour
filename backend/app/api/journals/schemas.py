@@ -63,6 +63,10 @@ class CalendarInfoDataSchema(BaseModel):
     sync_invitees: bool = Field(
         default=False, description="Whether to sync invitees with calendar"
     )
+    private_description: bool = Field(
+        default=False,
+        description="When true, description is kept private and not synced to external calendars",
+    )
     event_state: str | None = Field(
         default=None,
         description="Event participation state (invited, tentative, confirmed, cancelled)",
@@ -425,6 +429,23 @@ class GearMaintenanceDataSchema(BaseModel):
     retirement_reason: str | None = Field(
         default=None,
         description="Reason for retirement (required if maintenance_type is 'retiring gear')",
+    )
+
+
+class GearUsageDataSchema(BaseModel):
+    """Gear usage data for GEAR_USAGE type journals."""
+
+    gear_item_id: str = Field(
+        ...,
+        description="UUID of the gear item being used",
+    )
+    checkout_date: datetime | None = Field(
+        default=None,
+        description="Optional checkout buffer date",
+    )
+    checkin_date: datetime | None = Field(
+        default=None,
+        description="Optional checkin buffer date",
     )
 
 

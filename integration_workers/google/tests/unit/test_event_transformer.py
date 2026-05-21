@@ -871,3 +871,82 @@ class TestGoogleEventTransformerContactRelationships:
 
         assert len(rels) == 1
         assert rels[0]["email"] == "valid@example.com"
+
+
+class TestGoogleEventTransformerPrivateDescription:
+    """Tests for private_description flag on outbound Google Calendar payloads."""
+
+    def test_description_included_when_private_description_is_false(self) -> None:
+        """When private_description is False (default), description should be in payload."""
+        transformer = GoogleEventTransformer()
+        start_dt = datetime(2023, 10, 27, 10, 0, tzinfo=UTC)
+        end_dt = datetime(2023, 10, 27, 11, 0, tzinfo=UTC)
+
+        journal = Journal(
+            user_id="user_123",
+            title="Regular Meeting",
+            content="My private notes about this meeting",
+            event_date_range=EventDateRange(start=start_dt, end=end_dt),
+        )
+
+        calendar_info = CalendarInfo(
+            calendar_id=uuid.uuid4(),
+            start_time=start_dt.time().replace(tzinfo=None),
+            end_time=end_dt.time().replace(tzinfo=None),
+            is_all_day=False,
+            private_description=False,
+        )
+
+        payload = transformer.transform_to_google_event_payload(journal, calendar_info)
+
+        assert payload["description"] == "My private notes about this meeting"
+
+    def test_description_omitted_when_private_description_is_true(self) -> None:
+        """When private_description is True, description should NOT be in payload."""
+        transformer = GoogleEventTransformer()
+        start_dt = datetime(2023, 10, 27, 10, 0, tzinfo=UTC)
+        end_dt = datetime(2023, 10, 27, 11, 0, tzinfo=UTC)
+
+        journal = Journal(
+            user_id="user_123",
+            title="Confidential Meeting",
+            content="Secret journal notes - must not leak to Google",
+            event_date_range=EventDateRange(start=start_dt, end=end_dt),
+        )
+
+        calendar_info = CalendarInfo(
+            calendar_id=uuid.uuid4(),
+            start_time=start_dt.time().replace(tzinfo=None),
+            end_time=end_dt.time().replace(tzinfo=None),
+            is_all_day=False,
+            private_description=True,
+        )
+
+        payload = transformer.transform_to_google_event_payload(journal, calendar_info)
+
+        assert "description" not in payload
+        assert payload["summary"] == "Confidential Meeting"
+
+    def test_description_omitted_for_all_day_event_when_private(self) -> None:
+        """Private description should also work for all-day events."""
+        transformer = GoogleEventTransformer()
+        start_dt = datetime(2023, 12, 25, tzinfo=UTC)
+        end_dt = datetime(2023, 12, 26, tzinfo=UTC)
+
+        journal = Journal(
+            user_id="user_123",
+            title="Christmas",
+            content="Private holiday notes",
+            event_date_range=EventDateRange(start=start_dt, end=end_dt),
+        )
+
+        calendar_info = CalendarInfo(
+            calendar_id=uuid.uuid4(),
+            is_all_day=True,
+            private_description=True,
+        )
+
+        payload = transformer.transform_to_google_event_payload(journal, calendar_info)
+
+        assert "description" not in payload
+        assert payload["summary"] == "Christmas"

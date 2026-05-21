@@ -195,9 +195,9 @@ Push local maintenance to the remote API.
 **PR Size:** ~7-9 files
 Create the foundational data model for the new type.
 **Acceptance Criteria:**
-- [ ] Migration adds `journal_gear_usage_data` table.
-- [ ] `GEAR_USAGE` added to `JournalType` enum (no dependencies).
-- [ ] `GearUsageData` entity, repository, and JSON API schemas added to `core_shared` and `backend`.
+- [x] Migration adds `journal_gear_usage_data` table.
+- [x] `GEAR_USAGE` added to `JournalType` enum (no dependencies).
+- [x] `GearUsageData` entity, repository, and JSON API schemas added to `core_shared` and `backend`.
 **Required Test Coverage:**
 - **Unit/Integration:** Full CRUD testing for the new journal type data.
 

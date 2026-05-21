@@ -36,6 +36,7 @@ const createMockDisplayJournal = (
       end_time: '11:00:00',
       is_all_day: false,
       sync_invitees: false,
+      private_description: false,
     },
   },
   ...overrides,
@@ -79,6 +80,7 @@ describe('calendarEventHelpers', () => {
             end_time: null,
             is_all_day: true,
             sync_invitees: false,
+            private_description: false,
           },
         },
       });
@@ -98,6 +100,7 @@ describe('calendarEventHelpers', () => {
             end_time: '11:00:00',
             is_all_day: false,
             sync_invitees: false,
+            private_description: false,
             event_state: EventState.CANCELLED,
           },
         },
@@ -297,6 +300,7 @@ describe('calendarEventHelpers', () => {
             end_time: null,
             is_all_day: true,
             sync_invitees: false,
+            private_description: false,
           },
         },
       });
