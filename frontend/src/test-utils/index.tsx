@@ -8,7 +8,7 @@
 import { render, RenderOptions } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from '@/lib/auth/AuthProvider';
-import { ReactElement } from 'react';
+import { ReactElement, useState } from 'react';
 import {
   ContactMethodType,
   ContactResource,
@@ -85,12 +85,15 @@ interface TestWrapperProps {
 }
 
 function TestWrapper({ children }: TestWrapperProps) {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
-    },
-  });
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: { retry: false },
+          mutations: { retry: false },
+        },
+      })
+  );
 
   return (
     <QueryClientProvider client={queryClient}>

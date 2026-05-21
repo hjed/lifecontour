@@ -4,6 +4,7 @@ import { fixupConfigRules } from '@eslint/compat';
 import jsxA11y from 'eslint-plugin-jsx-a11y';
 import reactHooks from 'eslint-plugin-react-hooks';
 import playwright from 'eslint-plugin-playwright';
+import pluginQuery from '@tanstack/eslint-plugin-query';
 
 const eslintConfig = [
   {
@@ -25,6 +26,7 @@ const eslintConfig = [
   },
   ...fixupConfigRules(nextCoreWebVitals),
   ...fixupConfigRules(nextTypescript),
+  ...pluginQuery.configs['flat/recommended'],
   {
     files: ['**/*.{ts,tsx,js,jsx}'],
     rules: {
