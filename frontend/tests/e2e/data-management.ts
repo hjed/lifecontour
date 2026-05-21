@@ -217,19 +217,8 @@ export class TestDataManager {
         importantDates: contactData.importantDates,
       };
     } catch (error) {
-      console.debug(`❌ [Data Manager] Failed to create contact:`, error);
-
-      // Return mock data as fallback for tests that don't require real API
-      return {
-        id: `mock-${uniqueId}`,
-        firstName: contactData.firstName,
-        lastName: contactData.lastName,
-        email: contactData.email,
-        phone: contactData.phone,
-        tags: contactData.tags,
-        isFavourite: contactData.isFavourite,
-        importantDates: contactData.importantDates,
-      };
+      console.error(`❌ [Data Manager] Failed to create contact:`, error);
+      throw error;
     }
   }
 
@@ -388,16 +377,11 @@ export class TestDataManager {
         name: tagData.name,
       };
     } catch (error) {
-      console.debug(
+      console.error(
         `❌ [Data Manager] Failed to create tag: ${tagData.name}`,
         error
       );
-      // Return a mock ID as fallback
-      const mockId = `mock-tag-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
-      return {
-        id: mockId,
-        name: tagData.name,
-      };
+      throw error;
     }
   }
 
@@ -520,12 +504,6 @@ export class TestDataManager {
 
     try {
       for (const tagId of tagIds) {
-        // Skip mock tag IDs (they don't exist in the database)
-        if (tagId.startsWith('mock-tag-')) {
-          console.debug(`🏷️ [Data Manager] Skipping mock tag ID: ${tagId}`);
-          continue;
-        }
-
         const maxRetries = 3;
 
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
