@@ -37,6 +37,7 @@ import type {
   OutdoorPlanningData,
   OutdoorTrainingData,
   GearMaintenanceData,
+  GearUsageData,
 } from '@/types/journals';
 import { cn } from '@/lib/utils';
 import {
@@ -62,6 +63,7 @@ import {
   OutdoorPlanningTypeEditor,
   OutdoorTrainingTypeEditor,
   GearMaintenanceTypeEditor,
+  GearUsageTypeEditor,
 } from './type-editors';
 
 /** Union of all type-specific data shapes supported by JournalTypeSection. */
@@ -125,6 +127,7 @@ const TYPE_SECTION_LABELS: Record<JournalType, string> = {
   [JournalType.OUTDOOR_PLANNING]: 'Outdoor Planning',
   [JournalType.OUTDOOR_TRAINING]: 'Outdoor Training',
   [JournalType.GEAR_MAINTENANCE]: 'Gear Maintenance',
+  [JournalType.GEAR_USAGE]: 'Gear Usage',
 };
 
 /**
@@ -404,6 +407,14 @@ function TypeSpecificContent({
           journalId={journalId}
           data={typeData as GearMaintenanceData | undefined}
           onSave={makeEditorSave<GearMaintenanceData>(onSave, type)}
+        />
+      );
+    case JournalType.GEAR_USAGE:
+      return (
+        <GearUsageTypeEditor
+          journalId={journalId}
+          data={typeData as GearUsageData | undefined}
+          onSave={makeEditorSave<GearUsageData>(onSave, type)}
         />
       );
     case JournalType.NOTE:

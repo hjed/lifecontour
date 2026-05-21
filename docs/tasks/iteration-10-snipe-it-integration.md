@@ -201,15 +201,15 @@ Create the foundational data model for the new type.
 **Required Test Coverage:**
 - **Unit/Integration:** Full CRUD testing for the new journal type data.
 
-#### Phase 2: Frontend Editor for GEAR_USAGE
+#### Phase 2: Frontend Editor for GEAR_USAGE ✅ COMPLETED
 **PR Size:** ~6-8 files
 Build the user interface for logging gear usage.
 **Acceptance Criteria:**
-- [ ] `GearUsageTypeEditor` component created.
-- [ ] Includes gear item selector.
-- [ ] Includes date pickers for checkout buffer dates (defaulting to parent journal dates).
-- [ ] **Crucial:** The buffer dates UI is conditionally enabled/visible only when the Snipe-IT integration is connected.
-- [ ] Added to journal creation/editing forms.
+- [x] `GearUsageTypeEditor` component created.
+- [x] Includes gear item selector.
+- [x] Includes date pickers for checkout buffer dates (defaulting to parent journal dates).
+- [x] **Crucial:** The buffer dates UI is conditionally enabled/visible only when the Snipe-IT integration is connected.
+- [x] Added to journal creation/editing forms.
 **Required Test Coverage:**
 - **E2E:** Can successfully create a journal entry with the `GEAR_USAGE` type via the UI, and buffer dates behave conditionally based on integration status.
 

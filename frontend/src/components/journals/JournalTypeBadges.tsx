@@ -68,6 +68,7 @@ export const TYPE_ICONS: Record<
   [JournalType.OUTDOOR_PLANNING]: MapPin,
   [JournalType.OUTDOOR_TRAINING]: Target,
   [JournalType.GEAR_MAINTENANCE]: Wrench,
+  [JournalType.GEAR_USAGE]: Wrench,
 };
 
 // Display labels for journal types
@@ -95,6 +96,7 @@ export const TYPE_LABELS: Record<JournalType, string> = {
   [JournalType.OUTDOOR_PLANNING]: 'Outdoor Planning',
   [JournalType.OUTDOOR_TRAINING]: 'Outdoor Training',
   [JournalType.GEAR_MAINTENANCE]: 'Gear Maintenance',
+  [JournalType.GEAR_USAGE]: 'Gear Usage',
 };
 
 // Color variants for different journal types
@@ -125,6 +127,7 @@ export const TYPE_VARIANTS: Record<
   [JournalType.OUTDOOR_PLANNING]: 'secondary',
   [JournalType.OUTDOOR_TRAINING]: 'secondary',
   [JournalType.GEAR_MAINTENANCE]: 'secondary',
+  [JournalType.GEAR_USAGE]: 'secondary',
 };
 
 /**
