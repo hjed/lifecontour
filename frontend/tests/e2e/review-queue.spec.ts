@@ -301,10 +301,30 @@ test.describe('Journal Review Queue', () => {
     });
     await expect(sidebar).toBeVisible();
 
-    // Click the "Merge All Identical" button
+    // Click the "Merge All Identical" button and wait for both the POST
+    // auto-merge response and the subsequent GET review-items refetch.
+    // React Query invalidates the review items cache after the POST succeeds,
+    // and the sidebar only renders EmptyQueueState once the refetch returns
+    // an empty items list. On Mobile Chrome this refetch can be slow.
     const autoMergeBtn = sidebar.getByTestId('auto-merge-all-btn');
     await expect(autoMergeBtn).toBeVisible();
-    await autoMergeBtn.click();
+
+    await Promise.all([
+      page.waitForResponse(
+        resp =>
+          resp.url().includes('/api/journals/review-items/auto-merge') &&
+          resp.request().method() === 'POST' &&
+          resp.ok()
+      ),
+      page.waitForResponse(
+        resp =>
+          resp.url().includes('/api/journals/review-items') &&
+          !resp.url().includes('auto-merge') &&
+          resp.request().method() === 'GET' &&
+          resp.ok()
+      ),
+      autoMergeBtn.click(),
+    ]);
 
     // Wait for success toast
     await expect(page.getByText(/Auto-merged 1 journal/i)).toBeVisible({
@@ -481,10 +501,27 @@ test.describe('Journal Review Queue', () => {
     });
     await expect(sidebar).toBeVisible();
 
-    // Click "Merge All Identical"
+    // Click "Merge All Identical" and wait for both the POST and the
+    // subsequent GET refetch so the sidebar has up-to-date items.
     const autoMergeBtn = sidebar.getByTestId('auto-merge-all-btn');
     await expect(autoMergeBtn).toBeVisible();
-    await autoMergeBtn.click();
+
+    await Promise.all([
+      page.waitForResponse(
+        resp =>
+          resp.url().includes('/api/journals/review-items/auto-merge') &&
+          resp.request().method() === 'POST' &&
+          resp.ok()
+      ),
+      page.waitForResponse(
+        resp =>
+          resp.url().includes('/api/journals/review-items') &&
+          !resp.url().includes('auto-merge') &&
+          resp.request().method() === 'GET' &&
+          resp.ok()
+      ),
+      autoMergeBtn.click(),
+    ]);
 
     // Should report 1 merged
     await expect(page.getByText(/Auto-merged 1 journal/i)).toBeVisible({

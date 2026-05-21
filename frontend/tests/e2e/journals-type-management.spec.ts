@@ -88,7 +88,7 @@ test.describe('Journal Type Management', () => {
       page.getByTestId(`remove-type-${JournalType.PLAN}`)
     ).toBeVisible();
 
-    // Click remove inside the hovercard
+    // Click remove inside the hovercard and wait for both DELETE and the subsequent GET refetch
     await Promise.all([
       page.waitForResponse(
         response =>
@@ -98,6 +98,12 @@ test.describe('Journal Type Management', () => {
               `/api/journals/${testJournalId}/types/${JournalType.PLAN}`
             ) &&
           response.request().method() === 'DELETE' &&
+          response.ok()
+      ),
+      page.waitForResponse(
+        response =>
+          response.url().endsWith(`/api/journals/${testJournalId}`) &&
+          response.request().method() === 'GET' &&
           response.ok()
       ),
       page.getByTestId(`remove-type-${JournalType.PLAN}`).click(),
