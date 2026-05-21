@@ -34,6 +34,8 @@ class CalendarInfo:
         location: Optional location string
         timezone: Optional IANA timezone string (e.g. 'Australia/Sydney')
         sync_invitees: Whether to sync invitees to Google Calendar
+        private_description: When True, the description is not synced to external
+            calendars and inbound description changes are blocked
         event_state: Event participation state (invited/tentative/confirmed/cancelled)
         event_start_date: Optional event start date for date-aware time validation
             (not persisted — used only during construction to validate time ordering
@@ -51,6 +53,7 @@ class CalendarInfo:
     location: str | None = None
     timezone: str | None = None
     sync_invitees: bool = False
+    private_description: bool = False
     event_state: EventState = EventState.CONFIRMED
     event_start_date: date | None = field(default=None, repr=False)
     event_end_date: date | None = field(default=None, repr=False)

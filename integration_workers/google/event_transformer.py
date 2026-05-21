@@ -241,8 +241,10 @@ class GoogleEventTransformer:
         """
         payload: dict[str, Any] = {
             "summary": journal.title,
-            "description": journal.content,
         }
+
+        if not calendar_info.private_description:
+            payload["description"] = journal.content
 
         if calendar_info.location:
             payload["location"] = calendar_info.location

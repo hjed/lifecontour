@@ -25,6 +25,7 @@ class TestProcessJournalEvent:
         mock_row.is_synced_to_google = True
         mock_row.external_event_id = None
         mock_row.sync_status = None
+        mock_row.private_description = False
 
         mock_result.fetchone.return_value = mock_row
 
@@ -109,6 +110,7 @@ class TestProcessJournalEvent:
         mock_row.is_synced_to_google = True
         mock_row.external_event_id = "existing_event_id"
         mock_row.sync_status = "synced"
+        mock_row.private_description = False
         mock_result.fetchone.return_value = mock_row
 
         mock_auth_result = MagicMock()
@@ -287,6 +289,7 @@ class TestProcessJournalEvent:
             mock_row.is_synced_to_google = True
             mock_row.external_event_id = "new_event_id"
             mock_row.sync_status = "synced"
+            mock_row.private_description = False
             mock_result.fetchone.return_value = mock_row
 
             mock_auth_result = MagicMock()
