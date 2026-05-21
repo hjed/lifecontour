@@ -79,6 +79,21 @@ export function GearUsageTypeEditor({
     integrationsResponse?.data?.find(i => i.id === 'snipeit')?.attributes
       ?.status === 'connected';
 
+  const sanitizeDates = (d?: GearUsageData): GearUsageData => {
+    if (!d) return {};
+    const result = { ...d };
+    if (
+      result.checkout_date &&
+      isNaN(new Date(result.checkout_date).getTime())
+    ) {
+      delete result.checkout_date;
+    }
+    if (result.checkin_date && isNaN(new Date(result.checkin_date).getTime())) {
+      delete result.checkin_date;
+    }
+    return result;
+  };
+
   const {
     isEditing,
     editData,
@@ -87,7 +102,7 @@ export function GearUsageTypeEditor({
     handleSave,
     handleCancel,
   } = useTypeEditorState({
-    initialData: data ?? DEFAULT_DATA,
+    initialData: sanitizeDates(data) ?? DEFAULT_DATA,
     onSave,
     createMode,
     onChange,

@@ -95,6 +95,10 @@ test.describe('Gear Usage Editor', () => {
     await page.getByTestId('checkout-date-input').fill('2026-05-21T10:00');
     await page.getByTestId('checkin-date-input').fill('2026-05-21T18:00');
 
+    // Verify buffer dates are visible because Snipe-IT is connected
+    await expect(page.getByTestId('checkout-date-input')).toBeVisible();
+    await expect(page.getByTestId('checkin-date-input')).toBeVisible();
+
     // Submit
     const [request] = await Promise.all([
       page.waitForRequest(
@@ -115,10 +119,6 @@ test.describe('Gear Usage Editor', () => {
     expect(attrs.type_data['gear_usage'].checkin_date).toContain(
       '2026-05-21T18:00'
     );
-
-    // Verify buffer dates are visible because Snipe-IT is connected
-    await expect(page.getByTestId('checkout-date-input')).toBeVisible();
-    await expect(page.getByTestId('checkin-date-input')).toBeVisible();
   });
 
   test('hides buffer dates when Snipe-IT is disconnected', async ({
