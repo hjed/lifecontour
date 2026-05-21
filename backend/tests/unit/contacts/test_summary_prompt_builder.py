@@ -117,7 +117,7 @@ class TestSummaryPromptBuilder:
 
         assert "Running session" in prompt
         assert "types: EVENT, FITNESS" in prompt
-        assert "role: participant (attending)" in prompt
+        assert "role of contact: participant (attending)" in prompt
 
     def test_prompt_includes_relationships(self):
         """Test prompt includes relationship context."""

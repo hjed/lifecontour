@@ -52,7 +52,8 @@ class SummaryPromptBuilder:
         if summary_input.recent_journals:
             sections.append(
                 self._format_journals_section(
-                    "Recent Linked Journals", summary_input.recent_journals
+                    "Recent Linked Journals mentioning the Contact or where the Contact was a Particpant",
+                    summary_input.recent_journals,
                 )
             )
 
@@ -60,7 +61,8 @@ class SummaryPromptBuilder:
         if summary_input.future_journals:
             sections.append(
                 self._format_journals_section(
-                    "Upcoming Scheduled Events", summary_input.future_journals
+                    "Upcoming Scheduled Events with the Contact",
+                    summary_input.future_journals,
                 )
             )
 
@@ -101,7 +103,7 @@ class SummaryPromptBuilder:
             "- Be conservative and grounded in the evidence provided\n"
             "- Avoid overstating certainty or making intrusive assumptions\n"
             "- Focus on unresolved follow-ups, recent interactions, "
-            "suggested conversation prompts, and notable life context\n"
+            "  and suggested conversation prompts\n"
             "- Stay factual and helpful for reconnecting with the contact\n"
             "- If updating from a previous summary, preserve important "
             "long-term context while incorporating new information"
@@ -128,7 +130,9 @@ class SummaryPromptBuilder:
     def _activity_stats_section(self, inp: SummaryInput) -> str:
         lines = ["## Long-Term Activity Overview"]
         for bucket in inp.activity_stats:
-            lines.append(f"- {bucket.period_label}: {bucket.event_count} events")
+            lines.append(
+                f"- {bucket.period_label}: {bucket.event_count} events or journals related to the contact"
+            )
         return "\n".join(lines)
 
     def _notes_section(self, notes: list[str]) -> str:
@@ -157,7 +161,7 @@ class SummaryPromptBuilder:
 
             rel = j.get("relationship_type")
             if rel:
-                rel_str = f"role: {rel}"
+                rel_str = f"role of contact: {rel}"
                 status = j.get("status")
                 if status:
                     rel_str += f" ({status})"
@@ -193,13 +197,13 @@ class SummaryPromptBuilder:
             "Respond with a JSON object containing:\n"
             "```json\n"
             "{\n"
-            '  "summary_text": "A concise 2-4 sentence summary of this contact...",\n'
+            '  "summary_text": "A concise 2-4 sentence summary of the user\'s relationship with the contact...",\n'
             '  "follow_up_suggestions": [\n'
             '    "Specific actionable follow-up suggestion 1",\n'
             '    "Specific actionable follow-up suggestion 2"\n'
             "  ]\n"
             "}\n"
             "```\n"
-            "The summary_text should help the user reconnect effectively. "
+            "The summary_text should help the user reconnect effectively and remember actions and important details. "
             "Include 1-3 follow_up_suggestions that are specific and actionable."
         )
