@@ -3,7 +3,7 @@ import { test, expect } from './fixtures';
 test.describe('Gear Usage Editor', () => {
   test.beforeEach(async ({ authenticatedPage }) => {
     // Standard mock for gear items
-    await authenticatedPage.route('**/api/v1/gear-items*', async route => {
+    await authenticatedPage.route('**/api/gear-items*', async route => {
       await route.fulfill({
         status: 200,
         json: {

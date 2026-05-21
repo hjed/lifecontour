@@ -122,6 +122,16 @@ export function GearUsageTypeEditor({
     }
   };
 
+  const safeFormatDate = (dateStr?: string | null) => {
+    if (!dateStr) return null;
+    try {
+      const d = new Date(dateStr);
+      return isNaN(d.getTime()) ? null : format(d, 'PP p');
+    } catch {
+      return null;
+    }
+  };
+
   const summaryItems = compactSummaryItems(
     selectedGearItem
       ? {
@@ -129,16 +139,16 @@ export function GearUsageTypeEditor({
           value: selectedGearItem.name,
         }
       : null,
-    editData?.checkout_date
+    snipeItConnected && editData?.checkout_date
       ? {
           label: 'Checkout Date',
-          value: format(new Date(editData.checkout_date), 'PP p'),
+          value: safeFormatDate(editData.checkout_date) || 'Invalid Date',
         }
       : null,
-    editData?.checkin_date
+    snipeItConnected && editData?.checkin_date
       ? {
           label: 'Checkin Date',
-          value: format(new Date(editData.checkin_date), 'PP p'),
+          value: safeFormatDate(editData.checkin_date) || 'Invalid Date',
         }
       : null
   );
@@ -200,7 +210,7 @@ export function GearUsageTypeEditor({
                   id={`${baseId}-gear-item`}
                   variant='outline'
                   role='combobox'
-                  aria-expanded={openCombobox}
+                  aria-expanded={openCombobox && (isEditing || createMode)}
                   disabled={!isEditing && !createMode}
                   className='w-full justify-between'
                   data-testid='gear-item-selector'
