@@ -186,7 +186,21 @@ export function GearUsageTypeEditor({
         summaryItems={summaryItems}
         summaryTestId='gear-usage-summary'
         onEdit={handleEdit}
-        onSave={handleSave}
+        onSave={async () => {
+          if (!editData.gear_item_id) {
+            toast.error('A gear item must be selected.');
+            return;
+          }
+          if (
+            editData.checkout_date &&
+            editData.checkin_date &&
+            new Date(editData.checkin_date) < new Date(editData.checkout_date)
+          ) {
+            toast.error('Checkin date cannot be before checkout date.');
+            return;
+          }
+          await handleSave();
+        }}
         onCancel={handleCancel}
       >
         <div className='space-y-4'>
@@ -248,10 +262,7 @@ export function GearUsageTypeEditor({
                           onSelect={() => {
                             setEditData(prev => ({
                               ...prev,
-                              gear_item_id:
-                                item.id === editData.gear_item_id
-                                  ? null
-                                  : item.id,
+                              gear_item_id: item.id,
                             }));
                             setOpenCombobox(false);
                           }}

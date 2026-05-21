@@ -400,6 +400,25 @@ function hasRequiredTypeData(
     }
   }
 
+  if (type === JournalType.GEAR_USAGE) {
+    const gearData = data as GearUsageData | undefined;
+    if (!gearData?.gear_item_id || !gearData.gear_item_id.trim()) {
+      setTypesError(
+        setError,
+        'Gear Usage requires a Gear Item to be selected.'
+      );
+      return false;
+    }
+    if (
+      gearData?.checkout_date &&
+      gearData?.checkin_date &&
+      new Date(gearData.checkin_date) < new Date(gearData.checkout_date)
+    ) {
+      setTypesError(setError, 'Checkin date cannot be before checkout date.');
+      return false;
+    }
+  }
+
   return true;
 }
 

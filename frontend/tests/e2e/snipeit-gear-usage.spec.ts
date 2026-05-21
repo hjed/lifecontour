@@ -59,6 +59,63 @@ test.describe('Gear Usage Editor', () => {
     await expect(page.getByTestId('gear-usage-type-editor')).toBeVisible();
     await expect(page.getByTestId('gear-item-selector')).toBeVisible();
 
+    // Mock journal creation
+    await page.route('**/api/journals', async route => {
+      if (route.request().method() === 'POST') {
+        await route.fulfill({
+          status: 201,
+          json: {
+            data: {
+              id: 'j1',
+              type: 'journal',
+              attributes: {
+                title: 'Test Gear Usage',
+                journal_type: 'GEAR_USAGE',
+              },
+            },
+          },
+        });
+      } else {
+        await route.continue();
+      }
+    });
+
+    // Fill common journal fields
+    await page.getByLabel(/title/i).fill('Testing Gear Usage');
+    await page.getByLabel(/content/i).fill('Used the climbing rope today.');
+
+    // Select a gear item
+    await page.getByTestId('gear-item-selector').click();
+    await page.getByText('Test Climbing Rope').click();
+    await expect(page.getByTestId('gear-item-selector')).toContainText(
+      'Test Climbing Rope'
+    );
+
+    // Fill buffer dates
+    await page.getByTestId('checkout-date-input').fill('2026-05-21T10:00');
+    await page.getByTestId('checkin-date-input').fill('2026-05-21T18:00');
+
+    // Submit
+    const [request] = await Promise.all([
+      page.waitForRequest(
+        req => req.url().includes('/api/journals') && req.method() === 'POST'
+      ),
+      page.getByRole('button', { name: /create journal/i }).click(),
+    ]);
+    const requestPayload = request.postDataJSON();
+
+    // Assert payload
+    expect(requestPayload?.data?.attributes).toBeDefined();
+    const attrs = requestPayload.data.attributes;
+    expect(attrs.types).toContain('gear_usage');
+    expect(attrs.type_data['gear_usage'].gear_item_id).toBe('g1');
+    expect(attrs.type_data['gear_usage'].checkout_date).toContain(
+      '2026-05-21T10:00'
+    );
+    expect(attrs.type_data['gear_usage'].checkin_date).toContain(
+      '2026-05-21T18:00'
+    );
+
     // Verify buffer dates are visible because Snipe-IT is connected
     await expect(page.getByTestId('checkout-date-input')).toBeVisible();
     await expect(page.getByTestId('checkin-date-input')).toBeVisible();
