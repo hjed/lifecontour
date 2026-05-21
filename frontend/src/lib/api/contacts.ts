@@ -659,7 +659,11 @@ export function useContactHistory(
 ) {
   return useQuery({
     queryKey: historyKeys.list(contactId, filters.page, filters.limit),
-    queryFn: () => fetchContactHistory(contactId, filters),
+    queryFn: () =>
+      fetchContactHistory(contactId, {
+        page: filters.page,
+        limit: filters.limit,
+      }),
     enabled: options.enabled !== false && !!contactId,
     staleTime: 2 * 60 * 1000, // 2 minutes for history
   });
