@@ -35,6 +35,10 @@ class StravaSettings(BaseSettings):
     worker_id: str = "strava-worker"
     log_level: str = "INFO"
 
+    # Periodic sync configuration
+    enable_periodic_sync: bool = False
+    sync_interval_hours: int = 6
+
     # Observability
     enable_telemetry: bool = False
     otel_exporter_otlp_endpoint: str = ""

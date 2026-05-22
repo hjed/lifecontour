@@ -2110,6 +2110,7 @@ async def _process_journal_upsert_event(
                 jci.private_description,
                 c.is_synced_to_google,
                 c.google_calendar_id,
+                c.access_role,
                 jeel.external_event_id,
                 jeel.sync_status
             FROM journals j
@@ -2139,6 +2140,17 @@ async def _process_journal_upsert_event(
                 calendar_id=row.calendar_id,
             )
             return {"status": "ignored", "reason": "calendar_not_synced"}
+
+        # Skip outbound push for read-only calendars (shared calendars
+        # where the user doesn't have write access)
+        if row.access_role in ("reader", "freeBusyReader"):
+            logger.info(
+                "Skipping outbound sync: calendar is read-only",
+                journal_id=journal_id,
+                calendar_id=row.calendar_id,
+                access_role=row.access_role,
+            )
+            return {"status": "ignored", "reason": "read_only_calendar"}
 
         if event_type == "JournalUpdated":
             changed_fields = event_data.get("changed_fields", {})

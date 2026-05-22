@@ -840,3 +840,67 @@ class TaskQueueService:
                 ]
 
                 return job_dicts, total
+
+    async def enqueue_calendar_webhook_setup(
+        self,
+        google_account_email: str,
+        user_id: str | int,
+        google_calendar_id: str,
+    ) -> str:
+        """Enqueue a Google Calendar webhook setup task.
+
+        This is a lightweight task that registers a push notification channel
+        for a specific Google Calendar. Unlike sync jobs, webhook setup tasks
+        are not tracked in the sync_jobs table.
+
+        Args:
+            google_account_email: Google account email
+            user_id: User ID
+            google_calendar_id: The Google Calendar ID to register webhooks for
+
+        Returns:
+            ARQ job ID
+
+        Raises:
+            JobEnqueueError: If job enqueueing fails
+        """
+        logger.info(
+            "Enqueueing calendar webhook setup",
+            google_account_email=google_account_email,
+            user_id=user_id,
+            google_calendar_id=google_calendar_id,
+        )
+
+        try:
+            pool = await self._get_arq_pool()
+
+            job = await pool.enqueue_job(
+                "setup_calendar_webhook",
+                google_account_email,
+                user_id,
+                google_calendar_id,
+                _defer_until=None,
+                _queue_name=ARQ_QUEUE_NAME,
+            )
+
+            if not job:
+                raise JobEnqueueError(
+                    message="Failed to enqueue webhook setup - no job returned",
+                    integration_source="google",
+                    reason="ARQ pool returned None",
+                )
+
+            logger.info(
+                "Successfully enqueued calendar webhook setup",
+                job_id=job.job_id,
+                google_calendar_id=google_calendar_id,
+            )
+            return job.job_id
+
+        except Exception as e:
+            logger.error(
+                "Failed to enqueue calendar webhook setup",
+                google_calendar_id=google_calendar_id,
+                error=str(e),
+            )
+            raise

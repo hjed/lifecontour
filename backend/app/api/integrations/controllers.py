@@ -1043,6 +1043,7 @@ async def list_google_calendars(
                                 description=item.get("description"),
                                 background_color=item.get("backgroundColor"),
                                 primary=item.get("primary", False),
+                                access_role=item.get("accessRole"),
                             ),
                         )
                     )
@@ -1274,3 +1275,98 @@ async def receive_calendar_webhook(
         # Return 200 for unexpected internal errors to avoid Google retrying.
         # (HTTPExceptions for missing headers/unknown channels are re-raised above.)
         return {"status": "error", "detail": "Internal processing error"}
+
+
+# ---------------------------------------------------------------------------
+# Google Calendar Webhook Re-register
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/google/webhooks/reregister",
+    responses={
+        200: {"description": "Webhook re-registration queued"},
+        404: {"description": "Google account not connected"},
+    },
+)
+@inject
+async def reregister_google_webhooks(
+    user: FromDishka[SessionUser],
+    db_manager: FromDishka[IntegrationDatabaseManager],
+    task_queue_service: FromDishka[TaskQueueService],
+) -> dict[str, Any]:
+    """Re-register Google Calendar webhooks for all synced calendars.
+
+    Enqueues a ``setup_calendar_webhook`` task for every calendar that has
+    ``is_synced_to_google = true``, allowing the user to fix broken or expired
+    push notification channels without a full re-sync.
+    """
+    from sqlalchemy import text
+
+    from app.api.integrations.schemas import (
+        WebhookReregisterAttributes,
+        WebhookReregisterData,
+        WebhookReregisterResponse,
+    )
+
+    async with db_manager.get_session() as session:
+        conn = await session.connection()
+
+        # Look up the user's Google account email
+        auth_stmt = text("""
+            SELECT google_account_email
+            FROM user_google_auth
+            WHERE user_id = :user_id
+        """)
+        auth_result = await conn.execute(auth_stmt, {"user_id": str(user.id)})
+        auth_row = auth_result.fetchone()
+
+        if not auth_row:
+            raise HTTPException(
+                status_code=404,
+                detail="No Google account connected",
+            )
+
+        google_account_email = auth_row.google_account_email
+
+        # Find all synced calendars
+        cal_stmt = text("""
+            SELECT google_calendar_id
+            FROM calendars
+            WHERE user_id = :user_id AND is_synced_to_google = true
+              AND google_calendar_id IS NOT NULL
+        """)
+        cal_result = await conn.execute(cal_stmt, {"user_id": str(user.id)})
+        synced_calendars = cal_result.fetchall()
+
+    # Enqueue webhook setup for each synced calendar
+    webhooks_queued = 0
+    for cal_row in synced_calendars:
+        try:
+            await task_queue_service.enqueue_calendar_webhook_setup(
+                google_account_email=google_account_email,
+                user_id=user.id,
+                google_calendar_id=cal_row.google_calendar_id,
+            )
+            webhooks_queued += 1
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Failed to enqueue webhook setup for calendar",
+                google_calendar_id=cal_row.google_calendar_id,
+                exc_info=True,
+            )
+
+    message = (
+        f"Queued webhook re-registration for {webhooks_queued} calendar(s)"
+        if webhooks_queued > 0
+        else "No synced calendars found to re-register webhooks for"
+    )
+
+    return WebhookReregisterResponse(
+        data=WebhookReregisterData(
+            attributes=WebhookReregisterAttributes(
+                webhooks_queued=webhooks_queued,
+                message=message,
+            )
+        )
+    ).model_dump()

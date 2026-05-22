@@ -27,6 +27,7 @@ class SqlCalendarRepository(CalendarRepository):
             description=row.description,
             is_synced_to_google=row.is_synced_to_google,
             google_calendar_id=row.google_calendar_id,
+            access_role=getattr(row, "access_role", None),
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -37,7 +38,7 @@ class SqlCalendarRepository(CalendarRepository):
             """
             SELECT id, user_id, name, color, description,
                    is_synced_to_google, google_calendar_id,
-                   created_at, updated_at
+                   access_role, created_at, updated_at
             FROM calendars
             WHERE id = :calendar_id
             """
@@ -63,15 +64,15 @@ class SqlCalendarRepository(CalendarRepository):
             """
             INSERT INTO calendars (
                 user_id, name, color, description,
-                is_synced_to_google, google_calendar_id
+                is_synced_to_google, google_calendar_id, access_role
             )
             VALUES (
                 :user_id, :name, :color, :description,
-                :is_synced_to_google, :google_calendar_id
+                :is_synced_to_google, :google_calendar_id, :access_role
             )
             RETURNING id, user_id, name, color, description,
                       is_synced_to_google, google_calendar_id,
-                      created_at, updated_at
+                      access_role, created_at, updated_at
             """
         )
         result = await self.conn.execute(
@@ -83,6 +84,7 @@ class SqlCalendarRepository(CalendarRepository):
                 "description": calendar.description,
                 "is_synced_to_google": calendar.is_synced_to_google,
                 "google_calendar_id": calendar.google_calendar_id,
+                "access_role": calendar.access_role,
             },
         )
         row = result.fetchone()
@@ -99,11 +101,12 @@ class SqlCalendarRepository(CalendarRepository):
                 description = :description,
                 is_synced_to_google = :is_synced_to_google,
                 google_calendar_id = :google_calendar_id,
+                access_role = :access_role,
                 updated_at = now()
             WHERE id = :id
             RETURNING id, user_id, name, color, description,
                       is_synced_to_google, google_calendar_id,
-                      created_at, updated_at
+                      access_role, created_at, updated_at
             """
         )
         result = await self.conn.execute(
@@ -116,6 +119,7 @@ class SqlCalendarRepository(CalendarRepository):
                 "description": calendar.description,
                 "is_synced_to_google": calendar.is_synced_to_google,
                 "google_calendar_id": calendar.google_calendar_id,
+                "access_role": calendar.access_role,
             },
         )
         row = result.fetchone()
@@ -139,7 +143,7 @@ class SqlCalendarRepository(CalendarRepository):
             """
             SELECT id, user_id, name, color, description,
                    is_synced_to_google, google_calendar_id,
-                   created_at, updated_at
+                   access_role, created_at, updated_at
             FROM calendars
             WHERE user_id = :user_id
             ORDER BY name ASC

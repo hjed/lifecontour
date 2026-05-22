@@ -1000,6 +1000,10 @@ class CalendarAttributes(BaseModel):
     google_calendar_id: str | None = Field(
         default=None, description="Google Calendar ID"
     )
+    access_role: str | None = Field(
+        default=None,
+        description="Google Calendar access role (owner, writer, reader, freeBusyReader)",
+    )
 
 
 class CalendarResource(BaseModel):
