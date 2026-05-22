@@ -334,3 +334,18 @@ export interface UnmatchedStravaAthleteData {
 export interface UnmatchedStravaAthleteListResponse {
   data: UnmatchedStravaAthleteData[];
 }
+
+// Webhook Types
+export interface WebhookReregisterAttributes {
+  webhooks_queued: number;
+  message: string;
+}
+
+export interface WebhookReregisterData {
+  type: 'webhook-reregister';
+  attributes: WebhookReregisterAttributes;
+}
+
+export interface WebhookReregisterResponse {
+  data: WebhookReregisterData;
+}

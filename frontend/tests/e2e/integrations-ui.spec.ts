@@ -412,6 +412,138 @@ test.describe('Integrations Page UI (mocked API)', () => {
       authenticatedPage.locator('[data-testid="scope-upgrade-banner-google"]')
     ).toHaveCount(0);
   });
+
+  test('connected: can trigger reauthorize and reregister webhooks', async ({
+    authenticatedPage,
+  }) => {
+    let authorizeTriggered = false;
+    let reregisterTriggered = false;
+
+    await authenticatedPage.route('**/api/integrations/health', route =>
+      route.fulfill(
+        json({
+          data: {
+            id: 'integrations',
+            type: 'integration-health',
+            attributes: {
+              overall: 'healthy',
+              lastChecked: new Date().toISOString(),
+              redis: { status: 'healthy', latency: 1, lastSeen: null },
+              worker: { status: 'healthy', latency: 1, lastSeen: null },
+            },
+          },
+        })
+      )
+    );
+
+    await authenticatedPage.route('**/api/integrations', route =>
+      route.fulfill(
+        json({
+          data: [
+            {
+              id: 'google',
+              type: 'integration',
+              attributes: {
+                name: 'Google',
+                status: 'connected',
+                capabilities: ['contacts_sync', 'calendar_sync'],
+                sync_summary: {
+                  last_sync_time: new Date().toISOString(),
+                  sync_count: 42,
+                  error_count: 0,
+                },
+                needs_reauth: false,
+                needs_reconsent: false,
+              },
+            },
+          ],
+        })
+      )
+    );
+
+    await authenticatedPage.route(
+      '**/api/integrations/google/sync-history**',
+      route =>
+        route.fulfill(
+          json({
+            data: [],
+            meta: { total: 0, page: 1, pageSize: 5 },
+          })
+        )
+    );
+
+    await authenticatedPage.route(
+      '**/api/integrations/google/contacts/oauth/authorize',
+      async route => {
+        const req = route.request();
+        if (req.method() !== 'POST') return route.fallback();
+        authorizeTriggered = true;
+        return route.fulfill(
+          json({
+            authorization_url: 'https://accounts.google.com/o/oauth2/auth',
+            state: 'test-state',
+          })
+        );
+      }
+    );
+
+    await authenticatedPage.route(
+      '**/api/integrations/google/webhooks/reregister',
+      async route => {
+        const req = route.request();
+        if (req.method() !== 'POST') return route.fallback();
+        reregisterTriggered = true;
+        return route.fulfill(
+          json({
+            data: {
+              type: 'webhook-reregister',
+              attributes: {
+                webhooks_queued: 1,
+                message: 'Webhooks reregistered successfully',
+              },
+            },
+          })
+        );
+      }
+    );
+
+    await authenticatedPage.goto('/integrations');
+
+    const panel = authenticatedPage.locator(
+      '[data-testid="integration-panel-google"]'
+    );
+
+    // Click Reregister Webhooks
+    const reregisterPromise = authenticatedPage.waitForRequest(
+      request =>
+        request
+          .url()
+          .includes('/api/integrations/google/webhooks/reregister') &&
+        request.method() === 'POST'
+    );
+    await panel
+      .getByTestId('reregister-webhooks-google')
+      .click({ force: true });
+    await reregisterPromise;
+    await expect.poll(() => reregisterTriggered).toBe(true);
+
+    // Test Reauthorize
+    // Setting globalThis.location.href navigates the page away, which we can intercept
+    await authenticatedPage.route(
+      'https://accounts.google.com/o/oauth2/auth',
+      route => route.fulfill(json({}))
+    );
+    const reauthorizePromise = authenticatedPage.waitForRequest(
+      request =>
+        request
+          .url()
+          .includes('/api/integrations/google/contacts/oauth/authorize') &&
+        request.method() === 'POST'
+    );
+    await panel.getByTestId('reauthorize-google').click({ force: true });
+    await reauthorizePromise;
+    await expect.poll(() => authorizeTriggered).toBe(true);
+  });
 });
 
 test.describe('Strava Integration Panel (mocked API)', () => {
@@ -637,5 +769,84 @@ test.describe('Strava Integration Panel (mocked API)', () => {
 
     const reqBody = JSON.parse(request.postData() ?? '{}');
     expect(reqBody.sync_type).toBe('smart');
+  });
+
+  test('strava connected: can trigger reauthorize and reregister webhooks', async ({
+    authenticatedPage,
+  }) => {
+    await setupIntegrationsMocks(authenticatedPage, [stravaConnected]);
+
+    let authorizeTriggered = false;
+    let reregisterTriggered = false;
+
+    await authenticatedPage.route(
+      '**/api/integrations/strava/oauth/authorize',
+      async route => {
+        const req = route.request();
+        if (req.method() !== 'POST') return route.fallback();
+        authorizeTriggered = true;
+        return route.fulfill(
+          json({
+            authorization_url: 'https://www.strava.com/oauth/authorize',
+            state: 'test-state',
+          })
+        );
+      }
+    );
+
+    await authenticatedPage.route(
+      '**/api/integrations/strava/webhooks/reregister',
+      async route => {
+        const req = route.request();
+        if (req.method() !== 'POST') return route.fallback();
+        reregisterTriggered = true;
+        return route.fulfill(
+          json({
+            data: {
+              type: 'webhook-reregister',
+              attributes: {
+                webhooks_queued: 1,
+                message: 'Webhooks reregistered successfully',
+              },
+            },
+          })
+        );
+      }
+    );
+
+    await authenticatedPage.goto('/integrations');
+
+    const panel = authenticatedPage.locator(
+      '[data-testid="integration-panel-strava"]'
+    );
+
+    // Click Reregister Webhooks
+    const reregisterPromise = authenticatedPage.waitForRequest(
+      request =>
+        request
+          .url()
+          .includes('/api/integrations/strava/webhooks/reregister') &&
+        request.method() === 'POST'
+    );
+    await panel
+      .getByTestId('reregister-webhooks-strava')
+      .click({ force: true });
+    await reregisterPromise;
+    await expect.poll(() => reregisterTriggered).toBe(true);
+
+    // Test Reauthorize
+    // Setting globalThis.location.href navigates the page away, which we can intercept
+    await authenticatedPage.route(
+      'https://www.strava.com/oauth/authorize',
+      route => route.fulfill(json({}))
+    );
+    const reauthorizePromise = authenticatedPage.waitForRequest(
+      request =>
+        request.url().includes('/api/integrations/strava/oauth/authorize') &&
+        request.method() === 'POST'
+    );
+    await panel.getByTestId('reauthorize-strava').click({ force: true });
+    await reauthorizePromise;
+    await expect.poll(() => authorizeTriggered).toBe(true);
   });
 });

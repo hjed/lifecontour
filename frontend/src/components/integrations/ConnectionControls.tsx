@@ -6,10 +6,15 @@ import {
   Settings,
   ShieldAlert,
   Users,
+  Webhook,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { useOAuthAuthorize, useOAuthDisconnect } from '@/lib/api/integrations';
+import {
+  useOAuthAuthorize,
+  useOAuthDisconnect,
+  useReregisterWebhooks,
+} from '@/lib/api/integrations';
 
 interface ConnectionControlsProps {
   integrationId: string;
@@ -28,6 +33,8 @@ export function ConnectionControls({
     useOAuthAuthorize(integrationId);
   const { mutate: disconnectOAuth, isPending: disconnectLoading } =
     useOAuthDisconnect(integrationId);
+  const { mutate: reregisterWebhooks, isPending: reregisterLoading } =
+    useReregisterWebhooks(integrationId);
 
   const handleConnect = () => {
     authorizeOAuth({ redirect_url: '/integrations' });
@@ -106,19 +113,51 @@ export function ConnectionControls({
 
       <div className='flex gap-2'>
         {connected ? (
-          <Button
-            variant='outline'
-            onClick={handleDisconnect}
-            disabled={disconnectLoading}
-            data-testid={`disconnect-${integrationId}`}
-          >
-            {disconnectLoading ? (
-              <RefreshCw className='mr-2 h-4 w-4 animate-spin' />
-            ) : (
-              <Settings className='mr-2 h-4 w-4' />
+          <>
+            <Button
+              variant='outline'
+              onClick={handleDisconnect}
+              disabled={disconnectLoading}
+              data-testid={`disconnect-${integrationId}`}
+            >
+              {disconnectLoading ? (
+                <RefreshCw className='mr-2 h-4 w-4 animate-spin' />
+              ) : (
+                <Settings className='mr-2 h-4 w-4' />
+              )}
+              Disconnect
+            </Button>
+            {integrationId !== 'snipeit' && (
+              <>
+                <Button
+                  variant='outline'
+                  onClick={handleConnect}
+                  disabled={oauthLoading}
+                  data-testid={`reauthorize-${integrationId}`}
+                >
+                  {oauthLoading ? (
+                    <RefreshCw className='mr-2 h-4 w-4 animate-spin' />
+                  ) : (
+                    <KeyRound className='mr-2 h-4 w-4' />
+                  )}
+                  Reauthorize
+                </Button>
+                <Button
+                  variant='outline'
+                  onClick={() => reregisterWebhooks()}
+                  disabled={reregisterLoading}
+                  data-testid={`reregister-webhooks-${integrationId}`}
+                >
+                  {reregisterLoading ? (
+                    <RefreshCw className='mr-2 h-4 w-4 animate-spin' />
+                  ) : (
+                    <Webhook className='mr-2 h-4 w-4' />
+                  )}
+                  Reregister Webhooks
+                </Button>
+              </>
             )}
-            Disconnect
-          </Button>
+          </>
         ) : (
           <Button
             onClick={handleConnect}

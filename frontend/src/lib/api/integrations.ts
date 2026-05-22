@@ -28,6 +28,7 @@ import {
   StravaAthleteMappingResponse,
   StravaAthleteMappingCreateRequest,
   UnmatchedStravaAthleteListResponse,
+  WebhookReregisterResponse,
 } from '@/types/integrations';
 import { JsonApiErrorResponse } from '@/types/api';
 
@@ -836,6 +837,38 @@ export function useSaveSnipeItSettings() {
     },
     onError: (error: Error) => {
       toast.error(`Failed to save Snipe-IT settings: ${error.message}`);
+    },
+  });
+}
+
+// Webhooks
+export async function reregisterWebhooks(
+  integrationId: string
+): Promise<WebhookReregisterResponse> {
+  // Use specific endpoint for google and strava
+  const endpoint =
+    integrationId === 'google'
+      ? '/api/integrations/google/webhooks/reregister'
+      : `/api/integrations/${integrationId}/webhooks/reregister`;
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    credentials: 'include',
+  });
+  return handleApiResponse<WebhookReregisterResponse>(response);
+}
+
+export function useReregisterWebhooks(integrationId: string) {
+  return useMutation({
+    mutationFn: () => reregisterWebhooks(integrationId),
+    onSuccess: data => {
+      toast.success(data.data.attributes.message);
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to reregister webhooks: ${error.message}`);
     },
   });
 }
