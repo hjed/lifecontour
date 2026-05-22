@@ -20,6 +20,7 @@ from app.core.integrations.adapters.sql.snipeit_settings_repository import (
 )
 from app.core.integrations.models.snipeit import SnipeItSettings
 from app.infrastructure.auth.models import SessionUser
+from app.infrastructure.config import Settings
 
 router = APIRouter(
     prefix="/integrations/snipeit",
@@ -134,3 +135,50 @@ async def save_snipeit_settings(
             status_code=500,
             detail="An unexpected error occurred while saving Snipe-IT settings",
         ) from e
+
+
+@router.get(
+    "/webhook-url",
+    responses={
+        200: {"description": "Webhook URL returned"},
+        400: {"description": "Webhook base URL not configured"},
+    },
+)
+@inject
+async def get_snipeit_webhook_url(
+    user: FromDishka[SessionUser],  # noqa: ARG001
+    settings: FromDishka[Settings],
+) -> dict[str, object]:
+    """Get the webhook URL to configure in Snipe-IT.
+
+    Snipe-IT uses an inbound-only webhook model — the webhook URL must be
+    manually configured in the Snipe-IT admin UI. This endpoint returns
+    the URL so the user can copy it.
+    """
+    from app.api.integrations.schemas import (
+        WebhookUrlAttributes,
+        WebhookUrlData,
+        WebhookUrlResponse,
+    )
+
+    if not settings.webhook_base_url:
+        raise HTTPException(
+            status_code=400,
+            detail="Webhook base URL is not configured on the server",
+        )
+
+    webhook_url = (
+        f"{settings.webhook_base_url.rstrip('/')}/api/integrations/snipeit/webhook"
+    )
+
+    return WebhookUrlResponse(
+        data=WebhookUrlData(
+            attributes=WebhookUrlAttributes(
+                webhook_url=webhook_url,
+                message=(
+                    "Configure this URL in your Snipe-IT instance under "
+                    "Admin > Settings > Webhooks."
+                ),
+            )
+        )
+    ).model_dump()

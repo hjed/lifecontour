@@ -44,6 +44,7 @@ class Calendar:
     description: str | None = None
     is_synced_to_google: bool = False
     google_calendar_id: str | None = None
+    access_role: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

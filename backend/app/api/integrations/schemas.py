@@ -351,6 +351,11 @@ class GoogleCalendarAttributes(BaseModel):
     primary: bool = Field(
         default=False, description="Whether this is the primary calendar"
     )
+    access_role: str | None = Field(
+        default=None,
+        description="User's access role (owner, writer, reader, freeBusyReader)",
+        serialization_alias="accessRole",
+    )
 
     model_config = {"populate_by_name": True}
 
@@ -367,3 +372,48 @@ class GoogleCalendarListResponse(BaseModel):
     """JSON API response for listing Google Calendars."""
 
     data: list[GoogleCalendarData] = Field(description="List of Google Calendars")
+
+
+# Webhook Re-register Response Models
+class WebhookReregisterAttributes(BaseModel):
+    """Attributes for a webhook re-register response."""
+
+    webhooks_queued: int = Field(
+        description="Number of webhook re-registration jobs queued"
+    )
+    message: str = Field(description="Human-readable status message")
+
+
+class WebhookReregisterData(BaseModel):
+    """JSON API data wrapper for webhook re-register response."""
+
+    type: str = Field(default="webhook-reregister", description="Resource type")
+    attributes: WebhookReregisterAttributes = Field(
+        description="Re-register result attributes"
+    )
+
+
+class WebhookReregisterResponse(BaseModel):
+    """JSON API response for webhook re-registration."""
+
+    data: WebhookReregisterData = Field(description="Re-register result")
+
+
+class WebhookUrlAttributes(BaseModel):
+    """Attributes for a webhook URL response."""
+
+    webhook_url: str = Field(description="The webhook URL to configure")
+    message: str = Field(description="Human-readable instructions")
+
+
+class WebhookUrlData(BaseModel):
+    """JSON API data wrapper for webhook URL response."""
+
+    type: str = Field(default="webhook-url", description="Resource type")
+    attributes: WebhookUrlAttributes = Field(description="Webhook URL attributes")
+
+
+class WebhookUrlResponse(BaseModel):
+    """JSON API response for webhook URL retrieval."""
+
+    data: WebhookUrlData = Field(description="Webhook URL data")

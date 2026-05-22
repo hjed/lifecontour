@@ -14,6 +14,7 @@ from typing import Any
 
 from arq import Retry, run_worker
 from arq.connections import RedisSettings
+from arq.cron import cron
 from arq.typing import StartupShutdown, WorkerSettingsBase
 from core_shared.database.engine import create_session_factory
 from core_shared.integration_constants import STRAVA_ARQ_QUEUE_NAME
@@ -601,6 +602,111 @@ async def sync_strava_activity_batch(
         await sync_service._api_client.close()
 
 
+@trace_arq_job
+async def periodic_sync_all_strava_accounts(
+    ctx: dict[str, Any],
+) -> dict[str, Any]:
+    """Periodic sync wrapper that syncs all active Strava accounts.
+
+    This function is called by ARQ cron jobs and enqueues individual
+    ``sync_strava_activities`` tasks for each connected Strava
+    integration using 'smart' sync type.
+
+    Args:
+        ctx: ARQ context dictionary containing Redis pool and session_factory.
+
+    Returns:
+        Dictionary with sync summary (accounts_found, jobs_enqueued, errors).
+    """
+    logger.info("Starting periodic sync for all Strava accounts")
+
+    session_factory = ctx["session_factory"]
+
+    accounts_found = 0
+    jobs_enqueued = 0
+    errors: list[str] = []
+
+    try:
+        async with session_factory() as session:
+            from sqlalchemy import text
+
+            stmt = text("""
+                SELECT user_id, athlete_id
+                FROM user_strava_auth
+                ORDER BY user_id
+            """)
+            result = await session.execute(stmt)
+            accounts = result.fetchall()
+
+            accounts_found = len(accounts)
+            logger.info(
+                "Found active Strava accounts for periodic sync",
+                accounts_count=accounts_found,
+            )
+
+            for row in accounts:
+                user_id = row.user_id
+
+                try:
+                    job = await ctx["redis"].enqueue_job(
+                        "sync_strava_activities",
+                        str(user_id),
+                        "smart",
+                        _job_timeout=600,
+                        _queue_name=STRAVA_ARQ_QUEUE_NAME,
+                    )
+
+                    if job:
+                        jobs_enqueued += 1
+                        logger.info(
+                            "Enqueued periodic Strava sync job",
+                            job_id=job.job_id,
+                            user_id=user_id,
+                        )
+                    else:
+                        error_msg = f"Failed to enqueue Strava sync for user {user_id}"
+                        errors.append(error_msg)
+                        logger.warning(
+                            "Failed to enqueue periodic Strava sync job",
+                            user_id=user_id,
+                        )
+
+                except Exception as e:  # noqa: BLE001
+                    error_msg = (
+                        f"Error enqueueing Strava sync for user {user_id}: {e!s}"
+                    )
+                    errors.append(error_msg)
+                    logger.error(
+                        "Error enqueueing periodic Strava sync job",
+                        user_id=user_id,
+                        error=str(e),
+                        error_type=type(e).__name__,
+                    )
+
+        logger.info(
+            "Periodic Strava sync scheduling complete",
+            accounts_found=accounts_found,
+            jobs_enqueued=jobs_enqueued,
+            errors_count=len(errors),
+        )
+
+        return {
+            "status": "success",
+            "accounts_found": accounts_found,
+            "jobs_enqueued": jobs_enqueued,
+            "errors": errors,
+        }
+
+    except Exception:
+        logger.error(
+            "Fatal error during periodic Strava sync",
+            accounts_found=accounts_found,
+            jobs_enqueued=jobs_enqueued,
+            exc_info=True,
+        )
+        raise
+
+
 # ARQ Worker Settings
 class StravaWorkerSettings(WorkerSettingsBase):
     """ARQ worker configuration."""
@@ -610,6 +716,7 @@ class StravaWorkerSettings(WorkerSettingsBase):
         process_strava_webhook_event,
         sync_strava_activities,
         sync_strava_activity_batch,
+        periodic_sync_all_strava_accounts,
     ]
 
     # Worker lifecycle
@@ -629,6 +736,29 @@ class StravaWorkerSettings(WorkerSettingsBase):
 
     # Queue name
     queue_name = STRAVA_ARQ_QUEUE_NAME
+
+    # Periodic sync configuration (cron jobs)
+    # Only configure cron_jobs if periodic sync is enabled
+    cron_jobs = []
+    if settings.enable_periodic_sync:
+        # Generate cron schedule based on sync_interval_hours
+        # For example: sync_interval_hours=6 -> hours={0, 6, 12, 18}
+        sync_hours = set(range(0, 24, settings.sync_interval_hours))
+
+        cron_jobs = [
+            cron(
+                periodic_sync_all_strava_accounts,
+                hour=sync_hours,
+                minute=0,  # Run at the top of the hour
+                unique=True,  # Only run once even with multiple workers
+            )
+        ]
+
+        logger.info(
+            "Periodic Strava sync enabled",
+            sync_interval_hours=settings.sync_interval_hours,
+            sync_hours=list(sync_hours),
+        )
 
 
 if __name__ == "__main__":

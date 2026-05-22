@@ -817,3 +817,119 @@ async def get_journal_unmatched_athletes(
             for a in athletes
         ]
     )
+
+
+# ---------- Webhook Re-register ----------
+
+
+@router.post(
+    "/webhooks/reregister",
+    responses={
+        200: {"description": "Webhook re-registration completed"},
+        400: {"description": "Strava integration not configured"},
+        404: {"description": "Strava not connected"},
+        500: {"description": "Webhook re-registration failed"},
+    },
+)
+@inject
+async def reregister_strava_webhook(
+    user: FromDishka[SessionUser],
+    strava_token_service: FromDishka[StravaTokenService],
+    settings: FromDishka[Settings],
+) -> dict[str, object]:
+    """Re-register the Strava webhook subscription.
+
+    Deletes the existing Strava push subscription (if any) and creates a
+    new one with a fresh verify token. This is useful when the webhook URL
+    has changed or the subscription has become stale.
+    """
+    from app.api.integrations.schemas import (
+        WebhookReregisterAttributes,
+        WebhookReregisterData,
+        WebhookReregisterResponse,
+    )
+
+    if not settings.strava_client_id or not settings.strava_client_secret:
+        raise HTTPException(
+            status_code=400,
+            detail="Strava integration is not configured",
+        )
+
+    if not settings.webhook_base_url:
+        raise HTTPException(
+            status_code=400,
+            detail="Webhook base URL is not configured",
+        )
+
+    # Verify Strava is connected
+    is_connected = await strava_token_service.is_connected(str(user.id))
+    if not is_connected:
+        raise HTTPException(
+            status_code=404,
+            detail="Strava is not connected",
+        )
+
+    # Get existing subscription ID
+    auth_data = await strava_token_service.get_auth(str(user.id))
+    existing_sub_id = (
+        int(auth_data["strava_webhook_subscription_id"])
+        if auth_data and auth_data.get("strava_webhook_subscription_id")
+        else None
+    )
+
+    # Generate new verify token and store it
+    verify_token = secrets.token_urlsafe(32)
+    await strava_token_service.set_webhook_verify_token(
+        user_id=str(user.id),
+        verify_token=verify_token,
+    )
+    await strava_token_service.commit()
+
+    # Force resubscribe
+    callback_url = f"{settings.webhook_base_url}/api/integrations/strava/webhook"
+
+    try:
+        webhook_service = StravaWebhookService(
+            client_id=settings.strava_client_id,
+            client_secret=settings.strava_client_secret,
+        )
+        new_sub_id = await webhook_service.force_resubscribe(
+            callback_url=callback_url,
+            verify_token=verify_token,
+            existing_subscription_id=existing_sub_id,
+        )
+
+        # Store the new subscription ID
+        await strava_token_service.set_webhook_subscription(
+            user_id=str(user.id),
+            subscription_id=new_sub_id,
+            verify_token=verify_token,
+        )
+
+        logger.info(
+            "Strava webhook re-registered",
+            user_id=user.id,
+            old_subscription_id=existing_sub_id,
+            new_subscription_id=new_sub_id,
+        )
+
+        return WebhookReregisterResponse(
+            data=WebhookReregisterData(
+                attributes=WebhookReregisterAttributes(
+                    webhooks_queued=1,
+                    message="Strava webhook re-registered successfully",
+                )
+            )
+        ).model_dump()
+
+    except Exception as e:
+        logger.error(
+            "Failed to re-register Strava webhook",
+            user_id=user.id,
+            error=str(e),
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to re-register Strava webhook",
+        ) from e

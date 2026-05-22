@@ -56,6 +56,7 @@ async def list_calendars(
             color=calendar.color,
             is_synced_to_google=calendar.is_synced_to_google,
             google_calendar_id=calendar.google_calendar_id,
+            access_role=calendar.access_role,
         )
 
         calendar_resource = CalendarResource(
@@ -114,6 +115,7 @@ async def create_calendar(
         color=created_calendar.color,
         is_synced_to_google=created_calendar.is_synced_to_google,
         google_calendar_id=created_calendar.google_calendar_id,
+        access_role=created_calendar.access_role,
     )
 
     calendar_resource = CalendarResource(
@@ -221,6 +223,7 @@ async def update_calendar(
         color=updated_calendar.color,
         is_synced_to_google=updated_calendar.is_synced_to_google,
         google_calendar_id=updated_calendar.google_calendar_id,
+        access_role=updated_calendar.access_role,
     )
 
     calendar_resource = CalendarResource(
