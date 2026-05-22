@@ -1,7 +1,7 @@
 """add snipeit_checkout to integration_source check constraint
 
-Revision ID: 0076
-Revises: 0075
+Revision ID: 0077
+Revises: 0076
 Create Date: 2026-05-22 09:00:00.000000
 
 """
@@ -11,8 +11,8 @@ from collections.abc import Sequence
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "0076"
-down_revision: str | None = "0075"
+revision: str = "0077"
+down_revision: str | None = "0076"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
