@@ -8,12 +8,14 @@ POST to the Snipe-IT API and persist correct sync_metadata.
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
+import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
@@ -56,8 +58,10 @@ def mock_transport() -> MockTransport:
     return MockTransport()
 
 
-@pytest.fixture
-def integration_client(mock_transport: MockTransport) -> SnipeItAPIClient:
+@pytest_asyncio.fixture
+async def integration_client(
+    mock_transport: MockTransport,
+) -> AsyncGenerator[SnipeItAPIClient, None]:
     client = SnipeItAPIClient.create(
         base_url="https://snipeit.example.com/api/v1/",
         access_token="test-access-token",
@@ -68,7 +72,8 @@ def integration_client(mock_transport: MockTransport) -> SnipeItAPIClient:
         base_url="https://snipeit.example.com/api/v1/",
         headers={"Authorization": "Bearer test-access-token"},
     )
-    return client
+    yield client
+    await client._client.aclose()
 
 
 @pytest.fixture

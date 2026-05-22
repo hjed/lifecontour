@@ -425,13 +425,19 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
                         journal_id=journal_id,
                         session_factory=self._session_factory,
                     )
-                # Note: JournalUpdated for GEAR_USAGE is not yet implemented
-                # (no checkin sync per product spec)
-                logger.info(
-                    "Successfully processed journal gear usage event",
-                    journal_id=journal_id,
-                    event_type=event.event_type,
-                )
+                    logger.info(
+                        "Successfully processed journal gear usage checkout",
+                        journal_id=journal_id,
+                        event_type=event.event_type,
+                    )
+                else:
+                    # Note: JournalUpdated for GEAR_USAGE is not yet implemented
+                    # (no checkin sync per product spec)
+                    logger.debug(
+                        "Skipping journal gear usage event: unhandled event type",
+                        journal_id=journal_id,
+                        event_type=event.event_type,
+                    )
             else:
                 if event.event_type == "JournalCreated":
                     await sync_service.push_maintenance_create(

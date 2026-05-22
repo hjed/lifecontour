@@ -510,3 +510,47 @@ async def test_handle_event_skips_journal_created_no_maintenance_no_usage(
         # Should NOT attempt auth or create sync service for non-maintenance/non-usage
         mock_get_auth.assert_not_called()
         mock_create.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_handle_event_skips_journal_updated_gear_usage(
+    mock_stream_client: AsyncMock,
+    mock_session_factory: MagicMock,
+) -> None:
+    """Verify that JournalUpdated events for GEAR_USAGE are skipped (no checkin sync)."""
+    consumer = SnipeItWorkerStreamConsumer(
+        stream_client=mock_stream_client,
+        session_factory=mock_session_factory,
+    )
+    event = StreamEvent(
+        message_id="123",
+        event_id="abc",
+        event_type="JournalUpdated",
+        aggregate_id=100,
+        event_data={
+            "journal_id": 100,
+            "user_id": "user1",
+            "title": "Gear Usage Note",
+            "journal_type": "GEAR_USAGE",
+        },
+        occurred_at="2024-01-01T00:00:00Z",
+    )
+
+    mock_session = AsyncMock()
+    mock_session_factory.return_value.__aenter__.return_value = mock_session
+
+    settings_result = MagicMock()
+    settings_result.fetchone.return_value = MagicMock(
+        user_id="user1", base_url="http://snipeit", snipeit_user_id="s1"
+    )
+
+    mock_session.execute = AsyncMock(return_value=settings_result)
+
+    with patch("worker._create_sync_service") as mock_create_sync:
+        mock_sync_service = AsyncMock()
+        mock_create_sync.return_value = mock_sync_service
+
+        with patch("worker._get_auth_data", return_value={"token": "t"}):
+            await consumer._handle_event(event)
+
+        mock_sync_service.push_checkout_create.assert_not_called()

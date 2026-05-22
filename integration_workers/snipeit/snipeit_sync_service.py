@@ -1138,6 +1138,10 @@ class SnipeItSyncService:
             raise
 
         # Save sync metadata: journal_id → snipeit_checkout
+        # Note: Snipe-IT does not support an idempotency key on checkouts.
+        # A crash between the POST succeeding and this metadata insert will result
+        # in duplicate checkout attempts on retry. The Snipe-IT API blocks duplicate
+        # checkouts of the same asset with an error, which requires manual intervention.
         version_hash = hashlib.sha256(
             json.dumps(payload, sort_keys=True).encode()
         ).hexdigest()
