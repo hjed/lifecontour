@@ -225,6 +225,39 @@ class SnipeItAPIClient:
 
         return SnipeItAsset.model_validate(asset_payload)
 
+    async def checkout_asset(
+        self, asset_id: int, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Check out an asset to a user in Snipe-IT.
+
+        Sends ``POST /hardware/{asset_id}/checkout`` with the given payload.
+        The checkout response is returned as a raw dict because it differs
+        from the standard asset response structure.
+
+        Args:
+            asset_id: Snipe-IT asset numeric ID.
+            payload: Checkout fields (assigned_user, checkout_to_type,
+                checkout_at, expected_checkin, note).
+
+        Returns:
+            Raw response dict from Snipe-IT.
+
+        Raises:
+            SnipeItAPIError: If the response ``status`` is not ``"success"``.
+        """
+        data: dict[str, Any] = await self._post(
+            f"hardware/{asset_id}/checkout", json_data=payload
+        )
+
+        if data.get("status") != "success":
+            messages = data.get("messages", "Unknown error")
+            raise SnipeItAPIError(
+                f"Snipe-IT POST /hardware/{asset_id}/checkout failed: {messages}",
+                status_code=200,
+            )
+
+        return data
+
     async def create_maintenance(
         self, asset_id: int, payload: dict[str, Any]
     ) -> SnipeItMaintenance:
