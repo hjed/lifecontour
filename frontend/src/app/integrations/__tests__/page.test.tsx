@@ -15,6 +15,7 @@ import {
   useOAuthDisconnect,
   useGenericSync,
   useDeadLetters,
+  useReregisterWebhooks,
 } from '@/lib/api/integrations';
 
 // Mock the API hooks
@@ -28,6 +29,7 @@ jest.mock('@/lib/api/integrations', () => ({
   useOAuthDisconnect: jest.fn(),
   useGenericSync: jest.fn(),
   useDeadLetters: jest.fn(),
+  useReregisterWebhooks: jest.fn(),
 }));
 
 // Mock AuthGuard
@@ -50,6 +52,7 @@ const mockUseOAuthAuthorize = jest.mocked(useOAuthAuthorize);
 const mockUseOAuthDisconnect = jest.mocked(useOAuthDisconnect);
 const mockUseGenericSync = jest.mocked(useGenericSync);
 const mockUseDeadLetters = jest.mocked(useDeadLetters);
+const mockUseReregisterWebhooks = jest.mocked(useReregisterWebhooks);
 
 function createWrapper() {
   const queryClient = new QueryClient({
@@ -155,6 +158,12 @@ describe('IntegrationsPage', () => {
       isLoading: false,
       error: null,
     } as unknown as ReturnType<typeof useDeadLetters>);
+
+    mockUseReregisterWebhooks.mockReturnValue({
+      mutate: jest.fn(),
+      isPending: false,
+      error: null,
+    } as unknown as ReturnType<typeof useReregisterWebhooks>);
   });
 
   it('should render integrations page with title', () => {
