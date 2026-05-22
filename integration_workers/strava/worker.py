@@ -631,7 +631,7 @@ async def periodic_sync_all_strava_accounts(
             from sqlalchemy import text
 
             stmt = text("""
-                SELECT user_id, strava_athlete_id
+                SELECT user_id, athlete_id
                 FROM user_strava_auth
                 ORDER BY user_id
             """)

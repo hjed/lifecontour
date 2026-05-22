@@ -57,7 +57,7 @@ def _make_mock_ctx(
     """Create a mock ARQ context with session factory and redis.
 
     Args:
-        accounts: List of (user_id, strava_athlete_id) tuples.
+        accounts: List of (user_id, athlete_id) tuples.
         last_sync_time: Optional ISO timestamp for last sync.
 
     Returns:
@@ -68,7 +68,7 @@ def _make_mock_ctx(
     # First execute call returns account rows
     accounts_result = MagicMock()
     accounts_result.fetchall.return_value = [
-        MagicMock(user_id=uid, strava_athlete_id=aid) for uid, aid in accounts
+        MagicMock(user_id=uid, athlete_id=aid) for uid, aid in accounts
     ]
 
     # Second execute call returns last sync time
