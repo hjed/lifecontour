@@ -983,3 +983,192 @@ class SnipeItSyncService:
             journal_id=journal_id,
             snipeit_maintenance_id=snipeit_maintenance_id,
         )
+
+    # -- Outbound Checkout Sync Methods -------------------------------------
+
+    async def _fetch_journal_and_gear_usage_data(
+        self,
+        journal_id: int,
+        session_factory: Any,
+    ) -> tuple[Any, Any, Any] | None:
+        """Fetch journal, gear-usage, and asset-sync data for outbound checkout.
+
+        Returns a ``(journal_row, usage_data_row, asset_sync_meta_row)``
+        tuple, or ``None`` if any prerequisite is missing (logged and skipped).
+        """
+        async with session_factory() as session:
+            # 1. Get journal data
+            journal_result = await session.execute(
+                text("""
+                    SELECT title, content, event_date_range_start, event_date_range_end
+                    FROM journals
+                    WHERE id = :journal_id
+                """),
+                {"journal_id": journal_id},
+            )
+            journal_row = journal_result.fetchone()
+            if not journal_row:
+                logger.debug(
+                    "Skipping outbound checkout push: journal not found",
+                    journal_id=journal_id,
+                )
+                return None
+
+            # 2. Get gear usage data
+            usage_result = await session.execute(
+                text("""
+                    SELECT gear_item_id, checkout_date, checkin_date
+                    FROM journal_gear_usage_data
+                    WHERE journal_id = :journal_id
+                """),
+                {"journal_id": journal_id},
+            )
+            usage_data_row = usage_result.fetchone()
+            if not usage_data_row:
+                logger.debug(
+                    "Skipping outbound checkout push: no gear usage data",
+                    journal_id=journal_id,
+                )
+                return None
+
+            # 3. Get asset sync metadata (gear_item → Snipe-IT asset ID)
+            gear_item_id = str(usage_data_row.gear_item_id)
+            asset_meta_result = await session.execute(
+                text("""
+                    SELECT external_id
+                    FROM sync_metadata
+                    WHERE integration_source = 'snipeit'
+                      AND internal_uuid = :gear_item_id
+                """),
+                {"gear_item_id": gear_item_id},
+            )
+            asset_sync_meta_row = asset_meta_result.fetchone()
+            if not asset_sync_meta_row:
+                logger.debug(
+                    "Skipping outbound checkout push: gear item not synced to Snipe-IT",
+                    journal_id=journal_id,
+                    gear_item_id=gear_item_id,
+                )
+                return None
+
+        return journal_row, usage_data_row, asset_sync_meta_row
+
+    async def push_checkout_create(
+        self,
+        journal_id: int,
+        session_factory: Any,
+    ) -> None:
+        """Push a new GEAR_USAGE journal to Snipe-IT as an asset checkout.
+
+        Args:
+            journal_id: Internal journal ID.
+            session_factory: Async session factory for DB queries.
+        """
+        data = await self._fetch_journal_and_gear_usage_data(
+            journal_id, session_factory
+        )
+        if not data:
+            return
+
+        journal_row, usage_data_row, asset_sync_meta_row = data
+
+        # Check if already synced (prevent duplicates on retries)
+        async with session_factory() as session:
+            checkout_meta_result = await session.execute(
+                text("""
+                    SELECT 1
+                    FROM sync_metadata
+                    WHERE integration_source = 'snipeit_checkout'
+                      AND internal_uuid = :journal_id
+                """),
+                {"journal_id": str(journal_id)},
+            )
+            if checkout_meta_result.fetchone():
+                logger.debug(
+                    "Skipping checkout create: already synced to Snipe-IT",
+                    journal_id=journal_id,
+                )
+                return
+
+        # Resolve dates: buffer dates take precedence, fall back to journal range
+        checkout_at = _format_date_for_snipeit(
+            usage_data_row.checkout_date or journal_row.event_date_range_start
+        )
+        expected_checkin = _format_date_for_snipeit(
+            usage_data_row.checkin_date or journal_row.event_date_range_end
+        )
+
+        # Build checkout payload
+        payload: dict[str, Any] = {
+            "assigned_user": self._snipeit_user_id,
+            "checkout_to_type": "user",
+        }
+        if checkout_at:
+            payload["checkout_at"] = checkout_at
+        if expected_checkin:
+            payload["expected_checkin"] = expected_checkin
+        if journal_row.title:
+            payload["note"] = journal_row.title
+
+        try:
+            snipeit_asset_id = int(asset_sync_meta_row.external_id)
+        except (ValueError, TypeError):
+            logger.warning(
+                "Invalid asset sync metadata external_id",
+                external_id=asset_sync_meta_row.external_id,
+                journal_id=journal_id,
+            )
+            return
+
+        # POST to Snipe-IT
+        try:
+            await self._api_client.checkout_asset(
+                asset_id=snipeit_asset_id,
+                payload=payload,
+            )
+        except SnipeItAPIError as exc:
+            if exc.status_code in (403, 404):
+                logger.warning(
+                    "Snipe-IT checkout create failed (not found/forbidden)",
+                    journal_id=journal_id,
+                    snipeit_asset_id=snipeit_asset_id,
+                    status_code=exc.status_code,
+                )
+                return
+            raise
+
+        # Save sync metadata: journal_id → snipeit_checkout
+        version_hash = hashlib.sha256(
+            json.dumps(payload, sort_keys=True).encode()
+        ).hexdigest()
+        async with session_factory() as session:
+            async with session.begin():
+                await session.execute(
+                    text("""
+                        INSERT INTO sync_metadata
+                            (internal_uuid, integration_source, external_id,
+                             last_synced_at, version_hash, sync_status,
+                             error_message, retry_count, created_at, updated_at)
+                        VALUES
+                            (:internal_uuid, 'snipeit_checkout', :external_id,
+                             now(), :version_hash, 'success', NULL, 0, now(), now())
+                        ON CONFLICT (integration_source, external_id)
+                        DO UPDATE SET
+                            internal_uuid = EXCLUDED.internal_uuid,
+                            last_synced_at = EXCLUDED.last_synced_at,
+                            version_hash = EXCLUDED.version_hash,
+                            sync_status = EXCLUDED.sync_status,
+                            updated_at = EXCLUDED.updated_at
+                    """),
+                    {
+                        "internal_uuid": str(journal_id),
+                        "external_id": f"snipeit_checkout:{snipeit_asset_id}:{journal_id}",
+                        "version_hash": version_hash,
+                    },
+                )
+
+        logger.info(
+            "Successfully pushed checkout to Snipe-IT",
+            journal_id=journal_id,
+            snipeit_asset_id=snipeit_asset_id,
+        )

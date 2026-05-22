@@ -467,3 +467,321 @@ class TestPushMaintenanceUpdate:
             journal_id=100,
             session_factory=session_factory,
         )
+
+
+class TestPushCheckoutCreate:
+    """Tests for push_checkout_create method."""
+
+    @pytest.mark.asyncio
+    async def test_creates_checkout_in_snipeit(self) -> None:
+        """Happy path: posts checkout to Snipe-IT and saves sync metadata."""
+        api_client = _mock_api_client()
+        api_client.checkout_asset.return_value = {
+            "status": "success",
+            "messages": "Asset checked out successfully.",
+        }
+
+        journal_row = MagicMock(
+            title="Rope usage at crag",
+            content="Used climbing rope",
+            event_date_range_start=datetime(2024, 6, 1, tzinfo=UTC),
+            event_date_range_end=datetime(2024, 6, 2, 14, 30, tzinfo=UTC),
+        )
+        usage_data_row = MagicMock(
+            gear_item_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            checkout_date=datetime(2024, 6, 1, 8, 0, tzinfo=UTC),
+            checkin_date=datetime(2024, 6, 2, 18, 0, tzinfo=UTC),
+        )
+        asset_sync_meta_row = MagicMock(external_id="42")
+
+        # First session_factory() call: _fetch_journal_and_gear_usage_data (3 queries)
+        first_session = AsyncMock()
+        first_session_ctx = MagicMock()
+        first_session_ctx.__aenter__ = AsyncMock(return_value=first_session)
+        first_session_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        fetch_results = [
+            MagicMock(fetchone=MagicMock(return_value=journal_row)),
+            MagicMock(fetchone=MagicMock(return_value=usage_data_row)),
+            MagicMock(fetchone=MagicMock(return_value=asset_sync_meta_row)),
+        ]
+        first_session.execute = AsyncMock(side_effect=fetch_results)
+
+        # Second session_factory() call: check if already synced
+        second_session = AsyncMock()
+        second_session_ctx = MagicMock()
+        second_session_ctx.__aenter__ = AsyncMock(return_value=second_session)
+        second_session_ctx.__aexit__ = AsyncMock(return_value=False)
+        second_session.execute = AsyncMock(
+            return_value=MagicMock(fetchone=MagicMock(return_value=None))
+        )
+
+        # Third session_factory() call: save sync metadata (with begin())
+        third_session = MagicMock()
+        third_session_ctx = MagicMock()
+        third_session_ctx.__aenter__ = AsyncMock(return_value=third_session)
+        third_session_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        mock_begin = MagicMock()
+        mock_begin.__aenter__ = AsyncMock(return_value=None)
+        mock_begin.__aexit__ = AsyncMock(return_value=False)
+        third_session.begin.return_value = mock_begin
+        third_session.execute = AsyncMock()
+
+        session_factory = MagicMock(
+            side_effect=[first_session_ctx, second_session_ctx, third_session_ctx]
+        )
+
+        service = SnipeItSyncService(
+            api_client=api_client,
+            user_id="user-1",
+            snipeit_user_id="5",
+        )
+
+        await service.push_checkout_create(
+            journal_id=100,
+            session_factory=session_factory,
+        )
+
+        # Verify API was called with correct payload
+        api_client.checkout_asset.assert_called_once()
+        call_args = api_client.checkout_asset.call_args
+        assert call_args.kwargs["asset_id"] == 42
+        payload = call_args.kwargs["payload"]
+        assert payload["assigned_user"] == "5"
+        assert payload["checkout_to_type"] == "user"
+        assert payload["checkout_at"] == "2024-06-01"
+        assert payload["expected_checkin"] == "2024-06-02"
+        assert payload["note"] == "Rope usage at crag"
+
+    @pytest.mark.asyncio
+    async def test_skips_when_no_journal_found(self) -> None:
+        """No journal row means we skip silently."""
+        api_client = _mock_api_client()
+
+        session_factory = _mock_session_factory(
+            journal_row=None,
+            maintenance_data_row=None,
+            asset_sync_meta_row=None,
+        )
+
+        service = SnipeItSyncService(
+            api_client=api_client,
+            user_id="user-1",
+            snipeit_user_id="5",
+        )
+
+        await service.push_checkout_create(
+            journal_id=100,
+            session_factory=session_factory,
+        )
+
+        api_client.checkout_asset.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_skips_when_no_usage_data(self) -> None:
+        """Journal exists but no gear usage data means skip."""
+        api_client = _mock_api_client()
+
+        journal_row = MagicMock(
+            title="Some Journal",
+            content="",
+            event_date_range_start=None,
+            event_date_range_end=None,
+        )
+
+        # Build a mock that returns journal_row then None for usage data
+        first_session = AsyncMock()
+        first_session_ctx = MagicMock()
+        first_session_ctx.__aenter__ = AsyncMock(return_value=first_session)
+        first_session_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        first_session.execute = AsyncMock(
+            side_effect=[
+                MagicMock(fetchone=MagicMock(return_value=journal_row)),
+                MagicMock(fetchone=MagicMock(return_value=None)),
+            ]
+        )
+
+        session_factory = MagicMock(return_value=first_session_ctx)
+
+        service = SnipeItSyncService(
+            api_client=api_client,
+            user_id="user-1",
+            snipeit_user_id="5",
+        )
+
+        await service.push_checkout_create(
+            journal_id=100,
+            session_factory=session_factory,
+        )
+
+        api_client.checkout_asset.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_skips_when_no_asset_sync_metadata(self) -> None:
+        """Gear item not synced to Snipe-IT yet means skip."""
+        api_client = _mock_api_client()
+
+        journal_row = MagicMock(
+            title="Test",
+            content="",
+            event_date_range_start="2024-06-01",
+            event_date_range_end="2024-06-01",
+        )
+        usage_data_row = MagicMock(
+            gear_item_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            checkout_date=None,
+            checkin_date=None,
+        )
+
+        first_session = AsyncMock()
+        first_session_ctx = MagicMock()
+        first_session_ctx.__aenter__ = AsyncMock(return_value=first_session)
+        first_session_ctx.__aexit__ = AsyncMock(return_value=False)
+        first_session.execute = AsyncMock(
+            side_effect=[
+                MagicMock(fetchone=MagicMock(return_value=journal_row)),
+                MagicMock(fetchone=MagicMock(return_value=usage_data_row)),
+                MagicMock(fetchone=MagicMock(return_value=None)),
+            ]
+        )
+
+        session_factory = MagicMock(return_value=first_session_ctx)
+
+        service = SnipeItSyncService(
+            api_client=api_client,
+            user_id="user-1",
+            snipeit_user_id="5",
+        )
+
+        await service.push_checkout_create(
+            journal_id=100,
+            session_factory=session_factory,
+        )
+
+        api_client.checkout_asset.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_uses_journal_dates_when_buffer_dates_absent(self) -> None:
+        """When checkout/checkin dates are None, falls back to journal date range."""
+        api_client = _mock_api_client()
+        api_client.checkout_asset.return_value = {"status": "success"}
+
+        journal_row = MagicMock(
+            title="Usage log",
+            content="",
+            event_date_range_start=datetime(2024, 7, 10, tzinfo=UTC),
+            event_date_range_end=datetime(2024, 7, 12, tzinfo=UTC),
+        )
+        usage_data_row = MagicMock(
+            gear_item_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            checkout_date=None,
+            checkin_date=None,
+        )
+        asset_sync_meta_row = MagicMock(external_id="42")
+
+        first_session = AsyncMock()
+        first_session_ctx = MagicMock()
+        first_session_ctx.__aenter__ = AsyncMock(return_value=first_session)
+        first_session_ctx.__aexit__ = AsyncMock(return_value=False)
+        first_session.execute = AsyncMock(
+            side_effect=[
+                MagicMock(fetchone=MagicMock(return_value=journal_row)),
+                MagicMock(fetchone=MagicMock(return_value=usage_data_row)),
+                MagicMock(fetchone=MagicMock(return_value=asset_sync_meta_row)),
+            ]
+        )
+
+        second_session = AsyncMock()
+        second_session_ctx = MagicMock()
+        second_session_ctx.__aenter__ = AsyncMock(return_value=second_session)
+        second_session_ctx.__aexit__ = AsyncMock(return_value=False)
+        second_session.execute = AsyncMock(
+            return_value=MagicMock(fetchone=MagicMock(return_value=None))
+        )
+
+        third_session = MagicMock()
+        third_session_ctx = MagicMock()
+        third_session_ctx.__aenter__ = AsyncMock(return_value=third_session)
+        third_session_ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_begin = MagicMock()
+        mock_begin.__aenter__ = AsyncMock(return_value=None)
+        mock_begin.__aexit__ = AsyncMock(return_value=False)
+        third_session.begin.return_value = mock_begin
+        third_session.execute = AsyncMock()
+
+        session_factory = MagicMock(
+            side_effect=[first_session_ctx, second_session_ctx, third_session_ctx]
+        )
+
+        service = SnipeItSyncService(
+            api_client=api_client,
+            user_id="user-1",
+            snipeit_user_id="5",
+        )
+
+        await service.push_checkout_create(
+            journal_id=100,
+            session_factory=session_factory,
+        )
+
+        call_args = api_client.checkout_asset.call_args
+        payload = call_args.kwargs["payload"]
+        assert payload["checkout_at"] == "2024-07-10"
+        assert payload["expected_checkin"] == "2024-07-12"
+
+    @pytest.mark.asyncio
+    async def test_handles_api_404(self) -> None:
+        """404 from Snipe-IT during checkout logs and returns (doesn't raise)."""
+        api_client = _mock_api_client()
+        api_client.checkout_asset.side_effect = SnipeItAPIError(
+            "Not found", status_code=404
+        )
+
+        journal_row = MagicMock(
+            title="Test",
+            content="",
+            event_date_range_start=datetime(2024, 6, 1, tzinfo=UTC),
+            event_date_range_end=datetime(2024, 6, 1, tzinfo=UTC),
+        )
+        usage_data_row = MagicMock(
+            gear_item_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            checkout_date=None,
+            checkin_date=None,
+        )
+        asset_sync_meta_row = MagicMock(external_id="42")
+
+        first_session = AsyncMock()
+        first_session_ctx = MagicMock()
+        first_session_ctx.__aenter__ = AsyncMock(return_value=first_session)
+        first_session_ctx.__aexit__ = AsyncMock(return_value=False)
+        first_session.execute = AsyncMock(
+            side_effect=[
+                MagicMock(fetchone=MagicMock(return_value=journal_row)),
+                MagicMock(fetchone=MagicMock(return_value=usage_data_row)),
+                MagicMock(fetchone=MagicMock(return_value=asset_sync_meta_row)),
+            ]
+        )
+
+        second_session = AsyncMock()
+        second_session_ctx = MagicMock()
+        second_session_ctx.__aenter__ = AsyncMock(return_value=second_session)
+        second_session_ctx.__aexit__ = AsyncMock(return_value=False)
+        second_session.execute = AsyncMock(
+            return_value=MagicMock(fetchone=MagicMock(return_value=None))
+        )
+
+        session_factory = MagicMock(side_effect=[first_session_ctx, second_session_ctx])
+
+        service = SnipeItSyncService(
+            api_client=api_client,
+            user_id="user-1",
+            snipeit_user_id="5",
+        )
+
+        # Should not raise
+        await service.push_checkout_create(
+            journal_id=100,
+            session_factory=session_factory,
+        )

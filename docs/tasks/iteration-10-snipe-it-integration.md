@@ -217,10 +217,14 @@ Build the user interface for logging gear usage.
 **PR Size:** ~5-7 files
 Sync the usage event to Snipe-IT.
 **Acceptance Criteria:**
-- [ ] Worker consumes `JournalCreated` events containing `GEAR_USAGE` data.
-- [ ] Worker pushes a checkout request to the Snipe-IT API for the specified dates and mapped user.
+- [x] Worker consumes `JournalCreated` events containing `GEAR_USAGE` data.
+- [x] Worker pushes a checkout request to the Snipe-IT API for the specified dates and mapped user.
+- [x] Migration adds `snipeit_checkout` to the `integration_source` check constraint.
 **Required Test Coverage:**
-- **Integration:** Consumed event results in a checkout API call.
+- [x] **Unit:** API client `checkout_asset` method (4 tests).
+- [x] **Unit:** Sync service `push_checkout_create` method (6 tests).
+- [x] **Unit:** Stream consumer routes GEAR_USAGE events to checkout sync (2 tests).
+- [x] **Integration:** Consumed event results in a checkout API call (3 tests).
 
 ### ITER10-006: External Links and MCP Parity
 **Objective:** Surface Snipe-IT external links in the UI and ensure all capabilities are accessible via MCP.

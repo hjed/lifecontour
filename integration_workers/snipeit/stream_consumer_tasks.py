@@ -318,10 +318,11 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
                 await sync_service._api_client.close()
 
     async def _handle_journal_maintenance_event(self, event: StreamEvent) -> None:
-        """Process JournalCreated/JournalUpdated events for GEAR_MAINTENANCE outbound sync.
+        """Process JournalCreated/JournalUpdated events for outbound sync.
 
-        Checks if the journal has GEAR_MAINTENANCE type data, then pushes
-        the creation or update to Snipe-IT for users with active Snipe-IT settings.
+        Checks if the journal has GEAR_MAINTENANCE or GEAR_USAGE type data,
+        then pushes the creation or update to Snipe-IT for users with active
+        Snipe-IT settings.
         """
         journal_id = event.event_data.get("journal_id")
         if not journal_id:
@@ -335,6 +336,8 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
         from worker import _create_sync_service, _get_auth_data
 
         worker_settings = SnipeItWorkerSettings()  # type: ignore[call-arg]
+
+        journal_type: str | None = None
 
         async with self._session_factory() as session:
             # Look up the journal's user via snipeit_settings
@@ -376,9 +379,24 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
                 """),
                 {"journal_id": journal_id},
             )
-            if not maint_result.fetchone():
+            if maint_result.fetchone():
+                journal_type = "GEAR_MAINTENANCE"
+            else:
+                # Check if journal has GEAR_USAGE type data
+                usage_result = await session.execute(
+                    text("""
+                        SELECT journal_id
+                        FROM journal_gear_usage_data
+                        WHERE journal_id = :journal_id
+                    """),
+                    {"journal_id": journal_id},
+                )
+                if usage_result.fetchone():
+                    journal_type = "GEAR_USAGE"
+
+            if not journal_type:
                 logger.debug(
-                    "Skipping journal event: not a GEAR_MAINTENANCE journal",
+                    "Skipping journal event: not a GEAR_MAINTENANCE or GEAR_USAGE journal",
                     journal_id=journal_id,
                 )
                 return
@@ -401,25 +419,39 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
         )
 
         try:
-            if event.event_type == "JournalCreated":
-                await sync_service.push_maintenance_create(
+            if journal_type == "GEAR_USAGE":
+                if event.event_type == "JournalCreated":
+                    await sync_service.push_checkout_create(
+                        journal_id=journal_id,
+                        session_factory=self._session_factory,
+                    )
+                # Note: JournalUpdated for GEAR_USAGE is not yet implemented
+                # (no checkin sync per product spec)
+                logger.info(
+                    "Successfully processed journal gear usage event",
                     journal_id=journal_id,
-                    session_factory=self._session_factory,
+                    event_type=event.event_type,
                 )
             else:
-                await sync_service.push_maintenance_update(
+                if event.event_type == "JournalCreated":
+                    await sync_service.push_maintenance_create(
+                        journal_id=journal_id,
+                        session_factory=self._session_factory,
+                    )
+                else:
+                    await sync_service.push_maintenance_update(
+                        journal_id=journal_id,
+                        session_factory=self._session_factory,
+                    )
+                logger.info(
+                    "Successfully processed journal maintenance event",
                     journal_id=journal_id,
-                    session_factory=self._session_factory,
+                    event_type=event.event_type,
                 )
-            logger.info(
-                "Successfully processed journal maintenance event",
-                journal_id=journal_id,
-                event_type=event.event_type,
-            )
         except SnipeItAPIError as exc:
             if exc.status_code in (403, 404):
                 logger.debug(
-                    "Skipping journal maintenance export (not found/forbidden)",
+                    "Skipping journal export (not found/forbidden)",
                     journal_id=journal_id,
                     status_code=exc.status_code,
                 )
