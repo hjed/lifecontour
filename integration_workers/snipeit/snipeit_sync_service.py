@@ -1072,44 +1072,6 @@ class SnipeItSyncService:
 
         journal_row, usage_data_row, asset_sync_meta_row = data
 
-        # Check if already synced (prevent duplicates on retries)
-        async with session_factory() as session:
-            checkout_meta_result = await session.execute(
-                text("""
-                    SELECT 1
-                    FROM sync_metadata
-                    WHERE integration_source = 'snipeit_checkout'
-                      AND internal_uuid = :journal_id
-                """),
-                {"journal_id": str(journal_id)},
-            )
-            if checkout_meta_result.fetchone():
-                logger.debug(
-                    "Skipping checkout create: already synced to Snipe-IT",
-                    journal_id=journal_id,
-                )
-                return
-
-        # Resolve dates: buffer dates take precedence, fall back to journal range
-        checkout_at = _format_date_for_snipeit(
-            usage_data_row.checkout_date or journal_row.event_date_range_start
-        )
-        expected_checkin = _format_date_for_snipeit(
-            usage_data_row.checkin_date or journal_row.event_date_range_end
-        )
-
-        # Build checkout payload
-        payload: dict[str, Any] = {
-            "assigned_user": self._snipeit_user_id,
-            "checkout_to_type": "user",
-        }
-        if checkout_at:
-            payload["checkout_at"] = checkout_at
-        if expected_checkin:
-            payload["expected_checkin"] = expected_checkin
-        if journal_row.title:
-            payload["note"] = journal_row.title
-
         try:
             snipeit_asset_id = int(asset_sync_meta_row.external_id)
         except (ValueError, TypeError):
@@ -1120,6 +1082,117 @@ class SnipeItSyncService:
             )
             return
 
+        external_id = f"snipeit_checkout:{snipeit_asset_id}:{journal_id}"
+
+        # Check if already synced and acquire a distributed lock by marking as pending
+        async with session_factory() as session:
+            async with session.begin():
+                checkout_meta_result = await session.execute(
+                    text("""
+                        SELECT sync_status, extract(epoch from (now() - updated_at)) as age_seconds
+                        FROM sync_metadata
+                        WHERE integration_source = 'snipeit_checkout'
+                          AND internal_uuid = :journal_id
+                        FOR UPDATE SKIP LOCKED
+                    """),
+                    {"journal_id": str(journal_id)},
+                )
+                row = checkout_meta_result.fetchone()
+                if row:
+                    if row.sync_status == "success":
+                        logger.debug(
+                            "Skipping checkout create: already synced to Snipe-IT",
+                            journal_id=journal_id,
+                        )
+                        return
+                    if (
+                        row.sync_status == "pending"
+                        and row.age_seconds is not None
+                        and row.age_seconds < 300
+                    ):
+                        logger.debug(
+                            "Skipping checkout create: currently processing in another worker",
+                            journal_id=journal_id,
+                        )
+                        return
+
+                    await session.execute(
+                        text("""
+                            UPDATE sync_metadata
+                            SET sync_status = 'pending', updated_at = now()
+                            WHERE integration_source = 'snipeit_checkout' AND internal_uuid = :journal_id
+                        """),
+                        {"journal_id": str(journal_id)},
+                    )
+                else:
+                    insert_result = await session.execute(
+                        text("""
+                            INSERT INTO sync_metadata
+                                (internal_uuid, integration_source, external_id,
+                                 last_synced_at, version_hash, sync_status,
+                                 error_message, retry_count, created_at, updated_at)
+                            VALUES
+                                (:internal_uuid, 'snipeit_checkout', :external_id,
+                                 now(), 'PENDING', 'pending', NULL, 0, now(), now())
+                            ON CONFLICT (integration_source, external_id) DO NOTHING
+                            RETURNING id
+                        """),
+                        {
+                            "internal_uuid": str(journal_id),
+                            "external_id": external_id,
+                        },
+                    )
+                    if not insert_result.fetchone():
+                        logger.debug(
+                            "Skipping checkout create: locked by another process",
+                            journal_id=journal_id,
+                        )
+                        return
+
+        # Resolve dates: buffer dates take precedence, fall back to journal range
+        checkout_date = (
+            usage_data_row.checkout_date or journal_row.event_date_range_start
+        )
+        checkin_date = usage_data_row.checkin_date or journal_row.event_date_range_end
+
+        if not checkout_date or not checkin_date:
+            logger.warning(
+                "Missing required dates for gear usage checkout",
+                journal_id=journal_id,
+                has_checkout=bool(checkout_date),
+                has_checkin=bool(checkin_date),
+            )
+            # Unlock the pending status so it can be retried when data is fixed
+            await self._unlock_pending_checkout(
+                journal_id, session_factory, "Missing required dates"
+            )
+            return
+
+        if checkin_date < checkout_date:
+            logger.warning(
+                "Invalid date range for gear usage checkout: checkin before checkout",
+                journal_id=journal_id,
+                checkout_date=str(checkout_date),
+                checkin_date=str(checkin_date),
+            )
+            await self._unlock_pending_checkout(
+                journal_id, session_factory, "Invalid date range"
+            )
+            return
+
+        checkout_at = _format_date_for_snipeit(checkout_date)
+        expected_checkin = _format_date_for_snipeit(checkin_date)
+
+        # Build checkout payload
+        payload: dict[str, Any] = {
+            "assigned_user": self._snipeit_user_id,
+            "checkout_to_type": "user",
+            "checkout_at": checkout_at,
+            "expected_checkin": expected_checkin,
+        }
+        if journal_row.title:
+            payload["note"] = journal_row.title
+
         # POST to Snipe-IT
         try:
             await self._api_client.checkout_asset(
@@ -1127,6 +1200,7 @@ class SnipeItSyncService:
                 payload=payload,
             )
         except SnipeItAPIError as exc:
+            # Handle 403/404 specific errors gracefully
             if exc.status_code in (403, 404):
                 logger.warning(
                     "Snipe-IT checkout create failed (not found/forbidden)",
@@ -1134,14 +1208,25 @@ class SnipeItSyncService:
                     snipeit_asset_id=snipeit_asset_id,
                     status_code=exc.status_code,
                 )
+                await self._unlock_pending_checkout(
+                    journal_id, session_factory, f"API Error {exc.status_code}"
+                )
                 return
+
+            # For 500s or other errors, unlock and raise so it retries
+            await self._unlock_pending_checkout(
+                journal_id, session_factory, str(exc)[:255]
+            )
+            raise
+        except Exception as exc:
+            await self._unlock_pending_checkout(
+                journal_id, session_factory, str(exc)[:255]
+            )
             raise
 
         # Save sync metadata: journal_id → snipeit_checkout
         # Note: Snipe-IT does not support an idempotency key on checkouts.
-        # A crash between the POST succeeding and this metadata insert will result
-        # in duplicate checkout attempts on retry. The Snipe-IT API blocks duplicate
-        # checkouts of the same asset with an error, which requires manual intervention.
+        # By using a pending lock beforehand, we mitigate concurrent processing double-POSTs.
         version_hash = hashlib.sha256(
             json.dumps(payload, sort_keys=True).encode()
         ).hexdigest()
@@ -1149,24 +1234,17 @@ class SnipeItSyncService:
             async with session.begin():
                 await session.execute(
                     text("""
-                        INSERT INTO sync_metadata
-                            (internal_uuid, integration_source, external_id,
-                             last_synced_at, version_hash, sync_status,
-                             error_message, retry_count, created_at, updated_at)
-                        VALUES
-                            (:internal_uuid, 'snipeit_checkout', :external_id,
-                             now(), :version_hash, 'success', NULL, 0, now(), now())
-                        ON CONFLICT (integration_source, external_id)
-                        DO UPDATE SET
-                            internal_uuid = EXCLUDED.internal_uuid,
-                            last_synced_at = EXCLUDED.last_synced_at,
-                            version_hash = EXCLUDED.version_hash,
-                            sync_status = EXCLUDED.sync_status,
-                            updated_at = EXCLUDED.updated_at
+                        UPDATE sync_metadata
+                        SET version_hash = :version_hash,
+                            last_synced_at = now(),
+                            sync_status = 'success',
+                            error_message = NULL,
+                            updated_at = now()
+                        WHERE integration_source = 'snipeit_checkout'
+                          AND internal_uuid = :internal_uuid
                     """),
                     {
                         "internal_uuid": str(journal_id),
-                        "external_id": f"snipeit_checkout:{snipeit_asset_id}:{journal_id}",
                         "version_hash": version_hash,
                     },
                 )
@@ -1176,3 +1254,31 @@ class SnipeItSyncService:
             journal_id=journal_id,
             snipeit_asset_id=snipeit_asset_id,
         )
+
+    async def _unlock_pending_checkout(
+        self, journal_id: int, session_factory: Any, error_message: str
+    ) -> None:
+        """Mark a pending checkout sync as failed to release the lock for future retries."""
+        try:
+            async with session_factory() as session:
+                async with session.begin():
+                    await session.execute(
+                        text("""
+                            UPDATE sync_metadata
+                            SET sync_status = 'failed',
+                                updated_at = now(),
+                                error_message = :error_message
+                            WHERE integration_source = 'snipeit_checkout'
+                              AND internal_uuid = :internal_uuid
+                        """),
+                        {
+                            "internal_uuid": str(journal_id),
+                            "error_message": error_message,
+                        },
+                    )
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "Failed to unlock pending checkout",
+                journal_id=journal_id,
+                error=str(exc),
+            )

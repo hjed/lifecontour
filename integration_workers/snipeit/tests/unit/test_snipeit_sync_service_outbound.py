@@ -110,8 +110,15 @@ class TestPushMaintenanceCreate:
         second_session_ctx = MagicMock()
         second_session_ctx.__aenter__ = AsyncMock(return_value=second_session)
         second_session_ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_begin_2 = MagicMock()
+        mock_begin_2.__aenter__ = AsyncMock(return_value=None)
+        mock_begin_2.__aexit__ = AsyncMock(return_value=False)
+        second_session.begin = MagicMock(return_value=mock_begin_2)
         second_session.execute = AsyncMock(
-            return_value=MagicMock(fetchone=MagicMock(return_value=None))
+            side_effect=[
+                MagicMock(fetchone=MagicMock(return_value=None)),
+                MagicMock(fetchone=MagicMock(return_value=(1,))),
+            ]
         )
 
         # Third session_factory() call: save sync metadata (with begin())
@@ -123,7 +130,7 @@ class TestPushMaintenanceCreate:
         mock_begin = MagicMock()
         mock_begin.__aenter__ = AsyncMock(return_value=None)
         mock_begin.__aexit__ = AsyncMock(return_value=False)
-        third_session.begin.return_value = mock_begin
+        third_session.begin = MagicMock(return_value=mock_begin)
         third_session.execute = AsyncMock()
 
         session_factory = MagicMock(
@@ -273,11 +280,29 @@ class TestPushMaintenanceCreate:
         second_session_ctx = MagicMock()
         second_session_ctx.__aenter__ = AsyncMock(return_value=second_session)
         second_session_ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_begin_2 = MagicMock()
+        mock_begin_2.__aenter__ = AsyncMock(return_value=None)
+        mock_begin_2.__aexit__ = AsyncMock(return_value=False)
+        second_session.begin = MagicMock(return_value=mock_begin_2)
         second_session.execute = AsyncMock(
-            return_value=MagicMock(fetchone=MagicMock(return_value=None))
+            side_effect=[
+                MagicMock(fetchone=MagicMock(return_value=None)),
+                MagicMock(fetchone=MagicMock(return_value=(1,))),
+            ]
         )
 
-        session_factory = MagicMock(side_effect=[first_session_ctx, second_session_ctx])
+        third_session = MagicMock()
+        third_session_ctx = MagicMock()
+        third_session_ctx.__aenter__ = AsyncMock(return_value=third_session)
+        third_session_ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_begin_3 = MagicMock()
+        mock_begin_3.__aenter__ = AsyncMock(return_value=None)
+        mock_begin_3.__aexit__ = AsyncMock(return_value=False)
+        third_session.begin = MagicMock(return_value=mock_begin_3)
+        third_session.execute = AsyncMock()
+        session_factory = MagicMock(
+            side_effect=[first_session_ctx, second_session_ctx, third_session_ctx]
+        )
 
         service = SnipeItSyncService(
             api_client=api_client,
@@ -512,8 +537,15 @@ class TestPushCheckoutCreate:
         second_session_ctx = MagicMock()
         second_session_ctx.__aenter__ = AsyncMock(return_value=second_session)
         second_session_ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_begin_2 = MagicMock()
+        mock_begin_2.__aenter__ = AsyncMock(return_value=None)
+        mock_begin_2.__aexit__ = AsyncMock(return_value=False)
+        second_session.begin = MagicMock(return_value=mock_begin_2)
         second_session.execute = AsyncMock(
-            return_value=MagicMock(fetchone=MagicMock(return_value=None))
+            side_effect=[
+                MagicMock(fetchone=MagicMock(return_value=None)),
+                MagicMock(fetchone=MagicMock(return_value=(1,))),
+            ]
         )
 
         # Third session_factory() call: save sync metadata (with begin())
@@ -525,7 +557,7 @@ class TestPushCheckoutCreate:
         mock_begin = MagicMock()
         mock_begin.__aenter__ = AsyncMock(return_value=None)
         mock_begin.__aexit__ = AsyncMock(return_value=False)
-        third_session.begin.return_value = mock_begin
+        third_session.begin = MagicMock(return_value=mock_begin)
         third_session.execute = AsyncMock()
 
         session_factory = MagicMock(
@@ -697,8 +729,15 @@ class TestPushCheckoutCreate:
         second_session_ctx = MagicMock()
         second_session_ctx.__aenter__ = AsyncMock(return_value=second_session)
         second_session_ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_begin_2 = MagicMock()
+        mock_begin_2.__aenter__ = AsyncMock(return_value=None)
+        mock_begin_2.__aexit__ = AsyncMock(return_value=False)
+        second_session.begin = MagicMock(return_value=mock_begin_2)
         second_session.execute = AsyncMock(
-            return_value=MagicMock(fetchone=MagicMock(return_value=None))
+            side_effect=[
+                MagicMock(fetchone=MagicMock(return_value=None)),
+                MagicMock(fetchone=MagicMock(return_value=(1,))),
+            ]
         )
 
         third_session = MagicMock()
@@ -708,7 +747,7 @@ class TestPushCheckoutCreate:
         mock_begin = MagicMock()
         mock_begin.__aenter__ = AsyncMock(return_value=None)
         mock_begin.__aexit__ = AsyncMock(return_value=False)
-        third_session.begin.return_value = mock_begin
+        third_session.begin = MagicMock(return_value=mock_begin)
         third_session.execute = AsyncMock()
 
         session_factory = MagicMock(
@@ -768,11 +807,29 @@ class TestPushCheckoutCreate:
         second_session_ctx = MagicMock()
         second_session_ctx.__aenter__ = AsyncMock(return_value=second_session)
         second_session_ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_begin_2 = MagicMock()
+        mock_begin_2.__aenter__ = AsyncMock(return_value=None)
+        mock_begin_2.__aexit__ = AsyncMock(return_value=False)
+        second_session.begin = MagicMock(return_value=mock_begin_2)
         second_session.execute = AsyncMock(
-            return_value=MagicMock(fetchone=MagicMock(return_value=None))
+            side_effect=[
+                MagicMock(fetchone=MagicMock(return_value=None)),
+                MagicMock(fetchone=MagicMock(return_value=(1,))),
+            ]
         )
 
-        session_factory = MagicMock(side_effect=[first_session_ctx, second_session_ctx])
+        third_session = MagicMock()
+        third_session_ctx = MagicMock()
+        third_session_ctx.__aenter__ = AsyncMock(return_value=third_session)
+        third_session_ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_begin_3 = MagicMock()
+        mock_begin_3.__aenter__ = AsyncMock(return_value=None)
+        mock_begin_3.__aexit__ = AsyncMock(return_value=False)
+        third_session.begin = MagicMock(return_value=mock_begin_3)
+        third_session.execute = AsyncMock()
+        session_factory = MagicMock(
+            side_effect=[first_session_ctx, second_session_ctx, third_session_ctx]
+        )
 
         service = SnipeItSyncService(
             api_client=api_client,
