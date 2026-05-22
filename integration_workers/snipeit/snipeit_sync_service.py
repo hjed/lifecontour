@@ -1072,6 +1072,13 @@ class SnipeItSyncService:
 
         journal_row, usage_data_row, asset_sync_meta_row = data
 
+        if not self._snipeit_user_id:
+            logger.warning(
+                "Skipping checkout create: snipeit_user_id is not configured",
+                journal_id=journal_id,
+            )
+            return
+
         try:
             snipeit_asset_id = int(asset_sync_meta_row.external_id)
         except (ValueError, TypeError):
@@ -1164,7 +1171,7 @@ class SnipeItSyncService:
             )
             # Unlock the pending status so it can be retried when data is fixed
             await self._unlock_pending_checkout(
-                journal_id, session_factory, "Missing required dates"
+                journal_id, external_id, session_factory, "Missing required dates"
             )
             return
 
@@ -1176,7 +1183,7 @@ class SnipeItSyncService:
                 checkin_date=str(checkin_date),
             )
             await self._unlock_pending_checkout(
-                journal_id, session_factory, "Invalid date range"
+                journal_id, external_id, session_factory, "Invalid date range"
             )
             return
 
@@ -1209,18 +1216,21 @@ class SnipeItSyncService:
                     status_code=exc.status_code,
                 )
                 await self._unlock_pending_checkout(
-                    journal_id, session_factory, f"API Error {exc.status_code}"
+                    journal_id,
+                    external_id,
+                    session_factory,
+                    f"API Error {exc.status_code}",
                 )
                 return
 
             # For 500s or other errors, unlock and raise so it retries
             await self._unlock_pending_checkout(
-                journal_id, session_factory, str(exc)[:255]
+                journal_id, external_id, session_factory, str(exc)[:255]
             )
             raise
         except Exception as exc:
             await self._unlock_pending_checkout(
-                journal_id, session_factory, str(exc)[:255]
+                journal_id, external_id, session_factory, str(exc)[:255]
             )
             raise
 
@@ -1242,9 +1252,11 @@ class SnipeItSyncService:
                             updated_at = now()
                         WHERE integration_source = 'snipeit_checkout'
                           AND internal_uuid = :internal_uuid
+                          AND external_id = :external_id
                     """),
                     {
                         "internal_uuid": str(journal_id),
+                        "external_id": external_id,
                         "version_hash": version_hash,
                     },
                 )
@@ -1256,7 +1268,11 @@ class SnipeItSyncService:
         )
 
     async def _unlock_pending_checkout(
-        self, journal_id: int, session_factory: Any, error_message: str
+        self,
+        journal_id: int,
+        external_id: str,
+        session_factory: Any,
+        error_message: str,
     ) -> None:
         """Mark a pending checkout sync as failed to release the lock for future retries."""
         try:
@@ -1270,9 +1286,11 @@ class SnipeItSyncService:
                                 error_message = :error_message
                             WHERE integration_source = 'snipeit_checkout'
                               AND internal_uuid = :internal_uuid
+                              AND external_id = :external_id
                         """),
                         {
                             "internal_uuid": str(journal_id),
+                            "external_id": external_id,
                             "error_message": error_message,
                         },
                     )
