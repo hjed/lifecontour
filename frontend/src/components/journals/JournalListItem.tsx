@@ -79,6 +79,7 @@ const TYPE_ICONS: Record<
   [JournalType.OUTDOOR_PLANNING]: MapPin,
   [JournalType.OUTDOOR_TRAINING]: Target,
   [JournalType.GEAR_MAINTENANCE]: Wrench,
+  [JournalType.GEAR_USAGE]: Wrench,
 };
 
 /**

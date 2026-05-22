@@ -26,6 +26,7 @@ export { DownhillSkiingTypeEditor } from './DownhillSkiingTypeEditor';
 export { OutdoorPlanningTypeEditor } from './OutdoorPlanningTypeEditor';
 export { OutdoorTrainingTypeEditor } from './OutdoorTrainingTypeEditor';
 export { GearMaintenanceTypeEditor } from './GearMaintenanceTypeEditor';
+export { GearUsageTypeEditor } from './GearUsageTypeEditor';
 export { ReadOnlyTypeSummary } from './ReadOnlyTypeSummary';
 export { TypeEditorActions } from './TypeEditorActions';
 export { useTypeEditorState } from './useTypeEditorState';

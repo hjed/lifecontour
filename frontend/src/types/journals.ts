@@ -34,6 +34,7 @@ export enum JournalType {
   OUTDOOR_PLANNING = 'outdoor_planning',
   OUTDOOR_TRAINING = 'outdoor_training',
   GEAR_MAINTENANCE = 'gear_maintenance',
+  GEAR_USAGE = 'gear_usage',
 }
 
 // Journal Contact Relationship Type Enum
@@ -328,6 +329,12 @@ export interface GearMaintenanceData {
   retirement_reason?: string | null;
 }
 
+export interface GearUsageData {
+  gear_item_id?: string | null;
+  checkout_date?: string | null;
+  checkin_date?: string | null;
+}
+
 // Type data union type
 export type JournalTypeData =
   | CalendarInfoData
@@ -348,7 +355,8 @@ export type JournalTypeData =
   | CrossCountrySkiingData
   | OutdoorPlanningData
   | OutdoorTrainingData
-  | GearMaintenanceData;
+  | GearMaintenanceData
+  | GearUsageData;
 
 // Contact Relationship
 export interface JournalContactRelationship {
