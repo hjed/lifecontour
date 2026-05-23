@@ -58,6 +58,13 @@ export function DayGroupedJournalList({
     new Set()
   );
 
+  const [isTopIntersecting, setIsTopIntersecting] = useState(false);
+  const [isBottomIntersecting, setIsBottomIntersecting] = useState(false);
+  const isFetchingRef = useRef(false);
+
+  useEffect(() => {
+    isFetchingRef.current = isLoadingNext || isLoadingPrevious;
+  }, [isLoadingNext, isLoadingPrevious]);
   // Initial scroll to today before enabling observers
   useEffect(() => {
     if (hasScrolled) return;
@@ -106,34 +113,17 @@ export function DayGroupedJournalList({
     fetchPreviousPage,
   ]);
 
-  // Set up intersection observers for bi-directional scroll fetching
+  // Set up intersection observers to track intersection state
   useEffect(() => {
     if (!hasScrolled) return;
 
     const observer = new IntersectionObserver(
       entries => {
         entries.forEach(entry => {
-          if (!entry.isIntersecting) return;
-          const state = fetchStateRef.current;
-
           if (entry.target === topSentinelRef.current) {
-            // Scrolling up -> fetch previous (PAST items)
-            if (
-              state.hasPreviousPage &&
-              !state.isLoadingPrevious &&
-              state.fetchPreviousPage
-            ) {
-              state.fetchPreviousPage();
-            }
+            setIsTopIntersecting(entry.isIntersecting);
           } else if (entry.target === bottomSentinelRef.current) {
-            // Scrolling down -> fetch next (FUTURE items)
-            if (
-              state.hasNextPage &&
-              !state.isLoadingNext &&
-              state.fetchNextPage
-            ) {
-              state.fetchNextPage();
-            }
+            setIsBottomIntersecting(entry.isIntersecting);
           }
         });
       },
@@ -148,6 +138,55 @@ export function DayGroupedJournalList({
 
     return () => observer.disconnect();
   }, [hasScrolled]);
+
+  // Handle fetching based on intersection state to avoid dropped fetches
+  useEffect(() => {
+    if (
+      isTopIntersecting &&
+      hasPreviousPage &&
+      !isLoadingPrevious &&
+      !isLoadingNext &&
+      fetchPreviousPage
+    ) {
+      const timer = setTimeout(() => {
+        if (!isFetchingRef.current) {
+          isFetchingRef.current = true;
+          fetchPreviousPage();
+        }
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [
+    isTopIntersecting,
+    hasPreviousPage,
+    isLoadingPrevious,
+    isLoadingNext,
+    fetchPreviousPage,
+  ]);
+
+  useEffect(() => {
+    if (
+      isBottomIntersecting &&
+      hasNextPage &&
+      !isLoadingNext &&
+      !isLoadingPrevious &&
+      fetchNextPage
+    ) {
+      const timer = setTimeout(() => {
+        if (!isFetchingRef.current) {
+          isFetchingRef.current = true;
+          fetchNextPage();
+        }
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [
+    isBottomIntersecting,
+    hasNextPage,
+    isLoadingNext,
+    isLoadingPrevious,
+    fetchNextPage,
+  ]);
 
   // Derive date bounds
   let effectiveStartDate = dateBounds?.start;

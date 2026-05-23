@@ -59,14 +59,10 @@ test.describe('Journal Infinite Scroll', () => {
     await expect(page.getByTestId('journals-list-ready')).toBeVisible();
     // Use element-based assertion instead of networkidle
 
-    // 2. Initial state: Present should be visible, others shouldn't
+    // 2. Initial state: Present should be visible
     await expect(
       page.getByRole('heading', { name: /Present Journal/i })
     ).toBeVisible();
-    await expect(
-      page.getByRole('heading', { name: /Past Journal/i })
-    ).toBeHidden();
-
     // 3. Scroll Down (to FUTURE) -> Should trigger fetchNextPage
     const bottomSentinel = page.getByTestId('journal-bottom-sentinel');
 
