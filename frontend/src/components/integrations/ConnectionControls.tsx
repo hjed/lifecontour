@@ -111,7 +111,7 @@ export function ConnectionControls({
         </Alert>
       )}
 
-      <div className='flex gap-2'>
+      <div className='flex flex-wrap gap-2'>
         {connected ? (
           <>
             <Button
