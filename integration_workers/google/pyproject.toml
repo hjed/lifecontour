@@ -69,6 +69,9 @@ target-version = "py312"
 
 [tool.mypy]
 python_version = "3.14"
+plugins = [
+    "pydantic.mypy"
+]
 check_untyped_defs = true
 disallow_any_generics = true
 disallow_incomplete_defs = true
@@ -78,6 +81,12 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 warn_return_any = true
 strict_equality = true
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
 
 [[tool.mypy.overrides]]
 module = [

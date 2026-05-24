@@ -24,7 +24,7 @@ from snipeit_settings import SnipeItWorkerSettings
 # Logging
 # ---------------------------------------------------------------------------
 
-settings = SnipeItWorkerSettings()  # type: ignore[call-arg]
+settings = SnipeItWorkerSettings()
 
 log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
 

@@ -96,7 +96,7 @@ class WorkerSettings(BaseSettings):
 
 
 # Global settings instance
-settings = WorkerSettings()  # type: ignore[call-arg]
+settings = WorkerSettings()
 
 # Configure structured logging using shared module
 configure_logging(
