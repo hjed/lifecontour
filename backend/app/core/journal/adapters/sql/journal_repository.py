@@ -948,8 +948,8 @@ class SqlJournalRepository(JournalRepository):
             links.append(
                 {
                     "external_event_id": row[0],
-                    "calendar_id": row[1],
-                    "internal_calendar_id": row[2],
+                    "calendar_id": str(row[1]) if row[1] else None,
+                    "internal_calendar_id": str(row[2]) if row[2] else None,
                 }
             )
         return links

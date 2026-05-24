@@ -139,8 +139,8 @@ async def test_returns_snipeit_maintenance_link(
 
     assert len(data) == 1
     link = data[0]
-    assert link["id"] == "snipeit-maint-42"
-    assert link["attributes"]["source"] == "snipeit"
+    assert link["id"] == "snipeit_maintenance-maint-42"
+    assert link["attributes"]["source"] == "snipeit_maintenance"
     assert (
         link["attributes"]["url"]
         == "https://snipeit.example.com/hardware/maintenances/42"

@@ -198,7 +198,7 @@ def build_journal_external_links(
             if source == "snipeit_maintenance":
                 links.append(
                     ExternalLinkInfo(
-                        source="snipeit",
+                        source="snipeit_maintenance",
                         url=build_snipeit_maintenance_url(base_url, ext_id),
                         external_id=ext_id,
                         unique_key=f"maint-{ext_id}",
