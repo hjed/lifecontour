@@ -1607,11 +1607,11 @@ test.describe('Journal List Page', () => {
 
       // Wait for rendering
       // The empty days between (7 days empty) should be collapsed
-      const collapsedText = page.getByText(/empty days/i);
+      const collapsedText = page.getByText(/empty days/i).first();
       await expect(collapsedText).toBeVisible({ timeout: 15000 });
 
       // Click to expand
-      const toggleBtn = page.getByRole('button', { name: /expand/i });
+      const toggleBtn = page.getByRole('button', { name: /expand/i }).first();
       await expect(toggleBtn).toBeVisible();
       await toggleBtn.click();
 
