@@ -845,7 +845,7 @@ export function useSaveSnipeItSettings() {
 export async function reregisterWebhooks(
   integrationId: string
 ): Promise<WebhookReregisterResponse> {
-  // Use specific endpoint for google and strava
+  // Use specific endpoint for google (Strava uses the generic endpoint)
   const endpoint =
     integrationId === 'google'
       ? '/api/integrations/google/webhooks/reregister'

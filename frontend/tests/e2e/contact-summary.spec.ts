@@ -73,16 +73,10 @@ test.describe('Contact AI Summary', () => {
 
     // First, call the refresh API to create a pending summary record.
     // Without this, the component renders the empty state (no refresh button).
-    // Retry on transient 404s due to database visibility delays in CI
-    let refreshResponse;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      refreshResponse = await authenticatedPage.request.post(
-        `/api/contacts/${contact.id}/summary/refresh`
-      );
-      if (refreshResponse.status() !== 404) break;
-      await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-    }
-    expect(refreshResponse!.status()).toBe(202);
+    const refreshResponse = await authenticatedPage.request.post(
+      `/api/contacts/${contact.id}/summary/refresh`
+    );
+    expect(refreshResponse.status()).toBe(202);
 
     // Navigate to the contact page — the summary now has a PENDING status
     await authenticatedPage.goto(`/contacts/${contact.id}`);
@@ -131,16 +125,10 @@ test.describe('Contact AI Summary', () => {
     });
 
     // Create a pending summary so the refresh button is visible
-    // Retry on transient 404s due to database visibility delays in CI
-    let seedResponse;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      seedResponse = await authenticatedPage.request.post(
-        `/api/contacts/${contact.id}/summary/refresh`
-      );
-      if (seedResponse.status() !== 404) break;
-      await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-    }
-    expect(seedResponse!.status()).toBe(202);
+    const seedResponse = await authenticatedPage.request.post(
+      `/api/contacts/${contact.id}/summary/refresh`
+    );
+    expect(seedResponse.status()).toBe(202);
 
     await authenticatedPage.goto(`/contacts/${contact.id}`);
 

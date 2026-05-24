@@ -44,15 +44,6 @@ export function DayGroupedJournalList({
   const topSentinelRef = useRef<HTMLDivElement>(null);
   const bottomSentinelRef = useRef<HTMLDivElement>(null);
 
-  const fetchStateRef = useRef({
-    hasNextPage,
-    hasPreviousPage,
-    isLoadingNext,
-    isLoadingPrevious,
-    fetchNextPage,
-    fetchPreviousPage,
-  });
-
   const [hasScrolled, setHasScrolled] = useState(false);
   const [expandedEmptyGroups, setExpandedEmptyGroups] = useState<Set<string>>(
     new Set()
@@ -95,24 +86,6 @@ export function DayGroupedJournalList({
     };
   }, [journals, isLoadingNext, isLoadingPrevious, hasScrolled]);
 
-  useEffect(() => {
-    fetchStateRef.current = {
-      hasNextPage,
-      hasPreviousPage,
-      isLoadingNext,
-      isLoadingPrevious,
-      fetchNextPage,
-      fetchPreviousPage,
-    };
-  }, [
-    hasNextPage,
-    hasPreviousPage,
-    isLoadingNext,
-    isLoadingPrevious,
-    fetchNextPage,
-    fetchPreviousPage,
-  ]);
-
   // Set up intersection observers to track intersection state
   useEffect(() => {
     if (!hasScrolled) return;
@@ -141,7 +114,22 @@ export function DayGroupedJournalList({
 
   // Handle fetching based on intersection state to avoid dropped fetches
   useEffect(() => {
+    // If both are intersecting (e.g. short lists), prioritize fetching older journals (bottom)
     if (
+      isBottomIntersecting &&
+      hasNextPage &&
+      !isLoadingNext &&
+      !isLoadingPrevious &&
+      fetchNextPage
+    ) {
+      const timer = setTimeout(() => {
+        if (!isFetchingRef.current) {
+          isFetchingRef.current = true;
+          fetchNextPage();
+        }
+      }, 50);
+      return () => clearTimeout(timer);
+    } else if (
       isTopIntersecting &&
       hasPreviousPage &&
       !isLoadingPrevious &&
@@ -158,33 +146,12 @@ export function DayGroupedJournalList({
     }
   }, [
     isTopIntersecting,
+    isBottomIntersecting,
     hasPreviousPage,
+    hasNextPage,
     isLoadingPrevious,
     isLoadingNext,
     fetchPreviousPage,
-  ]);
-
-  useEffect(() => {
-    if (
-      isBottomIntersecting &&
-      hasNextPage &&
-      !isLoadingNext &&
-      !isLoadingPrevious &&
-      fetchNextPage
-    ) {
-      const timer = setTimeout(() => {
-        if (!isFetchingRef.current) {
-          isFetchingRef.current = true;
-          fetchNextPage();
-        }
-      }, 50);
-      return () => clearTimeout(timer);
-    }
-  }, [
-    isBottomIntersecting,
-    hasNextPage,
-    isLoadingNext,
-    isLoadingPrevious,
     fetchNextPage,
   ]);
 

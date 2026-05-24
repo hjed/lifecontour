@@ -145,7 +145,7 @@ export function ConnectionControls({
                 <Button
                   variant='outline'
                   onClick={() => reregisterWebhooks()}
-                  disabled={reregisterLoading}
+                  disabled={reregisterLoading || needsReauth || needsReconsent}
                   data-testid={`reregister-webhooks-${integrationId}`}
                 >
                   {reregisterLoading ? (
