@@ -82,8 +82,7 @@ test.describe('Contact Relationships', () => {
       exact: true,
     });
     await expect(parentOption).toBeVisible();
-    // Use force: true to bypass Playwright mobile bounding box bug on Radix Select portals
-    await parentOption.click({ force: true });
+    await parentOption.click();
   });
 
   test('should toggle "Relationship with me" and create a user-targeted relationship', async ({
@@ -142,8 +141,7 @@ test.describe('Contact Relationships', () => {
       .getByRole('listbox')
       .getByRole('option', { name: 'Friend', exact: true });
     await expect(option).toBeVisible();
-    // Use force: true to bypass Playwright mobile bounding box bug on Radix Select portals
-    await option.click({ force: true });
+    await option.click();
 
     // Submit
     const addButton = formContainer.getByRole('button', {

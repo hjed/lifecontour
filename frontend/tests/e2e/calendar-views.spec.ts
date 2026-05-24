@@ -681,8 +681,7 @@ test.describe('Calendar Views', () => {
       .getByRole('option', { name: calendars[0].name, exact: true })
       .first();
     await expect(calendarOption).toBeVisible({ timeout: 10000 });
-    // Use force: true to bypass Playwright mobile bounding box bug on Radix Select portals
-    await calendarOption.click({ force: true });
+    await calendarOption.click();
 
     // Submit form
     // The form contains a button "Create Journal"

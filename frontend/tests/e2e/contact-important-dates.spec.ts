@@ -59,7 +59,7 @@ test.describe('Important Dates', () => {
         name: 'Marriage Ann.',
       });
       await expect(typeOption).toBeVisible({ timeout: 1000 });
-      await typeOption.click({ force: true });
+      await typeOption.click();
       await expect(
         authenticatedPage.getByRole('combobox', { name: 'Important Date Type' })
       ).toHaveText('Marriage Ann.', { timeout: 1000 });
@@ -74,7 +74,7 @@ test.describe('Important Dates', () => {
         name: 'Year Only',
       });
       await expect(precisionOption).toBeVisible({ timeout: 1000 });
-      await precisionOption.click({ force: true });
+      await precisionOption.click();
       await expect(
         authenticatedPage.getByRole('combobox', {
           name: 'Important Date Precision',

@@ -49,34 +49,11 @@ const DEFAULT_EXPANDED_SECTIONS: Record<string, boolean> = {
 };
 
 /**
- * Load sidebar state from localStorage with fallback to defaults
+ * Load initial sidebar state (always uses defaults for SSR hydration)
  */
 function loadSidebarState(
   defaultExpandedSections: Record<string, boolean>
 ): SidebarState {
-  if (typeof window === 'undefined') {
-    return {
-      isOpen: false,
-      expandedSections: defaultExpandedSections,
-    };
-  }
-
-  try {
-    const stored = localStorage.getItem(SIDEBAR_STORAGE_KEY);
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      return {
-        isOpen: false, // Always start closed on page load
-        expandedSections: {
-          ...defaultExpandedSections,
-          ...parsed.expandedSections,
-        },
-      };
-    }
-  } catch (error) {
-    console.warn('Failed to load sidebar state from localStorage:', error);
-  }
-
   return {
     isOpen: false,
     expandedSections: defaultExpandedSections,
@@ -91,9 +68,31 @@ export function SidebarProvider({
     loadSidebarState(defaultExpandedSections)
   );
 
+  const [isClient, setIsClient] = useState(false);
+
+  // Load saved state from localStorage after hydration
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(SIDEBAR_STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        setState(prev => ({
+          ...prev,
+          expandedSections: {
+            ...defaultExpandedSections,
+            ...parsed.expandedSections,
+          },
+        }));
+      }
+    } catch (error) {
+      console.warn('Failed to load sidebar state from localStorage:', error);
+    }
+    setIsClient(true);
+  }, [defaultExpandedSections]);
+
   // Save expandedSections to localStorage whenever they change
   useEffect(() => {
-    if (typeof window !== 'undefined') {
+    if (isClient) {
       try {
         localStorage.setItem(
           SIDEBAR_STORAGE_KEY,
@@ -106,7 +105,7 @@ export function SidebarProvider({
         console.warn('Failed to save sidebar state to localStorage:', error);
       }
     }
-  }, [state.expandedSections]);
+  }, [state.expandedSections, isClient]);
 
   const toggleSidebar = useCallback(() => {
     setState(prev => ({ ...prev, isOpen: !prev.isOpen }));

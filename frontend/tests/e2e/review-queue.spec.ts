@@ -229,7 +229,7 @@ test.describe('Journal Review Queue', () => {
     await dismissBtn.scrollIntoViewIfNeeded();
     await expect(dismissBtn).toBeEnabled();
     // Use dispatchEvent instead of .click() as the Radix Sheet overlay and Mobile viewport
-    // constraints prevent reliable bounding-box clicks even with force: true
+    // constraints prevent reliable bounding-box clicks
     await dismissBtn.dispatchEvent('click');
 
     await expect(page.getByText('Review item dismissed')).toBeVisible();
