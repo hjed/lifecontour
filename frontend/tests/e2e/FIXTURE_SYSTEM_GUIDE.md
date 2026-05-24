@@ -2,13 +2,13 @@
 
 ## 🎯 Overview
 
-This guide documents the comprehensive fixture-based testing system that provides deterministic, isolated, and maintainable E2E tests. The system eliminates conditional logic, provides real OAuth authentication, and offers advanced data management capabilities.
+This guide documents the comprehensive fixture-based testing system that provides deterministic, isolated, and maintainable E2E tests. The system eliminates conditional logic, provides real OAuth authentication via Playwright's setup project + storageState pattern, and offers advanced data management capabilities.
 
 ## 🏗️ Architecture
 
 ### Core Components
 
-1. **Authentication Fixtures** - Real OAuth flow with worker-scoped authentication
+1. **Authentication Fixtures** - Real OAuth flow via setup project + storageState (runs once for all tests)
 2. **Data Management Fixtures** - Advanced data creation with automatic cleanup
 3. **Specialized Fixtures** - Purpose-built fixtures for specific scenarios
 4. **Data Factories** - Realistic test data generation
@@ -20,21 +20,29 @@ This guide documents the comprehensive fixture-based testing system that provide
 - ✅ **Real OAuth Authentication** - Authentic E2E testing with Hydra
 - ✅ **Deterministic Data** - Predictable test data for reliable tests
 - ✅ **Automatic Cleanup** - No test pollution or resource leaks
-- ✅ **Performance Optimized** - Worker-scoped auth, bulk operations
+- ✅ **Performance Optimized** - Single OAuth flow via setup project, bulk operations
 - ✅ **Scalable Architecture** - Easy to extend with new fixtures
 
 ## 🔐 Authentication Fixtures
 
-### Worker-Scoped Authentication
+### Setup Project + storageState Pattern
+
+Authentication uses Playwright's recommended [setup project pattern](https://playwright.dev/docs/auth):
+
+1. **`auth.setup.ts`** runs once before all test projects — performs the real OAuth flow against Hydra
+2. Saves authenticated browser state (cookies + localStorage) to `playwright/.auth/user.json`
+3. All browser projects declare `dependencies: ['setup']` and `storageState: 'playwright/.auth/user.json'`
+4. Every test starts pre-authenticated — zero per-test OAuth overhead
 
 ```typescript
 // Automatically authenticated page - no setup needed
+// storageState from setup project provides cookies
 test('should access protected page', async ({ authenticatedPage }) => {
   await authenticatedPage.goto('/contacts');
   await expect(authenticatedPage).toHaveURL(/\/contacts/);
 });
 
-// Automatically unauthenticated page - no setup needed
+// Automatically unauthenticated page - clears storageState cookies
 test('should redirect to login', async ({ unauthenticatedPage }) => {
   await unauthenticatedPage.goto('/contacts');
   await expect(unauthenticatedPage).toHaveURL(/\/auth\/login/);
@@ -45,8 +53,8 @@ test('should redirect to login', async ({ unauthenticatedPage }) => {
 
 - Uses actual Hydra OAuth provider
 - Auto-accepting login/consent service for deterministic flows
-- Worker-scoped authentication eliminates per-test OAuth overhead
-- Captures real session cookies and authentication state
+- Setup project runs OAuth **once** for the entire suite (not per worker or per test)
+- Saves real session cookies via Playwright's `storageState`
 
 ## 📊 Data Management Fixtures
 
@@ -284,11 +292,12 @@ test('manual cleanup example', async ({ authenticatedPage }) => {
 
 ## 🚀 Performance Features
 
-### Worker-Scoped Authentication
+### Setup Project Authentication
 
-- OAuth flow runs once per worker, not per test
-- Significant performance improvement for test suites
-- Real authentication state shared across tests
+- OAuth flow runs **once** via setup project, not per worker or per test
+- All 3 browser projects (chromium, firefox, Mobile Chrome) share the same auth state
+- Significant performance improvement (~30-60 seconds saved per full suite run)
+- Real authentication state persisted to disk and loaded automatically
 
 ### Bulk Operations
 
