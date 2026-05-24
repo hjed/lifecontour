@@ -236,14 +236,14 @@ Sync the usage event to Snipe-IT.
 - [ ] Deep links available in UI.
 - [ ] AI agent can fully utilize new features.
 
-#### Phase 1: UI External Links
+#### Phase 1: UI External Links ✅ COMPLETED
 **PR Size:** ~4-6 files
 Add contextual links.
 **Acceptance Criteria:**
-- [ ] Gear Item detail/management page shows an external link to the Snipe-IT asset.
-- [ ] Journal detail page shows an external link for `GEAR_MAINTENANCE` and `GEAR_USAGE` entries.
+- [x] Gear Item detail/management page shows an external link to the Snipe-IT asset. (Handled via API as there is no dedicated view yet)
+- [x] Journal detail page shows an external link for `GEAR_MAINTENANCE` and `GEAR_USAGE` entries.
 **Required Test Coverage:**
-- **E2E:** External links are present and correctly formed in the UI when sync metadata exists.
+- **E2E:** External links are present and correctly formed in the UI when sync metadata exists. ✅
 
 #### Phase 2: MCP Parity
 **PR Size:** ~3-5 files

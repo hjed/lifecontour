@@ -198,6 +198,96 @@ test.describe('External Links Display', () => {
       // Section should not exist when there are no links
       await expect(page.getByTestId('external-links-section')).toBeHidden();
     });
+
+    test('should display Snipe-IT external links on journal detail', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const page = authenticatedPage;
+      const dataManager = new TestDataManager(page);
+      await dataManager.clearAllJournals();
+
+      const journals = await dataManager.createJournals([
+        {
+          title: 'Snipe-IT Linked Journal',
+          content: 'Journal with Snipe-IT external links.',
+          event_date_range: {
+            start: new Date().toISOString(),
+            end: new Date().toISOString(),
+          },
+        },
+      ]);
+      const journal = journals[0];
+
+      testCleanup(async () => {
+        await dataManager.cleanup();
+      });
+
+      // Mock with Snipe-IT links
+      await page.route(
+        `**/api/journals/${journal.id}/external-links`,
+        async route => {
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              data: [
+                {
+                  type: 'external_links',
+                  id: 'snipeit_maintenance-42',
+                  attributes: {
+                    source: 'snipeit_maintenance',
+                    url: 'https://snipeit.example.com/hardware/maintenances/42',
+                    external_id: '42',
+                  },
+                },
+                {
+                  type: 'external_links',
+                  id: 'snipeit_checkout-50',
+                  attributes: {
+                    source: 'snipeit_checkout',
+                    url: 'https://snipeit.example.com/hardware/50',
+                    external_id: '50',
+                  },
+                },
+                {
+                  type: 'external_links',
+                  id: 'snipeit-50',
+                  attributes: {
+                    source: 'snipeit',
+                    url: 'https://snipeit.example.com/hardware/50',
+                    external_id: '50',
+                  },
+                },
+              ],
+            }),
+          });
+        }
+      );
+
+      await page.goto(`/journals/${journal.id}`);
+      await expect(page.getByTestId('journal-title-field')).toBeVisible();
+
+      const section = page.getByTestId('external-links-section');
+      await expect(section).toBeVisible();
+
+      // All badges should be visible
+      const maintLink = page.getByTestId('external-link-snipeit_maintenance');
+      await expect(maintLink).toBeVisible();
+      await expect(maintLink).toContainText('Snipe-IT Maintenance');
+      await expect(maintLink).toHaveAttribute(
+        'href',
+        'https://snipeit.example.com/hardware/maintenances/42'
+      );
+
+      const checkoutLink = page.getByTestId('external-link-snipeit_checkout');
+      await expect(checkoutLink).toBeVisible();
+      await expect(checkoutLink).toContainText('Snipe-IT Checkout');
+
+      const assetLink = page.getByTestId('external-link-snipeit');
+      await expect(assetLink).toBeVisible();
+      await expect(assetLink).toContainText('Snipe-IT Asset');
+    });
   });
 
   test.describe('Contact Detail Page', () => {

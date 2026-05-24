@@ -1813,9 +1813,52 @@ async def get_journal_external_links(
         for row in result
     ]
 
+    # Fetch Snipe-IT links (maintenance and checkout asset)
+    snipeit_links: list[dict[str, Any]] = []
+
+    # 1. Snipe-IT Maintenance records
+    snipeit_maint_query = await connection.execute(
+        text(
+            """
+            SELECT m.integration_source, m.external_id, s.base_url
+            FROM sync_metadata m
+            JOIN snipeit_settings s ON s.user_id = :user_id
+            WHERE m.internal_uuid = :journal_uuid
+            AND m.integration_source = 'snipeit_maintenance'
+            """
+        ),
+        {"journal_uuid": str(journal_id), "user_id": user.id},
+    )
+    for row in snipeit_maint_query:
+        snipeit_links.append(
+            {"integration_source": row[0], "external_id": row[1], "base_url": row[2]}
+        )
+
+    # 2. Snipe-IT Checkouts (link to the asset)
+    snipeit_checkout_query = await connection.execute(
+        text(
+            """
+            SELECT 'snipeit' AS integration_source, m_asset.external_id, s.base_url
+            FROM sync_metadata m_checkout
+            JOIN journal_gear_usage_data gud ON gud.journal_id = :journal_id
+            JOIN sync_metadata m_asset ON m_asset.internal_uuid = CAST(gud.gear_item_id AS VARCHAR)
+                AND m_asset.integration_source = 'snipeit'
+            JOIN snipeit_settings s ON s.user_id = :user_id
+            WHERE m_checkout.internal_uuid = :journal_uuid
+            AND m_checkout.integration_source = 'snipeit_checkout'
+            """
+        ),
+        {"journal_id": journal_id, "journal_uuid": str(journal_id), "user_id": user.id},
+    )
+    for row in snipeit_checkout_query:
+        snipeit_links.append(
+            {"integration_source": row[0], "external_id": row[1], "base_url": row[2]}
+        )
+
     links = build_journal_external_links(
         strava_activity_id=strava_activity_id,
         external_event_links=external_event_links,
+        snipeit_links=snipeit_links,
     )
 
     return ExternalLinksResponse(
