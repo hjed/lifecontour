@@ -69,17 +69,26 @@ function AvailabilityTestComponent() {
 
 describe('SidebarContext', () => {
   beforeEach(() => {
+    jest.useFakeTimers();
     jest.clearAllMocks();
     mockLocalStorage.getItem.mockReturnValue(null);
   });
 
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  const renderWithProvider = (ui: React.ReactNode, props?: any) => {
+    const result = render(<SidebarProvider {...props}>{ui}</SidebarProvider>);
+    act(() => {
+      jest.runAllTimers();
+    });
+    return result;
+  };
+
   describe('SidebarProvider', () => {
     it('provides default state when no localStorage data', () => {
-      render(
-        <SidebarProvider>
-          <TestComponent />
-        </SidebarProvider>
-      );
+      renderWithProvider(<TestComponent />);
 
       expect(screen.getByTestId('sidebar-open')).toHaveTextContent('false');
       expect(screen.getByTestId('contacts-expanded')).toHaveTextContent('true');
@@ -95,11 +104,7 @@ describe('SidebarContext', () => {
         })
       );
 
-      render(
-        <SidebarProvider>
-          <TestComponent />
-        </SidebarProvider>
-      );
+      renderWithProvider(<TestComponent />);
 
       expect(screen.getByTestId('contacts-expanded')).toHaveTextContent(
         'false'
@@ -111,11 +116,7 @@ describe('SidebarContext', () => {
       mockLocalStorage.getItem.mockReturnValue('invalid-json');
       const consoleSpy = jest.spyOn(console, 'warn').mockImplementation();
 
-      render(
-        <SidebarProvider>
-          <TestComponent />
-        </SidebarProvider>
-      );
+      renderWithProvider(<TestComponent />);
 
       expect(screen.getByTestId('contacts-expanded')).toHaveTextContent('true');
       expect(screen.getByTestId('journals-expanded')).toHaveTextContent(
@@ -132,11 +133,7 @@ describe('SidebarContext', () => {
     it('uses custom default expanded sections', () => {
       const customDefaults = { Contacts: false, Journals: true };
 
-      render(
-        <SidebarProvider defaultExpandedSections={customDefaults}>
-          <TestComponent />
-        </SidebarProvider>
-      );
+      renderWithProvider(<TestComponent />, { defaultExpandedSections: customDefaults });
 
       expect(screen.getByTestId('contacts-expanded')).toHaveTextContent(
         'false'
@@ -147,11 +144,7 @@ describe('SidebarContext', () => {
 
   describe('sidebar state management', () => {
     it('toggles sidebar open/closed', () => {
-      render(
-        <SidebarProvider>
-          <TestComponent />
-        </SidebarProvider>
-      );
+      renderWithProvider(<TestComponent />);
 
       const toggleButton = screen.getByTestId('toggle-sidebar');
 
@@ -165,11 +158,7 @@ describe('SidebarContext', () => {
     });
 
     it('opens sidebar', () => {
-      render(
-        <SidebarProvider>
-          <TestComponent />
-        </SidebarProvider>
-      );
+      renderWithProvider(<TestComponent />);
 
       const openButton = screen.getByTestId('open-sidebar');
 
@@ -180,11 +169,7 @@ describe('SidebarContext', () => {
     });
 
     it('closes sidebar', () => {
-      render(
-        <SidebarProvider>
-          <TestComponent />
-        </SidebarProvider>
-      );
+      renderWithProvider(<TestComponent />);
 
       const openButton = screen.getByTestId('open-sidebar');
       const closeButton = screen.getByTestId('close-sidebar');
@@ -199,11 +184,7 @@ describe('SidebarContext', () => {
     });
 
     it('toggles section expansion', () => {
-      render(
-        <SidebarProvider>
-          <TestComponent />
-        </SidebarProvider>
-      );
+      renderWithProvider(<TestComponent />);
 
       const toggleContactsButton = screen.getByTestId('toggle-contacts');
       const toggleJournalsButton = screen.getByTestId('toggle-journals');
@@ -228,11 +209,7 @@ describe('SidebarContext', () => {
 
   describe('localStorage persistence', () => {
     it('saves state to localStorage when state changes', async () => {
-      render(
-        <SidebarProvider>
-          <TestComponent />
-        </SidebarProvider>
-      );
+      renderWithProvider(<TestComponent />);
 
       const toggleContactsButton = screen.getByTestId('toggle-contacts');
 
@@ -254,11 +231,7 @@ describe('SidebarContext', () => {
       });
       const consoleSpy = jest.spyOn(console, 'warn').mockImplementation();
 
-      render(
-        <SidebarProvider>
-          <TestComponent />
-        </SidebarProvider>
-      );
+      renderWithProvider(<TestComponent />);
 
       const toggleContactsButton = screen.getByTestId('toggle-contacts');
 
@@ -277,11 +250,7 @@ describe('SidebarContext', () => {
 
   describe('useSidebarAvailable', () => {
     it('returns true when context is available', () => {
-      render(
-        <SidebarProvider>
-          <AvailabilityTestComponent />
-        </SidebarProvider>
-      );
+      renderWithProvider(<AvailabilityTestComponent />);
 
       expect(screen.getByTestId('sidebar-available')).toHaveTextContent('true');
     });
