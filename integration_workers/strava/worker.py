@@ -652,7 +652,6 @@ async def periodic_sync_all_strava_accounts(
                         "sync_strava_activities",
                         str(user_id),
                         "smart",
-                        _job_timeout=600,
                         _queue_name=STRAVA_ARQ_QUEUE_NAME,
                     )
 
