@@ -80,6 +80,12 @@ from app.core.journal.adapters.sql.fitness_data_repository import (
 from app.core.journal.adapters.sql.gear_item_repository import (
     SqlGearItemRepository,
 )
+from app.core.journal.adapters.sql.gear_maintenance_data_repository import (
+    SqlGearMaintenanceDataRepository,
+)
+from app.core.journal.adapters.sql.gear_usage_data_repository import (
+    SqlGearUsageDataRepository,
+)
 from app.core.journal.adapters.sql.jogging_data_repository import (
     SqlJoggingDataRepository,
 )
@@ -170,6 +176,8 @@ class _JournalToolRepositories:
     climbing_data_repo: SqlClimbingDataRepository
     kayaking_data_repo: SqlKayakingDataRepository
     cross_country_skiing_data_repo: SqlCrossCountrySkiingDataRepository
+    gear_maintenance_data_repo: SqlGearMaintenanceDataRepository
+    gear_usage_data_repo: SqlGearUsageDataRepository
     route_repo: SqlRouteRepository
     contact_relationship_repo: SqlJournalContactRelationshipRepository
     contact_repo: SqlContactRepository
@@ -228,6 +236,8 @@ def _create_journal_tool_repositories(
         cross_country_skiing_data_repo=SqlCrossCountrySkiingDataRepository(
             db_connection
         ),
+        gear_maintenance_data_repo=SqlGearMaintenanceDataRepository(db_connection),
+        gear_usage_data_repo=SqlGearUsageDataRepository(db_connection),
         route_repo=SqlRouteRepository(db_connection),
         contact_relationship_repo=SqlJournalContactRelationshipRepository(
             db_connection
@@ -309,7 +319,12 @@ def _parse_activity_type_filter(activity_type: str | None) -> str | None:
 
 
 # Valid integration sources for journal filtering
-_VALID_INTEGRATION_SOURCES = {"strava", "google_calendar"}
+_VALID_INTEGRATION_SOURCES = {
+    "strava",
+    "google_calendar",
+    "snipeit",
+    "snipeit_maintenance",
+}
 
 
 def _parse_integration_source_filter(value: str | None) -> str | None:
@@ -417,6 +432,8 @@ async def _fetch_types_for_journal(
         repos.climbing_data_repo,
         repos.kayaking_data_repo,
         repos.cross_country_skiing_data_repo,
+        repos.gear_maintenance_data_repo,
+        repos.gear_usage_data_repo,
     )
 
 
@@ -424,6 +441,7 @@ async def _fetch_journal_external_links(
     journal_id: int,
     fitness_data_repo: SqlFitnessDataRepository,
     db_connection: AsyncConnection,
+    user_id: str,
 ) -> list[ExternalLinkInfo]:
     """Fetch external system links for a journal.
 
@@ -444,6 +462,11 @@ async def _fetch_journal_external_links(
     fitness_data = await fitness_data_repo.find_by_journal_id(journal_id)
     if fitness_data and fitness_data.strava_activity_id:
         strava_activity_id = fitness_data.strava_activity_id
+
+    from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+
+    journal_repo = SqlJournalRepository(db_connection)
+    snipeit_links = await journal_repo.get_snipeit_links(journal_id, user_id)
 
     # Fetch Google Calendar external event links
     result = await db_connection.execute(
@@ -470,6 +493,7 @@ async def _fetch_journal_external_links(
     return build_journal_external_links(
         strava_activity_id=strava_activity_id,
         external_event_links=external_event_links,
+        snipeit_links=snipeit_links,
     )
 
 
@@ -1193,6 +1217,8 @@ async def _fetch_journal_types_and_data(
     climbing_data_repo: SqlClimbingDataRepository,
     kayaking_data_repo: SqlKayakingDataRepository,
     cross_country_skiing_data_repo: SqlCrossCountrySkiingDataRepository,
+    gear_maintenance_data_repo: SqlGearMaintenanceDataRepository,
+    gear_usage_data_repo: SqlGearUsageDataRepository,
 ) -> tuple[list[str], dict[str, Any]]:
     """
     Fetch all type-specific data for a journal.
@@ -1311,6 +1337,33 @@ async def _fetch_journal_types_and_data(
             _build_cross_country_skiing_data(cross_country_skiing_data)
         )
 
+    gear_maint_data = await gear_maintenance_data_repo.find_by_journal_id(journal_id)
+    if gear_maint_data:
+        types.append(JournalType.GEAR_MAINTENANCE.value)
+        type_data[JournalType.GEAR_MAINTENANCE.value] = {
+            "gear_item_id": str(gear_maint_data.gear_item_id)
+            if gear_maint_data.gear_item_id
+            else None,
+            "maintenance_type": gear_maint_data.maintenance_type,
+            "activity_types": gear_maint_data.activity_types,
+            "retirement_reason": gear_maint_data.retirement_reason,
+        }
+
+    gear_usage_data = await gear_usage_data_repo.find_by_journal_id(journal_id)
+    if gear_usage_data:
+        types.append(JournalType.GEAR_USAGE.value)
+        type_data[JournalType.GEAR_USAGE.value] = {
+            "gear_item_id": str(gear_usage_data.gear_item_id)
+            if gear_usage_data.gear_item_id
+            else None,
+            "checkout_date": gear_usage_data.checkout_date.isoformat()
+            if gear_usage_data.checkout_date
+            else None,
+            "checkin_date": gear_usage_data.checkin_date.isoformat()
+            if gear_usage_data.checkin_date
+            else None,
+        }
+
     # If no types found, it's a NOTE
     if not types:
         types.append(JournalType.NOTE.value)
@@ -1334,6 +1387,8 @@ async def _create_type_specific_data(
     climbing_data_repo: SqlClimbingDataRepository,
     kayaking_data_repo: SqlKayakingDataRepository,
     cross_country_skiing_data_repo: SqlCrossCountrySkiingDataRepository,
+    gear_maintenance_data_repo: SqlGearMaintenanceDataRepository,
+    gear_usage_data_repo: SqlGearUsageDataRepository,
 ) -> None:
     """
     Create type-specific data row with default values for the given journal type.
@@ -1354,6 +1409,8 @@ async def _create_type_specific_data(
         climbing_data_repo: Repository for climbing data
         kayaking_data_repo: Repository for kayaking data
         cross_country_skiing_data_repo: Repository for cross-country skiing data
+        gear_maintenance_data_repo: Repository for gear maintenance data
+        gear_usage_data_repo: Repository for gear usage data
     """
     if journal_type == JournalType.MOOD_RATING:
         mood_data = MoodData(journal_id=journal_id)
@@ -1391,6 +1448,27 @@ async def _create_type_specific_data(
     elif journal_type == JournalType.CROSS_COUNTRY_SKIING:
         cross_country_skiing_data = CrossCountrySkiingData(journal_id=journal_id)
         await cross_country_skiing_data_repo.save(cross_country_skiing_data)
+    elif journal_type == JournalType.GEAR_MAINTENANCE:
+        from core_shared.models.journals.gear_maintenance_data import (
+            GearMaintenanceData,
+        )
+
+        await gear_maintenance_data_repo.save(
+            GearMaintenanceData(
+                journal_id=journal_id,
+                gear_item_id=UUID(int=0),
+                maintenance_type="maintenance",
+            )
+        )
+    elif journal_type == JournalType.GEAR_USAGE:
+        from core_shared.models.journals.gear_usage_data import GearUsageData
+
+        await gear_usage_data_repo.save(
+            GearUsageData(
+                journal_id=journal_id,
+                gear_item_id=UUID(int=0),
+            )
+        )
     # EVENT and PHOTO_ALBUM types require additional data (calendar_id, immich_album_id)
     # These will be created when the user provides type_data
 
@@ -1674,6 +1752,8 @@ async def _update_type_specific_data(
     climbing_data_repo: SqlClimbingDataRepository,
     kayaking_data_repo: SqlKayakingDataRepository,
     cross_country_skiing_data_repo: SqlCrossCountrySkiingDataRepository,
+    gear_maintenance_data_repo: SqlGearMaintenanceDataRepository,
+    gear_usage_data_repo: SqlGearUsageDataRepository,
 ) -> None:
     """
     Update type-specific data for a journal type.
@@ -1695,6 +1775,8 @@ async def _update_type_specific_data(
         climbing_data_repo: Repository for climbing data
         kayaking_data_repo: Repository for kayaking data
         cross_country_skiing_data_repo: Repository for cross-country skiing data
+        gear_maintenance_data_repo: Repository for gear maintenance data
+        gear_usage_data_repo: Repository for gear usage data
     """
     if not type_data_dict:
         return
@@ -1736,6 +1818,60 @@ async def _update_type_specific_data(
             type_data_dict,
             cross_country_skiing_data_repo,
         )
+    elif journal_type == JournalType.GEAR_MAINTENANCE:
+        existing_maint = await gear_maintenance_data_repo.find_by_journal_id(journal_id)
+        if existing_maint:
+            maint_updates: dict[str, Any] = {}
+            if "gear_item_id" in type_data_dict:
+                maint_updates["gear_item_id"] = (
+                    UUID(type_data_dict["gear_item_id"])
+                    if type_data_dict["gear_item_id"]
+                    else UUID(int=0)
+                )
+            if "maintenance_type" in type_data_dict:
+                maint_updates["maintenance_type"] = type_data_dict["maintenance_type"]
+            if "activity_types" in type_data_dict:
+                maint_updates["activity_types"] = type_data_dict["activity_types"]
+            if "retirement_reason" in type_data_dict:
+                maint_updates["retirement_reason"] = type_data_dict["retirement_reason"]
+            import dataclasses
+
+            validated_maint = dataclasses.replace(existing_maint, **maint_updates)
+            await gear_maintenance_data_repo.save(validated_maint)
+
+    elif journal_type == JournalType.GEAR_USAGE:
+        existing_usage = await gear_usage_data_repo.find_by_journal_id(journal_id)
+        if existing_usage:
+            usage_updates: dict[str, Any] = {}
+            if "gear_item_id" in type_data_dict:
+                usage_updates["gear_item_id"] = (
+                    UUID(type_data_dict["gear_item_id"])
+                    if type_data_dict["gear_item_id"]
+                    else UUID(int=0)
+                )
+            if "checkout_date" in type_data_dict:
+                usage_updates["checkout_date"] = type_data_dict["checkout_date"]
+            if "checkin_date" in type_data_dict:
+                usage_updates["checkin_date"] = type_data_dict["checkin_date"]
+
+            from datetime import date
+
+            if usage_updates.get("checkout_date") and isinstance(
+                usage_updates["checkout_date"], str
+            ):
+                usage_updates["checkout_date"] = date.fromisoformat(
+                    usage_updates["checkout_date"]
+                )
+            if usage_updates.get("checkin_date") and isinstance(
+                usage_updates["checkin_date"], str
+            ):
+                usage_updates["checkin_date"] = date.fromisoformat(
+                    usage_updates["checkin_date"]
+                )
+            import dataclasses
+
+            validated_usage = dataclasses.replace(existing_usage, **usage_updates)
+            await gear_usage_data_repo.save(validated_usage)
 
 
 def _validate_contact_relationships(
@@ -1921,6 +2057,8 @@ async def _fetch_enrichment_data(
     climbing_data_repo: SqlClimbingDataRepository,
     kayaking_data_repo: SqlKayakingDataRepository,
     cross_country_skiing_data_repo: SqlCrossCountrySkiingDataRepository,
+    gear_maintenance_data_repo: SqlGearMaintenanceDataRepository,
+    gear_usage_data_repo: SqlGearUsageDataRepository,
     contact_relationship_repo: SqlJournalContactRelationshipRepository,
     contact_repo: SqlContactRepository,
     tag_repo: SqlJournalTagRepository,
@@ -1947,6 +2085,8 @@ async def _fetch_enrichment_data(
         climbing_data_repo: Repository for climbing data
         kayaking_data_repo: Repository for kayaking data
         cross_country_skiing_data_repo: Repository for cross-country skiing data
+        gear_maintenance_data_repo: Repository for gear maintenance data
+        gear_usage_data_repo: Repository for gear usage data
         contact_relationship_repo: Repository for contact relationships
         contact_repo: Repository for contacts
         tag_repo: Repository for tags
@@ -1971,6 +2111,8 @@ async def _fetch_enrichment_data(
         climbing_data_repo,
         kayaking_data_repo,
         cross_country_skiing_data_repo,
+        gear_maintenance_data_repo,
+        gear_usage_data_repo,
     )
 
     contacts = await _fetch_contact_relationships_with_names(
@@ -2277,6 +2419,8 @@ async def create_journal_entry(
                     repos.climbing_data_repo,
                     repos.kayaking_data_repo,
                     repos.cross_country_skiing_data_repo,
+                    repos.gear_maintenance_data_repo,
+                    repos.gear_usage_data_repo,
                 )
 
             # Update type-specific data if provided
@@ -2298,6 +2442,8 @@ async def create_journal_entry(
                     repos.climbing_data_repo,
                     repos.kayaking_data_repo,
                     repos.cross_country_skiing_data_repo,
+                    repos.gear_maintenance_data_repo,
+                    repos.gear_usage_data_repo,
                 )
 
     # Add contact relationships if provided
@@ -2331,6 +2477,8 @@ async def create_journal_entry(
         repos.climbing_data_repo,
         repos.kayaking_data_repo,
         repos.cross_country_skiing_data_repo,
+        repos.gear_maintenance_data_repo,
+        repos.gear_usage_data_repo,
         repos.contact_relationship_repo,
         repos.contact_repo,
         repos.tag_repo,
@@ -2468,6 +2616,8 @@ async def update_journal_entry(
             repos.climbing_data_repo,
             repos.kayaking_data_repo,
             repos.cross_country_skiing_data_repo,
+            repos.gear_maintenance_data_repo,
+            repos.gear_usage_data_repo,
         )
 
         # Remove types that are not in the new list
@@ -2509,6 +2659,8 @@ async def update_journal_entry(
                         repos.climbing_data_repo,
                         repos.kayaking_data_repo,
                         repos.cross_country_skiing_data_repo,
+                        repos.gear_maintenance_data_repo,
+                        repos.gear_usage_data_repo,
                     )
 
             # Update type-specific data if provided
@@ -2530,6 +2682,8 @@ async def update_journal_entry(
                     repos.climbing_data_repo,
                     repos.kayaking_data_repo,
                     repos.cross_country_skiing_data_repo,
+                    repos.gear_maintenance_data_repo,
+                    repos.gear_usage_data_repo,
                 )
 
     # Update type_data if provided (without changing types, already validated upfront)
@@ -2553,6 +2707,8 @@ async def update_journal_entry(
                 repos.climbing_data_repo,
                 repos.kayaking_data_repo,
                 repos.cross_country_skiing_data_repo,
+                repos.gear_maintenance_data_repo,
+                repos.gear_usage_data_repo,
             )
 
     # Update contact relationships if provided (replace all relationships)
@@ -2603,6 +2759,8 @@ async def update_journal_entry(
         repos.climbing_data_repo,
         repos.kayaking_data_repo,
         repos.cross_country_skiing_data_repo,
+        repos.gear_maintenance_data_repo,
+        repos.gear_usage_data_repo,
         repos.contact_relationship_repo,
         repos.contact_repo,
         repos.tag_repo,
@@ -2694,6 +2852,8 @@ async def get_journal(
         repos.climbing_data_repo,
         repos.kayaking_data_repo,
         repos.cross_country_skiing_data_repo,
+        repos.gear_maintenance_data_repo,
+        repos.gear_usage_data_repo,
     )
 
     # Fetch contact relationships and contact details
@@ -2705,8 +2865,9 @@ async def get_journal(
     journal_tags = await repos.tag_repo.get_tags_for_journal(journal_id)
 
     # Fetch external links (Strava and Google Calendar)
+    user_id = await get_current_user_id()
     external_links = await _fetch_journal_external_links(
-        journal_id, repos.fitness_data_repo, db_connection
+        journal_id, repos.fitness_data_repo, db_connection, user_id
     )
 
     # Convert to AI-friendly response
@@ -3761,6 +3922,8 @@ async def merge_journals(
         repos.climbing_data_repo,
         repos.kayaking_data_repo,
         repos.cross_country_skiing_data_repo,
+        repos.gear_maintenance_data_repo,
+        repos.gear_usage_data_repo,
     )
 
     contacts = await _fetch_contact_relationships_with_names(
@@ -3868,6 +4031,8 @@ async def get_merge_candidates(
             repos.climbing_data_repo,
             repos.kayaking_data_repo,
             repos.cross_country_skiing_data_repo,
+            repos.gear_maintenance_data_repo,
+            repos.gear_usage_data_repo,
         )
         c_tags = await repos.tag_repo.get_tags_for_journal(candidate_id)
         tag_names = [t.name for t in c_tags]

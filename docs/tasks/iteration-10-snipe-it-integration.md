@@ -233,8 +233,8 @@ Sync the usage event to Snipe-IT.
 - [Part 5: UI & Dashboard Integration](../product-specifications/snipe-it-integration-product-specification.md#part-5-ui--dashboard-integration)
 
 **Acceptance Criteria (task-level):**
-- [ ] Deep links available in UI.
-- [ ] AI agent can fully utilize new features.
+- [x] Deep links available in UI.
+- [x] AI agent can fully utilize new features.
 
 #### Phase 1: UI External Links ✅ COMPLETED
 **PR Size:** ~4-6 files
@@ -245,14 +245,14 @@ Add contextual links.
 **Required Test Coverage:**
 - **E2E:** External links are present and correctly formed in the UI when sync metadata exists. ✅
 
-#### Phase 2: MCP Parity
+#### Phase 2: MCP Parity ✅ COMPLETED
 **PR Size:** ~3-5 files
 Expose functionality to the AI assistant.
 **Acceptance Criteria:**
-- [ ] MCP generic journal tools handle `GEAR_USAGE` creation and updates.
-- [ ] `get_journal` and gear item retrieval tools include the Snipe-IT external link in the prompt text.
+- [x] MCP generic journal tools handle `GEAR_USAGE` creation and updates.
+- [x] `get_journal` and gear item retrieval tools include the Snipe-IT external link in the prompt text.
 **Required Test Coverage:**
-- **Unit:** AI prompt templates successfully format the external links.
+- **Unit:** AI prompt templates successfully format the external links. ✅
 
 ## Success Criteria
 - Bidirectional sync of Gear Items working reliably with Snipe-IT as the source of truth.

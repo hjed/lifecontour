@@ -136,6 +136,18 @@ class TestJournalConverterExternalLinks:
                 external_id="event-abc",
                 unique_key="event-abc",
             ),
+            ExternalLinkInfo(
+                source="snipeit",
+                url="https://snipeit.example.com/hardware/42",
+                external_id="42",
+                unique_key="asset-42",
+            ),
+            ExternalLinkInfo(
+                source="snipeit_maintenance",
+                url="https://snipeit.example.com/hardware/42/maintenances/10",
+                external_id="snipeit_maint:10",
+                unique_key="snipeit_maint:10",
+            ),
         ]
 
         response = JournalConverter.to_response(
@@ -147,7 +159,7 @@ class TestJournalConverterExternalLinks:
             external_links=external_links,
         )
 
-        assert len(response.external_links) == 2
+        assert len(response.external_links) == 4
         assert response.external_links[0].source == "strava"
         assert response.external_links[0].external_id == "12345"
         assert (
@@ -155,6 +167,19 @@ class TestJournalConverterExternalLinks:
         )
         assert response.external_links[1].source == "google_calendar"
         assert response.external_links[1].external_id == "event-abc"
+
+        assert response.external_links[2].source == "snipeit"
+        assert response.external_links[2].external_id == "42"
+        assert (
+            response.external_links[2].url == "https://snipeit.example.com/hardware/42"
+        )
+
+        assert response.external_links[3].source == "snipeit_maintenance"
+        assert response.external_links[3].external_id == "snipeit_maint:10"
+        assert (
+            response.external_links[3].url
+            == "https://snipeit.example.com/hardware/42/maintenances/10"
+        )
 
     def test_returns_empty_external_links_when_not_provided(self) -> None:
         """Converter returns empty external_links when parameter is not provided."""
@@ -209,6 +234,26 @@ class TestIntegrationSourceFilterParsing:
 
         assert _parse_integration_source_filter("google_calendar") == "google_calendar"
         assert _parse_integration_source_filter("Google_Calendar") == "google_calendar"
+
+    def test_normalizes_valid_snipeit_source(self) -> None:
+        """Normalizes 'snipeit' source correctly."""
+        from app.mcp.domains.journals.tools import _parse_integration_source_filter
+
+        assert _parse_integration_source_filter("snipeit") == "snipeit"
+        assert _parse_integration_source_filter("SnipeIt") == "snipeit"
+
+    def test_normalizes_valid_snipeit_maintenance_source(self) -> None:
+        """Normalizes 'snipeit_maintenance' source correctly."""
+        from app.mcp.domains.journals.tools import _parse_integration_source_filter
+
+        assert (
+            _parse_integration_source_filter("snipeit_maintenance")
+            == "snipeit_maintenance"
+        )
+        assert (
+            _parse_integration_source_filter("Snipeit_Maintenance")
+            == "snipeit_maintenance"
+        )
 
     def test_rejects_invalid_source(self) -> None:
         """Raises ValueError for unrecognized integration source."""

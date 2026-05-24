@@ -760,6 +760,8 @@ class TestFetchJournalTypesAndDataNewActivityTypes:
             SqlClimbingDataRepository(conn),
             SqlKayakingDataRepository(conn),
             SqlCrossCountrySkiingDataRepository(conn),
+            None,  # type: ignore[arg-type] # gear_maintenance_data_repo
+            None,  # type: ignore[arg-type] # gear_usage_data_repo
         )
 
     @pytest.mark.asyncio
