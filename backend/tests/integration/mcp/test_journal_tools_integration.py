@@ -727,6 +727,12 @@ class TestFetchJournalTypesAndDataNewActivityTypes:
         from app.core.journal.adapters.sql.cross_country_skiing_data_repository import (
             SqlCrossCountrySkiingDataRepository,
         )
+        from app.core.journal.adapters.sql.gear_maintenance_data_repository import (
+            SqlGearMaintenanceDataRepository,
+        )
+        from app.core.journal.adapters.sql.gear_usage_data_repository import (
+            SqlGearUsageDataRepository,
+        )
         from app.core.journal.adapters.sql.kayaking_data_repository import (
             SqlKayakingDataRepository,
         )
@@ -760,8 +766,8 @@ class TestFetchJournalTypesAndDataNewActivityTypes:
             SqlClimbingDataRepository(conn),
             SqlKayakingDataRepository(conn),
             SqlCrossCountrySkiingDataRepository(conn),
-            None,  # type: ignore[arg-type] # gear_maintenance_data_repo
-            None,  # type: ignore[arg-type] # gear_usage_data_repo
+            SqlGearMaintenanceDataRepository(conn),
+            SqlGearUsageDataRepository(conn),
         )
 
     @pytest.mark.asyncio
