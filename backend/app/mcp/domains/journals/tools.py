@@ -538,6 +538,16 @@ async def _fetch_journal_ids_by_integration_source(
             ),
             {"user_id": user_id},
         )
+    elif integration_source in ("snipeit", "snipeit_maintenance"):
+        result = await db_connection.execute(
+            text(
+                "SELECT CAST(entity_id AS INTEGER) AS journal_id "
+                "FROM sync_metadata "
+                "WHERE entity_type = 'journal_entry' "
+                "AND integration_type = :integration_source"
+            ),
+            {"integration_source": integration_source},
+        )
     else:
         return set()
 
@@ -1449,26 +1459,9 @@ async def _create_type_specific_data(
         cross_country_skiing_data = CrossCountrySkiingData(journal_id=journal_id)
         await cross_country_skiing_data_repo.save(cross_country_skiing_data)
     elif journal_type == JournalType.GEAR_MAINTENANCE:
-        from core_shared.models.journals.gear_maintenance_data import (
-            GearMaintenanceData,
-        )
-
-        await gear_maintenance_data_repo.save(
-            GearMaintenanceData(
-                journal_id=journal_id,
-                gear_item_id=UUID(int=0),
-                maintenance_type="maintenance",
-            )
-        )
+        pass  # Deferred to update logic because gear_item_id is required
     elif journal_type == JournalType.GEAR_USAGE:
-        from core_shared.models.journals.gear_usage_data import GearUsageData
-
-        await gear_usage_data_repo.save(
-            GearUsageData(
-                journal_id=journal_id,
-                gear_item_id=UUID(int=0),
-            )
-        )
+        pass  # Deferred to update logic because gear_item_id is required
     # EVENT and PHOTO_ALBUM types require additional data (calendar_id, immich_album_id)
     # These will be created when the user provides type_data
 
@@ -1822,12 +1815,8 @@ async def _update_type_specific_data(
         existing_maint = await gear_maintenance_data_repo.find_by_journal_id(journal_id)
         if existing_maint:
             maint_updates: dict[str, Any] = {}
-            if "gear_item_id" in type_data_dict:
-                maint_updates["gear_item_id"] = (
-                    UUID(type_data_dict["gear_item_id"])
-                    if type_data_dict["gear_item_id"]
-                    else UUID(int=0)
-                )
+            if "gear_item_id" in type_data_dict and type_data_dict["gear_item_id"]:
+                maint_updates["gear_item_id"] = UUID(type_data_dict["gear_item_id"])
             if "maintenance_type" in type_data_dict:
                 maint_updates["maintenance_type"] = type_data_dict["maintenance_type"]
             if "activity_types" in type_data_dict:
@@ -1838,40 +1827,90 @@ async def _update_type_specific_data(
 
             validated_maint = dataclasses.replace(existing_maint, **maint_updates)
             await gear_maintenance_data_repo.save(validated_maint)
+        else:
+            if (
+                "gear_item_id" not in type_data_dict
+                or not type_data_dict["gear_item_id"]
+            ):
+                raise ValueError(
+                    "gear_item_id is required to create a gear maintenance journal"
+                )
+            if (
+                "maintenance_type" not in type_data_dict
+                or not type_data_dict["maintenance_type"]
+            ):
+                raise ValueError(
+                    "maintenance_type is required to create a gear maintenance journal"
+                )
+
+            from core_shared.models.journals.gear_maintenance_data import (
+                GearMaintenanceData,
+            )
+
+            new_maint = GearMaintenanceData(
+                journal_id=journal_id,
+                gear_item_id=UUID(type_data_dict["gear_item_id"]),
+                maintenance_type=type_data_dict["maintenance_type"],
+                activity_types=type_data_dict.get("activity_types"),
+                retirement_reason=type_data_dict.get("retirement_reason"),
+            )
+            await gear_maintenance_data_repo.save(new_maint)
 
     elif journal_type == JournalType.GEAR_USAGE:
         existing_usage = await gear_usage_data_repo.find_by_journal_id(journal_id)
+        from datetime import datetime
+
         if existing_usage:
             usage_updates: dict[str, Any] = {}
-            if "gear_item_id" in type_data_dict:
-                usage_updates["gear_item_id"] = (
-                    UUID(type_data_dict["gear_item_id"])
-                    if type_data_dict["gear_item_id"]
-                    else UUID(int=0)
-                )
+            if "gear_item_id" in type_data_dict and type_data_dict["gear_item_id"]:
+                usage_updates["gear_item_id"] = UUID(type_data_dict["gear_item_id"])
             if "checkout_date" in type_data_dict:
                 usage_updates["checkout_date"] = type_data_dict["checkout_date"]
             if "checkin_date" in type_data_dict:
                 usage_updates["checkin_date"] = type_data_dict["checkin_date"]
 
-            from datetime import date
-
             if usage_updates.get("checkout_date") and isinstance(
                 usage_updates["checkout_date"], str
             ):
-                usage_updates["checkout_date"] = date.fromisoformat(
+                usage_updates["checkout_date"] = datetime.fromisoformat(
                     usage_updates["checkout_date"]
                 )
             if usage_updates.get("checkin_date") and isinstance(
                 usage_updates["checkin_date"], str
             ):
-                usage_updates["checkin_date"] = date.fromisoformat(
+                usage_updates["checkin_date"] = datetime.fromisoformat(
                     usage_updates["checkin_date"]
                 )
             import dataclasses
 
             validated_usage = dataclasses.replace(existing_usage, **usage_updates)
             await gear_usage_data_repo.save(validated_usage)
+        else:
+            if (
+                "gear_item_id" not in type_data_dict
+                or not type_data_dict["gear_item_id"]
+            ):
+                raise ValueError(
+                    "gear_item_id is required to create a gear usage journal"
+                )
+
+            chk_out = type_data_dict.get("checkout_date")
+            if chk_out and isinstance(chk_out, str):
+                chk_out = datetime.fromisoformat(chk_out)
+
+            chk_in = type_data_dict.get("checkin_date")
+            if chk_in and isinstance(chk_in, str):
+                chk_in = datetime.fromisoformat(chk_in)
+
+            from core_shared.models.journals.gear_usage_data import GearUsageData
+
+            new_usage = GearUsageData(
+                journal_id=journal_id,
+                gear_item_id=UUID(type_data_dict["gear_item_id"]),
+                checkout_date=chk_out,
+                checkin_date=chk_in,
+            )
+            await gear_usage_data_repo.save(new_usage)
 
 
 def _validate_contact_relationships(
