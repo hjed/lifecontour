@@ -902,7 +902,16 @@ test.describe('Journal Detail Page', () => {
       // Select the second calendar from the dropdown
       const calendarSelect = page.getByTestId('calendar-select');
       await calendarSelect.click();
-      await page.getByRole('option', { name: calendar2.name }).click();
+
+      const [patchResponse] = await Promise.all([
+        page.waitForResponse(
+          resp =>
+            resp.url().includes(`/api/journals/${journal.id}`) &&
+            resp.request().method() === 'PATCH'
+        ),
+        page.getByRole('option', { name: calendar2.name }).click(),
+      ]);
+      expect(patchResponse.status()).toBe(200);
 
       // Calendar badge should update to show the new calendar
       await expect(calendarBadgeTrigger).toContainText(calendar2.name);
