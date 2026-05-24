@@ -136,7 +136,9 @@ describe('SidebarContext', () => {
     it('uses custom default expanded sections', () => {
       const customDefaults = { Contacts: false, Journals: true };
 
-      renderWithProvider(<TestComponent />, { defaultExpandedSections: customDefaults });
+      renderWithProvider(<TestComponent />, {
+        defaultExpandedSections: customDefaults,
+      });
 
       expect(screen.getByTestId('contacts-expanded')).toHaveTextContent(
         'false'
