@@ -93,6 +93,9 @@ extend = "../ruff.toml"
 
 [tool.mypy]
 python_version = "3.14"
+plugins = [
+    "pydantic.mypy"
+]
 check_untyped_defs = true
 disallow_any_generics = true
 disallow_incomplete_defs = true
@@ -103,22 +106,15 @@ warn_unused_ignores = true
 warn_return_any = true
 strict_equality = true
 
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+
 [[tool.mypy.overrides]]
 module = [
-    "alembic.*",
     "psycopg2.*",
-    "stdnum.*",
-    "pycountry.*",
-    "authlib.integrations.starlette_client",
-    "googleapiclient.*",
-    "arq.*",
-    "dishka.*",
-    "fastmcp.*",
-    "redis.asyncio",
-    "opentelemetry.exporter.otlp.proto.http.trace_exporter",
-    "googleapiclient.*",
-    "gpxpy.*",
-    "google.genai.*",
     "reportlab.*",
 ]
 ignore_missing_imports = true

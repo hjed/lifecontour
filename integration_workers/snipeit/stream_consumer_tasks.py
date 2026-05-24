@@ -111,7 +111,7 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
         from snipeit_sync_service import _AssetSkipped
         from worker import _create_sync_service, _get_auth_data
 
-        worker_settings = SnipeItWorkerSettings()  # type: ignore[call-arg]
+        worker_settings = SnipeItWorkerSettings()
 
         # Query all users with Snipe-IT configured
         async with self._session_factory() as session:
@@ -195,7 +195,7 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
         from snipeit_settings import SnipeItWorkerSettings
         from worker import _create_sync_service, _get_auth_data
 
-        worker_settings = SnipeItWorkerSettings()  # type: ignore[call-arg]
+        worker_settings = SnipeItWorkerSettings()
 
         async with self._session_factory() as session:
             # Look up the gear item's user and see if they have Snipe-IT configured
@@ -264,7 +264,7 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
         from snipeit_settings import SnipeItWorkerSettings
         from worker import _create_sync_service, _get_auth_data
 
-        worker_settings = SnipeItWorkerSettings()  # type: ignore[call-arg]
+        worker_settings = SnipeItWorkerSettings()
 
         async with self._session_factory() as session:
             result = await session.execute(
@@ -335,7 +335,7 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
         from snipeit_settings import SnipeItWorkerSettings
         from worker import _create_sync_service, _get_auth_data
 
-        worker_settings = SnipeItWorkerSettings()  # type: ignore[call-arg]
+        worker_settings = SnipeItWorkerSettings()
 
         journal_type: str | None = None
 

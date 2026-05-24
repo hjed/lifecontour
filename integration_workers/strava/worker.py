@@ -25,7 +25,7 @@ from strava_rate_limiter import StravaRateLimitError
 from strava_settings import StravaSettings
 
 # Global settings instance
-settings = StravaSettings()  # type: ignore[call-arg]
+settings = StravaSettings()
 
 # Configure structured logging using shared module
 configure_logging(
