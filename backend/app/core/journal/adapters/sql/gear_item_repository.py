@@ -139,3 +139,31 @@ class SqlGearItemRepository(GearItemRepository):
         """Delete a gear item by ID."""
         query = text("DELETE FROM gear_items WHERE id = :id")
         await self.conn.execute(query, {"id": gear_item_id})
+
+    async def get_snipeit_links(
+        self, gear_item_id: str, user_id: str
+    ) -> list[dict[str, Any]]:
+        """Get Snipe-IT external links for a gear item."""
+        query = text(
+            """
+            SELECT m.external_id, s.base_url
+            FROM sync_metadata m
+            JOIN snipeit_settings s ON s.user_id = :user_id
+            WHERE m.internal_uuid = :gear_item_id
+            AND m.integration_source = 'snipeit'
+            """
+        )
+        result = await self.conn.execute(
+            query, {"gear_item_id": gear_item_id, "user_id": user_id}
+        )
+
+        links = []
+        for row in result.fetchall():
+            links.append(
+                {
+                    "integration_source": "snipeit",
+                    "external_id": row[0],
+                    "base_url": row[1],
+                }
+            )
+        return links

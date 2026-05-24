@@ -85,6 +85,7 @@ from app.core.journal.models.repositories import (
     GearMaintenanceDataRepository,
     JoggingDataRepository,
     JournalContactRelationshipRepository,
+    JournalRepository,
     JournalTagRepository,
     KayakingDataRepository,
     MoodDataRepository,
@@ -1773,7 +1774,7 @@ async def get_journal_external_links(
     journal_id: int,
     journal_service: FromDishka[JournalService],
     fitness_data_repo: FromDishka[FitnessDataRepository],
-    connection: FromDishka[AsyncConnection],
+    journal_repo: FromDishka[JournalRepository],
     user: FromDishka[SessionUser],
 ) -> ExternalLinksResponse:
     """
@@ -1793,67 +1794,10 @@ async def get_journal_external_links(
         strava_activity_id = fitness_data.strava_activity_id
 
     # Fetch external event links for Google Calendar links
-    from sqlalchemy import text
-
-    result = await connection.execute(
-        text(
-            "SELECT l.external_event_id, c.google_calendar_id, l.calendar_id "
-            "FROM journal_external_event_links l "
-            "LEFT JOIN calendars c ON l.calendar_id = c.id "
-            "WHERE l.journal_id = :journal_id"
-        ),
-        {"journal_id": journal_id},
-    )
-    external_event_links = [
-        {
-            "external_event_id": row[0],
-            "calendar_id": str(row[1]) if row[1] else None,
-            "internal_calendar_id": str(row[2]) if row[2] else None,
-        }
-        for row in result
-    ]
+    external_event_links = await journal_repo.get_external_event_links(journal_id)
 
     # Fetch Snipe-IT links (maintenance and checkout asset)
-    snipeit_links: list[dict[str, Any]] = []
-
-    # 1. Snipe-IT Maintenance records
-    snipeit_maint_query = await connection.execute(
-        text(
-            """
-            SELECT m.integration_source, m.external_id, s.base_url
-            FROM sync_metadata m
-            JOIN snipeit_settings s ON s.user_id = :user_id
-            WHERE m.internal_uuid = :journal_uuid
-            AND m.integration_source = 'snipeit_maintenance'
-            """
-        ),
-        {"journal_uuid": str(journal_id), "user_id": user.id},
-    )
-    for row in snipeit_maint_query:
-        snipeit_links.append(
-            {"integration_source": row[0], "external_id": row[1], "base_url": row[2]}
-        )
-
-    # 2. Snipe-IT Checkouts (link to the asset)
-    snipeit_checkout_query = await connection.execute(
-        text(
-            """
-            SELECT 'snipeit' AS integration_source, m_asset.external_id, s.base_url
-            FROM sync_metadata m_checkout
-            JOIN journal_gear_usage_data gud ON gud.journal_id = :journal_id
-            JOIN sync_metadata m_asset ON m_asset.internal_uuid = CAST(gud.gear_item_id AS VARCHAR)
-                AND m_asset.integration_source = 'snipeit'
-            JOIN snipeit_settings s ON s.user_id = :user_id
-            WHERE m_checkout.internal_uuid = :journal_uuid
-            AND m_checkout.integration_source = 'snipeit_checkout'
-            """
-        ),
-        {"journal_id": journal_id, "journal_uuid": str(journal_id), "user_id": user.id},
-    )
-    for row in snipeit_checkout_query:
-        snipeit_links.append(
-            {"integration_source": row[0], "external_id": row[1], "base_url": row[2]}
-        )
+    snipeit_links = await journal_repo.get_snipeit_links(journal_id, user.id)
 
     links = build_journal_external_links(
         strava_activity_id=strava_activity_id,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 if TYPE_CHECKING:
@@ -362,6 +362,35 @@ class JournalRepository(ABC):
 
         Returns:
             Count of journals matching the filter criteria
+        """
+        pass
+
+    @abstractmethod
+    async def get_external_event_links(self, journal_id: int) -> list[dict[str, Any]]:
+        """
+        Get Google Calendar external event links for a journal.
+
+        Args:
+            journal_id: The journal ID
+
+        Returns:
+            List of dictionaries containing link details
+        """
+        pass
+
+    @abstractmethod
+    async def get_snipeit_links(
+        self, journal_id: int, user_id: str
+    ) -> list[dict[str, Any]]:
+        """
+        Get Snipe-IT external links for a journal.
+
+        Args:
+            journal_id: The journal ID
+            user_id: The user ID
+
+        Returns:
+            List of dictionaries containing link details
         """
         pass
 
@@ -2204,6 +2233,22 @@ class GearItemRepository(ABC):
 
         Args:
             gear_item_id: The gear item UUID string to delete
+        """
+        pass
+
+    @abstractmethod
+    async def get_snipeit_links(
+        self, gear_item_id: str, user_id: str
+    ) -> list[dict[str, Any]]:
+        """
+        Get Snipe-IT external links for a gear item.
+
+        Args:
+            gear_item_id: The gear item UUID string
+            user_id: The user ID
+
+        Returns:
+            List of dictionaries containing link details
         """
         pass
 

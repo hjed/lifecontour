@@ -10,6 +10,7 @@ from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.api.common.schemas import ExternalLinksResponse
 from app.api.journals.converters import GearItemConverter
 from app.api.journals.schemas import (
     GearItemCreateRequest,
@@ -195,3 +196,43 @@ async def delete_gear_item(
         )
 
     await repo.delete(str(gear_item_id))
+
+
+@router.get("/{gear_item_id}/external-links")
+@inject
+async def get_gear_item_external_links(
+    gear_item_id: uuid.UUID,
+    repo: FromDishka[GearItemRepository],
+    user: FromDishka[SessionUser],
+) -> ExternalLinksResponse:
+    """Get external system links for a gear item."""
+    from app.api.common.schemas import ExternalLinkAttributes, ExternalLinkResource
+    from app.core.integrations.external_link_helpers import build_snipeit_asset_url
+
+    item = await repo.find_by_id(str(gear_item_id))
+    if not item or item.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Gear item not found"
+        )
+
+    links = []
+
+    snipeit_links_data = await repo.get_snipeit_links(str(gear_item_id), user.id)
+
+    for link_data in snipeit_links_data:
+        ext_id = link_data["external_id"]
+        base_url = link_data["base_url"]
+
+        url = build_snipeit_asset_url(base_url, ext_id)
+        links.append(
+            ExternalLinkResource(
+                id=f"snipeit-asset-{ext_id}",
+                attributes=ExternalLinkAttributes(
+                    source="snipeit",
+                    url=url,
+                    external_id=ext_id,
+                ),
+            )
+        )
+
+    return ExternalLinksResponse(data=links)
