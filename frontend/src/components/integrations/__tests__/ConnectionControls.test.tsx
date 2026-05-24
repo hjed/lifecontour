@@ -124,62 +124,48 @@ describe('ConnectionControls', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('shows reauth banner and triggers reauthorize when needsReauth is true', async () => {
-    const user = userEvent.setup();
-    render(
-      <ConnectionControls
-        integrationId='google'
-        connected={true}
-        needsReauth={true}
-        needsReconsent={false}
-      />
+  describe('Banner states', () => {
+    it.each([
+      {
+        scenario: 'needsReauth',
+        props: { needsReauth: true, needsReconsent: false },
+        bannerText: 'Connection expired',
+        actionButton: /relink account/i,
+      },
+      {
+        scenario: 'needsReconsent',
+        props: { needsReauth: false, needsReconsent: true },
+        bannerText: 'Permissions required',
+        actionButton: /upgrade permissions/i,
+      },
+    ])(
+      'shows banner, disables reregister, and triggers reauthorize when $scenario is true',
+      async ({ props, bannerText, actionButton }) => {
+        const user = userEvent.setup();
+        render(
+          <ConnectionControls
+            integrationId='google'
+            connected={true}
+            {...props}
+          />
+        );
+
+        expect(screen.getByText(bannerText)).toBeInTheDocument();
+
+        const btn = screen.getByRole('button', { name: actionButton });
+        expect(btn).toBeInTheDocument();
+
+        const reregisterButton = screen.getByRole('button', {
+          name: /reregister webhooks/i,
+        });
+        expect(reregisterButton).toBeDisabled();
+
+        await user.click(btn);
+        expect(mockAuthorize).toHaveBeenCalledWith({
+          redirect_url: '/integrations',
+        });
+      }
     );
-
-    expect(screen.getByText('Connection expired')).toBeInTheDocument();
-
-    const relinkButton = screen.getByRole('button', {
-      name: /relink account/i,
-    });
-    expect(relinkButton).toBeInTheDocument();
-
-    const reregisterButton = screen.getByRole('button', {
-      name: /reregister webhooks/i,
-    });
-    expect(reregisterButton).toBeDisabled();
-
-    await user.click(relinkButton);
-    expect(mockAuthorize).toHaveBeenCalledWith({
-      redirect_url: '/integrations',
-    });
-  });
-
-  it('shows reconsent banner and triggers reauthorize when needsReconsent is true', async () => {
-    const user = userEvent.setup();
-    render(
-      <ConnectionControls
-        integrationId='google'
-        connected={true}
-        needsReauth={false}
-        needsReconsent={true}
-      />
-    );
-
-    expect(screen.getByText('Permissions required')).toBeInTheDocument();
-
-    const upgradeButton = screen.getByRole('button', {
-      name: /upgrade permissions/i,
-    });
-    expect(upgradeButton).toBeInTheDocument();
-
-    const reregisterButton = screen.getByRole('button', {
-      name: /reregister webhooks/i,
-    });
-    expect(reregisterButton).toBeDisabled();
-
-    await user.click(upgradeButton);
-    expect(mockAuthorize).toHaveBeenCalledWith({
-      redirect_url: '/integrations',
-    });
   });
 
   it('disables buttons when loading', () => {
