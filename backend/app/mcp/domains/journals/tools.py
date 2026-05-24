@@ -453,6 +453,7 @@ async def _fetch_journal_external_links(
         journal_id: The journal ID to fetch links for
         fitness_data_repo: Repository for fitness data (Strava link)
         db_connection: Database connection for external event link queries
+        user_id: The user ID to filter Snipe-IT sync metadata links
 
     Returns:
         List of ExternalLinkInfo objects for the journal.
@@ -507,7 +508,7 @@ async def _fetch_journal_ids_by_integration_source(
     Args:
         db_connection: Database connection
         user_id: The user ID to filter by
-        integration_source: 'strava' or 'google_calendar'
+        integration_source: 'strava', 'google_calendar', 'snipeit', 'snipeit_maintenance', or 'snipeit_checkout'
 
     Returns:
         Set of journal IDs linked to the specified source.
@@ -2389,22 +2390,26 @@ async def create_journal_entry(
 
         # Enforce type_data requirements for GEAR_MAINTENANCE and GEAR_USAGE
         req_types_upper = {t.upper() for t in request.types}
-        type_data_keys = (
-            {k.upper() for k in request.type_data.keys()}
-            if request.type_data
-            else set()
-        )
 
-        if (
-            "GEAR_MAINTENANCE" in req_types_upper
-            and "GEAR_MAINTENANCE" not in type_data_keys
+        def has_non_empty_type_data(target_type: str) -> bool:
+            if not request.type_data:
+                return False
+            for k, v in request.type_data.items():
+                if k.upper() == target_type:
+                    return bool(v)
+            return False
+
+        if "GEAR_MAINTENANCE" in req_types_upper and not has_non_empty_type_data(
+            "GEAR_MAINTENANCE"
         ):
             raise ValueError(
-                "Type GEAR_MAINTENANCE requires corresponding type_data to be provided"
+                "Type GEAR_MAINTENANCE requires corresponding non-empty type_data to be provided"
             )
-        if "GEAR_USAGE" in req_types_upper and "GEAR_USAGE" not in type_data_keys:
+        if "GEAR_USAGE" in req_types_upper and not has_non_empty_type_data(
+            "GEAR_USAGE"
+        ):
             raise ValueError(
-                "Type GEAR_USAGE requires corresponding type_data to be provided"
+                "Type GEAR_USAGE requires corresponding non-empty type_data to be provided"
             )
 
     if request.type_data:
@@ -2699,12 +2704,16 @@ async def update_journal_entry(
             # Only add if not already present
             if type_str.upper() not in current_types:
                 if type_str.upper() in ("GEAR_MAINTENANCE", "GEAR_USAGE"):
-                    if (
-                        not request.type_data
-                        or type_str.upper() not in request.type_data
-                    ):
+                    # ensure type_data is provided and is not falsy
+                    has_data = False
+                    if request.type_data:
+                        for k, v in request.type_data.items():
+                            if k.upper() == type_str.upper() and v:
+                                has_data = True
+                                break
+                    if not has_data:
                         raise ValueError(
-                            f"Type {type_str.upper()} requires corresponding type_data to be provided when adding the type"
+                            f"Type {type_str.upper()} requires corresponding non-empty type_data to be provided when adding the type"
                         )
 
                 # Capture the return value: includes all types added (requested +
