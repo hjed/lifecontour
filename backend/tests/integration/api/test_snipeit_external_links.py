@@ -35,12 +35,11 @@ async def journal_with_snipeit_links(
         {"user_id": test_user.id},
     )
 
-    # 3. Add Snipe-IT Maintenance sync metadata
     await async_connection.execute(
         text(
             """
             INSERT INTO sync_metadata (integration_source, external_id, internal_uuid, sync_status, version_hash, last_synced_at)
-            VALUES ('snipeit_maintenance', '42', :journal_id, 'success', 'hash1', CURRENT_TIMESTAMP)
+            VALUES ('snipeit_maintenance', 'snipeit_maint:42', :journal_id, 'success', 'hash1', CURRENT_TIMESTAMP)
             """
         ),
         {"journal_id": str(journal_id)},
@@ -139,13 +138,13 @@ async def test_returns_snipeit_maintenance_link(
 
     assert len(data) == 1
     link = data[0]
-    assert link["id"] == "snipeit_maintenance-maint-42"
+    assert link["id"] == "snipeit_maintenance-maint-snipeit_maint:42"
     assert link["attributes"]["source"] == "snipeit_maintenance"
     assert (
         link["attributes"]["url"]
         == "https://snipeit.example.com/hardware/maintenances/42"
     )
-    assert link["attributes"]["external_id"] == "42"
+    assert link["attributes"]["external_id"] == "snipeit_maint:42"
 
 
 @pytest.mark.asyncio

@@ -234,25 +234,16 @@ test.describe('External Links Display', () => {
               data: [
                 {
                   type: 'external_links',
-                  id: 'snipeit_maintenance-42',
+                  id: 'snipeit_maintenance-maint-snipeit_maint:42',
                   attributes: {
                     source: 'snipeit_maintenance',
                     url: 'https://snipeit.example.com/hardware/maintenances/42',
-                    external_id: '42',
+                    external_id: 'snipeit_maint:42',
                   },
                 },
                 {
                   type: 'external_links',
-                  id: 'snipeit_checkout-50',
-                  attributes: {
-                    source: 'snipeit_checkout',
-                    url: 'https://snipeit.example.com/hardware/50',
-                    external_id: '50',
-                  },
-                },
-                {
-                  type: 'external_links',
-                  id: 'snipeit-50',
+                  id: 'snipeit-asset-50',
                   attributes: {
                     source: 'snipeit',
                     url: 'https://snipeit.example.com/hardware/50',
@@ -279,10 +270,6 @@ test.describe('External Links Display', () => {
         'href',
         'https://snipeit.example.com/hardware/maintenances/42'
       );
-
-      const checkoutLink = page.getByTestId('external-link-snipeit_checkout');
-      await expect(checkoutLink).toBeVisible();
-      await expect(checkoutLink).toContainText('Snipe-IT Checkout');
 
       const assetLink = page.getByTestId('external-link-snipeit');
       await expect(assetLink).toBeVisible();

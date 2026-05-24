@@ -136,7 +136,11 @@ def build_snipeit_maintenance_url(
     if clean_base.endswith("/api/v1"):
         clean_base = clean_base[:-7]
 
-    return f"{clean_base}/hardware/maintenances/{maintenance_id.strip()}"
+    clean_maintenance_id = maintenance_id.strip()
+    if clean_maintenance_id.startswith("snipeit_maint:"):
+        clean_maintenance_id = clean_maintenance_id[len("snipeit_maint:") :]
+
+    return f"{clean_base}/hardware/maintenances/{clean_maintenance_id}"
 
 
 def build_journal_external_links(
