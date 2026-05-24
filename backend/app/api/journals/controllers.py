@@ -3627,6 +3627,8 @@ async def _update_event_type_data(
     """Update EVENT type-specific data."""
     from uuid import UUID
 
+    from core_shared.models.journals.event_state import EventState
+
     calendar_info = await calendar_info_repo.find_by_journal_id(journal_id)
     if not calendar_info:
         raise JournalValidationError(
@@ -3653,10 +3655,21 @@ async def _update_event_type_data(
         updates["end_time"] = _parse_optional_time(attrs["end_time"], "end_time")
     if "location" in attrs:
         updates["location"] = attrs["location"]
+    if "timezone" in attrs:
+        updates["timezone"] = attrs["timezone"]
     if "sync_invitees" in attrs:
         updates["sync_invitees"] = attrs["sync_invitees"]
     if "private_description" in attrs:
         updates["private_description"] = attrs["private_description"]
+    if "event_state" in attrs:
+        try:
+            updates["event_state"] = EventState(attrs["event_state"])
+        except (ValueError, KeyError, TypeError) as e:
+            raise JournalValidationError(
+                "event_state",
+                f"Invalid event state: {attrs['event_state']}. "
+                f"Must be one of: {', '.join(e.value for e in EventState)}",
+            ) from e
 
     try:
         from core_shared.models.journals.exceptions import CalendarInfoValidationError

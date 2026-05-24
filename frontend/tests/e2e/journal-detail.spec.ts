@@ -365,6 +365,12 @@ test.describe('Journal Detail Page', () => {
       const endTimeInput = eventTypeEditor.getByTestId('end-time-input');
       await endTimeInput.fill('13:30');
 
+      // Change event state to cancelled
+      const eventStateSelect =
+        eventTypeEditor.getByTestId('event-state-select');
+      await eventStateSelect.click();
+      await page.getByRole('option', { name: 'Cancelled' }).click();
+
       const [response] = await Promise.all([
         page.waitForResponse(response => {
           return (
@@ -381,6 +387,10 @@ test.describe('Journal Detail Page', () => {
         updateStatus,
         `Expected 200 but got ${updateStatus}. Response: ${responseText}`
       ).toBe(200);
+
+      // Verify the status was sent as cancelled
+      const requestData = JSON.parse(response.request().postData() || '{}');
+      expect(requestData.data.attributes.event_state).toBe('cancelled');
 
       // Wait for edit mode to finish
       await expect(saveButton).toBeHidden();
