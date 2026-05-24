@@ -63,6 +63,7 @@ coverage/
 test-results/
 playwright-report/
 test-output.txt
+frontend/playwright/.auth/*.json
 
 # Logs
 logs

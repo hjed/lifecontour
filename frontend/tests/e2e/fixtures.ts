@@ -4,60 +4,32 @@
  * Provides deterministic test fixtures for authentication, data setup, and cleanup.
  * Eliminates conditional logic and ensures each test has exactly the data it needs.
  *
+ * Authentication is handled by the setup project (auth.setup.ts) which saves
+ * storageState to a file. All browser projects load this state automatically,
+ * so every test starts pre-authenticated — no per-test OAuth overhead.
+ *
  * IMPORTANT: This file follows Playwright best practices:
  * - Web-first assertions with auto-retry instead of hard-coded waits
  * - Proper navigation waiting with Promise.all
  * - No waitForTimeout() - use waitForURL, waitForResponse, or assertions instead
  *
  * @see E2E_TESTING_GUIDELINES.md for best practices documentation
+ * @see auth.setup.ts for the OAuth setup project
  */
 
 /* eslint-disable react-hooks/rules-of-hooks */
 // This file contains Playwright fixtures that use the `use()` function,
 // which is not a React hook but triggers the React hooks ESLint rule
 
-import {
-  test as base,
-  Page,
-  Browser,
-  expect as playwrightExpect,
-} from '@playwright/test';
+import { test as base, Page } from '@playwright/test';
 import {
   TestDataManager,
   ContactFactory,
   TagFactory,
   DataSetFactory,
 } from './data-management';
-import {
-  FRONTEND_TEST_LOGIN_URL,
-  OAUTH_PUBLIC_TEST_PORT,
-  OAUTH_UI_TEST_PORT,
-} from './utils/frontend-test-config';
 
 // Types for our fixtures
-export interface AuthState {
-  storageState: {
-    cookies: Array<{
-      name: string;
-      value: string;
-      domain: string;
-      path: string;
-      expires?: number;
-      httpOnly?: boolean;
-      secure?: boolean;
-      sameSite?: 'Strict' | 'Lax' | 'None';
-    }>;
-    origins?: Array<{
-      origin: string;
-      localStorage?: Array<{
-        name: string;
-        value: string;
-      }>;
-    }>;
-  };
-  isAuthenticated: boolean;
-}
-
 export interface TestContact {
   id: string;
   firstName: string;
@@ -190,29 +162,6 @@ export interface TestFixtures {
   };
 }
 
-export interface WorkerFixtures {
-  // Worker-scoped authentication state
-  workerAuth: AuthState;
-}
-
-// Global lock to prevent multiple workers from interfering with OAuth flow
-let oauthFlowInProgress = false;
-
-/**
- * Helper to wait for OAuth lock with proper timeout
- * Uses Promise-based waiting instead of polling loops
- */
-async function waitForOAuthLock(timeoutMs: number = 30000): Promise<boolean> {
-  const startTime = Date.now();
-  while (oauthFlowInProgress && Date.now() - startTime < timeoutMs) {
-    console.log(
-      '🔐 [Worker Auth] Waiting for ongoing OAuth flow to complete...'
-    );
-    await new Promise(resolve => setTimeout(resolve, 1000));
-  }
-  return !oauthFlowInProgress;
-}
-
 /**
  * Helper to convert dataset tags to the expected format for fixtures.
  * Uses original dataset tags to avoid race conditions in tag extraction.
@@ -227,327 +176,14 @@ function convertDatasetTags(
   }));
 }
 
-/**
- * Complete OAuth flow once per worker and store authentication state
- * Uses the real Hydra OAuth provider for authentic E2E testing
- *
- * RELIABILITY IMPROVEMENTS:
- * - Uses waitForURL instead of polling loops
- * - Uses web-first assertions for element readiness
- * - Uses waitForResponse for API call completion
- * - Removed all waitForTimeout calls where possible
- */
-async function completeWorkerOAuthFlow(browser: Browser): Promise<AuthState> {
-  // Wait for any ongoing OAuth flow to complete with timeout
-  const lockAcquired = await waitForOAuthLock(30000);
-  if (!lockAcquired) {
-    console.warn(
-      '🔐 [Worker Auth] OAuth flow wait timed out, proceeding anyway'
-    );
-    oauthFlowInProgress = false;
-  }
-
-  oauthFlowInProgress = true;
-  console.log('🔐 [Worker Auth] Starting REAL OAuth flow for worker...');
-
-  const context = await browser.newContext();
-  const page = await context.newPage();
-
-  try {
-    // Step 1: Navigate to login page and wait for OAuth button to be ready
-    await page.goto(FRONTEND_TEST_LOGIN_URL);
-
-    // Wait for OAuth button to be visible and enabled (web-first assertion)
-    const oauthButton = page
-      .locator('button:has-text("Continue with")')
-      .first();
-    await playwrightExpect(oauthButton).toBeVisible({ timeout: 15000 });
-    await playwrightExpect(oauthButton).toBeEnabled({ timeout: 10000 });
-
-    // Step 2: Click OAuth button and wait for navigation away from login page
-    // Use waitForURL to wait for redirect - more reliable than waitForNavigation.
-    // The click timeout must match waitForURL to avoid the global actionTimeout
-    // (20s) cutting off a slow OAuth redirect before waitForURL's 30s expires.
-    await Promise.all([
-      page.waitForURL((url: URL) => !url.toString().includes('/auth/login'), {
-        timeout: 30000,
-      }),
-      oauthButton.click({ timeout: 30000 }),
-    ]);
-
-    let currentUrl = page.url();
-    console.debug(
-      '🔐 [Worker Auth] Current URL after OAuth click:',
-      currentUrl
-    );
-
-    // Step 3: Handle OAuth provider interaction
-    if (
-      currentUrl.includes(`localhost:${OAUTH_PUBLIC_TEST_PORT}`) ||
-      currentUrl.includes(`localhost:${OAUTH_UI_TEST_PORT}`) ||
-      currentUrl.includes('hydra')
-    ) {
-      console.debug(
-        '🔐 [Worker Auth] Successfully redirected to Hydra OAuth provider'
-      );
-
-      // Wait for Hydra to process and redirect back to callback
-      // Hydra is configured with skip_consent: true, so it auto-redirects
-      await page.waitForURL(
-        (url: URL) =>
-          url.toString().includes('/auth/callback') ||
-          url.toString().includes('/contacts'),
-        { timeout: 30000 }
-      );
-
-      currentUrl = page.url();
-      console.debug('🔐 [Worker Auth] URL after Hydra processing:', currentUrl);
-    }
-
-    if (currentUrl.includes('/auth/callback')) {
-      console.debug('🔐 [Worker Auth] OAuth callback received, processing...');
-
-      // Wait for callback to complete by watching for the final redirect.
-      // We can land on the callback directly if Hydra redirects very quickly,
-      // so this needs to run even when we never observed the provider page.
-      try {
-        await page.waitForURL(
-          (url: URL) => !url.toString().includes('/auth/callback'),
-          { timeout: 15000 }
-        );
-        currentUrl = page.url();
-        console.debug('🔐 [Worker Auth] Final URL after callback:', currentUrl);
-      } catch {
-        // If redirect times out, we might still be on the callback page
-        // This can happen if the callback page is still processing
-        console.warn(
-          '🔐 [Worker Auth] Callback redirect timeout, checking if still on callback page'
-        );
-        const stillOnCallback = page.url().includes('/auth/callback');
-        if (stillOnCallback) {
-          // Wait a bit longer for the callback to complete
-          try {
-            await page.waitForURL(
-              (url: URL) => !url.toString().includes('/auth/callback'),
-              { timeout: 15000 }
-            );
-          } catch (error) {
-            const callbackUrl = page.url();
-            console.error(
-              '🔐 [Worker Auth] Callback did not complete after additional wait. Current URL:',
-              callbackUrl
-            );
-            throw error;
-          }
-          currentUrl = page.url();
-          console.log(
-            '🔐 [Worker Auth] After additional wait, URL is:',
-            currentUrl
-          );
-        }
-      }
-    }
-
-    if (currentUrl.includes('/auth/login')) {
-      console.warn(
-        '🔐 [Worker Auth] Still on login page - OAuth provider may not be configured'
-      );
-      throw new Error(
-        'OAuth provider not responding - cannot complete real OAuth flow'
-      );
-    } else {
-      console.debug(
-        '🔐 [Worker Auth] Already redirected past OAuth provider:',
-        currentUrl
-      );
-    }
-
-    // Step 4: Verify authentication using web-first assertion pattern
-    // Uses toPass for automatic retry instead of manual loops
-    console.debug('🔐 [Worker Auth] Verifying authentication...');
-
-    let authUser: string | undefined;
-    // NOTE: This uses a 10s timeout because the real OAuth flow involves an external
-    // IdP + backend round-trip that can be slow and variable under CI/network load.
-    // `toPass` will poll with web-first retries and typically resolve much faster,
-    // but we allow up to 10s to avoid flaky failures when the provider is slow.
-    await playwrightExpect(async () => {
-      // Log cookies before making the request
-
-      const statusResponse = await page.request.get('/api/auth/status');
-      playwrightExpect(statusResponse.ok()).toBe(true);
-
-      const authStatus = await statusResponse.json();
-      console.debug('🔐 [Worker Auth] Auth status response:', authStatus);
-      playwrightExpect(authStatus.authenticated).toBe(true);
-      authUser = authStatus.user?.email;
-    }).toPass({ timeout: 10000 });
-
-    console.log(
-      '🔐 [Worker Auth] Real OAuth authentication successful!',
-      authUser
-    );
-
-    // Step 5: Extract authentication cookies from browser context
-    const cookies = await context.cookies();
-
-    const validCookies = cookies
-      .filter(
-        (cookie: { name?: string; value?: string }) =>
-          cookie.name && cookie.value
-      )
-      .map(
-        (cookie: {
-          name?: string;
-          value?: string;
-          domain?: string;
-          path?: string;
-          expires?: number;
-          httpOnly?: boolean;
-          secure?: boolean;
-          sameSite?: 'Strict' | 'Lax' | 'None';
-        }) => ({
-          name: cookie.name as string,
-          value: cookie.value as string,
-          domain: cookie.domain as string,
-          path: cookie.path as string,
-          expires:
-            cookie.expires && cookie.expires > 0
-              ? Math.floor(cookie.expires)
-              : Math.floor(Date.now() / 1000) + 86400,
-          // Firefox is stricter about secure flag on non-HTTPS connections
-          // For localhost testing, we need to set secure: false to allow cookies
-          secure: false,
-          httpOnly: cookie.httpOnly,
-          sameSite: cookie.sameSite,
-        })
-      );
-
-    return {
-      storageState: {
-        cookies: validCookies,
-        origins: [],
-      },
-      isAuthenticated: true,
-    };
-  } catch (error) {
-    console.error('🔐 [Worker Auth] Real OAuth flow failed:', error);
-    throw error;
-  } finally {
-    oauthFlowInProgress = false;
-    await context.close();
-  }
-}
-
-/**
- * Apply authentication state to a page context using Playwright's storageState
- */
-async function applyAuthState(page: Page, authState: AuthState): Promise<void> {
-  // Add cookies from the stored state
-  const validCookies = authState.storageState.cookies
-    .filter(
-      (cookie: {
-        name?: string;
-        value?: string;
-        domain?: string;
-        path?: string;
-        expires?: number;
-        httpOnly?: boolean;
-        secure?: boolean;
-        sameSite?: string;
-      }) => {
-        // Ensure required fields are present
-        if (!cookie.name || !cookie.value) {
-          return false;
-        }
-
-        // Validate expires field
-        if (
-          cookie.expires !== undefined &&
-          (cookie.expires < -1 || !Number.isInteger(cookie.expires))
-        ) {
-          return false;
-        }
-
-        return true;
-      }
-    )
-    .map(
-      (cookie: {
-        name?: string;
-        value?: string;
-        domain?: string;
-        path?: string;
-        expires?: number;
-        httpOnly?: boolean;
-        secure?: boolean;
-        sameSite?: 'Strict' | 'Lax' | 'None';
-      }) => ({
-        name: cookie.name as string,
-        value: cookie.value as string,
-        // Set default domain and path if not present
-        domain: cookie.domain || 'localhost',
-        path: cookie.path || '/',
-        expires: cookie.expires || Math.floor(Date.now() / 1000) + 86400,
-        httpOnly: cookie.httpOnly,
-        // Firefox is stricter about secure flag on non-HTTPS connections
-        // For localhost testing, we need to set secure: false to allow cookies
-        secure: false,
-        sameSite: cookie.sameSite,
-      })
-    );
-
-  // Add real authentication cookies to the page context
-  if (validCookies.length > 0) {
-    await page.context().addCookies(validCookies);
-
-    // Verify cookies were applied by checking them
-    const appliedCookies = await page.context().cookies();
-    console.log(
-      `🔐 [Auth State] Verified ${appliedCookies.length} cookies in context:`,
-      appliedCookies.map((c: { name: string }) => c.name).join(', ')
-    );
-  } else {
-    console.warn(
-      '🔐 [Auth State] No valid authentication cookies available - authentication may not work'
-    );
-  }
-}
-
 // Extend Playwright's base test with our fixtures
-export const test = base.extend<TestFixtures, WorkerFixtures>({
-  // Worker-scoped fixture: Complete OAuth flow once per worker
-  // This ensures all tests in a worker share the same authenticated session
-  workerAuth: [
-    async ({ browser }, use) => {
-      const authState = await completeWorkerOAuthFlow(browser);
-      await use(authState);
-    },
-    { scope: 'worker' },
-  ],
-
+// Note: No WorkerFixtures needed — authentication is handled by the setup project
+// (auth.setup.ts) via storageState, so every page is pre-authenticated.
+export const test = base.extend<TestFixtures>({
   // Test-scoped fixture: Authenticated page
-  // Uses the worker-scoped auth state to authenticate each test
-  authenticatedPage: async ({ page, workerAuth }, use) => {
-    // Apply the authenticated state to the test page
-    await applyAuthState(page, workerAuth);
-
-    // Verify authentication is working before proceeding with test
-    try {
-      await playwrightExpect(async () => {
-        const statusResponse = await page.request.get('/api/auth/status');
-        playwrightExpect(statusResponse.ok()).toBe(true);
-        const authStatus = await statusResponse.json();
-        playwrightExpect(authStatus.authenticated).toBe(true);
-      }).toPass({ timeout: 10000 });
-    } catch (error) {
-      console.error(
-        '🔐 [Auth State] Authentication verification failed:',
-        error
-      );
-      throw error;
-    }
-
+  // The page is already authenticated via storageState from the setup project.
+  // No per-test OAuth flow or cookie injection needed.
+  authenticatedPage: async ({ page }, use) => {
     await use(page);
   },
 

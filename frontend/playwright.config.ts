@@ -10,14 +10,17 @@ import {
 /**
  * Playwright E2E Test Configuration
  *
- * Configuration optimized for reliability following Playwright best practices:
- * - Web-first assertions with auto-retry
- * - Proper timeout configuration
- * - CI-specific settings for flaky test detection
+ * Uses Playwright's setup project pattern for authentication:
+ * 1. The 'setup' project runs first, performs OAuth once, saves storageState
+ * 2. All browser projects depend on 'setup' and load the saved auth state
+ * 3. Every test starts pre-authenticated — no per-test OAuth overhead
  *
+ * @see https://playwright.dev/docs/auth
  * @see https://playwright.dev/docs/test-configuration
- * @see https://playwright.dev/docs/best-practices
  */
+
+const AUTH_FILE = 'playwright/.auth/user.json';
+
 export default defineConfig({
   testDir: './tests/e2e',
 
@@ -87,9 +90,20 @@ export default defineConfig({
   /* Only test browsers that are tested in CI: chromium, firefox, and Mobile Chrome */
   /* Note: Webkit (Safari) was removed due to known issues with OAuth redirects in test environments */
   projects: [
+    // Setup project: performs OAuth once and saves storageState
+    {
+      name: 'setup',
+      testMatch: /.*\.setup\.ts/,
+    },
+
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'], timezoneId: 'UTC' },
+      use: {
+        ...devices['Desktop Chrome'],
+        timezoneId: 'UTC',
+        storageState: AUTH_FILE,
+      },
+      dependencies: ['setup'],
     },
 
     {
@@ -97,6 +111,7 @@ export default defineConfig({
       use: {
         ...devices['Desktop Firefox'],
         timezoneId: 'UTC',
+        storageState: AUTH_FILE,
         // Firefox-specific settings for better reliability
         launchOptions: {
           firefoxUserPrefs: {
@@ -107,6 +122,7 @@ export default defineConfig({
         // Firefox inherits global actionTimeout (20s) and navigationTimeout (60s)
         // which are more generous than the previously set Firefox-specific values
       },
+      dependencies: ['setup'],
     },
 
     /* Test against mobile viewports. */
@@ -115,11 +131,13 @@ export default defineConfig({
       use: {
         ...devices['Pixel 7'],
         timezoneId: 'UTC',
+        storageState: AUTH_FILE,
         // Mobile viewport interactions (hamburger menus, touch targets) need
         // slightly longer action timeouts than desktop browsers.
         // Decouple from global retries to prevent worker OAuth retry cascades
         actionTimeout: 30000,
       },
+      dependencies: ['setup'],
       retries: 0,
     },
 
