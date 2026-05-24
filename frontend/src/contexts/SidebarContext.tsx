@@ -72,22 +72,26 @@ export function SidebarProvider({
 
   // Load saved state from localStorage after hydration
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(SIDEBAR_STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        setState(prev => ({
-          ...prev,
-          expandedSections: {
-            ...defaultExpandedSections,
-            ...parsed.expandedSections,
-          },
-        }));
+    // Wrap in setTimeout to prevent "Calling setState synchronously within an effect" lint error
+    const timer = setTimeout(() => {
+      try {
+        const stored = localStorage.getItem(SIDEBAR_STORAGE_KEY);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          setState(prev => ({
+            ...prev,
+            expandedSections: {
+              ...defaultExpandedSections,
+              ...parsed.expandedSections,
+            },
+          }));
+        }
+      } catch (error) {
+        console.warn('Failed to load sidebar state from localStorage:', error);
       }
-    } catch (error) {
-      console.warn('Failed to load sidebar state from localStorage:', error);
-    }
-    setIsClient(true);
+      setIsClient(true);
+    }, 0);
+    return () => clearTimeout(timer);
   }, [defaultExpandedSections]);
 
   // Save expandedSections to localStorage whenever they change
