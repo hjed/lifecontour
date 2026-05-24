@@ -114,7 +114,7 @@ export function DayGroupedJournalList({
 
   // Handle fetching based on intersection state to avoid dropped fetches
   useEffect(() => {
-    // If both are intersecting (e.g. short lists), prioritize fetching older journals (bottom)
+    // If both are intersecting (e.g. short lists), prioritize fetching newer journals (bottom)
     if (
       isBottomIntersecting &&
       hasNextPage &&

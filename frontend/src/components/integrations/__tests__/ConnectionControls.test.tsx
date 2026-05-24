@@ -142,6 +142,11 @@ describe('ConnectionControls', () => {
     });
     expect(relinkButton).toBeInTheDocument();
 
+    const reregisterButton = screen.getByRole('button', {
+      name: /reregister webhooks/i,
+    });
+    expect(reregisterButton).toBeDisabled();
+
     await user.click(relinkButton);
     expect(mockAuthorize).toHaveBeenCalledWith({
       redirect_url: '/integrations',
@@ -165,6 +170,11 @@ describe('ConnectionControls', () => {
       name: /upgrade permissions/i,
     });
     expect(upgradeButton).toBeInTheDocument();
+
+    const reregisterButton = screen.getByRole('button', {
+      name: /reregister webhooks/i,
+    });
+    expect(reregisterButton).toBeDisabled();
 
     await user.click(upgradeButton);
     expect(mockAuthorize).toHaveBeenCalledWith({
