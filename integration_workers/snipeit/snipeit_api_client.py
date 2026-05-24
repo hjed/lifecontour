@@ -3,15 +3,17 @@ Snipe-IT API v1 async client.
 
 Provides typed methods for the Snipe-IT REST API endpoints needed for
 gear item sync: asset listing and single-asset retrieval. Integrates
-rate limiting and automatic token refresh on 401 responses.
+rate limiting.
 
 The base URL is dynamic (self-hosted instances) and provided at
 construction time from the user's ``snipeit_settings`` configuration.
+
+Authentication uses a personal access token (API key) set as a Bearer
+token in the ``Authorization`` header.
 """
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
@@ -43,32 +45,27 @@ class SnipeItAPIError(Exception):
 class SnipeItAPIClient:
     """Async client for Snipe-IT API v1.
 
-    Uses an injected ``httpx.AsyncClient`` with Bearer-token authentication,
-    pre-emptive rate limiting, and optional token refresh on 401.
+    Uses an injected ``httpx.AsyncClient`` with Bearer-token authentication
+    and pre-emptive rate limiting.
 
     Args:
         client: Pre-configured ``httpx.AsyncClient`` (injected for testability).
-        on_token_refresh: Optional async callback invoked on 401 to obtain
-            a new access token. Should return the new token string.
         rate_limiter: Optional ``SnipeItRateLimiter`` instance (defaults to 120 req/min).
     """
 
     def __init__(
         self,
         client: httpx.AsyncClient,
-        on_token_refresh: Callable[[], Awaitable[str]] | None = None,
         rate_limiter: SnipeItRateLimiter | None = None,
     ) -> None:
         self._client = client
-        self._on_token_refresh = on_token_refresh
         self._rate_limiter = rate_limiter or SnipeItRateLimiter()
 
     @classmethod
     def create(
         cls,
         base_url: str,
-        access_token: str,
-        on_token_refresh: Callable[[], Awaitable[str]] | None = None,
+        api_key: str,
         requests_per_minute: int = 120,
     ) -> SnipeItAPIClient:
         """Factory: create a client with a new ``httpx.AsyncClient``.
@@ -79,14 +76,13 @@ class SnipeItAPIClient:
         Args:
             base_url: Snipe-IT instance base URL
                 (e.g. ``https://snipeit.example.com``).
-            access_token: Current OAuth access token.
-            on_token_refresh: Optional async callback for 401 refresh.
+            api_key: Snipe-IT personal access token (API key).
             requests_per_minute: Rate limit for pre-emptive throttling.
         """
         client = httpx.AsyncClient(
             base_url=f"{base_url.rstrip('/')}/api/v1/",
             headers={
-                "Authorization": f"Bearer {access_token}",
+                "Authorization": f"Bearer {api_key}",
                 "Accept": "application/json",
                 "Content-Type": "application/json",
             },
@@ -94,7 +90,6 @@ class SnipeItAPIClient:
         )
         return cls(
             client=client,
-            on_token_refresh=on_token_refresh,
             rate_limiter=SnipeItRateLimiter(requests_per_minute=requests_per_minute),
         )
 
@@ -342,17 +337,14 @@ class SnipeItAPIClient:
         self,
         path: str,
         params: dict[str, Any] | None = None,
-        *,
-        _is_retry: bool = False,
     ) -> Any:
-        """Execute a GET request with rate limiting and 401 refresh.
+        """Execute a GET request with rate limiting.
 
         Args:
             path: API path relative to base URL (e.g. ``hardware``).
                 Must NOT start with ``/`` (httpx would discard the
                 base URL path component).
             params: Optional query parameters.
-            _is_retry: Internal flag to prevent infinite refresh loops.
 
         Returns:
             Parsed JSON response body.
@@ -362,23 +354,10 @@ class SnipeItAPIClient:
 
         response = await self._client.get(path, params=params)
 
-        # Handle 401 — token refresh and retry
-        if response.status_code == 401 and not _is_retry:
-            if self._on_token_refresh is not None:
-                logger.info("Snipe-IT API returned 401 — refreshing token")
-                try:
-                    new_token = await self._on_token_refresh()
-                    self._client.headers["Authorization"] = f"Bearer {new_token}"
-                    return await self._get(path, params=params, _is_retry=True)
-                except Exception:
-                    logger.error("Token refresh failed", exc_info=True)
-                    raise SnipeItAPIError(
-                        "Snipe-IT authentication failed after token refresh",
-                        status_code=401,
-                    ) from None
-
+        # Handle 401 — API key invalid or revoked
+        if response.status_code == 401:
             raise SnipeItAPIError(
-                "Snipe-IT authentication failed (no refresh callback)",
+                "Snipe-IT authentication failed (invalid API key)",
                 status_code=401,
             )
 
@@ -404,15 +383,12 @@ class SnipeItAPIClient:
         self,
         path: str,
         json_data: dict[str, Any],
-        *,
-        _is_retry: bool = False,
     ) -> Any:
-        """Execute a PATCH request with rate limiting and 401 refresh.
+        """Execute a PATCH request with rate limiting.
 
         Args:
             path: API path relative to base URL (e.g. ``hardware/1``).
             json_data: JSON payload for the update.
-            _is_retry: Internal flag to prevent infinite refresh loops.
 
         Returns:
             Parsed JSON response body.
@@ -422,23 +398,10 @@ class SnipeItAPIClient:
 
         response = await self._client.patch(path, json=json_data)
 
-        # Handle 401 — token refresh and retry
-        if response.status_code == 401 and not _is_retry:
-            if self._on_token_refresh is not None:
-                logger.info("Snipe-IT API returned 401 — refreshing token")
-                try:
-                    new_token = await self._on_token_refresh()
-                    self._client.headers["Authorization"] = f"Bearer {new_token}"
-                    return await self._patch(path, json_data=json_data, _is_retry=True)
-                except Exception:
-                    logger.error("Token refresh failed", exc_info=True)
-                    raise SnipeItAPIError(
-                        "Snipe-IT authentication failed after token refresh",
-                        status_code=401,
-                    ) from None
-
+        # Handle 401 — API key invalid or revoked
+        if response.status_code == 401:
             raise SnipeItAPIError(
-                "Snipe-IT authentication failed (no refresh callback)",
+                "Snipe-IT authentication failed (invalid API key)",
                 status_code=401,
             )
 
@@ -464,15 +427,12 @@ class SnipeItAPIClient:
         self,
         path: str,
         json_data: dict[str, Any],
-        *,
-        _is_retry: bool = False,
     ) -> Any:
-        """Execute a POST request with rate limiting and 401 refresh.
+        """Execute a POST request with rate limiting.
 
         Args:
             path: API path relative to base URL (e.g. ``maintenances``).
             json_data: JSON payload for the creation.
-            _is_retry: Internal flag to prevent infinite refresh loops.
 
         Returns:
             Parsed JSON response body.
@@ -482,23 +442,10 @@ class SnipeItAPIClient:
 
         response = await self._client.post(path, json=json_data)
 
-        # Handle 401 — token refresh and retry
-        if response.status_code == 401 and not _is_retry:
-            if self._on_token_refresh is not None:
-                logger.info("Snipe-IT API returned 401 — refreshing token")
-                try:
-                    new_token = await self._on_token_refresh()
-                    self._client.headers["Authorization"] = f"Bearer {new_token}"
-                    return await self._post(path, json_data=json_data, _is_retry=True)
-                except Exception:
-                    logger.error("Token refresh failed", exc_info=True)
-                    raise SnipeItAPIError(
-                        "Snipe-IT authentication failed after token refresh",
-                        status_code=401,
-                    ) from None
-
+        # Handle 401 — API key invalid or revoked
+        if response.status_code == 401:
             raise SnipeItAPIError(
-                "Snipe-IT authentication failed (no refresh callback)",
+                "Snipe-IT authentication failed (invalid API key)",
                 status_code=401,
             )
 

@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 from contextlib import asynccontextmanager
 from typing import Any
-from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -59,13 +58,12 @@ def mock_transport() -> MockTransport:
 def integration_client(mock_transport: MockTransport) -> SnipeItAPIClient:
     client = SnipeItAPIClient.create(
         base_url="https://snipeit.example.com/api/v1/",
-        access_token="test-access-token",
-        on_token_refresh=AsyncMock(return_value="new-token"),
+        api_key="test-api-key",
     )
     client._client = httpx.AsyncClient(
         transport=mock_transport,
         base_url="https://snipeit.example.com/api/v1/",
-        headers={"Authorization": "Bearer test-access-token"},
+        headers={"Authorization": "Bearer test-api-key"},
     )
     return client
 

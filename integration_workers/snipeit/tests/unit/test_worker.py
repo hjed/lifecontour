@@ -74,8 +74,7 @@ async def test_sync_snipeit_assets_orchestrator(mock_ctx):
         mock_ctx["session_factory"].return_value.__aenter__.return_value = mock_session
 
         mock_auth_data.return_value = {
-            "encrypted_access_token": b"access",
-            "encrypted_refresh_token": b"refresh",
+            "encrypted_api_key": b"api-key",
         }
 
         mock_sync_service = MagicMock()
@@ -121,8 +120,7 @@ async def test_sync_snipeit_asset_batch(mock_ctx):
         mock_ctx["session_factory"].return_value.__aenter__.return_value = mock_session
 
         mock_auth_data.return_value = {
-            "encrypted_access_token": b"access",
-            "encrypted_refresh_token": b"refresh",
+            "encrypted_api_key": b"api-key",
         }
 
         mock_sync_service = MagicMock()
@@ -159,8 +157,7 @@ async def test_sync_snipeit_maintenances_orchestrator(mock_ctx):
         mock_ctx["session_factory"].return_value.__aenter__.return_value = mock_session
 
         mock_auth_data.return_value = {
-            "encrypted_access_token": b"access",
-            "encrypted_refresh_token": b"refresh",
+            "encrypted_api_key": b"api-key",
         }
 
         mock_sync_service = MagicMock()
@@ -206,8 +203,7 @@ async def test_sync_snipeit_maintenance_batch(mock_ctx):
         mock_ctx["session_factory"].return_value.__aenter__.return_value = mock_session
 
         mock_auth_data.return_value = {
-            "encrypted_access_token": b"access",
-            "encrypted_refresh_token": b"refresh",
+            "encrypted_api_key": b"api-key",
         }
 
         mock_sync_service = MagicMock()

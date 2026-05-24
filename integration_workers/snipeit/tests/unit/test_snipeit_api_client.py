@@ -11,7 +11,7 @@ if "DATABASE_URL" not in os.environ:
 os.environ["ENCRYPTION_KEY"] = "testkey"
 
 from collections.abc import AsyncGenerator
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
@@ -27,32 +27,12 @@ from snipeit_models import (
 from snipeit_rate_limiter import SnipeItRateLimitError
 
 
-@pytest.fixture
-def mock_refresh() -> AsyncMock:
-    """Async callback returning a new token string."""
-    return AsyncMock(return_value="new-token")
-
-
 @pytest_asyncio.fixture
 async def client_no_refresh() -> AsyncGenerator[SnipeItAPIClient, None]:
-    """Client without a refresh callback (uses real httpx.AsyncClient)."""
+    """Client for testing (uses real httpx.AsyncClient)."""
     client = SnipeItAPIClient.create(
         base_url="https://snipeit.example.com",
-        access_token="test-token",
-    )
-    yield client
-    await client.close()
-
-
-@pytest_asyncio.fixture
-async def client_with_refresh(
-    mock_refresh: AsyncMock,
-) -> AsyncGenerator[SnipeItAPIClient, None]:
-    """Client with a refresh callback."""
-    client = SnipeItAPIClient.create(
-        base_url="https://snipeit.example.com",
-        access_token="test-token",
-        on_token_refresh=mock_refresh,
+        api_key="test-api-key",
     )
     yield client
     await client.close()
@@ -246,30 +226,10 @@ class TestSnipeItAPIClientErrorHandling:
     """Tests for error handling in the API client."""
 
     @pytest.mark.asyncio
-    async def test_401_triggers_retry_callback(
-        self,
-        client_with_refresh: SnipeItAPIClient,
-        mock_refresh: AsyncMock,
-    ) -> None:
-        """401 response invokes on_token_refresh callback and retries."""
-        mock_401 = MagicMock()
-        mock_401.status_code = 401
-
-        mock_ok = _ok_response(_asset_json(1, "After Refresh"))
-
-        with patch.object(
-            client_with_refresh._client, "get", side_effect=[mock_401, mock_ok]
-        ):
-            result = await client_with_refresh.get_asset(1)
-
-        mock_refresh.assert_called_once()
-        assert result.name == "After Refresh"
-
-    @pytest.mark.asyncio
-    async def test_401_without_callback_raises(
+    async def test_401_raises_api_error(
         self, client_no_refresh: SnipeItAPIClient
     ) -> None:
-        """401 without refresh callback raises SnipeItAPIError."""
+        """401 response raises SnipeItAPIError (API key invalid or revoked)."""
         mock_401 = MagicMock()
         mock_401.status_code = 401
         with patch.object(client_no_refresh._client, "get", return_value=mock_401):

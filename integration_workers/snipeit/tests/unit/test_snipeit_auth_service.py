@@ -1,5 +1,5 @@
 # ruff: noqa: E402
-"""Tests for Snipe-IT auth service (token retrieval and refresh)."""
+"""Tests for Snipe-IT auth service (API key retrieval and decryption)."""
 
 import os
 
@@ -10,13 +10,12 @@ if "DATABASE_URL" not in os.environ:
     )
 os.environ["ENCRYPTION_KEY"] = "testkey"
 
-from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from cryptography.fernet import Fernet
 
-from snipeit_auth_service import SnipeItAuthService, SnipeItTokenData
+from snipeit_auth_service import SnipeItAuthService
 
 
 @pytest.fixture
@@ -26,44 +25,17 @@ def encryption_key() -> str:
 
 
 @pytest.fixture
-def mock_http_client() -> AsyncMock:
-    """Create a mock httpx.AsyncClient."""
-    return AsyncMock()
-
-
-@pytest.fixture
-def auth_service(
-    encryption_key: str, mock_http_client: AsyncMock
-) -> SnipeItAuthService:
-    """Create an auth service with a valid encryption key and injected client."""
-    return SnipeItAuthService(
-        encryption_key=encryption_key,
-        http_client=mock_http_client,
-    )
-
-
-class TestSnipeItAuthServiceTokenData:
-    """Tests for SnipeItTokenData dataclass."""
-
-    def test_token_data_fields(self) -> None:
-        """Token data holds all expected fields."""
-        expires = datetime.now(UTC) + timedelta(hours=1)
-        data = SnipeItTokenData(
-            access_token="access",
-            refresh_token="refresh",
-            expires_at=expires,
-        )
-        assert data.access_token == "access"
-        assert data.refresh_token == "refresh"
-        assert data.expires_at == expires
+def auth_service(encryption_key: str) -> SnipeItAuthService:
+    """Create an auth service with a valid encryption key."""
+    return SnipeItAuthService(encryption_key=encryption_key)
 
 
 class TestSnipeItAuthServiceEncryption:
-    """Tests for token encryption/decryption."""
+    """Tests for API key encryption/decryption."""
 
     def test_encrypt_decrypt_roundtrip(self, auth_service: SnipeItAuthService) -> None:
         """Encrypting and decrypting a value returns the original."""
-        original = "my-secret-token"
+        original = "my-secret-api-key"
         encrypted = auth_service.encrypt(original)
         decrypted = auth_service.decrypt(encrypted)
         assert decrypted == original
@@ -72,27 +44,23 @@ class TestSnipeItAuthServiceEncryption:
         self, auth_service: SnipeItAuthService
     ) -> None:
         """Encrypted value is not the same as the original."""
-        original = "my-secret-token"
+        original = "my-secret-api-key"
         encrypted = auth_service.encrypt(original)
         assert encrypted != original.encode()
 
 
-class TestSnipeItAuthServiceGetTokens:
-    """Tests for retrieving tokens from the database."""
+class TestSnipeItAuthServiceGetApiKey:
+    """Tests for retrieving API key from the database."""
 
     @pytest.mark.asyncio
-    async def test_get_tokens_returns_data(
+    async def test_get_api_key_returns_decrypted_key(
         self, auth_service: SnipeItAuthService
     ) -> None:
-        """get_tokens returns decrypted token data when row exists."""
-        expires = datetime.now(UTC) + timedelta(hours=1)
-        encrypted_access = auth_service.encrypt("access-tok")
-        encrypted_refresh = auth_service.encrypt("refresh-tok")
+        """get_api_key returns decrypted API key when row exists."""
+        encrypted_key = auth_service.encrypt("my-api-key-123")
 
         mock_row = MagicMock()
-        mock_row.encrypted_access_token = encrypted_access
-        mock_row.encrypted_refresh_token = encrypted_refresh
-        mock_row.token_expires_at = expires
+        mock_row.encrypted_api_key = encrypted_key
         mock_row.needs_reauth = False
 
         mock_result = MagicMock()
@@ -101,39 +69,32 @@ class TestSnipeItAuthServiceGetTokens:
         mock_session = AsyncMock()
         mock_session.execute.return_value = mock_result
 
-        result = await auth_service.get_tokens("user-1", mock_session)
-        assert result is not None
-        assert result.access_token == "access-tok"
-        assert result.refresh_token == "refresh-tok"
-        assert result.expires_at == expires
+        result = await auth_service.get_api_key("user-1", mock_session)
+        assert result == "my-api-key-123"
 
     @pytest.mark.asyncio
-    async def test_get_tokens_returns_none_when_no_row(
+    async def test_get_api_key_returns_none_when_no_row(
         self, auth_service: SnipeItAuthService
     ) -> None:
-        """get_tokens returns None when no auth row exists."""
+        """get_api_key returns None when no auth row exists."""
         mock_result = MagicMock()
         mock_result.fetchone.return_value = None
 
         mock_session = AsyncMock()
         mock_session.execute.return_value = mock_result
 
-        result = await auth_service.get_tokens("nonexistent", mock_session)
+        result = await auth_service.get_api_key("nonexistent", mock_session)
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_get_tokens_returns_none_when_needs_reauth(
+    async def test_get_api_key_returns_none_when_needs_reauth(
         self, auth_service: SnipeItAuthService
     ) -> None:
-        """get_tokens returns None when needs_reauth is True."""
-        expires = datetime.now(UTC) + timedelta(hours=1)
-        encrypted_access = auth_service.encrypt("access-tok")
-        encrypted_refresh = auth_service.encrypt("refresh-tok")
+        """get_api_key returns None when needs_reauth is True."""
+        encrypted_key = auth_service.encrypt("my-api-key")
 
         mock_row = MagicMock()
-        mock_row.encrypted_access_token = encrypted_access
-        mock_row.encrypted_refresh_token = encrypted_refresh
-        mock_row.token_expires_at = expires
+        mock_row.encrypted_api_key = encrypted_key
         mock_row.needs_reauth = True
 
         mock_result = MagicMock()
@@ -142,23 +103,16 @@ class TestSnipeItAuthServiceGetTokens:
         mock_session = AsyncMock()
         mock_session.execute.return_value = mock_result
 
-        result = await auth_service.get_tokens("user-1", mock_session)
+        result = await auth_service.get_api_key("user-1", mock_session)
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_get_tokens_returns_none_when_invalid_token(
+    async def test_get_api_key_returns_none_when_invalid_data(
         self, auth_service: SnipeItAuthService
     ) -> None:
-        """get_tokens returns None and catches InvalidToken when decryption fails."""
-        expires = datetime.now(UTC) + timedelta(hours=1)
-        # Use a string that is not a valid fernet token
-        invalid_encrypted_access = b"invalid-token-data"
-        invalid_encrypted_refresh = b"invalid-token-data"
-
+        """get_api_key returns None when decryption fails (corrupted data)."""
         mock_row = MagicMock()
-        mock_row.encrypted_access_token = invalid_encrypted_access
-        mock_row.encrypted_refresh_token = invalid_encrypted_refresh
-        mock_row.token_expires_at = expires
+        mock_row.encrypted_api_key = b"invalid-fernet-data"
         mock_row.needs_reauth = False
 
         mock_result = MagicMock()
@@ -167,7 +121,7 @@ class TestSnipeItAuthServiceGetTokens:
         mock_session = AsyncMock()
         mock_session.execute.return_value = mock_result
 
-        result = await auth_service.get_tokens("user-1", mock_session)
+        result = await auth_service.get_api_key("user-1", mock_session)
         assert result is None
 
 
@@ -204,58 +158,3 @@ class TestSnipeItAuthServiceGetBaseUrl:
 
         result = await auth_service.get_base_url("user-1", mock_session)
         assert result is None
-
-
-class TestSnipeItAuthServiceRefreshToken:
-    """Tests for token refresh using injected httpx client."""
-
-    @pytest.mark.asyncio
-    async def test_refresh_token_calls_injected_client(
-        self, auth_service: SnipeItAuthService, mock_http_client: AsyncMock
-    ) -> None:
-        """refresh_token uses the injected HTTP client, not a new one."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "access_token": "new-access",
-            "refresh_token": "new-refresh",
-            "expires_in": 3600,
-        }
-        mock_response.raise_for_status = MagicMock()
-        mock_http_client.post.return_value = mock_response
-
-        result = await auth_service.refresh_token(
-            base_url="https://snipeit.example.com",
-            refresh_token_value="old-refresh",
-            client_id="test-id",
-            client_secret="test-secret",
-        )
-
-        mock_http_client.post.assert_called_once()
-        assert result.access_token == "new-access"
-        assert result.refresh_token == "new-refresh"
-
-    @pytest.mark.asyncio
-    async def test_refresh_token_posts_correct_url(
-        self, auth_service: SnipeItAuthService, mock_http_client: AsyncMock
-    ) -> None:
-        """refresh_token posts to the correct OAuth token endpoint."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "access_token": "a",
-            "refresh_token": "r",
-            "expires_in": 3600,
-        }
-        mock_response.raise_for_status = MagicMock()
-        mock_http_client.post.return_value = mock_response
-
-        await auth_service.refresh_token(
-            base_url="https://snipeit.example.com/",
-            refresh_token_value="tok",
-            client_id="cid",
-            client_secret="csec",
-        )
-
-        call_args = mock_http_client.post.call_args
-        assert call_args.args[0] == "https://snipeit.example.com/oauth/token"

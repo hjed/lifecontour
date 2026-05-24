@@ -71,11 +71,11 @@ class TestStreamConsumerIntegration:
         await async_connection.execute(
             text("""
                 INSERT INTO user_snipe_it_auth (
-                    user_id, encrypted_access_token, encrypted_refresh_token,
-                    token_expires_at, created_at, updated_at
+                    user_id, encrypted_api_key,
+                    created_at, updated_at
                 ) VALUES (
-                    :user_id, 'enc-access', 'enc-refresh',
-                    now() + interval '1 hour', now(), now()
+                    :user_id, 'enc-api-key',
+                    now(), now()
                 )
             """),
             {"user_id": user_id},
@@ -150,7 +150,7 @@ class TestStreamConsumerIntegration:
 
             client = SnipeItAPIClient.create(
                 base_url=base_url,
-                access_token="test",
+                api_key="test",
             )
             client._client = httpx.AsyncClient(
                 transport=mock_transport,
@@ -194,8 +194,8 @@ class TestStreamConsumerIntegration:
 
         await async_connection.execute(
             text("""
-                INSERT INTO user_snipe_it_auth (user_id, encrypted_access_token, encrypted_refresh_token, token_expires_at, created_at, updated_at)
-                VALUES (:user_id, 'enc-access', 'enc-refresh', now() + interval '1 hour', now(), now())
+                INSERT INTO user_snipe_it_auth (user_id, encrypted_api_key, created_at, updated_at)
+                VALUES (:user_id, 'enc-api-key', now(), now())
             """),
             {"user_id": user_id},
         )
@@ -301,7 +301,7 @@ class TestStreamConsumerIntegration:
         ) -> Any:
             from snipeit_sync_service import SnipeItSyncService
 
-            client = SnipeItAPIClient.create(base_url=base_url, access_token="test")
+            client = SnipeItAPIClient.create(base_url=base_url, api_key="test")
             client._client = httpx.AsyncClient(
                 transport=mock_transport, base_url=f"{base_url.rstrip('/')}/api/v1/"
             )

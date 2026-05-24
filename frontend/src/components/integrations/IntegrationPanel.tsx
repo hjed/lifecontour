@@ -101,12 +101,15 @@ export function IntegrationPanel({ integration }: IntegrationPanelProps) {
             </div>
           </div>
 
-          <ConnectionControls
-            integrationId={id}
-            connected={connected}
-            needsReauth={needs_reauth}
-            needsReconsent={needs_reconsent}
-          />
+          {/* ConnectionControls — not used by snipeit (API key auth is in SnipeItSettings) */}
+          {id !== 'snipeit' && (
+            <ConnectionControls
+              integrationId={id}
+              connected={connected}
+              needsReauth={needs_reauth}
+              needsReconsent={needs_reconsent}
+            />
+          )}
 
           <SyncControls
             integrationId={id}
@@ -121,7 +124,7 @@ export function IntegrationPanel({ integration }: IntegrationPanelProps) {
           <div className='flex flex-wrap items-center gap-2 border-t pt-4'>
             <SyncHistory integrationId={id} />
             <HealthStatus integrationId={id} />
-            <IntegrationSettings integrationId={id} />
+            <IntegrationSettings integrationId={id} connected={connected} />
           </div>
         </div>
       </CardContent>

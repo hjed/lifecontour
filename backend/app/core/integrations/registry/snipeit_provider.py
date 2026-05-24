@@ -4,6 +4,8 @@ Snipe-IT integration provider.
 Derives Snipe-IT integration status from the ``user_snipe_it_auth`` table.
 Implements the ``IntegrationProvider`` protocol for registration in the
 ``IntegrationRegistryService``.
+
+Snipe-IT uses API key (personal access token) authentication.
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ logger = structlog.get_logger()
 
 class SnipeItIntegrationProvider:
     """
-    Derives Snipe-IT integration status from OAuth tokens and sync jobs.
+    Derives Snipe-IT integration status from API key connection and sync jobs.
 
     Queries ``user_snipe_it_auth`` for connection/reauth state, and
     ``sync_jobs`` for sync history. Packages the data into the generic
@@ -49,7 +51,7 @@ class SnipeItIntegrationProvider:
             IntegrationInfo with Snipe-IT status, capabilities, and sync
             summary.
         """
-        # 1. Query OAuth token state
+        # 1. Query API key connection state
         is_connected = False
         needs_reauth = False
 
