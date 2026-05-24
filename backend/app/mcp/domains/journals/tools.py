@@ -538,15 +538,20 @@ async def _fetch_journal_ids_by_integration_source(
             ),
             {"user_id": user_id},
         )
-    elif integration_source in ("snipeit", "snipeit_maintenance"):
+    elif integration_source in ("snipeit", "snipeit_maintenance", "snipeit_checkout"):
+        mapped_source = (
+            "snipeit_checkout"
+            if integration_source == "snipeit"
+            else integration_source
+        )
         result = await db_connection.execute(
             text(
-                "SELECT CAST(entity_id AS INTEGER) AS journal_id "
+                "SELECT CAST(internal_uuid AS INTEGER) AS journal_id "
                 "FROM sync_metadata "
-                "WHERE entity_type = 'journal_entry' "
-                "AND integration_type = :integration_source"
+                "WHERE integration_source = :integration_source "
+                "AND internal_uuid IS NOT NULL"
             ),
-            {"integration_source": integration_source},
+            {"integration_source": mapped_source},
         )
     else:
         return set()
@@ -2382,6 +2387,26 @@ async def create_journal_entry(
                 f"Valid types are: {', '.join(sorted(valid_type_names))}"
             )
 
+        # Enforce type_data requirements for GEAR_MAINTENANCE and GEAR_USAGE
+        req_types_upper = {t.upper() for t in request.types}
+        type_data_keys = (
+            {k.upper() for k in request.type_data.keys()}
+            if request.type_data
+            else set()
+        )
+
+        if (
+            "GEAR_MAINTENANCE" in req_types_upper
+            and "GEAR_MAINTENANCE" not in type_data_keys
+        ):
+            raise ValueError(
+                "Type GEAR_MAINTENANCE requires corresponding type_data to be provided"
+            )
+        if "GEAR_USAGE" in req_types_upper and "GEAR_USAGE" not in type_data_keys:
+            raise ValueError(
+                "Type GEAR_USAGE requires corresponding type_data to be provided"
+            )
+
     if request.type_data:
         invalid_type_data_keys = [
             k for k in request.type_data if k.upper() not in valid_type_names
@@ -2673,6 +2698,15 @@ async def update_journal_entry(
 
             # Only add if not already present
             if type_str.upper() not in current_types:
+                if type_str.upper() in ("GEAR_MAINTENANCE", "GEAR_USAGE"):
+                    if (
+                        not request.type_data
+                        or type_str.upper() not in request.type_data
+                    ):
+                        raise ValueError(
+                            f"Type {type_str.upper()} requires corresponding type_data to be provided when adding the type"
+                        )
+
                 # Capture the return value: includes all types added (requested +
                 # auto-resolved dependencies like FITNESS for OUTDOOR_ACTIVITY).
                 added_types = await journal_service.add_type_to_journal(
@@ -2859,13 +2893,16 @@ async def get_journal(
     Raises:
         JournalNotFoundError: If the journal with the given ID does not exist
     """
+    # Get current user ID from auth context
+    user_id = await get_current_user_id()
+
     # Create repositories
     repos = _create_journal_tool_repositories(db_connection)
     journal_repo = repos.journal_repo
 
     # Get journal
     journal = await journal_repo.find_by_id(journal_id)
-    if not journal:
+    if not journal or str(journal.user_id) != str(user_id):
         raise JournalNotFoundError(journal_id)
 
     # Get children if requested
