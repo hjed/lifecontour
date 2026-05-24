@@ -8,6 +8,8 @@
 import type { Page, Route } from '@playwright/test';
 import { expect, test } from './fixtures';
 
+// ─── Shared Helpers ────────────────────────────────────────────────────────
+
 function json(data: unknown) {
   return {
     status: 200,
@@ -16,63 +18,195 @@ function json(data: unknown) {
   };
 }
 
+/** Set up common route mocks for integrations page with given entries. */
+async function setupIntegrationsMocks(page: Page, integrations: unknown[]) {
+  await page.route('**/api/integrations/health', (route: Route) =>
+    route.fulfill(
+      json({
+        data: {
+          id: 'integrations',
+          type: 'integration-health',
+          attributes: {
+            overall: 'healthy',
+            lastChecked: new Date().toISOString(),
+            redis: { status: 'healthy', latency: 1, lastSeen: null },
+            worker: { status: 'healthy', latency: 1, lastSeen: null },
+          },
+        },
+      })
+    )
+  );
+
+  await page.route('**/api/integrations', (route: Route) =>
+    route.fulfill(
+      json({
+        data: integrations,
+      })
+    )
+  );
+
+  await page.route(
+    '**/api/integrations/google/sync-history**',
+    (route: Route) =>
+      route.fulfill(
+        json({
+          data: [],
+          meta: { total: 0, page: 1, pageSize: 5 },
+        })
+      )
+  );
+}
+
+/**
+ * Shared test logic: click Reregister Webhooks, then Reauthorize,
+ * and verify both requests fire correctly.
+ *
+ * @param integrationId - e.g. 'google' or 'strava'
+ * @param authorizeEndpoint - API path fragment for the authorize POST
+ * @param providerUrlPattern - wildcard pattern for the external OAuth URL
+ */
+async function testReauthAndReregister(
+  page: Page,
+  integrationId: string,
+  authorizeEndpoint: string,
+  providerUrlPattern: string
+) {
+  let authorizeTriggered = false;
+  let reregisterTriggered = false;
+
+  await page.route(
+    `**/api/integrations/${integrationId}/**/authorize`,
+    async route => {
+      const req = route.request();
+      if (req.method() !== 'POST') return route.fallback();
+      authorizeTriggered = true;
+      return route.fulfill(
+        json({
+          authorization_url: providerUrlPattern.replace('**', ''),
+          state: 'test-state',
+        })
+      );
+    }
+  );
+
+  await page.route(
+    `**/api/integrations/${integrationId}/webhooks/reregister`,
+    async route => {
+      const req = route.request();
+      if (req.method() !== 'POST') return route.fallback();
+      reregisterTriggered = true;
+      return route.fulfill(
+        json({
+          data: {
+            type: 'webhook-reregister',
+            attributes: {
+              webhooks_queued: 1,
+              message: 'Webhooks reregistered successfully',
+            },
+          },
+        })
+      );
+    }
+  );
+
+  await page.goto('/integrations');
+
+  const panel = page.locator(
+    `[data-testid="integration-panel-${integrationId}"]`
+  );
+
+  // Click Reregister Webhooks
+  const reregisterPromise = page.waitForRequest(
+    request =>
+      request
+        .url()
+        .includes(`/api/integrations/${integrationId}/webhooks/reregister`) &&
+      request.method() === 'POST'
+  );
+  await panel.getByTestId(`reregister-webhooks-${integrationId}`).click();
+  await reregisterPromise;
+  await expect.poll(() => reregisterTriggered).toBe(true);
+
+  // Intercept external OAuth redirect using a wildcard pattern so query
+  // params on the authorization_url don't cause a match failure.
+  await page.route(providerUrlPattern, route => route.fulfill(json({})));
+  const reauthorizePromise = page.waitForRequest(
+    request =>
+      request.url().includes(authorizeEndpoint) && request.method() === 'POST'
+  );
+  await panel.getByTestId(`reauthorize-${integrationId}`).click();
+  await reauthorizePromise;
+  await expect.poll(() => authorizeTriggered).toBe(true);
+}
+
+// ─── Fixtures ──────────────────────────────────────────────────────────────
+
+function makeIntegration(
+  id: string,
+  name: string,
+  capabilities: string[],
+  overrides: Record<string, unknown> = {}
+) {
+  return {
+    id,
+    type: 'integration',
+    attributes: {
+      name,
+      status: 'disconnected',
+      capabilities,
+      sync_summary: {
+        last_sync_time: null,
+        sync_count: 0,
+        error_count: 0,
+      },
+      needs_reauth: false,
+      needs_reconsent: false,
+      ...overrides,
+    },
+  };
+}
+
+const googleDisconnected = makeIntegration('google', 'Google', [
+  'contacts_sync',
+  'calendar_sync',
+]);
+const googleConnected = makeIntegration(
+  'google',
+  'Google',
+  ['contacts_sync', 'calendar_sync'],
+  {
+    status: 'connected',
+    sync_summary: {
+      last_sync_time: new Date().toISOString(),
+      sync_count: 42,
+      error_count: 0,
+    },
+  }
+);
+const stravaDisconnected = makeIntegration('strava', 'Strava', [
+  'activity_import',
+]);
+const stravaConnected = makeIntegration(
+  'strava',
+  'Strava',
+  ['activity_import'],
+  {
+    status: 'connected',
+    sync_summary: {
+      last_sync_time: '2026-01-01T12:00:00Z',
+      sync_count: 5,
+      error_count: 0,
+    },
+  }
+);
+
+// ─── Google Tests ──────────────────────────────────────────────────────────
+
 test.describe('Integrations Page UI (mocked API)', () => {
   test('disconnected: shows Connect button and hides sync controls', async ({
     authenticatedPage,
   }) => {
-    await authenticatedPage.route('**/api/integrations/health', route =>
-      route.fulfill(
-        json({
-          data: {
-            id: 'integrations',
-            type: 'integration-health',
-            attributes: {
-              overall: 'healthy',
-              lastChecked: new Date().toISOString(),
-              redis: { status: 'healthy', latency: 1, lastSeen: null },
-              worker: { status: 'healthy', latency: 1, lastSeen: null },
-            },
-          },
-        })
-      )
-    );
-
-    await authenticatedPage.route('**/api/integrations', route =>
-      route.fulfill(
-        json({
-          data: [
-            {
-              id: 'google',
-              type: 'integration',
-              attributes: {
-                name: 'Google',
-                status: 'disconnected',
-                capabilities: ['contacts_sync', 'calendar_sync'],
-                sync_summary: {
-                  last_sync_time: null,
-                  sync_count: 0,
-                  error_count: 0,
-                },
-                needs_reauth: false,
-                needs_reconsent: false,
-              },
-            },
-          ],
-        })
-      )
-    );
-
-    await authenticatedPage.route(
-      '**/api/integrations/google/sync-history**',
-      route =>
-        route.fulfill(
-          json({
-            data: [],
-            meta: { total: 0, page: 1, pageSize: 5 },
-          })
-        )
-    );
-
+    await setupIntegrationsMocks(authenticatedPage, [googleDisconnected]);
     await authenticatedPage.goto('/integrations');
 
     await expect(
@@ -99,41 +233,29 @@ test.describe('Integrations Page UI (mocked API)', () => {
     let syncTriggeredPayload: Record<string, unknown> | null = null;
     let disconnectCalled = false;
 
-    await authenticatedPage.route('**/api/integrations/health', route =>
-      route.fulfill(
-        json({
-          data: {
-            id: 'integrations',
-            type: 'integration-health',
-            attributes: {
-              overall: 'healthy',
-              lastChecked: new Date().toISOString(),
-              redis: { status: 'healthy', latency: 1, lastSeen: null },
-              worker: { status: 'healthy', latency: 1, lastSeen: null },
-            },
-          },
-        })
-      )
-    );
+    const googleDynamic = makeIntegration('google', 'Google', [
+      'contacts_sync',
+      'calendar_sync',
+    ]);
 
+    // Override with a dynamic handler so connection state can change mid-test
+    await setupIntegrationsMocks(authenticatedPage, []);
+
+    // Re-register the /api/integrations route with dynamic state
     await authenticatedPage.route('**/api/integrations', route =>
       route.fulfill(
         json({
           data: [
             {
-              id: 'google',
-              type: 'integration',
+              ...googleDynamic,
               attributes: {
-                name: 'Google',
+                ...googleDynamic.attributes,
                 status: connected ? 'connected' : 'disconnected',
-                capabilities: ['contacts_sync', 'calendar_sync'],
                 sync_summary: {
                   last_sync_time: connected ? new Date().toISOString() : null,
                   sync_count: connected ? 123 : 0,
                   error_count: 0,
                 },
-                needs_reauth: false,
-                needs_reconsent: false,
               },
             },
           ],
@@ -229,16 +351,10 @@ test.describe('Integrations Page UI (mocked API)', () => {
     await expect(authenticatedPage.getByRole('dialog')).toBeHidden();
 
     // Trigger sync sends correct payload and shows progress briefly
-    // Wait, with multiple capabilities there might be multiple sync buttons.
-    // The SyncControls renders buttons per capability.
-    // So there would be [data-testid="sync-google-contacts"] and [data-testid="sync-google-calendar"]
-    // Let's use the correct selector: [data-testid="sync-google-contacts"]
     await authenticatedPage.click(
       '[data-testid="trigger-google-contacts-sync"]'
     );
 
-    // We didn't keep sync-progress in SyncControls actually. It just spins the icon.
-    // But we check that syncTriggeredPayload is correctly sent.
     await expect
       .poll(() => syncTriggeredPayload)
       .toEqual({ sync_type: 'smart' });
@@ -246,11 +362,6 @@ test.describe('Integrations Page UI (mocked API)', () => {
     // Disconnect flips UI to disconnected state
     await authenticatedPage.click('[data-testid="disconnect-google"]');
     await expect.poll(() => disconnectCalled).toBeTruthy();
-
-    // Actually, UI state won't instantly flip unless we re-fetch /api/integrations and react-query triggers update.
-    // But since `connected` is modified in the mock, React query refetching will get the new state.
-    // The test might need to wait for the UI to update.
-    // Instead of waiting for mock state, we can just assert disconnect was called.
   });
 
   test('connected with needsReconsent: shows scope upgrade banner and triggers re-auth', async ({
@@ -258,58 +369,22 @@ test.describe('Integrations Page UI (mocked API)', () => {
   }) => {
     let oauthAuthorizePayload: Record<string, unknown> | null = null;
 
-    await authenticatedPage.route('**/api/integrations/health', route =>
-      route.fulfill(
-        json({
-          data: {
-            id: 'integrations',
-            type: 'integration-health',
-            attributes: {
-              overall: 'healthy',
-              lastChecked: new Date().toISOString(),
-              redis: { status: 'healthy', latency: 1, lastSeen: null },
-              worker: { status: 'healthy', latency: 1, lastSeen: null },
-            },
-          },
-        })
-      )
+    const googleNeedsReconsent = makeIntegration(
+      'google',
+      'Google',
+      ['contacts_sync', 'calendar_sync'],
+      {
+        status: 'connected',
+        sync_summary: {
+          last_sync_time: new Date().toISOString(),
+          sync_count: 42,
+          error_count: 0,
+        },
+        needs_reconsent: true,
+      }
     );
 
-    await authenticatedPage.route('**/api/integrations', route =>
-      route.fulfill(
-        json({
-          data: [
-            {
-              id: 'google',
-              type: 'integration',
-              attributes: {
-                name: 'Google',
-                status: 'connected',
-                capabilities: ['contacts_sync', 'calendar_sync'],
-                sync_summary: {
-                  last_sync_time: new Date().toISOString(),
-                  sync_count: 42,
-                  error_count: 0,
-                },
-                needs_reauth: false,
-                needs_reconsent: true,
-              },
-            },
-          ],
-        })
-      )
-    );
-
-    await authenticatedPage.route(
-      '**/api/integrations/google/sync-history**',
-      route =>
-        route.fulfill(
-          json({
-            data: [],
-            meta: { total: 0, page: 1, pageSize: 5 },
-          })
-        )
-    );
+    await setupIntegrationsMocks(authenticatedPage, [googleNeedsReconsent]);
 
     await authenticatedPage.route(
       '**/api/integrations/google/contacts/oauth/authorize',
@@ -347,59 +422,7 @@ test.describe('Integrations Page UI (mocked API)', () => {
   test('connected without needsReconsent: does not show scope upgrade banner', async ({
     authenticatedPage,
   }) => {
-    await authenticatedPage.route('**/api/integrations/health', route =>
-      route.fulfill(
-        json({
-          data: {
-            id: 'integrations',
-            type: 'integration-health',
-            attributes: {
-              overall: 'healthy',
-              lastChecked: new Date().toISOString(),
-              redis: { status: 'healthy', latency: 1, lastSeen: null },
-              worker: { status: 'healthy', latency: 1, lastSeen: null },
-            },
-          },
-        })
-      )
-    );
-
-    await authenticatedPage.route('**/api/integrations', route =>
-      route.fulfill(
-        json({
-          data: [
-            {
-              id: 'google',
-              type: 'integration',
-              attributes: {
-                name: 'Google',
-                status: 'connected',
-                capabilities: ['contacts_sync', 'calendar_sync'],
-                sync_summary: {
-                  last_sync_time: new Date().toISOString(),
-                  sync_count: 42,
-                  error_count: 0,
-                },
-                needs_reauth: false,
-                needs_reconsent: false,
-              },
-            },
-          ],
-        })
-      )
-    );
-
-    await authenticatedPage.route(
-      '**/api/integrations/google/sync-history**',
-      route =>
-        route.fulfill(
-          json({
-            data: [],
-            meta: { total: 0, page: 1, pageSize: 5 },
-          })
-        )
-    );
-
+    await setupIntegrationsMocks(authenticatedPage, [googleConnected]);
     await authenticatedPage.goto('/integrations');
 
     // Status should show Connected
@@ -416,214 +439,20 @@ test.describe('Integrations Page UI (mocked API)', () => {
   test('connected: can trigger reauthorize and reregister webhooks', async ({
     authenticatedPage,
   }) => {
-    let authorizeTriggered = false;
-    let reregisterTriggered = false;
+    await setupIntegrationsMocks(authenticatedPage, [googleConnected]);
 
-    await authenticatedPage.route('**/api/integrations/health', route =>
-      route.fulfill(
-        json({
-          data: {
-            id: 'integrations',
-            type: 'integration-health',
-            attributes: {
-              overall: 'healthy',
-              lastChecked: new Date().toISOString(),
-              redis: { status: 'healthy', latency: 1, lastSeen: null },
-              worker: { status: 'healthy', latency: 1, lastSeen: null },
-            },
-          },
-        })
-      )
+    await testReauthAndReregister(
+      authenticatedPage,
+      'google',
+      '/api/integrations/google/contacts/oauth/authorize',
+      'https://accounts.google.com/**'
     );
-
-    await authenticatedPage.route('**/api/integrations', route =>
-      route.fulfill(
-        json({
-          data: [
-            {
-              id: 'google',
-              type: 'integration',
-              attributes: {
-                name: 'Google',
-                status: 'connected',
-                capabilities: ['contacts_sync', 'calendar_sync'],
-                sync_summary: {
-                  last_sync_time: new Date().toISOString(),
-                  sync_count: 42,
-                  error_count: 0,
-                },
-                needs_reauth: false,
-                needs_reconsent: false,
-              },
-            },
-          ],
-        })
-      )
-    );
-
-    await authenticatedPage.route(
-      '**/api/integrations/google/sync-history**',
-      route =>
-        route.fulfill(
-          json({
-            data: [],
-            meta: { total: 0, page: 1, pageSize: 5 },
-          })
-        )
-    );
-
-    await authenticatedPage.route(
-      '**/api/integrations/google/contacts/oauth/authorize',
-      async route => {
-        const req = route.request();
-        if (req.method() !== 'POST') return route.fallback();
-        authorizeTriggered = true;
-        return route.fulfill(
-          json({
-            authorization_url: 'https://accounts.google.com/o/oauth2/auth',
-            state: 'test-state',
-          })
-        );
-      }
-    );
-
-    await authenticatedPage.route(
-      '**/api/integrations/google/webhooks/reregister',
-      async route => {
-        const req = route.request();
-        if (req.method() !== 'POST') return route.fallback();
-        reregisterTriggered = true;
-        return route.fulfill(
-          json({
-            data: {
-              type: 'webhook-reregister',
-              attributes: {
-                webhooks_queued: 1,
-                message: 'Webhooks reregistered successfully',
-              },
-            },
-          })
-        );
-      }
-    );
-
-    await authenticatedPage.goto('/integrations');
-
-    const panel = authenticatedPage.locator(
-      '[data-testid="integration-panel-google"]'
-    );
-
-    // Click Reregister Webhooks
-    const reregisterPromise = authenticatedPage.waitForRequest(
-      request =>
-        request
-          .url()
-          .includes('/api/integrations/google/webhooks/reregister') &&
-        request.method() === 'POST'
-    );
-    await panel
-      .getByTestId('reregister-webhooks-google')
-      .click({ force: true });
-    await reregisterPromise;
-    await expect.poll(() => reregisterTriggered).toBe(true);
-
-    // Test Reauthorize
-    // Setting globalThis.location.href navigates the page away, which we can intercept
-    await authenticatedPage.route(
-      'https://accounts.google.com/o/oauth2/auth',
-      route => route.fulfill(json({}))
-    );
-    const reauthorizePromise = authenticatedPage.waitForRequest(
-      request =>
-        request
-          .url()
-          .includes('/api/integrations/google/contacts/oauth/authorize') &&
-        request.method() === 'POST'
-    );
-    await panel.getByTestId('reauthorize-google').click({ force: true });
-    await reauthorizePromise;
-    await expect.poll(() => authorizeTriggered).toBe(true);
   });
 });
 
+// ─── Strava Tests ──────────────────────────────────────────────────────────
+
 test.describe('Strava Integration Panel (mocked API)', () => {
-  /**
-   * Helper to set up common route mocks for the integrations page
-   * with a given set of integration entries.
-   */
-  async function setupIntegrationsMocks(page: Page, integrations: unknown[]) {
-    await page.route('**/api/integrations/health', (route: Route) =>
-      route.fulfill(
-        json({
-          data: {
-            id: 'integrations',
-            type: 'integration-health',
-            attributes: {
-              overall: 'healthy',
-              lastChecked: new Date().toISOString(),
-              redis: { status: 'healthy', latency: 1, lastSeen: null },
-              worker: { status: 'healthy', latency: 1, lastSeen: null },
-            },
-          },
-        })
-      )
-    );
-
-    await page.route('**/api/integrations', (route: Route) =>
-      route.fulfill(
-        json({
-          data: integrations,
-        })
-      )
-    );
-
-    // Strava has no sync-history endpoint yet, but the page may request Google's
-    await page.route(
-      '**/api/integrations/google/sync-history**',
-      (route: Route) =>
-        route.fulfill(
-          json({
-            data: [],
-            meta: { total: 0, page: 1, pageSize: 5 },
-          })
-        )
-    );
-  }
-
-  const stravaDisconnected = {
-    id: 'strava',
-    type: 'integration',
-    attributes: {
-      name: 'Strava',
-      status: 'disconnected',
-      capabilities: ['activity_import'],
-      sync_summary: {
-        last_sync_time: null,
-        sync_count: 0,
-        error_count: 0,
-      },
-      needs_reauth: false,
-      needs_reconsent: false,
-    },
-  };
-
-  const stravaConnected = {
-    id: 'strava',
-    type: 'integration',
-    attributes: {
-      name: 'Strava',
-      status: 'connected',
-      capabilities: ['activity_import'],
-      sync_summary: {
-        last_sync_time: '2026-01-01T12:00:00Z',
-        sync_count: 5,
-        error_count: 0,
-      },
-      needs_reauth: false,
-      needs_reconsent: false,
-    },
-  };
-
   test('strava disconnected: shows Connect button', async ({
     authenticatedPage,
   }) => {
@@ -776,77 +605,11 @@ test.describe('Strava Integration Panel (mocked API)', () => {
   }) => {
     await setupIntegrationsMocks(authenticatedPage, [stravaConnected]);
 
-    let authorizeTriggered = false;
-    let reregisterTriggered = false;
-
-    await authenticatedPage.route(
-      '**/api/integrations/strava/oauth/authorize',
-      async route => {
-        const req = route.request();
-        if (req.method() !== 'POST') return route.fallback();
-        authorizeTriggered = true;
-        return route.fulfill(
-          json({
-            authorization_url: 'https://www.strava.com/oauth/authorize',
-            state: 'test-state',
-          })
-        );
-      }
+    await testReauthAndReregister(
+      authenticatedPage,
+      'strava',
+      '/api/integrations/strava/oauth/authorize',
+      'https://www.strava.com/**'
     );
-
-    await authenticatedPage.route(
-      '**/api/integrations/strava/webhooks/reregister',
-      async route => {
-        const req = route.request();
-        if (req.method() !== 'POST') return route.fallback();
-        reregisterTriggered = true;
-        return route.fulfill(
-          json({
-            data: {
-              type: 'webhook-reregister',
-              attributes: {
-                webhooks_queued: 1,
-                message: 'Webhooks reregistered successfully',
-              },
-            },
-          })
-        );
-      }
-    );
-
-    await authenticatedPage.goto('/integrations');
-
-    const panel = authenticatedPage.locator(
-      '[data-testid="integration-panel-strava"]'
-    );
-
-    // Click Reregister Webhooks
-    const reregisterPromise = authenticatedPage.waitForRequest(
-      request =>
-        request
-          .url()
-          .includes('/api/integrations/strava/webhooks/reregister') &&
-        request.method() === 'POST'
-    );
-    await panel
-      .getByTestId('reregister-webhooks-strava')
-      .click({ force: true });
-    await reregisterPromise;
-    await expect.poll(() => reregisterTriggered).toBe(true);
-
-    // Test Reauthorize
-    // Setting globalThis.location.href navigates the page away, which we can intercept
-    await authenticatedPage.route(
-      'https://www.strava.com/oauth/authorize',
-      route => route.fulfill(json({}))
-    );
-    const reauthorizePromise = authenticatedPage.waitForRequest(
-      request =>
-        request.url().includes('/api/integrations/strava/oauth/authorize') &&
-        request.method() === 'POST'
-    );
-    await panel.getByTestId('reauthorize-strava').click({ force: true });
-    await reauthorizePromise;
-    await expect.poll(() => authorizeTriggered).toBe(true);
   });
 });

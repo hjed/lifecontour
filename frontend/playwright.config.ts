@@ -84,6 +84,16 @@ export default defineConfig({
 
     /* Video recording - only on failure in CI to save resources */
     video: process.env.CI ? 'retain-on-failure' : 'off',
+
+    /*
+     * Disable CSS animations/transitions during tests.
+     * The popover open animations (fade-in, zoom-in, slide-in from tw-animate-css)
+     * cause calendar buttons to be perpetually "not stable" in Playwright's
+     * actionability checks, leading to consistent click timeouts.
+     */
+    contextOptions: {
+      reducedMotion: 'reduce',
+    },
   },
 
   /* Configure projects for major browsers */
