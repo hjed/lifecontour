@@ -1023,6 +1023,7 @@ class TestJournalTypeManagement:
                 "attributes": {
                     "location": "Test Location",
                     "is_all_day": True,
+                    "event_state": "cancelled",
                 },
             }
         }
@@ -1032,7 +1033,13 @@ class TestJournalTypeManagement:
         )
 
         # Should succeed or return validation error
-        assert response.status_code in [200, 400, 422]
+        assert response.status_code == 200
+
+        response_json = response.json()
+        event_data = response_json["data"]["attributes"]["type_data"]["event"]
+        assert event_data["location"] == "Test Location"
+        assert event_data["is_all_day"] is True
+        assert event_data["event_state"] == "cancelled"
 
     async def test_update_event_type_data_with_times(self, integration_api_client):
         """Test updating EVENT type data with HH:MM times explicitly."""
