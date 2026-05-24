@@ -78,7 +78,10 @@ describe('SidebarContext', () => {
     jest.useRealTimers();
   });
 
-  const renderWithProvider = (ui: React.ReactNode, props?: any) => {
+  const renderWithProvider = (
+    ui: React.ReactNode,
+    props?: Record<string, unknown>
+  ) => {
     const result = render(<SidebarProvider {...props}>{ui}</SidebarProvider>);
     act(() => {
       jest.runAllTimers();
