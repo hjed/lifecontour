@@ -725,12 +725,17 @@ class GoogleAPIClient:
     async def update_event(
         self, event_id: str, event_data: dict[str, Any], calendar_id: str = "primary"
     ) -> dict[str, Any]:
-        """Update an existing event."""
+        """Update an existing event using partial update (patch).
+
+        Uses PATCH semantics so that only the fields present in event_data are
+        modified.  Unspecified fields — notably ``attendees`` — are left
+        untouched on the server, preventing accidental removal of invites.
+        """
         try:
             service = await self._get_calendar_service()
             result = (
                 service.events()
-                .update(calendarId=calendar_id, eventId=event_id, body=event_data)
+                .patch(calendarId=calendar_id, eventId=event_id, body=event_data)
                 .execute()
             )
             return cast(dict[str, Any], result)

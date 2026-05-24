@@ -78,11 +78,12 @@ async def test_create_event_success(mock_auth_service, mock_google_calendar_serv
 
 @pytest.mark.asyncio
 async def test_update_event_success(mock_auth_service, mock_google_calendar_service):
+    """Verify update_event uses patch() (partial update) to preserve unspecified fields like attendees."""
     from google_client import GoogleAPIClient
 
-    # Setup mock
-    mock_update = mock_google_calendar_service.events.return_value.update
-    mock_update.return_value.execute.return_value = {
+    # Setup mock — patch() is the correct method for partial updates
+    mock_patch = mock_google_calendar_service.events.return_value.patch
+    mock_patch.return_value.execute.return_value = {
         "id": "event123",
         "summary": "Updated Event",
     }
@@ -102,7 +103,9 @@ async def test_update_event_success(mock_auth_service, mock_google_calendar_serv
         result = await client.update_event("event123", event_data, "primary")
 
         assert result["summary"] == "Updated Event"
-        mock_update.assert_called_once_with(
+        # Must use patch() not update() — update() is a full replacement that
+        # would remove attendees/invites when they aren't in the payload
+        mock_patch.assert_called_once_with(
             calendarId="primary", eventId="event123", body=event_data
         )
 
