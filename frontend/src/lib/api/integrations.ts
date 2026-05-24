@@ -28,6 +28,8 @@ import {
   StravaAthleteMappingResponse,
   StravaAthleteMappingCreateRequest,
   UnmatchedStravaAthleteListResponse,
+  WebhookReregisterResponse,
+  WebhookUrlResponse,
 } from '@/types/integrations';
 import { JsonApiErrorResponse } from '@/types/api';
 
@@ -837,5 +839,57 @@ export function useSaveSnipeItSettings() {
     onError: (error: Error) => {
       toast.error(`Failed to save Snipe-IT settings: ${error.message}`);
     },
+  });
+}
+
+// Webhook Re-registration
+
+/**
+ * Re-register webhooks for an integration.
+ * - Google: POST /api/integrations/google/webhooks/reregister
+ * - Strava: POST /api/integrations/strava/webhooks/reregister
+ */
+export async function reregisterWebhooks(
+  integrationId: string
+): Promise<WebhookReregisterResponse> {
+  const response = await fetch(
+    `/api/integrations/${integrationId}/webhooks/reregister`,
+    {
+      method: 'POST',
+      credentials: 'include',
+    }
+  );
+  return handleApiResponse<WebhookReregisterResponse>(response);
+}
+
+export function useReregisterWebhooks(integrationId: string) {
+  return useMutation({
+    mutationFn: () => reregisterWebhooks(integrationId),
+    onSuccess: (data: WebhookReregisterResponse) => {
+      toast.success(data.data.attributes.message);
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to re-register webhooks: ${error.message}`);
+    },
+  });
+}
+
+/**
+ * Fetch the webhook URL for Snipe-IT (manual webhook setup).
+ * GET /api/integrations/snipeit/webhook-url
+ */
+export async function fetchSnipeItWebhookUrl(): Promise<WebhookUrlResponse> {
+  const response = await fetch('/api/integrations/snipeit/webhook-url', {
+    credentials: 'include',
+  });
+  return handleApiResponse<WebhookUrlResponse>(response);
+}
+
+export function useSnipeItWebhookUrl(enabled: boolean = false) {
+  return useQuery({
+    queryKey: [...integrationKeys.all, 'snipeit', 'webhook-url'],
+    queryFn: fetchSnipeItWebhookUrl,
+    enabled,
+    staleTime: 5 * 60 * 1000, // 5 minutes
   });
 }

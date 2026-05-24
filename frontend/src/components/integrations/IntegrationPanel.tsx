@@ -7,6 +7,7 @@ import { SyncControls } from './SyncControls';
 import { SyncHistory } from './SyncHistory';
 import { HealthStatus } from './HealthStatus';
 import { IntegrationSettings } from './IntegrationSettings';
+import { IntegrationActions } from './IntegrationActions';
 
 // Map integration ID to a specific icon
 function getIntegrationIcon(id: string) {
@@ -114,6 +115,8 @@ export function IntegrationPanel({ integration }: IntegrationPanelProps) {
             needsReauth={needs_reauth}
             needsReconsent={needs_reconsent}
           />
+
+          <IntegrationActions integrationId={id} connected={connected} />
 
           <div className='flex flex-wrap items-center gap-2 border-t pt-4'>
             <SyncHistory integrationId={id} />
