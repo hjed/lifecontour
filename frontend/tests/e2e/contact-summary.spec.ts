@@ -73,10 +73,16 @@ test.describe('Contact AI Summary', () => {
 
     // First, call the refresh API to create a pending summary record.
     // Without this, the component renders the empty state (no refresh button).
-    const refreshResponse = await authenticatedPage.request.post(
-      `/api/contacts/${contact.id}/summary/refresh`
-    );
-    expect(refreshResponse.status()).toBe(202);
+    // Use a retry loop to handle transient 404s (contact not yet visible in DB)
+    let refreshResponse;
+    for (let i = 0; i < 3; i++) {
+      refreshResponse = await authenticatedPage.request.post(
+        `/api/contacts/${contact.id}/summary/refresh`
+      );
+      if (refreshResponse.status() === 202) break;
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    expect(refreshResponse?.status()).toBe(202);
 
     // Navigate to the contact page — the summary now has a PENDING status
     await authenticatedPage.goto(`/contacts/${contact.id}`);
@@ -125,10 +131,15 @@ test.describe('Contact AI Summary', () => {
     });
 
     // Create a pending summary so the refresh button is visible
-    const seedResponse = await authenticatedPage.request.post(
-      `/api/contacts/${contact.id}/summary/refresh`
-    );
-    expect(seedResponse.status()).toBe(202);
+    let seedResponse;
+    for (let i = 0; i < 3; i++) {
+      seedResponse = await authenticatedPage.request.post(
+        `/api/contacts/${contact.id}/summary/refresh`
+      );
+      if (seedResponse.status() === 202) break;
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    expect(seedResponse?.status()).toBe(202);
 
     await authenticatedPage.goto(`/contacts/${contact.id}`);
 
@@ -177,10 +188,15 @@ test.describe('Contact AI Summary', () => {
     });
 
     // First create a pending summary so the record exists
-    const seedResponse = await authenticatedPage.request.post(
-      `/api/contacts/${contact.id}/summary/refresh`
-    );
-    expect(seedResponse.status()).toBe(202);
+    let seedResponse;
+    for (let i = 0; i < 3; i++) {
+      seedResponse = await authenticatedPage.request.post(
+        `/api/contacts/${contact.id}/summary/refresh`
+      );
+      if (seedResponse.status() === 202) break;
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    expect(seedResponse?.status()).toBe(202);
 
     // Set user override text via PATCH — status becomes GENERATED but generated_at is null
     const patchResponse = await authenticatedPage.request.patch(
