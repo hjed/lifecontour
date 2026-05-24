@@ -85,6 +85,7 @@ from app.core.journal.models.repositories import (
     GearMaintenanceDataRepository,
     JoggingDataRepository,
     JournalContactRelationshipRepository,
+    JournalRepository,
     JournalTagRepository,
     KayakingDataRepository,
     MoodDataRepository,
@@ -1773,7 +1774,7 @@ async def get_journal_external_links(
     journal_id: int,
     journal_service: FromDishka[JournalService],
     fitness_data_repo: FromDishka[FitnessDataRepository],
-    connection: FromDishka[AsyncConnection],
+    journal_repo: FromDishka[JournalRepository],
     user: FromDishka[SessionUser],
 ) -> ExternalLinksResponse:
     """
@@ -1793,29 +1794,15 @@ async def get_journal_external_links(
         strava_activity_id = fitness_data.strava_activity_id
 
     # Fetch external event links for Google Calendar links
-    from sqlalchemy import text
+    external_event_links = await journal_repo.get_external_event_links(journal_id)
 
-    result = await connection.execute(
-        text(
-            "SELECT l.external_event_id, c.google_calendar_id, l.calendar_id "
-            "FROM journal_external_event_links l "
-            "LEFT JOIN calendars c ON l.calendar_id = c.id "
-            "WHERE l.journal_id = :journal_id"
-        ),
-        {"journal_id": journal_id},
-    )
-    external_event_links = [
-        {
-            "external_event_id": row[0],
-            "calendar_id": str(row[1]) if row[1] else None,
-            "internal_calendar_id": str(row[2]) if row[2] else None,
-        }
-        for row in result
-    ]
+    # Fetch Snipe-IT links (maintenance and checkout asset)
+    snipeit_links = await journal_repo.get_snipeit_links(journal_id, user.id)
 
     links = build_journal_external_links(
         strava_activity_id=strava_activity_id,
         external_event_links=external_event_links,
+        snipeit_links=snipeit_links,
     )
 
     return ExternalLinksResponse(

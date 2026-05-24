@@ -90,20 +90,76 @@ def build_google_contacts_url(external_entity_id: str | None) -> str | None:
     return f"https://contacts.google.com/person/{resource_name}"
 
 
+def build_snipeit_asset_url(base_url: str | None, asset_id: str | None) -> str | None:
+    """Build a Snipe-IT hardware asset URL.
+
+    Args:
+        base_url: The Snipe-IT base URL for the user.
+        asset_id: The Snipe-IT asset ID.
+
+    Returns:
+        Full Snipe-IT asset URL, or None if parameters are missing.
+    """
+    if not base_url or not base_url.strip() or not asset_id or not asset_id.strip():
+        return None
+
+    # Strip trailing slashes or /api/v1 from base_url to get the frontend URL
+    # base_url might be "https://snipeit.example.com" or "https://snipeit.example.com/api/v1/"
+    clean_base = base_url.strip().rstrip("/")
+    if clean_base.endswith("/api/v1"):
+        clean_base = clean_base[:-7]
+
+    return f"{clean_base}/hardware/{asset_id.strip()}"
+
+
+def build_snipeit_maintenance_url(
+    base_url: str | None, maintenance_id: str | None
+) -> str | None:
+    """Build a Snipe-IT maintenance URL.
+
+    Args:
+        base_url: The Snipe-IT base URL for the user.
+        maintenance_id: The Snipe-IT maintenance ID.
+
+    Returns:
+        Full Snipe-IT maintenance URL, or None if parameters are missing.
+    """
+    if (
+        not base_url
+        or not base_url.strip()
+        or not maintenance_id
+        or not maintenance_id.strip()
+    ):
+        return None
+
+    clean_base = base_url.strip().rstrip("/")
+    if clean_base.endswith("/api/v1"):
+        clean_base = clean_base[:-7]
+
+    clean_maintenance_id = maintenance_id.strip()
+    if clean_maintenance_id.startswith("snipeit_maint:"):
+        clean_maintenance_id = clean_maintenance_id[len("snipeit_maint:") :]
+
+    return f"{clean_base}/hardware/maintenances/{clean_maintenance_id}"
+
+
 def build_journal_external_links(
     *,
     strava_activity_id: str | None,
     external_event_links: list[dict[str, Any]],
+    snipeit_links: list[dict[str, Any]] | None = None,
 ) -> list[ExternalLinkInfo]:
     """Build a list of external links for a journal.
 
-    Aggregates links from Strava fitness data and Google Calendar
-    external event links.
+    Aggregates links from Strava fitness data, Google Calendar
+    external event links, and Snipe-IT sync metadata.
 
     Args:
         strava_activity_id: Strava activity ID from fitness_data, or None.
         external_event_links: List of dicts with 'external_event_id' and
             'calendar_id' keys from JournalExternalEventLink records.
+        snipeit_links: List of dicts with 'integration_source', 'external_id',
+            and 'base_url' keys from sync_metadata and snipeit_settings.
 
     Returns:
         List of ExternalLinkInfo objects for display.
@@ -135,6 +191,32 @@ def build_journal_external_links(
                 unique_key=event_id if event_id else (internal_cal_id or ""),
             )
         )
+
+    # Snipe-IT links from sync metadata
+    if snipeit_links:
+        for snipeit_link in snipeit_links:
+            source = snipeit_link.get("integration_source", "")
+            ext_id = snipeit_link.get("external_id", "")
+            base_url = snipeit_link.get("base_url", "")
+
+            if source == "snipeit_maintenance":
+                links.append(
+                    ExternalLinkInfo(
+                        source="snipeit_maintenance",
+                        url=build_snipeit_maintenance_url(base_url, ext_id),
+                        external_id=ext_id,
+                        unique_key=f"maint-{ext_id}",
+                    )
+                )
+            elif source == "snipeit":
+                links.append(
+                    ExternalLinkInfo(
+                        source="snipeit",
+                        url=build_snipeit_asset_url(base_url, ext_id),
+                        external_id=ext_id,
+                        unique_key=f"asset-{ext_id}",
+                    )
+                )
 
     return links
 

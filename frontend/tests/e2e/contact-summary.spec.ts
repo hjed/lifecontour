@@ -176,6 +176,12 @@ test.describe('Contact AI Summary', () => {
       await dataManager.cleanup();
     });
 
+    // First create a pending summary so the record exists
+    const seedResponse = await authenticatedPage.request.post(
+      `/api/contacts/${contact.id}/summary/refresh`
+    );
+    expect(seedResponse.status()).toBe(202);
+
     // Set user override text via PATCH — status becomes GENERATED but generated_at is null
     const patchResponse = await authenticatedPage.request.patch(
       `/api/contacts/${contact.id}/summary`,

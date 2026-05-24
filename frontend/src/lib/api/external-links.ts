@@ -16,6 +16,8 @@ export const externalLinkKeys = {
     ['journals', journalId, 'external-links'] as const,
   contact: (contactId: string) =>
     ['contacts', contactId, 'external-links'] as const,
+  gearItem: (gearItemId: string) =>
+    ['gear-items', gearItemId, 'external-links'] as const,
 };
 
 // Fetch Functions
@@ -53,6 +55,21 @@ async function fetchContactExternalLinks(
   return response.json();
 }
 
+async function fetchGearItemExternalLinks(
+  gearItemId: string
+): Promise<ExternalLinksResponse> {
+  // Using direct path since API_ENDPOINTS.GEAR_ITEMS might not be fully defined like JOURNALS
+  const response = await fetch(`/api/gear-items/${gearItemId}/external-links`, {
+    credentials: 'include',
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch gear item external links');
+  }
+
+  return response.json();
+}
+
 // React Query Hooks
 
 /**
@@ -75,6 +92,18 @@ export function useContactExternalLinks(contactId: string) {
     queryKey: externalLinkKeys.contact(contactId),
     queryFn: () => fetchContactExternalLinks(contactId),
     enabled: !!contactId,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+}
+
+/**
+ * Fetch external system links for a gear item.
+ */
+export function useGearItemExternalLinks(gearItemId: string) {
+  return useQuery({
+    queryKey: externalLinkKeys.gearItem(gearItemId),
+    queryFn: () => fetchGearItemExternalLinks(gearItemId),
+    enabled: !!gearItemId,
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 }

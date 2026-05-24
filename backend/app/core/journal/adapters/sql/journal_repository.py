@@ -933,3 +933,82 @@ class SqlJournalRepository(JournalRepository):
         # We need to access it safely
         count_value = row[0]  # Access by index instead of attribute
         return int(count_value) if count_value is not None else 0
+
+    async def get_external_event_links(self, journal_id: int) -> list[dict[str, Any]]:
+        """Get Google Calendar external event links for a journal."""
+        query = text(
+            "SELECT l.external_event_id, c.google_calendar_id, l.calendar_id "
+            "FROM journal_external_event_links l "
+            "LEFT JOIN calendars c ON l.calendar_id = c.id "
+            "WHERE l.journal_id = :journal_id"
+        )
+        result = await self.conn.execute(query, {"journal_id": journal_id})
+        links = []
+        for row in result.fetchall():
+            links.append(
+                {
+                    "external_event_id": row[0],
+                    "calendar_id": str(row[1]) if row[1] else None,
+                    "internal_calendar_id": str(row[2]) if row[2] else None,
+                }
+            )
+        return links
+
+    async def get_snipeit_links(
+        self, journal_id: int, user_id: str
+    ) -> list[dict[str, Any]]:
+        """Get Snipe-IT external links for a journal."""
+        snipeit_links = []
+
+        # Maintenance links
+        snipeit_maintenance_query = await self.conn.execute(
+            text(
+                """
+                SELECT 'snipeit_maintenance' AS integration_source, m.external_id, s.base_url
+                FROM sync_metadata m
+                JOIN snipeit_settings s ON s.user_id = :user_id
+                WHERE m.internal_uuid = :journal_uuid
+                AND m.integration_source = 'snipeit_maintenance'
+                """
+            ),
+            {"journal_uuid": str(journal_id), "user_id": user_id},
+        )
+        for row in snipeit_maintenance_query.fetchall():
+            snipeit_links.append(
+                {
+                    "integration_source": row[0],
+                    "external_id": row[1],
+                    "base_url": row[2],
+                }
+            )
+
+        # Checkout/Usage links
+        snipeit_checkout_query = await self.conn.execute(
+            text(
+                """
+                SELECT 'snipeit' AS integration_source, m_asset.external_id, s.base_url
+                FROM sync_metadata m_checkout
+                JOIN journal_gear_usage_data gud ON gud.journal_id = :journal_id
+                JOIN sync_metadata m_asset ON m_asset.internal_uuid = CAST(gud.gear_item_id AS VARCHAR)
+                    AND m_asset.integration_source = 'snipeit'
+                JOIN snipeit_settings s ON s.user_id = :user_id
+                WHERE m_checkout.internal_uuid = :journal_uuid
+                AND m_checkout.integration_source = 'snipeit_checkout'
+                """
+            ),
+            {
+                "journal_id": journal_id,
+                "journal_uuid": str(journal_id),
+                "user_id": user_id,
+            },
+        )
+        for row in snipeit_checkout_query.fetchall():
+            snipeit_links.append(
+                {
+                    "integration_source": row[0],
+                    "external_id": row[1],
+                    "base_url": row[2],
+                }
+            )
+
+        return snipeit_links

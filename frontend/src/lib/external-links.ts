@@ -6,7 +6,16 @@
  * Google Contacts) on journal and contact detail pages.
  */
 
-import { Activity, Calendar, Users, Link, type LucideIcon } from 'lucide-react';
+import {
+  Activity,
+  Calendar,
+  Users,
+  Link,
+  Package,
+  Wrench,
+  ClipboardList,
+  type LucideIcon,
+} from 'lucide-react';
 
 /**
  * External system link returned by the API.
@@ -36,6 +45,9 @@ const SOURCE_ICONS: Record<string, LucideIcon> = {
   strava: Activity,
   google_calendar: Calendar,
   google_contacts: Users,
+  snipeit: Package,
+  snipeit_maintenance: Wrench,
+  snipeit_checkout: ClipboardList,
 };
 
 /** Map of source identifiers to human-readable labels */
@@ -43,6 +55,9 @@ const SOURCE_LABELS: Record<string, string> = {
   strava: 'Strava',
   google_calendar: 'Google Calendar',
   google_contacts: 'Google Contacts',
+  snipeit: 'Snipe-IT Asset',
+  snipeit_maintenance: 'Snipe-IT Maintenance',
+  snipeit_checkout: 'Snipe-IT Checkout',
 };
 
 /**
