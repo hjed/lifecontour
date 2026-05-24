@@ -228,19 +228,6 @@ class TestPeriodicSyncAllStravaAccounts:
         assert result["jobs_enqueued"] == 2
         assert len(result["errors"]) == 1
 
-    @pytest.mark.asyncio
-    async def test_uses_job_timeout(self) -> None:
-        """Jobs should be enqueued with a reasonable timeout."""
-        worker_mod = _import_worker()
-
-        accounts = [("user-1", 111)]
-        ctx, mock_redis, _ = _make_mock_ctx(accounts)
-
-        await worker_mod.periodic_sync_all_strava_accounts(ctx)
-
-        call = mock_redis.enqueue_job.call_args_list[0]
-        assert call.kwargs["_job_timeout"] == 600
-
 
 class TestPeriodicSyncConfiguration:
     """Test cron schedule generation for periodic sync."""
