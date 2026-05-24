@@ -90,7 +90,6 @@ warn_required_dynamic_aliases = true
 
 [[tool.mypy.overrides]]
 module = [
-    "arq.*",
     "google.*",
     "googleapiclient.*",
     "redis.*",

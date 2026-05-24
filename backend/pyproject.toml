@@ -114,20 +114,7 @@ warn_required_dynamic_aliases = true
 
 [[tool.mypy.overrides]]
 module = [
-    "alembic.*",
     "psycopg2.*",
-    "stdnum.*",
-    "pycountry.*",
-    "authlib.integrations.starlette_client",
-    "googleapiclient.*",
-    "arq.*",
-    "dishka.*",
-    "fastmcp.*",
-    "redis.asyncio",
-    "opentelemetry.exporter.otlp.proto.http.trace_exporter",
-    "googleapiclient.*",
-    "gpxpy.*",
-    "google.genai.*",
     "reportlab.*",
 ]
 ignore_missing_imports = true
