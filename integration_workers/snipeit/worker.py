@@ -97,9 +97,9 @@ async def _get_auth_data(session_factory: Any, user_id: str) -> dict[str, Any] |
     async with session_factory() as session:
         result = await session.execute(
             text("""
-                SELECT encrypted_access_token, encrypted_refresh_token
+                SELECT encrypted_api_key
                 FROM user_snipe_it_auth
-                WHERE user_id = :user_id
+                WHERE user_id = :user_id AND needs_reauth = FALSE
                 LIMIT 1
             """),
             {"user_id": user_id},
@@ -109,47 +109,8 @@ async def _get_auth_data(session_factory: Any, user_id: str) -> dict[str, Any] |
             return None
 
         return {
-            "encrypted_access_token": row.encrypted_access_token,
-            "encrypted_refresh_token": row.encrypted_refresh_token,
+            "encrypted_api_key": row.encrypted_api_key,
         }
-
-
-async def _update_user_tokens(
-    session_factory: Any,
-    user_id: str,
-    access_token: str,
-    refresh_token: str,
-    auth_service: Any,
-) -> None:
-    from datetime import UTC, datetime, timedelta
-
-    from sqlalchemy import text
-
-    # Rough estimate since SnipeIT token refresh returns expires_in
-    # This might need adjustment if SnipeIT requires precise expires_at
-    expires_at = datetime.now(UTC) + timedelta(seconds=31536000)
-
-    encrypted_access = auth_service.encrypt(access_token)
-    encrypted_refresh = auth_service.encrypt(refresh_token)
-
-    async with session_factory() as session:
-        await session.execute(
-            text("""
-                UPDATE user_snipe_it_auth
-                SET encrypted_access_token = :access,
-                    encrypted_refresh_token = :refresh,
-                    token_expires_at = :expires_at,
-                    updated_at = NOW()
-                WHERE user_id = :user_id
-            """),
-            {
-                "access": encrypted_access,
-                "refresh": encrypted_refresh,
-                "expires_at": expires_at,
-                "user_id": user_id,
-            },
-        )
-        await session.commit()
 
 
 def _create_sync_service(
@@ -158,58 +119,19 @@ def _create_sync_service(
     base_url: str,
     snipeit_user_id: str | None,
     worker_settings: SnipeItWorkerSettings,
-    session_factory: Any,
+    session_factory: Any,  # noqa: ARG001
 ) -> Any:
-    # Simple Fernet decrypter for tokens
     from cryptography.fernet import Fernet
 
     from snipeit_api_client import SnipeItAPIClient
     from snipeit_sync_service import SnipeItSyncService
 
     fernet = Fernet(worker_settings.encryption_key.encode())
-
-    access_token = fernet.decrypt(auth_data["encrypted_access_token"]).decode()
-    refresh_token = fernet.decrypt(auth_data["encrypted_refresh_token"]).decode()
-
-    async def on_token_refresh() -> str:
-        # Simplistic token refresh logic
-        import httpx
-
-        nonlocal refresh_token
-
-        token_url = f"{base_url.rstrip('/')}/oauth/token"
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                token_url,
-                data={
-                    "grant_type": "refresh_token",
-                    "refresh_token": refresh_token,
-                    "client_id": getattr(worker_settings, "snipeit_client_id", ""),
-                    "client_secret": getattr(
-                        worker_settings, "snipeit_client_secret", ""
-                    ),
-                },
-            )
-            response.raise_for_status()
-            token_data = response.json()
-            new_access = token_data["access_token"]
-            new_refresh = token_data.get("refresh_token", refresh_token)
-
-            # Simple wrapper to match the signature
-            class DummyAuth:
-                def encrypt(self, txt: str) -> bytes:
-                    return fernet.encrypt(txt.encode())
-
-            await _update_user_tokens(
-                session_factory, user_id, new_access, new_refresh, DummyAuth()
-            )
-            refresh_token = new_refresh
-            return str(new_access)
+    api_key = fernet.decrypt(auth_data["encrypted_api_key"]).decode()
 
     api_client = SnipeItAPIClient.create(
         base_url=base_url,
-        access_token=access_token,
-        on_token_refresh=on_token_refresh,
+        api_key=api_key,
     )
 
     return SnipeItSyncService(

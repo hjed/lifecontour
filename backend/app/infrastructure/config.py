@@ -181,12 +181,8 @@ class Settings(BaseSettings):
     )
 
     # Snipe-IT integration settings
-    snipeit_client_id: str = Field(default="", description="Snipe-IT OAuth client ID")
-    snipeit_client_secret: str = Field(
-        default="", description="Snipe-IT OAuth client secret"
-    )
     snipeit_encryption_key: str = Field(
-        default="", description="Fernet encryption key for Snipe-IT OAuth tokens"
+        default="", description="Fernet encryption key for Snipe-IT API key storage"
     )
 
     immich_base_url: str = Field(default="", description="Immich instance base URL")

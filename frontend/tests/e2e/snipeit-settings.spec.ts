@@ -333,6 +333,195 @@ test.describe('Snipe-IT Integration Settings', () => {
     );
     await expect(userIdInput).toHaveValue('99');
   });
+
+  test('settings modal submits API Key and triggers connect flow', async ({
+    authenticatedPage,
+  }) => {
+    await setupBaseRoutes(authenticatedPage);
+    await page_mockSnipeItSettingsNotFound(authenticatedPage);
+
+    let connectCalled = false;
+    let savedConnectPayload: Record<string, unknown> | null = null;
+    await authenticatedPage.route(
+      '**/api/integrations/snipeit/connect',
+      async route => {
+        if (route.request().method() === 'POST') {
+          connectCalled = true;
+          savedConnectPayload = route.request().postDataJSON();
+          return route.fulfill(
+            json({
+              data: {
+                id: 'snipeit',
+                type: 'integration',
+                attributes: {
+                  name: 'Snipe-IT',
+                  status: 'connected',
+                },
+              },
+            })
+          );
+        }
+        return route.fallback();
+      }
+    );
+
+    // Mock settings save to succeed
+    await authenticatedPage.route(
+      '**/api/integrations/snipeit/settings',
+      async route => {
+        if (route.request().method() === 'PUT') {
+          return route.fulfill(
+            json({
+              data: {
+                id: '123',
+                type: 'snipeit_settings',
+                attributes: {
+                  base_url: 'https://snipeit.example.com',
+                  snipeit_user_id: '42',
+                },
+              },
+            })
+          );
+        }
+        return route.fallback();
+      }
+    );
+
+    await authenticatedPage.goto('/integrations');
+
+    // Open settings modal
+    const snipeitPanel = authenticatedPage.locator(
+      '[data-testid="integration-panel-snipeit"]'
+    );
+    await expect(snipeitPanel).toBeVisible();
+    await snipeitPanel.getByRole('button', { name: /settings/i }).click();
+
+    // Fill in the form
+    await authenticatedPage
+      .locator('[data-testid="snipeit-base-url-input"]')
+      .fill('https://snipeit.example.com');
+    await authenticatedPage
+      .locator('[data-testid="snipeit-user-id-input"]')
+      .fill('42');
+    await authenticatedPage
+      .locator('[data-testid="snipeit-api-key-input"]')
+      .fill('super-secret-key');
+
+    // Submit
+    await authenticatedPage
+      .locator('[data-testid="snipeit-settings-save-button"]')
+      .click();
+
+    // Verify connect endpoint was called with API key
+    await expect(async () => {
+      expect(connectCalled).toBe(true);
+      expect(savedConnectPayload).not.toBeNull();
+      expect(savedConnectPayload?.api_key).toBe('super-secret-key');
+    }).toPass({ timeout: 5000 });
+  });
+
+  test('disconnect button sends DELETE and updates status', async ({
+    authenticatedPage,
+  }) => {
+    // Override base routes to make Snipe-IT connected
+    await authenticatedPage.route('**/api/integrations', route => {
+      if (new URL(route.request().url()).pathname !== '/api/integrations')
+        return route.fallback();
+      return route.fulfill(
+        json({
+          data: [
+            {
+              id: 'snipeit',
+              type: 'integration',
+              attributes: {
+                name: 'Snipe-IT',
+                status: 'connected',
+                capabilities: [],
+                sync_summary: { sync_count: 0, error_count: 0 },
+                needs_reauth: false,
+                needs_reconsent: false,
+              },
+            },
+          ],
+        })
+      );
+    });
+    await authenticatedPage.route('**/api/integrations/health', route =>
+      route.fulfill(
+        json({
+          data: {
+            type: 'integration-health',
+            attributes: { overall: 'healthy' },
+          },
+        })
+      )
+    );
+
+    let deleteCalled = false;
+    await authenticatedPage.route(
+      '**/api/integrations/snipeit/connect',
+      async route => {
+        if (route.request().method() === 'DELETE') {
+          deleteCalled = true;
+          // Mock the disconnected state
+          await authenticatedPage.route('**/api/integrations', r => {
+            if (new URL(r.request().url()).pathname !== '/api/integrations')
+              return r.fallback();
+            return r.fulfill(
+              json({
+                data: [
+                  {
+                    id: 'snipeit',
+                    type: 'integration',
+                    attributes: {
+                      name: 'Snipe-IT',
+                      status: 'disconnected',
+                      capabilities: [],
+                      sync_summary: { sync_count: 0, error_count: 0 },
+                      needs_reauth: false,
+                      needs_reconsent: false,
+                    },
+                  },
+                ],
+              })
+            );
+          });
+          return route.fulfill(
+            json({
+              success: true,
+              message: 'Snipe-IT disconnected successfully',
+            })
+          );
+        }
+        return route.fallback();
+      }
+    );
+
+    await authenticatedPage.goto('/integrations');
+
+    const snipeitPanel = authenticatedPage.locator(
+      '[data-testid="integration-panel-snipeit"]'
+    );
+    await expect(snipeitPanel).toBeVisible();
+    await expect(snipeitPanel).toContainText('Connected');
+
+    // Open settings modal where disconnect button lives
+    await snipeitPanel.getByRole('button', { name: /settings/i }).click();
+
+    const disconnectButton = authenticatedPage.locator(
+      '[data-testid="snipeit-disconnect-button"]'
+    );
+    await expect(disconnectButton).toBeVisible();
+
+    // Initiate disconnect
+    await disconnectButton.click();
+
+    // Verify delete was called and UI updates
+    await expect(async () => {
+      expect(deleteCalled).toBe(true);
+      await expect(snipeitPanel).toContainText('Disconnected');
+    }).toPass({ timeout: 5000 });
+  });
 });
 
 /**

@@ -842,6 +842,84 @@ export function useSaveSnipeItSettings() {
   });
 }
 
+// Snipe-IT API Key Connection
+
+export interface SnipeItConnectRequest {
+  api_key: string;
+}
+
+export interface SnipeItConnectResponse {
+  success: boolean;
+  message: string;
+}
+
+export interface SnipeItDisconnectResponse {
+  success: boolean;
+  message: string;
+}
+
+export async function connectSnipeIt(
+  request: SnipeItConnectRequest
+): Promise<SnipeItConnectResponse> {
+  const response = await fetch('/api/integrations/snipeit/connect', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    credentials: 'include',
+    body: JSON.stringify(request),
+  });
+  return handleApiResponse<SnipeItConnectResponse>(response);
+}
+
+export async function disconnectSnipeIt(): Promise<SnipeItDisconnectResponse> {
+  const response = await fetch('/api/integrations/snipeit/connect', {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+  return handleApiResponse<SnipeItDisconnectResponse>(response);
+}
+
+export function useSnipeItConnect() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: connectSnipeIt,
+    onSuccess: (data: SnipeItConnectResponse) => {
+      queryClient.invalidateQueries({
+        queryKey: integrationKeys.list(),
+      });
+      queryClient.invalidateQueries({
+        queryKey: [...integrationKeys.all, 'snipeit', 'settings'],
+      });
+      toast.success(data.message);
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to connect Snipe-IT: ${error.message}`);
+    },
+  });
+}
+
+export function useSnipeItDisconnect() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: disconnectSnipeIt,
+    onSuccess: (data: SnipeItDisconnectResponse) => {
+      queryClient.invalidateQueries({
+        queryKey: integrationKeys.list(),
+      });
+      queryClient.invalidateQueries({
+        queryKey: [...integrationKeys.all, 'snipeit', 'settings'],
+      });
+      toast.success(data.message);
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to disconnect Snipe-IT: ${error.message}`);
+    },
+  });
+}
+
 // Webhook Re-registration
 
 /**

@@ -15,10 +15,12 @@ import { SnipeItSettings } from '@/components/integrations/SnipeItSettings';
 
 export interface IntegrationSettingsProps {
   readonly integrationId: string;
+  readonly connected?: boolean;
 }
 
 export function IntegrationSettings({
   integrationId,
+  connected,
 }: IntegrationSettingsProps) {
   const [open, setOpen] = useState(false);
 
@@ -87,7 +89,7 @@ export function IntegrationSettings({
                       Configure your Snipe-IT instance URL and user mapping.
                     </p>
                   </div>
-                  <SnipeItSettings />
+                  <SnipeItSettings connected={connected} />
                 </div>
               );
             } else {

@@ -1,9 +1,8 @@
 """
-Snipe-IT Token Service for managing OAuth tokens in core API.
+Snipe-IT Token Service for managing API keys in core API.
 
-Provides secure storage and retrieval of Snipe-IT OAuth tokens with
-encryption via Fernet and proper database management. Token exchange
-and refresh are delegated to the Snipe-IT auth endpoints.
+Provides secure storage and retrieval of Snipe-IT API keys with
+encryption via Fernet and proper database management.
 """
 
 from __future__ import annotations
@@ -20,20 +19,20 @@ logger = structlog.get_logger()
 
 
 class SnipeItTokenNotFoundError(Exception):
-    """Raised when Snipe-IT OAuth tokens are not found for a user."""
+    """Raised when Snipe-IT API key is not found for a user."""
 
 
 class SnipeItTokenStorageError(Exception):
-    """Raised when token storage operations fail."""
+    """Raised when API key storage operations fail."""
 
 
 class SnipeItTokenService:
     """
-    Service for managing Snipe-IT OAuth tokens in the main API.
+    Service for managing Snipe-IT API keys in the main API.
 
-    Provides encrypted token CRUD operations against the ``user_snipe_it_auth``
-    table. Actual token exchange and refresh are handled by the Snipe-IT auth
-    endpoints, which call this service to persist the results.
+    Provides encrypted CRUD operations against the ``user_snipe_it_auth``
+    table. The API key is a personal access token generated in the
+    Snipe-IT admin panel.
     """
 
     def __init__(self, connection: AsyncConnection, encryption_key: str) -> None:
@@ -75,49 +74,40 @@ class SnipeItTokenService:
         """Decrypt sensitive data."""
         return self.fernet.decrypt(encrypted_data).decode()
 
-    async def store_tokens(
+    async def store_api_key(
         self,
         user_id: str,
-        access_token: str,
-        refresh_token: str,
-        token_expires_at: datetime,
+        api_key: str,
     ) -> None:
         """
-        Store Snipe-IT OAuth tokens for a user.
+        Store a Snipe-IT API key for a user.
 
         Uses UPSERT to handle re-connection: if the user already has a
-        Snipe-IT auth row, it updates the tokens rather than inserting a
+        Snipe-IT auth row, it updates the key rather than inserting a
         duplicate.
 
         Args:
             user_id: Authenticated user's ID.
-            access_token: OAuth access token (will be encrypted).
-            refresh_token: OAuth refresh token (will be encrypted).
-            token_expires_at: UTC datetime when the access token expires.
+            api_key: Snipe-IT personal access token (will be encrypted).
 
         Raises:
             SnipeItTokenStorageError: If storage operation fails.
         """
         try:
-            encrypted_access_token = self.encrypt(access_token)
-            encrypted_refresh_token = self.encrypt(refresh_token)
+            encrypted_api_key = self.encrypt(api_key)
 
             stmt = text("""
                 INSERT INTO user_snipe_it_auth (
-                    user_id, encrypted_access_token,
-                    encrypted_refresh_token, token_expires_at,
+                    user_id, encrypted_api_key,
                     needs_reauth, created_at, updated_at
                 )
                 VALUES (
-                    :user_id, :encrypted_access_token,
-                    :encrypted_refresh_token, :token_expires_at,
+                    :user_id, :encrypted_api_key,
                     FALSE, :now, :now
                 )
                 ON CONFLICT (user_id)
                 DO UPDATE SET
-                    encrypted_access_token = EXCLUDED.encrypted_access_token,
-                    encrypted_refresh_token = EXCLUDED.encrypted_refresh_token,
-                    token_expires_at = EXCLUDED.token_expires_at,
+                    encrypted_api_key = EXCLUDED.encrypted_api_key,
                     needs_reauth = FALSE,
                     updated_at = EXCLUDED.updated_at
             """)
@@ -127,30 +117,24 @@ class SnipeItTokenService:
                 stmt,
                 {
                     "user_id": user_id,
-                    "encrypted_access_token": encrypted_access_token,
-                    "encrypted_refresh_token": encrypted_refresh_token,
-                    "token_expires_at": token_expires_at,
+                    "encrypted_api_key": encrypted_api_key,
                     "now": now,
                 },
             )
 
-            logger.info(
-                "Stored Snipe-IT OAuth tokens",
-                user_id=user_id,
-                token_expires_at=token_expires_at.isoformat(),
-            )
+            logger.info("Stored Snipe-IT API key", user_id=user_id)
 
         except SnipeItTokenStorageError:
             raise
         except Exception as e:
             logger.error(
-                "Failed to store Snipe-IT tokens",
+                "Failed to store Snipe-IT API key",
                 user_id=user_id,
                 error=str(e),
                 exc_info=True,
             )
             raise SnipeItTokenStorageError(
-                f"Failed to store Snipe-IT tokens: {e!s}"
+                f"Failed to store Snipe-IT API key: {e!s}"
             ) from e
 
     async def get_auth(self, user_id: str) -> dict[str, Any] | None:
@@ -161,11 +145,10 @@ class SnipeItTokenService:
             user_id: User ID.
 
         Returns:
-            Dictionary with decrypted tokens and metadata, or None if not found.
+            Dictionary with decrypted API key and metadata, or None if not found.
         """
         stmt = text("""
-            SELECT encrypted_access_token, encrypted_refresh_token,
-                   token_expires_at, needs_reauth
+            SELECT encrypted_api_key, needs_reauth
             FROM user_snipe_it_auth
             WHERE user_id = :user_id
         """)
@@ -177,22 +160,19 @@ class SnipeItTokenService:
             return None
 
         return {
-            "access_token": self.decrypt(row.encrypted_access_token),
-            "refresh_token": self.decrypt(row.encrypted_refresh_token),
-            "token_expires_at": row.token_expires_at,
+            "api_key": self.decrypt(row.encrypted_api_key),
             "needs_reauth": row.needs_reauth,
-            "is_expired": datetime.now(UTC) >= row.token_expires_at,
         }
 
     async def delete_tokens(self, user_id: str) -> bool:
         """
-        Delete Snipe-IT OAuth tokens for a user.
+        Delete Snipe-IT API key for a user.
 
         Args:
             user_id: User ID.
 
         Returns:
-            True if tokens were deleted, False if not found.
+            True if the key was deleted, False if not found.
         """
         stmt = text("""
             DELETE FROM user_snipe_it_auth
@@ -203,13 +183,13 @@ class SnipeItTokenService:
         deleted = result.rowcount > 0
 
         if deleted:
-            logger.info("Deleted Snipe-IT OAuth tokens", user_id=user_id)
+            logger.info("Deleted Snipe-IT API key", user_id=user_id)
 
         return deleted
 
     async def is_connected(self, user_id: str) -> bool:
         """
-        Check whether a user has a Snipe-IT OAuth connection.
+        Check whether a user has a Snipe-IT API key stored.
 
         Args:
             user_id: User ID.
