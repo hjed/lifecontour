@@ -64,7 +64,7 @@ Create the worker scaffold, database models for auth, and integrate with the plu
 - [x] Remove legacy `immich_base_url` and `immich_api_key` from `backend/app/infrastructure/config.py`
 - [x] `ImmichIntegrationProvider` implements registry interface: derives status from `user_immich_auth` state
 - [x] `POST /api/integrations/immich/connect` — validates API key against Immich `GET /server/about`, stores encrypted credentials
-- [x] `DELETE /api/integrations/immich/disconnect` — removes credentials
+- [x] `POST /api/integrations/immich/disconnect` — removes credentials
 - [x] Immich panel appears in integrations dashboard with Server URL + API Key inputs and Connect/Disconnect controls
 - [x] Worker tests and linting are setup and included in ci
 

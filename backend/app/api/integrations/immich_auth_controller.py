@@ -36,7 +36,7 @@ async def connect_immich(
         await token_service.validate_and_save_credentials(
             user_id=user.id,
             server_url=str(request.server_url),
-            api_key=request.api_key,
+            api_key=request.api_key.strip(),
         )
         return {"status": "success", "message": "Immich connected successfully."}
     except ImmichValidationException as e:

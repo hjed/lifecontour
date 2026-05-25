@@ -4,88 +4,92 @@ Immich Integration Provider.
 Exposes Immich integration status and capabilities to the integration registry.
 """
 
-from typing import Any
+from __future__ import annotations
 
-from sqlalchemy import text
+import structlog
+from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.integrations.adapters.sql.immich_auth_repository import (
+    SqlImmichAuthRepository,
+)
 from app.core.integrations.registry.models import (
     IntegrationCapability,
     IntegrationInfo,
     IntegrationStatus,
     SyncSummary,
 )
-from app.core.integrations.registry.providers import IntegrationProvider
+
+logger = structlog.get_logger()
 
 
-class ImmichIntegrationProvider(IntegrationProvider):
+class ImmichIntegrationProvider:
     """Provider for the Immich integration."""
 
     integration_id: str = "immich"
 
-    def __init__(self) -> None:
-        """Initialize Immich provider."""
-        self.name = "Immich"
-        self.capabilities = [
-            IntegrationCapability.CONTACTS_SYNC,
-            IntegrationCapability.ALBUM_SYNC,
-        ]
-
-    async def get_integration_info(self, user_id: str, session: Any) -> IntegrationInfo:
+    async def get_integration_info(
+        self, user_id: str, connection: AsyncConnection
+    ) -> IntegrationInfo:
         """
         Get the current status and metadata of the Immich integration.
 
         Args:
             user_id: Internal user ID.
-            session: Async database session.
+            connection: Async database connection.
 
         Returns:
             IntegrationInfo object representing the current state.
         """
-        # 1. Check if connected by querying the auth table
-        auth_stmt = text("""
-            SELECT 1
-            FROM user_immich_auth
-            WHERE user_id = :user_id
-        """)
-        auth_result = await session.execute(auth_stmt, {"user_id": user_id})
-        is_connected = auth_result.fetchone() is not None
+        repo = SqlImmichAuthRepository(connection)
+
+        # 1. Check if connected via repository
+        try:
+            is_connected = await repo.is_connected(user_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "Failed to query user_immich_auth",
+                user_id=user_id,
+                error=str(e),
+            )
+            is_connected = False
 
         if not is_connected:
             return IntegrationInfo(
                 id=self.integration_id,
-                name=self.name,
+                name="Immich",
                 status=IntegrationStatus.DISCONNECTED,
-                capabilities=self.capabilities,
+                capabilities=[
+                    IntegrationCapability.CONTACTS_SYNC,
+                    IntegrationCapability.ALBUM_SYNC,
+                ],
                 sync_summary=SyncSummary(),
                 needs_reauth=False,
             )
 
-        # 2. Get sync history from sync_jobs table
-        sync_stmt = text("""
-            SELECT
-                COUNT(*) as sync_count,
-                COUNT(CASE WHEN status = 'failed' THEN 1 END) as error_count,
-                MAX(completed_at) as last_sync_time
-            FROM sync_jobs
-            WHERE user_id = :user_id
-              AND integration_source = 'immich'
-        """)
-        sync_result = await session.execute(sync_stmt, {"user_id": user_id})
-        sync_row = sync_result.fetchone()
-
-        sync_summary = SyncSummary()
-        if sync_row:
+        # 2. Get sync summary via repository
+        try:
+            summary_row = await repo.get_sync_summary(user_id)
             sync_summary = SyncSummary(
-                sync_count=sync_row.sync_count or 0,
-                error_count=sync_row.error_count or 0,
-                last_sync_time=sync_row.last_sync_time,
+                sync_count=summary_row.sync_count,
+                error_count=summary_row.error_count,
+                last_sync_time=summary_row.last_sync_time,
             )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "Failed to query sync_jobs for Immich",
+                user_id=user_id,
+                error=str(e),
+            )
+            sync_summary = SyncSummary()
 
         return IntegrationInfo(
             id=self.integration_id,
-            name=self.name,
+            name="Immich",
             status=IntegrationStatus.CONNECTED,
-            capabilities=self.capabilities,
+            capabilities=[
+                IntegrationCapability.CONTACTS_SYNC,
+                IntegrationCapability.ALBUM_SYNC,
+            ],
             sync_summary=sync_summary,
             needs_reauth=False,  # API keys don't expire like OAuth tokens
         )

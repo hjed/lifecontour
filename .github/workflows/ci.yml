@@ -26,6 +26,7 @@ jobs:
       core_shared: ${{ steps.filter.outputs.core_shared }}
       frontend: ${{ steps.filter.outputs.frontend }}
       worker_google: ${{ steps.filter.outputs.worker_google }}
+      worker_immich: ${{ steps.filter.outputs.worker_immich }}
       worker_snipeit: ${{ steps.filter.outputs.worker_snipeit }}
       worker_strava: ${{ steps.filter.outputs.worker_strava }}
       workers: ${{ steps.set-matrix.outputs.workers }}
@@ -63,6 +64,13 @@ jobs:
               - 'integration_workers/snipeit/**/Dockerfile*'
               - 'integration_workers/snipeit/**/docker-compose*.yml'
               - 'integration_workers/snipeit/**/docker-compose*.yaml'
+            worker_immich:
+              - 'integration_workers/immich/**/*.py'
+              - 'integration_workers/immich/**/*.toml'
+              - 'integration_workers/immich/**/uv.lock'
+              - 'integration_workers/immich/**/Dockerfile*'
+              - 'integration_workers/immich/**/docker-compose*.yml'
+              - 'integration_workers/immich/**/docker-compose*.yaml'
             worker_strava:
               - 'integration_workers/strava/**/*.py'
               - 'integration_workers/strava/**/*.toml'
@@ -86,10 +94,14 @@ jobs:
           comma=""
 
           if [ "${{ github.event_name }}" == "push" ] || [ "${{ github.event_name }}" == "workflow_call" ] || [ "${{ steps.filter.outputs.core_shared }}" == "true" ]; then
-            workers="[\"google\", \"snipeit\", \"strava\"]"
+            workers="[\"google\", \"immich\", \"snipeit\", \"strava\"]"
           else
             if [ "${{ steps.filter.outputs.worker_google }}" == "true" ]; then
               workers="$workers$comma\"google\""
+              comma=","
+            fi
+            if [ "${{ steps.filter.outputs.worker_immich }}" == "true" ]; then
+              workers="$workers$comma\"immich\""
               comma=","
             fi
             if [ "${{ steps.filter.outputs.worker_snipeit }}" == "true" ]; then

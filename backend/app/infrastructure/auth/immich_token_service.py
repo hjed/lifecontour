@@ -6,9 +6,12 @@ and validating it against the Immich instance.
 """
 
 import httpx
+import structlog
 from cryptography.fernet import Fernet
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
+
+logger = structlog.get_logger()
 
 
 class ImmichAuthException(Exception):
@@ -19,6 +22,10 @@ class ImmichValidationException(ImmichAuthException):
     """Raised when the Immich server or API key is invalid."""
 
 
+class ImmichTokenStorageError(ImmichAuthException):
+    """Raised when encryption/decryption operations fail."""
+
+
 class ImmichTokenService:
     """Service for managing Immich API keys."""
 
@@ -27,10 +34,28 @@ class ImmichTokenService:
 
         Args:
             connection: Database connection
-            encryption_key: Fernet-compatible encryption key string
+            encryption_key: Base64-encoded Fernet key for token encryption.
+                May be empty if Immich is not configured; operations that
+                require encryption will raise ``ImmichTokenStorageError``.
         """
         self._connection = connection
-        self._fernet = Fernet(encryption_key.encode())
+        self._encryption_key = encryption_key
+        self._fernet: Fernet | None = None
+
+    @property
+    def fernet(self) -> Fernet:
+        """Lazily initialise Fernet so the service can be created even when
+        ``immich_encryption_key`` is empty (unconfigured environments)."""
+        if self._fernet is None:
+            if not self._encryption_key:
+                raise ImmichTokenStorageError("Immich encryption key is not configured")
+            try:
+                self._fernet = Fernet(self._encryption_key.encode())
+            except (ValueError, Exception) as e:
+                raise ImmichTokenStorageError(
+                    f"Invalid Immich encryption key: {e!s}"
+                ) from e
+        return self._fernet
 
     async def validate_and_save_credentials(
         self, user_id: str, server_url: str, api_key: str
@@ -45,8 +70,12 @@ class ImmichTokenService:
         Raises:
             ImmichValidationException: If validation fails
         """
-        # Normalize URL
-        server_url = server_url.rstrip("/")
+        # Normalize inputs
+        server_url = server_url.strip().rstrip("/")
+        api_key = api_key.strip()
+
+        if not api_key:
+            raise ImmichValidationException("API key must not be empty")
 
         # Validate with the server
         try:
@@ -62,7 +91,7 @@ class ImmichTokenService:
             ) from e
 
         # Encrypt the API key
-        encrypted_key = self._fernet.encrypt(api_key.encode())
+        encrypted_key = self.fernet.encrypt(api_key.encode())
 
         # UPSERT the credentials
         stmt = text("""
