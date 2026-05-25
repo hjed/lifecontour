@@ -17,6 +17,7 @@ from typing import Any
 
 import structlog
 from arq.connections import RedisSettings
+from core_shared.telemetry import trace_arq_job
 
 from snipeit_settings import SnipeItWorkerSettings
 
@@ -141,6 +142,7 @@ def _create_sync_service(
     )
 
 
+@trace_arq_job
 async def sync_snipeit_assets(
     ctx: dict,  # type: ignore[type-arg]
     user_id: str,
@@ -215,6 +217,7 @@ async def sync_snipeit_assets(
         await sync_service._api_client.close()
 
 
+@trace_arq_job
 async def sync_snipeit_asset_batch(
     ctx: dict,  # type: ignore[type-arg]
     user_id: str,
@@ -271,9 +274,11 @@ async def sync_snipeit_asset_batch(
         await sync_service._api_client.close()
 
 
+@trace_arq_job
 async def sync_snipeit_maintenances(
     ctx: dict,  # type: ignore[type-arg]
     user_id: str,
+    sync_type: str = "full",
 ) -> None:
     """Orchestrator job for full sync of Snipe-IT maintenance records."""
     session_factory = ctx["session_factory"]
@@ -345,6 +350,7 @@ async def sync_snipeit_maintenances(
         await sync_service._api_client.close()
 
 
+@trace_arq_job
 async def sync_snipeit_maintenance_batch(
     ctx: dict,  # type: ignore[type-arg]
     user_id: str,

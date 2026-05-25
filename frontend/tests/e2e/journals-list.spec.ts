@@ -1121,6 +1121,7 @@ test.describe('Journal List Page', () => {
       await expect(calendarListbox1).toBeVisible();
       await calendarListbox1
         .getByRole('option', { name: /Work Calendar/i })
+        .first()
         .click();
       await responsePromise;
 
@@ -1154,6 +1155,7 @@ test.describe('Journal List Page', () => {
       await expect(calendarListbox2).toBeVisible();
       await calendarListbox2
         .getByRole('option', { name: /Personal Calendar/i })
+        .first()
         .click();
       await personalResponsePromise;
 
