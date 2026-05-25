@@ -414,6 +414,32 @@ services:
       - personal-management
     restart: unless-stopped
 
+  immich-worker:
+    build:
+      context: .
+      dockerfile: integration_workers/immich/Dockerfile
+      additional_contexts:
+        pms-python-base: "service:python-base"
+    container_name: ${CONTAINER_PREFIX:-pms}-immich-worker
+    profiles: [dev, test, prod]
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@${CONTAINER_PREFIX:-pms}-postgres:5432/${DB_NAME:-personal_management}
+      REDIS_URL: redis://${CONTAINER_PREFIX:-pms}-redis:6379
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-KzC1vYhL3bQpT_x5Ue8q0Wl1MvX-oVwYwK9cQx7lKHg=}
+      LOG_LEVEL: ${WORKER_LOG_LEVEL:-DEBUG}
+      WORKER_ID: immich-worker
+    volumes:
+      - ./core_shared:/core_shared:ro
+      - ./integration_workers/immich:/app
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - personal-management
+    restart: unless-stopped
+
   # ============================================================================
   # PRODUCTION SERVICES
   # ============================================================================

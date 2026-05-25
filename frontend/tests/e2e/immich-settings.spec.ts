@@ -1,0 +1,225 @@
+/**
+ * E2E tests for the Immich integration settings modal.
+ *
+ * These tests stub integration API responses to deterministically verify
+ * the Immich settings modal opens and submits credentials cleanly.
+ */
+
+import { expect, test } from './fixtures';
+
+function json(data: unknown) {
+  return {
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify(data),
+  };
+}
+
+/**
+ * Shared API route stubs that every test in this file needs.
+ * Sets up: health, integration list (with immich), sync history.
+ */
+async function setupBaseRoutes(page: import('@playwright/test').Page) {
+  // Health endpoint
+  await page.route('**/api/integrations/health', route =>
+    route.fulfill(
+      json({
+        data: {
+          id: 'integrations',
+          type: 'integration-health',
+          attributes: {
+            overall: 'healthy',
+            lastChecked: new Date().toISOString(),
+            redis: { status: 'healthy', latency: 1, lastSeen: null },
+            worker: { status: 'healthy', latency: 1, lastSeen: null },
+          },
+        },
+      })
+    )
+  );
+
+  // Integration list — includes immich as disconnected
+  await page.route('**/api/integrations', route => {
+    // Only handle exact /api/integrations, not sub-paths
+    const url = new URL(route.request().url());
+    if (url.pathname !== '/api/integrations') {
+      return route.fallback();
+    }
+
+    return route.fulfill(
+      json({
+        data: [
+          {
+            id: 'immich',
+            type: 'integration',
+            attributes: {
+              name: 'Immich',
+              status: 'disconnected',
+              capabilities: ['contacts_sync', 'album_sync'],
+              sync_summary: {
+                last_sync_time: null,
+                sync_count: 0,
+                error_count: 0,
+              },
+              needs_reauth: false,
+              needs_reconsent: false,
+            },
+          },
+        ],
+      })
+    );
+  });
+
+  // Sync history stubs for all integrations
+  await page.route('**/api/integrations/*/sync-history**', route =>
+    route.fulfill(
+      json({
+        data: [],
+        meta: { total: 0, page: 1, pageSize: 5 },
+      })
+    )
+  );
+}
+
+test.describe('Immich Integration Settings', () => {
+  test('immich panel is visible in integration list', async ({
+    authenticatedPage,
+  }) => {
+    await setupBaseRoutes(authenticatedPage);
+
+    await authenticatedPage.goto('/integrations');
+
+    // Verify the Immich panel exists and shows disconnected status
+    const immichPanel = authenticatedPage.locator(
+      '[data-testid="integration-panel-immich"]'
+    );
+    await expect(immichPanel).toBeVisible();
+    await expect(immichPanel).toContainText('Immich');
+    await expect(immichPanel).toContainText('Disconnected');
+  });
+
+  test('settings modal opens and shows the Immich configuration form', async ({
+    authenticatedPage,
+  }) => {
+    await setupBaseRoutes(authenticatedPage);
+
+    await authenticatedPage.goto('/integrations');
+
+    // Click the Settings button on the Immich panel
+    const immichPanel = authenticatedPage.locator(
+      '[data-testid="integration-panel-immich"]'
+    );
+    await expect(immichPanel).toBeVisible();
+
+    const settingsButton = immichPanel.getByRole('button', {
+      name: /settings/i,
+    });
+    await expect(settingsButton).toBeVisible();
+    await settingsButton.click();
+
+    // Verify the modal appears
+    const dialogContent = authenticatedPage.getByRole('dialog');
+    await expect(dialogContent).toBeVisible();
+
+    // Verify Immich form elements are present
+    await expect(dialogContent.getByText('Immich Configuration')).toBeVisible();
+
+    const form = dialogContent.locator('[data-testid="immich-settings-form"]');
+    await expect(form).toBeVisible();
+
+    await expect(
+      form.locator('[data-testid="immich-server-url-input"]')
+    ).toBeVisible();
+    await expect(
+      form.locator('[data-testid="immich-api-key-input"]')
+    ).toBeVisible();
+    await expect(
+      form.locator('[data-testid="immich-connect-button"]')
+    ).toBeVisible();
+  });
+
+  test('can connect to Immich', async ({ authenticatedPage }) => {
+    await setupBaseRoutes(authenticatedPage);
+
+    // Mock successful connect
+    await authenticatedPage.route(
+      '**/api/integrations/immich/connect',
+      route => {
+        if (route.request().method() !== 'POST') return route.fallback();
+        return route.fulfill(
+          json({
+            status: 'success',
+            message: 'Connected to Immich successfully',
+          })
+        );
+      }
+    );
+
+    await authenticatedPage.goto('/integrations');
+
+    // Open settings modal
+    const immichPanel = authenticatedPage.locator(
+      '[data-testid="integration-panel-immich"]'
+    );
+    await immichPanel.getByRole('button', { name: /settings/i }).click();
+
+    // Fill form
+    const form = authenticatedPage.locator(
+      '[data-testid="immich-settings-form"]'
+    );
+    await form
+      .locator('[data-testid="immich-server-url-input"]')
+      .fill('https://immich.example.com');
+    await form
+      .locator('[data-testid="immich-api-key-input"]')
+      .fill('test-api-key');
+
+    // Stub the integrations endpoint to return connected on subsequent calls
+    let getIntegrationsCallCount = 0;
+    await authenticatedPage.route('**/api/integrations', async route => {
+      const url = new URL(route.request().url());
+      if (url.pathname !== '/api/integrations') {
+        return route.fallback();
+      }
+
+      getIntegrationsCallCount++;
+
+      return route.fulfill(
+        json({
+          data: [
+            {
+              id: 'immich',
+              type: 'integration',
+              attributes: {
+                name: 'Immich',
+                status:
+                  getIntegrationsCallCount > 1 ? 'connected' : 'disconnected',
+                capabilities: ['contacts_sync', 'album_sync'],
+                sync_summary: {
+                  last_sync_time: null,
+                  sync_count: 0,
+                  error_count: 0,
+                },
+                needs_reauth: false,
+                needs_reconsent: false,
+              },
+            },
+          ],
+        })
+      );
+    });
+
+    // Click connect
+    await form.locator('[data-testid="immich-connect-button"]').click();
+
+    // Verify toast notification
+    await expect(
+      authenticatedPage.getByText('Connected to Immich successfully')
+    ).toBeVisible();
+
+    // Wait for the modal UI to update or verify it resets
+    await expect(
+      form.locator('[data-testid="immich-server-url-input"]')
+    ).toHaveValue('');
+  });
+});

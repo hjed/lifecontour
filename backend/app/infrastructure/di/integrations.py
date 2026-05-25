@@ -27,6 +27,7 @@ from app.core.integrations.external_reference_service import ExternalReferenceSe
 from app.core.integrations.health_service import IntegrationHealthService
 from app.core.integrations.outbox_event_processor import OutboxEventProcessor
 from app.core.integrations.registry.google_provider import GoogleIntegrationProvider
+from app.core.integrations.registry.immich_provider import ImmichIntegrationProvider
 from app.core.integrations.registry.service import IntegrationRegistryService
 from app.core.integrations.registry.snipeit_provider import SnipeItIntegrationProvider
 from app.core.integrations.registry.strava_provider import StravaIntegrationProvider
@@ -36,6 +37,7 @@ from app.core.integrations.strava.athlete_mapping_service import (
 from app.core.integrations.task_queue import get_redis_pool, get_redis_settings
 from app.core.integrations.task_queue_service import TaskQueueService
 from app.core.journal.models.repositories import JournalContactRelationshipRepository
+from app.infrastructure.auth.immich_token_service import ImmichTokenService
 from app.infrastructure.auth.snipeit_token_service import SnipeItTokenService
 from app.infrastructure.auth.strava_token_service import StravaTokenService
 from app.infrastructure.config import Settings
@@ -209,11 +211,22 @@ class IntegrationProvider(Provider):
         return SnipeItIntegrationProvider()
 
     @provide(scope=Scope.APP)
+    def provide_immich_integration_provider(self) -> ImmichIntegrationProvider:
+        """
+        Provide Immich integration provider (singleton).
+
+        Returns:
+            ImmichIntegrationProvider: Immich status/capability provider
+        """
+        return ImmichIntegrationProvider()
+
+    @provide(scope=Scope.APP)
     def provide_integration_registry_service(
         self,
         google_provider: GoogleIntegrationProvider,
         strava_provider: StravaIntegrationProvider,
         snipeit_provider: SnipeItIntegrationProvider,
+        immich_provider: ImmichIntegrationProvider,
     ) -> IntegrationRegistryService:
         """
         Provide integration registry service with all registered providers.
@@ -222,12 +235,18 @@ class IntegrationProvider(Provider):
             google_provider: Google integration provider
             strava_provider: Strava integration provider
             snipeit_provider: Snipe-IT integration provider
+            immich_provider: Immich integration provider
 
         Returns:
             IntegrationRegistryService: Registry aggregating all providers
         """
         return IntegrationRegistryService(
-            providers=[google_provider, strava_provider, snipeit_provider]
+            providers=[
+                google_provider,
+                strava_provider,
+                snipeit_provider,
+                immich_provider,
+            ]
         )
 
     @provide(scope=Scope.REQUEST)
@@ -276,6 +295,24 @@ class IntegrationProvider(Provider):
         return SnipeItTokenService(
             connection=connection,
             encryption_key=settings.snipeit_encryption_key,
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def provide_immich_token_service(
+        self, connection: AsyncConnection, settings: Settings
+    ) -> ImmichTokenService:
+        """Provide Immich token service for request scope.
+
+        Args:
+            connection: Database connection
+            settings: Application settings for encryption key
+
+        Returns:
+            ImmichTokenService: Service for Immich token CRUD operations
+        """
+        return ImmichTokenService(
+            connection=connection,
+            encryption_key=settings.immich_encryption_key,
         )
 
     @provide(scope=Scope.REQUEST)

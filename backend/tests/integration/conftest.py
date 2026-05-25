@@ -699,6 +699,9 @@ def test_settings():
             "http://localhost:" + workspace_env.get("MEILI_TEST_PORT", "7701"),
         ),
         meilisearch_api_key=os.getenv("MEILISEARCH_API_KEY", "test_master_key"),
+        immich_encryption_key=os.getenv(
+            "IMMICH_ENCRYPTION_KEY", "uO6F-e9F_m65sS8Yh1c4G6fM2D_jO4rV3U-f1Y-tLnM="
+        ),
         allowed_hosts=["*"],  # Allow all hosts for testing
         cors_origins=["*"],
     )
