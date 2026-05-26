@@ -264,3 +264,4 @@ AGPL v3 - See [LICENSE](LICENSE) for details.
 ---
 
 **Personal Management System** - Centralize your personal data with AI integration
+
