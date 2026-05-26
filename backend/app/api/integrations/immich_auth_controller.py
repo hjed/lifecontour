@@ -10,6 +10,7 @@ from pydantic import BaseModel, HttpUrl
 
 from app.infrastructure.auth.immich_token_service import (
     ImmichTokenService,
+    ImmichTokenStorageError,
     ImmichValidationException,
 )
 from app.infrastructure.auth.models import SessionUser
@@ -41,6 +42,10 @@ async def connect_immich(
         return {"status": "success", "message": "Immich connected successfully."}
     except ImmichValidationException as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except ImmichTokenStorageError as e:
+        raise HTTPException(
+            status_code=500, detail="Immich integration is misconfigured on the server."
+        ) from e
 
 
 @router.post("/disconnect", summary="Disconnect Immich", status_code=204)

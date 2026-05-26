@@ -45,7 +45,7 @@ def get_async_database_url() -> str:
 if "DATABASE_URL" not in os.environ:
     os.environ["DATABASE_URL"] = get_async_database_url()
 if "ENCRYPTION_KEY" not in os.environ:
-    os.environ["ENCRYPTION_KEY"] = "testkey"
+    os.environ["ENCRYPTION_KEY"] = "ooL44Zmgckd-qzhAlEr-NndhL7qby1UV_HkmWSze8mQ="
 
 
 @pytest_asyncio.fixture(scope="function")
