@@ -5,6 +5,8 @@ This is a placeholder for Iteration 11 Phase 1. The full worker logic
 will be implemented in Phase 2.
 """
 
+__version__ = "0.1.0"
+
 import asyncio
 import logging
 import sys
