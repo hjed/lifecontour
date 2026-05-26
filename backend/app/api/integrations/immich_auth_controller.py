@@ -36,7 +36,7 @@ async def connect_immich(
     try:
         await token_service.validate_and_save_credentials(
             user_id=user.id,
-            server_url=str(request.server_url),
+            server_url=str(request.server_url).strip(),
             api_key=request.api_key.strip(),
         )
         return {"status": "success", "message": "Immich connected successfully."}

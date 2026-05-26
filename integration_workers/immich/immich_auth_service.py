@@ -28,7 +28,17 @@ class ImmichAuthService:
     """
 
     def __init__(self, encryption_key: str) -> None:
-        self._fernet = Fernet(encryption_key.encode())
+        self._encryption_key = encryption_key
+        self._fernet: Fernet | None = None
+
+    @property
+    def fernet(self) -> Fernet:
+        """Lazily initialize Fernet."""
+        if self._fernet is None:
+            if not self._encryption_key:
+                raise ValueError("Immich encryption key is not configured")
+            self._fernet = Fernet(self._encryption_key.encode())
+        return self._fernet
 
     def encrypt(self, value: str) -> bytes:
         """Encrypt a string value using Fernet.
@@ -39,7 +49,7 @@ class ImmichAuthService:
         Returns:
             Encrypted bytes.
         """
-        return self._fernet.encrypt(value.encode())
+        return self.fernet.encrypt(value.encode())
 
     def decrypt(self, encrypted: bytes) -> str:
         """Decrypt Fernet-encrypted bytes.
@@ -50,7 +60,7 @@ class ImmichAuthService:
         Returns:
             Original plaintext string.
         """
-        return self._fernet.decrypt(encrypted).decode()
+        return self.fernet.decrypt(encrypted).decode()
 
     async def get_api_key(self, user_id: str, session: Any) -> str | None:
         """Retrieve and decrypt Immich API key for a user.
