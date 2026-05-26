@@ -261,7 +261,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.13" },
     { name = "sqlalchemy", specifier = ">=2.0.0" },
     { name = "structlog", specifier = ">=23.2.0" },
-    { name = "types-psycopg2", marker = "extra == 'dev'", specifier = ">=2.9.21.20260422" },
+    { name = "types-psycopg2", marker = "extra == 'dev'", specifier = ">=2.9.21.20260518" },
 ]
 provides-extras = ["dev"]
 
