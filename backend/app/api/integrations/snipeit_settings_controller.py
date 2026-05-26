@@ -224,6 +224,18 @@ async def trigger_snipeit_gear_sync(
 
         return SyncJobJsonApiResponse(data=_build_sync_job_data(job))
 
+    except ValueError as e:
+        logger.error("Invalid sync parameters", error=str(e), exc_info=True)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid sync parameters: {str(e)}",
+        ) from e
+    except ConnectionError as e:
+        logger.error("Task queue connection failed", error=str(e), exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail="Task queue service is temporarily unavailable",
+        ) from e
     except Exception as e:
         logger.error(
             "Failed to enqueue Snipe-IT gear sync job", error=str(e), exc_info=True
@@ -266,6 +278,18 @@ async def trigger_snipeit_maintenance_sync(
 
         return SyncJobJsonApiResponse(data=_build_sync_job_data(job))
 
+    except ValueError as e:
+        logger.error("Invalid sync parameters", error=str(e), exc_info=True)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid sync parameters: {str(e)}",
+        ) from e
+    except ConnectionError as e:
+        logger.error("Task queue connection failed", error=str(e), exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail="Task queue service is temporarily unavailable",
+        ) from e
     except Exception as e:
         logger.error(
             "Failed to enqueue Snipe-IT maintenance sync job",
@@ -319,6 +343,18 @@ async def trigger_snipeit_checkout_sync(
                 ),
             )
         )
+    except ValueError as e:
+        logger.error("Invalid sync parameters", error=str(e), exc_info=True)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid sync parameters: {str(e)}",
+        ) from e
+    except ConnectionError as e:
+        logger.error("Task queue connection failed", error=str(e), exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail="Task queue service is temporarily unavailable",
+        ) from e
     except Exception as e:
         logger.error(
             "Failed to handle Snipe-IT checkout sync request",

@@ -149,6 +149,7 @@ async def sync_snipeit_assets(
     sync_type: str = "full",
 ) -> None:
     """Orchestrator job for full sync of Snipe-IT assets."""
+    # TODO: Implement smart sync behavior using sync_type parameter
     session_factory = ctx["session_factory"]
     worker_settings: SnipeItWorkerSettings = settings
 
@@ -281,6 +282,7 @@ async def sync_snipeit_maintenances(
     sync_type: str = "full",
 ) -> None:
     """Orchestrator job for full sync of Snipe-IT maintenance records."""
+    # TODO: Implement smart sync behavior using sync_type parameter
     session_factory = ctx["session_factory"]
     worker_settings: SnipeItWorkerSettings = settings
 
