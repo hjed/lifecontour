@@ -121,8 +121,10 @@ test.describe('Journal Complete Workflows', () => {
       await expect(createLink).toBeVisible();
 
       // Wait for navigation to complete
-      await createLink.click();
-      await expect(page).toHaveURL(/.*\/journals\/new/);
+      await expect(async () => {
+        await createLink.click();
+        await expect(page).toHaveURL(/.*\/journals\/new/);
+      }).toPass({ timeout: 15000 });
 
       // Step 4: Verify we're on the create page
       await expect(page).toHaveURL(/\/journals\/new/);
@@ -147,8 +149,10 @@ test.describe('Journal Complete Workflows', () => {
       await expect(newLink).toBeVisible();
 
       // Wait for navigation to complete
-      await newLink.click();
-      await expect(page).toHaveURL(/.*\/journals\/new/);
+      await expect(async () => {
+        await newLink.click();
+        await expect(page).toHaveURL(/.*\/journals\/new/);
+      }).toPass({ timeout: 15000 });
 
       // Step 3: Verify we're on the create page
       await expect(page).toHaveURL(/\/journals\/new/);

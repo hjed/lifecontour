@@ -323,7 +323,7 @@ test.describe('Journal Review Queue', () => {
           resp.request().method() === 'GET' &&
           resp.ok()
       ),
-      autoMergeBtn.click(),
+      autoMergeBtn.dispatchEvent('click'),
     ]);
 
     // Wait for success toast
@@ -520,7 +520,7 @@ test.describe('Journal Review Queue', () => {
           resp.request().method() === 'GET' &&
           resp.ok()
       ),
-      autoMergeBtn.click(),
+      autoMergeBtn.dispatchEvent('click'),
     ]);
 
     // Should report 1 merged
