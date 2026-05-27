@@ -557,6 +557,12 @@ class SnipeItSyncService:
         async with session_factory() as session:
             async with session.begin():
                 # Look up internal gear_item_id for this asset
+                if maintenance.asset_id is None:
+                    logger.warning(
+                        "Skipping maintenance: no asset_id in API response",
+                        maintenance_id=maintenance_id,
+                    )
+                    raise _MaintenanceSkipped
                 asset_external_id = str(maintenance.asset_id)
                 asset_result = await session.execute(
                     text("""

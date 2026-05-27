@@ -107,17 +107,14 @@ class SnipeItAssetListResponse(BaseModel):
     rows: list[SnipeItAsset] = Field(default_factory=list)
 
 
-class SnipeItMaintenance(BaseModel):
-    """A single Snipe-IT asset maintenance record.
+class _SnipeItMaintenanceBase(BaseModel):
+    """Shared fields for Snipe-IT maintenance response models.
 
-    Corresponds to responses from ``GET /api/v1/maintenances/{id}`` and
-    individual rows from ``GET /api/v1/maintenances``.
-
-    See: https://snipe-it.readme.io/reference/maintenances
+    Both GET and POST/PATCH response shapes share these fields.
+    Not intended for direct instantiation.
     """
 
     id: int
-    asset_id: int
     title: str | None = None
     asset_maintenance_type: str | None = None
     start_date: SnipeItDateObject | None = None
@@ -125,7 +122,6 @@ class SnipeItMaintenance(BaseModel):
     notes: str | None = None
     cost: str | None = None
     supplier: SnipeItNestedObject | None = None
-    asset: SnipeItNestedObject | None = None
     updated_at: SnipeItDateObject | None = None
 
     # -- Convenience accessors ------------------------------------------------
@@ -139,6 +135,39 @@ class SnipeItMaintenance(BaseModel):
     def completion_date_str(self) -> str | None:
         """Return the raw completion date string (``YYYY-MM-DD``)."""
         return self.completion_date.date if self.completion_date else None
+
+
+class SnipeItMaintenance(_SnipeItMaintenanceBase):
+    """A Snipe-IT maintenance record from a GET response.
+
+    Corresponds to responses from ``GET /api/v1/maintenances/{id}`` and
+    individual rows from ``GET /api/v1/maintenances``.
+
+    GET responses return the associated asset as a nested ``{id, name}``
+    object and do **not** include a top-level ``asset_id`` field.  Use
+    the ``asset_id`` property to access the asset's numeric ID.
+
+    See: https://snipe-it.readme.io/reference/maintenances
+    """
+
+    asset: SnipeItNestedObject | None = None
+
+    @property
+    def asset_id(self) -> int | None:
+        """Return the asset's numeric ID from the nested ``asset`` object."""
+        return self.asset.id if self.asset else None
+
+
+class SnipeItMaintenanceWriteResponse(_SnipeItMaintenanceBase):
+    """A Snipe-IT maintenance record from a POST/PATCH ``payload`` response.
+
+    Snipe-IT wraps mutating responses as
+    ``{"status": "success", "payload": {...}}``.
+    The ``payload`` object includes ``asset_id`` as a top-level int
+    and does **not** include a nested ``asset`` object.
+    """
+
+    asset_id: int
 
 
 class SnipeItMaintenanceListResponse(BaseModel):
