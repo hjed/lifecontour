@@ -33,7 +33,7 @@ jobs:
 
     strategy:
       matrix:
-        component: [backend, frontend, google-worker, strava-worker, snipeit-worker]
+        component: [backend, frontend, google-worker, strava-worker, snipeit-worker, immich-worker]
 
     steps:
       - name: Checkout code
@@ -79,6 +79,8 @@ jobs:
             echo "path=integration_workers/strava/Dockerfile" >> $GITHUB_OUTPUT
           elif [ "${{ matrix.component }}" = "snipeit-worker" ]; then
             echo "path=integration_workers/snipeit/Dockerfile" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.component }}" = "immich-worker" ]; then
+            echo "path=integration_workers/immich/Dockerfile" >> $GITHUB_OUTPUT
           else
             echo "path=docker/${{ matrix.component }}/Dockerfile" >> $GITHUB_OUTPUT
           fi
@@ -182,6 +184,7 @@ jobs:
             - Google Worker: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-google-worker:${{ steps.version.outputs.version }}`
             - Strava Worker: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-strava-worker:${{ steps.version.outputs.version }}`
             - Snipe-IT Worker: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-snipeit-worker:${{ steps.version.outputs.version }}`
+            - Immich Worker: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-immich-worker:${{ steps.version.outputs.version }}`
 
             ## Installation
 
