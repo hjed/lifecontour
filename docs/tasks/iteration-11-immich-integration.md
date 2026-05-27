@@ -79,14 +79,14 @@ Create the worker scaffold, database models for auth, and integrate with the plu
 Build the `ImmichApiClient` with all methods needed for sync, and the ARQ worker container.
 
 **Acceptance Criteria:**
-- [ ] `ImmichApiClient` class using `httpx` async client with API key header injection
-- [ ] Client methods: `get_server_info()`, `get_all_people()`, `get_person(id)`, `update_person(id, data)`, `get_person_thumbnail(id)`, `get_all_albums()`, `get_album(id)`, `create_album(data)`, `search_assets(filters)`, `get_asset_thumbnail(id)`, `get_shared_links()`, `create_shared_link(data)`
-- [ ] Pydantic response models: `ImmichPerson`, `ImmichAlbum`, `ImmichAsset`, `ImmichSharedLink`
-- [ ] `integration_workers/immich/worker.py` — ARQ worker entry point with health checks
-- [ ] Worker registers as `immich-worker` consumer group on Redis Stream
-- [ ] Immich worker added to `docker-compose.yml` and CI
-- [ ] `ImmichWorkerStreamConsumer` for consuming outbound domain events
-- [ ] Release build included immich worker
+- [x] `ImmichApiClient` class using `httpx` async client with API key header injection
+- [x] Client methods: `get_server_info()`, `get_all_people()`, `get_person(id)`, `update_person(id, data)`, `get_person_thumbnail(id)`, `get_all_albums()`, `get_album(id)`, `create_album(data)`, `search_assets(filters)`, `get_asset_thumbnail(id)`, `get_shared_links()`, `create_shared_link(data)`
+- [x] Pydantic response models: `ImmichPerson`, `ImmichAlbum`, `ImmichAsset`, `ImmichSharedLink`
+- [x] `integration_workers/immich/worker.py` — ARQ worker entry point with health checks
+- [x] Worker registers as `immich-worker` consumer group on Redis Stream
+- [x] Immich worker added to `docker-compose.yml` and CI
+- [x] `ImmichWorkerStreamConsumer` for consuming outbound domain events
+- [x] Release build included immich worker
 
 **Required Test Coverage:**
 - **Unit:** Response model parsing for each endpoint, API key header injection, error handling (401, 404, 500).
