@@ -971,3 +971,74 @@ export function useSnipeItWebhookUrl(enabled: boolean = false) {
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 }
+
+// Immich API Key Connection
+
+export interface ImmichConnectRequest {
+  server_url: string;
+  api_key: string;
+}
+
+export interface ImmichConnectResponse {
+  status: string;
+  message: string;
+}
+
+export async function connectImmich(
+  request: ImmichConnectRequest
+): Promise<ImmichConnectResponse> {
+  const response = await fetch('/api/integrations/immich/connect', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    credentials: 'include',
+    body: JSON.stringify(request),
+  });
+  return handleApiResponse<ImmichConnectResponse>(response);
+}
+
+export async function disconnectImmich(): Promise<void> {
+  const response = await fetch('/api/integrations/immich/disconnect', {
+    method: 'POST',
+    credentials: 'include',
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to disconnect Immich');
+  }
+}
+
+export function useImmichConnect() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: connectImmich,
+    onSuccess: (data: ImmichConnectResponse) => {
+      queryClient.invalidateQueries({
+        queryKey: integrationKeys.list(),
+      });
+      toast.success(data.message || 'Connected to Immich successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to connect to Immich: ${error.message}`);
+    },
+  });
+}
+
+export function useImmichDisconnect() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: disconnectImmich,
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: integrationKeys.list(),
+      });
+      toast.success('Disconnected from Immich successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to disconnect Immich: ${error.message}`);
+    },
+  });
+}

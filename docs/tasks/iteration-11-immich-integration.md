@@ -1,6 +1,6 @@
 # Iteration 11: Immich Integration
 
-**Status:** ⬜ NOT STARTED
+**Status:** 🟡 IN PROGRESS
 **Dependencies:** Iteration 5 (Integration Architecture, Generic Dashboard, Redis Streams Event Bus), Iteration 7.1 (Journal Contact Links)
 **Goal:** Deliver a bidirectional integration with a self-hosted Immich instance for contact/people sync (including avatars), album import as PHOTO_ALBUM journals, and on-demand album creation from journal date ranges.
 
@@ -59,13 +59,14 @@ The work builds on the existing Redis Streams event bus and pluggable integratio
 Create the worker scaffold, database models for auth, and integrate with the pluggable dashboard.
 
 **Acceptance Criteria:**
-- [ ] `integration_workers/immich/` package created (following Strava/Snipe-IT worker structure)
-- [ ] Migration creates `user_immich_auth` table (`user_id`, `server_url`, `api_key` encrypted, `created_at`, `updated_at`)
-- [ ] Remove legacy `immich_base_url` and `immich_api_key` from `backend/app/infrastructure/config.py`
-- [ ] `ImmichIntegrationProvider` implements registry interface: derives status from `user_immich_auth` state
-- [ ] `POST /api/integrations/immich/connect` — validates API key against Immich `GET /server/about`, stores encrypted credentials
-- [ ] `DELETE /api/integrations/immich/disconnect` — removes credentials
-- [ ] Immich panel appears in integrations dashboard with Server URL + API Key inputs and Connect/Disconnect controls
+- [x] `integration_workers/immich/` package created (following Strava/Snipe-IT worker structure)
+- [x] Migration creates `user_immich_auth` table (`user_id`, `server_url`, `api_key` encrypted, `created_at`, `updated_at`)
+- [x] Remove legacy `immich_base_url` and `immich_api_key` from `backend/app/infrastructure/config.py`
+- [x] `ImmichIntegrationProvider` implements registry interface: derives status from `user_immich_auth` state
+- [x] `POST /api/integrations/immich/connect` — validates API key against Immich `GET /server/about`, stores encrypted credentials
+- [x] `POST /api/integrations/immich/disconnect` — removes credentials
+- [x] Immich panel appears in integrations dashboard with Server URL + API Key inputs and Connect/Disconnect controls
+- [x] Worker tests and linting are setup and included in ci
 
 **Required Test Coverage:**
 - **Unit:** API key encryption/decryption, registry provider status derivation, connect endpoint validation logic.
@@ -85,6 +86,7 @@ Build the `ImmichApiClient` with all methods needed for sync, and the ARQ worker
 - [ ] Worker registers as `immich-worker` consumer group on Redis Stream
 - [ ] Immich worker added to `docker-compose.yml` and CI
 - [ ] `ImmichWorkerStreamConsumer` for consuming outbound domain events
+- [ ] Release build included immich worker
 
 **Required Test Coverage:**
 - **Unit:** Response model parsing for each endpoint, API key header injection, error handling (401, 404, 500).

@@ -31,6 +31,7 @@ class IntegrationCapability(StrEnum):
     GEAR_SYNC = "gear_sync"
     MAINTENANCE_SYNC = "maintenance_sync"
     CHECKOUT_SYNC = "checkout_sync"
+    ALBUM_SYNC = "album_sync"
 
 
 @dataclass(frozen=True)

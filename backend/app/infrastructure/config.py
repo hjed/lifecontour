@@ -185,8 +185,9 @@ class Settings(BaseSettings):
         default="", description="Fernet encryption key for Snipe-IT API key storage"
     )
 
-    immich_base_url: str = Field(default="", description="Immich instance base URL")
-    immich_api_key: str = Field(default="", description="Immich API key")
+    immich_encryption_key: str = Field(
+        default="", description="Fernet encryption key for Immich API key storage"
+    )
 
     # Gemini AI settings
     gemini_api_key: str = Field(

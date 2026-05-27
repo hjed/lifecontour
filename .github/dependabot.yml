@@ -5,6 +5,7 @@ updates:
     directories:
       - "/backend"
       - "/integration_workers/google"
+      - "/integration_workers/immich"
       - "/integration_workers/strava"
       - "/integration_workers/snipeit"
       - "/core_shared"

@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install UV for dependency management
-RUN pip install uv
+RUN pip install uv==0.11.15
 
 # Create shared non-root user with home directory
 # (FastMCP OAuthProxy needs writable home for token storage)
