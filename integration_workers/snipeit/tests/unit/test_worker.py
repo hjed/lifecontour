@@ -2,6 +2,13 @@
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
+db_port = os.environ.get("DB_TEST_PORT", "5432")
+if "DATABASE_URL" not in os.environ:
+    os.environ["DATABASE_URL"] = (
+        f"postgresql+asyncpg://postgres:postgres@localhost:{db_port}/personal_management_test"
+    )
+os.environ["ENCRYPTION_KEY"] = "testkey"
+
 import pytest
 from arq.connections import RedisSettings
 
@@ -12,13 +19,6 @@ from worker import (
     sync_snipeit_maintenance_batch,
     sync_snipeit_maintenances,
 )
-
-db_port = os.environ.get("DB_TEST_PORT", "5432")
-if "DATABASE_URL" not in os.environ:
-    os.environ["DATABASE_URL"] = (
-        f"postgresql+asyncpg://postgres:postgres@localhost:{db_port}/personal_management_test"
-    )
-os.environ["ENCRYPTION_KEY"] = "testkey"
 
 
 def test_parse_redis_url() -> None:
@@ -98,6 +98,43 @@ async def test_sync_snipeit_assets_orchestrator(mock_ctx):
         job2 = mock_ctx["redis"].jobs[1]
         assert job2[0] == "sync_snipeit_asset_batch"
         assert job2[1] == (user_id, [4, 5])
+
+
+@pytest.mark.asyncio
+async def test_sync_snipeit_assets_ignores_otel_carrier(mock_ctx):
+    """Test that the orchestrator job accepts and strips otel_carrier kwargs."""
+    user_id = "user-123"
+
+    with (
+        patch("worker._get_auth_data", new_callable=AsyncMock) as mock_auth_data,
+        patch("worker._create_sync_service") as mock_create_service,
+    ):
+        mock_result = MagicMock()
+        mock_result.fetchone.return_value = type(
+            "Row", (), {"base_url": "https://snipeit.com", "snipeit_user_id": "1"}
+        )()
+
+        mock_session = AsyncMock()
+        mock_session.execute.return_value = mock_result
+        mock_ctx["session_factory"].return_value.__aenter__.return_value = mock_session
+        mock_auth_data.return_value = {"encrypted_api_key": b"api-key"}
+
+        mock_sync_service = MagicMock()
+
+        async def mock_batches():
+            yield []
+
+        mock_sync_service.list_asset_batches.return_value = mock_batches()
+        mock_sync_service._api_client.close = AsyncMock()
+        mock_create_service.return_value = mock_sync_service
+
+        # This should not raise TypeError: sync_snipeit_assets() got an unexpected keyword argument 'otel_carrier'
+        await sync_snipeit_assets(
+            mock_ctx, user_id, otel_carrier={"traceparent": "00-1234-5678-01"}
+        )
+
+        # Verify it completed successfully without error
+        mock_sync_service._api_client.close.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -181,6 +218,47 @@ async def test_sync_snipeit_maintenances_orchestrator(mock_ctx):
         job2 = mock_ctx["redis"].jobs[1]
         assert job2[0] == "sync_snipeit_maintenance_batch"
         assert job2[1] == (user_id, [30])
+
+
+@pytest.mark.asyncio
+async def test_sync_snipeit_maintenances_accepts_sync_type_and_otel_carrier(mock_ctx):
+    """Test that the maintenance orchestrator accepts sync_type and otel_carrier.
+
+    enqueue_snipeit_maintenance_sync passes sync_type as a positional arg
+    and otel_carrier as a keyword arg. This test verifies the worker function
+    signature is compatible with that calling convention.
+    """
+    user_id = "user-123"
+
+    with (
+        patch("worker._get_auth_data", new_callable=AsyncMock) as mock_auth_data,
+        patch("worker._create_sync_service") as mock_create_service,
+    ):
+        mock_result = MagicMock()
+        mock_result.fetchone.return_value = type(
+            "Row", (), {"base_url": "https://snipeit.com", "snipeit_user_id": "1"}
+        )()
+
+        mock_session = AsyncMock()
+        mock_session.execute.return_value = mock_result
+        mock_ctx["session_factory"].return_value.__aenter__.return_value = mock_session
+        mock_auth_data.return_value = {"encrypted_api_key": b"api-key"}
+
+        mock_sync_service = MagicMock()
+
+        async def mock_batches():
+            yield []
+
+        mock_sync_service.list_maintenance_batches.return_value = mock_batches()
+        mock_sync_service._api_client.close = AsyncMock()
+        mock_create_service.return_value = mock_sync_service
+
+        # Call with sync_type positional and otel_carrier keyword - matches enqueue call
+        await sync_snipeit_maintenances(
+            mock_ctx, user_id, "full", otel_carrier={"traceparent": "00-1234-5678-01"}
+        )
+
+        mock_sync_service._api_client.close.assert_called_once()
 
 
 @pytest.mark.asyncio

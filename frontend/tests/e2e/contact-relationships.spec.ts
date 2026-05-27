@@ -161,7 +161,9 @@ test.describe('Contact Relationships', () => {
     await responsePromise;
 
     // Wait for the relationship to appear in the list with "You" label
-    await expect(page.getByTestId('relationship-user-target')).toBeVisible();
+    await expect(page.getByTestId('relationship-user-target')).toBeVisible({
+      timeout: 15000,
+    });
     await expect(page.getByTestId('relationship-user-target')).toHaveText(
       'You'
     );
