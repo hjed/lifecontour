@@ -162,7 +162,7 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
                 (info for info in integrations if info.id == "strava"), None
             )
 
-            if not strava_info or strava_info.status == IntegrationStatus.DISCONNECTED:
+            if not strava_info or strava_info.status != IntegrationStatus.CONNECTED:
                 raise ValueError(
                     "Cannot trigger sync: Strava integration is not connected."
                 )
@@ -180,7 +180,7 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
                 (info for info in integrations if info.id == "immich"), None
             )
 
-            if not immich_info or immich_info.status == IntegrationStatus.DISCONNECTED:
+            if not immich_info or immich_info.status != IntegrationStatus.CONNECTED:
                 raise ValueError(
                     "Cannot trigger sync: Immich integration is not connected."
                 )

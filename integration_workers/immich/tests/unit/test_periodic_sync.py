@@ -234,22 +234,37 @@ class TestSyncImmichPeople:
 class TestPeriodicSyncConfiguration:
     """Test cron schedule generation for periodic sync."""
 
+    def _get_cron_hours(self, interval: int) -> set[int]:
+        import importlib
+        from unittest.mock import patch
+
+        import immich_settings
+        import worker
+
+        with patch.dict(
+            os.environ,
+            {"ENABLE_PERIODIC_SYNC": "true", "SYNC_INTERVAL_HOURS": str(interval)},
+        ):
+            importlib.reload(immich_settings)
+            importlib.reload(worker)
+
+            cron_jobs = worker.WorkerSettings.cron_jobs
+            if not cron_jobs:
+                return set()
+            return cron_jobs[0].hour  # type: ignore
+
     def test_cron_schedule_for_6_hour_interval(self) -> None:
         """6-hour interval produces hours {0, 6, 12, 18}."""
-        sync_hours = set(range(0, 24, 6))
-        assert sync_hours == {0, 6, 12, 18}
+        assert self._get_cron_hours(6) == {0, 6, 12, 18}
 
     def test_cron_schedule_for_12_hour_interval(self) -> None:
         """12-hour interval produces hours {0, 12}."""
-        sync_hours = set(range(0, 24, 12))
-        assert sync_hours == {0, 12}
+        assert self._get_cron_hours(12) == {0, 12}
 
     def test_cron_schedule_for_24_hour_interval(self) -> None:
         """24-hour interval produces hours {0}."""
-        sync_hours = set(range(0, 24, 24))
-        assert sync_hours == {0}
+        assert self._get_cron_hours(24) == {0}
 
     def test_cron_schedule_for_1_hour_interval(self) -> None:
         """1-hour interval produces all 24 hours."""
-        sync_hours = set(range(0, 24, 1))
-        assert sync_hours == set(range(24))
+        assert self._get_cron_hours(1) == set(range(24))

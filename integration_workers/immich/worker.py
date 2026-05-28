@@ -291,7 +291,7 @@ class WorkerSettings:
 
         logger.info(
             "Periodic Immich sync enabled",
-            sync_interval_hours=settings.sync_interval_hours,
+            sync_interval_hours=interval,
             sync_hours=list(sync_hours),
         )
 
