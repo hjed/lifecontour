@@ -182,7 +182,7 @@ class SnipeItMaintenanceTransformer:
         snipeit_type = _reverse_map_maintenance_type(maintenance_type)
 
         payload: dict[str, Any] = {
-            "title": title,
+            "name": title,
             "notes": content,
             "asset_maintenance_type": snipeit_type,
         }

@@ -152,7 +152,7 @@ class TestPushMaintenanceCreate:
         call_args = api_client.create_maintenance.call_args
         assert call_args.kwargs["asset_id"] == 42
         payload = call_args.kwargs["payload"]
-        assert payload["title"] == "Rope Inspection"
+        assert payload["name"] == "Rope Inspection"
         assert payload["asset_maintenance_type"] == "PAT Test"  # routine inspection
         # Dates must be YYYY-MM-DD format for Snipe-IT API
         assert payload["start_date"] == "2024-06-01"
@@ -384,7 +384,7 @@ class TestPushMaintenanceUpdate:
         call_args = api_client.update_maintenance.call_args
         assert call_args.args[0] == 201  # maintenance_id
         payload = call_args.args[1]
-        assert payload["title"] == "Updated Inspection"
+        assert payload["name"] == "Updated Inspection"
         assert payload["asset_maintenance_type"] == "Repair"
 
         # Verify sync metadata was updated (5th execute call)
