@@ -50,7 +50,7 @@ dependencies = [
     # __getitem__ raises KeyError for missing metadata keys. aiofile 3.9.0
     # (transitive dep of fastmcp) uses metadata["Author"] which crashes.
     # Remove this pin once aiofile releases a fix.
-    "importlib-metadata<8.0",
+    "importlib-metadata<10.0",
 ]
 
 [tool.uv.sources]
