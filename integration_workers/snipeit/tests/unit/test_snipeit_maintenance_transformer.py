@@ -260,7 +260,7 @@ class TestReverseTransformPayload:
             start_date="2024-06-01",
             end_date="2024-06-02",
         )
-        assert result["title"] == "Rope Inspection"
+        assert result["name"] == "Rope Inspection"
         assert result["notes"] == "Checked all points"
         assert result["start_date"] == "2024-06-01"
         assert result["completion_date"] == "2024-06-02"
@@ -273,7 +273,7 @@ class TestReverseTransformPayload:
             content="",
             maintenance_type="routine maintenance",
         )
-        assert result["title"] == "Quick Check"
+        assert result["name"] == "Quick Check"
         assert result["notes"] == ""
         assert result["asset_maintenance_type"] == "Maintenance"
         assert "start_date" not in result
