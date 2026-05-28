@@ -7,6 +7,10 @@ on:
     branches: [ main, develop ]
   workflow_call:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   PYTHON_VERSION: "3.14"
   NODE_VERSION: "24"
