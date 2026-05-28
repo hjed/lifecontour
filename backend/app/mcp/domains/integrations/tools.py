@@ -138,7 +138,7 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
         Trigger a sync for a specific integration.
 
         Args:
-            integration_id: The ID of the integration (currently only 'strava' is supported).
+            integration_id: The ID of the integration ('strava' or 'immich').
             sync_type: The type of sync to perform (e.g., 'smart', 'full'). Defaults to 'smart'.
 
         Returns:
@@ -168,6 +168,24 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
                 )
 
             job_id = await task_queue_service.enqueue_strava_sync(
+                user_id=user_id, sync_type=sync_type
+            )
+        elif integration_id == "immich":
+            from app.core.integrations.registry.models import IntegrationStatus
+
+            integrations = await integration_registry_service.list_integrations(
+                user_id=user_id, connection=connection
+            )
+            immich_info = next(
+                (info for info in integrations if info.id == "immich"), None
+            )
+
+            if not immich_info or immich_info.status == IntegrationStatus.DISCONNECTED:
+                raise ValueError(
+                    "Cannot trigger sync: Immich integration is not connected."
+                )
+
+            job_id = await task_queue_service.enqueue_immich_sync(
                 user_id=user_id, sync_type=sync_type
             )
         elif integration_id == "google_calendar":

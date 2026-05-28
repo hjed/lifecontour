@@ -27,9 +27,12 @@ class TestWorkerSettings:
         """Worker uses the correct ARQ queue name."""
         assert WorkerSettings.queue_name == "arq:immich"
 
-    def test_functions_list_is_empty(self) -> None:
-        """Functions list is empty in Phase 2 (no sync tasks yet)."""
-        assert WorkerSettings.functions == []
+    def test_functions_list_has_sync_tasks(self) -> None:
+        """Functions list contains sync tasks from Phase 3."""
+        assert len(WorkerSettings.functions) == 2
+        func_names = [f.__name__ for f in WorkerSettings.functions]
+        assert "sync_immich_people" in func_names
+        assert "periodic_sync_all_immich_accounts" in func_names
 
     def test_lifecycle_hooks_set(self) -> None:
         """Startup and shutdown hooks are configured."""

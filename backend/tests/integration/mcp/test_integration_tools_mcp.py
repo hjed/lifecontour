@@ -66,6 +66,53 @@ async def test_trigger_sync_mcp_tool(
 
 
 @pytest.mark.asyncio
+async def test_trigger_sync_mcp_tool_immich(
+    authenticated_lifespan_client,
+    clean_database: AsyncConnection,
+):
+    """Test trigger_sync MCP tool with Immich integration."""
+    # Insert immich auth for test user
+    await clean_database.execute(
+        text(
+            "INSERT INTO user_immich_auth (user_id, server_url, encrypted_api_key, created_at, updated_at) "
+            "VALUES ('test-user-123', 'https://immich.example.com', 'encrypted_key', now(), now())"
+        )
+    )
+
+    with patch(
+        "app.core.integrations.task_queue_service.TaskQueueService.enqueue_immich_sync",
+        new_callable=AsyncMock,
+    ) as mock_enqueue:
+        mock_enqueue.return_value = "test_immich_job_123"
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+
+            resp = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "trigger_sync",
+                        "arguments": {"integration_id": "immich"},
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+            assert resp.status_code == 200
+            payload = extract_mcp_json_payload(resp.text)
+
+            assert "status" in payload
+            assert payload["status"] == "queued"
+            assert payload["job_id"] == "test_immich_job_123"
+
+            mock_enqueue.assert_awaited_once_with(
+                user_id="test-user-123", sync_type="smart"
+            )
+
+
+@pytest.mark.asyncio
 async def test_get_strava_athlete_mappings_mcp_tool(
     authenticated_lifespan_client,
     clean_database: AsyncConnection,

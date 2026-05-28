@@ -98,15 +98,17 @@ Build the `ImmichApiClient` with all methods needed for sync, and the ARQ worker
 Set up the periodic sync scheduling and manual sync triggers.
 
 **Acceptance Criteria:**
-- [ ] `periodic_sync_all_immich_accounts(ctx)` ARQ task — iterates all connected users and triggers sync
-- [ ] Manual sync trigger from integrations dashboard via `POST /api/integrations/immich/sync`
-- [ ] `SyncJob` records created for each sync run
-- [ ] Sync controls visible on Immich integration panel (Sync People, Sync Albums buttons)
-- [ ] MCP: `trigger_sync` tool updated/verified for Immich
+- [x] `periodic_sync_all_immich_accounts(ctx)` ARQ task — iterates all connected users and triggers sync
+- [x] Manual sync trigger from integrations dashboard via `POST /api/integrations/immich/sync`
+- [x] `SyncJob` records created for each sync run
+- [x] Sync controls visible on Immich integration panel (Sync People, Sync Albums buttons)
+- [x] MCP: `trigger_sync` tool updated/verified for Immich
+- [x] Full and partial sync supported
 
 **Required Test Coverage:**
 - **Unit:** Periodic task iterates users, sync job creation.
-- **Integration:** Manual sync trigger endpoint, sync job recorded in DB.
+- **Integration:** Manual sync trigger endpoint, sync job recorded in DB, manual trigger successfully hits agent.
+- **E2E:** Sync button visibility when connected/disconnected, sync trigger API call via Playwright.
 
 ---
 

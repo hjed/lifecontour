@@ -991,3 +991,90 @@ class TaskQueueService:
                 error=str(e),
             )
             raise
+
+    async def enqueue_immich_sync(
+        self, user_id: str | int, sync_type: str = "full"
+    ) -> str:
+        """
+        Enqueue an Immich people sync job.
+
+        Args:
+            user_id: ID of the user requesting the sync (string or integer)
+            sync_type: Type of sync ('full' or 'smart')
+
+        Returns:
+            Job ID for tracking the job status
+
+        Raises:
+            JobEnqueueError: If job enqueueing fails
+            ConnectionError: If Redis connection fails
+        """
+        from core_shared.integration_constants import IMMICH_ARQ_QUEUE_NAME
+
+        logger.info(
+            "Enqueueing Immich sync job",
+            user_id=user_id,
+            sync_type=sync_type,
+        )
+
+        try:
+            pool = await self._get_arq_pool()
+
+            from opentelemetry.propagate import inject
+
+            carrier: dict[str, str] = {}
+            try:
+                inject(carrier)
+            except Exception:  # noqa: BLE001
+                pass
+
+            job = await pool.enqueue_job(
+                "sync_immich_people",
+                str(user_id),
+                sync_type,
+                otel_carrier=carrier,
+                _defer_until=None,
+                _queue_name=IMMICH_ARQ_QUEUE_NAME,
+            )
+
+            if not job:
+                raise JobEnqueueError(
+                    message="Failed to enqueue Immich sync job - no job returned",
+                    integration_source="immich",
+                    reason="ARQ pool returned None",
+                )
+
+            job_id = job.job_id
+            logger.info(
+                "Successfully enqueued Immich sync job",
+                job_id=job_id,
+                user_id=user_id,
+                sync_type=sync_type,
+            )
+
+            # Store user-job association for security
+            await self._store_user_job_association(user_id, job_id)
+
+            # Persist job to database for history tracking
+            async with self.db_manager.get_session() as session:
+                async with session.begin():
+                    conn = await session.connection()
+                    repo = SyncJobRepository(conn)
+                    await repo.create(
+                        job_id=job_id,
+                        user_id=str(user_id),
+                        integration_source="immich",
+                        sync_type=sync_type,
+                        status="queued",
+                    )
+
+            return job_id
+
+        except Exception as e:
+            logger.error(
+                "Failed to enqueue Immich sync job",
+                user_id=user_id,
+                sync_type=sync_type,
+                error=str(e),
+            )
+            raise

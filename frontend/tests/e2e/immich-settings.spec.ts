@@ -223,3 +223,173 @@ test.describe('Immich Integration Settings', () => {
     ).toHaveValue('');
   });
 });
+
+test.describe('Immich Sync Controls', () => {
+  /**
+   * Setup routes for a connected Immich integration.
+   */
+  async function setupConnectedRoutes(page: import('@playwright/test').Page) {
+    // Health endpoint
+    await page.route('**/api/integrations/health', route =>
+      route.fulfill(
+        json({
+          data: {
+            id: 'integrations',
+            type: 'integration-health',
+            attributes: {
+              overall: 'healthy',
+              lastChecked: new Date().toISOString(),
+              redis: { status: 'healthy', latency: 1, lastSeen: null },
+              worker: { status: 'healthy', latency: 1, lastSeen: null },
+            },
+          },
+        })
+      )
+    );
+
+    // Integration list — immich as connected
+    await page.route('**/api/integrations', route => {
+      const url = new URL(route.request().url());
+      if (url.pathname !== '/api/integrations') {
+        return route.fallback();
+      }
+
+      return route.fulfill(
+        json({
+          data: [
+            {
+              id: 'immich',
+              type: 'integration',
+              attributes: {
+                name: 'Immich',
+                status: 'connected',
+                capabilities: ['contacts_sync', 'album_sync'],
+                sync_summary: {
+                  last_sync_time: '2026-01-15T10:30:00Z',
+                  sync_count: 5,
+                  error_count: 0,
+                },
+                needs_reauth: false,
+                needs_reconsent: false,
+              },
+            },
+          ],
+        })
+      );
+    });
+
+    // Sync history
+    await page.route('**/api/integrations/*/sync-history**', route =>
+      route.fulfill(
+        json({
+          data: [],
+          meta: { total: 0, page: 1, pageSize: 5 },
+        })
+      )
+    );
+  }
+
+  test('sync buttons are visible when Immich is connected', async ({
+    authenticatedPage,
+  }) => {
+    await setupConnectedRoutes(authenticatedPage);
+
+    await authenticatedPage.goto('/integrations');
+
+    const immichPanel = authenticatedPage.locator(
+      '[data-testid="integration-panel-immich"]'
+    );
+    await expect(immichPanel).toBeVisible();
+
+    // When connected, sync controls should be visible
+    const contactsSyncButton = immichPanel.locator(
+      '[data-testid="trigger-immich-contacts-sync"]'
+    );
+    await expect(contactsSyncButton).toBeVisible();
+
+    const albumSyncButton = immichPanel.locator(
+      '[data-testid="trigger-immich-album-sync"]'
+    );
+    await expect(albumSyncButton).toBeVisible();
+  });
+
+  test('clicking contacts sync button triggers API call', async ({
+    authenticatedPage,
+  }) => {
+    await setupConnectedRoutes(authenticatedPage);
+
+    // Mock the sync trigger endpoint
+    let syncRequestReceived = false;
+    await authenticatedPage.route(
+      '**/api/integrations/immich/contacts/sync',
+      route => {
+        if (route.request().method() !== 'POST') return route.fallback();
+        syncRequestReceived = true;
+        return route.fulfill(
+          json({
+            data: {
+              id: 'sync-job-1',
+              type: 'sync-job',
+              attributes: {
+                status: 'queued',
+                syncType: 'smart',
+                integrationSource: 'immich',
+                createdAt: new Date().toISOString(),
+                startedAt: null,
+                completedAt: null,
+                errorMessage: null,
+                contactsProcessed: null,
+                contactsCreated: null,
+                contactsUpdated: null,
+                contactsDeleted: null,
+                progress: null,
+              },
+            },
+          })
+        );
+      }
+    );
+
+    await authenticatedPage.goto('/integrations');
+
+    const immichPanel = authenticatedPage.locator(
+      '[data-testid="integration-panel-immich"]'
+    );
+    await expect(immichPanel).toBeVisible();
+
+    // Click the contacts sync button
+    const contactsSyncButton = immichPanel.locator(
+      '[data-testid="trigger-immich-contacts-sync"]'
+    );
+    await expect(contactsSyncButton).toBeVisible();
+    await contactsSyncButton.click();
+
+    // Verify the sync toast notification appears
+    await expect(
+      authenticatedPage.getByText(/sync started successfully/i)
+    ).toBeVisible();
+
+    // Verify the API was called
+    expect(syncRequestReceived).toBe(true);
+  });
+
+  test('sync buttons are not shown when Immich is disconnected', async ({
+    authenticatedPage,
+  }) => {
+    // Use the base routes (disconnected state)
+    await setupBaseRoutes(authenticatedPage);
+
+    await authenticatedPage.goto('/integrations');
+
+    const immichPanel = authenticatedPage.locator(
+      '[data-testid="integration-panel-immich"]'
+    );
+    await expect(immichPanel).toBeVisible();
+
+    // Sync controls should not be rendered when disconnected
+    const contactsSyncButton = immichPanel.locator(
+      '[data-testid="trigger-immich-contacts-sync"]'
+    );
+    await expect(contactsSyncButton).toHaveCount(0);
+  });
+});
