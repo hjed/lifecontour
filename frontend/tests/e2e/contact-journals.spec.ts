@@ -89,14 +89,15 @@ test.describe('Contact Journals Display', () => {
       await navigateToContactAndWaitForJournals(page, contact.id);
 
       // Verify participant journal is displayed
-      await expect(
-        page.getByRole('heading', { name: participantJournal.title })
-      ).toBeVisible();
-
-      // Verify about journal is displayed
-      await expect(
-        page.getByRole('heading', { name: aboutJournal.title })
-      ).toBeVisible();
+      await expect(async () => {
+        await page.reload();
+        await expect(
+          page.getByRole('heading', { name: participantJournal.title })
+        ).toBeVisible();
+        await expect(
+          page.getByRole('heading', { name: aboutJournal.title })
+        ).toBeVisible();
+      }).toPass({ timeout: 15000 });
     });
 
     test('should display contact name instead of Contact <id> on related journals', async ({
@@ -192,13 +193,16 @@ test.describe('Contact Journals Display', () => {
       // Navigate to contact detail page and wait for journals section
       await navigateToContactAndWaitForJournals(page, contact.id);
 
-      // Verify relationship type sections exist
-      await expect(
-        page.getByTestId('relationship-section-trigger-PARTICIPANT')
-      ).toBeVisible();
-      await expect(
-        page.getByTestId('relationship-section-trigger-ABOUT')
-      ).toBeVisible();
+      // Verify relationship type sections exist, using a retry loop for indexing
+      await expect(async () => {
+        await page.reload();
+        await expect(
+          page.getByTestId('relationship-section-trigger-PARTICIPANT')
+        ).toBeVisible();
+        await expect(
+          page.getByTestId('relationship-section-trigger-ABOUT')
+        ).toBeVisible();
+      }).toPass({ timeout: 15000 });
 
       // Test collapsible functionality
       const participantSection = page
@@ -274,10 +278,13 @@ test.describe('Contact Journals Display', () => {
 
       await navigateToContactAndWaitForJournals(page, contact.id);
 
-      // Parent should be visible
-      await expect(
-        page.getByRole('heading', { name: parentJournal.title })
-      ).toBeVisible();
+      // Parent should be visible, use retry loop for indexing
+      await expect(async () => {
+        await page.reload();
+        await expect(
+          page.getByRole('heading', { name: parentJournal.title })
+        ).toBeVisible();
+      }).toPass({ timeout: 15000 });
 
       // Child should render under parent's children container by default
       const childContainer = page.getByTestId(
@@ -344,10 +351,13 @@ test.describe('Contact Journals Display', () => {
       // Navigate to contact detail page
       await page.goto(`/contacts/${contact.id}`);
 
-      // Wait for journal to be visible
-      await expect(
-        page.getByRole('heading', { name: journal.title })
-      ).toBeVisible();
+      // Wait for journal to be visible, use retry loop for indexing
+      await expect(async () => {
+        await page.reload();
+        await expect(
+          page.getByRole('heading', { name: journal.title })
+        ).toBeVisible();
+      }).toPass({ timeout: 15000 });
 
       // Click on the journal
       await Promise.all([
@@ -431,13 +441,13 @@ test.describe('Contact Journals Display', () => {
         ],
       });
 
-      // Refresh the page to see the new journal
-      await page.reload();
-
-      // Wait for the new journal to appear
-      await expect(
-        page.getByRole('heading', { name: newJournal.title })
-      ).toBeVisible({ timeout: 10000 });
+      // Wait for the new journal to appear, use retry loop for indexing
+      await expect(async () => {
+        await page.reload();
+        await expect(
+          page.getByRole('heading', { name: newJournal.title })
+        ).toBeVisible();
+      }).toPass({ timeout: 15000 });
 
       // Verify empty state is gone
       await expect(
