@@ -11,6 +11,8 @@ Type System Architecture:
 - Type-specific data tables contain required and optional fields
 """
 
+from __future__ import annotations
+
 from enum import StrEnum
 
 

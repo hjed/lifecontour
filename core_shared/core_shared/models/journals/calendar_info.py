@@ -47,6 +47,7 @@ class CalendarInfo:
 
     calendar_id: UUID
     journal_id: int | None = None
+    description: str | None = None
     start_time: time | None = None
     end_time: time | None = None
     is_all_day: bool = False

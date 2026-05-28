@@ -103,6 +103,7 @@ class GoogleEventTransformer:
         calendar_info = CalendarInfo(
             journal_id=None,
             calendar_id=calendar_id,
+            description=description,
             start_time=start_time,
             end_time=end_time,
             is_all_day=is_all_day,
@@ -244,7 +245,7 @@ class GoogleEventTransformer:
         }
 
         if not calendar_info.private_description:
-            payload["description"] = journal.content
+            payload["description"] = calendar_info.description or ""
 
         if calendar_info.location:
             payload["location"] = calendar_info.location

@@ -5,6 +5,8 @@ This model enables reliable event publishing by storing events in the same
 database transaction as the business data changes.
 """
 
+from __future__ import annotations
+
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4

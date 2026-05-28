@@ -27,6 +27,7 @@ def project_calendar_info_to_linked_calendar(
     return CalendarInfo(
         journal_id=calendar_info.journal_id,
         calendar_id=calendar_id,
+        description=calendar_info.description,
         start_time=calendar_info.start_time,
         end_time=calendar_info.end_time,
         is_all_day=calendar_info.is_all_day,
@@ -101,6 +102,7 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
         return CalendarInfo(
             journal_id=row.journal_id,
             calendar_id=row.calendar_id,
+            description=getattr(row, "description", None),
             start_time=row.start_time,
             end_time=row.end_time,
             is_all_day=row.is_all_day,
@@ -119,7 +121,7 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
         """Find calendar info by journal ID."""
         query = text(
             """
-            SELECT jci.journal_id, jci.calendar_id, jci.start_time, jci.end_time,
+            SELECT jci.journal_id, jci.calendar_id, jci.description, jci.start_time, jci.end_time,
                    jci.is_all_day, jci.location, jci.timezone, jci.sync_invitees,
                    jci.private_description, jci.event_state,
                    jci.created_at, jci.updated_at,
@@ -164,16 +166,16 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
         query = text(
             """
             INSERT INTO journal_calendar_info (
-                journal_id, calendar_id, start_time, end_time,
+                journal_id, calendar_id, description, start_time, end_time,
                 is_all_day, location, timezone, sync_invitees,
                 private_description, event_state
             )
             VALUES (
-                :journal_id, :calendar_id, :start_time, :end_time,
+                :journal_id, :calendar_id, :description, :start_time, :end_time,
                 :is_all_day, :location, :timezone, :sync_invitees,
                 :private_description, :event_state
             )
-            RETURNING journal_id, calendar_id, start_time, end_time,
+            RETURNING journal_id, calendar_id, description, start_time, end_time,
                       is_all_day, location, timezone, sync_invitees,
                       private_description, event_state,
                       created_at, updated_at
@@ -184,6 +186,7 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
             {
                 "journal_id": calendar_info.journal_id,
                 "calendar_id": str(calendar_info.calendar_id),
+                "description": calendar_info.description,
                 "start_time": calendar_info.start_time,
                 "end_time": calendar_info.end_time,
                 "is_all_day": calendar_info.is_all_day,
@@ -207,6 +210,7 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
             """
             UPDATE journal_calendar_info
             SET calendar_id = :calendar_id,
+                description = :description,
                 start_time = :start_time,
                 end_time = :end_time,
                 is_all_day = :is_all_day,
@@ -217,7 +221,7 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
                 event_state = :event_state,
                 updated_at = now()
             WHERE journal_id = :journal_id
-            RETURNING journal_id, calendar_id, start_time, end_time,
+            RETURNING journal_id, calendar_id, description, start_time, end_time,
                       is_all_day, location, timezone, sync_invitees,
                       private_description, event_state,
                       created_at, updated_at
@@ -228,6 +232,7 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
             {
                 "journal_id": calendar_info.journal_id,
                 "calendar_id": str(calendar_info.calendar_id),
+                "description": calendar_info.description,
                 "start_time": calendar_info.start_time,
                 "end_time": calendar_info.end_time,
                 "is_all_day": calendar_info.is_all_day,
@@ -260,7 +265,7 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
         """Get all calendar info entries for a calendar."""
         primary_query = text(
             """
-            SELECT jci.journal_id, jci.calendar_id, jci.start_time, jci.end_time,
+            SELECT jci.journal_id, jci.calendar_id, jci.description, jci.start_time, jci.end_time,
                    jci.is_all_day, jci.location, jci.timezone, jci.sync_invitees,
                    jci.private_description, jci.event_state,
                    jci.created_at, jci.updated_at,
@@ -280,7 +285,7 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
 
         linked_query = text(
             """
-            SELECT jci.journal_id, jci.calendar_id, jci.start_time, jci.end_time,
+            SELECT jci.journal_id, jci.calendar_id, jci.description, jci.start_time, jci.end_time,
                    jci.is_all_day, jci.location, jci.timezone, jci.sync_invitees,
                    jci.private_description, jci.event_state,
                    jci.created_at, jci.updated_at,

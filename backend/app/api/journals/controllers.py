@@ -2162,6 +2162,7 @@ async def _process_journal_type_data(
             calendar_info = CalendarInfo(
                 journal_id=journal_id,
                 calendar_id=UUID(event_data["calendar_id"]),
+                description=event_data.get("description"),
                 start_time=start_time,
                 end_time=end_time,
                 is_all_day=event_data.get("is_all_day", False),
@@ -3657,6 +3658,8 @@ async def _update_event_type_data(
         updates["location"] = attrs["location"]
     if "timezone" in attrs:
         updates["timezone"] = attrs["timezone"]
+    if "description" in attrs:
+        updates["description"] = attrs["description"]
     if "sync_invitees" in attrs:
         updates["sync_invitees"] = attrs["sync_invitees"]
     if "private_description" in attrs:

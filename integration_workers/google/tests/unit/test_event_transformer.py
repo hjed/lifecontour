@@ -147,6 +147,7 @@ class TestGoogleEventTransformer:
             end_time=end_dt.time().replace(tzinfo=None),
             is_all_day=False,
             location="Room 404",
+            description="Public event description",
         )
 
         # Act
@@ -154,7 +155,7 @@ class TestGoogleEventTransformer:
 
         # Assert
         assert payload["summary"] == "Outbound Meeting"
-        assert payload["description"] == "Syncing this out"
+        assert payload["description"] == "Public event description"
         assert payload["location"] == "Room 404"
         assert payload["start"]["dateTime"] == "2023-10-27T10:00:00Z"
         assert payload["end"]["dateTime"] == "2023-10-27T11:00:00Z"
@@ -175,7 +176,10 @@ class TestGoogleEventTransformer:
         )
 
         calendar_info = CalendarInfo(
-            calendar_id=uuid.uuid4(), is_all_day=True, location=None
+            calendar_id=uuid.uuid4(),
+            is_all_day=True,
+            location=None,
+            description="Public holiday description",
         )
 
         # Act
@@ -183,7 +187,7 @@ class TestGoogleEventTransformer:
 
         # Assert
         assert payload["summary"] == "Christmas"
-        assert payload["description"] == "Holiday"
+        assert payload["description"] == "Public holiday description"
         assert "location" not in payload  # Should be excluded if None
         assert payload["start"]["date"] == "2023-12-25"
         assert payload["end"]["date"] == "2023-12-27"
@@ -895,14 +899,15 @@ class TestGoogleEventTransformerPrivateDescription:
             end_time=end_dt.time().replace(tzinfo=None),
             is_all_day=False,
             private_description=False,
+            description="My public description for this meeting",
         )
 
         payload = transformer.transform_to_google_event_payload(journal, calendar_info)
 
-        assert payload["description"] == "My private notes about this meeting"
+        assert payload["description"] == "My public description for this meeting"
 
-    def test_description_omitted_when_private_description_is_true(self) -> None:
-        """When private_description is True, description should NOT be in payload."""
+    def test_description_not_synced_when_private_description_is_true(self) -> None:
+        """When private_description is True, description should be omitted from payload."""
         transformer = GoogleEventTransformer()
         start_dt = datetime(2023, 10, 27, 10, 0, tzinfo=UTC)
         end_dt = datetime(2023, 10, 27, 11, 0, tzinfo=UTC)
@@ -927,8 +932,8 @@ class TestGoogleEventTransformerPrivateDescription:
         assert "description" not in payload
         assert payload["summary"] == "Confidential Meeting"
 
-    def test_description_omitted_for_all_day_event_when_private(self) -> None:
-        """Private description should also work for all-day events."""
+    def test_description_not_synced_for_all_day_event_when_private(self) -> None:
+        """Private description should omit description from all-day event payloads too."""
         transformer = GoogleEventTransformer()
         start_dt = datetime(2023, 12, 25, tzinfo=UTC)
         end_dt = datetime(2023, 12, 26, tzinfo=UTC)
