@@ -48,7 +48,7 @@ def _make_mock_ctx(
     mock_session.execute = AsyncMock(return_value=accounts_result)
 
     @asynccontextmanager
-    async def _session_ctx():  # type: ignore[no-untyped-def]
+    async def _session_ctx():
         yield mock_session
 
     session_factory = MagicMock(side_effect=lambda: _session_ctx())
@@ -92,7 +92,10 @@ class TestPeriodicSyncAllImmichAccounts:
         """Should enqueue sync_immich_people for every connected account."""
         from worker import periodic_sync_all_immich_accounts
 
-        accounts = [("user-1", "https://immich1.example.com"), ("user-2", "https://immich2.example.com")]
+        accounts = [
+            ("user-1", "https://immich1.example.com"),
+            ("user-2", "https://immich2.example.com"),
+        ]
         ctx, mock_redis, _ = _make_mock_ctx(accounts)
 
         result = await periodic_sync_all_immich_accounts(ctx)

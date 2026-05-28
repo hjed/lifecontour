@@ -17,6 +17,7 @@ import sys
 from typing import Any
 
 import structlog
+from arq import cron
 from arq.connections import RedisSettings
 from core_shared.integration_constants import IMMICH_ARQ_QUEUE_NAME
 
@@ -274,8 +275,6 @@ class WorkerSettings:
     # Only configure cron_jobs if periodic sync is enabled
     cron_jobs: list[Any] = []
     if settings.enable_periodic_sync:
-        from arq import cron
-
         # Generate cron schedule based on sync_interval_hours
         # For example: sync_interval_hours=6 -> hours={0, 6, 12, 18}
         sync_hours = set(range(0, 24, settings.sync_interval_hours))

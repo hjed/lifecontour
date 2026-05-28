@@ -157,6 +157,28 @@ repos:
         files: ^integration_workers/snipeit/.*\.py$
         pass_filenames: false
 
+  # Immich Worker Python hooks
+  - repo: local
+    hooks:
+      - id: ruff-format-immich-worker
+        name: ruff format (immich-worker)
+        entry: uv run --directory integration_workers/immich ruff format .
+        language: system
+        files: ^integration_workers/immich/.*\.py$
+        pass_filenames: false
+      - id: ruff-immich-worker
+        name: ruff check (immich-worker)
+        entry: uv run --directory integration_workers/immich ruff check --fix .
+        language: system
+        files: ^integration_workers/immich/.*\.py$
+        pass_filenames: false
+      - id: mypy-immich-worker
+        name: mypy (immich-worker)
+        entry: uv run --directory integration_workers/immich mypy .
+        language: system
+        files: ^integration_workers/immich/.*\.py$
+        pass_filenames: false
+
   # General hooks
   - repo: local
     hooks:
