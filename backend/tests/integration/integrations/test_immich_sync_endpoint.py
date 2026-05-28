@@ -17,7 +17,7 @@ async def test_trigger_immich_sync_creates_sync_job(
     authenticated_client,
     clean_database: AsyncConnection,
 ) -> None:
-    """Manual sync trigger should enqueue a job and persist a SyncJob record."""
+    """Manual sync trigger should enqueue a job."""
     # Setup: insert Immich auth credentials for the test user
     await clean_database.execute(
         text(
@@ -88,14 +88,9 @@ async def test_trigger_immich_sync_not_connected(
 
     assert response.status_code == 400
     body = response.json()
-    # Handle both JSON API error format and standard FastAPI detail format
-    if "detail" in body:
-        assert "not connected" in body["detail"].lower()
-    elif "errors" in body:
-        error_detail = body["errors"][0].get("detail", "")
-        assert "not connected" in error_detail.lower()
-    else:
-        raise AssertionError(f"Unexpected response format: {body}")
+    assert "errors" in body
+    error_detail = body["errors"][0].get("detail", "")
+    assert "not connected" in error_detail.lower()
 
 
 @pytest.mark.asyncio
@@ -179,10 +174,6 @@ async def test_trigger_immich_sync_connection_error(
 
     assert response.status_code == 503
     body = response.json()
-    if "detail" in body:
-        assert "unavailable" in body["detail"].lower()
-    elif "errors" in body:
-        error_detail = body["errors"][0].get("detail", "")
-        assert "unavailable" in error_detail.lower()
-    else:
-        raise AssertionError(f"Unexpected response format: {body}")
+    assert "errors" in body
+    error_detail = body["errors"][0].get("detail", "")
+    assert "unavailable" in error_detail.lower()

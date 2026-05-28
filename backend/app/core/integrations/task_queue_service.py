@@ -1011,6 +1011,9 @@ class TaskQueueService:
         """
         from core_shared.integration_constants import IMMICH_ARQ_QUEUE_NAME
 
+        if sync_type == "incremental":
+            sync_type = "smart"
+
         logger.info(
             "Enqueueing Immich sync job",
             user_id=user_id,

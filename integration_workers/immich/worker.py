@@ -277,7 +277,8 @@ class WorkerSettings:
     if settings.enable_periodic_sync:
         # Generate cron schedule based on sync_interval_hours
         # For example: sync_interval_hours=6 -> hours={0, 6, 12, 18}
-        sync_hours = set(range(0, 24, settings.sync_interval_hours))
+        interval = max(1, settings.sync_interval_hours)
+        sync_hours = set(range(0, 24, interval))
 
         cron_jobs = [
             cron(
