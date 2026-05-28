@@ -130,7 +130,7 @@ class TestMaintenanceSyncIntegration:
             f"/maintenances/{maintenance_id}",
             json_data={
                 "id": maintenance_id,
-                "asset_id": 42,
+                "asset": {"id": 42, "name": "Climbing Rope 60m"},
                 "title": "Annual Rope Inspection",
                 "asset_maintenance_type": "Maintenance",
                 "start_date": {"date": "2024-06-01", "formatted": "Jun 01, 2024"},
@@ -246,7 +246,7 @@ class TestMaintenanceSyncIntegration:
 
         maintenance_data = {
             "id": 200,
-            "asset_id": 50,
+            "asset": {"id": 50, "name": "Harness"},
             "title": "Harness Check",
             "asset_maintenance_type": "PAT Test",
             "start_date": {"date": "2024-07-01", "formatted": "Jul 01, 2024"},
@@ -294,7 +294,7 @@ class TestMaintenanceSyncIntegration:
             "/maintenances/300",
             json_data={
                 "id": 300,
-                "asset_id": 999,
+                "asset": {"id": 999, "name": "Unknown Asset"},
                 "title": "Unknown Asset Maintenance",
                 "asset_maintenance_type": "Repair",
             },
@@ -311,6 +311,40 @@ class TestMaintenanceSyncIntegration:
 
         result = await sync_service.sync_maintenance_batch(
             maintenance_ids=[300],
+            session_factory=mock_session_factory,
+        )
+
+        assert result["skipped"] == 1
+        assert result["synced"] == 0
+
+    @pytest.mark.asyncio
+    async def test_sync_maintenance_skips_when_no_asset_id(
+        self,
+        sync_service: SnipeItSyncService,
+        mock_transport: MockTransport,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """Verify maintenance is skipped when API response has no asset_id or asset object."""
+        mock_transport.add_response(
+            "/maintenances/400",
+            json_data={
+                "id": 400,
+                "title": "Orphan Maintenance",
+                "asset_maintenance_type": "Repair",
+            },
+        )
+
+        @asynccontextmanager
+        async def mock_session_factory() -> Any:
+            async with AsyncSession(
+                async_connection,
+                expire_on_commit=False,
+                join_transaction_mode="create_savepoint",
+            ) as session:
+                yield session
+
+        result = await sync_service.sync_maintenance_batch(
+            maintenance_ids=[400],
             session_factory=mock_session_factory,
         )
 

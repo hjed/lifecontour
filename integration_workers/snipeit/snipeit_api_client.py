@@ -24,6 +24,7 @@ from snipeit_models import (
     SnipeItAssetListResponse,
     SnipeItMaintenance,
     SnipeItMaintenanceListResponse,
+    SnipeItMaintenanceWriteResponse,
 )
 from snipeit_rate_limiter import SnipeItRateLimiter, SnipeItRateLimitError
 
@@ -255,7 +256,7 @@ class SnipeItAPIClient:
 
     async def create_maintenance(
         self, asset_id: int, payload: dict[str, Any]
-    ) -> SnipeItMaintenance:
+    ) -> SnipeItMaintenanceWriteResponse:
         """Create a new asset maintenance record.
 
         Snipe-IT POST responses are wrapped as
@@ -266,7 +267,7 @@ class SnipeItAPIClient:
             payload: Maintenance fields (title, asset_maintenance_type, etc.).
 
         Returns:
-            SnipeItMaintenance parsed from the ``payload`` key.
+            SnipeItMaintenanceWriteResponse parsed from the ``payload`` key.
 
         Raises:
             SnipeItAPIError: If the response ``status`` is not ``"success"``
@@ -290,11 +291,11 @@ class SnipeItAPIClient:
                 status_code=200,
             )
 
-        return SnipeItMaintenance.model_validate(maintenance_payload)
+        return SnipeItMaintenanceWriteResponse.model_validate(maintenance_payload)
 
     async def update_maintenance(
         self, maintenance_id: int, payload: dict[str, Any]
-    ) -> SnipeItMaintenance:
+    ) -> SnipeItMaintenanceWriteResponse:
         """Update an existing asset maintenance record.
 
         Args:
@@ -302,7 +303,7 @@ class SnipeItAPIClient:
             payload: Fields to update (e.g. title, notes).
 
         Returns:
-            SnipeItMaintenance parsed from the ``payload`` key.
+            SnipeItMaintenanceWriteResponse parsed from the ``payload`` key.
 
         Raises:
             SnipeItAPIError: If the response ``status`` is not ``"success"``
@@ -325,7 +326,7 @@ class SnipeItAPIClient:
                 status_code=200,
             )
 
-        return SnipeItMaintenance.model_validate(maintenance_payload)
+        return SnipeItMaintenanceWriteResponse.model_validate(maintenance_payload)
 
     async def close(self) -> None:
         """Close the underlying HTTP client."""

@@ -23,6 +23,7 @@ from snipeit_models import (
     SnipeItAssetListResponse,
     SnipeItMaintenance,
     SnipeItMaintenanceListResponse,
+    SnipeItMaintenanceWriteResponse,
 )
 from snipeit_rate_limiter import SnipeItRateLimitError
 
@@ -58,10 +59,30 @@ def _list_json(
 def _maintenance_json(
     maintenance_id: int = 1, asset_id: int = 10, title: str = "Inspection"
 ) -> dict[str, object]:
-    """Minimal maintenance JSON for mocking."""
+    """Minimal maintenance JSON for mocking.
+
+    POST/PATCH responses include ``asset_id``; GET responses use a nested
+    ``asset`` object instead.  This helper produces the POST/PATCH shape
+    (explicit ``asset_id``).  Use ``_maintenance_get_json`` for GET.
+    """
     return {
         "id": maintenance_id,
         "asset_id": asset_id,
+        "title": title,
+    }
+
+
+def _maintenance_get_json(
+    maintenance_id: int = 1, asset_id: int = 10, title: str = "Inspection"
+) -> dict[str, object]:
+    """Maintenance JSON matching real Snipe-IT GET response format.
+
+    GET responses include a nested ``asset`` object instead of a
+    top-level ``asset_id``.
+    """
+    return {
+        "id": maintenance_id,
+        "asset": {"id": asset_id, "name": f"Asset-{asset_id}"},
         "title": title,
     }
 
@@ -70,7 +91,7 @@ def _maintenance_list_json(
     maintenances: list[dict[str, object]] | None = None, total: int | None = None
 ) -> dict[str, object]:
     """Maintenance list response JSON for mocking."""
-    rows = maintenances or [_maintenance_json()]
+    rows = maintenances or [_maintenance_get_json()]
     return {"total": total if total is not None else len(rows), "rows": rows}
 
 
@@ -326,8 +347,8 @@ class TestSnipeItAPIClientListMaintenances:
         resp = _ok_response(
             _maintenance_list_json(
                 [
-                    _maintenance_json(1, 10, "Inspect"),
-                    _maintenance_json(2, 20, "Repair"),
+                    _maintenance_get_json(1, 10, "Inspect"),
+                    _maintenance_get_json(2, 20, "Repair"),
                 ],
                 total=2,
             )
@@ -391,7 +412,7 @@ class TestSnipeItAPIClientGetMaintenance:
     @pytest.mark.asyncio
     async def test_successful_get(self, client_no_refresh: SnipeItAPIClient) -> None:
         """GET maintenances/{id} returns parsed maintenance."""
-        resp = _ok_response(_maintenance_json(101, 42, "Annual Inspection"))
+        resp = _ok_response(_maintenance_get_json(101, 42, "Annual Inspection"))
         with patch.object(client_no_refresh._client, "get", return_value=resp):
             result = await client_no_refresh.get_maintenance(101)
 
@@ -404,7 +425,7 @@ class TestSnipeItAPIClientGetMaintenance:
         self, client_no_refresh: SnipeItAPIClient
     ) -> None:
         """get_maintenance uses correct relative path."""
-        resp = _ok_response(_maintenance_json(101))
+        resp = _ok_response(_maintenance_get_json(101))
         with patch.object(
             client_no_refresh._client, "get", return_value=resp
         ) as mock_get:
@@ -435,7 +456,7 @@ class TestSnipeItAPIClientCreateMaintenance:
                 },
             )
 
-        assert isinstance(result, SnipeItMaintenance)
+        assert isinstance(result, SnipeItMaintenanceWriteResponse)
         assert result.id == 201
         assert result.title == "New Inspection"
 
@@ -530,7 +551,7 @@ class TestSnipeItAPIClientUpdateMaintenance:
                 101, {"title": "Updated Inspection"}
             )
 
-        assert isinstance(result, SnipeItMaintenance)
+        assert isinstance(result, SnipeItMaintenanceWriteResponse)
         assert result.id == 101
         assert result.title == "Updated Inspection"
 

@@ -21,4 +21,10 @@ class SnipeItWorkerSettings(BaseSettings):
     worker_id: str = "snipeit-worker"
     queue_name: str = "arq:snipeit"
 
+    # Observability
+    enable_telemetry: bool = False
+    otel_exporter_otlp_endpoint: str = ""
+    otel_service_name: str = "snipeit-worker"
+    otel_resource_attributes: str = ""
+
     model_config = {"env_file": ".env", "extra": "ignore"}

@@ -39,7 +39,7 @@ class TestMaintenanceTypeMapping:
         maintenance = SnipeItMaintenance.model_validate(
             {
                 "id": 1,
-                "asset_id": 10,
+                "asset": {"id": 10, "name": "Test Asset"},
                 "title": "Test",
                 "asset_maintenance_type": snipeit_type,
                 "start_date": {"date": "2024-01-01"},
@@ -57,7 +57,7 @@ class TestMaintenanceTypeMapping:
         maintenance = SnipeItMaintenance.model_validate(
             {
                 "id": 1,
-                "asset_id": 10,
+                "asset": {"id": 10, "name": "Test Asset"},
                 "title": "Test",
                 "asset_maintenance_type": "SomeNewType",
                 "start_date": {"date": "2024-01-01"},
@@ -75,7 +75,7 @@ class TestMaintenanceTypeMapping:
         maintenance = SnipeItMaintenance.model_validate(
             {
                 "id": 1,
-                "asset_id": 10,
+                "asset": {"id": 10, "name": "Test Asset"},
                 "title": "Test",
                 "start_date": {"date": "2024-01-01"},
             }
@@ -96,7 +96,7 @@ class TestMaintenanceFieldMapping:
         maintenance = SnipeItMaintenance.model_validate(
             {
                 "id": 101,
-                "asset_id": 42,
+                "asset": {"id": 42, "name": "Test Asset"},
                 "title": "Annual Rope Inspection",
                 "asset_maintenance_type": "Maintenance",
                 "start_date": {"date": "2024-06-01"},
@@ -133,7 +133,7 @@ class TestMaintenanceFieldMapping:
         maintenance = SnipeItMaintenance.model_validate(
             {
                 "id": 1,
-                "asset_id": 10,
+                "asset": {"id": 10, "name": "Test Asset"},
             }
         )
         result = SnipeItMaintenanceTransformer.transform(
@@ -155,7 +155,7 @@ class TestMaintenanceFieldMapping:
         maintenance = SnipeItMaintenance.model_validate(
             {
                 "id": 5,
-                "asset_id": 10,
+                "asset": {"id": 10, "name": "Test Asset"},
                 "asset_maintenance_type": "Repair",
             }
         )
@@ -177,7 +177,7 @@ class TestMaintenanceVersionHash:
         """Same maintenance record produces the same hash."""
         data = {
             "id": 1,
-            "asset_id": 10,
+            "asset": {"id": 10, "name": "Test Asset"},
             "title": "Test",
             "asset_maintenance_type": "Maintenance",
             "start_date": {"date": "2024-01-01"},
@@ -197,7 +197,7 @@ class TestMaintenanceVersionHash:
         """Changing the title produces a different hash."""
         base = {
             "id": 1,
-            "asset_id": 10,
+            "asset": {"id": 10, "name": "Test Asset"},
             "asset_maintenance_type": "Maintenance",
             "start_date": {"date": "2024-01-01"},
         }

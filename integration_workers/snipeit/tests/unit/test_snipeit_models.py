@@ -10,6 +10,7 @@ from snipeit_models import (
     SnipeItDateObject,
     SnipeItMaintenance,
     SnipeItMaintenanceListResponse,
+    SnipeItMaintenanceWriteResponse,
     SnipeItNestedObject,
 )
 
@@ -210,13 +211,12 @@ class TestSnipeItAssignedTo:
 
 
 class TestSnipeItMaintenance:
-    """Tests for the SnipeItMaintenance model."""
+    """Tests for the SnipeItMaintenance model (GET response shape)."""
 
-    def test_parse_full_maintenance(self) -> None:
-        """Full maintenance payload parses correctly."""
+    def test_parse_full_maintenance_get_response(self) -> None:
+        """Full GET response with nested asset object parses correctly."""
         data = {
             "id": 101,
-            "asset_id": 42,
             "title": "Annual Rope Inspection",
             "asset_maintenance_type": "Maintenance",
             "start_date": {"date": "2024-06-01", "formatted": "Jun 01, 2024"},
@@ -245,25 +245,43 @@ class TestSnipeItMaintenance:
         assert m.asset is not None
         assert m.asset.name == "Climbing Rope"
 
-    def test_parse_minimal_maintenance(self) -> None:
-        """Maintenance with only required fields (id, asset_id)."""
-        data = {"id": 1, "asset_id": 10}
+    def test_asset_id_derived_from_nested_asset(self) -> None:
+        """asset_id property derives value from asset.id."""
+        data = {
+            "id": 7,
+            "asset": {"id": 42, "name": "Climbing Rope"},
+            "title": "Inspection",
+        }
         m = SnipeItMaintenance.model_validate(data)
 
+        assert m.asset_id == 42
+        assert m.asset is not None
+        assert m.asset.id == 42
+
+    def test_parse_minimal_maintenance(self) -> None:
+        """Maintenance with only required field (id)."""
+        m = SnipeItMaintenance.model_validate({"id": 1})
+
         assert m.id == 1
-        assert m.asset_id == 10
+        assert m.asset_id is None
         assert m.title is None
-        assert m.asset_maintenance_type is None
-        assert m.start_date is None
-        assert m.completion_date is None
-        assert m.notes is None
-        assert m.cost is None
-        assert m.supplier is None
         assert m.asset is None
+
+    def test_asset_id_none_when_no_asset_object(self) -> None:
+        """asset_id is None when no asset object provided."""
+        m = SnipeItMaintenance.model_validate({"id": 1})
+        assert m.asset_id is None
+
+    def test_asset_id_none_when_asset_has_null_id(self) -> None:
+        """asset object present but with null id gives asset_id as None."""
+        data = {"id": 1, "asset": {"id": None, "name": "Test"}}
+        m = SnipeItMaintenance.model_validate(data)
+        assert m.asset_id is None
+        assert m.asset is not None
 
     def test_convenience_properties_with_none_dates(self) -> None:
         """Convenience properties return None when date objects are None."""
-        m = SnipeItMaintenance.model_validate({"id": 1, "asset_id": 10})
+        m = SnipeItMaintenance.model_validate({"id": 1})
         assert m.start_date_str is None
         assert m.completion_date_str is None
 
@@ -271,7 +289,6 @@ class TestSnipeItMaintenance:
         """Convenience properties return None when date objects have null inner date."""
         data = {
             "id": 1,
-            "asset_id": 10,
             "start_date": {"date": None, "formatted": None},
             "completion_date": {"date": None, "formatted": None},
         }
@@ -279,10 +296,38 @@ class TestSnipeItMaintenance:
         assert m.start_date_str is None
         assert m.completion_date_str is None
 
+
+class TestSnipeItMaintenanceWriteResponse:
+    """Tests for the SnipeItMaintenanceWriteResponse model (POST/PATCH shape)."""
+
+    def test_parse_post_response_payload(self) -> None:
+        """POST payload response with explicit asset_id parses correctly."""
+        data = {
+            "id": 501,
+            "asset_id": 42,
+            "title": "Rope Inspection",
+            "asset_maintenance_type": "PAT Test",
+            "start_date": {"date": "2024-06-01"},
+            "completion_date": {"date": "2024-06-02"},
+            "notes": "All ropes checked",
+        }
+        m = SnipeItMaintenanceWriteResponse.model_validate(data)
+
+        assert m.id == 501
+        assert m.asset_id == 42
+        assert m.title == "Rope Inspection"
+
     def test_missing_asset_id_raises_validation_error(self) -> None:
-        """Missing required asset_id field raises ValidationError."""
+        """POST/PATCH payload without asset_id raises ValidationError."""
         with pytest.raises(ValidationError):
-            SnipeItMaintenance.model_validate({"id": 1})
+            SnipeItMaintenanceWriteResponse.model_validate({"id": 1})
+
+    def test_minimal_write_response(self) -> None:
+        """Minimal POST/PATCH payload with required fields only."""
+        m = SnipeItMaintenanceWriteResponse.model_validate({"id": 1, "asset_id": 10})
+        assert m.id == 1
+        assert m.asset_id == 10
+        assert m.title is None
 
 
 class TestSnipeItMaintenanceListResponse:
@@ -293,15 +338,17 @@ class TestSnipeItMaintenanceListResponse:
         data = {
             "total": 2,
             "rows": [
-                {"id": 1, "asset_id": 10, "title": "Inspection"},
-                {"id": 2, "asset_id": 20, "title": "Repair"},
+                {"id": 1, "asset": {"id": 10, "name": "Rope"}, "title": "Inspection"},
+                {"id": 2, "asset": {"id": 20, "name": "Harness"}, "title": "Repair"},
             ],
         }
         response = SnipeItMaintenanceListResponse.model_validate(data)
         assert response.total == 2
         assert len(response.rows) == 2
         assert response.rows[0].title == "Inspection"
+        assert response.rows[0].asset_id == 10
         assert response.rows[1].title == "Repair"
+        assert response.rows[1].asset_id == 20
 
     def test_parse_empty_list(self) -> None:
         """Empty rows list."""
