@@ -20,6 +20,7 @@ import structlog
 from arq import cron
 from arq.connections import RedisSettings
 from core_shared.integration_constants import IMMICH_ARQ_QUEUE_NAME
+from core_shared.telemetry import trace_arq_job
 
 from immich_settings import ImmichWorkerSettings
 
@@ -96,6 +97,29 @@ async def shutdown(ctx: dict) -> None:  # type: ignore[type-arg]
 # ---------------------------------------------------------------------------
 
 
+async def _update_sync_job_status(
+    session_factory: Any,
+    job_id: str,
+    status: str,
+    **kwargs: Any,
+) -> None:
+    """Update a sync_jobs row via SyncJobRepository."""
+    from core_shared.repositories.sync_job_repository import SyncJobRepository
+
+    async with session_factory() as session:
+        conn = await session.connection()
+        repo = SyncJobRepository(conn)
+        result = await repo.update_status(job_id=job_id, status=status, **kwargs)
+        await session.commit()
+        if result is None:
+            logger.warning(
+                "Failed to update sync job status - job not found",
+                job_id=job_id,
+                status=status,
+            )
+
+
+@trace_arq_job
 async def sync_immich_people(
     ctx: dict[str, Any],
     user_id: str,
@@ -114,10 +138,31 @@ async def sync_immich_people(
     Returns:
         Dictionary with sync summary.
     """
+    from datetime import UTC, datetime
+
+    job_id = ctx.get("job_id", "unknown")
+    session_factory = ctx["session_factory"]
+    started_at = datetime.now(UTC)
+
     logger.info(
         "sync_immich_people called (placeholder)",
         user_id=user_id,
         sync_type=sync_type,
+        job_id=job_id,
+    )
+
+    # Mark job as running
+    await _update_sync_job_status(
+        session_factory, job_id, "running", started_at=started_at, progress=0
+    )
+
+    # Mark job as completed (placeholder — no real work yet)
+    await _update_sync_job_status(
+        session_factory,
+        job_id,
+        "completed",
+        completed_at=datetime.now(UTC),
+        progress=100,
     )
 
     return {

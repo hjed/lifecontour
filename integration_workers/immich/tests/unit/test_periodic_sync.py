@@ -222,10 +222,17 @@ class TestSyncImmichPeople:
     @pytest.mark.asyncio
     async def test_placeholder_returns_success(self) -> None:
         """Placeholder task returns success with not-yet-implemented message."""
+        from unittest.mock import patch
+
         from worker import sync_immich_people
 
-        ctx: dict[str, Any] = {"session_factory": MagicMock()}
-        result = await sync_immich_people(ctx, "user-1", "full")
+        ctx: dict[str, Any] = {
+            "session_factory": MagicMock(),
+            "job_id": "test-placeholder-job",
+        }
+
+        with patch("worker._update_sync_job_status", new_callable=AsyncMock):
+            result = await sync_immich_people(ctx, "user-1", "full")
 
         assert result["status"] == "success"
         assert "not yet implemented" in result["message"].lower()

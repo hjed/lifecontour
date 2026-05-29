@@ -1125,6 +1125,9 @@ test.describe('Journal List Page', () => {
         .click();
       await responsePromise;
 
+      // Wait for the listbox to close (Firefox can leave it open briefly)
+      await expect(page.getByRole('listbox')).toBeHidden({ timeout: 5000 });
+
       // Ensure the loading state has finished and the list is rendered again
       await expect(page.getByTestId('journals-list-ready')).toBeVisible();
 
@@ -1158,6 +1161,9 @@ test.describe('Journal List Page', () => {
         .first()
         .click();
       await personalResponsePromise;
+
+      // Wait for the listbox to close (Firefox can leave it open briefly)
+      await expect(page.getByRole('listbox')).toBeHidden({ timeout: 5000 });
 
       // Ensure the loading state has finished and the list is rendered again
       await expect(page.getByTestId('journals-list-ready')).toBeVisible();

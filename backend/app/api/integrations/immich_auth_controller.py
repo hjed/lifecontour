@@ -115,6 +115,10 @@ async def trigger_immich_sync(
     Enqueues a background sync job that syncs people and albums from Immich.
     The sync type may be ``full`` (all data) or ``smart`` (only changes
     since last sync).
+
+    Note: All capability routes (``/contacts/sync``, ``/album/sync``,
+    ``/sync``) currently enqueue the same ``sync_immich_people`` task.
+    Capability-specific task routing will be added in ITER11-002+.
     """
     try:
         # Verify Immich is connected via repository
