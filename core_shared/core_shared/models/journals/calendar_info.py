@@ -28,6 +28,7 @@ class CalendarInfo:
     Attributes:
         journal_id: Foreign key to the journal (primary key in DB)
         calendar_id: Required calendar reference (UUID)
+        description: Optional public event description
         start_time: Optional start time (null for all-day events)
         end_time: Optional end time (null for all-day events)
         is_all_day: Whether this is an all-day event
