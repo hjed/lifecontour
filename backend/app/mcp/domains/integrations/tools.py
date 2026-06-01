@@ -138,7 +138,7 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
         Trigger a sync for a specific integration.
 
         Args:
-            integration_id: The ID of the integration ('strava' or 'immich').
+            integration_id: The ID of the integration ('strava', 'immich', 'google_calendar', or 'google_contacts').
             sync_type: The type of sync to perform (e.g., 'smart', 'full'). Defaults to 'smart'.
 
         Returns:

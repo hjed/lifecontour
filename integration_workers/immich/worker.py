@@ -256,6 +256,7 @@ async def periodic_sync_all_immich_accounts(
                         )
 
                 except Exception as e:  # noqa: BLE001
+                    await session.rollback()
                     error_msg = (
                         f"Error enqueueing Immich sync for user {user_id}: {e!s}"
                     )
