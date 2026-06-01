@@ -2006,6 +2006,49 @@ class TestJournalTypeDependencyDataCreation:
         )
         assert "outdoor_activity" in type_data
 
+    async def test_add_type_preserves_existing_dependency_data(
+        self, integration_api_client
+    ):
+        """POST /types endpoint should preserve existing data rows for dependency types."""
+        # Create a journal with FITNESS
+        create_data = create_journal_request_data(
+            title="Preserve Data Test", content="Test content", types=["FITNESS"]
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        # Update FITNESS data
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {"distance": 5.0, "duration": 1800},
+            }
+        }
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/FITNESS/data", json=update_data
+        )
+        assert response.status_code == 200
+
+        # Add OUTDOOR_ACTIVITY which depends on FITNESS
+        type_payload = {
+            "data": {
+                "type": "journal-type",
+                "attributes": {"journal_type": "OUTDOOR_ACTIVITY"},
+            }
+        }
+        response = await integration_api_client.post(
+            f"/api/journals/{journal_id}/types", json=type_payload
+        )
+        assert response.status_code == 200
+
+        # Verify FITNESS data was not cleared
+        type_data = response.json()["data"]["attributes"]["type_data"]
+        assert type_data["fitness"]["distance"] == 5.0
+        assert type_data["fitness"]["duration"] == 1800
+
     async def test_adding_abseiling_trip_creates_fitness_and_outdoor_activity_data(
         self, integration_api_client
     ):
