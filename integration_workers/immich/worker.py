@@ -232,6 +232,21 @@ async def periodic_sync_all_immich_accounts(
                             job_id=job.job_id,
                             user_id=user_id,
                         )
+
+                        from core_shared.repositories.sync_job_repository import (
+                            SyncJobRepository,
+                        )
+
+                        conn = await session.connection()
+                        repo = SyncJobRepository(conn)
+                        await repo.create(
+                            job_id=job.job_id,
+                            user_id=str(user_id),
+                            integration_source="immich",
+                            sync_type="smart",
+                            status="queued",
+                        )
+                        await session.commit()
                     else:
                         error_msg = f"Failed to enqueue Immich sync for user {user_id}"
                         errors.append(error_msg)
@@ -294,6 +309,31 @@ def _parse_redis_url(url: str) -> RedisSettings:
     )
 
 
+def _generate_cron_jobs(
+    enable_periodic_sync: bool, sync_interval_hours: int
+) -> list[Any]:
+    if not enable_periodic_sync:
+        return []
+
+    interval = max(1, sync_interval_hours)
+    sync_hours = set(range(0, 24, interval))
+
+    logger.info(
+        "Periodic Immich sync enabled",
+        sync_interval_hours=interval,
+        sync_hours=list(sync_hours),
+    )
+
+    return [
+        cron(
+            periodic_sync_all_immich_accounts,
+            hour=sync_hours,
+            minute=0,  # Run at the top of the hour
+            unique=True,  # Only run once even with multiple workers
+        )
+    ]
+
+
 class WorkerSettings:
     """ARQ worker settings for the Immich integration worker."""
 
@@ -317,28 +357,9 @@ class WorkerSettings:
     redis_settings = _parse_redis_url(settings.redis_url)
 
     # Periodic sync configuration (cron jobs)
-    # Only configure cron_jobs if periodic sync is enabled
-    cron_jobs: list[Any] = []
-    if settings.enable_periodic_sync:
-        # Generate cron schedule based on sync_interval_hours
-        # For example: sync_interval_hours=6 -> hours={0, 6, 12, 18}
-        interval = max(1, settings.sync_interval_hours)
-        sync_hours = set(range(0, 24, interval))
-
-        cron_jobs = [
-            cron(
-                periodic_sync_all_immich_accounts,
-                hour=sync_hours,
-                minute=0,  # Run at the top of the hour
-                unique=True,  # Only run once even with multiple workers
-            )
-        ]
-
-        logger.info(
-            "Periodic Immich sync enabled",
-            sync_interval_hours=interval,
-            sync_hours=list(sync_hours),
-        )
+    cron_jobs: list[Any] = _generate_cron_jobs(
+        settings.enable_periodic_sync, settings.sync_interval_hours
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -16,14 +16,15 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-# Ensure env vars are set before importing worker module
-db_port = os.environ.get("DB_TEST_PORT", "5432")
-if "DATABASE_URL" not in os.environ:
-    os.environ["DATABASE_URL"] = (
-        f"postgresql+asyncpg://postgres:postgres@localhost:{db_port}"
-        "/personal_management_test"
+
+@pytest.fixture(autouse=True)
+def _setup_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    db_port = os.environ.get("DB_TEST_PORT", "5432")
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        f"postgresql+asyncpg://postgres:postgres@localhost:{db_port}/personal_management_test",
     )
-os.environ.setdefault("ENCRYPTION_KEY", "testkey")
+    monkeypatch.setenv("ENCRYPTION_KEY", "testkey")
 
 
 def _make_mock_ctx(
@@ -38,7 +39,7 @@ def _make_mock_ctx(
     Returns:
         Tuple of (ctx dict, mock_redis, mock_session).
     """
-    mock_session = MagicMock()
+    mock_session = AsyncMock()
 
     # Execute call returns account rows
     accounts_result = MagicMock()
@@ -85,7 +86,17 @@ class TestPeriodicSyncSettings:
 
 
 class TestPeriodicSyncAllImmichAccounts:
-    """Tests for periodic_sync_all_immich_accounts ARQ task."""
+    """Tests for periodic_sync_all_immich_accounts logic."""
+
+    @pytest.fixture(autouse=True)
+    def _mock_repo(self) -> Any:
+        from unittest.mock import AsyncMock, patch
+
+        with patch(
+            "core_shared.repositories.sync_job_repository.SyncJobRepository.create",
+            new_callable=AsyncMock,
+        ) as mock:
+            yield mock
 
     @pytest.mark.asyncio
     async def test_enqueues_sync_for_each_account(self) -> None:
@@ -242,23 +253,12 @@ class TestPeriodicSyncConfiguration:
     """Test cron schedule generation for periodic sync."""
 
     def _get_cron_hours(self, interval: int) -> set[int]:
-        import importlib
-        from unittest.mock import patch
+        from worker import _generate_cron_jobs
 
-        import immich_settings
-        import worker
-
-        with patch.dict(
-            os.environ,
-            {"ENABLE_PERIODIC_SYNC": "true", "SYNC_INTERVAL_HOURS": str(interval)},
-        ):
-            importlib.reload(immich_settings)
-            importlib.reload(worker)
-
-            cron_jobs = worker.WorkerSettings.cron_jobs
-            if not cron_jobs:
-                return set()
-            return cron_jobs[0].hour  # type: ignore
+        cron_jobs = _generate_cron_jobs(True, interval)
+        if not cron_jobs:
+            return set()
+        return cron_jobs[0].hour  # type: ignore
 
     def test_cron_schedule_for_6_hour_interval(self) -> None:
         """6-hour interval produces hours {0, 6, 12, 18}."""
