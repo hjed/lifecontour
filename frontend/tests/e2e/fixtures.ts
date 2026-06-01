@@ -187,40 +187,34 @@ export const test = base.extend<TestFixtures>({
     await use(page);
   },
 
-  // Test-scoped fixture: Unauthenticated page (clean state)
-  unauthenticatedPage: async ({ page }, use) => {
-    // Clear any existing auth state using Playwright's context methods
-    try {
-      // Clear storage state using Playwright's built-in methods
-      await page.context().clearCookies();
-
-      // Try to clear storage via evaluate, but catch any SecurityErrors
-      try {
-        await page.evaluate(() => {
-          try {
-            sessionStorage.clear();
-            localStorage.clear();
-          } catch (e) {
-            // Ignore SecurityError when storage is not accessible
-            console.warn(
-              'Storage clearing failed (likely SecurityError):',
-              (e as Error).message
-            );
-          }
-        });
-      } catch (e) {
-        // Ignore SecurityError from page.evaluate itself
-        console.warn(
-          'Page evaluate failed (likely SecurityError):',
-          (e as Error).message
-        );
-      }
-    } catch (e) {
-      // Ignore any other errors during cleanup
-      console.warn('Context cleanup failed:', (e as Error).message);
-    }
+  // Test-scoped fixture: Unauthenticated page (clean browser context)
+  // Creates a brand-new context WITHOUT storageState so the browser
+  // never has auth cookies. This prevents Next.js hydration mismatches
+  // that occurred when clearing cookies from an authenticated context
+  // (SSR would render authenticated HTML, then the client would see
+  // no cookies and try to render unauthenticated UI).
+  //
+  // We explicitly pass device settings from Playwright's built-in fixtures
+  // because browser.newContext() does NOT inherit project `use` config.
+  unauthenticatedPage: async (
+    { browser, viewport, userAgent, isMobile, hasTouch, deviceScaleFactor },
+    use
+  ) => {
+    const context = await browser.newContext({
+      storageState: undefined,
+      // Replicate the project's device settings so Mobile Chrome tests
+      // still get the correct viewport, touch emulation, etc.
+      viewport: viewport ?? undefined,
+      userAgent: userAgent ?? undefined,
+      isMobile: isMobile ?? undefined,
+      hasTouch: hasTouch ?? undefined,
+      deviceScaleFactor: deviceScaleFactor ?? undefined,
+    });
+    const page = await context.newPage();
 
     await use(page);
+
+    await context.close();
   },
 
   // Test-scoped fixture: Page with test contacts

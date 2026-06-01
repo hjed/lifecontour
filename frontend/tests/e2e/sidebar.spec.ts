@@ -109,20 +109,25 @@ test.describe('Sidebar Navigation', () => {
         page.getByRole('link', { name: 'All Journals' })
       ).toBeHidden();
 
-      // Click to expand — use toPass() so the entire click + assertion retries
-      // as a unit. Firefox can occasionally fail to register a click, so the
-      // click itself must be inside the retry block.
+      // Click to expand — use toPass() to retry. Only click if not already
+      // expanded to prevent toggling back on retry iterations.
       await expect(async () => {
-        await journalsButton.click();
+        const expanded = await journalsButton.getAttribute('aria-expanded');
+        if (expanded !== 'true') {
+          await journalsButton.click();
+        }
         await expect(journalsButton).toHaveAttribute('aria-expanded', 'true');
       }).toPass({ timeout: 15000 });
       await expect(
         page.getByRole('link', { name: 'All Journals' })
       ).toBeVisible();
 
-      // Click to collapse — same retryable pattern
+      // Click to collapse — only click if not already collapsed.
       await expect(async () => {
-        await journalsButton.click();
+        const expanded = await journalsButton.getAttribute('aria-expanded');
+        if (expanded !== 'false') {
+          await journalsButton.click();
+        }
         await expect(journalsButton).toHaveAttribute('aria-expanded', 'false');
       }).toPass({ timeout: 15000 });
       await expect(
@@ -298,7 +303,11 @@ test.describe('Sidebar Navigation', () => {
       await page.setViewportSize({ width: 1024, height: 768 });
       await page.goto('/contacts');
       await expect(async () => {
-        await page.getByRole('button', { name: /journals/i }).click();
+        const journalsBtn = page.getByRole('button', { name: /journals/i });
+        const expanded = await journalsBtn.getAttribute('aria-expanded');
+        if (expanded !== 'true') {
+          await journalsBtn.click();
+        }
         await expect(
           page.getByRole('link', { name: 'All Journals' })
         ).toBeVisible();
@@ -310,7 +319,16 @@ test.describe('Sidebar Navigation', () => {
       await expect(page.getByTestId('sidebar')).toBeHidden();
       await expect(page.getByTestId('mobile-nav-trigger')).toBeVisible();
       await expect(async () => {
-        await page.getByTestId('mobile-nav-trigger').click();
+        // Only click the trigger if the mobile dialog is NOT already open.
+        // Clicking a toggle inside toPass() retries can close it on the
+        // next attempt, causing an infinite retry loop.
+        const dialogVisible = await page
+          .locator('[role="dialog"]')
+          .isVisible()
+          .catch(() => false);
+        if (!dialogVisible) {
+          await page.getByTestId('mobile-nav-trigger').click();
+        }
         // Journals should still be expanded
         await expect(
           page.getByRole('button', { name: /journals/i })
