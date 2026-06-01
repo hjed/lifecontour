@@ -21,4 +21,8 @@ class ImmichWorkerSettings(BaseSettings):
     worker_id: str = "immich-worker"
     queue_name: str = "arq:immich"
 
+    # Periodic sync configuration
+    enable_periodic_sync: bool = False
+    sync_interval_hours: int = 6
+
     model_config = {"env_file": ".env", "extra": "ignore"}

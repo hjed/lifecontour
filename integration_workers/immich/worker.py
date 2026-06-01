@@ -4,9 +4,9 @@ Immich Integration Worker.
 ARQ worker process that handles Immich integration tasks including
 contact/album sync with face-based matching.
 
-This is the entry-point for the worker container. Task functions will be
-added in subsequent phases (Phase 3+). Phase 2 provides the ARQ shell,
-stream consumer, and lifecycle management.
+This is the entry-point for the worker container. Phase 3 provides
+periodic sync scheduling, manual sync triggers, and placeholder
+sync tasks. Actual sync logic will be implemented in ITER11-002+.
 """
 
 from __future__ import annotations
@@ -17,11 +17,14 @@ import sys
 from typing import Any
 
 import structlog
+from arq import cron
 from arq.connections import RedisSettings
+from core_shared.integration_constants import IMMICH_ARQ_QUEUE_NAME
+from core_shared.telemetry import trace_arq_job
 
 from immich_settings import ImmichWorkerSettings
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -90,6 +93,206 @@ async def shutdown(ctx: dict) -> None:  # type: ignore[type-arg]
 
 
 # ---------------------------------------------------------------------------
+# ARQ sync tasks
+# ---------------------------------------------------------------------------
+
+
+async def _update_sync_job_status(
+    session_factory: Any,
+    job_id: str,
+    status: str,
+    **kwargs: Any,
+) -> None:
+    """Update a sync_jobs row via SyncJobRepository."""
+    from core_shared.repositories.sync_job_repository import SyncJobRepository
+
+    async with session_factory() as session:
+        conn = await session.connection()
+        repo = SyncJobRepository(conn)
+        result = await repo.update_status(job_id=job_id, status=status, **kwargs)
+        await session.commit()
+        if result is None:
+            logger.warning(
+                "Failed to update sync job status - job not found",
+                job_id=job_id,
+                status=status,
+            )
+
+
+@trace_arq_job
+async def sync_immich_people(
+    ctx: dict[str, Any],
+    user_id: str,
+    sync_type: str = "full",
+) -> dict[str, Any]:
+    """ARQ task: sync Immich People for a user.
+
+    Phase 3 placeholder — logs the request and returns success.
+    Full implementation will be added in ITER11-002 (Contact Sync).
+
+    Args:
+        ctx: ARQ worker context (must contain ``session_factory``).
+        user_id: Internal user ID.
+        sync_type: 'full' or 'smart'.
+
+    Returns:
+        Dictionary with sync summary.
+    """
+    from datetime import UTC, datetime
+
+    job_id = ctx.get("job_id", "unknown")
+    session_factory = ctx["session_factory"]
+    started_at = datetime.now(UTC)
+
+    logger.info(
+        "sync_immich_people called (placeholder)",
+        user_id=user_id,
+        sync_type=sync_type,
+        job_id=job_id,
+    )
+
+    # Mark job as running
+    await _update_sync_job_status(
+        session_factory, job_id, "running", started_at=started_at, progress=0
+    )
+
+    # Mark job as completed (placeholder — no real work yet)
+    await _update_sync_job_status(
+        session_factory,
+        job_id,
+        "completed",
+        completed_at=datetime.now(UTC),
+        progress=100,
+    )
+
+    return {
+        "status": "success",
+        "message": "People sync not yet implemented — placeholder for ITER11-002",
+        "user_id": user_id,
+        "sync_type": sync_type,
+    }
+
+
+async def periodic_sync_all_immich_accounts(
+    ctx: dict[str, Any],
+) -> dict[str, Any]:
+    """Periodic sync wrapper that syncs all active Immich accounts.
+
+    This function is called by ARQ cron jobs and enqueues individual
+    ``sync_immich_people`` tasks for each connected Immich
+    integration using 'smart' sync type.
+
+    Args:
+        ctx: ARQ context dictionary containing Redis pool and session_factory.
+
+    Returns:
+        Dictionary with sync summary (accounts_found, jobs_enqueued, errors).
+    """
+    logger.info("Starting periodic sync for all Immich accounts")
+
+    session_factory = ctx["session_factory"]
+
+    accounts_found = 0
+    jobs_enqueued = 0
+    errors: list[str] = []
+
+    try:
+        async with session_factory() as session:
+            from sqlalchemy import text
+
+            stmt = text("""
+                SELECT user_id
+                FROM user_immich_auth
+                ORDER BY user_id
+            """)
+            result = await session.execute(stmt)
+            accounts = result.fetchall()
+
+            accounts_found = len(accounts)
+            logger.info(
+                "Found active Immich accounts for periodic sync",
+                accounts_count=accounts_found,
+            )
+
+            for row in accounts:
+                user_id = row.user_id
+
+                try:
+                    job = await ctx["redis"].enqueue_job(
+                        "sync_immich_people",
+                        str(user_id),
+                        "smart",
+                        _queue_name=IMMICH_ARQ_QUEUE_NAME,
+                    )
+
+                    if job:
+                        jobs_enqueued += 1
+                        logger.info(
+                            "Enqueued periodic Immich sync job",
+                            job_id=job.job_id,
+                            user_id=user_id,
+                        )
+
+                        from core_shared.repositories.sync_job_repository import (
+                            SyncJobRepository,
+                        )
+
+                        conn = await session.connection()
+                        repo = SyncJobRepository(conn)
+                        await repo.create(
+                            job_id=job.job_id,
+                            user_id=str(user_id),
+                            integration_source="immich",
+                            sync_type="smart",
+                            status="queued",
+                        )
+                        await session.commit()
+                    else:
+                        error_msg = f"Failed to enqueue Immich sync for user {user_id}"
+                        errors.append(error_msg)
+                        logger.warning(
+                            "Failed to enqueue periodic Immich sync job",
+                            user_id=user_id,
+                        )
+
+                except Exception as e:  # noqa: BLE001
+                    await session.rollback()
+                    error_msg = (
+                        f"Error enqueueing Immich sync for user {user_id}: {e!s}"
+                    )
+                    errors.append(error_msg)
+                    logger.error(
+                        "Error enqueueing periodic Immich sync job",
+                        user_id=user_id,
+                        error=str(e),
+                        error_type=type(e).__name__,
+                    )
+
+        logger.info(
+            "Periodic Immich sync scheduling complete",
+            accounts_found=accounts_found,
+            jobs_enqueued=jobs_enqueued,
+            errors_count=len(errors),
+        )
+
+        return {
+            "status": "success",
+            "accounts_found": accounts_found,
+            "jobs_enqueued": jobs_enqueued,
+            "errors": errors,
+        }
+
+    except Exception:
+        logger.error(
+            "Fatal error during periodic Immich sync",
+            accounts_found=accounts_found,
+            jobs_enqueued=jobs_enqueued,
+            exc_info=True,
+        )
+        raise
+
+
+# ---------------------------------------------------------------------------
 # ARQ worker configuration
 # ---------------------------------------------------------------------------
 
@@ -107,13 +310,41 @@ def _parse_redis_url(url: str) -> RedisSettings:
     )
 
 
+def _generate_cron_jobs(
+    enable_periodic_sync: bool, sync_interval_hours: int
+) -> list[Any]:
+    if not enable_periodic_sync:
+        return []
+
+    interval = max(1, sync_interval_hours)
+    sync_hours = set(range(0, 24, interval))
+
+    logger.info(
+        "Periodic Immich sync enabled",
+        sync_interval_hours=interval,
+        sync_hours=list(sync_hours),
+    )
+
+    return [
+        cron(
+            periodic_sync_all_immich_accounts,
+            hour=sync_hours,
+            minute=0,  # Run at the top of the hour
+            unique=True,  # Only run once even with multiple workers
+        )
+    ]
+
+
 class WorkerSettings:
     """ARQ worker settings for the Immich integration worker."""
 
     queue_name = ImmichWorkerSettings.model_fields["queue_name"].default
 
-    # Task functions — populated as phases are implemented (Phase 3+)
-    functions: list[Any] = []
+    # Task functions — Phase 3 provides placeholder sync tasks
+    functions: list[Any] = [
+        sync_immich_people,
+        periodic_sync_all_immich_accounts,
+    ]
 
     on_startup = startup
     on_shutdown = shutdown
@@ -125,6 +356,11 @@ class WorkerSettings:
     health_check_interval = 30
 
     redis_settings = _parse_redis_url(settings.redis_url)
+
+    # Periodic sync configuration (cron jobs)
+    cron_jobs: list[Any] = _generate_cron_jobs(
+        settings.enable_periodic_sync, settings.sync_interval_hours
+    )
 
 
 # ---------------------------------------------------------------------------
