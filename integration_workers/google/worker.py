@@ -3534,11 +3534,12 @@ async def sync_calendar_events(
                         # Build journal data dict for outbox
                         journal_data = {
                             "title": journal.title,
-                            "content": journal.content,
                             "event_date_range_start": journal.event_date_range.start.isoformat(),
                             "event_date_range_end": journal.event_date_range.end.isoformat(),
                             "user_id": str(user_id),
                         }
+                        if action == InboundSyncAction.CREATE_JOURNAL:
+                            journal_data["content"] = journal.content
                         calendar_info_data = {
                             "calendar_id": str(calendar_id),
                             "is_all_day": calendar_info.is_all_day,

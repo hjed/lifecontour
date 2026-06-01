@@ -365,6 +365,12 @@ test.describe('Journal Detail Page', () => {
       const endTimeInput = eventTypeEditor.getByTestId('end-time-input');
       await endTimeInput.fill('13:30');
 
+      // Change description
+      const descriptionInput = eventTypeEditor.getByTestId(
+        'description-textarea'
+      );
+      await descriptionInput.fill('New Public Description');
+
       // Change event state to cancelled
       const eventStateSelect =
         eventTypeEditor.getByTestId('event-state-select');
@@ -388,9 +394,12 @@ test.describe('Journal Detail Page', () => {
         `Expected 200 but got ${updateStatus}. Response: ${responseText}`
       ).toBe(200);
 
-      // Verify the status was sent as cancelled
+      // Verify the status was sent as cancelled and description was updated
       const requestData = JSON.parse(response.request().postData() || '{}');
       expect(requestData.data.attributes.event_state).toBe('cancelled');
+      expect(requestData.data.attributes.description).toBe(
+        'New Public Description'
+      );
 
       // Wait for edit mode to finish
       await expect(saveButton).toBeHidden();

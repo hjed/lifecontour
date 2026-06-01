@@ -46,6 +46,10 @@ class CalendarInfoDataSchema(BaseModel):
     """Calendar info data for EVENT type journals."""
 
     calendar_id: str = Field(..., description="Calendar ID")
+    description: str | None = Field(
+        default=None,
+        description="Event description separate from private note",
+    )
     start_time: time | None = Field(
         default=None,
         description="Event start time (time-of-day, null for all-day events)",

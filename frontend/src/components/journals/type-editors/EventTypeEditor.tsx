@@ -14,9 +14,11 @@ import {
   Clock,
   Globe,
   CircleCheck,
+  FileText,
 } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Select,
@@ -63,6 +65,7 @@ const DEFAULT_DATA: CalendarInfoData = {
   is_all_day: false,
   sync_invitees: false,
   private_description: false,
+  description: '',
 };
 
 /**
@@ -267,6 +270,28 @@ export function EventTypeEditor({
           placeholder='Add location'
           disabled={!isEditing}
           data-testid='location-input'
+        />
+      </div>
+
+      {/* Description */}
+      <div className='space-y-2'>
+        <Label htmlFor='description' className='flex items-center gap-2'>
+          <FileText className='h-4 w-4' aria-hidden='true' />
+          Public Description
+        </Label>
+        <Textarea
+          id='description'
+          value={editData.description || ''}
+          onChange={e =>
+            setEditData(previous => ({
+              ...previous,
+              description: e.target.value,
+            }))
+          }
+          placeholder='Add description that will sync to external calendar'
+          disabled={!isEditing}
+          data-testid='description-textarea'
+          className='min-h-[80px]'
         />
       </div>
 

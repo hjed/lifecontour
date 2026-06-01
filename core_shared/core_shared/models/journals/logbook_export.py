@@ -1,5 +1,7 @@
 """Domain models for logbook export data contracts."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 from .abseil_pitch import AbseilPitch

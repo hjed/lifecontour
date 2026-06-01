@@ -336,6 +336,7 @@ class TypeDataConverter:
         """Convert CalendarInfo domain entity to API schema."""
         return CalendarInfoDataSchema(
             calendar_id=str(calendar_info.calendar_id),
+            description=calendar_info.description,
             start_time=calendar_info.start_time,
             end_time=calendar_info.end_time,
             is_all_day=calendar_info.is_all_day,

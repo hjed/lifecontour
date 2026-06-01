@@ -435,10 +435,11 @@ class JournalOutboxEventProcessor:
         # Apply InboundFieldMerger for protected local edits
         inbound_data: dict[str, Any] = {
             "title": journal_data.get("title", ""),
-            "content": journal_data.get("content", ""),
             "event_date_range_start": journal_data.get("event_date_range_start"),
             "event_date_range_end": journal_data.get("event_date_range_end"),
         }
+        if "content" in journal_data:
+            inbound_data["content"] = journal_data["content"]
 
         # When private_description is enabled, block inbound content changes
         # to prevent external calendar descriptions overwriting local journal notes.
@@ -460,8 +461,10 @@ class JournalOutboxEventProcessor:
 
         # Build updated journal from merged data
         merged_journal_data = dict(journal_data)
-        merged_journal_data["title"] = merged_data["title"]
-        merged_journal_data["content"] = merged_data["content"]
+        merged_journal_data["title"] = merged_data.get("title", existing_journal.title)
+        merged_journal_data["content"] = merged_data.get(
+            "content", existing_journal.content or ""
+        )
         merged_journal_data["event_date_range_start"] = merged_data[
             "event_date_range_start"
         ]
