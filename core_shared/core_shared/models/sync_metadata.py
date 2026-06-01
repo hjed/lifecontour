@@ -68,7 +68,7 @@ class SyncMetadata(Base):
         comment="Timestamp of the last successful sync",
     )
     version_hash: Mapped[str] = mapped_column(
-        String(64), nullable=False, comment="SHA-256 hash for change detection"
+        String(255), nullable=False, comment="Hash/ETag for change detection"
     )
     sync_status: Mapped[str] = mapped_column(
         String(20),

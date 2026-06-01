@@ -129,8 +129,8 @@ class OutboxSyncData(BaseModel):
         min_length=1, description="Strava activity ID used as external_id"
     )
     version_hash: str = Field(
-        min_length=64,
-        max_length=64,
+        min_length=1,
+        max_length=255,
         description="Hash of mutable fields for change detection",
     )
 
