@@ -235,16 +235,17 @@ Confidence score (0.0-1.0):"""
                 logger.warning("Gemini returned empty response")
                 return None
 
-            except TimeoutError:
+            except Exception as e:
                 if attempt == max_attempts - 1:
                     raise
 
                 delay = base_delay * (2**attempt)
                 logger.warning(
-                    "Gemini API timeout, retrying",
+                    "Gemini API error, retrying",
                     delay_seconds=delay,
                     attempt=attempt + 1,
                     max_attempts=max_attempts,
+                    error=str(e),
                 )
                 await asyncio.sleep(delay)
 

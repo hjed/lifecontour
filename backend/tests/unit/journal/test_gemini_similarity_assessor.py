@@ -89,21 +89,19 @@ class TestGeminiTitleSimilarityAssessor:
         # Dates should be present in some format
         assert "2024" in captured_prompt
 
-    async def test_handles_gemini_timeout(
+    async def test_handles_gemini_error(
         self,
         assessor: GeminiTitleSimilarityAssessor,
         sample_dates: dict[str, datetime],
     ) -> None:
-        """Test that a timeout from Gemini raises an appropriate error."""
-        import asyncio
-
+        """Test that an error from Gemini raises an appropriate error."""
         with patch.object(
             assessor,
             "_call_gemini",
             new_callable=AsyncMock,
-            side_effect=TimeoutError("Gemini call timed out"),
+            side_effect=RuntimeError("Gemini call failed"),
         ):
-            with pytest.raises(asyncio.TimeoutError):
+            with pytest.raises(RuntimeError):
                 await assessor.assess_similarity(
                     title_a="Event A",
                     content_a="",
@@ -183,24 +181,24 @@ class TestGeminiTitleSimilarityAssessor:
 
             assert score == 0.0
 
-    async def test_call_gemini_retries_on_timeout(
+    async def test_call_gemini_retries_on_error(
         self,
         assessor: GeminiTitleSimilarityAssessor,
     ) -> None:
-        """Test that _call_gemini retries on TimeoutError before failing."""
+        """Test that _call_gemini retries on Exception before failing."""
         from unittest.mock import MagicMock
 
         with patch("google.genai.Client") as mock_client_class:
             mock_client = MagicMock()
             mock_client_class.return_value = mock_client
 
-            # Make the async call raise TimeoutError every time
-            # We mock asyncio.wait_for instead, because the TimeoutError is raised by wait_for
+            # Make the async call raise RuntimeError every time
+            # We mock asyncio.wait_for instead, because the error is raised by wait_for
             with patch("asyncio.wait_for", new_callable=AsyncMock) as mock_wait_for:
-                mock_wait_for.side_effect = TimeoutError("Timeout")
+                mock_wait_for.side_effect = RuntimeError("API Error")
 
                 with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
-                    with pytest.raises(TimeoutError):
+                    with pytest.raises(RuntimeError):
                         await assessor._call_gemini("test prompt")
 
                     # Should have been called 3 times (initial + 2 retries)
