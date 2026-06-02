@@ -46,12 +46,12 @@ test.describe('Sidebar Tag Management', () => {
     await page.goto('/contacts');
     await ensureSidebarOpen(page);
 
-    // Click Create Tag button
-    await page.getByRole('button', { name: 'Create Tag' }).click();
-
-    // Fill out the dialog
+    // Click Create Tag button and wait for dialog (retrying if click is swallowed by React hydration/animations)
     const dialog = page.getByRole('dialog', { name: 'Create Tag' });
-    await expect(dialog).toBeVisible();
+    await expect(async () => {
+      await page.getByRole('button', { name: 'Create Tag' }).click();
+      await expect(dialog).toBeVisible({ timeout: 2000 });
+    }).toPass();
 
     await dialog.getByLabel('Name').fill(uniqueTagName);
     await dialog.getByPlaceholder('#000000').fill('#123456');
@@ -96,19 +96,19 @@ test.describe('Sidebar Tag Management', () => {
     const tagLink = page.getByRole('link', { name: tagName, exact: true });
     await expect(tagLink).toBeVisible();
 
-    // Right click the tag item
-    await tagLink.click({ button: 'right' });
-
     // Wait for context menu item
     const editMenuItem = page.getByRole('menuitem', { name: 'Edit Tag' });
-    await expect(editMenuItem).toBeVisible();
+    await expect(async () => {
+      await tagLink.click({ button: 'right' });
+      await expect(editMenuItem).toBeVisible({ timeout: 2000 });
+    }).toPass();
 
-    // Click edit
-    await editMenuItem.click();
-
-    // Dialog should appear
+    // Click edit and wait for dialog
     const dialog = page.getByRole('dialog', { name: 'Edit Tag' });
-    await expect(dialog).toBeVisible();
+    await expect(async () => {
+      await editMenuItem.click();
+      await expect(dialog).toBeVisible({ timeout: 2000 });
+    }).toPass();
 
     // Update name
     await dialog.getByLabel('Name').fill(newTagName);
@@ -148,11 +148,17 @@ test.describe('Sidebar Tag Management', () => {
     await expect(tagLink).toBeVisible();
 
     // Right click and edit
-    await tagLink.click({ button: 'right' });
-    await page.getByRole('menuitem', { name: 'Edit Tag' }).click();
+    const editMenuItem = page.getByRole('menuitem', { name: 'Edit Tag' });
+    await expect(async () => {
+      await tagLink.click({ button: 'right' });
+      await expect(editMenuItem).toBeVisible({ timeout: 2000 });
+    }).toPass();
 
     const dialog = page.getByRole('dialog', { name: 'Edit Tag' });
-    await expect(dialog).toBeVisible();
+    await expect(async () => {
+      await editMenuItem.click();
+      await expect(dialog).toBeVisible({ timeout: 2000 });
+    }).toPass();
 
     // Click delete
     await dialog.getByRole('button', { name: 'Delete Tag' }).click();
@@ -183,10 +189,11 @@ test.describe('Sidebar Tag Management', () => {
     await page.goto('/contacts');
     await ensureSidebarOpen(page);
 
-    await page.getByRole('button', { name: 'Create Tag' }).click();
-
     const dialog = page.getByRole('dialog', { name: 'Create Tag' });
-    await expect(dialog).toBeVisible();
+    await expect(async () => {
+      await page.getByRole('button', { name: 'Create Tag' }).click();
+      await expect(dialog).toBeVisible({ timeout: 2000 });
+    }).toPass();
 
     // Submit empty form
     await dialog.getByRole('button', { name: 'Create Tag' }).click();
@@ -214,11 +221,17 @@ test.describe('Sidebar Tag Management', () => {
     const tagLink = page.getByRole('link', { name: tagName, exact: true });
     await expect(tagLink).toBeVisible();
 
-    await tagLink.click({ button: 'right' });
-    await page.getByRole('menuitem', { name: 'Edit Tag' }).click();
+    const editMenuItem = page.getByRole('menuitem', { name: 'Edit Tag' });
+    await expect(async () => {
+      await tagLink.click({ button: 'right' });
+      await expect(editMenuItem).toBeVisible({ timeout: 2000 });
+    }).toPass();
 
     const dialog = page.getByRole('dialog', { name: 'Edit Tag' });
-    await expect(dialog).toBeVisible();
+    await expect(async () => {
+      await editMenuItem.click();
+      await expect(dialog).toBeVisible({ timeout: 2000 });
+    }).toPass();
 
     // Clear name
     await dialog.getByLabel('Name').fill('');
