@@ -57,12 +57,12 @@ reference = ExternalReference(
 )
 ```
 
-### SyncConflict
+### PendingEntityMapping
 
 Tracks unresolved sync conflicts when name-based matching produces multiple candidate contacts:
 
 ```python
-from core_shared import SyncConflict
+from core_shared import PendingEntityMapping
 
 # Created automatically during people sync when ambiguous matches found
 # Resolved via conflict resolution UI or MCP tools

@@ -271,6 +271,8 @@ class ImmichSyncService:
               AND internal_entity_type = :internal_entity_type
               AND external_entity_type = :external_entity_type
               AND external_entity_id = :external_entity_id
+            ORDER BY id DESC
+            LIMIT 1
         """)
         result = await self._conn.execute(
             query,
@@ -369,12 +371,17 @@ class ImmichSyncService:
             INSERT INTO external_references
                 (internal_entity_type, internal_entity_id, external_system,
                  external_entity_type, external_entity_id)
-            VALUES
-                (:internal_entity_type, :internal_entity_id, :external_system,
-                 :external_entity_type, :external_entity_id)
-            RETURNING id, created_at, updated_at
+            SELECT
+                :internal_entity_type, :internal_entity_id, :external_system,
+                :external_entity_type, :external_entity_id
+            WHERE NOT EXISTS (
+                SELECT 1 FROM external_references
+                WHERE external_system = :external_system
+                  AND external_entity_type = :external_entity_type
+                  AND external_entity_id = :external_entity_id
+            )
         """)
-        result = await self._conn.execute(
+        await self._conn.execute(
             query,
             {
                 "internal_entity_type": self._INTERNAL_ENTITY_TYPE,
@@ -384,11 +391,6 @@ class ImmichSyncService:
                 "external_entity_id": person_id,
             },
         )
-        row = result.fetchone()
-        if not row:
-            raise RuntimeError(
-                f"Failed to create ExternalReference for contact {contact_id}"
-            )
 
     async def _upsert_sync_metadata(
         self,

@@ -139,7 +139,7 @@ Implement the core inbound sync: fetch Immich people, match to contacts, create/
 - [x] `ExternalReference` records created for each person-to-contact mapping
 - [x] `SyncMetadata` tracks sync state with version hash of name + birthDate
 - [x] Birthday sync inbound: create BIRTHDAY `ImportantDate` (precision=FULL) if contact has none; skip if existing
-- [x] Conflict records stored in a `sync_conflicts` table for unresolved ambiguous matches
+- [x] Conflict records stored in a `pending_entity_mappings` table for unresolved ambiguous matches
 
 **Required Test Coverage:**
 - **Unit:** ContactNameMatcher (exact, middle initial, abbreviated last name, case insensitive, no match, multi-match), name parsing, birthday sync skip logic. ✅ 18 tests in core_shared, 15 tests in immich worker

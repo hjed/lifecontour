@@ -159,10 +159,11 @@ class ContactNameMatcher:
                     ):
                         return True
                 else:
-                    # Contact has no middle name — skip middle initial,
-                    # the first+last already matches so this is valid
-                    # e.g. "John A Smith" matches "John Smith"
-                    return True
+                    # Contact has no middle name — only skip if it's an initial
+                    # e.g. "John A Smith" matches "John Smith", but
+                    # "John Random Smith" does not.
+                    if len(middle_token.replace(".", "").strip()) == 1:
+                        return True
 
         # The contact has a middle name but the parsed name doesn't
         if c_middle and c_last:
