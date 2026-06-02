@@ -1,5 +1,5 @@
 """
-Sync conflict SQLAlchemy model.
+PendingEntityMapping SQLAlchemy model.
 
 Tracks unresolved synchronisation conflicts that arise when a name-based
 match produces multiple candidate contacts for a single external entity.
@@ -14,8 +14,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from core_shared.models.base import Base
 
 
-class SyncConflict(Base):
-    """Tracks unresolved sync conflicts for manual resolution.
+class PendingEntityMapping(Base):
+    """Tracks unresolved entity mappings (sync conflicts) for manual resolution.
 
     When inbound sync detects multiple local contacts matching a single
     external entity name, a conflict row is created instead of
@@ -35,7 +35,7 @@ class SyncConflict(Base):
         resolved_contact_id: The contact chosen during resolution.
     """
 
-    __tablename__ = "sync_conflicts"
+    __tablename__ = "pending_entity_mappings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
@@ -92,7 +92,7 @@ class SyncConflict(Base):
 
     def __repr__(self) -> str:
         return (
-            f"<SyncConflict(id={self.id}, user={self.user_id}, "
+            f"<PendingEntityMapping(id={self.id}, user={self.user_id}, "
             f"source={self.integration_source}, "
             f"external={self.external_entity_id}, "
             f"status={self.status})>"

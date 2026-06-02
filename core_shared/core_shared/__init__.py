@@ -50,7 +50,7 @@ from core_shared.models import (
     ExternalEventLinkSyncStatus,
     ExternalReference,
     JournalExternalEventLink,
-    SyncConflict,
+    PendingEntityMapping,
     SyncMetadata,
     SyncStatus,
 )
@@ -58,7 +58,7 @@ from core_shared.models import (
 __all__ = [
     "Base",
     "ContactNameMatcher",
-    "SyncConflict",
+    "PendingEntityMapping",
     "SyncMetadata",
     "ExternalReference",
     "SyncStatus",

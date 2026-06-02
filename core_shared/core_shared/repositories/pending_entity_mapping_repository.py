@@ -1,5 +1,5 @@
 """
-Repository for ``sync_conflicts`` table operations.
+Repository for ``pending_entity_mappings`` table operations.
 
 Provides CRUD helpers used by integration workers to create, list, and
 resolve sync conflicts.
@@ -18,8 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 logger = structlog.get_logger(__name__)
 
 
-class SyncConflictRepository:
-    """Database operations for the ``sync_conflicts`` table.
+class PendingEntityMappingRepository:
+    """Database operations for the ``pending_entity_mappings`` table.
 
     Args:
         connection: An async SQLAlchemy connection (typically injected).
@@ -49,7 +49,7 @@ class SyncConflictRepository:
         now = datetime.now(UTC)
 
         query = text("""
-            INSERT INTO sync_conflicts
+            INSERT INTO pending_entity_mappings
                 (user_id, integration_source, external_entity_id,
                  external_entity_name, candidate_contact_ids, status,
                  created_at, updated_at)
@@ -99,7 +99,7 @@ class SyncConflictRepository:
             SELECT id, user_id, integration_source, external_entity_id,
                    external_entity_name, candidate_contact_ids, status,
                    resolved_contact_id, created_at, updated_at
-            FROM sync_conflicts
+            FROM pending_entity_mappings
             WHERE user_id = :user_id
               AND integration_source = :integration_source
               AND status = 'unresolved'
@@ -127,7 +127,7 @@ class SyncConflictRepository:
             SELECT id, user_id, integration_source, external_entity_id,
                    external_entity_name, candidate_contact_ids, status,
                    resolved_contact_id, created_at, updated_at
-            FROM sync_conflicts
+            FROM pending_entity_mappings
             WHERE user_id = :user_id
               AND integration_source = :integration_source
               AND external_entity_id = :external_entity_id
@@ -156,7 +156,7 @@ class SyncConflictRepository:
             Updated conflict dictionary, or ``None`` if not found.
         """
         query = text("""
-            UPDATE sync_conflicts
+            UPDATE pending_entity_mappings
             SET status = 'resolved',
                 resolved_contact_id = :resolved_contact_id,
                 updated_at = :now

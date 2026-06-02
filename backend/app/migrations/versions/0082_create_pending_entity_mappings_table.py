@@ -1,4 +1,4 @@
-"""Create sync_conflicts table
+"""Create pending_entity_mappings table
 
 Revision ID: 0082
 Revises: 0081
@@ -19,9 +19,9 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    """Create sync_conflicts table for unresolved integration sync conflicts."""
+    """Create pending_entity_mappings table for unresolved integration sync conflicts."""
     op.create_table(
-        "sync_conflicts",
+        "pending_entity_mappings",
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column(
             "user_id",
@@ -82,27 +82,31 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.CheckConstraint(
             "status IN ('unresolved', 'resolved')",
-            name="ck_sync_conflicts_status",
+            name="ck_pending_entity_mappings_status",
         ),
     )
     # Partial unique index: only one unresolved conflict per user+source+entity
     op.create_index(
-        "uq_sync_conflicts_active",
-        "sync_conflicts",
+        "uq_pending_entity_mappings_active",
+        "pending_entity_mappings",
         ["user_id", "integration_source", "external_entity_id"],
         unique=True,
         postgresql_where=sa.text("status = 'unresolved'"),
     )
     # Index for listing conflicts by user
     op.create_index(
-        "ix_sync_conflicts_user_status",
-        "sync_conflicts",
+        "ix_pending_entity_mappings_user_status",
+        "pending_entity_mappings",
         ["user_id", "integration_source", "status"],
     )
 
 
 def downgrade() -> None:
-    """Remove sync_conflicts table."""
-    op.drop_index("ix_sync_conflicts_user_status", table_name="sync_conflicts")
-    op.drop_index("uq_sync_conflicts_active", table_name="sync_conflicts")
-    op.drop_table("sync_conflicts")
+    """Remove pending_entity_mappings table."""
+    op.drop_index(
+        "ix_pending_entity_mappings_user_status", table_name="pending_entity_mappings"
+    )
+    op.drop_index(
+        "uq_pending_entity_mappings_active", table_name="pending_entity_mappings"
+    )
+    op.drop_table("pending_entity_mappings")

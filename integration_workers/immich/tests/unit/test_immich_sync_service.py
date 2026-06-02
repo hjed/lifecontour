@@ -204,9 +204,13 @@ class TestSyncPeopleFlow:
     ) -> None:
         """People without names are skipped."""
         unnamed = _make_person("p1", "")  # No name
-        mock_api_client.get_all_people.return_value = _make_people_response([unnamed])
 
-        result = await service.sync_people()
+        # Fetch contacts cache (empty)
+        no_contacts_mock = MagicMock()
+        no_contacts_mock.fetchall.return_value = []
+        mock_connection.execute = AsyncMock(return_value=no_contacts_mock)
+
+        result = await service.sync_people_batch([unnamed.model_dump()])
 
         assert result.skipped == 1
         assert result.created == 0
@@ -217,12 +221,17 @@ class TestSyncPeopleFlow:
         self,
         service: ImmichSyncService,
         mock_api_client: AsyncMock,
+        mock_connection: AsyncMock,
     ) -> None:
         """Hidden people are skipped."""
         hidden = _make_person("p1", "John Smith", is_hidden=True)
-        mock_api_client.get_all_people.return_value = _make_people_response([hidden])
 
-        result = await service.sync_people()
+        # Fetch contacts cache (empty)
+        no_contacts_mock = MagicMock()
+        no_contacts_mock.fetchall.return_value = []
+        mock_connection.execute = AsyncMock(return_value=no_contacts_mock)
+
+        result = await service.sync_people_batch([hidden.model_dump()])
 
         assert result.skipped == 1
 
@@ -235,7 +244,10 @@ class TestSyncPeopleFlow:
     ) -> None:
         """Person with existing ExternalReference uses existing link."""
         person = _make_person("p1", "John Smith")
-        mock_api_client.get_all_people.return_value = _make_people_response([person])
+
+        # Contacts cache
+        no_contacts_mock = MagicMock()
+        no_contacts_mock.fetchall.return_value = []
 
         # Simulate existing ExternalReference
         ext_ref_row = MagicMock()
@@ -250,9 +262,11 @@ class TestSyncPeopleFlow:
         sync_meta_mock = MagicMock()
         sync_meta_mock.fetchone.return_value = sync_meta_row
 
-        mock_connection.execute = AsyncMock(side_effect=[ext_ref_mock, sync_meta_mock])
+        mock_connection.execute = AsyncMock(
+            side_effect=[no_contacts_mock, ext_ref_mock, sync_meta_mock]
+        )
 
-        result = await service.sync_people()
+        result = await service.sync_people_batch([person.model_dump()])
 
         assert result.unchanged == 1
         assert result.created == 0
@@ -266,16 +280,15 @@ class TestSyncPeopleFlow:
     ) -> None:
         """Person matching a single contact is auto-linked."""
         person = _make_person("p1", "Jane Doe", "1990-03-20")
-        mock_api_client.get_all_people.return_value = _make_people_response([person])
+
+        # Contact cache returns single match
+        contact_row = _make_contact_row(10, "Jane", "Doe")
+        contacts_mock = MagicMock()
+        contacts_mock.fetchall.return_value = [contact_row]
 
         # No existing ExternalReference
         no_ref_mock = MagicMock()
         no_ref_mock.fetchone.return_value = None
-
-        # Contact search returns single match
-        contact_row = _make_contact_row(10, "Jane", "Doe")
-        contacts_mock = MagicMock()
-        contacts_mock.fetchall.return_value = [contact_row]
 
         # No existing birthday
         no_birthday_mock = MagicMock()
@@ -291,8 +304,8 @@ class TestSyncPeopleFlow:
 
         mock_connection.execute = AsyncMock(
             side_effect=[
+                contacts_mock,  # Contact cache
                 no_ref_mock,  # ExternalReference lookup
-                contacts_mock,  # Contact search
                 insert_mock,  # ExternalReference create
                 insert_mock,  # SyncMetadata upsert
                 no_birthday_mock,  # Birthday check
@@ -300,7 +313,7 @@ class TestSyncPeopleFlow:
             ]
         )
 
-        result = await service.sync_people()
+        result = await service.sync_people_batch([person.model_dump()])
 
         assert result.linked == 1
         assert result.created == 0
@@ -314,18 +327,17 @@ class TestSyncPeopleFlow:
     ) -> None:
         """Person matching multiple contacts creates a conflict."""
         person = _make_person("p1", "John Smith")
-        mock_api_client.get_all_people.return_value = _make_people_response([person])
 
-        # No existing ExternalReference
-        no_ref_mock = MagicMock()
-        no_ref_mock.fetchone.return_value = None
-
-        # Contact search returns multiple matches
+        # Contact cache returns multiple matches
         contacts_mock = MagicMock()
         contacts_mock.fetchall.return_value = [
             _make_contact_row(1, "John", "Smith"),
             _make_contact_row(2, "John", "Smith", middle_name="Andrew"),
         ]
+
+        # No existing ExternalReference
+        no_ref_mock = MagicMock()
+        no_ref_mock.fetchone.return_value = None
 
         # Conflict insert
         conflict_mock = MagicMock()
@@ -335,13 +347,13 @@ class TestSyncPeopleFlow:
 
         mock_connection.execute = AsyncMock(
             side_effect=[
+                contacts_mock,  # Contact cache
                 no_ref_mock,  # ExternalReference lookup
-                contacts_mock,  # Contact search
                 conflict_mock,  # Conflict insert
             ]
         )
 
-        result = await service.sync_people()
+        result = await service.sync_people_batch([person.model_dump()])
 
         assert result.conflicts == 1
 
@@ -354,15 +366,14 @@ class TestSyncPeopleFlow:
     ) -> None:
         """Person with no contact match creates a new contact."""
         person = _make_person("p1", "Bob Jones", "1985-12-25")
-        mock_api_client.get_all_people.return_value = _make_people_response([person])
+
+        # Contact cache returns no matches
+        no_contacts_mock = MagicMock()
+        no_contacts_mock.fetchall.return_value = []
 
         # No existing ExternalReference
         no_ref_mock = MagicMock()
         no_ref_mock.fetchone.return_value = None
-
-        # Contact search returns no matches
-        no_contacts_mock = MagicMock()
-        no_contacts_mock.fetchall.return_value = []
 
         # Contact insert
         contact_insert_mock = MagicMock()
@@ -380,17 +391,21 @@ class TestSyncPeopleFlow:
         insert_row.updated_at = datetime.now(UTC)
         insert_mock.fetchone.return_value = insert_row
 
+        no_birthday_mock = MagicMock()
+        no_birthday_mock.fetchone.return_value = None
+
         mock_connection.execute = AsyncMock(
             side_effect=[
+                no_contacts_mock,  # Contact cache
                 no_ref_mock,  # ExternalReference lookup
-                no_contacts_mock,  # Contact search
                 contact_insert_mock,  # Contact insert
                 insert_mock,  # ExternalReference create
                 insert_mock,  # SyncMetadata upsert
-                insert_mock,  # ImportantDate insert
+                no_birthday_mock,  # Birthday check
+                insert_mock,  # ImportantDate insert (only 1 important date insert)
             ]
         )
 
-        result = await service.sync_people()
+        result = await service.sync_people_batch([person.model_dump()])
 
         assert result.created == 1

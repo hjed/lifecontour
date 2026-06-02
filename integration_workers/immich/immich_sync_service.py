@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -78,36 +79,49 @@ class ImmichSyncService:
         self._conn = connection
         self._user_id = user_id
         self._integration_source = integration_source
+        self._contacts_cache: list[Contact] | None = None
 
     # -- Public API -------------------------------------------------------
 
-    async def sync_people(self) -> PeopleSyncResult:
-        """Fetch all Immich people and sync to local contacts.
+    async def list_people_batches(self) -> AsyncIterator[list[dict[str, Any]]]:
+        """Yield pages of serialized Immich people for batch processing."""
+        page = 1
+        while True:
+            response = await self._api.get_all_people(page=page, size=500)
+            if not response.people:
+                break
+
+            logger.info(
+                "Listed people batch", page=page, batch_size=len(response.people)
+            )
+            yield [p.model_dump() for p in response.people]
+
+            if not response.has_next_page:
+                break
+            page += 1
+
+    async def sync_people_batch(
+        self, people_data: list[dict[str, Any]]
+    ) -> PeopleSyncResult:
+        """Sync a batch of Immich people to local contacts.
+
+        Args:
+            people_data: Serialized ImmichPerson dictionaries.
 
         Returns:
-            A :class:`PeopleSyncResult` summarising the operation.
+            A :class:`PeopleSyncResult` summarising the batch operation.
         """
         result = PeopleSyncResult()
 
-        # Fetch all people (paginated)
-        all_people = await self._fetch_all_people()
+        # Pre-load contacts cache for this batch
+        self._contacts_cache = await self._fetch_user_contacts()
 
-        for person in all_people:
-            try:
-                await self._process_person(person, result)
-            except Exception:
-                logger.exception(
-                    "Error syncing Immich person",
-                    person_id=person.id,
-                    person_name=person.name,
-                )
-                result.errors += 1
-                result.error_details.append(
-                    f"Failed to sync person {person.id}: {person.name}"
-                )
+        for p_dict in people_data:
+            person = ImmichPerson.model_validate(p_dict)
+            await self._process_person(person, result)
 
         logger.info(
-            "Immich people sync complete",
+            "Immich people batch sync complete",
             user_id=self._user_id,
             created=result.created,
             linked=result.linked,
@@ -115,7 +129,6 @@ class ImmichSyncService:
             updated=result.updated,
             skipped=result.skipped,
             conflicts=result.conflicts,
-            errors=result.errors,
         )
 
         return result
@@ -160,18 +173,6 @@ class ImmichSyncService:
 
     # -- Private implementation -------------------------------------------
 
-    async def _fetch_all_people(self) -> list[ImmichPerson]:
-        """Fetch all people from Immich, handling pagination."""
-        all_people: list[ImmichPerson] = []
-        page = 1
-        while True:
-            response = await self._api.get_all_people(page=page, size=500)
-            all_people.extend(response.people)
-            if not response.has_next_page:
-                break
-            page += 1
-        return all_people
-
     async def _process_person(
         self,
         person: ImmichPerson,
@@ -204,11 +205,17 @@ class ImmichSyncService:
                 internal_id=existing_ref.internal_entity_id,
                 version_hash=version_hash,
             )
+            # Sync birthday since version hash changed
+            await self._sync_birthday(existing_ref.internal_entity_id, person)
             result.updated += 1
             return
 
         # 2. No existing link — try name matching
-        contacts = await self._fetch_user_contacts()
+        contacts = (
+            self._contacts_cache
+            if self._contacts_cache is not None
+            else await self._fetch_user_contacts()
+        )
         matches = ContactNameMatcher.find_matches(person.name, contacts)
 
         if len(matches) == 1:
@@ -229,9 +236,9 @@ class ImmichSyncService:
             return
 
         if len(matches) > 1:
-            # Multiple matches — create conflict
+            # Multiple matches — create pending entity mapping
             candidate_ids = [m.id for m in matches if m.id is not None]
-            await self._create_sync_conflict(
+            await self._create_pending_entity_mapping(
                 person_id=person.id,
                 person_name=person.name,
                 candidate_ids=candidate_ids,
@@ -261,6 +268,7 @@ class ImmichSyncService:
             SELECT id, internal_entity_id
             FROM external_references
             WHERE external_system = :external_system
+              AND internal_entity_type = :internal_entity_type
               AND external_entity_type = :external_entity_type
               AND external_entity_id = :external_entity_id
         """)
@@ -268,6 +276,7 @@ class ImmichSyncService:
             query,
             {
                 "external_system": self._integration_source,
+                "internal_entity_type": self._INTERNAL_ENTITY_TYPE,
                 "external_entity_type": self._EXTERNAL_ENTITY_TYPE,
                 "external_entity_id": person_id,
             },
@@ -300,9 +309,8 @@ class ImmichSyncService:
         query = text("""
             SELECT id, first_name, last_name, middle_name
             FROM contacts
-            WHERE user_id = :user_id
         """)
-        result = await self._conn.execute(query, {"user_id": self._user_id})
+        result = await self._conn.execute(query)
         rows = result.fetchall()
 
         return [
@@ -326,10 +334,10 @@ class ImmichSyncService:
 
         query = text("""
             INSERT INTO contacts
-                (first_name, last_name, user_id, is_favourite,
+                (first_name, last_name, is_favourite,
                  created_at, updated_at)
             VALUES
-                (:first_name, :last_name, :user_id, false,
+                (:first_name, :last_name, false,
                  :now, :now)
             RETURNING id, created_at, updated_at
         """)
@@ -338,7 +346,6 @@ class ImmichSyncService:
             {
                 "first_name": first_name,
                 "last_name": last_name,
-                "user_id": self._user_id,
                 "now": now,
             },
         )
@@ -421,18 +428,18 @@ class ImmichSyncService:
             },
         )
 
-    async def _create_sync_conflict(
+    async def _create_pending_entity_mapping(
         self,
         person_id: str,
         person_name: str,
         candidate_ids: list[int],
     ) -> None:
-        """Create a sync conflict for an ambiguous name match."""
+        """Create a pending entity mapping for an ambiguous name match."""
         now = datetime.now(UTC)
         candidates_json = json.dumps(candidate_ids)
 
         query = text("""
-            INSERT INTO sync_conflicts
+            INSERT INTO pending_entity_mappings
                 (user_id, integration_source, external_entity_id,
                  external_entity_name, candidate_contact_ids, status,
                  created_at, updated_at)
@@ -461,10 +468,12 @@ class ImmichSyncService:
         )
         row = result.fetchone()
         if not row:
-            raise RuntimeError(f"Failed to create sync conflict for person {person_id}")
+            raise RuntimeError(
+                f"Failed to create pending entity mapping for person {person_id}"
+            )
 
         logger.info(
-            "Created sync conflict for ambiguous name match",
+            "Created pending entity mapping for ambiguous name match",
             person_id=person_id,
             person_name=person_name,
             candidate_count=len(candidate_ids),
@@ -503,7 +512,7 @@ class ImmichSyncService:
                 (contact_id, date_type, precision, year, month, day)
             VALUES
                 (:contact_id, 'birthday', 'full', :year, :month, :day)
-            RETURNING id, created_at, updated_at
+            ON CONFLICT DO NOTHING
         """)
         await self._conn.execute(
             insert_query,

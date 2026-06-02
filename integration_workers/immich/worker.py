@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -22,7 +23,10 @@ from arq.connections import RedisSettings
 from core_shared.integration_constants import IMMICH_ARQ_QUEUE_NAME
 from core_shared.telemetry import trace_arq_job
 
+from immich_api_client import ImmichApiClient
+from immich_auth_service import ImmichAuthService
 from immich_settings import ImmichWorkerSettings
+from immich_sync_service import ImmichSyncService
 
 __version__ = "0.2.0"
 
@@ -125,27 +129,19 @@ async def sync_immich_people(
     user_id: str,
     sync_type: str = "full",
 ) -> dict[str, Any]:
-    """ARQ task: sync Immich People → local contacts for a user.
+    """ARQ task: orchestrate Immich People sync.
 
-    Fetches all named Immich people, matches them to local contacts
-    using :class:`ContactNameMatcher`, creates new contacts for
-    unmatched people, and records sync conflicts for ambiguous
-    matches.
+    Lists people pages from Immich and enqueues a `sync_immich_people_batch`
+    job for each page. Each batch commits independently.
 
     Args:
-        ctx: ARQ worker context (must contain ``session_factory``).
+        ctx: ARQ worker context (must contain `session_factory`).
         user_id: Internal user ID.
         sync_type: 'full' or 'smart'.
 
     Returns:
         Dictionary with sync summary.
     """
-    from datetime import UTC, datetime
-
-    from immich_api_client import ImmichApiClient
-    from immich_auth_service import ImmichAuthService
-    from immich_sync_service import ImmichSyncService
-
     job_id = ctx.get("job_id", "unknown")
     session_factory = ctx["session_factory"]
     started_at = datetime.now(UTC)
@@ -157,7 +153,6 @@ async def sync_immich_people(
         job_id=job_id,
     )
 
-    # Mark job as running
     await _update_sync_job_status(
         session_factory, job_id, "running", started_at=started_at, progress=0
     )
@@ -166,16 +161,12 @@ async def sync_immich_people(
         async with session_factory() as session:
             conn = await session.connection()
 
-            # Get Immich credentials
             auth_service = ImmichAuthService(settings.encryption_key)
             api_key = await auth_service.get_api_key(user_id, conn)
             server_url = await auth_service.get_server_url(user_id, conn)
 
             if not api_key or not server_url:
-                logger.warning(
-                    "Immich credentials not found for user",
-                    user_id=user_id,
-                )
+                logger.warning("Immich credentials not found for user", user_id=user_id)
                 await _update_sync_job_status(
                     session_factory,
                     job_id,
@@ -189,7 +180,7 @@ async def sync_immich_people(
                     "user_id": user_id,
                 }
 
-            # Create API client and sync service
+            batches_enqueued = 0
             api_client = ImmichApiClient.create(server_url, api_key)
             try:
                 sync_service = ImmichSyncService(
@@ -198,13 +189,36 @@ async def sync_immich_people(
                     user_id=user_id,
                 )
 
-                result = await sync_service.sync_people()
+                page_number = 0
+                async for people_batch in sync_service.list_people_batches():
+                    page_number += 1
+                    batch_job_id = f"immich-batch-{user_id}-p{page_number}"
 
-                await session.commit()
+                    job = await ctx["redis"].enqueue_job(
+                        "sync_immich_people_batch",
+                        user_id,
+                        people_batch,
+                        _job_id=batch_job_id,
+                        _queue_name=IMMICH_ARQ_QUEUE_NAME,
+                    )
+                    if job:
+                        batches_enqueued += 1
+                        logger.info(
+                            "Enqueued people batch job",
+                            job_id=job.job_id,
+                            batch_size=len(people_batch),
+                            batch_number=page_number,
+                        )
+                    else:
+                        logger.info(
+                            "People batch job already enqueued",
+                            batch_job_id=batch_job_id,
+                            batch_number=page_number,
+                        )
+
             finally:
                 await api_client.close()
 
-        # Mark job as completed
         await _update_sync_job_status(
             session_factory,
             job_id,
@@ -214,16 +228,10 @@ async def sync_immich_people(
         )
 
         return {
-            "status": "success",
+            "status": "enqueued",
             "user_id": user_id,
             "sync_type": sync_type,
-            "created": result.created,
-            "linked": result.linked,
-            "unchanged": result.unchanged,
-            "updated": result.updated,
-            "skipped": result.skipped,
-            "conflicts": result.conflicts,
-            "errors": result.errors,
+            "batches_enqueued": batches_enqueued,
         }
 
     except Exception as e:
@@ -232,18 +240,79 @@ async def sync_immich_people(
             user_id=user_id,
             error=str(e),
         )
+        error_msg = "Immich people sync failed due to an internal error"
         await _update_sync_job_status(
             session_factory,
             job_id,
             "failed",
             completed_at=datetime.now(UTC),
-            error_message=str(e),
+            error_message=error_msg,
         )
         return {
             "status": "error",
-            "message": str(e),
+            "message": error_msg,
             "user_id": user_id,
         }
+
+
+@trace_arq_job
+async def sync_immich_people_batch(
+    ctx: dict[str, Any],
+    user_id: str,
+    people_data: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """ARQ task: process a batch of Immich people.
+
+    Args:
+        ctx: ARQ worker context.
+        user_id: Internal user ID.
+        people_data: Serialized ImmichPerson dicts.
+    """
+    session_factory = ctx["session_factory"]
+
+    logger.info(
+        "sync_immich_people_batch started", user_id=user_id, batch_size=len(people_data)
+    )
+
+    try:
+        async with session_factory() as session:
+            conn = await session.connection()
+
+            auth_service = ImmichAuthService(settings.encryption_key)
+            api_key = await auth_service.get_api_key(user_id, conn)
+            server_url = await auth_service.get_server_url(user_id, conn)
+
+            if not api_key or not server_url:
+                raise ValueError("Immich credentials missing")
+
+            api_client = ImmichApiClient.create(server_url, api_key)
+            try:
+                sync_service = ImmichSyncService(
+                    api_client=api_client, connection=conn, user_id=user_id
+                )
+                result = await sync_service.sync_people_batch(people_data)
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+            finally:
+                await api_client.close()
+
+        return {
+            "status": "success",
+            "user_id": user_id,
+            "created": result.created,
+            "linked": result.linked,
+            "unchanged": result.unchanged,
+            "updated": result.updated,
+            "skipped": result.skipped,
+            "conflicts": result.conflicts,
+        }
+    except Exception as e:
+        logger.exception(
+            "sync_immich_people_batch failed", user_id=user_id, error=str(e)
+        )
+        raise
 
 
 async def periodic_sync_all_immich_accounts(
@@ -416,6 +485,7 @@ class WorkerSettings:
     # Task functions — Phase 3 provides placeholder sync tasks
     functions: list[Any] = [
         sync_immich_people,
+        sync_immich_people_batch,
         periodic_sync_all_immich_accounts,
     ]
 
