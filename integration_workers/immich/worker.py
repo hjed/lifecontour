@@ -125,10 +125,12 @@ async def sync_immich_people(
     user_id: str,
     sync_type: str = "full",
 ) -> dict[str, Any]:
-    """ARQ task: sync Immich People for a user.
+    """ARQ task: sync Immich People → local contacts for a user.
 
-    Phase 3 placeholder — logs the request and returns success.
-    Full implementation will be added in ITER11-002 (Contact Sync).
+    Fetches all named Immich people, matches them to local contacts
+    using :class:`ContactNameMatcher`, creates new contacts for
+    unmatched people, and records sync conflicts for ambiguous
+    matches.
 
     Args:
         ctx: ARQ worker context (must contain ``session_factory``).
@@ -140,12 +142,16 @@ async def sync_immich_people(
     """
     from datetime import UTC, datetime
 
+    from immich_api_client import ImmichApiClient
+    from immich_auth_service import ImmichAuthService
+    from immich_sync_service import ImmichSyncService
+
     job_id = ctx.get("job_id", "unknown")
     session_factory = ctx["session_factory"]
     started_at = datetime.now(UTC)
 
     logger.info(
-        "sync_immich_people called (placeholder)",
+        "sync_immich_people started",
         user_id=user_id,
         sync_type=sync_type,
         job_id=job_id,
@@ -156,21 +162,88 @@ async def sync_immich_people(
         session_factory, job_id, "running", started_at=started_at, progress=0
     )
 
-    # Mark job as completed (placeholder — no real work yet)
-    await _update_sync_job_status(
-        session_factory,
-        job_id,
-        "completed",
-        completed_at=datetime.now(UTC),
-        progress=100,
-    )
+    try:
+        async with session_factory() as session:
+            conn = await session.connection()
 
-    return {
-        "status": "success",
-        "message": "People sync not yet implemented — placeholder for ITER11-002",
-        "user_id": user_id,
-        "sync_type": sync_type,
-    }
+            # Get Immich credentials
+            auth_service = ImmichAuthService(settings.encryption_key)
+            api_key = await auth_service.get_api_key(user_id, conn)
+            server_url = await auth_service.get_server_url(user_id, conn)
+
+            if not api_key or not server_url:
+                logger.warning(
+                    "Immich credentials not found for user",
+                    user_id=user_id,
+                )
+                await _update_sync_job_status(
+                    session_factory,
+                    job_id,
+                    "failed",
+                    completed_at=datetime.now(UTC),
+                    error_message="Immich credentials not configured",
+                )
+                return {
+                    "status": "error",
+                    "message": "Immich credentials not configured",
+                    "user_id": user_id,
+                }
+
+            # Create API client and sync service
+            api_client = ImmichApiClient.create(server_url, api_key)
+            try:
+                sync_service = ImmichSyncService(
+                    api_client=api_client,
+                    connection=conn,
+                    user_id=user_id,
+                )
+
+                result = await sync_service.sync_people()
+
+                await session.commit()
+            finally:
+                await api_client.close()
+
+        # Mark job as completed
+        await _update_sync_job_status(
+            session_factory,
+            job_id,
+            "completed",
+            completed_at=datetime.now(UTC),
+            progress=100,
+        )
+
+        return {
+            "status": "success",
+            "user_id": user_id,
+            "sync_type": sync_type,
+            "created": result.created,
+            "linked": result.linked,
+            "unchanged": result.unchanged,
+            "updated": result.updated,
+            "skipped": result.skipped,
+            "conflicts": result.conflicts,
+            "errors": result.errors,
+        }
+
+    except Exception as e:
+        logger.exception(
+            "sync_immich_people failed",
+            user_id=user_id,
+            error=str(e),
+        )
+        await _update_sync_job_status(
+            session_factory,
+            job_id,
+            "failed",
+            completed_at=datetime.now(UTC),
+            error_message=str(e),
+        )
+        return {
+            "status": "error",
+            "message": str(e),
+            "user_id": user_id,
+        }
 
 
 async def periodic_sync_all_immich_accounts(

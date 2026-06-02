@@ -57,6 +57,40 @@ reference = ExternalReference(
 )
 ```
 
+### SyncConflict
+
+Tracks unresolved sync conflicts when name-based matching produces multiple candidate contacts:
+
+```python
+from core_shared import SyncConflict
+
+# Created automatically during people sync when ambiguous matches found
+# Resolved via conflict resolution UI or MCP tools
+```
+
+## Utilities
+
+### ContactNameMatcher
+
+Shared name-matching utility for integrations that link external entities to local contacts (used by Immich and Strava):
+
+```python
+from core_shared import ContactNameMatcher
+from core_shared.models.contacts.entities import Contact
+
+# Parse a full name string into first/last name
+first, last = ContactNameMatcher.parse_name("John Michael Smith")
+# → ("John Michael", "Smith")
+
+# Find contacts matching a name (case-insensitive, middle initial, abbreviated)
+matches = ContactNameMatcher.find_matches("John S", contacts)
+```
+
+Supports:
+- **Exact match** (case-insensitive)
+- **Middle initial variants** ("John A Smith" ↔ "John Smith")
+- **Abbreviated last name** ("John S" matches "John Smith")
+
 ## Database Utilities
 
 ### Connection Management
