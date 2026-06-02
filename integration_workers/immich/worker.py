@@ -190,9 +190,14 @@ async def sync_immich_people(
                 )
 
                 page_number = 0
+                batch_jobs = []
+                import asyncio
+
+                from arq.jobs import Job
+
                 async for people_batch in sync_service.list_people_batches():
                     page_number += 1
-                    batch_job_id = f"immich-batch-{user_id}-p{page_number}"
+                    batch_job_id = f"immich-batch-{job_id}-p{page_number}"
 
                     job = await ctx["redis"].enqueue_job(
                         "sync_immich_people_batch",
@@ -203,6 +208,7 @@ async def sync_immich_people(
                     )
                     if job:
                         batches_enqueued += 1
+                        batch_jobs.append(job)
                         logger.info(
                             "Enqueued people batch job",
                             job_id=job.job_id,
@@ -210,6 +216,13 @@ async def sync_immich_people(
                             batch_number=page_number,
                         )
                     else:
+                        batch_jobs.append(
+                            Job(
+                                batch_job_id,
+                                ctx["redis"],
+                                _queue_name=IMMICH_ARQ_QUEUE_NAME,
+                            )
+                        )
                         logger.info(
                             "People batch job already enqueued",
                             batch_job_id=batch_job_id,
@@ -218,6 +231,19 @@ async def sync_immich_people(
 
             finally:
                 await api_client.close()
+
+        if batch_jobs:
+            logger.info(
+                "Waiting for batch jobs to complete",
+                job_id=job_id,
+                count=len(batch_jobs),
+            )
+            results = await asyncio.gather(
+                *[j.result(timeout=290) for j in batch_jobs], return_exceptions=True
+            )
+            for res in results:
+                if isinstance(res, Exception):
+                    raise res
 
         await _update_sync_job_status(
             session_factory,

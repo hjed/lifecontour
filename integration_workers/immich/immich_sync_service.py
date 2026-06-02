@@ -377,6 +377,7 @@ class ImmichSyncService:
             WHERE NOT EXISTS (
                 SELECT 1 FROM external_references
                 WHERE external_system = :external_system
+                  AND internal_entity_type = :internal_entity_type
                   AND external_entity_type = :external_entity_type
                   AND external_entity_id = :external_entity_id
             )
