@@ -228,25 +228,41 @@ class TestPeriodicSyncAllImmichAccounts:
 
 
 class TestSyncImmichPeople:
-    """Tests for the sync_immich_people placeholder task."""
+    """Tests for the sync_immich_people task."""
 
     @pytest.mark.asyncio
-    async def test_placeholder_returns_success(self) -> None:
-        """Placeholder task returns success with not-yet-implemented message."""
+    async def test_returns_error_when_no_credentials(self) -> None:
+        """Task returns error when Immich credentials are not configured."""
+        from contextlib import asynccontextmanager
         from unittest.mock import patch
 
         from worker import sync_immich_people
 
+        # Mock session that returns no auth row
+        mock_session = AsyncMock()
+        mock_conn = AsyncMock()
+        mock_session.connection = AsyncMock(return_value=mock_conn)
+
+        no_result = MagicMock()
+        no_result.fetchone.return_value = None
+        mock_conn.execute = AsyncMock(return_value=no_result)
+
+        @asynccontextmanager
+        async def _session_ctx():
+            yield mock_session
+
+        session_factory = MagicMock(side_effect=lambda: _session_ctx())
+
         ctx: dict[str, Any] = {
-            "session_factory": MagicMock(),
-            "job_id": "test-placeholder-job",
+            "session_factory": session_factory,
+            "job_id": "test-no-creds-job",
         }
 
         with patch("worker._update_sync_job_status", new_callable=AsyncMock):
             result = await sync_immich_people(ctx, "user-1", "full")
 
-        assert result["status"] == "success"
-        assert "not yet implemented" in result["message"].lower()
+        assert result["status"] == "error"
+        assert "credentials" in result["message"].lower()
 
 
 class TestPeriodicSyncConfiguration:

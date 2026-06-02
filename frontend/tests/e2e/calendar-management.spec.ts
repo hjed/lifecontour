@@ -19,11 +19,24 @@ test.describe('Calendar Management', () => {
     await page.getByTestId('color-input').fill('#123456');
 
     // 4. Submit and wait for creation
+    let postFinished = false;
     await Promise.all([
-      page.waitForResponse(
-        response =>
+      page.waitForResponse(response => {
+        if (
           response.url().includes('/api/calendars') &&
           response.request().method() === 'POST' &&
+          response.ok()
+        ) {
+          postFinished = true;
+          return true;
+        }
+        return false;
+      }),
+      page.waitForResponse(
+        response =>
+          postFinished &&
+          response.url().includes('/api/calendars') &&
+          response.request().method() === 'GET' &&
           response.ok()
       ),
       page.getByRole('button', { name: /save changes/i }).click(),
@@ -45,16 +58,22 @@ test.describe('Calendar Management', () => {
     await page.getByLabel(/name/i).fill(updatedName);
 
     // Submit and wait for update + React Query refetch
+    let putFinished = false;
     await Promise.all([
-      page.waitForResponse(
-        response =>
+      page.waitForResponse(response => {
+        if (
           response.url().includes('/api/calendars/') &&
           response.request().method() === 'PUT' &&
           response.ok()
-      ),
-      // Also wait for the React Query invalidation refetch to complete
+        ) {
+          putFinished = true;
+          return true;
+        }
+        return false;
+      }),
       page.waitForResponse(
         response =>
+          putFinished &&
           response.url().includes('/api/calendars') &&
           response.request().method() === 'GET' &&
           response.ok()

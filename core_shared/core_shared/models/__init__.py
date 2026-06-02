@@ -22,6 +22,7 @@ from core_shared.models.outbox_events import (
     SyncCompletedEventData,
     parse_outbox_event_data,
 )
+from core_shared.models.pending_entity_mapping import PendingEntityMapping
 from core_shared.models.route import Route
 from core_shared.models.sync_job import SyncJob, SyncJobStatus, SyncType
 from core_shared.models.sync_metadata import SyncMetadata, SyncStatus
@@ -29,6 +30,7 @@ from core_shared.models.sync_metadata import SyncMetadata, SyncStatus
 __all__ = [
     "Base",
     "ContactSyncEventData",
+    "PendingEntityMapping",
     "SyncMetadata",
     "SyncStatus",
     "SyncJob",

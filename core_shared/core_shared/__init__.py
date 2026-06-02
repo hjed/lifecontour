@@ -15,6 +15,7 @@ from core_shared.base_service import (
     SyncResult,
     TransformationError,
 )
+from core_shared.contact_name_matcher import ContactNameMatcher
 
 # Only import what's available to avoid circular imports
 from core_shared.database.engine import (
@@ -49,12 +50,15 @@ from core_shared.models import (
     ExternalEventLinkSyncStatus,
     ExternalReference,
     JournalExternalEventLink,
+    PendingEntityMapping,
     SyncMetadata,
     SyncStatus,
 )
 
 __all__ = [
     "Base",
+    "ContactNameMatcher",
+    "PendingEntityMapping",
     "SyncMetadata",
     "ExternalReference",
     "SyncStatus",
