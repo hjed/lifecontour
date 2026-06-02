@@ -124,11 +124,17 @@ test.describe('Journal Merge Workflow', () => {
     });
     await expect(confirmMergeBtn).toBeEnabled();
 
-    // Wait for the merge API request and response
+    // Wait for the merge API request and response and React Query invalidation
     const mergeResponsePromise = page.waitForResponse(
       response =>
         response.url().includes(`/api/journals/${target.id}/merge`) &&
         response.request().method() === 'POST'
+    );
+    const detailGetPromise = page.waitForResponse(
+      response =>
+        response.url().endsWith(`/api/journals/${target.id}`) &&
+        response.request().method() === 'GET' &&
+        response.ok()
     );
 
     await confirmMergeBtn.click();
@@ -138,12 +144,11 @@ test.describe('Journal Merge Workflow', () => {
       console.debug('Merge Error Body:', await mergeResponse.text());
     }
     expect(mergeResponse.status()).toBe(200);
+    await detailGetPromise;
 
     // Verify dialog is closed
     await expect(resolutionDialog).toBeHidden();
 
-    // Wait for the detail view to reload data or manually reload
-    // In our implementation, react-query should automatically refetch after the mutation
     // Wait for the new combined content to appear
     await expect(page.getByTestId('journal-content')).toContainText(
       'Source interesting content'

@@ -97,16 +97,11 @@ test.describe('Important Dates', () => {
     await authenticatedPage.getByLabel('Save date').click();
     await saveResponsePromise;
 
-    // Verify UI updates — use toPass() to allow for React Query cache
-    // invalidation and re-render after the PUT response completes.
-    await expect(async () => {
-      await expect(
-        authenticatedPage.getByText(/marriage anniversary/i)
-      ).toBeVisible({ timeout: 1000 });
-      await expect(authenticatedPage.getByText('2010')).toBeVisible({
-        timeout: 1000,
-      });
-    }).toPass({ timeout: 15000 });
+    // Verify UI updates without needing polling/reload loops
+    await expect(
+      authenticatedPage.getByText(/marriage anniversary/i)
+    ).toBeVisible();
+    await expect(authenticatedPage.getByText('2010')).toBeVisible();
 
     // --- Delete the birthday ---
     await authenticatedPage.getByLabel('Delete birthday').click();

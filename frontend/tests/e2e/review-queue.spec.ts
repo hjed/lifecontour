@@ -309,29 +309,31 @@ test.describe('Journal Review Queue', () => {
     const autoMergeBtn = sidebar.getByTestId('auto-merge-all-btn');
     await expect(autoMergeBtn).toBeVisible();
 
-    await Promise.all([
-      page.waitForResponse(
-        resp =>
-          resp.url().includes('/api/journals/review-items/auto-merge') &&
-          resp.request().method() === 'POST' &&
-          resp.ok()
-      ),
-      page.waitForResponse(
-        resp =>
-          resp.url().includes('/api/journals/review-items') &&
-          !resp.url().includes('auto-merge') &&
-          resp.request().method() === 'GET' &&
-          resp.ok()
-      ),
-      autoMergeBtn.dispatchEvent('click'),
-    ]);
+    const postPromise = page.waitForResponse(
+      resp =>
+        resp.url().includes('/api/journals/review-items/auto-merge') &&
+        resp.request().method() === 'POST' &&
+        resp.ok()
+    );
+    await autoMergeBtn.dispatchEvent('click');
+    await postPromise;
+
+    // Wait for the subsequent React Query refetch
+    await page.waitForResponse(
+      resp =>
+        resp.url().includes('/api/journals/review-items') &&
+        !resp.url().includes('auto-merge') &&
+        resp.request().method() === 'GET' &&
+        resp.ok()
+    );
 
     // Wait for success toast
     await expect(page.getByText(/Auto-merged 1 journal/i)).toBeVisible({
       timeout: 15000,
     });
 
-    // The review queue should now be empty
+    // The review queue should now be empty. We can wait for the UI to update directly
+    // since we've already synchronized with the React Query invalidation GET.
     await expect(sidebar.getByText('Your review queue is empty.')).toBeVisible({
       timeout: 15000,
     });
