@@ -316,100 +316,119 @@ async def _create_type_specific_data(
     if journal_type == JournalType.MOOD_RATING:
         from core_shared.models.journals import MoodData
 
-        mood_data = MoodData(journal_id=journal_id)
-        await mood_data_repo.save(mood_data)
+        if not await mood_data_repo.find_by_journal_id(journal_id):
+            mood_data = MoodData(journal_id=journal_id)
+            await mood_data_repo.save(mood_data)
     elif journal_type == JournalType.PLAN:
         from core_shared.models.journals import PlanData
 
-        plan_data = PlanData(journal_id=journal_id)
-        await plan_data_repo.save(plan_data)
+        if not await plan_data_repo.find_by_journal_id(journal_id):
+            plan_data = PlanData(journal_id=journal_id)
+            await plan_data_repo.save(plan_data)
     elif journal_type == JournalType.TRAVEL:
         from core_shared.models.journals import TravelData
 
-        travel_data = TravelData(journal_id=journal_id)
-        await travel_data_repo.save(travel_data)
+        if not await travel_data_repo.find_by_journal_id(journal_id):
+            travel_data = TravelData(journal_id=journal_id)
+            await travel_data_repo.save(travel_data)
     elif journal_type == JournalType.FITNESS:
         from core_shared.models.journals import FitnessData
 
-        fitness_data = FitnessData(journal_id=journal_id)
-        await fitness_data_repo.save(fitness_data)
+        if not await fitness_data_repo.find_by_journal_id(journal_id):
+            fitness_data = FitnessData(journal_id=journal_id)
+            await fitness_data_repo.save(fitness_data)
     elif journal_type == JournalType.OUTDOOR_ACTIVITY:
         from core_shared.models.journals import OutdoorActivityData
 
-        outdoor_activity_data = OutdoorActivityData(journal_id=journal_id)
-        await outdoor_activity_data_repo.save(outdoor_activity_data)
+        if not await outdoor_activity_data_repo.find_by_journal_id(journal_id):
+            outdoor_activity_data = OutdoorActivityData(journal_id=journal_id)
+            await outdoor_activity_data_repo.save(outdoor_activity_data)
     elif journal_type == JournalType.BUSHWALKING:
         from core_shared.models.journals import BushwalkingData
 
-        bushwalking_data = BushwalkingData(journal_id=journal_id)
-        await bushwalking_data_repo.save(bushwalking_data)
+        if not await bushwalking_data_repo.find_by_journal_id(journal_id):
+            bushwalking_data = BushwalkingData(journal_id=journal_id)
+            await bushwalking_data_repo.save(bushwalking_data)
     elif journal_type == JournalType.JOGGING:
         from core_shared.models.journals import JoggingData
 
-        jogging_data = JoggingData(journal_id=journal_id)
-        await jogging_data_repo.save(jogging_data)
+        if not await jogging_data_repo.find_by_journal_id(journal_id):
+            jogging_data = JoggingData(journal_id=journal_id)
+            await jogging_data_repo.save(jogging_data)
     elif journal_type == JournalType.ABSEILING_TRIP:
         from core_shared.models.journals import AbseilingData
 
-        abseiling_data = AbseilingData(journal_id=journal_id)
-        await abseiling_data_repo.save(abseiling_data)
+        if not await abseiling_data_repo.find_by_journal_id(journal_id):
+            abseiling_data = AbseilingData(journal_id=journal_id)
+            await abseiling_data_repo.save(abseiling_data)
     elif journal_type == JournalType.CANYONING:
         from core_shared.models.journals import CanyoningData
 
-        canyoning_data = CanyoningData(journal_id=journal_id)
-        await canyoning_data_repo.save(canyoning_data)
+        if not await canyoning_data_repo.find_by_journal_id(journal_id):
+            canyoning_data = CanyoningData(journal_id=journal_id)
+            await canyoning_data_repo.save(canyoning_data)
     elif journal_type == JournalType.CLIMBING:
         from core_shared.models.journals import ClimbingData
 
-        climbing_data = ClimbingData(journal_id=journal_id)
-        await climbing_data_repo.save(climbing_data)
+        if not await climbing_data_repo.find_by_journal_id(journal_id):
+            climbing_data = ClimbingData(journal_id=journal_id)
+            await climbing_data_repo.save(climbing_data)
     elif journal_type == JournalType.KAYAKING:
         from core_shared.models.journals import KayakingData
 
-        kayaking_data = KayakingData(journal_id=journal_id)
-        await kayaking_data_repo.save(kayaking_data)
+        if not await kayaking_data_repo.find_by_journal_id(journal_id):
+            kayaking_data = KayakingData(journal_id=journal_id)
+            await kayaking_data_repo.save(kayaking_data)
     elif journal_type == JournalType.CROSS_COUNTRY_SKIING:
         from core_shared.models.journals import (
             CrossCountrySkiingData,
         )
 
-        skiing_data = CrossCountrySkiingData(journal_id=journal_id)
-        await skiing_data_repo.save(skiing_data)
+        if not await skiing_data_repo.find_by_journal_id(journal_id):
+            skiing_data = CrossCountrySkiingData(journal_id=journal_id)
+            await skiing_data_repo.save(skiing_data)
     elif journal_type == JournalType.CAVING:
         from core_shared.models.journals import CavingData
 
-        caving_data = CavingData(journal_id=journal_id)
-        await caving_data_repo.save(caving_data)
+        if not await caving_data_repo.find_by_journal_id(journal_id):
+            caving_data = CavingData(journal_id=journal_id)
+            await caving_data_repo.save(caving_data)
     elif journal_type == JournalType.CANOEING:
         from core_shared.models.journals import CanoeingData
 
-        canoeing_data = CanoeingData(journal_id=journal_id)
-        await canoeing_data_repo.save(canoeing_data)
+        if not await canoeing_data_repo.find_by_journal_id(journal_id):
+            canoeing_data = CanoeingData(journal_id=journal_id)
+            await canoeing_data_repo.save(canoeing_data)
     elif journal_type == JournalType.SNORKELLING:
         from core_shared.models.journals import SnorkellingData
 
-        snorkelling_data = SnorkellingData(journal_id=journal_id)
-        await snorkelling_data_repo.save(snorkelling_data)
+        if not await snorkelling_data_repo.find_by_journal_id(journal_id):
+            snorkelling_data = SnorkellingData(journal_id=journal_id)
+            await snorkelling_data_repo.save(snorkelling_data)
     elif journal_type == JournalType.DIVING:
         from core_shared.models.journals import DivingData
 
-        diving_data = DivingData(journal_id=journal_id)
-        await diving_data_repo.save(diving_data)
+        if not await diving_data_repo.find_by_journal_id(journal_id):
+            diving_data = DivingData(journal_id=journal_id)
+            await diving_data_repo.save(diving_data)
     elif journal_type == JournalType.DOWNHILL_SKIING:
         from core_shared.models.journals import DownhillSkiingData
 
-        downhill_skiing_data = DownhillSkiingData(journal_id=journal_id)
-        await downhill_skiing_data_repo.save(downhill_skiing_data)
+        if not await downhill_skiing_data_repo.find_by_journal_id(journal_id):
+            downhill_skiing_data = DownhillSkiingData(journal_id=journal_id)
+            await downhill_skiing_data_repo.save(downhill_skiing_data)
     elif journal_type == JournalType.OUTDOOR_PLANNING:
         from core_shared.models.journals import OutdoorPlanningData
 
-        outdoor_planning_data = OutdoorPlanningData(journal_id=journal_id)
-        await outdoor_planning_data_repo.save(outdoor_planning_data)
+        if not await outdoor_planning_data_repo.find_by_journal_id(journal_id):
+            outdoor_planning_data = OutdoorPlanningData(journal_id=journal_id)
+            await outdoor_planning_data_repo.save(outdoor_planning_data)
     elif journal_type == JournalType.OUTDOOR_TRAINING:
         from core_shared.models.journals import OutdoorTrainingData
 
-        outdoor_training_data = OutdoorTrainingData(journal_id=journal_id)
-        await outdoor_training_data_repo.save(outdoor_training_data)
+        if not await outdoor_training_data_repo.find_by_journal_id(journal_id):
+            outdoor_training_data = OutdoorTrainingData(journal_id=journal_id)
+            await outdoor_training_data_repo.save(outdoor_training_data)
     elif journal_type == JournalType.GEAR_MAINTENANCE:
         # GEAR_MAINTENANCE requires initial data and cannot be created with defaults.
         # Data is either populated by _process_journal_type_data during creation
