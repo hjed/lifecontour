@@ -125,13 +125,20 @@ test.describe('Journal Merge Workflow', () => {
     await expect(confirmMergeBtn).toBeEnabled();
 
     // Wait for the merge API request and response and React Query invalidation
-    const mergeResponsePromise = page.waitForResponse(
-      response =>
+    let postFinished = false;
+    const mergeResponsePromise = page.waitForResponse(response => {
+      if (
         response.url().includes(`/api/journals/${target.id}/merge`) &&
         response.request().method() === 'POST'
-    );
+      ) {
+        postFinished = true;
+        return true;
+      }
+      return false;
+    });
     const detailGetPromise = page.waitForResponse(
       response =>
+        postFinished &&
         response.url().endsWith(`/api/journals/${target.id}`) &&
         response.request().method() === 'GET' &&
         response.ok()

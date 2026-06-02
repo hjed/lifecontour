@@ -41,13 +41,11 @@ test.describe('Journal Contact Status & Role API', () => {
       },
     };
 
-    await expect(async () => {
-      const addResponse = await page.request.post(
-        `/api/journals/${journal.id}/relationships/contacts`,
-        { data: relationshipData }
-      );
-      expect(addResponse.ok()).toBe(true);
-    }).toPass({ timeout: 15000 });
+    const addResponse = await page.request.post(
+      `/api/journals/${journal.id}/relationships/contacts`,
+      { data: relationshipData }
+    );
+    expect(addResponse.ok()).toBe(true);
 
     // 3. GET journal detail and verify the contact relationship includes status and role
     const getResponse = await page.request.get(`/api/journals/${journal.id}`);

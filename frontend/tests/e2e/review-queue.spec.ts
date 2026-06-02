@@ -508,15 +508,22 @@ test.describe('Journal Review Queue', () => {
     const autoMergeBtn = sidebar.getByTestId('auto-merge-all-btn');
     await expect(autoMergeBtn).toBeVisible();
 
+    let postFinished = false;
     await Promise.all([
-      page.waitForResponse(
-        resp =>
+      page.waitForResponse(resp => {
+        if (
           resp.url().includes('/api/journals/review-items/auto-merge') &&
           resp.request().method() === 'POST' &&
           resp.ok()
-      ),
+        ) {
+          postFinished = true;
+          return true;
+        }
+        return false;
+      }),
       page.waitForResponse(
         resp =>
+          postFinished &&
           resp.url().includes('/api/journals/review-items') &&
           !resp.url().includes('auto-merge') &&
           resp.request().method() === 'GET' &&

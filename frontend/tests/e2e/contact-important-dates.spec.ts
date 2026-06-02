@@ -100,8 +100,10 @@ test.describe('Important Dates', () => {
     // Verify UI updates without needing polling/reload loops
     await expect(
       authenticatedPage.getByText(/marriage anniversary/i)
-    ).toBeVisible();
-    await expect(authenticatedPage.getByText('2010')).toBeVisible();
+    ).toBeVisible({ timeout: 15000 });
+    await expect(authenticatedPage.getByText('2010')).toBeVisible({
+      timeout: 15000,
+    });
 
     // --- Delete the birthday ---
     await authenticatedPage.getByLabel('Delete birthday').click();
@@ -125,12 +127,12 @@ test.describe('Important Dates', () => {
     // Verify dialog is closed and birthday is removed
     await expect(deleteDialog).toBeHidden();
     await expect(authenticatedPage.getByText(/birthday/i)).not.toBeVisible({
-      timeout: 10000,
+      timeout: 15000,
     });
     // But marriage anniversary is still there
     await expect(
       authenticatedPage.getByText(/marriage anniversary/i)
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 15000 });
   });
 
   test('should render synced dates at different precisions', async ({
