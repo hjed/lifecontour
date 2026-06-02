@@ -24,7 +24,7 @@ async def redis_pool():
     redis_settings = RedisSettings.from_dsn(redis_url)
     pool = await create_pool(redis_settings)
     yield pool
-    await pool.close()
+    await pool.aclose()
 
 
 @pytest.mark.asyncio

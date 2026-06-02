@@ -32,7 +32,7 @@ dependencies = [
     "cryptography>=47.0.0",
 
     # Redis client
-    "redis[hiredis]>=4.2.0,<5.0.0",
+    "redis[hiredis]>=8.0.0",
 ]
 
 [tool.uv.sources]
@@ -124,3 +124,11 @@ exclude_lines = [
     "class .*\\bProtocol\\):",
     "@(abc\\.)?abstractmethod",
 ]
+
+
+
+
+
+[tool.uv]
+override-dependencies = ["redis>=8.0.0"]
+

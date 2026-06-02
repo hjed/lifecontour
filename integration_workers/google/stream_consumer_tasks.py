@@ -163,4 +163,4 @@ async def run_google_stream_consumer(
         logger.info("Google worker stream consumer cancelled")
         raise
     finally:
-        await redis_client.close()
+        await redis_client.aclose()

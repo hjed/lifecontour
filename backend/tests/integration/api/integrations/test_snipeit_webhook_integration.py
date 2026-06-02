@@ -82,4 +82,4 @@ async def test_snipeit_webhook_publishes_to_stream(
             await redis_client.xgroup_destroy(test_settings.stream_name, unique_group)
         except ResponseError:
             pass
-        await redis_client.close()
+        await redis_client.aclose()

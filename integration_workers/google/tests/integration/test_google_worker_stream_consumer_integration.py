@@ -34,7 +34,7 @@ async def redis_client() -> Any:
     """Create a real Redis client for testing."""
     client = redis_async.from_url(_get_redis_url())
     yield client
-    await client.close()
+    await client.aclose()
 
 
 @pytest_asyncio.fixture

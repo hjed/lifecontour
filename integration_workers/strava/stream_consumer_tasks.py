@@ -93,7 +93,7 @@ async def run_strava_stream_consumer(
         redis_url: Redis connection URL.
         stream_name: Name of the domain events stream.
     """
-    from redis.asyncio import Redis  # type: ignore[import-untyped]
+    from redis.asyncio import Redis
 
     redis_client = Redis.from_url(redis_url)
     stream_client = StreamClient(redis_client)
@@ -116,4 +116,4 @@ async def run_strava_stream_consumer(
         logger.info("Strava worker stream consumer cancelled")
         raise
     finally:
-        await redis_client.close()
+        await redis_client.aclose()
