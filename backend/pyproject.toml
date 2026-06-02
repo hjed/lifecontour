@@ -63,7 +63,7 @@ dev = [
     "pytest-cov>=4.1.0",
     "httpx>=0.25.0",  # for testing
     "asyncpg>=0.29.0",  # for async PostgreSQL testing
-    "ruff>=0.15.14",
+    "ruff>=0.15.15",
     "mypy>=2.1.0",
     "pre-commit>=4.6.0",
     "types-authlib>=1.6.11.20260518",  # type stubs for authlib
@@ -182,7 +182,7 @@ dev = [
     "pytest>=9.0.3",
     "pytest-asyncio>=1.4.0",
     "respx>=0.23.1",
-    "ruff>=0.15.14",
+    "ruff>=0.15.15",
     "types-authlib>=1.6.11.20260518",
 ]
 
