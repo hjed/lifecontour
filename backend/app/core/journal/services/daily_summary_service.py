@@ -124,11 +124,12 @@ class DailySummaryService:
             prompt = self._prompt_builder.build(summary_input)
             raw_response = await self._call_gemini(prompt)
             result = self._parse_response(raw_response)
-        except Exception:
+        except Exception as e:
             logger.exception(
-                "AI generation failed for daily summary %s on %s",
+                "AI generation failed for daily summary %s on %s: %s",
                 user_id,
                 summary_date,
+                e,
             )
             # Use update_status to preserve existing text/counts;
             # fall back to upsert if no row exists yet
@@ -183,6 +184,8 @@ class DailySummaryService:
         if self._gemini_response_override is not None:
             return self._gemini_response_override
 
+        import asyncio
+
         from fastmcp import Client
         from google import genai
         from google.genai import types
@@ -195,16 +198,35 @@ class DailySummaryService:
 
         client = genai.Client(api_key=self._gemini_api_key)
 
+        max_attempts = 3
+        base_delay = 1.0
+
         async with Client(read_only_mcp) as mcp_client:
-            response = await client.aio.models.generate_content(
-                model=self._gemini_model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    tools=[mcp_client.session],
-                    temperature=0.3,
-                ),
-            )
-        return response.text or ""
+            for attempt in range(max_attempts):
+                try:
+                    response = await client.aio.models.generate_content(
+                        model=self._gemini_model,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            tools=[mcp_client.session],
+                            temperature=0.3,
+                        ),
+                    )
+                    return response.text or ""
+                except Exception as e:
+                    if attempt == max_attempts - 1:
+                        raise
+                    delay = base_delay * (2**attempt)
+                    logger.warning(
+                        "Gemini API error (attempt %d/%d), retrying in %.1fs: %s",
+                        attempt + 1,
+                        max_attempts,
+                        delay,
+                        e,
+                    )
+                    await asyncio.sleep(delay)
+
+            raise RuntimeError("Unreachable")
 
     @staticmethod
     def _parse_response(raw: str) -> dict[str, Any]:
