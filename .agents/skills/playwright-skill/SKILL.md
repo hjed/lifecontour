@@ -44,6 +44,7 @@ For CI/CD workflows, pin all external dependencies (GitHub Actions, Docker image
 |---|---|---|
 | Choosing selectors | [locators.md](core/locators.md) | [locator-strategy.md](core/locator-strategy.md) |
 | Assertions & waiting | [assertions-and-waiting.md](core/assertions-and-waiting.md) | |
+| Async data & React Query | [async-data-loads.md](core/async-data-loads.md) | |
 | Organizing test suites | [test-organization.md](core/test-organization.md) | [test-architecture.md](core/test-architecture.md) |
 | Playwright config | [configuration.md](core/configuration.md) | |
 | Page objects | [page-object-model.md](pom/page-object-model.md) | [pom-vs-fixtures-vs-helpers.md](pom/pom-vs-fixtures-vs-helpers.md) |

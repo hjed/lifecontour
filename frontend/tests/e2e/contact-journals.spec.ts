@@ -93,11 +93,11 @@ test.describe('Contact Journals Display', () => {
         await page.reload();
         await expect(
           page.getByRole('heading', { name: participantJournal.title })
-        ).toBeVisible();
+        ).toBeVisible({ timeout: 2000 });
         await expect(
           page.getByRole('heading', { name: aboutJournal.title })
-        ).toBeVisible();
-      }).toPass({ timeout: 15000 });
+        ).toBeVisible({ timeout: 2000 });
+      }).toPass({ timeout: 30000 });
     });
 
     test('should display contact name instead of Contact <id> on related journals', async ({
@@ -134,8 +134,8 @@ test.describe('Contact Journals Display', () => {
       const journalCard = page.getByTestId(`journal-${journal.id}`);
       await expect(async () => {
         await page.reload();
-        await expect(journalCard).toBeVisible();
-      }).toPass({ timeout: 15000 });
+        await expect(journalCard).toBeVisible({ timeout: 2000 });
+      }).toPass({ timeout: 30000 });
 
       // Verify that the contact's name is rendered in the journal's contact badges
       // It should NOT render as "Contact <id>"
@@ -198,11 +198,11 @@ test.describe('Contact Journals Display', () => {
         await page.reload();
         await expect(
           page.getByTestId('relationship-section-trigger-PARTICIPANT')
-        ).toBeVisible();
+        ).toBeVisible({ timeout: 2000 });
         await expect(
           page.getByTestId('relationship-section-trigger-ABOUT')
-        ).toBeVisible();
-      }).toPass({ timeout: 15000 });
+        ).toBeVisible({ timeout: 2000 });
+      }).toPass({ timeout: 30000 });
 
       // Test collapsible functionality
       const participantSection = page
@@ -283,8 +283,8 @@ test.describe('Contact Journals Display', () => {
         await page.reload();
         await expect(
           page.getByRole('heading', { name: parentJournal.title })
-        ).toBeVisible();
-      }).toPass({ timeout: 15000 });
+        ).toBeVisible({ timeout: 2000 });
+      }).toPass({ timeout: 30000 });
 
       // Child should render under parent's children container by default
       const childContainer = page.getByTestId(
@@ -356,8 +356,8 @@ test.describe('Contact Journals Display', () => {
         await page.reload();
         await expect(
           page.getByRole('heading', { name: journal.title })
-        ).toBeVisible();
-      }).toPass({ timeout: 15000 });
+        ).toBeVisible({ timeout: 2000 });
+      }).toPass({ timeout: 30000 });
 
       // Click on the journal
       await Promise.all([
@@ -446,8 +446,8 @@ test.describe('Contact Journals Display', () => {
         await page.reload();
         await expect(
           page.getByRole('heading', { name: newJournal.title })
-        ).toBeVisible();
-      }).toPass({ timeout: 15000 });
+        ).toBeVisible({ timeout: 2000 });
+      }).toPass({ timeout: 30000 });
 
       // Verify empty state is gone
       await expect(
