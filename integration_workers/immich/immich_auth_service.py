@@ -118,3 +118,16 @@ class ImmichAuthService:
             return None
 
         return str(row.server_url)
+
+    async def get_all_user_ids(self, session: Any) -> list[str]:
+        """Retrieve all user IDs that have Immich auth configured.
+
+        Args:
+            session: Database session (AsyncSession or AsyncConnection).
+
+        Returns:
+            List of user ID strings.
+        """
+        stmt = text("SELECT user_id FROM user_immich_auth")
+        result = await session.execute(stmt)
+        return [str(row.user_id) for row in result.fetchall()]

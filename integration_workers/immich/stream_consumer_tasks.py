@@ -78,9 +78,21 @@ class ImmichWorkerStreamConsumer(StreamConsumer):
             aggregate_id=event.aggregate_id,
         )
 
-        # Phase 3 will add routing logic here, e.g.:
-        # if event.event_type == "ContactCreated":
-        #     await self._handle_contact_created(event)
+        ctx = {
+            "session_factory": self._session_factory,
+            "job_id": event.event_id,
+        }
+
+        if event.event_type in (
+            "ContactCreated",
+            "ContactUpdated",
+            "ContactBirthdayChanged",
+        ):
+            from worker import process_contact_event
+
+            event_data = event.event_data
+            event_data["contact_id"] = event.aggregate_id
+            await process_contact_event(ctx, event.event_type, event_data)
 
 
 async def run_immich_stream_consumer(
