@@ -21,6 +21,7 @@ import structlog
 from arq import cron
 from arq.connections import RedisSettings
 from core_shared.integration_constants import IMMICH_ARQ_QUEUE_NAME
+from core_shared.logging import set_job_id, set_worker_id
 from core_shared.telemetry import trace_arq_job
 
 from immich_api_client import ImmichApiClient
@@ -341,6 +342,109 @@ async def sync_immich_people_batch(
         raise
 
 
+@trace_arq_job
+async def process_contact_event(
+    ctx: dict[str, Any], event_type: str, event_data: dict[str, Any]
+) -> dict[str, Any]:
+    """Process a single contact event for Immich outbound sync.
+
+    Receives domain events (ContactCreated, ContactUpdated, ContactBirthdayChanged)
+    and pushes the changes to Immich for all synced accounts.
+
+    Args:
+        ctx: ARQ-compatible context dictionary with session_factory
+        event_type: The domain event type
+        event_data: The event payload containing contact_id
+
+    Returns:
+        Task result dictionary with sync status
+    """
+    job_id = ctx.get("job_id", "unknown")
+    set_job_id(job_id)
+    set_worker_id(settings.worker_id)
+
+    contact_id = event_data.get("contact_id")
+    if not contact_id:
+        logger.error(
+            "Contact event missing contact_id",
+            event_type=event_type,
+            job_id=job_id,
+        )
+        return {"status": "error", "error": "Missing contact_id"}
+
+    logger.info(
+        "Processing contact event",
+        job_id=job_id,
+        event_type=event_type,
+        contact_id=contact_id,
+    )
+
+    session_factory = ctx["session_factory"]
+
+    async with session_factory() as session:
+        # Find all Immich integrations for all users
+        auth_service = ImmichAuthService(settings.encryption_key)
+        conn = await session.connection()
+        user_ids = await auth_service.get_all_user_ids(conn)
+
+        if not user_ids:
+            logger.info(
+                "No Immich integrations found, skipping contact event",
+                contact_id=contact_id,
+                event_type=event_type,
+            )
+            return {"status": "skipped", "reason": "no_immich_integrations"}
+
+        results: list[dict[str, Any]] = []
+        # NOTE: This system is single-user by design. We iterate all
+        # user_immich_auth rows for forward-compatibility, but in
+        # practice there is only one user. The same pattern is used
+        # in periodic_sync_all_immich_accounts.
+        for user_id in user_ids:
+            try:
+                conn = await session.connection()
+                auth_service = ImmichAuthService(settings.encryption_key)
+                api_key = await auth_service.get_api_key(user_id, conn)
+                server_url = await auth_service.get_server_url(user_id, conn)
+
+                if not api_key or not server_url:
+                    results.append({"user_id": user_id, "status": "skipped"})
+                    continue
+
+                api_client = ImmichApiClient.create(server_url, api_key)
+                try:
+                    sync_service = ImmichSyncService(
+                        api_client=api_client, connection=conn, user_id=user_id
+                    )
+                    result = await sync_service.sync_contact_outbound(contact_id)
+                    await session.commit()
+                    results.append({"user_id": user_id, "result": result})
+                except Exception as inner_e:  # noqa: BLE001
+                    await session.rollback()
+                    logger.error(
+                        "Error syncing contact to Immich",
+                        user_id=user_id,
+                        contact_id=contact_id,
+                        error=str(inner_e),
+                    )
+                    results.append(
+                        {"user_id": user_id, "status": "error", "error": str(inner_e)}
+                    )
+                finally:
+                    await api_client.close()
+
+            except Exception as e:  # noqa: BLE001
+                logger.error(
+                    "Error processing contact event for user",
+                    user_id=user_id,
+                    contact_id=contact_id,
+                    error=str(e),
+                )
+                results.append({"user_id": user_id, "status": "error", "error": str(e)})
+
+        return {"status": "success", "results": results}
+
+
 async def periodic_sync_all_immich_accounts(
     ctx: dict[str, Any],
 ) -> dict[str, Any]:
@@ -513,6 +617,7 @@ class WorkerSettings:
         sync_immich_people,
         sync_immich_people_batch,
         periodic_sync_all_immich_accounts,
+        process_contact_event,
     ]
 
     on_startup = startup

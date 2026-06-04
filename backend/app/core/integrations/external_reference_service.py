@@ -354,3 +354,77 @@ class ExternalReferenceService:
                 external_entity_id=external_entity_id,
             )
             raise
+
+    async def upsert_contact_reference(
+        self,
+        contact_id: int,
+        external_system: str,
+        external_entity_type: str,
+        external_entity_id: str,
+    ) -> ExternalReference:
+        """Find an existing contact external reference and update it, or create a new one.
+
+        Uses ``ORDER BY id LIMIT 1`` for deterministic row selection when
+        multiple references exist for the same contact, system, and entity type.
+
+        Args:
+            contact_id: Internal contact ID.
+            external_system: External system name (e.g. 'immich').
+            external_entity_type: External entity type (e.g. 'person').
+            external_entity_id: External entity ID to link.
+
+        Returns:
+            Created or updated ExternalReference.
+        """
+        # Scoped lookup: filter by entity type and use ORDER BY for determinism
+        query = text("""
+            SELECT id, internal_entity_type, internal_entity_id, external_system,
+                   external_entity_type, external_entity_id, reference_data,
+                   created_at, updated_at
+            FROM external_references
+            WHERE internal_entity_type = 'contact'
+              AND internal_entity_id = :contact_id
+              AND external_system = :external_system
+              AND external_entity_type = :external_entity_type
+            ORDER BY id
+            LIMIT 1
+        """)
+        result = await self.connection.execute(
+            query,
+            {
+                "contact_id": contact_id,
+                "external_system": external_system,
+                "external_entity_type": external_entity_type,
+            },
+        )
+        row = result.fetchone()
+
+        if row:
+            updated = await self.update_external_reference(
+                reference_id=row.id,
+                external_entity_id=external_entity_id,
+            )
+            if updated:
+                return updated
+            # Fall through to create if update returned None (shouldn't happen)
+
+        return await self.create_external_reference(
+            internal_entity_type="contact",
+            internal_entity_id=contact_id,
+            external_system=external_system,
+            external_entity_type=external_entity_type,
+            external_entity_id=external_entity_id,
+        )
+
+    async def contact_exists(self, contact_id: int) -> bool:
+        """Check if a contact with the given ID exists.
+
+        Args:
+            contact_id: Contact ID to check.
+
+        Returns:
+            True if the contact exists, False otherwise.
+        """
+        query = text("SELECT id FROM contacts WHERE id = :contact_id")
+        result = await self.connection.execute(query, {"contact_id": contact_id})
+        return result.first() is not None

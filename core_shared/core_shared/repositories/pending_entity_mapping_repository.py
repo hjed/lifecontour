@@ -112,6 +112,38 @@ class PendingEntityMappingRepository:
         )
         return [self._row_to_dict(row) for row in result.fetchall()]
 
+    async def get_unresolved_by_id(
+        self,
+        conflict_id: int,
+        user_id: str,
+        integration_source: str,
+    ) -> dict[str, Any] | None:
+        """Get a specific unresolved conflict by ID, user, and source.
+
+        Returns:
+            Conflict dictionary or ``None`` if not found or already resolved.
+        """
+        query = text("""
+            SELECT id, user_id, integration_source, external_entity_id,
+                   external_entity_name, candidate_contact_ids, status,
+                   resolved_contact_id, created_at, updated_at
+            FROM pending_entity_mappings
+            WHERE id = :id AND user_id = :user_id
+              AND integration_source = :integration_source
+              AND status = 'unresolved'
+        """)
+
+        result = await self._conn.execute(
+            query,
+            {
+                "id": conflict_id,
+                "user_id": user_id,
+                "integration_source": integration_source,
+            },
+        )
+        row = result.fetchone()
+        return self._row_to_dict(row) if row else None
+
     async def find_by_external_id(
         self,
         user_id: str,

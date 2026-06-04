@@ -155,10 +155,10 @@ Push local contact changes to Immich and provide conflict resolution UI + MCP.
 - [ ] Outbound sync: push name and birthday (FULL precision only) to Immich `PUT /people/{id}`
 - [ ] Non-full-precision birthdays skipped without clearing Immich's existing birthDate
 - [ ] Source of truth enforcement: local values win on conflict
-- [ ] `GET /api/integrations/immich/conflicts` — list unresolved sync conflicts
-- [ ] `POST /api/integrations/immich/conflicts/{id}/resolve` — resolve by mapping person to contact
+- [x] `GET /api/integrations/immich/conflicts` — list unresolved sync conflicts
+- [x] `POST /api/integrations/immich/conflicts/{id}/resolve` — resolve by mapping person to contact
 - [ ] Conflict resolution UI on Immich integration panel: shows Immich person name + thumbnail, candidate contacts, "Link" / "Create New" actions
-- [ ] MCP tools: `list_immich_conflicts`, `resolve_immich_conflict`
+- [x] MCP tools: `list_immich_conflicts`, `resolve_immich_conflict`
 
 **Required Test Coverage:**
 - **Unit:** Outbound sync field mapping, birthday precision filtering, conflict resolution logic.

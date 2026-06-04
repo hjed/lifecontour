@@ -417,3 +417,68 @@ class WebhookUrlResponse(BaseModel):
     """JSON API response for webhook URL retrieval."""
 
     data: WebhookUrlData = Field(description="Webhook URL data")
+
+
+# Conflict Resolution Models (JSON API format)
+class ConflictResolutionAction(StrEnum):
+    """Action to take when resolving a conflict."""
+
+    LINK = "link"
+    CREATE = "create"
+
+
+class ConflictResolutionRequest(BaseModel):
+    """Request model for resolving a sync conflict."""
+
+    action: ConflictResolutionAction = Field(
+        description="Action to take (link to existing or create new)"
+    )
+    contact_id: int | None = Field(
+        default=None,
+        description="ID of the local contact to link (required if action is 'link')",
+    )
+
+
+class ImmichConflictAttributes(BaseModel):
+    """Attributes for a sync conflict (JSON API format)."""
+
+    external_entity_id: str = Field(
+        description="Immich person ID", serialization_alias="externalEntityId"
+    )
+    external_entity_name: str | None = Field(
+        default=None,
+        description="Name of the Immich person",
+        serialization_alias="externalEntityName",
+    )
+    candidate_contact_ids: list[int] = Field(
+        default_factory=list,
+        description="List of candidate local contact IDs",
+        serialization_alias="candidateContactIds",
+    )
+    status: str = Field(description="Conflict status (unresolved, resolved)")
+    created_at: str = Field(
+        description="ISO timestamp when the conflict was recorded",
+        serialization_alias="createdAt",
+    )
+
+    model_config = {"populate_by_name": True}
+
+
+class ImmichConflictData(BaseModel):
+    """Data wrapper for a sync conflict (JSON API format)."""
+
+    id: str = Field(description="Conflict ID")
+    type: str = Field(default="immich-conflict", description="Resource type")
+    attributes: ImmichConflictAttributes = Field(description="Conflict attributes")
+
+
+class ImmichConflictListResponse(BaseModel):
+    """JSON API response for a list of conflicts."""
+
+    data: list[ImmichConflictData] = Field(description="List of conflicts")
+
+
+class ImmichConflictResponse(BaseModel):
+    """JSON API response for a single conflict."""
+
+    data: ImmichConflictData = Field(description="Conflict data")

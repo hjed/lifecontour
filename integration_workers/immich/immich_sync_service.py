@@ -20,6 +20,9 @@ from typing import Any
 import structlog
 from core_shared.contact_name_matcher import ContactNameMatcher
 from core_shared.models.contacts.entities import Contact
+from core_shared.repositories.external_reference_repository import (
+    ExternalReferenceRepository,
+)
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -132,6 +135,80 @@ class ImmichSyncService:
         )
 
         return result
+
+    async def sync_contact_outbound(self, contact_id: int) -> dict[str, Any]:
+        """Sync a local contact update to Immich.
+
+        Checks if the contact is linked to an Immich person. If so, fetches
+        the contact's details (name, full precision birthday) and pushes
+        updates to Immich.
+
+        Args:
+            contact_id: Local contact ID.
+
+        Returns:
+            Dictionary with sync status.
+        """
+        # 1. Find if contact is linked to Immich
+        ext_ref_repo = ExternalReferenceRepository(self._conn)
+        ref = await ext_ref_repo.find_by_internal_entity(
+            internal_entity_type=self._INTERNAL_ENTITY_TYPE,
+            internal_entity_id=contact_id,
+            external_system=self._integration_source,
+            external_entity_type=self._EXTERNAL_ENTITY_TYPE,
+        )
+        if not ref:
+            return {"status": "skipped", "reason": "not_linked"}
+
+        person_id = ref["external_entity_id"]
+
+        # 2. Fetch contact details (name and FULL precision birthday)
+        contact_data = await ext_ref_repo.find_contact_with_birthday(contact_id)
+        if not contact_data:
+            return {"status": "error", "reason": "contact_not_found"}
+
+        # Format name
+        parts = []
+        if contact_data["first_name"]:
+            parts.append(contact_data["first_name"])
+        if contact_data["middle_name"]:
+            parts.append(contact_data["middle_name"])
+        if contact_data["last_name"]:
+            parts.append(contact_data["last_name"])
+        full_name = " ".join(parts) if parts else "Unnamed Contact"
+
+        # Format birthday if present
+        birth_date = None
+        if contact_data["year"] and contact_data["month"] and contact_data["day"]:
+            birth_date = f"{contact_data['year']:04d}-{contact_data['month']:02d}-{contact_data['day']:02d}"
+
+        # 3. Fetch current Immich person to avoid overwriting existing birthDate if local is null
+        person = await self._api.get_person(person_id)
+
+        update_data = {"name": full_name}
+        if birth_date:
+            update_data["birthDate"] = birth_date
+        elif person.birth_date:
+            # Preserve existing birth_date if local doesn't have a FULL precision one
+            update_data["birthDate"] = person.birth_date
+
+        # 4. Push update to Immich
+        updated_person = await self._api.update_person(person_id, update_data)
+
+        # 5. Update sync metadata version hash
+        new_hash = self.calculate_version_hash(updated_person)
+        await self._upsert_sync_metadata(
+            external_id=person_id,
+            internal_id=contact_id,
+            version_hash=new_hash,
+        )
+
+        logger.info(
+            "Outbound contact sync successful",
+            contact_id=contact_id,
+            person_id=person_id,
+        )
+        return {"status": "success", "person_id": person_id}
 
     # -- Static helpers ---------------------------------------------------
 
