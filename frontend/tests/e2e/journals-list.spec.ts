@@ -15,7 +15,8 @@ import { waitForContactSearchIndexing } from './utils/test-helpers';
  */
 function relativeDate(dayOffset: number): string {
   const d = new Date();
-  d.setDate(d.getDate() + dayOffset);
+  d.setUTCDate(d.getUTCDate() + dayOffset);
+  d.setUTCHours(12, 0, 0, 0); // Noon UTC to avoid boundary issues
   return d.toISOString();
 }
 

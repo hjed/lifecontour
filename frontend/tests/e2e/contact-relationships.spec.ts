@@ -155,10 +155,20 @@ test.describe('Contact Relationships', () => {
     const responsePromise = page.waitForResponse(
       resp =>
         resp.url().includes('/relationships') &&
-        resp.request().method() === 'POST'
+        resp.request().method() === 'POST' &&
+        resp.ok()
     );
     await addButton.click();
     await responsePromise;
+
+    // Now wait for the React Query cache invalidation refetch
+    const getResponsePromise = page.waitForResponse(
+      resp =>
+        resp.url().includes('/api/contacts/') &&
+        resp.request().method() === 'GET' &&
+        resp.ok()
+    );
+    await getResponsePromise;
 
     // Wait for the relationship to appear in the list with "You" label
     await expect(page.getByTestId('relationship-user-target')).toBeVisible({
