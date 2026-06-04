@@ -472,7 +472,7 @@ async def run_snipeit_stream_consumer(
     stream_name: str = "pms:domain-events",
 ) -> None:
     """Run the Snipe-IT worker stream consumer loop."""
-    from redis.asyncio import Redis  # type: ignore[import-untyped]
+    from redis.asyncio import Redis
 
     redis_client = Redis.from_url(redis_url)
     stream_client = StreamClient(redis_client)
@@ -495,4 +495,4 @@ async def run_snipeit_stream_consumer(
         logger.info("Snipe-IT worker stream consumer cancelled")
         raise
     finally:
-        await redis_client.close()
+        await redis_client.aclose()

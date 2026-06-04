@@ -195,3 +195,7 @@ name = "ruff"
 type = "console_scripts"
 entrypoint = "ruff"
 options = "check --fix REVISION_SCRIPT_FILENAME"
+
+[tool.uv]
+override-dependencies = ["redis>=8.0.0"]
+

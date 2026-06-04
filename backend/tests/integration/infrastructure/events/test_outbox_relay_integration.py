@@ -87,10 +87,17 @@ class TestOutboxRelayIntegration:
 
         # Verify events appear in Redis Stream
         stream_messages = await redis_client.xrange(test_stream_name)
+        assert stream_messages is not None
         assert len(stream_messages) == 2
 
         # Verify event data in stream
-        event_ids_in_stream = [msg[1][b"event_id"].decode() for msg in stream_messages]
+        event_ids_in_stream = []
+        for msg in stream_messages:
+            if msg[1] is not None and b"event_id" in msg[1]:
+                val = msg[1][b"event_id"]
+                event_ids_in_stream.append(
+                    val.decode() if isinstance(val, bytes) else val
+                )
         assert event_id_1 in event_ids_in_stream
         assert event_id_2 in event_ids_in_stream
 
@@ -146,6 +153,7 @@ class TestOutboxRelayIntegration:
 
         # Only one message in the stream
         stream_messages = await redis_client.xrange(test_stream_name)
+        assert stream_messages is not None
         assert len(stream_messages) == 1
 
 

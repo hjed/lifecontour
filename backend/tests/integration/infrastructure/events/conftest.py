@@ -32,7 +32,7 @@ async def redis_client(test_stream_name: str):
     await client.ping()
     yield client
     await client.delete(test_stream_name)
-    await client.close()
+    await client.aclose()
 
 
 @pytest.fixture

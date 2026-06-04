@@ -808,7 +808,7 @@ class TaskQueueService:
             pool = self.redis_pool
             if pool is None:
                 pool = await self._get_arq_pool()
-            await pool.hset(key, job_id, "enqueued")  # type: ignore
+            await pool.hset(key, job_id, "enqueued")
             expiry_seconds = self.settings.task_queue_user_job_expiry_hours * 3600
             await pool.expire(key, expiry_seconds)
             logger.debug("Stored user-job association", user_id=user_id, job_id=job_id)
@@ -837,7 +837,7 @@ class TaskQueueService:
             pool = self.redis_pool
             if pool is None:
                 pool = await self._get_arq_pool()
-            result = await pool.hexists(key, job_id)  # type: ignore
+            result = await pool.hexists(key, job_id)
             owns_job = bool(result) if result is not None else False
             logger.debug(
                 "Verified user-job ownership",

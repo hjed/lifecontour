@@ -198,7 +198,7 @@ class StreamClient:
         if result is None:
             return []
 
-        return self._parse_stream_response(result)
+        return self._parse_stream_response(cast(list[Any], result))
 
     async def acknowledge(
         self,
@@ -256,10 +256,10 @@ class StreamClient:
 
             entries.append(
                 PendingEntry(
-                    message_id=msg_id,
-                    consumer=consumer,
-                    idle_time_ms=entry.get("time_since_delivered", 0),
-                    delivery_count=entry.get("times_delivered", 0),
+                    message_id=str(msg_id),
+                    consumer=str(consumer),
+                    idle_time_ms=int(entry.get("time_since_delivered", 0)),
+                    delivery_count=int(entry.get("times_delivered", 0)),
                 )
             )
 
@@ -315,7 +315,7 @@ class StreamClient:
         Returns:
             List of claimed StreamEvent objects
         """
-        result = await self._redis.xclaim(
+        result: list[Any] = await self._redis.xclaim(
             stream_name,
             group_name,
             consumer_name,
@@ -324,8 +324,14 @@ class StreamClient:
         )
 
         events = []
-        for msg_id, fields in result:
-            events.append(self._parse_message(msg_id, fields))
+        for item in result:
+            msg_id = item[0]
+            fields = item[1]
+            events.append(
+                self._parse_message(
+                    cast(bytes | str, msg_id), cast(dict[Any, Any], fields)
+                )
+            )
 
         return events
 

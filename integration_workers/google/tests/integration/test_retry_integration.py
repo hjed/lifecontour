@@ -101,7 +101,7 @@ class TestARQRetryIntegration:
         except RedisError:
             pass  # Ignore cleanup errors
         try:
-            await pool.close()
+            await pool.aclose()
         except RedisError:
             pass  # Ignore cleanup errors
 
