@@ -32,10 +32,11 @@ class TestWebhookReregisterResponse:
         """Should serialise to JSON API format."""
         response = WebhookReregisterResponse(
             data=WebhookReregisterData(
+                id="test-webhook-reregister",
                 attributes=WebhookReregisterAttributes(
                     webhooks_queued=3,
                     message="Queued webhook re-registration for 3 calendar(s)",
-                )
+                ),
             )
         )
         dumped = response.model_dump()
@@ -48,10 +49,11 @@ class TestWebhookReregisterResponse:
         """Should allow 0 webhooks_queued."""
         response = WebhookReregisterResponse(
             data=WebhookReregisterData(
+                id="test-webhook-reregister",
                 attributes=WebhookReregisterAttributes(
                     webhooks_queued=0,
                     message="No synced calendars found",
-                )
+                ),
             )
         )
         dumped = response.model_dump()
@@ -65,10 +67,11 @@ class TestWebhookUrlResponse:
         """Should serialise to JSON API format."""
         response = WebhookUrlResponse(
             data=WebhookUrlData(
+                id="test-webhook-url",
                 attributes=WebhookUrlAttributes(
                     webhook_url="https://example.com/api/integrations/snipeit/webhook",
                     message="Configure this URL in your Snipe-IT instance.",
-                )
+                ),
             )
         )
         dumped = response.model_dump()

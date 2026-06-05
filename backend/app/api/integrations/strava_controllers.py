@@ -918,10 +918,11 @@ async def reregister_strava_webhook(
 
         return WebhookReregisterResponse(
             data=WebhookReregisterData(
+                id="strava-webhook-reregister",
                 attributes=WebhookReregisterAttributes(
                     webhooks_queued=1,
                     message="Strava webhook re-registered successfully",
-                )
+                ),
             )
         ).model_dump()
 

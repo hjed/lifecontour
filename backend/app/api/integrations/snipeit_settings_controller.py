@@ -181,13 +181,14 @@ async def get_snipeit_webhook_url(
 
     return WebhookUrlResponse(
         data=WebhookUrlData(
+            id="snipeit-webhook-url",
             attributes=WebhookUrlAttributes(
                 webhook_url=webhook_url,
                 message=(
                     "Configure this URL in your Snipe-IT instance under "
                     "Admin > Settings > Webhooks."
                 ),
-            )
+            ),
         )
     ).model_dump()
 

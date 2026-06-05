@@ -130,6 +130,88 @@ class TestStravaWebhookValidation:
         )
         assert response.status_code == 400
 
+    async def test_webhook_get_validates_multiple_tokens_returns_200(
+        self, authenticated_client, async_connection, test_settings
+    ) -> None:
+        """GET with multiple users/tokens validates successfully against the correct one."""
+        test_settings.strava_encryption_key = (
+            "KzC1vYhL3bQpT_x5Ue8q0Wl1MvX-oVwYwK9cQx7lKHg="
+        )
+        fernet = Fernet(test_settings.strava_encryption_key.encode())
+        now = datetime.now(UTC)
+
+        # Insert user 1 with token A
+        await async_connection.execute(
+            text("""
+                INSERT INTO user_strava_auth (
+                    user_id, athlete_id, encrypted_access_token,
+                    encrypted_refresh_token, expires_at,
+                    needs_reauth, strava_webhook_subscription_id,
+                    strava_webhook_verify_token,
+                    created_at, updated_at
+                )
+                VALUES (
+                    :user_id, :athlete_id, :access_token,
+                    :refresh_token, :expires_at,
+                    FALSE, :sub_id, :verify_token,
+                    :now, :now
+                )
+            """),
+            {
+                "user_id": "test-user-1",
+                "athlete_id": 111,
+                "access_token": fernet.encrypt(b"test-access"),
+                "refresh_token": fernet.encrypt(b"test-refresh"),
+                "expires_at": now + timedelta(hours=6),
+                "sub_id": 11111,
+                "verify_token": "token-user-1",
+                "now": now,
+            },
+        )
+
+        # Insert user 2 with token B
+        await async_connection.execute(
+            text("""
+                INSERT INTO user_strava_auth (
+                    user_id, athlete_id, encrypted_access_token,
+                    encrypted_refresh_token, expires_at,
+                    needs_reauth, strava_webhook_subscription_id,
+                    strava_webhook_verify_token,
+                    created_at, updated_at
+                )
+                VALUES (
+                    :user_id, :athlete_id, :access_token,
+                    :refresh_token, :expires_at,
+                    FALSE, :sub_id, :verify_token,
+                    :now, :now
+                )
+            """),
+            {
+                "user_id": "test-user-2",
+                "athlete_id": 222,
+                "access_token": fernet.encrypt(b"test-access"),
+                "refresh_token": fernet.encrypt(b"test-refresh"),
+                "expires_at": now + timedelta(hours=6),
+                "sub_id": 22222,
+                "verify_token": "token-user-2",
+                "now": now,
+            },
+        )
+
+        # Handshake for user 2
+        response = await authenticated_client.get(
+            "/api/integrations/strava/webhook",
+            params={
+                "hub.mode": "subscribe",
+                "hub.challenge": "challenge-for-2",
+                "hub.verify_token": "token-user-2",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["hub.challenge"] == "challenge-for-2"
+
     async def test_webhook_get_validates_when_subscription_id_is_null(
         self, authenticated_client, async_connection, test_settings
     ) -> None:
