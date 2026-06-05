@@ -360,3 +360,26 @@ export interface WebhookUrlResponse {
     attributes: WebhookUrlAttributes;
   };
 }
+
+// Immich Conflict Types
+export interface ImmichConflictAttributes {
+  externalEntityId: string;
+  externalEntityName: string | null;
+  candidateContactIds: number[];
+  status: 'unresolved' | 'resolved';
+  createdAt: string;
+}
+
+export interface ImmichConflictData {
+  id: string;
+  type: 'immich-conflict';
+  attributes: ImmichConflictAttributes;
+}
+
+export interface ImmichConflictListResponse {
+  data: ImmichConflictData[];
+}
+
+export interface ImmichConflictResponse {
+  data: ImmichConflictData;
+}

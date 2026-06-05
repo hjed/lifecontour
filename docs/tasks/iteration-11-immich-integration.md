@@ -121,10 +121,10 @@ Set up the periodic sync scheduling and manual sync triggers.
 - [Part 9: Contact Name Matcher extraction](../product-specifications/immich-integration-product-specification.md#part-9-commonalities-with-existing-integrations)
 
 **Acceptance Criteria (task-level):**
-- [ ] Immich People sync bidirectionally with local contacts.
-- [ ] Name-based matching prevents duplicate contacts.
-- [ ] Conflict resolution UI and MCP for ambiguous matches.
-- [ ] Birthday sync with precision-aware rules.
+- [x] Immich People sync bidirectionally with local contacts.
+- [x] Name-based matching prevents duplicate contacts.
+- [x] Conflict resolution UI and MCP for ambiguous matches.
+- [x] Birthday sync with precision-aware rules.
 
 #### Phase 1: Inbound People Sync and Name Matching
 **PR Size:** ~8–10 files
@@ -151,13 +151,13 @@ Implement the core inbound sync: fetch Immich people, match to contacts, create/
 Push local contact changes to Immich and provide conflict resolution UI + MCP.
 
 **Acceptance Criteria:**
-- [ ] Stream consumer handles `contact.created`, `contact.updated`, `contact.birthday_changed` events
-- [ ] Outbound sync: push name and birthday (FULL precision only) to Immich `PUT /people/{id}`
-- [ ] Non-full-precision birthdays skipped without clearing Immich's existing birthDate
-- [ ] Source of truth enforcement: local values win on conflict
+- [x] Stream consumer handles `contact.created`, `contact.updated`, `contact.birthday_changed` events
+- [x] Outbound sync: push name and birthday (FULL precision only) to Immich `PUT /people/{id}`
+- [x] Non-full-precision birthdays skipped without clearing Immich's existing birthDate
+- [x] Source of truth enforcement: local values win on conflict
 - [x] `GET /api/integrations/immich/conflicts` — list unresolved sync conflicts
 - [x] `POST /api/integrations/immich/conflicts/{id}/resolve` — resolve by mapping person to contact
-- [ ] Conflict resolution UI on Immich integration panel: shows Immich person name + thumbnail, candidate contacts, "Link" / "Create New" actions
+- [x] Conflict resolution UI on Immich integration panel: shows Immich person name + thumbnail, candidate contacts, "Link" / "Create New" actions
 - [x] MCP tools: `list_immich_conflicts`, `resolve_immich_conflict`
 
 **Required Test Coverage:**

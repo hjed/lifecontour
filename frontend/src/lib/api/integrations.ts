@@ -30,6 +30,8 @@ import {
   UnmatchedStravaAthleteListResponse,
   WebhookReregisterResponse,
   WebhookUrlResponse,
+  ImmichConflictListResponse,
+  ImmichConflictResponse,
 } from '@/types/integrations';
 import { JsonApiErrorResponse } from '@/types/api';
 
@@ -58,6 +60,8 @@ export const integrationKeys = {
   stravaMappings: () => [...integrationKeys.all, 'strava', 'mappings'] as const,
   stravaJournalUnmatched: (journalId: string) =>
     [...integrationKeys.all, 'strava', 'unmatched', journalId] as const,
+  immichConflicts: () =>
+    [...integrationKeys.all, 'immich', 'conflicts'] as const,
 };
 
 // Error handling helper
@@ -1039,6 +1043,70 @@ export function useImmichDisconnect() {
     },
     onError: (error: Error) => {
       toast.error(`Failed to disconnect Immich: ${error.message}`);
+    },
+  });
+}
+
+// Immich Conflict Resolution
+
+export interface ImmichConflictResolveRequest {
+  action: 'link' | 'create';
+  contact_id?: number;
+}
+
+export async function fetchImmichConflicts(): Promise<ImmichConflictListResponse> {
+  const response = await fetch('/api/integrations/immich/conflicts', {
+    credentials: 'include',
+  });
+  return handleApiResponse<ImmichConflictListResponse>(response);
+}
+
+export async function resolveImmichConflict(
+  conflictId: string,
+  request: ImmichConflictResolveRequest
+): Promise<ImmichConflictResponse> {
+  const response = await fetch(
+    `/api/integrations/immich/conflicts/${conflictId}/resolve`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify(request),
+    }
+  );
+  return handleApiResponse<ImmichConflictResponse>(response);
+}
+
+export function useImmichConflicts(enabled: boolean = true) {
+  return useQuery({
+    queryKey: integrationKeys.immichConflicts(),
+    queryFn: fetchImmichConflicts,
+    enabled,
+    staleTime: 30 * 1000, // 30 seconds
+  });
+}
+
+export function useResolveImmichConflict() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      conflictId,
+      request,
+    }: {
+      conflictId: string;
+      request: ImmichConflictResolveRequest;
+    }) => resolveImmichConflict(conflictId, request),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: integrationKeys.immichConflicts(),
+      });
+      toast.success('Conflict resolved successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to resolve conflict: ${error.message}`);
     },
   });
 }

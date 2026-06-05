@@ -12,6 +12,7 @@ import structlog
 from fastmcp import FastMCP
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.contacts.services import ContactService
 from app.core.integrations.registry.service import IntegrationRegistryService
 from app.core.integrations.strava.athlete_mapping_service import (
     StravaAthleteMappingService,
@@ -20,6 +21,7 @@ from app.core.integrations.task_queue_service import TaskQueueService
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
     get_async_connection,
+    get_contact_service,
     get_current_user_id,
     get_integration_registry_service,
     get_strava_athlete_mapping_service,
@@ -265,5 +267,186 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
             ],
             "total_count": len(filtered_mappings),
         }
+
+        return json.dumps(result, indent=2)
+
+    @mcp.tool
+    @mcp_unified_error_handler("list_immich_conflicts", "integration")
+    async def list_immich_conflicts(
+        user_id: str = mcp_depends(get_current_user_id),
+        connection: AsyncConnection = mcp_depends(get_async_connection),
+    ) -> str:
+        """
+        List unresolved Immich synchronisation conflicts.
+
+        When Immich contacts cannot be automatically matched to a single
+        local contact (e.g. multiple contacts share the same name), a
+        conflict is created. This tool returns the list of unresolved
+        conflicts that need manual resolution.
+
+        Each conflict includes:
+        - conflict id
+        - external_entity_id: the Immich person UUID
+        - external_entity_name: the person's name in Immich
+        - candidate_contact_ids: list of local contact IDs that may match
+        - status: always 'unresolved' for pending conflicts
+
+        Returns:
+            JSON string containing the list of unresolved conflicts.
+        """
+        from core_shared.repositories.pending_entity_mapping_repository import (
+            PendingEntityMappingRepository,
+        )
+
+        logger.info("MCP: Listing Immich conflicts", user_id=user_id)
+
+        repo = PendingEntityMappingRepository(connection)
+        conflicts = await repo.find_unresolved(
+            user_id=user_id, integration_source="immich"
+        )
+
+        result = {
+            "conflicts": [
+                {
+                    "id": c["id"],
+                    "external_entity_id": c["external_entity_id"],
+                    "external_entity_name": c["external_entity_name"],
+                    "candidate_contact_ids": c["candidate_contact_ids"],
+                    "status": c["status"],
+                    "created_at": (
+                        c["created_at"].isoformat() if c["created_at"] else None
+                    ),
+                }
+                for c in conflicts
+            ],
+            "total_count": len(conflicts),
+        }
+
+        logger.info(
+            "MCP: Immich conflicts listed",
+            user_id=user_id,
+            conflict_count=len(conflicts),
+        )
+
+        return json.dumps(result, indent=2)
+
+    @mcp.tool
+    @mcp_unified_error_handler("resolve_immich_conflict", "integration")
+    async def resolve_immich_conflict(
+        conflict_id: int,
+        action: str,
+        contact_id: int | None = None,
+        user_id: str = mcp_depends(get_current_user_id),
+        connection: AsyncConnection = mcp_depends(get_async_connection),
+        contact_service: ContactService = mcp_depends(get_contact_service),
+    ) -> str:
+        """
+        Resolve an Immich synchronisation conflict.
+
+        Links an Immich person to a local contact (action='link') or creates
+        a new contact from the Immich person's name (action='create').
+
+        Args:
+            conflict_id: The ID of the conflict to resolve.
+            action: Either 'link' (to link to an existing contact) or
+                    'create' (to create a new contact from the Immich name).
+            contact_id: Required when action='link'. The ID of the local
+                        contact to link the Immich person to.
+
+        Returns:
+            JSON string containing the resolved conflict details.
+        """
+        from core_shared.models.contacts.entities import Contact
+        from core_shared.models.contacts.value_objects import Provenance
+        from core_shared.repositories.pending_entity_mapping_repository import (
+            PendingEntityMappingRepository,
+        )
+
+        from app.core.integrations.external_reference_service import (
+            ExternalReferenceService,
+        )
+
+        logger.info(
+            "MCP: Resolving Immich conflict",
+            user_id=user_id,
+            conflict_id=conflict_id,
+            action=action,
+        )
+
+        if action not in ("link", "create"):
+            raise ValueError(f"Invalid action '{action}'. Must be 'link' or 'create'.")
+
+        repo = PendingEntityMappingRepository(connection)
+        ext_ref_service = ExternalReferenceService(connection)
+
+        async with connection.begin_nested():
+            conflict_row = await repo.get_unresolved_by_id(
+                conflict_id=conflict_id,
+                user_id=user_id,
+                integration_source="immich",
+            )
+
+            if not conflict_row:
+                raise ValueError(
+                    f"Conflict {conflict_id} not found or already resolved."
+                )
+
+            external_id = conflict_row["external_entity_id"]
+            external_name = conflict_row["external_entity_name"]
+
+            resolved_contact_id = contact_id
+
+            if action == "create":
+                from core_shared.contact_name_matcher import ContactNameMatcher
+
+                name = (external_name or "").strip()
+                first_name, last_name_parsed = ContactNameMatcher.parse_name(name)
+                first_name = first_name or "Unnamed"
+                last_name = last_name_parsed or ""
+
+                new_contact = Contact(first_name=first_name, last_name=last_name)
+                saved_contact = await contact_service.create_contact(
+                    contact=new_contact,
+                    transaction=connection,
+                    changed_by="mcp",
+                    source=Provenance.MCP,
+                )
+                resolved_contact_id = saved_contact.id
+
+            if resolved_contact_id is None:
+                raise ValueError("contact_id is required when action is 'link'.")
+
+            if action == "link":
+                if not await ext_ref_service.contact_exists(resolved_contact_id):
+                    raise ValueError(f"Contact {resolved_contact_id} not found.")
+
+            updated = await repo.resolve(
+                conflict_id=conflict_id, resolved_contact_id=resolved_contact_id
+            )
+
+            if not updated:
+                raise ValueError(f"Failed to resolve conflict {conflict_id}.")
+
+            await ext_ref_service.upsert_contact_reference(
+                contact_id=resolved_contact_id,
+                external_system="immich",
+                external_entity_type="person",
+                external_entity_id=external_id,
+            )
+
+        result = {
+            "conflict_id": conflict_id,
+            "action": action,
+            "contact_id": resolved_contact_id,
+            "status": "resolved",
+        }
+
+        logger.info(
+            "MCP: Immich conflict resolved",
+            user_id=user_id,
+            conflict_id=conflict_id,
+            action=action,
+            contact_id=resolved_contact_id,
+        )
 
         return json.dumps(result, indent=2)
