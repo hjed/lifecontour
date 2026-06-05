@@ -1,5 +1,12 @@
 import { test, expect } from './fixtures';
 
+function relativeDate(dayOffset: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + dayOffset);
+  d.setUTCHours(12, 0, 0, 0);
+  return d.toISOString();
+}
+
 test.describe('Journal Infinite Scroll', () => {
   test('should load past and future journals seamlessly', async ({
     authenticatedPage,
@@ -13,39 +20,30 @@ test.describe('Journal Infinite Scroll', () => {
     // Clear existing data
     await dataManager.clearAllJournals();
 
-    // Calculate dates
-    const today = new Date();
-
-    const pastDate = new Date(today);
-    pastDate.setDate(today.getDate() - 7);
-
-    const futureDate = new Date(today);
-    futureDate.setDate(today.getDate() + 7);
-
     // Create 3 journals spaced apart > chunk size (7 days)
     await dataManager.createJournals([
       {
         title: 'Present Journal',
         content: 'This happened today',
         event_date_range: {
-          start: today.toISOString(),
-          end: today.toISOString(),
+          start: relativeDate(0),
+          end: relativeDate(0),
         },
       },
       {
         title: 'Past Journal',
         content: 'This happened 7 days ago',
         event_date_range: {
-          start: pastDate.toISOString(),
-          end: pastDate.toISOString(),
+          start: relativeDate(-7),
+          end: relativeDate(-7),
         },
       },
       {
         title: 'Future Journal',
         content: 'This will happen 7 days in future',
         event_date_range: {
-          start: futureDate.toISOString(),
-          end: futureDate.toISOString(),
+          start: relativeDate(7),
+          end: relativeDate(7),
         },
       },
     ]);
