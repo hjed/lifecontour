@@ -618,9 +618,11 @@ async def strava_webhook_validation(
         )
 
     # Look up the stored verify token from the database
-    stored_token = await strava_token_service.get_webhook_verify_token()
+    is_valid = await strava_token_service.is_valid_webhook_verify_token(
+        hub_verify_token
+    )
 
-    if not stored_token or hub_verify_token != stored_token:
+    if not is_valid:
         logger.warning(
             "Strava webhook validation failed: token mismatch",
             received_token_prefix=hub_verify_token[:8] + "..."
@@ -905,6 +907,7 @@ async def reregister_strava_webhook(
             subscription_id=new_sub_id,
             verify_token=verify_token,
         )
+        await strava_token_service.commit()
 
         logger.info(
             "Strava webhook re-registered",
