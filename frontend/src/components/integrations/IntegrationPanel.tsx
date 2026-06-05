@@ -8,6 +8,7 @@ import { SyncHistory } from './SyncHistory';
 import { HealthStatus } from './HealthStatus';
 import { IntegrationSettings } from './IntegrationSettings';
 import { IntegrationActions } from './IntegrationActions';
+import { ImmichConflicts } from './ImmichConflicts';
 
 // Map integration ID to a specific icon
 function getIntegrationIcon(id: string) {
@@ -118,6 +119,8 @@ export function IntegrationPanel({ integration }: IntegrationPanelProps) {
             needsReauth={needs_reauth}
             needsReconsent={needs_reconsent}
           />
+
+          {id === 'immich' && <ImmichConflicts connected={connected} />}
 
           <IntegrationActions integrationId={id} connected={connected} />
 
