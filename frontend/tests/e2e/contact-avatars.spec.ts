@@ -37,7 +37,7 @@ test.describe('Contact Avatars', () => {
     // Verify the avatar container exists within the contact card
     // ContactAvatar renders inside an Avatar wrapper with AvatarFallback showing initials
     const avatarFallback = contactCard.locator(
-      '[data-testid="contact-avatar-fallback"]'
+      '[data-testid="avatar-contact-fallback"]'
     );
     await expect(avatarFallback).toBeVisible();
 
@@ -46,7 +46,7 @@ test.describe('Contact Avatars', () => {
 
     // No img element should be rendered since photo_url is null
     const avatarImage = contactCard.locator(
-      '[data-testid="contact-avatar-image"]'
+      '[data-testid="avatar-contact-image"]'
     );
     await expect(avatarImage).toHaveCount(0);
   });
@@ -75,7 +75,7 @@ test.describe('Contact Avatars', () => {
 
     // The detail page has a large avatar (h-32 w-32)
     const avatarFallback = authenticatedPage
-      .locator('[data-testid="contact-avatar-fallback"]')
+      .locator('[data-testid="avatar-contact-fallback"]')
       .first();
     await expect(avatarFallback).toBeVisible();
 
@@ -142,7 +142,7 @@ test.describe('Contact Avatars', () => {
 
     // The badge should contain an avatar with initials fallback
     const avatarInBadge = contactBadge.locator(
-      '[data-testid="contact-avatar-fallback"]'
+      '[data-testid="avatar-contact-fallback"]'
     );
     await expect(avatarInBadge).toBeVisible();
   });
