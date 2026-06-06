@@ -369,6 +369,7 @@ export interface JournalContactRelationship {
   role?: ContactEventRole | null;
   first_name?: string | null;
   last_name?: string | null;
+  photo_url?: string | null;
 }
 
 // Alias for backward compatibility

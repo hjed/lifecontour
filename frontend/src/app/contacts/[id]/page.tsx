@@ -143,6 +143,7 @@ function ContactDetailPageContent() {
             <ContactAvatar
               firstName={contact.attributes.first_name}
               lastName={contact.attributes.last_name}
+              imageUrl={contact.attributes.photo_url ?? undefined}
               size='lg'
               className='h-32 w-32 shrink-0'
             />

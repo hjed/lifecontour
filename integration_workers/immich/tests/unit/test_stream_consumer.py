@@ -139,7 +139,7 @@ class TestHandleEvent:
         )
 
         await consumer._handle_event(event)
-        mock_process_contact_event.assert_called_once_with(
+        mock_process_contact_event.assert_awaited_once_with(
             {"session_factory": consumer._session_factory, "job_id": "evt-1"},
             "ContactCreated",
             {"user_id": 1, "contact_id": 42},
@@ -161,7 +161,7 @@ class TestHandleEvent:
         )
 
         await consumer._handle_event(event)
-        mock_process_contact_event.assert_called_once_with(
+        mock_process_contact_event.assert_awaited_once_with(
             {"session_factory": consumer._session_factory, "job_id": "evt-2"},
             "ContactUpdated",
             {"user_id": 1, "contact_id": 43},
@@ -183,7 +183,7 @@ class TestHandleEvent:
         )
 
         await consumer._handle_event(event)
-        mock_process_contact_event.assert_called_once_with(
+        mock_process_contact_event.assert_awaited_once_with(
             {"session_factory": consumer._session_factory, "job_id": "evt-3"},
             "ContactBirthdayChanged",
             {"user_id": 1, "contact_id": 44},

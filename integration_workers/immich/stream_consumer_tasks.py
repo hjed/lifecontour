@@ -90,7 +90,8 @@ class ImmichWorkerStreamConsumer(StreamConsumer):
         ):
             from worker import process_contact_event
 
-            event_data = event.event_data
+            # Create a shallow copy to avoid mutating the original event data
+            event_data = dict(event.event_data) if event.event_data else {}
             event_data["contact_id"] = event.aggregate_id
             await process_contact_event(ctx, event.event_type, event_data)
 

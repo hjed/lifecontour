@@ -1243,7 +1243,7 @@ export class ReliableWaiter {
 
     // Wait for the contact avatar to be visible (indicates page structure loaded)
     await expect(
-      this.page.locator('[data-testid="contact-avatar"]')
+      this.page.locator('[data-testid="avatar-contact"]')
     ).toBeVisible({ timeout });
 
     // If specific names are expected, wait for them

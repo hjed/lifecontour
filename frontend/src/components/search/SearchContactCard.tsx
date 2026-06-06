@@ -1,8 +1,7 @@
-import Link from 'next/link';
 import { Mail, Phone, Star, BookOpen, Activity, Sparkles } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { FavouriteToggle } from '@/components/contacts/FavouriteToggle';
+import { ContactCardHeader as SharedContactCardHeader } from '@/components/contacts/ContactCardHeader';
 import { DisplayContact } from '@/hooks/useDisplayContacts';
 import { ContactRankingSignals } from '@/utils/searchUtils';
 
@@ -27,18 +26,7 @@ export function SearchContactCard({
       className='transition-shadow hover:shadow-md'
     >
       <CardHeader className='pb-2'>
-        <div className='flex items-start justify-between gap-2'>
-          <CardTitle className='text-lg'>
-            <Link href={`/contacts/${contact.id}`} className='hover:underline'>
-              {contact.name}
-            </Link>
-          </CardTitle>
-          <FavouriteToggle
-            contactId={contact.id}
-            isFavourite={contact.is_favourite}
-            contactName={contact.name}
-          />
-        </div>
+        <SharedContactCardHeader contact={contact} />
 
         {/* Ranking Signal Badges */}
         <div className='flex flex-wrap items-center gap-1.5 pt-1'>

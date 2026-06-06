@@ -59,12 +59,20 @@ export function ContactAvatar({
   return (
     <Avatar
       className={cn(sizeClasses[size], className)}
-      data-testid='contact-avatar'
+      data-testid='avatar-contact'
       role='img'
       aria-label={displayName}
     >
-      {imageUrl && <AvatarImage src={imageUrl} alt={displayName} />}
-      <AvatarFallback>{initials}</AvatarFallback>
+      {imageUrl && (
+        <AvatarImage
+          src={imageUrl}
+          alt={displayName}
+          data-testid='avatar-contact-image'
+        />
+      )}
+      <AvatarFallback data-testid='avatar-contact-fallback'>
+        {initials}
+      </AvatarFallback>
     </Avatar>
   );
 }

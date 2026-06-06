@@ -459,6 +459,7 @@ function ContactBadge({
         <ContactAvatar
           firstName={firstName}
           lastName={lastName}
+          imageUrl={contact.photo_url ?? undefined}
           size='sm'
           className='h-4 w-4 shrink-0'
         />

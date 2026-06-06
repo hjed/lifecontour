@@ -107,7 +107,7 @@ describe('ContactAvatar', () => {
 
       const avatar = screen
         .getByText('JD')
-        .closest('[data-testid="contact-avatar"]');
+        .closest('[data-testid="avatar-contact"]');
       expect(avatar).toHaveClass('h-8', 'w-8');
     });
 
@@ -116,7 +116,7 @@ describe('ContactAvatar', () => {
 
       const avatar = screen
         .getByText('JD')
-        .closest('[data-testid="contact-avatar"]');
+        .closest('[data-testid="avatar-contact"]');
       expect(avatar).toHaveClass('h-10', 'w-10');
     });
 
@@ -125,7 +125,7 @@ describe('ContactAvatar', () => {
 
       const avatar = screen
         .getByText('JD')
-        .closest('[data-testid="contact-avatar"]');
+        .closest('[data-testid="avatar-contact"]');
       expect(avatar).toHaveClass('h-16', 'w-16');
     });
   });
@@ -142,7 +142,7 @@ describe('ContactAvatar', () => {
 
       const avatar = screen
         .getByText('JD')
-        .closest('[data-testid="contact-avatar"]');
+        .closest('[data-testid="avatar-contact"]');
       expect(avatar).toHaveClass('custom-class');
     });
 
@@ -151,7 +151,7 @@ describe('ContactAvatar', () => {
 
       const avatar = screen
         .getByText('JD')
-        .closest('[data-testid="contact-avatar"]');
+        .closest('[data-testid="avatar-contact"]');
       expect(avatar).toHaveAttribute('role', 'img');
       expect(avatar).toHaveAttribute('aria-label', 'John Doe');
     });
@@ -161,7 +161,7 @@ describe('ContactAvatar', () => {
 
       const avatar = screen
         .getByText('J')
-        .closest('[data-testid="contact-avatar"]');
+        .closest('[data-testid="avatar-contact"]');
       expect(avatar).toHaveAttribute('aria-label', 'John');
     });
 
@@ -170,7 +170,7 @@ describe('ContactAvatar', () => {
 
       const avatar = screen
         .getByText('?')
-        .closest('[data-testid="contact-avatar"]');
+        .closest('[data-testid="avatar-contact"]');
       expect(avatar).toHaveAttribute('aria-label', 'Contact avatar');
     });
   });

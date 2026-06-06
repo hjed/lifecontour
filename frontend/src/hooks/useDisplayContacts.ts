@@ -7,7 +7,10 @@ import { ContactResource, TagResource } from '@/types/contacts';
 export interface DisplayContact {
   id: string;
   name: string;
+  first_name: string;
+  last_name?: string;
   is_favourite: boolean;
+  photo_url?: string | null;
   primary_email?: string;
   primary_phone?: string;
   tags: TagResource[];
@@ -54,7 +57,10 @@ export function useDisplayContacts(
       return {
         id: contact.id,
         name: `${contact.attributes.first_name} ${contact.attributes.last_name || ''}`.trim(),
+        first_name: contact.attributes.first_name,
+        last_name: contact.attributes.last_name,
         is_favourite: contact.attributes.is_favourite || false,
+        photo_url: contact.attributes.photo_url ?? null,
         primary_email: contact.attributes.contact_methods?.find(
           m => m.attributes.method_type === 'email' && m.attributes.is_primary
         )?.attributes.value,

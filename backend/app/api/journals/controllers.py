@@ -160,13 +160,13 @@ async def _populate_contact_names(
     contact_ids_to_fetch = [
         int(cs.id)
         for cs in resource.attributes.contacts
-        if int(cs.id) not in contact_cache and not cs.name
+        if int(cs.id) not in contact_cache and (not cs.name or not cs.photo_url)
     ]
 
-    # Bulk fetch names in a single query
+    # Bulk fetch names and photo_url in a single query
     if contact_ids_to_fetch:
         name_rows = await contact_repo.find_names_by_ids(contact_ids_to_fetch)
-        for cid, (first_name, last_name) in name_rows.items():
+        for cid, (first_name, last_name, photo_url) in name_rows.items():
             # Null-safe formatter: filter out None or empty name parts
             name_parts = [part for part in (first_name, last_name) if part]
             name = " ".join(name_parts)
@@ -174,6 +174,7 @@ async def _populate_contact_names(
                 "name": name if name else f"Contact {cid}",
                 "first_name": first_name,
                 "last_name": last_name,
+                "photo_url": photo_url,
             }
 
         # Mark any IDs not found in the database
@@ -183,9 +184,10 @@ async def _populate_contact_names(
                     "name": f"Unknown Contact {cid}",
                     "first_name": None,
                     "last_name": None,
+                    "photo_url": None,
                 }
 
-    # Set names from cache
+    # Set names and photo_url from cache
     for contact_schema in resource.attributes.contacts:
         contact_id = int(contact_schema.id)
         if contact_id in contact_cache:
@@ -193,6 +195,7 @@ async def _populate_contact_names(
             contact_schema.name = cache_info["name"]
             contact_schema.first_name = cache_info["first_name"]
             contact_schema.last_name = cache_info["last_name"]
+            contact_schema.photo_url = cache_info.get("photo_url")
 
 
 async def _build_journal_response(
