@@ -1364,9 +1364,10 @@ async def reregister_google_webhooks(
 
     return WebhookReregisterResponse(
         data=WebhookReregisterData(
+            id="google-webhook-reregister",
             attributes=WebhookReregisterAttributes(
                 webhooks_queued=webhooks_queued,
                 message=message,
-            )
+            ),
         )
     ).model_dump()

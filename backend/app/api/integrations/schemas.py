@@ -387,6 +387,7 @@ class WebhookReregisterAttributes(BaseModel):
 class WebhookReregisterData(BaseModel):
     """JSON API data wrapper for webhook re-register response."""
 
+    id: str = Field(description="Resource identifier")
     type: str = Field(default="webhook-reregister", description="Resource type")
     attributes: WebhookReregisterAttributes = Field(
         description="Re-register result attributes"
@@ -409,6 +410,7 @@ class WebhookUrlAttributes(BaseModel):
 class WebhookUrlData(BaseModel):
     """JSON API data wrapper for webhook URL response."""
 
+    id: str = Field(description="Resource identifier")
     type: str = Field(default="webhook-url", description="Resource type")
     attributes: WebhookUrlAttributes = Field(description="Webhook URL attributes")
 

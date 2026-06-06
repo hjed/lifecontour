@@ -309,29 +309,28 @@ class StravaTokenService:
         """
         await self.connection.commit()
 
-    async def get_webhook_verify_token(self) -> str | None:
+    async def is_valid_webhook_verify_token(self, token: str) -> bool:
         """
-        Retrieve the stored webhook verify token.
+        Check whether a given webhook verify token exists.
 
-        Looks up the verify token from any user_strava_auth row. The token
-        is stored *before* Strava's validation handshake (when
-        ``subscription_id`` is still NULL), so the query must not
-        filter on ``subscription_id``.
+        Used during Strava's validation handshake to confirm the token
+        matches one we've generated, without assuming a single token for
+        all users.
+
+        Args:
+            token: The verify token to check.
 
         Returns:
-            The verify token string, or None if no token exists.
+            True if the token exists, False otherwise.
         """
         stmt = text("""
-            SELECT strava_webhook_verify_token
+            SELECT 1
             FROM user_strava_auth
-            WHERE strava_webhook_verify_token IS NOT NULL
+            WHERE strava_webhook_verify_token = :token
             LIMIT 1
         """)
-        result = await self.connection.execute(stmt)
-        row = result.fetchone()
-        if row and row.strava_webhook_verify_token:
-            return str(row.strava_webhook_verify_token)
-        return None
+        result = await self.connection.execute(stmt, {"token": token})
+        return result.fetchone() is not None
 
     async def has_subscription_id(self, subscription_id: int) -> bool:
         """
