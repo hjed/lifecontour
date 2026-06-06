@@ -4,6 +4,10 @@ Implements the inbound people sync logic: fetch Immich people, match to
 local contacts using :class:`ContactNameMatcher`, create or link as
 needed, and handle birthday sync.
 
+Contact mutations (create/update) are published as outbox events so that
+the backend ``OutboxEventProcessor`` handles the actual database writes
+via ``ContactService``, matching the established Google-worker pattern.
+
 This service runs inside the Immich worker and uses a database
 connection (``AsyncConnection``) for all persistence operations.
 """
@@ -16,10 +20,16 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
 import structlog
 from core_shared.contact_name_matcher import ContactNameMatcher
-from core_shared.models.contacts.entities import Contact
+from core_shared.models.contacts.entities import Contact, ImportantDate
+from core_shared.models.contacts.important_date_types import (
+    DatePrecision,
+    ImportantDateType,
+)
+from core_shared.models.contacts.serialization import serialize_contact
 from core_shared.repositories.external_reference_repository import (
     ExternalReferenceRepository,
 )
@@ -59,6 +69,11 @@ class PeopleSyncResult:
 
 class ImmichSyncService:
     """Inbound people sync from Immich to local contacts.
+
+    Contact mutations are emitted as outbox events so the backend
+    ``OutboxEventProcessor`` handles them through ``ContactService``,
+    which records history, publishes domain events, and triggers
+    search re-indexing.
 
     Args:
         api_client: Configured :class:`ImmichApiClient`.
@@ -108,31 +123,32 @@ class ImmichSyncService:
     ) -> PeopleSyncResult:
         """Sync a batch of Immich people to local contacts.
 
+        Contact creates/updates are published as outbox events and
+        processed asynchronously by the backend ``OutboxEventProcessor``.
+
         Args:
-            people_data: Serialized ImmichPerson dictionaries.
+            people_data: List of serialized ImmichPerson dicts.
 
         Returns:
-            A :class:`PeopleSyncResult` summarising the batch operation.
+            A :class:`PeopleSyncResult` summarising the sync.
         """
         result = PeopleSyncResult()
 
-        # Pre-load contacts cache for this batch
-        self._contacts_cache = await self._fetch_user_contacts()
-
-        for p_dict in people_data:
-            person = ImmichPerson.model_validate(p_dict)
-            await self._process_person(person, result)
-
-        logger.info(
-            "Immich people batch sync complete",
-            user_id=self._user_id,
-            created=result.created,
-            linked=result.linked,
-            unchanged=result.unchanged,
-            updated=result.updated,
-            skipped=result.skipped,
-            conflicts=result.conflicts,
-        )
+        for data in people_data:
+            person = ImmichPerson.model_validate(data)
+            try:
+                await self._process_person(person, result)
+            except Exception as e:  # noqa: BLE001
+                result.errors += 1
+                result.error_details.append(
+                    f"Error processing person {person.id}: {e!s}"
+                )
+                logger.error(
+                    "Error processing person",
+                    person_id=person.id,
+                    person_name=person.name,
+                    error=str(e),
+                )
 
         return result
 
@@ -162,35 +178,40 @@ class ImmichSyncService:
 
         person_id = ref["external_entity_id"]
 
-        # 2. Fetch contact details (name and FULL precision birthday)
+        # 2. Fetch the contact's name and birthday
         contact_data = await ext_ref_repo.find_contact_with_birthday(contact_id)
         if not contact_data:
             return {"status": "error", "reason": "contact_not_found"}
 
-        # Format name
-        parts = []
-        if contact_data["first_name"]:
-            parts.append(contact_data["first_name"])
-        if contact_data["middle_name"]:
-            parts.append(contact_data["middle_name"])
-        if contact_data["last_name"]:
-            parts.append(contact_data["last_name"])
-        full_name = " ".join(parts) if parts else "Unnamed Contact"
+        # 3. Build update payload for Immich
+        update_data: dict[str, Any] = {}
+        name_parts = []
+        if contact_data.get("first_name"):
+            name_parts.append(contact_data["first_name"])
+        if contact_data.get("middle_name"):
+            name_parts.append(contact_data["middle_name"])
+        if contact_data.get("last_name"):
+            name_parts.append(contact_data["last_name"])
+        if name_parts:
+            update_data["name"] = " ".join(name_parts)
 
-        # Format birthday if present
-        birth_date = None
-        if contact_data["year"] and contact_data["month"] and contact_data["day"]:
-            birth_date = f"{contact_data['year']:04d}-{contact_data['month']:02d}-{contact_data['day']:02d}"
+        if (
+            contact_data.get("year")
+            and contact_data.get("month")
+            and contact_data.get("day")
+        ):
+            update_data["birthDate"] = (
+                f"{contact_data['year']:04d}-{contact_data['month']:02d}-{contact_data['day']:02d}"
+            )
+        else:
+            # Preserve Immich's existing birthday when local has no
+            # full-precision birthday (source-of-truth enforcement).
+            immich_person = await self._api.get_person(person_id)
+            if immich_person and immich_person.birth_date:
+                update_data["birthDate"] = immich_person.birth_date
 
-        # 3. Fetch current Immich person to avoid overwriting existing birthDate if local is null
-        person = await self._api.get_person(person_id)
-
-        update_data = {"name": full_name}
-        if birth_date:
-            update_data["birthDate"] = birth_date
-        elif person.birth_date:
-            # Preserve existing birth_date if local doesn't have a FULL precision one
-            update_data["birthDate"] = person.birth_date
+        if not update_data:
+            return {"status": "skipped", "reason": "no_changes"}
 
         # 4. Push update to Immich
         updated_person = await self._api.update_person(person_id, update_data)
@@ -222,11 +243,7 @@ class ImmichSyncService:
 
     @staticmethod
     def calculate_version_hash(person: ImmichPerson) -> str:
-        """Compute a version hash from a person's name and birth date.
-
-        Used for idempotency: if the hash hasn't changed, the sync
-        is skipped.
-        """
+        """Calculate a SHA-256 hash for an Immich person's mutable fields."""
         data = f"{person.name}|{person.birth_date or ''}"
         return hashlib.sha256(data.encode()).hexdigest()
 
@@ -276,16 +293,20 @@ class ImmichSyncService:
                 result.unchanged += 1
                 return
 
-            # Version changed — update sync metadata
+            # Version changed — emit contact.updated outbox event
+            contact_data = self._build_contact_data(
+                person, existing_ref.internal_entity_id
+            )
+            await self._emit_outbox_event(
+                sync_type="updated",
+                external_id=person.id,
+                contact_data=contact_data,
+            )
             await self._upsert_sync_metadata(
                 external_id=person.id,
                 internal_id=existing_ref.internal_entity_id,
                 version_hash=version_hash,
             )
-            # Sync birthday since version hash changed
-            await self._sync_birthday(existing_ref.internal_entity_id, person)
-            # Update photo_url to proxy endpoint
-            await self._set_photo_url(existing_ref.internal_entity_id)
             result.updated += 1
             return
 
@@ -304,15 +325,19 @@ class ImmichSyncService:
             await self._create_external_reference(
                 contact_id=contact.id, person_id=person.id
             )
+            # Emit contact.updated so the processor updates the contact
+            # (adds photo_url, birthday, etc.) through ContactService
+            contact_data = self._build_contact_data(person, contact.id)
+            await self._emit_outbox_event(
+                sync_type="updated",
+                external_id=person.id,
+                contact_data=contact_data,
+            )
             await self._upsert_sync_metadata(
                 external_id=person.id,
                 internal_id=contact.id,
                 version_hash=version_hash,
             )
-            # Handle birthday sync
-            await self._sync_birthday(contact.id, person)
-            # Set photo_url to proxy endpoint
-            await self._set_photo_url(contact.id)
             result.linked += 1
             return
 
@@ -327,45 +352,116 @@ class ImmichSyncService:
             result.conflicts += 1
             return
 
-        # 3. No match — create new contact
-        contact_id = await self._create_contact(person)
-        await self._create_external_reference(
-            contact_id=contact_id, person_id=person.id
-        )
-        await self._upsert_sync_metadata(
+        # 3. No match — emit contact.created outbox event
+        contact_data = self._build_contact_data(person, contact_id=None)
+        await self._emit_outbox_event(
+            sync_type="created",
             external_id=person.id,
-            internal_id=contact_id,
-            version_hash=version_hash,
+            contact_data=contact_data,
         )
-        # Handle birthday sync for new contact
-        await self._sync_birthday(contact_id, person)
-        # Set photo_url to proxy endpoint
-        await self._set_photo_url(contact_id)
         result.created += 1
 
-    # -- Database operations ----------------------------------------------
+    def _build_contact_data(
+        self, person: ImmichPerson, contact_id: int | None
+    ) -> dict[str, Any]:
+        """Build a serialized contact dict from an Immich person.
 
-    async def _set_photo_url(self, contact_id: int) -> None:
-        """Set the contact's photo_url to the internal avatar proxy endpoint.
+        The data follows the canonical contact format used by the outbox
+        pattern, including the avatar proxy URL and birthday.
 
-        The URL points to ``/api/contacts/{id}/avatar`` which proxies the
-        thumbnail from Immich using stored credentials.
+        Args:
+            person: Immich person to convert.
+            contact_id: Existing contact ID (for photo_url), or ``None``
+                for new contacts (photo_url will be set later by the
+                processor when the contact ID is assigned).
+
+        Returns:
+            Serialized contact dict suitable for outbox event payload.
         """
-        photo_url = f"/api/contacts/{contact_id}/avatar"
+        first_name, last_name = self.parse_person_name(person.name)
+
+        # Build important_dates from birthday
+        important_dates: list[ImportantDate] | None = None
+        parsed_birthday = self.parse_birth_date(person.birth_date)
+        if parsed_birthday:
+            year, month, day = parsed_birthday
+            important_dates = [
+                ImportantDate(
+                    contact_id=contact_id or 0,
+                    date_type=ImportantDateType.BIRTHDAY,
+                    precision=DatePrecision.FULL,
+                    year=year,
+                    month=month,
+                    day=day,
+                )
+            ]
+
+        # Build photo_url for the avatar proxy endpoint
+        photo_url = f"/api/contacts/{contact_id}/avatar" if contact_id else None
+
+        contact = Contact(
+            first_name=first_name,
+            last_name=last_name,
+            photo_url=photo_url,
+            important_dates=important_dates,
+        )
+
+        return serialize_contact(contact)
+
+    # -- Outbox event emission --------------------------------------------
+
+    async def _emit_outbox_event(
+        self,
+        sync_type: str,
+        external_id: str,
+        contact_data: dict[str, Any],
+    ) -> None:
+        """Insert a contact sync outbox event via raw SQL.
+
+        Follows the same event structure as the Google worker's
+        ``OutboxEvent.create_contact_sync_event()``.
+
+        Args:
+            sync_type: ``'created'`` or ``'updated'``.
+            external_id: Immich person ID.
+            contact_data: Serialized contact dict.
+        """
+        event_id = str(uuid4())
+        now = datetime.now(UTC)
+        event_data = {
+            "integration_source": self._integration_source,
+            "external_id": external_id,
+            "contact_data": contact_data,
+            "sync_timestamp": now.isoformat(),
+            "sync_type": sync_type,
+        }
+
         query = text("""
-            UPDATE contacts
-            SET photo_url = :photo_url, updated_at = NOW()
-            WHERE id = :contact_id
+            INSERT INTO outbox_events
+                (event_id, event_type, aggregate_id, event_data,
+                 occurred_at, created_at, retry_count)
+            VALUES
+                (:event_id, :event_type, 0, :event_data,
+                 :occurred_at, :created_at, 0)
         """)
         await self._conn.execute(
             query,
-            {"photo_url": photo_url, "contact_id": contact_id},
+            {
+                "event_id": event_id,
+                "event_type": f"contact.{sync_type}",
+                "event_data": json.dumps(event_data),
+                "occurred_at": now,
+                "created_at": now,
+            },
         )
         logger.debug(
-            "Set contact photo_url",
-            contact_id=contact_id,
-            photo_url=photo_url,
+            "Emitted outbox event for Immich contact sync",
+            event_id=event_id,
+            sync_type=sync_type,
+            external_id=external_id,
         )
+
+    # -- Database operations (integration-specific) -----------------------
 
     async def _find_external_reference(self, person_id: str) -> Any | None:
         """Look up an ExternalReference by Immich person ID."""
@@ -430,46 +526,6 @@ class ImmichSyncService:
             for row in rows
         ]
 
-    async def _create_contact(self, person: ImmichPerson) -> int:
-        """Create a new contact from an Immich person.
-
-        Returns:
-            The new contact's ID.
-        """
-        first_name, last_name = self.parse_person_name(person.name)
-        now = datetime.now(UTC)
-
-        query = text("""
-            INSERT INTO contacts
-                (first_name, last_name, is_favourite,
-                 created_at, updated_at)
-            VALUES
-                (:first_name, :last_name, false,
-                 :now, :now)
-            RETURNING id, created_at, updated_at
-        """)
-        result = await self._conn.execute(
-            query,
-            {
-                "first_name": first_name,
-                "last_name": last_name,
-                "now": now,
-            },
-        )
-        row = result.fetchone()
-        if not row:
-            raise RuntimeError(
-                f"Failed to create contact for Immich person {person.id}"
-            )
-
-        logger.info(
-            "Created new contact from Immich person",
-            contact_id=row.id,
-            person_id=person.id,
-            person_name=person.name,
-        )
-        return int(row.id)
-
     async def _create_external_reference(self, contact_id: int, person_id: str) -> None:
         """Create an ExternalReference linking a contact to an Immich person."""
         query = text("""
@@ -523,7 +579,6 @@ class ImmichSyncService:
                 sync_status = 'success',
                 retry_count = 0,
                 updated_at = EXCLUDED.updated_at
-            RETURNING id
         """)
         await self._conn.execute(
             query,
@@ -585,54 +640,4 @@ class ImmichSyncService:
             person_id=person_id,
             person_name=person_name,
             candidate_count=len(candidate_ids),
-        )
-
-    async def _sync_birthday(self, contact_id: int, person: ImmichPerson) -> None:
-        """Sync birthday from Immich person to contact.
-
-        Only creates a birthday if:
-        - The Immich person has a birth_date
-        - The contact does not already have a birthday
-        """
-        parsed = self.parse_birth_date(person.birth_date)
-        if parsed is None:
-            return
-
-        year, month, day = parsed
-
-        # Check if contact already has a birthday
-        check_query = text("""
-            SELECT id FROM contact_important_dates
-            WHERE contact_id = :contact_id AND date_type = 'birthday'
-            LIMIT 1
-        """)
-        result = await self._conn.execute(check_query, {"contact_id": contact_id})
-        if result.fetchone() is not None:
-            logger.debug(
-                "Contact already has birthday, skipping",
-                contact_id=contact_id,
-            )
-            return
-
-        # Create birthday important date
-        insert_query = text("""
-            INSERT INTO contact_important_dates
-                (contact_id, date_type, precision, year, month, day)
-            VALUES
-                (:contact_id, 'birthday', 'full', :year, :month, :day)
-            ON CONFLICT DO NOTHING
-        """)
-        await self._conn.execute(
-            insert_query,
-            {
-                "contact_id": contact_id,
-                "year": year,
-                "month": month,
-                "day": day,
-            },
-        )
-        logger.info(
-            "Created birthday from Immich person",
-            contact_id=contact_id,
-            birth_date=person.birth_date,
         )

@@ -121,6 +121,45 @@ class ExternalReferenceRepository:
             "day": row.day,
         }
 
+    async def update_contact_photo_url(self, contact_id: int, photo_url: str) -> None:
+        """Update a contact's photo_url field.
+
+        Args:
+            contact_id: Internal contact ID.
+            photo_url: The proxy URL to set.
+        """
+        query = text("""
+            UPDATE contacts
+            SET photo_url = :photo_url, updated_at = NOW()
+            WHERE id = :contact_id
+        """)
+        await self._conn.execute(
+            query,
+            {"photo_url": photo_url, "contact_id": contact_id},
+        )
+
+    async def get_immich_person_id(self, contact_id: int) -> str | None:
+        """Look up the Immich person ID linked to a contact.
+
+        Args:
+            contact_id: Internal contact ID.
+
+        Returns:
+            The Immich person ID string, or ``None`` if unlinked.
+        """
+        query = text("""
+            SELECT external_entity_id
+            FROM external_references
+            WHERE internal_entity_type = 'contact'
+              AND internal_entity_id = :contact_id
+              AND external_system = 'immich'
+              AND external_entity_type = 'person'
+            LIMIT 1
+        """)
+        result = await self._conn.execute(query, {"contact_id": contact_id})
+        row = result.fetchone()
+        return row.external_entity_id if row else None
+
     @staticmethod
     def _row_to_dict(row: Any) -> dict[str, Any]:
         """Convert a database row to a dictionary."""

@@ -247,3 +247,60 @@ class TestRoundTrip:
         restored = deserialize_contact(serialized)
 
         assert restored.important_dates is None
+
+
+class TestPhotoUrlSerialization:
+    """Test serialization/deserialization of photo_url field."""
+
+    def test_serialize_with_photo_url(self) -> None:
+        """Contact with photo_url serializes it."""
+        contact = Contact(
+            first_name="Test",
+            photo_url="/api/contacts/42/avatar",
+        )
+
+        result = serialize_contact(contact)
+
+        assert result["photo_url"] == "/api/contacts/42/avatar"
+
+    def test_serialize_with_none_photo_url(self) -> None:
+        """Contact with None photo_url serializes as None."""
+        contact = Contact(first_name="Test")
+
+        result = serialize_contact(contact)
+
+        assert result["photo_url"] is None
+
+    def test_deserialize_with_photo_url(self) -> None:
+        """photo_url in payload is deserialized to Contact."""
+        data = {
+            "first_name": "Test",
+            "photo_url": "/api/contacts/42/avatar",
+        }
+
+        contact = deserialize_contact(data)
+
+        assert contact.photo_url == "/api/contacts/42/avatar"
+
+    def test_deserialize_without_photo_url_key(self) -> None:
+        """Missing photo_url key defaults to None."""
+        data = {"first_name": "Test"}
+
+        contact = deserialize_contact(data)
+
+        assert contact.photo_url is None
+
+    def test_round_trip_with_photo_url(self) -> None:
+        """Serialize then deserialize preserves photo_url."""
+        original = Contact(
+            first_name="Round",
+            last_name="Trip",
+            photo_url="/api/contacts/1/avatar",
+        )
+
+        serialized = serialize_contact(original)
+        restored = deserialize_contact(serialized)
+
+        assert restored.photo_url == "/api/contacts/1/avatar"
+        assert restored.first_name == "Round"
+        assert restored.last_name == "Trip"

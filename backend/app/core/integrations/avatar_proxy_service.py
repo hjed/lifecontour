@@ -6,11 +6,15 @@ keeping the Immich server URL and API key hidden from the browser.
 
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 import httpx
 import structlog
-from cryptography.fernet import Fernet, InvalidToken
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncConnection
+from core_shared.repositories.external_reference_repository import (
+    ExternalReferenceRepository,
+)
+
+from app.infrastructure.auth.immich_token_service import ImmichTokenService
 
 logger = structlog.get_logger(__name__)
 
@@ -22,16 +26,25 @@ class AvatarNotFoundError(Exception):
 class AvatarProxyService:
     """Proxy service that fetches Immich person thumbnails on behalf of the user.
 
+    Uses ``ExternalReferenceRepository`` for person-ID lookups and
+    ``ImmichTokenService`` for credential resolution — no ad-hoc SQL.
+
     Args:
-        connection: Async database connection.
-        encryption_key: Fernet key for decrypting the stored Immich API key.
+        ext_ref_repo: Repository for external reference lookups.
+        immich_token_service: Service for Immich credential management.
     """
 
-    def __init__(self, connection: AsyncConnection, encryption_key: str) -> None:
-        self._conn = connection
-        self._encryption_key = encryption_key
+    def __init__(
+        self,
+        ext_ref_repo: ExternalReferenceRepository,
+        immich_token_service: ImmichTokenService,
+    ) -> None:
+        self._ext_ref_repo = ext_ref_repo
+        self._token_service = immich_token_service
 
-    async def get_avatar_bytes(self, contact_id: int, user_id: str) -> bytes:
+    async def get_avatar_bytes(
+        self, contact_id: int, user_id: str
+    ) -> tuple[bytes, str]:
         """Fetch the Immich person thumbnail for a contact.
 
         Args:
@@ -39,14 +52,14 @@ class AvatarProxyService:
             user_id: Internal user ID (for credential lookup).
 
         Returns:
-            Raw JPEG/PNG bytes of the thumbnail.
+            Tuple of (raw image bytes, content-type string).
 
         Raises:
             AvatarNotFoundError: If the contact has no Immich link, the user
                 has no Immich credentials, or the thumbnail fetch fails.
         """
         # 1. Look up the Immich person_id for this contact
-        person_id = await self._get_immich_person_id(contact_id)
+        person_id = await self._ext_ref_repo.get_immich_person_id(contact_id)
         if person_id is None:
             raise AvatarNotFoundError(
                 f"Contact {contact_id} is not linked to an Immich person"
@@ -60,55 +73,41 @@ class AvatarProxyService:
         # 3. Fetch the thumbnail from Immich
         return await self._fetch_thumbnail(server_url, api_key, person_id)
 
-    async def _get_immich_person_id(self, contact_id: int) -> str | None:
-        """Look up the Immich person ID from external_references."""
-        query = text("""
-            SELECT external_entity_id
-            FROM external_references
-            WHERE internal_entity_type = 'contact'
-              AND internal_entity_id = :contact_id
-              AND external_system = 'immich'
-              AND external_entity_type = 'person'
-            LIMIT 1
-        """)
-        result = await self._conn.execute(query, {"contact_id": contact_id})
-        row = result.fetchone()
-        return row.external_entity_id if row else None
-
     async def _get_immich_credentials(
         self, user_id: str
     ) -> tuple[str | None, str | None]:
-        """Fetch and decrypt the user's Immich server URL and API key."""
-        query = text("""
-            SELECT server_url, encrypted_api_key
-            FROM user_immich_auth
-            WHERE user_id = :user_id
-        """)
-        result = await self._conn.execute(query, {"user_id": user_id})
-        row = result.fetchone()
-        if row is None:
-            return None, None
+        """Fetch and decrypt the user's Immich server URL and API key.
 
+        Delegates to ImmichTokenService for credential retrieval.
+        """
         try:
-            fernet = Fernet(self._encryption_key.encode())
-            api_key = fernet.decrypt(row.encrypted_api_key).decode()
-        except (InvalidToken, ValueError) as e:
+            return await self._token_service.get_credentials(user_id)
+        except Exception:  # noqa: BLE001
             logger.warning(
-                "Failed to decrypt Immich API key for avatar proxy",
+                "Failed to retrieve Immich credentials for avatar proxy",
                 user_id=user_id,
-                error=str(e),
             )
             return None, None
 
-        return row.server_url, api_key
-
     @staticmethod
-    async def _fetch_thumbnail(server_url: str, api_key: str, person_id: str) -> bytes:
+    async def _fetch_thumbnail(
+        server_url: str, api_key: str, person_id: str
+    ) -> tuple[bytes, str]:
         """Download the person thumbnail from Immich.
+
+        Returns:
+            Tuple of (image bytes, content-type).
 
         Raises:
             AvatarNotFoundError: If the Immich API returns an error.
         """
+        # Validate the server URL to prevent SSRF
+        parsed = urlparse(server_url)
+        if parsed.scheme not in ("http", "https"):
+            raise AvatarNotFoundError(
+                f"Invalid Immich server URL scheme: {parsed.scheme}"
+            )
+
         url = f"{server_url.rstrip('/')}/api/people/{person_id}/thumbnail"
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
@@ -120,7 +119,8 @@ class AvatarProxyService:
                     },
                 )
                 response.raise_for_status()
-                return response.content
+                content_type = response.headers.get("content-type", "image/jpeg")
+                return response.content, content_type
         except httpx.HTTPStatusError as e:
             logger.warning(
                 "Immich thumbnail request failed",

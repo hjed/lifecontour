@@ -67,6 +67,7 @@ def _map_provenance(integration_source: str) -> Provenance:
         "google": Provenance.GOOGLE_CONTACTS,
         "google_contacts": Provenance.GOOGLE_CONTACTS,
         "strava": Provenance.STRAVA,
+        "immich": Provenance.SYSTEM,
     }
     return source_map.get(integration_source, Provenance.SYSTEM)
 

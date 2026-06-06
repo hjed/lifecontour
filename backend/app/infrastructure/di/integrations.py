@@ -7,6 +7,9 @@ registry.
 """
 
 from arq.connections import ArqRedis, RedisSettings
+from core_shared.repositories.external_reference_repository import (
+    ExternalReferenceRepository,
+)
 from dishka import Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -317,21 +320,30 @@ class IntegrationProvider(Provider):
         )
 
     @provide(scope=Scope.REQUEST)
+    def provide_external_reference_repository(
+        self, connection: AsyncConnection
+    ) -> ExternalReferenceRepository:
+        """Provide ExternalReferenceRepository for request scope."""
+        return ExternalReferenceRepository(connection=connection)
+
+    @provide(scope=Scope.REQUEST)
     def provide_avatar_proxy_service(
-        self, connection: AsyncConnection, settings: Settings
+        self,
+        ext_ref_repo: ExternalReferenceRepository,
+        immich_token_service: ImmichTokenService,
     ) -> AvatarProxyService:
         """Provide avatar proxy service for request scope.
 
         Args:
-            connection: Database connection
-            settings: Application settings for encryption key
+            ext_ref_repo: Repository for external reference lookups
+            immich_token_service: Service for Immich credential management
 
         Returns:
             AvatarProxyService: Service for proxying Immich thumbnails
         """
         return AvatarProxyService(
-            connection=connection,
-            encryption_key=settings.immich_encryption_key,
+            ext_ref_repo=ext_ref_repo,
+            immich_token_service=immich_token_service,
         )
 
     @provide(scope=Scope.REQUEST)

@@ -249,15 +249,15 @@ async def get_contact_avatar(
     from app.core.integrations.avatar_proxy_service import AvatarNotFoundError
 
     try:
-        image_bytes = await avatar_service.get_avatar_bytes(
+        image_bytes, content_type = await avatar_service.get_avatar_bytes(
             contact_id=contact_id,
             user_id=user.id,
         )
         return Response(
             content=image_bytes,
-            media_type="image/jpeg",
+            media_type=content_type,
             headers={
-                "Cache-Control": "public, max-age=3600",
+                "Cache-Control": "private, max-age=3600",
             },
         )
     except AvatarNotFoundError:

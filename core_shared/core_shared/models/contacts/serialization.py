@@ -47,6 +47,7 @@ def serialize_contact(contact: Contact) -> dict[str, Any]:
         "nick_name": contact.nick_name,
         "company": contact.company,
         "job_title": contact.job_title,
+        "photo_url": contact.photo_url,
         "is_favourite": contact.is_favourite,
     }
 
@@ -230,6 +231,7 @@ def deserialize_contact(data: dict[str, Any]) -> Contact:
             nick_name=data.get("nick_name"),
             company=data.get("company"),
             job_title=data.get("job_title"),
+            photo_url=data.get("photo_url"),
             is_favourite=data.get("is_favourite", False),
             methods=methods,
             addresses=addresses,
