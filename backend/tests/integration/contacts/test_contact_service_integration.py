@@ -406,10 +406,12 @@ class TestContactServiceIntegration:
 
         # Verify field history was recorded for tag assignment
         history = await history_repo.get_contact_history(saved_contact.id)
-        tag_history = [h for h in history if h.entity_type == "contact_tag"]
+        tag_history = [
+            h for h in history if h.entity_type == "contact" and h.field_name == "tags"
+        ]
         assert len(tag_history) == 1
-        assert tag_history[0].field_name == "contact_id"
-        assert tag_history[0].new_value == str(saved_contact.id)
+        assert tag_history[0].field_name == "tags"
+        assert tag_history[0].new_value == "work"
 
     @pytest.mark.asyncio
     async def test_comprehensive_contact_workflow(
