@@ -55,6 +55,7 @@ export function PitchEditor({
         anchor_type: null,
         did_rescue: null,
         did_setup: null,
+        notes: null,
       },
     ]);
   }, [pitches, onChange]);
@@ -98,28 +99,35 @@ export function PitchEditor({
           {pitches.map((pitch, idx) => (
             <div
               key={pitch.id ?? `temp-${idx}`}
-              className='hover:bg-muted/50 grid grid-cols-6 items-center gap-2 p-2'
+              className='hover:bg-muted/50 flex flex-col gap-1 p-2'
             >
-              <div className='font-medium'>#{pitch.pitch_number}</div>
-              <div className='text-muted-foreground'>
-                {pitch.height != null ? `${pitch.height}m` : '-'}
+              <div className='grid grid-cols-6 items-center gap-2'>
+                <div className='font-medium'>#{pitch.pitch_number}</div>
+                <div className='text-muted-foreground'>
+                  {pitch.height != null ? `${pitch.height}m` : '-'}
+                </div>
+                <div className='truncate'>{pitch.anchor_location || '-'}</div>
+                <div className='col-span-2 truncate'>
+                  {pitch.anchor_type || '-'}
+                </div>
+                <div className='flex gap-2 text-xs'>
+                  {pitch.did_setup && (
+                    <span className='bg-primary/10 text-primary rounded px-1.5'>
+                      Setup
+                    </span>
+                  )}
+                  {pitch.did_rescue && (
+                    <span className='bg-destructive/10 text-destructive rounded px-1.5'>
+                      Rescue
+                    </span>
+                  )}
+                </div>
               </div>
-              <div className='truncate'>{pitch.anchor_location || '-'}</div>
-              <div className='col-span-2 truncate'>
-                {pitch.anchor_type || '-'}
-              </div>
-              <div className='flex gap-2 text-xs'>
-                {pitch.did_setup && (
-                  <span className='bg-primary/10 text-primary rounded px-1.5'>
-                    Setup
-                  </span>
-                )}
-                {pitch.did_rescue && (
-                  <span className='bg-destructive/10 text-destructive rounded px-1.5'>
-                    Rescue
-                  </span>
-                )}
-              </div>
+              {pitch.notes && (
+                <div className='text-muted-foreground pl-[60px] text-xs italic'>
+                  {pitch.notes}
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -160,131 +168,150 @@ export function PitchEditor({
               return (
                 <div
                   key={pitch.id ?? `temp-${index}`}
-                  className='grid grid-cols-[60px_1fr_1fr_2fr_60px_60px_40px] items-center gap-2 p-2'
+                  className='flex flex-col gap-2 p-2'
                   data-testid={`pitch-row-${index}`}
                 >
-                  <Input
-                    type='number'
-                    min={1}
-                    value={pitch.pitch_number || ''}
-                    onChange={e =>
-                      handleUpdatePitch(
-                        index,
-                        'pitch_number',
-                        e.target.value === ''
-                          ? 0
-                          : Number.parseInt(e.target.value, 10)
-                      )
-                    }
-                    className='h-8 px-2'
-                    aria-label={`Pitch number for row ${index + 1}`}
-                  />
-
-                  <Input
-                    type='number'
-                    min={0}
-                    value={pitch.height ?? ''}
-                    onChange={e =>
-                      handleUpdatePitch(
-                        index,
-                        'height',
-                        e.target.value === ''
-                          ? null
-                          : Number.parseInt(e.target.value, 10)
-                      )
-                    }
-                    className='h-8 px-2'
-                    placeholder='Height'
-                    aria-label={`Height for pitch ${pitch.pitch_number}`}
-                  />
-
-                  <Select
-                    value={pitch.anchor_location ?? ''}
-                    onValueChange={value =>
-                      handleUpdatePitch(
-                        index,
-                        'anchor_location',
-                        value === 'none' ? null : value
-                      )
-                    }
-                  >
-                    <SelectTrigger
-                      className='h-8 px-2'
-                      aria-label={`Location for pitch ${pitch.pitch_number}`}
-                    >
-                      <SelectValue placeholder='-' />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value='none'>- None -</SelectItem>
-                      {VALID_ANCHOR_LOCATIONS.map(loc => (
-                        <SelectItem key={loc} value={loc}>
-                          {loc}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-
-                  <Select
-                    value={pitch.anchor_type ?? ''}
-                    onValueChange={value =>
-                      handleUpdatePitch(
-                        index,
-                        'anchor_type',
-                        value === 'none' ? null : value
-                      )
-                    }
-                  >
-                    <SelectTrigger
-                      className='h-8 px-2'
-                      aria-label={`Anchor type for pitch ${pitch.pitch_number}`}
-                    >
-                      <SelectValue placeholder='-' />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value='none'>- None -</SelectItem>
-                      {VALID_ANCHOR_TYPES.map(type => (
-                        <SelectItem key={type} value={type}>
-                          {type}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-
-                  <div className='flex justify-center'>
-                    <Checkbox
-                      checked={pitch.did_setup ?? false}
-                      onCheckedChange={checked =>
-                        handleUpdatePitch(index, 'did_setup', checked === true)
+                  <div className='grid grid-cols-[60px_1fr_1fr_2fr_60px_60px_40px] items-center gap-2'>
+                    <Input
+                      type='number'
+                      min={1}
+                      value={pitch.pitch_number || ''}
+                      onChange={e =>
+                        handleUpdatePitch(
+                          index,
+                          'pitch_number',
+                          e.target.value === ''
+                            ? 0
+                            : Number.parseInt(e.target.value, 10)
+                        )
                       }
-                      aria-label={`Setup for pitch ${pitch.pitch_number}`}
-                      data-testid={`pitch-setup-${index}`}
+                      className='h-8 px-2'
+                      aria-label={`Pitch number for row ${index + 1}`}
                     />
-                  </div>
 
-                  <div className='flex justify-center'>
-                    <Checkbox
-                      checked={pitch.did_rescue ?? false}
-                      onCheckedChange={checked =>
-                        handleUpdatePitch(index, 'did_rescue', checked === true)
+                    <Input
+                      type='number'
+                      min={0}
+                      value={pitch.height ?? ''}
+                      onChange={e =>
+                        handleUpdatePitch(
+                          index,
+                          'height',
+                          e.target.value === ''
+                            ? null
+                            : Number.parseInt(e.target.value, 10)
+                        )
                       }
-                      aria-label={`Rescue for pitch ${pitch.pitch_number}`}
-                      data-testid={`pitch-rescue-${index}`}
+                      className='h-8 px-2'
+                      placeholder='Height'
+                      aria-label={`Height for pitch ${pitch.pitch_number}`}
                     />
-                  </div>
 
-                  <div className='flex justify-center'>
-                    <Button
-                      type='button'
-                      variant='ghost'
-                      size='icon'
-                      className='text-muted-foreground hover:text-destructive h-8 w-8'
-                      onClick={() => handleRemovePitch(index)}
-                      aria-label={`Remove pitch ${pitch.pitch_number}`}
-                      data-testid={`remove-pitch-${index}`}
+                    <Select
+                      value={pitch.anchor_location ?? ''}
+                      onValueChange={value =>
+                        handleUpdatePitch(
+                          index,
+                          'anchor_location',
+                          value === 'none' ? null : value
+                        )
+                      }
                     >
-                      <Trash2 className='h-4 w-4' />
-                    </Button>
+                      <SelectTrigger
+                        className='h-8 px-2'
+                        aria-label={`Location for pitch ${pitch.pitch_number}`}
+                      >
+                        <SelectValue placeholder='-' />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value='none'>- None -</SelectItem>
+                        {VALID_ANCHOR_LOCATIONS.map(loc => (
+                          <SelectItem key={loc} value={loc}>
+                            {loc}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+
+                    <Select
+                      value={pitch.anchor_type ?? ''}
+                      onValueChange={value =>
+                        handleUpdatePitch(
+                          index,
+                          'anchor_type',
+                          value === 'none' ? null : value
+                        )
+                      }
+                    >
+                      <SelectTrigger
+                        className='h-8 px-2'
+                        aria-label={`Anchor type for pitch ${pitch.pitch_number}`}
+                      >
+                        <SelectValue placeholder='-' />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value='none'>- None -</SelectItem>
+                        {VALID_ANCHOR_TYPES.map(type => (
+                          <SelectItem key={type} value={type}>
+                            {type}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+
+                    <div className='flex justify-center'>
+                      <Checkbox
+                        checked={pitch.did_setup ?? false}
+                        onCheckedChange={checked =>
+                          handleUpdatePitch(
+                            index,
+                            'did_setup',
+                            checked === true
+                          )
+                        }
+                        aria-label={`Setup for pitch ${pitch.pitch_number}`}
+                        data-testid={`pitch-setup-${index}`}
+                      />
+                    </div>
+
+                    <div className='flex justify-center'>
+                      <Checkbox
+                        checked={pitch.did_rescue ?? false}
+                        onCheckedChange={checked =>
+                          handleUpdatePitch(
+                            index,
+                            'did_rescue',
+                            checked === true
+                          )
+                        }
+                        aria-label={`Rescue for pitch ${pitch.pitch_number}`}
+                        data-testid={`pitch-rescue-${index}`}
+                      />
+                    </div>
+
+                    <div className='flex justify-center'>
+                      <Button
+                        type='button'
+                        variant='ghost'
+                        size='icon'
+                        className='text-muted-foreground hover:text-destructive h-8 w-8'
+                        onClick={() => handleRemovePitch(index)}
+                        aria-label={`Remove pitch ${pitch.pitch_number}`}
+                        data-testid={`remove-pitch-${index}`}
+                      >
+                        <Trash2 className='h-4 w-4' />
+                      </Button>
+                    </div>
                   </div>
+                  <Input
+                    value={pitch.notes || ''}
+                    onChange={e =>
+                      handleUpdatePitch(index, 'notes', e.target.value)
+                    }
+                    className='h-8 w-full'
+                    placeholder='Optional pitch notes...'
+                    aria-label={`Notes for pitch ${pitch.pitch_number}`}
+                  />
                 </div>
               );
             })}

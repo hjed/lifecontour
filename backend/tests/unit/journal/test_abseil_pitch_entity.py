@@ -20,6 +20,7 @@ class TestAbseilPitch:
         assert pitch.anchor_type is None
         assert pitch.did_rescue is None
         assert pitch.did_setup is None
+        assert pitch.notes is None
         assert pitch.created_at is None
         assert pitch.updated_at is None
 
@@ -34,6 +35,7 @@ class TestAbseilPitch:
             anchor_type="double bolt",
             did_rescue=True,
             did_setup=False,
+            notes="Very wet pitch",
         )
 
         assert pitch.journal_id == 5
@@ -44,6 +46,7 @@ class TestAbseilPitch:
         assert pitch.anchor_type == "double bolt"
         assert pitch.did_rescue is True
         assert pitch.did_setup is False
+        assert pitch.notes == "Very wet pitch"
 
     # --- journal_id validation ---
 
@@ -189,3 +192,15 @@ class TestAbseilPitch:
         """Test did_setup set to None (field is optional)."""
         pitch = AbseilPitch(journal_id=1, pitch_number=1, did_setup=None)
         assert pitch.did_setup is None
+
+    # --- notes field ---
+
+    def test_notes_valid(self):
+        """Test notes field is correctly populated."""
+        pitch = AbseilPitch(journal_id=1, pitch_number=1, notes="Slippery rope")
+        assert pitch.notes == "Slippery rope"
+
+    def test_notes_none(self):
+        """Test notes field set to None."""
+        pitch = AbseilPitch(journal_id=1, pitch_number=1, notes=None)
+        assert pitch.notes is None

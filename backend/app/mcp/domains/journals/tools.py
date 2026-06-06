@@ -2263,6 +2263,7 @@ _JOURNAL_TYPE_DATA_FIELDS: dict[str, dict[str, str]] = {
         "total_length": "float in m (optional)",
         "number_of_setups": "int (optional)",
         "number_of_rescues": "int (optional)",
+        "pitches": "list of objects with optional fields: pitch_number (int, required), height (int), anchor_location (str), anchor_type (str), did_rescue (bool), did_setup (bool), notes (str)",
     },
     "CANYONING": {
         "french_grade": "string (optional)",
