@@ -260,6 +260,7 @@ class Contact:
     nick_name: str | None = None
     company: str | None = None
     job_title: str | None = None
+    photo_url: str | None = None
     is_favourite: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None

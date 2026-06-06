@@ -34,6 +34,7 @@ contacts_table = Table(
     Column("nick_name", String(100), nullable=True),
     Column("company", String(200), nullable=True),
     Column("job_title", String(200), nullable=True),
+    Column("photo_url", String(500), nullable=True),
     Column(
         "created_at",
         DateTime(timezone=True),

@@ -192,6 +192,7 @@ class ContactConverter:
             middle_name=contact.middle_name,
             nick_name=contact.nick_name,
             is_favourite=contact.is_favourite,
+            photo_url=contact.photo_url,
             created_at=contact.created_at,
             updated_at=contact.updated_at,
             contact_methods=contact_methods,

@@ -119,3 +119,28 @@ class ImmichTokenService:
         """
         stmt = text("DELETE FROM user_immich_auth WHERE user_id = :user_id")
         await self._connection.execute(stmt, {"user_id": user_id})
+
+    async def get_credentials(self, user_id: str) -> tuple[str | None, str | None]:
+        """Fetch and decrypt the user's Immich server URL and API key.
+
+        Args:
+            user_id: The internal user ID.
+
+        Returns:
+            Tuple of (server_url, api_key), or (None, None) if not configured.
+
+        Raises:
+            ImmichTokenStorageError: If decryption fails.
+        """
+        query = text("""
+            SELECT server_url, encrypted_api_key
+            FROM user_immich_auth
+            WHERE user_id = :user_id
+        """)
+        result = await self._connection.execute(query, {"user_id": user_id})
+        row = result.fetchone()
+        if row is None:
+            return None, None
+
+        api_key = self.fernet.decrypt(row.encrypted_api_key).decode()
+        return row.server_url, api_key

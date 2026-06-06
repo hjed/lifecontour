@@ -7,6 +7,9 @@ registry.
 """
 
 from arq.connections import ArqRedis, RedisSettings
+from core_shared.repositories.external_reference_repository import (
+    ExternalReferenceRepository,
+)
 from dishka import Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -21,6 +24,7 @@ from app.core.integrations.adapters.sql.snipeit_settings_repository import (
 from app.core.integrations.adapters.sql.strava_athlete_mapping_repository import (
     SqlStravaAthleteMappingRepository,
 )
+from app.core.integrations.avatar_proxy_service import AvatarProxyService
 from app.core.integrations.database import IntegrationDatabaseManager
 from app.core.integrations.encryption import EncryptionService
 from app.core.integrations.external_reference_service import ExternalReferenceService
@@ -313,6 +317,33 @@ class IntegrationProvider(Provider):
         return ImmichTokenService(
             connection=connection,
             encryption_key=settings.immich_encryption_key,
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def provide_external_reference_repository(
+        self, connection: AsyncConnection
+    ) -> ExternalReferenceRepository:
+        """Provide ExternalReferenceRepository for request scope."""
+        return ExternalReferenceRepository(connection=connection)
+
+    @provide(scope=Scope.REQUEST)
+    def provide_avatar_proxy_service(
+        self,
+        ext_ref_repo: ExternalReferenceRepository,
+        immich_token_service: ImmichTokenService,
+    ) -> AvatarProxyService:
+        """Provide avatar proxy service for request scope.
+
+        Args:
+            ext_ref_repo: Repository for external reference lookups
+            immich_token_service: Service for Immich credential management
+
+        Returns:
+            AvatarProxyService: Service for proxying Immich thumbnails
+        """
+        return AvatarProxyService(
+            ext_ref_repo=ext_ref_repo,
+            immich_token_service=immich_token_service,
         )
 
     @provide(scope=Scope.REQUEST)
