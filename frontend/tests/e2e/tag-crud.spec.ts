@@ -1,6 +1,30 @@
 import { test, expect } from './fixtures';
+import type { Page } from '@playwright/test';
 
-import { SidebarTestHelpers } from './utils/test-helpers';
+async function ensureSidebarOpen(page: Page) {
+  const isMobile =
+    page.viewportSize()?.width && page.viewportSize()!.width < 768;
+  if (isMobile) {
+    const mobileTrigger = page.getByTestId('mobile-nav-trigger');
+    const isSidebarVisible = await page
+      .getByRole('heading', { name: 'Navigation' })
+      .isVisible();
+    if (!isSidebarVisible) {
+      await mobileTrigger.click();
+      await expect(
+        page.getByRole('heading', { name: 'Navigation' })
+      ).toBeVisible();
+    }
+  }
+
+  // Expand Contacts section if collapsed
+  const sectionHeader = page.getByRole('button', { name: 'Contacts' });
+  await expect(sectionHeader).toBeVisible();
+  const isExpanded = await sectionHeader.getAttribute('aria-expanded');
+  if (isExpanded === 'false') {
+    await sectionHeader.click();
+  }
+}
 
 test.describe('Tag CRUD UI Updates', () => {
   test('tag creation, update, and deletion reflects in sidebar', async ({
@@ -10,8 +34,6 @@ test.describe('Tag CRUD UI Updates', () => {
     const uniqueHash = Date.now().toString();
     const tagName = 'CrudTest-' + uniqueHash;
     let tagId = '';
-
-    const sidebarHelpers = new SidebarTestHelpers(authenticatedPage);
 
     // Navigate to contacts page
     await authenticatedPage.goto('/contacts');
@@ -35,14 +57,16 @@ test.describe('Tag CRUD UI Updates', () => {
     // we can always execute the delete without a branch.
     try {
       // Reload page and poll until it appears in sidebar
-      await expect(async () => {
-        await authenticatedPage.reload();
-        await sidebarHelpers.waitForSidebar();
+      // Reload page once and open sidebar
+      await authenticatedPage.reload();
+      await ensureSidebarOpen(authenticatedPage);
 
-        const tagLink = authenticatedPage
-          .locator(`a[href*="/contacts?tag=${tagId}"]`)
-          .filter({ hasText: new RegExp(tagName, 'i') })
-          .first();
+      // Poll until it appears in sidebar
+      await expect(async () => {
+        const tagLink = authenticatedPage.getByRole('link', {
+          name: tagName,
+          exact: true,
+        });
         await expect(tagLink).toBeVisible();
       }).toPass({ timeout: 15000 });
 
@@ -64,14 +88,16 @@ test.describe('Tag CRUD UI Updates', () => {
       expect(updateResp.ok()).toBe(true);
 
       // Reload page and poll until the new text appears
-      await expect(async () => {
-        await authenticatedPage.reload();
-        await sidebarHelpers.waitForSidebar();
+      // Reload page once and open sidebar
+      await authenticatedPage.reload();
+      await ensureSidebarOpen(authenticatedPage);
 
-        const tagLink = authenticatedPage
-          .locator(`a[href*="/contacts?tag=${tagId}"]`)
-          .filter({ hasText: new RegExp(newTagName, 'i') })
-          .first();
+      // Poll until the new text appears
+      await expect(async () => {
+        const tagLink = authenticatedPage.getByRole('link', {
+          name: newTagName,
+          exact: true,
+        });
         await expect(tagLink).toBeVisible();
       }).toPass({ timeout: 15000 });
 
@@ -82,13 +108,16 @@ test.describe('Tag CRUD UI Updates', () => {
       expect(deleteResp.ok()).toBe(true);
 
       // Reload page and poll until it disappears
-      await expect(async () => {
-        await authenticatedPage.reload();
-        await sidebarHelpers.waitForSidebar();
+      // Reload page once and open sidebar
+      await authenticatedPage.reload();
+      await ensureSidebarOpen(authenticatedPage);
 
-        const tagLink = authenticatedPage.locator(
-          `a[href*="/contacts?tag=${tagId}"]`
-        );
+      // Poll until it disappears
+      await expect(async () => {
+        const tagLink = authenticatedPage.getByRole('link', {
+          name: newTagName,
+          exact: true,
+        });
         await expect(tagLink).toHaveCount(0);
       }).toPass({ timeout: 15000 });
     } finally {
