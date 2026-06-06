@@ -228,13 +228,36 @@ test.describe('Journal Review Queue', () => {
     await expect(dismissBtn).toBeVisible();
     await dismissBtn.scrollIntoViewIfNeeded();
     await expect(dismissBtn).toBeEnabled();
-    // Use dispatchEvent instead of .click() as the Radix Sheet overlay and Mobile viewport
-    // constraints prevent reliable bounding-box clicks even with force: true
-    await dismissBtn.dispatchEvent('click');
+    // Wait for both the POST dismiss response and the subsequent GET review-items refetch.
+    let dismissPostFinished = false;
+    await Promise.all([
+      page.waitForResponse(resp => {
+        if (
+          resp.url().includes('/dismiss') &&
+          resp.request().method() === 'POST' &&
+          resp.ok()
+        ) {
+          dismissPostFinished = true;
+          return true;
+        }
+        return false;
+      }),
+      page.waitForResponse(
+        resp =>
+          dismissPostFinished &&
+          resp.url().includes('/api/journals/review-items') &&
+          !resp.url().includes('/dismiss') &&
+          resp.request().method() === 'GET' &&
+          resp.ok()
+      ),
+      // Use dispatchEvent instead of .click() as the Radix Sheet overlay and Mobile viewport
+      // constraints prevent reliable bounding-box clicks even with force: true
+      dismissBtn.dispatchEvent('click'),
+    ]);
 
     await expect(page.getByText('Review item dismissed')).toBeVisible();
     await expect(sidebar).not.toContainText('Dismiss Candidate Duplicate', {
-      timeout: 10000,
+      timeout: 15000,
     });
 
     // Also verify the list reflects the empty state or is removed

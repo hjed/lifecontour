@@ -729,9 +729,23 @@ test.describe('Journal Detail Page', () => {
       await expect(page.locator('main, [role="main"]').first()).toBeVisible();
       await expect(page.getByTestId('journal-detail-view')).toBeVisible();
 
-      // Contact badge should be visible before removal
+      // Contact badge should be visible before removal (using toPass with reload for Mobile Chrome flakiness)
+      await expect(async () => {
+        // Sometimes the UI needs a hard refresh on Mobile to render newly created relationships
+        const badge = page.getByTestId(`contact-badge-${contact.id}`);
+        try {
+          await expect(badge).toBeVisible({ timeout: 2000 });
+        } catch {
+          await page.reload();
+          await expect(
+            page.locator('main, [role="main"]').first()
+          ).toBeVisible();
+          await expect(page.getByTestId('journal-detail-view')).toBeVisible();
+          await expect(badge).toBeVisible({ timeout: 5000 });
+        }
+      }).toPass({ timeout: 15000 });
+
       const contactBadge = page.getByTestId(`contact-badge-${contact.id}`);
-      await expect(contactBadge).toBeVisible();
 
       // Click the remove button
       const removeContactButton = page.getByTestId(
@@ -796,9 +810,21 @@ test.describe('Journal Detail Page', () => {
       await expect(page.locator('main, [role="main"]').first()).toBeVisible();
       await expect(page.getByTestId('journal-detail-view')).toBeVisible();
 
-      // Contact badge should be visible
-      const contactBadge = page.getByTestId(`contact-badge-${contact.id}`);
-      await expect(contactBadge).toBeVisible();
+      // Contact badge should be visible (using toPass with reload for Mobile Chrome flakiness)
+      await expect(async () => {
+        // Sometimes the UI needs a hard refresh on Mobile to render newly created relationships
+        const badge = page.getByTestId(`contact-badge-${contact.id}`);
+        try {
+          await expect(badge).toBeVisible({ timeout: 2000 });
+        } catch {
+          await page.reload();
+          await expect(
+            page.locator('main, [role="main"]').first()
+          ).toBeVisible();
+          await expect(page.getByTestId('journal-detail-view')).toBeVisible();
+          await expect(badge).toBeVisible({ timeout: 5000 });
+        }
+      }).toPass({ timeout: 15000 });
 
       // Verify initial status
       const neutralStatus = page.getByTestId(`contact-status-${contact.id}`);

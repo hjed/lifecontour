@@ -40,7 +40,28 @@ test.describe('Settings - Template Management', () => {
     // 5. Confirm deletion in dialog
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
-    await dialog.getByRole('button', { name: /delete/i }).click();
+    let deletePostFinished = false;
+    await Promise.all([
+      page.waitForResponse(resp => {
+        if (
+          resp.url().includes('/api/templates') &&
+          resp.request().method() === 'DELETE' &&
+          resp.ok()
+        ) {
+          deletePostFinished = true;
+          return true;
+        }
+        return false;
+      }),
+      page.waitForResponse(
+        resp =>
+          deletePostFinished &&
+          resp.url().includes('/api/templates') &&
+          resp.request().method() === 'GET' &&
+          resp.ok()
+      ),
+      dialog.getByRole('button', { name: /delete/i }).click(),
+    ]);
 
     // Wait for dialog to close
     await expect(dialog).toBeHidden();

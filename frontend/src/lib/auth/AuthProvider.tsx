@@ -96,7 +96,9 @@ function authReducer(state: AuthState, event: AuthEvent): AuthState {
         user: null,
         isAuthenticated: false,
         isLoading: false,
-        error: ERROR_MESSAGES.SESSION_EXPIRED,
+        error: state.isAuthenticated
+          ? ERROR_MESSAGES.SESSION_EXPIRED
+          : undefined,
       };
 
     case 'SESSION_REFRESH':
@@ -145,18 +147,33 @@ export function AuthProvider({ children }: AuthProviderProps) {
         });
 
         if (!response.ok) {
-          return null;
+          if (response.status === 401 || response.status === 403) {
+            return null;
+          }
+          throw new Error(
+            `Session check failed with status ${response.status}`
+          );
         }
 
         const data = await response.json();
         // Backend returns { authenticated: boolean, user: SessionUser | null }
         return data.authenticated ? data.user : null;
-      } catch {
-        return null;
+      } catch (err) {
+        // If it's already a handled error status, rethrow it
+        if (
+          err instanceof Error &&
+          err.message.startsWith('Session check failed')
+        ) {
+          throw err;
+        }
+        // Otherwise it's a network error
+        throw new Error(
+          err instanceof Error ? err.message : 'Network error checking session'
+        );
       }
     },
     staleTime: 5 * 60 * 1000, // 5 minutes
-    retry: false,
+    retry: 2, // Retry twice on network or server errors to handle transient glitches
   });
 
   // Update auth state when session data changes
@@ -167,7 +184,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
 
     if (sessionError) {
+      // On network/server errors, treat user as not authenticated but clear error
+      // so we don't display a false "Session expired" message
       dispatch({ type: 'SESSION_EXPIRED' });
+      dispatch({ type: 'CLEAR_ERROR' });
       return;
     }
 
