@@ -1,11 +1,9 @@
-import Link from 'next/link';
 import { Mail, Phone, Calendar } from 'lucide-react';
 import { format } from 'date-fns';
 import { enAU } from 'date-fns/locale';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { FavouriteToggle } from '@/components/contacts/FavouriteToggle';
-import { ContactAvatar } from '@/components/contacts/ContactAvatar';
+import { ContactCardHeader as SharedContactCardHeader } from '@/components/contacts/ContactCardHeader';
 import { DisplayContact } from '@/hooks/useDisplayContacts';
 import { DATE_FORMATS } from '@/lib/constants';
 
@@ -25,29 +23,7 @@ export function ContactCard({ contact }: ContactCardProps) {
       className='transition-shadow hover:shadow-md'
     >
       <CardHeader>
-        <div className='flex items-start justify-between'>
-          <div className='flex items-center gap-3'>
-            <ContactAvatar
-              firstName={contact.first_name}
-              lastName={contact.last_name}
-              imageUrl={contact.photo_url ?? undefined}
-              size='sm'
-            />
-            <CardTitle className='text-lg'>
-              <Link
-                href={`/contacts/${contact.id}`}
-                className='hover:underline'
-              >
-                {contact.name}
-              </Link>
-            </CardTitle>
-          </div>
-          <FavouriteToggle
-            contactId={contact.id}
-            isFavourite={contact.is_favourite}
-            contactName={contact.name}
-          />
-        </div>
+        <SharedContactCardHeader contact={contact} />
       </CardHeader>
       <CardContent className='space-y-3'>
         {/* Contact Methods */}
