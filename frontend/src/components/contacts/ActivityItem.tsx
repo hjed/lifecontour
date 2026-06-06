@@ -95,7 +95,7 @@ function formatActivityDescription(
     case 'created':
       return `Added ${formattedField}: "${newValue}"`;
     case 'deleted':
-      return `Removed ${formattedField}`;
+      return `Removed ${formattedField}: "${oldValue}"`;
     case 'updated':
       return `Changed ${formattedField} from "${oldValue}" to "${newValue}"`;
     default:

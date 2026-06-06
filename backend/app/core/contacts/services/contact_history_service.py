@@ -105,6 +105,7 @@ class ContactHistoryService:
         self,
         contact_id: int,
         tag_id: int,
+        tag_name: str,
         action: str,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
@@ -112,11 +113,11 @@ class ContactHistoryService:
     ) -> None:
         """Record a tag assignment/removal as field change."""
         entry = ContactFieldHistoryEntry(
-            entity_type="contact_tag",
-            entity_id=tag_id,
-            field_name="contact_id",
-            old_value=None if action == "assigned" else str(contact_id),
-            new_value=str(contact_id) if action == "assigned" else None,
+            entity_type="contact",
+            entity_id=contact_id,
+            field_name="tags",
+            old_value=None if action == "assigned" else tag_name,
+            new_value=tag_name if action == "assigned" else None,
             changed_by=changed_by,
             source=source,
         )
