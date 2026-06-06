@@ -1,5 +1,6 @@
 ---
-description: How to create and name alembic database migrations
+name: creating-migrations
+description: How to create and name Alembic database migrations. Use whenever creating a new database migration so it follows the project's sequential naming convention.
 ---
 
 # Creating Database Migrations
