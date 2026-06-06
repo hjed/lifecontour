@@ -301,10 +301,6 @@ class ImmichSyncService:
                 sync_type="updated",
                 external_id=person.id,
                 contact_data=contact_data,
-            )
-            await self._upsert_sync_metadata(
-                external_id=person.id,
-                internal_id=existing_ref.internal_entity_id,
                 version_hash=version_hash,
             )
             result.updated += 1
@@ -332,10 +328,6 @@ class ImmichSyncService:
                 sync_type="updated",
                 external_id=person.id,
                 contact_data=contact_data,
-            )
-            await self._upsert_sync_metadata(
-                external_id=person.id,
-                internal_id=contact.id,
                 version_hash=version_hash,
             )
             result.linked += 1
@@ -358,6 +350,7 @@ class ImmichSyncService:
             sync_type="created",
             external_id=person.id,
             contact_data=contact_data,
+            version_hash=version_hash,
         )
         result.created += 1
 
@@ -415,6 +408,7 @@ class ImmichSyncService:
         sync_type: str,
         external_id: str,
         contact_data: dict[str, Any],
+        version_hash: str,
     ) -> None:
         """Insert a contact sync outbox event via raw SQL.
 
@@ -425,6 +419,7 @@ class ImmichSyncService:
             sync_type: ``'created'`` or ``'updated'``.
             external_id: Immich person ID.
             contact_data: Serialized contact dict.
+            version_hash: The calculated Immich person version hash.
         """
         event_id = str(uuid4())
         now = datetime.now(UTC)
@@ -434,6 +429,7 @@ class ImmichSyncService:
             "contact_data": contact_data,
             "sync_timestamp": now.isoformat(),
             "sync_type": sync_type,
+            "etag": version_hash,
         }
 
         query = text("""

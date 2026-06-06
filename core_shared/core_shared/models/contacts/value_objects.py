@@ -14,6 +14,7 @@ class Provenance(StrEnum):
     STRAVA = "strava"
     SUMMARY_REGENERATION = "summary_regeneration"
     SYSTEM = "system"
+    IMMICH = "immich"
 
 
 @dataclass(frozen=True)

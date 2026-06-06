@@ -67,7 +67,7 @@ def _map_provenance(integration_source: str) -> Provenance:
         "google": Provenance.GOOGLE_CONTACTS,
         "google_contacts": Provenance.GOOGLE_CONTACTS,
         "strava": Provenance.STRAVA,
-        "immich": Provenance.SYSTEM,
+        "immich": Provenance.IMMICH,
     }
     return source_map.get(integration_source, Provenance.SYSTEM)
 
@@ -685,6 +685,22 @@ class OutboxEventProcessor:
                     changed_by=sync_changed_by,
                     source=provenance_source,
                 )
+
+                # Backfill photo_url for immich since the ID wasn't known during outbox event creation
+                if (
+                    integration_source == "immich"
+                    and created_contact.id
+                    and not created_contact.photo_url
+                ):
+                    # Update the contact object with the new photo_url
+                    contact.id = created_contact.id
+                    contact.photo_url = f"/api/contacts/{created_contact.id}/avatar"
+                    created_contact = await self.contact_service.update_contact(
+                        contact,
+                        self.connection,
+                        changed_by=sync_changed_by,
+                        source=provenance_source,
+                    )
             else:
                 contact.id = matched_contact.id
                 created_contact = await self.contact_service.update_contact(
@@ -756,7 +772,12 @@ class OutboxEventProcessor:
 
         # Create initial sync metadata
         # Calculate version hash for the contact data
-        version_hash = calculate_contact_version_hash(contact_data)
+        # Use integration-provided etag if available, fallback to contact data hash
+        version_hash = (
+            payload.etag
+            if payload.etag is not None
+            else calculate_contact_version_hash(contact_data)
+        )
 
         try:
             await self.sync_metadata_repo.upsert(
@@ -819,7 +840,12 @@ class OutboxEventProcessor:
         )
 
         # Calculate version hash for idempotency check
-        new_version_hash = calculate_contact_version_hash(contact_data)
+        # Use integration-provided etag if available, fallback to contact data hash
+        new_version_hash = (
+            payload.etag
+            if payload.etag is not None
+            else calculate_contact_version_hash(contact_data)
+        )
 
         # Acquire lock on sync metadata (SELECT FOR UPDATE)
         # This prevents concurrent updates to the same contact

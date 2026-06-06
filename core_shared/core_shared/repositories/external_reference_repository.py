@@ -121,23 +121,6 @@ class ExternalReferenceRepository:
             "day": row.day,
         }
 
-    async def update_contact_photo_url(self, contact_id: int, photo_url: str) -> None:
-        """Update a contact's photo_url field.
-
-        Args:
-            contact_id: Internal contact ID.
-            photo_url: The proxy URL to set.
-        """
-        query = text("""
-            UPDATE contacts
-            SET photo_url = :photo_url, updated_at = NOW()
-            WHERE id = :contact_id
-        """)
-        await self._conn.execute(
-            query,
-            {"photo_url": photo_url, "contact_id": contact_id},
-        )
-
     async def get_immich_person_id(self, contact_id: int) -> str | None:
         """Look up the Immich person ID linked to a contact.
 
