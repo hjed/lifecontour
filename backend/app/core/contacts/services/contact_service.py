@@ -778,25 +778,25 @@ class ContactService:
 
         # Check method changes
         if updated_contact.methods is not None:
-            current_method_strs = {
-                f"{m.method_type.value}:{m.value}"
-                for m in (current_contact.methods or [])
-                if m.method_type and m.value
-            }
-            updated_method_strs = {
-                f"{m.method_type.value}:{m.value}"
-                for m in updated_contact.methods
-                if m.method_type and m.value
-            }
+            current_method_strs = sorted(
+                [
+                    f"{m.method_type.value}:{m.value}"
+                    for m in (current_contact.methods or [])
+                    if m.method_type and m.value
+                ]
+            )
+            updated_method_strs = sorted(
+                [
+                    f"{m.method_type.value}:{m.value}"
+                    for m in updated_contact.methods
+                    if m.method_type and m.value
+                ]
+            )
 
             if current_method_strs != updated_method_strs:
                 changed_fields["contact_methods"] = (
-                    ", ".join(sorted(current_method_strs))
-                    if current_method_strs
-                    else "None",
-                    ", ".join(sorted(updated_method_strs))
-                    if updated_method_strs
-                    else "None",
+                    ", ".join(current_method_strs) if current_method_strs else "None",
+                    ", ".join(updated_method_strs) if updated_method_strs else "None",
                 )
 
         # Check address changes
@@ -805,6 +805,7 @@ class ContactService:
             def _format_address(a: ContactAddress) -> str:
                 parts = [
                     a.street_line_1,
+                    a.street_line_2,
                     a.locality,
                     a.region,
                     a.postal_code,
@@ -812,19 +813,17 @@ class ContactService:
                 ]
                 return ", ".join(str(p) for p in parts if p) or "Unknown Address"
 
-            current_addr_strs = {
-                _format_address(a) for a in (current_contact.addresses or [])
-            }
-            updated_addr_strs = {_format_address(a) for a in updated_contact.addresses}
+            current_addr_strs = sorted(
+                [_format_address(a) for a in (current_contact.addresses or [])]
+            )
+            updated_addr_strs = sorted(
+                [_format_address(a) for a in updated_contact.addresses]
+            )
 
             if current_addr_strs != updated_addr_strs:
                 changed_fields["addresses"] = (
-                    " | ".join(sorted(current_addr_strs))
-                    if current_addr_strs
-                    else "None",
-                    " | ".join(sorted(updated_addr_strs))
-                    if updated_addr_strs
-                    else "None",
+                    " | ".join(current_addr_strs) if current_addr_strs else "None",
+                    " | ".join(updated_addr_strs) if updated_addr_strs else "None",
                 )
 
         if updated_contact.notes is not None and len(
@@ -845,33 +844,21 @@ class ContactService:
 
         # Check tag changes
         if updated_contact.tags is not None:
-            current_tags = {
-                str(tag.name) for tag in (current_contact.tags or []) if tag.name
-            }
-            updated_tags = {str(tag.name) for tag in updated_contact.tags if tag.name}
 
-            if not updated_tags and any(
-                tag.id is not None for tag in updated_contact.tags
-            ):
-                # Fallback to IDs if names are missing
-                current_tag_ids = {
-                    str(tag.id)
-                    for tag in (current_contact.tags or [])
-                    if tag.id is not None
-                }
-                updated_tag_ids = {
-                    str(tag.id) for tag in updated_contact.tags if tag.id is not None
-                }
+            def _format_tag(t: Tag) -> str:
+                if t.name:
+                    return str(t.name)
+                return f"id:{t.id}" if t.id is not None else "Unknown Tag"
 
-                if current_tag_ids != updated_tag_ids:
-                    changed_fields["tags"] = (
-                        f"ids:[{', '.join(sorted(current_tag_ids))}]",
-                        f"ids:[{', '.join(sorted(updated_tag_ids))}]",
-                    )
-            elif current_tags != updated_tags:
+            current_tags = sorted(
+                [_format_tag(tag) for tag in (current_contact.tags or [])]
+            )
+            updated_tags = sorted([_format_tag(tag) for tag in updated_contact.tags])
+
+            if current_tags != updated_tags:
                 changed_fields["tags"] = (
-                    ", ".join(sorted(current_tags)) if current_tags else "None",
-                    ", ".join(sorted(updated_tags)) if updated_tags else "None",
+                    ", ".join(current_tags) if current_tags else "None",
+                    ", ".join(updated_tags) if updated_tags else "None",
                 )
 
         return changed_fields
