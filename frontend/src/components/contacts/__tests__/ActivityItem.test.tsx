@@ -98,7 +98,7 @@ describe('ActivityItem', () => {
       </TooltipProvider>
     );
 
-    expect(screen.getByText(/Removed Last Name/i)).toBeInTheDocument();
+    expect(screen.getByText(/Removed Last Name: "Smith"/i)).toBeInTheDocument();
   });
 
   it('applies custom className', () => {
@@ -207,6 +207,6 @@ describe('formatActivityDescription', () => {
       null,
       'contact'
     );
-    expect(result).toBe('Removed Last Name');
+    expect(result).toBe('Removed Last Name: "Smith"');
   });
 });

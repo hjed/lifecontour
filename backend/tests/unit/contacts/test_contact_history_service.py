@@ -153,18 +153,22 @@ class TestContactHistoryService:
         await service.record_tag_change(
             contact_id=1,
             tag_id=2,
+            tag_name="Friend",
             action="assigned",
             changed_by="user123",
             _transaction=mock_transaction,
         )
 
-        call_entry = mock_history_repo.record_change.call_args[0][0]
-        assert call_entry.entity_type == "contact_tag"
-        assert call_entry.entity_id == 2
-        assert call_entry.field_name == "contact_id"
-        assert call_entry.old_value is None
-        assert call_entry.new_value == "1"
-        assert call_entry.changed_by == "user123"
+        # Verify repo call
+        mock_history_repo.record_change.assert_called_once()
+        args = mock_history_repo.record_change.call_args[0]
+        entry = args[0]
+        assert entry.entity_type == "contact"
+        assert entry.entity_id == 1
+        assert entry.field_name == "tags"
+        assert entry.old_value is None
+        assert entry.new_value == "Friend"
+        assert entry.changed_by == "user123"
 
     @pytest.mark.asyncio
     async def test_record_tag_change_removed(
@@ -172,16 +176,23 @@ class TestContactHistoryService:
     ):
         """Test recording tag removal."""
         await service.record_tag_change(
-            contact_id=1, tag_id=2, action="removed", _transaction=mock_transaction
+            contact_id=1,
+            tag_id=2,
+            tag_name="Friend",
+            action="removed",
+            _transaction=mock_transaction,
         )
 
-        call_entry = mock_history_repo.record_change.call_args[0][0]
-        assert call_entry.entity_type == "contact_tag"
-        assert call_entry.entity_id == 2
-        assert call_entry.field_name == "contact_id"
-        assert call_entry.old_value == "1"
-        assert call_entry.new_value is None
-        assert call_entry.changed_by == "system"
+        # Verify repo call
+        mock_history_repo.record_change.assert_called_once()
+        args = mock_history_repo.record_change.call_args[0]
+        entry = args[0]
+        assert entry.entity_type == "contact"
+        assert entry.entity_id == 1
+        assert entry.field_name == "tags"
+        assert entry.old_value == "Friend"
+        assert entry.new_value is None
+        assert entry.changed_by == "system"
 
     @pytest.mark.asyncio
     async def test_get_contact_history(
