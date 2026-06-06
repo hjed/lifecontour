@@ -94,9 +94,7 @@ test.describe('Tag CRUD UI Updates', () => {
     } finally {
       if (tagId) {
         // Only delete if we actually got a valid tag ID back
-        await authenticatedPage.request
-          .delete(`/api/tags/${tagId}`)
-          .catch(() => {});
+        await authenticatedPage.request.delete(`/api/tags/${tagId}`);
       }
     }
   });

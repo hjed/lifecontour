@@ -160,7 +160,7 @@ async def _populate_contact_names(
     contact_ids_to_fetch = [
         int(cs.id)
         for cs in resource.attributes.contacts
-        if int(cs.id) not in contact_cache and not cs.name
+        if int(cs.id) not in contact_cache and (not cs.name or not cs.photo_url)
     ]
 
     # Bulk fetch names and photo_url in a single query

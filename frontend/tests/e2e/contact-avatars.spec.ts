@@ -42,7 +42,7 @@ test.describe('Contact Avatars', () => {
     await expect(avatarFallback).toBeVisible();
 
     // Verify initials are rendered (first letter of first + last name)
-    await expect(avatarFallback).toContainText('A');
+    await expect(avatarFallback).toHaveText('AT');
 
     // No img element should be rendered since photo_url is null
     const avatarImage = contactCard.locator(
@@ -80,7 +80,7 @@ test.describe('Contact Avatars', () => {
     await expect(avatarFallback).toBeVisible();
 
     // Verify initials are rendered
-    await expect(avatarFallback).toContainText('A');
+    await expect(avatarFallback).toHaveText('AP');
   });
 
   test('should display initials avatar on journal participant badges', async ({
@@ -145,5 +145,6 @@ test.describe('Contact Avatars', () => {
       '[data-testid="avatar-contact-fallback"]'
     );
     await expect(avatarInBadge).toBeVisible();
+    await expect(avatarInBadge).toHaveText('JP');
   });
 });
