@@ -18,7 +18,6 @@ from core_shared.models.contacts.entities import (
     SummaryStatus,
 )
 from core_shared.models.contacts.value_objects import Provenance
-from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.contacts.models.repositories import (
     ContactFieldHistoryRepository,
@@ -84,7 +83,9 @@ class SummaryInputAssembler:
         self._summary_repo = summary_repo
         self._calendar_info_repo = None
 
-    async def assemble(self, contact_id: int) -> SummaryInput | None:
+    async def assemble(
+        self, contact_id: int, user_timezone: str = "UTC"
+    ) -> SummaryInput | None:
         """Assemble bounded input data for summary generation.
 
         Returns None if the contact does not exist.
@@ -153,46 +154,6 @@ class SummaryInputAssembler:
         all_j_rels = await self._journal_relationship_repo.get_by_contact(contact_id)
 
         now = datetime.now(tz=UTC)
-
-        # Try to find user's timezone if possible
-        user_timezone = "UTC"
-
-        # Find user ID from a recent journal relation
-        user_id = None
-        for jr in all_j_rels:
-            journal = await self._journal_repo.find_by_id(jr.journal_id)
-            if journal and hasattr(journal, "user_id"):
-                user_id = journal.user_id
-                break
-
-        # To avoid introducing a new dependency on CalendarInfoRepository here
-        # we'll look for timezone directly from the journal calendar infos
-        if user_id and hasattr(self._journal_repo, "find_by_ids_for_user"):
-            from sqlalchemy import text
-
-            try:
-                # We can access connection via one of the repos if we don't have calendar_info_repo
-                # A better approach is to rely on DI to inject it, but we don't want to break existing tests
-                if hasattr(self._summary_repo, "conn"):
-                    query = text(
-                        """
-                        SELECT jci.timezone
-                        FROM journal_calendar_info jci
-                        INNER JOIN journals j ON j.id = jci.journal_id
-                        WHERE j.user_id = :user_id
-                          AND jci.timezone IS NOT NULL
-                        ORDER BY jci.updated_at DESC
-                        LIMIT 1
-                        """
-                    )
-                    result = await self._summary_repo.conn.execute(
-                        query, {"user_id": user_id}
-                    )
-                    row = result.fetchone()
-                    if row:
-                        user_timezone = getattr(row, "timezone", "UTC") or "UTC"
-            except SQLAlchemyError:
-                pass
 
         window_start = now - timedelta(days=self.HISTORY_WINDOW_DAYS)
 
@@ -418,7 +379,9 @@ class SummaryGenerator:
         self._gemini_response_override = _gemini_response_override
         self._history_service = history_service
 
-    async def generate(self, contact_id: int) -> ContactSummary | None:
+    async def generate(
+        self, contact_id: int, user_timezone: str = "UTC"
+    ) -> ContactSummary | None:
         """Generate or regenerate an AI summary for a contact.
 
         Returns the resulting ContactSummary, or None if generation was skipped.
@@ -439,7 +402,7 @@ class SummaryGenerator:
             return existing
 
         # Assemble input first to verify contact exists
-        summary_input = await self._input_assembler.assemble(contact_id)
+        summary_input = await self._input_assembler.assemble(contact_id, user_timezone)
         if summary_input is None:
             logger.warning("Contact %d not found, cannot generate summary", contact_id)
             return None

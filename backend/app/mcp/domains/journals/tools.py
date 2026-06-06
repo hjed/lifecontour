@@ -4454,12 +4454,14 @@ async def dismiss_review_item(
 @mcp_unified_error_handler("get_daily_summary", "journal")
 async def get_daily_summary(
     summary_date: str,
+    user_timezone: str = "UTC",
     daily_summary_service: DailySummaryService = mcp_depends(get_daily_summary_service),
 ) -> str:
     """Get the AI-generated daily summary for a specific date.
 
     Args:
         summary_date: The date to get the summary for (YYYY-MM-DD format)
+        user_timezone: The IANA timezone of the user (e.g. 'Australia/Sydney')
     """
     try:
         parsed_date = date.fromisoformat(summary_date)
@@ -4470,7 +4472,9 @@ async def get_daily_summary(
 
     user_id = await get_current_user_id()
 
-    result = await daily_summary_service.get_or_generate(user_id, parsed_date)
+    result = await daily_summary_service.get_or_generate(
+        user_id, parsed_date, user_timezone
+    )
 
     if result is None:
         return json.dumps({"data": None})

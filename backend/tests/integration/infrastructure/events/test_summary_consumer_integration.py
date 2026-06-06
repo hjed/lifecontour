@@ -129,7 +129,9 @@ class TestSummaryConsumerIntegration:
             assert pending_info["pending"] == 0
 
             # Verify generate was called with our contact
-            mock_generator.generate.assert_called_once_with(contact_id=contact_id)
+            mock_generator.generate.assert_called_once_with(
+                contact_id=contact_id, user_timezone="UTC"
+            )
 
             # Verify search indexer was called after summary generation
             mock_indexer.process_event.assert_called_once()

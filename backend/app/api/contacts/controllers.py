@@ -1101,6 +1101,9 @@ async def refresh_contact_summary(
     summary_repo: FromDishka[ContactSummaryRepository],
     event_publisher: FromDishka[ContactEventPublisher],
     _user: FromDishka[SessionUser],
+    timezone: Annotated[
+        str | None, Query(description="User timezone (IANA format)")
+    ] = None,
 ) -> dict[str, str]:
     """
     Request a refresh of the AI-generated summary for a contact.
@@ -1134,7 +1137,9 @@ async def refresh_contact_summary(
         await summary_repo.upsert(new_summary)
 
     # Publish outbox event to trigger async generation
-    summary_event = ContactSummaryRefreshRequested(contact_id=contact_id)
+    summary_event = ContactSummaryRefreshRequested(
+        contact_id=contact_id, user_timezone=timezone or "UTC"
+    )
     await event_publisher.publish(summary_event)
 
     return {"status": "accepted"}

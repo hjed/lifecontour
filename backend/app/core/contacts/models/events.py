@@ -460,6 +460,7 @@ class ContactSummaryRefreshRequested(DomainEvent):
     def __init__(
         self,
         contact_id: int,
+        user_timezone: str = "UTC",
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
@@ -467,6 +468,6 @@ class ContactSummaryRefreshRequested(DomainEvent):
             occurred_at=datetime.now(tz=UTC),
             aggregate_id=contact_id,
             event_type="ContactSummaryRefreshRequested",
-            event_data={"contact_id": contact_id},
+            event_data={"contact_id": contact_id, "user_timezone": user_timezone},
             transaction=transaction,
         )

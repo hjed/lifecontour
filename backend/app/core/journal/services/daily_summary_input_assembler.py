@@ -47,7 +47,9 @@ class DailySummaryInputAssembler:
         self._summary_repo = summary_repo
         self._calendar_info_repo = calendar_info_repo
 
-    async def assemble(self, user_id: str, summary_date: date) -> DailySummaryInput:
+    async def assemble(
+        self, user_id: str, summary_date: date, user_timezone: str = "UTC"
+    ) -> DailySummaryInput:
         """Assemble input data for a single day's summary.
 
         Fetches all journals for the given date, along with their types,
@@ -129,15 +131,6 @@ class DailySummaryInputAssembler:
         existing = await self._summary_repo.find_by_user_and_date(user_id, summary_date)
         if existing and existing.status == SummaryStatus.GENERATED:
             previous_summary = existing.summary_text
-
-        # Fetch timezone
-        user_timezone = "UTC"
-        if self._calendar_info_repo:
-            tz = await self._calendar_info_repo.get_most_recent_timezone_for_user(
-                user_id
-            )
-            if tz:
-                user_timezone = tz
 
         return DailySummaryInput(
             user_id=user_id,

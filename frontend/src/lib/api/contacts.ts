@@ -35,6 +35,7 @@ import {
   ERROR_MESSAGES,
   SUCCESS_MESSAGES,
 } from '@/lib/constants';
+import { getDefaultTimezone } from '@/components/settings/TimezoneSettings';
 
 // Query Keys
 export const contactKeys = {
@@ -1309,16 +1310,20 @@ export function useCreateCustomDateType() {
 // Summary Refresh API Functions
 
 async function refreshContactSummary(contactId: string): Promise<void> {
-  const response = await fetch(
+  const timezone = getDefaultTimezone();
+  const url = new URL(
     `${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/summary/refresh`,
-    {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    }
+    window.location.origin
   );
+  url.searchParams.append('timezone', timezone);
+
+  const response = await fetch(url.toString(), {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
 
   if (!response.ok) {
     const errorData: JsonApiErrorResponse = await response.json();

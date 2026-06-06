@@ -191,6 +191,8 @@ class SummaryConsumer(DeadLetterConsumerMixin, StreamConsumer):
         activity_checker = LowActivityChecker()
         prompt_builder = SummaryPromptBuilder()
 
+        user_timezone = event_data.get("user_timezone", "UTC")
+
         generator = SummaryGenerator(
             input_assembler=input_assembler,
             activity_checker=activity_checker,
@@ -201,7 +203,9 @@ class SummaryConsumer(DeadLetterConsumerMixin, StreamConsumer):
             history_service=history_service,
         )
 
-        result = await generator.generate(contact_id=contact_id)
+        result = await generator.generate(
+            contact_id=contact_id, user_timezone=user_timezone
+        )
 
         logger.info(
             "Processed summary generation event (stream consumer)",

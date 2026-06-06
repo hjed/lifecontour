@@ -52,7 +52,7 @@ class DailySummaryService:
         self._gemini_response_override = _gemini_response_override
 
     async def get_or_generate(
-        self, user_id: str, summary_date: date
+        self, user_id: str, summary_date: date, user_timezone: str = "UTC"
     ) -> JournalDailySummary | None:
         """Get a cached summary or generate a new one.
 
@@ -85,7 +85,9 @@ class DailySummaryService:
             return existing
 
         # 2. Assemble input
-        summary_input = await self._input_assembler.assemble(user_id, summary_date)
+        summary_input = await self._input_assembler.assemble(
+            user_id, summary_date, user_timezone
+        )
 
         # 3. Check eligibility
         if not self._eligibility_checker.is_eligible(summary_input.journal_count):
@@ -165,11 +167,11 @@ class DailySummaryService:
         return await self._summary_repo.upsert(generated_summary)
 
     async def regenerate(
-        self, user_id: str, summary_date: date
+        self, user_id: str, summary_date: date, user_timezone: str = "UTC"
     ) -> JournalDailySummary | None:
         """Force regenerate a daily summary by invalidating cache first."""
         await self._summary_repo.invalidate_for_date(user_id, summary_date)
-        return await self.get_or_generate(user_id, summary_date)
+        return await self.get_or_generate(user_id, summary_date, user_timezone)
 
     async def invalidate(self, user_id: str, summary_date: date) -> None:
         """Invalidate (set to PENDING) an existing daily summary.

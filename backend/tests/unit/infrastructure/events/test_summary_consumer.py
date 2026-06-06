@@ -139,7 +139,9 @@ class TestSummaryConsumerHandleEvent:
         ):
             await consumer._handle_event(event)
 
-        mock_generator.generate.assert_called_once_with(contact_id=42)
+        mock_generator.generate.assert_called_once_with(
+            contact_id=42, user_timezone="UTC"
+        )
 
     @pytest.mark.asyncio
     async def test_handle_event_updates_search_index_after_summary(
