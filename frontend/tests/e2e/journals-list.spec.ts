@@ -160,12 +160,19 @@ test.describe('Journal List Page', () => {
       const noteCheckbox = filtersSection.getByLabel('Note');
 
       // Check the NOTE type checkbox and wait for API response
-      const responsePromise = page.waitForResponse(
-        response =>
-          response.url().includes('/api/journals') && response.status() === 200
-      );
-      await noteCheckbox.check();
-      await responsePromise;
+      await expect(async () => {
+        const responsePromise = page.waitForResponse(
+          response =>
+            response.url().includes('/api/journals') &&
+            response.url().includes('type=note') &&
+            response.status() === 200,
+          { timeout: 3000 }
+        );
+        if ((await noteCheckbox.getAttribute('aria-checked')) !== 'true') {
+          await noteCheckbox.click();
+        }
+        await responsePromise;
+      }).toPass({ timeout: 10000 });
 
       // Verify only note type journals are shown
       const noteJournal = journals.find(j => j.types?.includes('note'));
@@ -305,15 +312,19 @@ test.describe('Journal List Page', () => {
       const filtersSection = page.locator('[data-testid="journal-filters"]');
       const eventCheckbox = filtersSection.getByLabel('Event', { exact: true });
 
-      const responsePromise = page.waitForResponse(
-        response =>
-          response.url().includes('/api/journals/search') &&
-          response.url().includes('types=event') &&
-          response.status() === 200
-      );
-
-      await eventCheckbox.check();
-      await responsePromise;
+      await expect(async () => {
+        const responsePromise = page.waitForResponse(
+          response =>
+            response.url().includes('/api/journals/search') &&
+            response.url().includes('types=event') &&
+            response.status() === 200,
+          { timeout: 3000 }
+        );
+        if ((await eventCheckbox.getAttribute('aria-checked')) !== 'true') {
+          await eventCheckbox.click();
+        }
+        await responsePromise;
+      }).toPass({ timeout: 10000 });
 
       // Should only show "Team Meeting" (EVENT type with "Meeting" in title)
       await expect(
@@ -723,16 +734,19 @@ test.describe('Journal List Page', () => {
       // Filter by Work tag (use the exact tag name returned from creation)
       const workCheckbox = filtersSection.getByLabel(tags[0].name);
 
-      // Start waiting for API response before checking the checkbox
-      const responsePromise = page.waitForResponse(
-        response =>
-          response.url().includes('/api/journals') &&
-          response.url().includes('tag_id') &&
-          response.status() === 200
-      );
-
-      await workCheckbox.check();
-      await responsePromise;
+      await expect(async () => {
+        const responsePromise = page.waitForResponse(
+          response =>
+            response.url().includes('/api/journals') &&
+            response.url().includes('tag_id') &&
+            response.status() === 200,
+          { timeout: 3000 }
+        );
+        if ((await workCheckbox.getAttribute('aria-checked')) !== 'true') {
+          await workCheckbox.click();
+        }
+        await responsePromise;
+      }).toPass({ timeout: 10000 });
 
       // Verify only journals with Work tag are visible
       const workHeading = page.getByRole('heading', { name: /Work Meeting/i });
@@ -751,7 +765,18 @@ test.describe('Journal List Page', () => {
       ).toBeHidden();
 
       // Uncheck Work tag
-      await workCheckbox.uncheck();
+      await expect(async () => {
+        const responsePromise = page.waitForResponse(
+          response =>
+            response.url().includes('/api/journals') &&
+            response.status() === 200,
+          { timeout: 3000 }
+        );
+        if ((await workCheckbox.getAttribute('aria-checked')) === 'true') {
+          await workCheckbox.click();
+        }
+        await responsePromise;
+      }).toPass({ timeout: 10000 });
 
       // Wait for all journals to be visible again
       await expect(
@@ -761,15 +786,19 @@ test.describe('Journal List Page', () => {
       // Filter by Personal tag (use the exact tag name returned from creation)
       const personalCheckbox = filtersSection.getByLabel(tags[1].name);
 
-      const personalResponsePromise = page.waitForResponse(
-        response =>
-          response.url().includes('/api/journals') &&
-          response.url().includes('tag_id') &&
-          response.status() === 200
-      );
-
-      await personalCheckbox.check();
-      await personalResponsePromise;
+      await expect(async () => {
+        const responsePromise = page.waitForResponse(
+          response =>
+            response.url().includes('/api/journals') &&
+            response.url().includes('tag_id') &&
+            response.status() === 200,
+          { timeout: 3000 }
+        );
+        if ((await personalCheckbox.getAttribute('aria-checked')) !== 'true') {
+          await personalCheckbox.click();
+        }
+        await responsePromise;
+      }).toPass({ timeout: 10000 });
 
       // Verify only journals with Personal tag are visible
       await expect(
@@ -970,7 +999,21 @@ test.describe('Journal List Page', () => {
       // Apply type filter (Note)
       const filtersSection = page.locator('[data-testid="journal-filters"]');
       const noteCheckbox = filtersSection.getByLabel('Note', { exact: true });
-      await noteCheckbox.check();
+
+      await expect(async () => {
+        const responsePromise = page.waitForResponse(
+          response =>
+            response.url().includes('/api/journals') &&
+            response.url().includes('type=note') &&
+            response.status() === 200,
+          { timeout: 3000 }
+        );
+        if ((await noteCheckbox.getAttribute('aria-checked')) !== 'true') {
+          await noteCheckbox.click();
+        }
+        await responsePromise;
+      }).toPass({ timeout: 10000 });
+      await expect(page.getByTestId('journals-list-ready')).toBeVisible();
 
       // Apply contact filter (Charlie) using unique firstName to avoid
       // matching stale MeiliSearch entries from previous test runs/retries
@@ -1034,9 +1077,12 @@ test.describe('Journal List Page', () => {
       await dataManager.clearAllJournals();
 
       // Create test calendars
+      const timestamp = Date.now();
+      const workCalendarName = `Work Calendar ${timestamp}`;
+      const personalCalendarName = `Personal Calendar ${timestamp}`;
       const calendars = await dataManager.createCalendars([
-        { name: 'Work Calendar', color: '#FF0000' },
-        { name: 'Personal Calendar', color: '#00FF00' },
+        { name: workCalendarName, color: '#FF0000' },
+        { name: personalCalendarName, color: '#00FF00' },
       ]);
 
       // Create journals with different calendars
@@ -1121,7 +1167,7 @@ test.describe('Journal List Page', () => {
       const calendarListbox1 = page.getByRole('listbox');
       await expect(calendarListbox1).toBeVisible();
       await calendarListbox1
-        .getByRole('option', { name: /Work Calendar/i })
+        .getByRole('option', { name: new RegExp(workCalendarName, 'i') })
         .first()
         .click();
       await responsePromise;
@@ -1158,7 +1204,7 @@ test.describe('Journal List Page', () => {
       const calendarListbox2 = page.getByRole('listbox');
       await expect(calendarListbox2).toBeVisible();
       await calendarListbox2
-        .getByRole('option', { name: /Personal Calendar/i })
+        .getByRole('option', { name: new RegExp(personalCalendarName, 'i') })
         .first()
         .click();
       await personalResponsePromise;
@@ -1189,6 +1235,12 @@ test.describe('Journal List Page', () => {
       await calendarListbox3
         .getByRole('option', { name: /All calendars/i })
         .click();
+
+      // Wait for the listbox to close (Firefox can leave it open briefly)
+      await expect(page.getByRole('listbox')).toBeHidden({ timeout: 5000 });
+
+      // Ensure the loading state has finished and the list is rendered again
+      await expect(page.getByTestId('journals-list-ready')).toBeVisible();
 
       // Wait for the filter to be cleared and all journals to be visible
       await expect(

@@ -25,18 +25,8 @@ test.describe('Calendar Management', () => {
         response.request().method() === 'POST' &&
         response.ok()
     );
-
     await page.getByRole('button', { name: /save changes/i }).click();
     await postResponsePromise;
-
-    // Now wait for the React Query cache invalidation refetch
-    const getResponsePromise = page.waitForResponse(
-      response =>
-        response.url().includes('/api/calendars') &&
-        response.request().method() === 'GET' &&
-        response.ok()
-    );
-    await getResponsePromise;
 
     // Verify dialog closed and calendar appears in the list
     await expect(page.getByRole('dialog')).toBeHidden();
@@ -60,17 +50,8 @@ test.describe('Calendar Management', () => {
         response.request().method() === 'PUT' &&
         response.ok()
     );
-
     await page.getByRole('button', { name: /save changes/i }).click();
     await putResponsePromise;
-
-    const getResponsePromiseEdit = page.waitForResponse(
-      response =>
-        response.url().includes('/api/calendars') &&
-        response.request().method() === 'GET' &&
-        response.ok()
-    );
-    await getResponsePromiseEdit;
 
     // Verify dialog closed and updated name appears
     await expect(page.getByRole('dialog')).toBeHidden();
@@ -94,17 +75,8 @@ test.describe('Calendar Management', () => {
         response.request().method() === 'DELETE' &&
         response.ok()
     );
-
     await page.getByRole('button', { name: 'Delete' }).click();
     await deleteResponsePromise;
-
-    const getResponsePromiseDelete = page.waitForResponse(
-      response =>
-        response.url().includes('/api/calendars') &&
-        response.request().method() === 'GET' &&
-        response.ok()
-    );
-    await getResponsePromiseDelete;
 
     // Verify it's gone
     await expect(page.getByRole('dialog')).toBeHidden();
