@@ -20,7 +20,7 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     """Upgrade database schema."""
-    op.add_column("abseil_pitches", sa.Column("notes", sa.String(255), nullable=True))
+    op.add_column("abseil_pitches", sa.Column("notes", sa.Text(), nullable=True))
 
 
 def downgrade() -> None:
