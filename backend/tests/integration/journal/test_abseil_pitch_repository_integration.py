@@ -95,6 +95,7 @@ class TestAbseilPitchRepositorySave:
             anchor_type="double bolt",
             did_rescue=False,
             did_setup=True,
+            notes="Watch out for loose rock",
         )
 
         saved = await pitch_repository.save(pitch)
@@ -107,6 +108,7 @@ class TestAbseilPitchRepositorySave:
         assert saved.anchor_type == "double bolt"
         assert saved.did_rescue is False
         assert saved.did_setup is True
+        assert saved.notes == "Watch out for loose rock"
         assert saved.created_at is not None
         assert saved.updated_at is not None
 
@@ -130,6 +132,7 @@ class TestAbseilPitchRepositorySave:
         assert saved.anchor_type is None
         assert saved.did_rescue is None
         assert saved.did_setup is None
+        assert saved.notes is None
 
     async def test_save_upsert_updates_existing_pitch(
         self,
@@ -142,6 +145,7 @@ class TestAbseilPitchRepositorySave:
             pitch_number=1,
             height=20,
             anchor_type="single bolt",
+            notes="Initial notes",
         )
         first_save = await pitch_repository.save(pitch)
 
@@ -151,6 +155,7 @@ class TestAbseilPitchRepositorySave:
             height=30,
             anchor_type="chains",
             did_rescue=True,
+            notes="Updated notes",
         )
         second_save = await pitch_repository.save(updated_pitch)
 
@@ -158,6 +163,7 @@ class TestAbseilPitchRepositorySave:
         assert second_save.height == 30
         assert second_save.anchor_type == "chains"
         assert second_save.did_rescue is True
+        assert second_save.notes == "Updated notes"
 
     async def test_save_multiple_pitches_for_journal(
         self,

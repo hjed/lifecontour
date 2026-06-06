@@ -193,6 +193,7 @@ export interface AbseilPitch {
   anchor_type?: string | null;
   did_rescue?: boolean | null;
   did_setup?: boolean | null;
+  notes?: string | null;
 }
 
 // Activity Templates

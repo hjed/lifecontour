@@ -20,6 +20,7 @@ describe('PitchEditor', () => {
         anchor_type: 'chains',
         did_setup: true,
         did_rescue: false,
+        notes: 'A slippery descent',
       },
     ];
 
@@ -39,6 +40,7 @@ describe('PitchEditor', () => {
     expect(screen.getByText('chains')).toBeInTheDocument();
     expect(screen.getByText('Setup')).toBeInTheDocument();
     expect(screen.queryByText('Rescue')).not.toBeInTheDocument();
+    expect(screen.getByText('A slippery descent')).toBeInTheDocument();
   });
 
   it('renders nothing in read-only mode if there are no pitches', () => {
@@ -70,6 +72,7 @@ describe('PitchEditor', () => {
         anchor_type: null,
         did_rescue: null,
         did_setup: null,
+        notes: null,
       },
     ]);
   });
@@ -155,6 +158,31 @@ describe('PitchEditor', () => {
         pitch_number: 1,
         did_setup: true,
         did_rescue: false,
+      },
+    ]);
+  });
+
+  it('updates the notes field', async () => {
+    const pitches: AbseilPitch[] = [
+      {
+        id: 1,
+        pitch_number: 1,
+        notes: '',
+      },
+    ];
+
+    render(
+      <PitchEditor pitches={pitches} onChange={mockOnChange} isEditing={true} />
+    );
+
+    const notesInput = screen.getByLabelText('Notes for pitch 1');
+    fireEvent.change(notesInput, { target: { value: 'Very wet' } });
+
+    expect(mockOnChange).toHaveBeenCalledWith([
+      {
+        id: 1,
+        pitch_number: 1,
+        notes: 'Very wet',
       },
     ]);
   });

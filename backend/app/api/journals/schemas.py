@@ -263,6 +263,9 @@ class AbseilPitchSchema(BaseModel):
     did_setup: bool | None = Field(
         default=None, description="Whether the user set up the anchor"
     )
+    notes: str | None = Field(
+        default=None, description="Optional short notes for the pitch"
+    )
 
 
 class AbseilingDataSchema(BaseModel):
