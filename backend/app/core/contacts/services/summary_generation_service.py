@@ -18,6 +18,7 @@ from core_shared.models.contacts.entities import (
     SummaryStatus,
 )
 from core_shared.models.contacts.value_objects import Provenance
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.contacts.models.repositories import (
     ContactFieldHistoryRepository,
@@ -81,6 +82,7 @@ class SummaryInputAssembler:
         self._journal_relationship_repo = journal_relationship_repo
         self._journal_repo = journal_repo
         self._summary_repo = summary_repo
+        self._calendar_info_repo = None
 
     async def assemble(self, contact_id: int) -> SummaryInput | None:
         """Assemble bounded input data for summary generation.
@@ -151,6 +153,47 @@ class SummaryInputAssembler:
         all_j_rels = await self._journal_relationship_repo.get_by_contact(contact_id)
 
         now = datetime.now(tz=UTC)
+
+        # Try to find user's timezone if possible
+        user_timezone = "UTC"
+
+        # Find user ID from a recent journal relation
+        user_id = None
+        for jr in all_j_rels:
+            journal = await self._journal_repo.find_by_id(jr.journal_id)
+            if journal and hasattr(journal, "user_id"):
+                user_id = journal.user_id
+                break
+
+        # To avoid introducing a new dependency on CalendarInfoRepository here
+        # we'll look for timezone directly from the journal calendar infos
+        if user_id and hasattr(self._journal_repo, "find_by_ids_for_user"):
+            from sqlalchemy import text
+
+            try:
+                # We can access connection via one of the repos if we don't have calendar_info_repo
+                # A better approach is to rely on DI to inject it, but we don't want to break existing tests
+                if hasattr(self._summary_repo, "conn"):
+                    query = text(
+                        """
+                        SELECT jci.timezone
+                        FROM journal_calendar_info jci
+                        INNER JOIN journals j ON j.id = jci.journal_id
+                        WHERE j.user_id = :user_id
+                          AND jci.timezone IS NOT NULL
+                        ORDER BY jci.updated_at DESC
+                        LIMIT 1
+                        """
+                    )
+                    result = await self._summary_repo.conn.execute(
+                        query, {"user_id": user_id}
+                    )
+                    row = result.fetchone()
+                    if row:
+                        user_timezone = getattr(row, "timezone", "UTC") or "UTC"
+            except SQLAlchemyError:
+                pass
+
         window_start = now - timedelta(days=self.HISTORY_WINDOW_DAYS)
 
         # Split into recent and older for stats
@@ -244,6 +287,7 @@ class SummaryInputAssembler:
 
         return SummaryInput(
             contact_id=contact_id,
+            timezone=user_timezone,
             contact_name=contact_name,
             company=company,
             job_title=job_title,

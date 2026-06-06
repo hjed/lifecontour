@@ -32,3 +32,4 @@ class SummaryInput:
     important_dates: list[str]
     previous_summary: str | None
     activity_stats: list[ActivityStatsBucket]
+    timezone: str = "UTC"

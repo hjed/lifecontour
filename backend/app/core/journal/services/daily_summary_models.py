@@ -24,10 +24,7 @@ class DailySummaryJournalEntry:
 
 @dataclass
 class DailySummaryInput:
-    """Aggregated input data for a single day's summary generation.
-
-    Assembled by DailySummaryInputAssembler from repository data.
-    """
+    """Data assembled for daily summary generation."""
 
     user_id: str
     summary_date: date
@@ -37,3 +34,4 @@ class DailySummaryInput:
     contact_names: list[str] = field(default_factory=list)
     mood_values: list[int] = field(default_factory=list)
     previous_summary: str | None = None
+    timezone: str = "UTC"

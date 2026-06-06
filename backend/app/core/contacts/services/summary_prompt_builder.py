@@ -5,8 +5,9 @@ incremental context (prior summary), long-term activity statistics,
 and tone/safety guardrails per the product specification.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime, tzinfo
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.core.contacts.services.summary_models import (
     SummaryInput,
@@ -24,12 +25,18 @@ class SummaryPromptBuilder:
         """Build a structured prompt from assembled input data."""
         sections: list[str] = []
 
-        from datetime import UTC, datetime
+        tz: tzinfo
+        try:
+            tz = ZoneInfo(summary_input.timezone)
+        except ZoneInfoNotFoundError:
+            tz = UTC
 
-        now = datetime.now(tz=UTC)
+        now = datetime.now(tz=tz)
 
         # System instructions
-        sections.append(self._system_instructions(now))
+        sections.append(
+            self._system_instructions(now, tz.key if hasattr(tz, "key") else str(tz))
+        )
 
         # Contact identity
         sections.append(self._contact_section(summary_input))
@@ -92,12 +99,12 @@ class SummaryPromptBuilder:
 
         return prompt
 
-    def _system_instructions(self, now: datetime) -> str:
-        current_time = now.strftime("%Y-%m-%d %H:%M:%S UTC")
+    def _system_instructions(self, now: datetime, timezone_str: str) -> str:
+        current_time = now.strftime("%Y-%m-%d %H:%M:%S")
         return (
             "You are an AI assistant that generates concise, evidence-grounded "
             "interaction summaries for a personal contact management system.\n\n"
-            f"Current System Time: {current_time}\n"
+            f"Current System Time: {current_time} {timezone_str}\n"
             "Use this time context to differentiate between past and future events.\n\n"
             "Guidelines:\n"
             "- Be conservative and grounded in the evidence provided\n"

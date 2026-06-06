@@ -367,3 +367,22 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
             ),
             {"journal_id": journal_id, "calendar_id": str(calendar_id)},
         )
+
+    async def get_most_recent_timezone_for_user(self, user_id: str) -> str | None:
+        """Get the most recent timezone configured by the user in any of their calendar info records."""
+        query = text(
+            """
+            SELECT jci.timezone
+            FROM journal_calendar_info jci
+            INNER JOIN journals j ON j.id = jci.journal_id
+            WHERE j.user_id = :user_id
+              AND jci.timezone IS NOT NULL
+            ORDER BY jci.updated_at DESC
+            LIMIT 1
+            """
+        )
+        result = await self.conn.execute(query, {"user_id": user_id})
+        row = result.fetchone()
+        if row:
+            return getattr(row, "timezone", None)
+        return None

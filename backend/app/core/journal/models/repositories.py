@@ -525,6 +525,19 @@ class CalendarInfoRepository(ABC):
         """
         pass
 
+    @abstractmethod
+    async def get_most_recent_timezone_for_user(self, user_id: str) -> str | None:
+        """
+        Get the most recent timezone configured by the user in any of their calendar info records.
+
+        Args:
+            user_id: The user ID to look up
+
+        Returns:
+            The most recently used IANA timezone string, or None if not found.
+        """
+        pass
+
 
 class MoodDataRepository(ABC):
     """

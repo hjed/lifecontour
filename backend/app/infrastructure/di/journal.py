@@ -440,6 +440,7 @@ class JournalProvider(Provider):
         mood_repo: MoodDataRepository,
         contact_relationship_repo: JournalContactRelationshipRepository,
         summary_repo: JournalDailySummaryRepository,
+        calendar_info_repo: CalendarInfoRepository,
     ) -> DailySummaryInputAssembler:
         """Provide a DailySummaryInputAssembler instance."""
         return DailySummaryInputAssembler(
@@ -447,6 +448,7 @@ class JournalProvider(Provider):
             mood_repo=mood_repo,
             contact_relationship_repo=contact_relationship_repo,
             summary_repo=summary_repo,
+            calendar_info_repo=calendar_info_repo,
         )
 
     @provide(scope=Scope.REQUEST)

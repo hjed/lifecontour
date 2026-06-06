@@ -19,6 +19,7 @@ from app.core.journal.services.daily_summary_models import (
 
 if TYPE_CHECKING:
     from app.core.journal.models.repositories import (
+        CalendarInfoRepository,
         JournalContactRelationshipRepository,
         JournalRepository,
         MoodDataRepository,
@@ -38,11 +39,13 @@ class DailySummaryInputAssembler:
         mood_repo: MoodDataRepository,
         contact_relationship_repo: JournalContactRelationshipRepository,
         summary_repo: JournalDailySummaryRepository,
+        calendar_info_repo: CalendarInfoRepository | None = None,
     ) -> None:
         self._journal_repo = journal_repo
         self._mood_repo = mood_repo
         self._contact_relationship_repo = contact_relationship_repo
         self._summary_repo = summary_repo
+        self._calendar_info_repo = calendar_info_repo
 
     async def assemble(self, user_id: str, summary_date: date) -> DailySummaryInput:
         """Assemble input data for a single day's summary.
@@ -127,9 +130,19 @@ class DailySummaryInputAssembler:
         if existing and existing.status == SummaryStatus.GENERATED:
             previous_summary = existing.summary_text
 
+        # Fetch timezone
+        user_timezone = "UTC"
+        if self._calendar_info_repo:
+            tz = await self._calendar_info_repo.get_most_recent_timezone_for_user(
+                user_id
+            )
+            if tz:
+                user_timezone = tz
+
         return DailySummaryInput(
             user_id=user_id,
             summary_date=summary_date,
+            timezone=user_timezone,
             journals=entries,
             journal_count=len(journals),
             event_count=event_count,

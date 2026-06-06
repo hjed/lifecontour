@@ -32,14 +32,25 @@ class DailySummaryPromptBuilder:
         sections: list[str] = []
 
         # 1. System instructions
-        from datetime import UTC, datetime
+        from datetime import UTC, datetime, tzinfo
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        tz: tzinfo
+        try:
+            tz = ZoneInfo(summary_input.timezone)
+        except ZoneInfoNotFoundError:
+            tz = UTC
 
         if now is None:
-            now = datetime.now(tz=UTC)
+            now = datetime.now(tz=tz)
         else:
-            now = now.astimezone(UTC) if now.tzinfo else now.replace(tzinfo=UTC)
+            now = now.astimezone(tz) if now.tzinfo else now.replace(tzinfo=tz)
 
-        sections.append(self._build_system_instructions(now))
+        sections.append(
+            self._build_system_instructions(
+                now, tz.key if hasattr(tz, "key") else str(tz)
+            )
+        )
 
         # 2. Day overview
         sections.append(self._build_day_overview(summary_input, now))
@@ -60,11 +71,11 @@ class DailySummaryPromptBuilder:
 
         return "\n\n".join(sections)
 
-    def _build_system_instructions(self, now: datetime) -> str:
-        current_time = now.strftime("%Y-%m-%d %H:%M:%S UTC")
+    def _build_system_instructions(self, now: datetime, timezone_str: str) -> str:
+        current_time = now.strftime("%Y-%m-%d %H:%M:%S")
         return (
             "You are summarising a user's day based on their journal entries.\n"
-            f"Current System Time: {current_time}\n"
+            f"Current System Time: {current_time} {timezone_str}\n"
             "Use this time context to differentiate between past events, today's events, and upcoming future events.\n"
             "Be short, practical, and descriptive rather than speculative.\n"
             "Do not invent information not present in the journals.\n"
