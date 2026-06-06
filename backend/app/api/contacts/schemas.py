@@ -295,6 +295,9 @@ class ContactAttributes(BaseModel):
     is_favourite: bool = Field(
         default=False, description="Whether contact is marked as favourite"
     )
+    photo_url: str | None = Field(
+        default=None, description="URL for contact avatar photo proxy"
+    )
     created_at: datetime | None = Field(
         default=None, description="Contact creation timestamp"
     )

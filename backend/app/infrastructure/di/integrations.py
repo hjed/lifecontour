@@ -21,6 +21,7 @@ from app.core.integrations.adapters.sql.snipeit_settings_repository import (
 from app.core.integrations.adapters.sql.strava_athlete_mapping_repository import (
     SqlStravaAthleteMappingRepository,
 )
+from app.core.integrations.avatar_proxy_service import AvatarProxyService
 from app.core.integrations.database import IntegrationDatabaseManager
 from app.core.integrations.encryption import EncryptionService
 from app.core.integrations.external_reference_service import ExternalReferenceService
@@ -311,6 +312,24 @@ class IntegrationProvider(Provider):
             ImmichTokenService: Service for Immich token CRUD operations
         """
         return ImmichTokenService(
+            connection=connection,
+            encryption_key=settings.immich_encryption_key,
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def provide_avatar_proxy_service(
+        self, connection: AsyncConnection, settings: Settings
+    ) -> AvatarProxyService:
+        """Provide avatar proxy service for request scope.
+
+        Args:
+            connection: Database connection
+            settings: Application settings for encryption key
+
+        Returns:
+            AvatarProxyService: Service for proxying Immich thumbnails
+        """
+        return AvatarProxyService(
             connection=connection,
             encryption_key=settings.immich_encryption_key,
         )

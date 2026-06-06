@@ -13,7 +13,8 @@ from core_shared.models.contacts.exceptions import ContactValidationError
 from core_shared.models.contacts.value_objects import Provenance
 from core_shared.models.journals import Journal
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, Query, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.api.common.schemas import (
@@ -64,6 +65,7 @@ from app.core.contacts.models.repositories import (
 )
 from app.core.contacts.services import ContactService
 from app.core.contacts.services.contact_history_service import ContactHistoryService
+from app.core.integrations.avatar_proxy_service import AvatarProxyService
 from app.core.integrations.external_link_helpers import build_contact_external_links
 from app.core.journal.models.repositories import (
     AbseilingDataRepository,
@@ -228,6 +230,41 @@ async def get_contact_external_links(
             for link in links
         ]
     )
+
+
+@router.get("/{contact_id}/avatar")
+@inject
+async def get_contact_avatar(
+    contact_id: int,
+    avatar_service: FromDishka[AvatarProxyService],
+    user: FromDishka[SessionUser],
+) -> Response:
+    """
+    Proxy a contact's Immich person thumbnail.
+
+    Fetches the thumbnail from the Immich server using stored credentials
+    and streams it back to the client. Returns 404 if the contact has no
+    linked Immich person or the thumbnail cannot be fetched.
+    """
+    from app.core.integrations.avatar_proxy_service import AvatarNotFoundError
+
+    try:
+        image_bytes = await avatar_service.get_avatar_bytes(
+            contact_id=contact_id,
+            user_id=user.id,
+        )
+        return Response(
+            content=image_bytes,
+            media_type="image/jpeg",
+            headers={
+                "Cache-Control": "public, max-age=3600",
+            },
+        )
+    except AvatarNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Avatar not available for this contact",
+        ) from None
 
 
 @router.get("/{contact_id}")

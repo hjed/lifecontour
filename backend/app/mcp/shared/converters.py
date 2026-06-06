@@ -142,6 +142,7 @@ class ContactConverter:
             phone=primary_phone,
             company=contact.company,
             job_title=contact.job_title,
+            photo_url=contact.photo_url,
             tags=tag_names,
             relationships=relationships_list,
             is_favourite=contact.is_favourite,

@@ -2,8 +2,8 @@
 
 Tests people sync logic with mocked database and API dependencies.
 Covers name parsing, version hash calculation, sync flow variants
-(ExternalReference hit, single match, multi-match, no match), and
-birthday sync logic.
+(ExternalReference hit, single match, multi-match, no match),
+birthday sync logic, and photo_url population.
 """
 
 from __future__ import annotations
@@ -310,6 +310,7 @@ class TestSyncPeopleFlow:
                 insert_mock,  # SyncMetadata upsert
                 no_birthday_mock,  # Birthday check
                 insert_mock,  # ImportantDate insert
+                insert_mock,  # _set_photo_url
             ]
         )
 
@@ -403,9 +404,190 @@ class TestSyncPeopleFlow:
                 insert_mock,  # SyncMetadata upsert
                 no_birthday_mock,  # Birthday check
                 insert_mock,  # ImportantDate insert (only 1 important date insert)
+                insert_mock,  # _set_photo_url
             ]
         )
 
         result = await service.sync_people_batch([person.model_dump()])
 
         assert result.created == 1
+
+
+# ---------------------------------------------------------------------------
+# Photo URL population during sync
+# ---------------------------------------------------------------------------
+
+
+class TestPhotoUrlSync:
+    """Tests for photo_url population during sync."""
+
+    @pytest.mark.asyncio
+    async def test_set_photo_url_called_on_create(
+        self,
+        service: ImmichSyncService,
+        mock_api_client: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """_set_photo_url should be called when a new contact is created."""
+        person = _make_person("p1", "Bob Jones")
+
+        no_contacts_mock = MagicMock()
+        no_contacts_mock.fetchall.return_value = []
+
+        no_ref_mock = MagicMock()
+        no_ref_mock.fetchone.return_value = None
+
+        contact_insert_mock = MagicMock()
+        contact_row = MagicMock()
+        contact_row.id = 100
+        contact_row.created_at = datetime.now(UTC)
+        contact_row.updated_at = datetime.now(UTC)
+        contact_insert_mock.fetchone.return_value = contact_row
+
+        insert_mock = MagicMock()
+        insert_row = MagicMock()
+        insert_row.id = 1
+        insert_mock.fetchone.return_value = insert_row
+
+        photo_url_mock = MagicMock()  # Capture _set_photo_url call
+
+        mock_connection.execute = AsyncMock(
+            side_effect=[
+                no_contacts_mock,  # Contact cache
+                no_ref_mock,  # ExternalReference lookup
+                contact_insert_mock,  # Contact insert
+                insert_mock,  # ExternalReference create
+                insert_mock,  # SyncMetadata upsert
+                insert_mock,  # Birthday sync (no birthdate, skipped by parse)
+                photo_url_mock,  # _set_photo_url
+            ]
+        )
+
+        result = await service.sync_people_batch([person.model_dump()])
+
+        assert result.created == 1
+
+        # Verify _set_photo_url was called with the correct URL
+        # The 7th call (index 6) should be the photo_url update
+        calls = mock_connection.execute.call_args_list
+        # Find the call that updates photo_url
+        photo_url_call_found = False
+        for call in calls:
+            args = call[0]
+            if len(args) >= 2 and isinstance(args[1], dict):
+                params = args[1]
+                if "photo_url" in params:
+                    assert params["photo_url"] == "/api/contacts/100/avatar"
+                    assert params["contact_id"] == 100
+                    photo_url_call_found = True
+        assert photo_url_call_found, "Expected _set_photo_url to be called"
+
+    @pytest.mark.asyncio
+    async def test_set_photo_url_called_on_link(
+        self,
+        service: ImmichSyncService,
+        mock_api_client: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """_set_photo_url should be called when a contact is auto-linked."""
+        person = _make_person("p1", "Jane Doe")
+
+        contact_row = _make_contact_row(10, "Jane", "Doe")
+        contacts_mock = MagicMock()
+        contacts_mock.fetchall.return_value = [contact_row]
+
+        no_ref_mock = MagicMock()
+        no_ref_mock.fetchone.return_value = None
+
+        insert_mock = MagicMock()
+        insert_row = MagicMock()
+        insert_row.id = 1
+        insert_mock.fetchone.return_value = insert_row
+
+        photo_url_mock = MagicMock()
+
+        mock_connection.execute = AsyncMock(
+            side_effect=[
+                contacts_mock,  # Contact cache
+                no_ref_mock,  # ExternalReference lookup
+                insert_mock,  # ExternalReference create
+                insert_mock,  # SyncMetadata upsert
+                insert_mock,  # Birthday sync (skipped)
+                photo_url_mock,  # _set_photo_url
+            ]
+        )
+
+        result = await service.sync_people_batch([person.model_dump()])
+
+        assert result.linked == 1
+
+        # Verify _set_photo_url was called with the correct URL
+        calls = mock_connection.execute.call_args_list
+        photo_url_call_found = False
+        for call in calls:
+            args = call[0]
+            if len(args) >= 2 and isinstance(args[1], dict):
+                params = args[1]
+                if "photo_url" in params:
+                    assert params["photo_url"] == "/api/contacts/10/avatar"
+                    assert params["contact_id"] == 10
+                    photo_url_call_found = True
+        assert photo_url_call_found, "Expected _set_photo_url to be called"
+
+    @pytest.mark.asyncio
+    async def test_set_photo_url_called_on_update(
+        self,
+        service: ImmichSyncService,
+        mock_api_client: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """_set_photo_url should be called when a linked person's version hash changes."""
+        person = _make_person("p1", "John Smith Updated")
+
+        contacts_mock = MagicMock()
+        contacts_mock.fetchall.return_value = []
+
+        ext_ref_row = MagicMock()
+        ext_ref_row.id = 1
+        ext_ref_row.internal_entity_id = 42
+        ext_ref_mock = MagicMock()
+        ext_ref_mock.fetchone.return_value = ext_ref_row
+
+        sync_meta_row = MagicMock()
+        sync_meta_row.version_hash = "old-stale-hash"  # Different from current
+        sync_meta_mock = MagicMock()
+        sync_meta_mock.fetchone.return_value = sync_meta_row
+
+        insert_mock = MagicMock()
+        insert_row = MagicMock()
+        insert_row.id = 1
+        insert_mock.fetchone.return_value = insert_row
+
+        photo_url_mock = MagicMock()
+
+        mock_connection.execute = AsyncMock(
+            side_effect=[
+                contacts_mock,  # Contact cache
+                ext_ref_mock,  # ExternalReference lookup (found)
+                sync_meta_mock,  # SyncMetadata lookup (stale hash)
+                insert_mock,  # SyncMetadata upsert
+                insert_mock,  # Birthday sync
+                photo_url_mock,  # _set_photo_url
+            ]
+        )
+
+        result = await service.sync_people_batch([person.model_dump()])
+
+        assert result.updated == 1
+
+        calls = mock_connection.execute.call_args_list
+        photo_url_call_found = False
+        for call in calls:
+            args = call[0]
+            if len(args) >= 2 and isinstance(args[1], dict):
+                params = args[1]
+                if "photo_url" in params:
+                    assert params["photo_url"] == "/api/contacts/42/avatar"
+                    assert params["contact_id"] == 42
+                    photo_url_call_found = True
+        assert photo_url_call_found, "Expected _set_photo_url to be called"

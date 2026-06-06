@@ -175,8 +175,8 @@ Push local contact changes to Immich and provide conflict resolution UI + MCP.
 - [Part 2: Contact Avatar — New Capability](../product-specifications/immich-integration-product-specification.md#contact-avatar-feature-photo--new-capability)
 
 **Acceptance Criteria (task-level):**
-- [ ] New `photo_url` field on contacts, populated from Immich feature photos.
-- [ ] Backend proxy for Immich thumbnails.
+- [x] New `photo_url` field on contacts, populated from Immich feature photos.
+- [x] Backend proxy for Immich thumbnails.
 - [ ] `ContactAvatar` component displays photos throughout the UI.
 
 #### Phase 1: Backend — Photo URL Field and Proxy Endpoint
@@ -185,12 +185,12 @@ Push local contact changes to Immich and provide conflict resolution UI + MCP.
 Add the `photo_url` field to the contact entity/table and implement the backend image proxy.
 
 **Acceptance Criteria:**
-- [ ] Migration adds `photo_url` column to `contacts` table (nullable `String(500)`)
-- [ ] `Contact` entity updated with `photo_url` field
-- [ ] `GET /api/contacts/{id}/avatar` proxy endpoint — fetches thumbnail from Immich `GET /people/{person_id}/thumbnail` using stored credentials
-- [ ] Photo URL set to proxy endpoint URL during contact sync (not direct Immich URL)
-- [ ] `photo_url` included in contact API responses and MCP responses
-- [ ] Photo URL updated on each people sync cycle
+- [x] Migration adds `photo_url` column to `contacts` table (nullable `String(500)`)
+- [x] `Contact` entity updated with `photo_url` field
+- [x] `GET /api/contacts/{id}/avatar` proxy endpoint — fetches thumbnail from Immich `GET /people/{person_id}/thumbnail` using stored credentials
+- [x] Photo URL set to proxy endpoint URL during contact sync (not direct Immich URL)
+- [x] `photo_url` included in contact API responses and MCP responses
+- [x] Photo URL updated on each people sync cycle
 
 **Required Test Coverage:**
 - **Unit:** Proxy URL construction, photo_url field in API schemas.
@@ -202,7 +202,7 @@ Add the `photo_url` field to the contact entity/table and implement the backend 
 Wire the `ContactAvatar` component to display Immich photos.
 
 **Acceptance Criteria:**
-- [ ] `ContactAttributes` TypeScript type updated with optional `photo_url` field
+- [x] `ContactAttributes` TypeScript type updated with optional `photo_url` field
 - [ ] `ContactAvatar` component's `imageUrl` prop wired to `photo_url` from API response
 - [ ] Avatars display on: contact list, contact detail page, journal participant list, search results
 - [ ] Graceful fallback to initials when `photo_url` is null or image fails to load

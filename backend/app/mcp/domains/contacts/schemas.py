@@ -88,6 +88,11 @@ class ContactResponse(BaseModel):
 
     job_title: str | None = Field(default=None, description=_JOB_TITLE_DESC)
 
+    photo_url: str | None = Field(
+        default=None,
+        description="URL to the contact's avatar photo proxy endpoint, if available",
+    )
+
     tags: list[str] = Field(
         default_factory=list,
         description="List of tags associated with the contact (e.g., 'friend', 'work', 'family')",

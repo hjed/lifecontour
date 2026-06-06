@@ -284,6 +284,8 @@ class ImmichSyncService:
             )
             # Sync birthday since version hash changed
             await self._sync_birthday(existing_ref.internal_entity_id, person)
+            # Update photo_url to proxy endpoint
+            await self._set_photo_url(existing_ref.internal_entity_id)
             result.updated += 1
             return
 
@@ -309,6 +311,8 @@ class ImmichSyncService:
             )
             # Handle birthday sync
             await self._sync_birthday(contact.id, person)
+            # Set photo_url to proxy endpoint
+            await self._set_photo_url(contact.id)
             result.linked += 1
             return
 
@@ -335,9 +339,33 @@ class ImmichSyncService:
         )
         # Handle birthday sync for new contact
         await self._sync_birthday(contact_id, person)
+        # Set photo_url to proxy endpoint
+        await self._set_photo_url(contact_id)
         result.created += 1
 
     # -- Database operations ----------------------------------------------
+
+    async def _set_photo_url(self, contact_id: int) -> None:
+        """Set the contact's photo_url to the internal avatar proxy endpoint.
+
+        The URL points to ``/api/contacts/{id}/avatar`` which proxies the
+        thumbnail from Immich using stored credentials.
+        """
+        photo_url = f"/api/contacts/{contact_id}/avatar"
+        query = text("""
+            UPDATE contacts
+            SET photo_url = :photo_url, updated_at = NOW()
+            WHERE id = :contact_id
+        """)
+        await self._conn.execute(
+            query,
+            {"photo_url": photo_url, "contact_id": contact_id},
+        )
+        logger.debug(
+            "Set contact photo_url",
+            contact_id=contact_id,
+            photo_url=photo_url,
+        )
 
     async def _find_external_reference(self, person_id: str) -> Any | None:
         """Look up an ExternalReference by Immich person ID."""

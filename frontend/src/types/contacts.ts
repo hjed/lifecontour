@@ -198,6 +198,7 @@ export interface ContactAttributes {
   middle_name?: string;
   nick_name?: string;
   is_favourite?: boolean;
+  photo_url?: string | null;
   created_at: string;
   updated_at: string;
   // Embedded related data (not separate resources for REST API)
