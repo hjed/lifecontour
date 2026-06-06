@@ -387,8 +387,8 @@ async def process_contact_event(
         conn = await session.connection()
 
         event_user_id = event_data.get("user_id")
-        if event_user_id:
-            user_ids = [event_user_id]
+        if event_user_id is not None:
+            user_ids = [str(event_user_id)]
         else:
             user_ids = await auth_service.get_all_user_ids(conn)
 

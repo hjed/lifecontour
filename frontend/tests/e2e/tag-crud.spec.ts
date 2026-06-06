@@ -92,9 +92,12 @@ test.describe('Tag CRUD UI Updates', () => {
         await expect(tagLink).toHaveCount(0);
       }).toPass({ timeout: 15000 });
     } finally {
-      // Always attempt cleanup using the tagId or a dummy '0'
-      // This avoids conditional logic while ensuring safety
-      await authenticatedPage.request.delete(`/api/tags/${tagId || '0'}`);
+      if (tagId) {
+        // Only delete if we actually got a valid tag ID back
+        await authenticatedPage.request
+          .delete(`/api/tags/${tagId}`)
+          .catch(() => {});
+      }
     }
   });
 });
