@@ -496,6 +496,9 @@ class JournalContactRelationshipSchema(BaseModel):
     )
     first_name: str | None = Field(default=None, description="Contact first name")
     last_name: str | None = Field(default=None, description="Contact last name")
+    photo_url: str | None = Field(
+        default=None, description="URL for contact avatar photo proxy"
+    )
 
 
 # Tag schema

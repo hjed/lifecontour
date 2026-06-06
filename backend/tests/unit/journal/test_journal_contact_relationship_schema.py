@@ -46,6 +46,7 @@ class TestJournalContactRelationshipSchema:
         assert schema.role == "ORGANISER"
         assert schema.first_name == "Test"
         assert schema.last_name == "User"
+        assert schema.photo_url is None
 
     def test_schema_without_status_and_role(self):
         """Test schema serialization without status and role (backward compatibility)."""
@@ -64,6 +65,25 @@ class TestJournalContactRelationshipSchema:
         assert schema.role is None
         assert schema.first_name is None
         assert schema.last_name is None
+        assert schema.photo_url is None
+
+    def test_schema_with_photo_url(self):
+        """Test schema serialization with photo_url for avatar display."""
+        data = {
+            "id": "123",
+            "name": "Test User",
+            "relationship_type": "PARTICIPANT",
+            "first_name": "Test",
+            "last_name": "User",
+            "photo_url": "/api/contacts/123/avatar",
+        }
+
+        schema = JournalContactRelationshipSchema(**data)
+
+        assert schema.id == "123"
+        assert schema.photo_url == "/api/contacts/123/avatar"
+        assert schema.first_name == "Test"
+        assert schema.last_name == "User"
 
 
 class TestJournalContactRelationshipAddAttributes:

@@ -304,20 +304,23 @@ class SqlContactRepository(ContactRepository):
 
     async def find_names_by_ids(
         self, contact_ids: list[int]
-    ) -> dict[int, tuple[str | None, str | None]]:
-        """Fetch (first_name, last_name) for multiple contacts in a single query."""
+    ) -> dict[int, tuple[str | None, str | None, str | None]]:
+        """Fetch (first_name, last_name, photo_url) for multiple contacts in a single query."""
         if not contact_ids:
             return {}
 
         query = text(
             """
-            SELECT id, first_name, last_name
+            SELECT id, first_name, last_name, photo_url
             FROM contacts
             WHERE id = ANY(:ids)
         """
         )
         result = await self.conn.execute(query, {"ids": contact_ids})
-        return {row.id: (row.first_name, row.last_name) for row in result.fetchall()}
+        return {
+            row.id: (row.first_name, row.last_name, row.photo_url)
+            for row in result.fetchall()
+        }
 
     async def find_by_email(self, email: str) -> Contact | None:
         """Find a contact by email address."""

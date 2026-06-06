@@ -260,6 +260,7 @@ export function JournalListItem({
                     <ContactAvatar
                       firstName={firstName}
                       lastName={lastName}
+                      imageUrl={contact.photo_url ?? undefined}
                       size='sm'
                     />
                   </Link>

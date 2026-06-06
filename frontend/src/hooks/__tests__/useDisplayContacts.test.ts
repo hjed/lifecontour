@@ -60,7 +60,10 @@ describe('useDisplayContacts', () => {
     expect(displayContact).toEqual({
       id: mockContact.id,
       name: 'John Doe',
+      first_name: 'John',
+      last_name: 'Doe',
       is_favourite: false,
+      photo_url: null,
       primary_email: 'john@example.com',
       primary_phone: undefined, // Mock contact doesn't have phone
       tags: [],
@@ -72,6 +75,26 @@ describe('useDisplayContacts', () => {
       highlightedEmail: null,
       highlightedPhone: null,
     });
+  });
+
+  it('propagates photo_url from contact attributes', () => {
+    const contactWithPhoto = contactTestUtils.createMockContact({
+      attributes: {
+        ...contactTestUtils.createMockContact().attributes,
+        photo_url: '/api/contacts/1/avatar',
+      },
+    });
+
+    const { result } = renderHook(() => useDisplayContacts([contactWithPhoto]));
+
+    expect(result.current[0].photo_url).toBe('/api/contacts/1/avatar');
+    expect(result.current[0].first_name).toBe('John');
+    expect(result.current[0].last_name).toBe('Doe');
+  });
+
+  it('sets photo_url to null when not present', () => {
+    const { result } = renderHook(() => useDisplayContacts([mockContact]));
+    expect(result.current[0].photo_url).toBeNull();
   });
 
   it('handles undefined contacts', () => {

@@ -63,8 +63,16 @@ export function ContactAvatar({
       role='img'
       aria-label={displayName}
     >
-      {imageUrl && <AvatarImage src={imageUrl} alt={displayName} />}
-      <AvatarFallback>{initials}</AvatarFallback>
+      {imageUrl && (
+        <AvatarImage
+          src={imageUrl}
+          alt={displayName}
+          data-testid='contact-avatar-image'
+        />
+      )}
+      <AvatarFallback data-testid='contact-avatar-fallback'>
+        {initials}
+      </AvatarFallback>
     </Avatar>
   );
 }

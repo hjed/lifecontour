@@ -6,6 +6,14 @@
 
 import { expect, test } from './fixtures';
 
+interface SyncJob {
+  attributes?: {
+    status?: string;
+    syncType?: string;
+    createdAt?: string | Date;
+  };
+}
+
 test.describe('Sync History - Authenticated User', () => {
   test('should fetch sync history successfully', async ({
     authenticatedPage,
@@ -41,16 +49,10 @@ test.describe('Sync History - Authenticated User', () => {
     const data = await response.json();
     expect(data).toHaveProperty('data');
 
-    // If there are results, verify they match the filter
-    if (data.data.length > 0) {
-      data.data.forEach(
-        (job: {
-          attributes: { status?: string; syncType?: string; createdAt: string };
-        }) => {
-          expect(job.attributes.status).toBe('completed');
-        }
-      );
-    }
+    const statuses = data.data.map((job: SyncJob) => job.attributes?.status);
+    expect(
+      statuses.every((status: string) => status === 'completed')
+    ).toBeTruthy();
   });
 
   test('should filter sync history by sync type', async ({
@@ -66,16 +68,8 @@ test.describe('Sync History - Authenticated User', () => {
     const data = await response.json();
     expect(data).toHaveProperty('data');
 
-    // If there are results, verify they match the filter
-    if (data.data.length > 0) {
-      data.data.forEach(
-        (job: {
-          attributes: { status?: string; syncType?: string; createdAt: string };
-        }) => {
-          expect(job.attributes.syncType).toBe('smart');
-        }
-      );
-    }
+    const syncTypes = data.data.map((job: SyncJob) => job.attributes?.syncType);
+    expect(syncTypes.every((type: string) => type === 'smart')).toBeTruthy();
   });
 
   test('should filter sync history by date range', async ({
@@ -94,18 +88,12 @@ test.describe('Sync History - Authenticated User', () => {
     const data = await response.json();
     expect(data).toHaveProperty('data');
 
-    // If there are results, verify they are within the date range
-    if (data.data.length > 0) {
-      data.data.forEach(
-        (job: {
-          attributes: { status?: string; syncType?: string; createdAt: string };
-        }) => {
-          const createdAt = new Date(job.attributes.createdAt);
-          expect(createdAt >= new Date(dateFrom)).toBeTruthy();
-          expect(createdAt <= new Date(dateTo)).toBeTruthy();
-        }
-      );
-    }
+    const dates = data.data.map(
+      (job: SyncJob) => new Date(job.attributes?.createdAt as string)
+    );
+    expect(
+      dates.every((d: Date) => d >= new Date(dateFrom) && d <= new Date(dateTo))
+    ).toBeTruthy();
   });
 
   test('should paginate sync history', async ({ authenticatedPage }) => {

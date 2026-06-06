@@ -385,7 +385,12 @@ async def process_contact_event(
         # Find all Immich integrations for all users
         auth_service = ImmichAuthService(settings.encryption_key)
         conn = await session.connection()
-        user_ids = await auth_service.get_all_user_ids(conn)
+
+        event_user_id = event_data.get("user_id")
+        if event_user_id:
+            user_ids = [event_user_id]
+        else:
+            user_ids = await auth_service.get_all_user_ids(conn)
 
         if not user_ids:
             logger.info(

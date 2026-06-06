@@ -41,7 +41,10 @@ jest.mock('@/components/contacts/FavouriteToggle', () => ({
 const baseContact: DisplayContact = {
   id: '1',
   name: 'Alice Smith',
+  first_name: 'Alice',
+  last_name: 'Smith',
   is_favourite: false,
+  photo_url: null,
   primary_email: 'alice@example.com',
   primary_phone: '+61400000000',
   tags: [],

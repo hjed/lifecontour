@@ -196,17 +196,17 @@ Add the `photo_url` field to the contact entity/table and implement the backend 
 - **Unit:** Proxy URL construction, photo_url field in API schemas.
 - **Integration:** Avatar proxy endpoint returns image bytes from mocked Immich. Contact sync populates photo_url.
 
-#### Phase 2: Frontend — Avatar Display
+#### Phase 2: Frontend — Avatar Display ✅
 **PR Size:** ~4–6 files
 
 Wire the `ContactAvatar` component to display Immich photos.
 
 **Acceptance Criteria:**
 - [x] `ContactAttributes` TypeScript type updated with optional `photo_url` field
-- [ ] `ContactAvatar` component's `imageUrl` prop wired to `photo_url` from API response
-- [ ] Avatars display on: contact list, contact detail page, journal participant list, search results
-- [ ] Graceful fallback to initials when `photo_url` is null or image fails to load
-- [ ] Loading state while avatar image fetches
+- [x] `ContactAvatar` component's `imageUrl` prop wired to `photo_url` from API response
+- [x] Avatars display on: contact list, contact detail page, journal participant list, search results
+- [x] Graceful fallback to initials when `photo_url` is null or image fails to load
+- [x] Loading state while avatar image fetches (AvatarFallback shows initials while image loads)
 
 **Required Test Coverage:**
 - **Unit:** ContactAvatar renders image when URL present, falls back to initials when absent/errored.
