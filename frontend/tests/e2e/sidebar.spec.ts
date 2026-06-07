@@ -183,21 +183,30 @@ test.describe('Sidebar Navigation', () => {
         page.getByTestId('nav-link-favourites').click(),
       ]);
 
-      // Test dynamic tag navigation (if any tags exist)
-      const tagLinks = page.locator('a[href*="/contacts?tag="]');
-      const tagCount = await tagLinks.count();
-
-      if (tagCount > 0) {
-        // Click the first tag link
-        const firstTagLink = tagLinks.first();
-        const href = await firstTagLink.getAttribute('href');
-        await Promise.all([page.waitForURL(href!), firstTagLink.click()]);
-      }
-
       await Promise.all([
         page.waitForURL('/contacts'),
         page.getByTestId('nav-link-all').click(),
       ]);
+    });
+
+    test('navigates to a tag page from a dynamic sidebar tag link', async ({
+      taggedContactsData,
+    }) => {
+      // Fixture guarantees at least one tag exists, so this is deterministic.
+      const { page } = taggedContactsData;
+      await page.setViewportSize({ width: 1024, height: 768 });
+      await page.goto('/contacts');
+      await expect(
+        page.getByRole('navigation', { name: 'Main navigation' })
+      ).toBeVisible();
+
+      const tagLink = page.locator('a[href*="/contacts?tag="]').first();
+      await expect(tagLink).toBeVisible({ timeout: 15000 });
+      const href = await tagLink.getAttribute('href');
+      expect(href).toMatch(/\/contacts\?tag=\w+/);
+
+      await Promise.all([page.waitForURL(`**${href}`), tagLink.click()]);
+      expect(page.url()).toContain('/contacts?tag=');
     });
   });
 

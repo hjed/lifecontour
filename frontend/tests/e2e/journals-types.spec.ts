@@ -70,129 +70,54 @@ async function createJournalWithCleanup(
 
 test.describe('Journal Types', () => {
   test.describe('Creating Journals with Types', () => {
-    test('should create a journal with mood_rating type', async ({
+    // Note: per-type creation through the UI is covered comprehensively in
+    // journal-creation-ui.spec.ts. These remaining tests assert only the
+    // raw API contract (types + auto-populated type_data) that the UI flow
+    // cannot directly observe.
+
+    test('should create journals with each supported type and populate type_data', async ({
       authenticatedPage,
       testCleanup,
     }) => {
-      const data = await createJournalWithCleanup(
-        authenticatedPage,
-        testCleanup,
-        'Mood Test Journal',
-        'Testing mood rating type',
-        ['mood_rating']
-      );
+      // A single type per journal across the supported set, plus a multi-type
+      // journal — each should round-trip its type and an empty type_data entry.
+      const singleTypeCases = [
+        'mood_rating',
+        'plan',
+        'travel',
+        'outdoor_activity',
+        'jogging',
+        'bushwalking',
+      ];
 
-      // Verify journal was created with correct type
-      expect(data.data.attributes.types).toContain('mood_rating');
-      expect(data.data.attributes.type_data).toHaveProperty('mood_rating');
-    });
+      for (const type of singleTypeCases) {
+        const data = await createJournalWithCleanup(
+          authenticatedPage,
+          testCleanup,
+          `${type} Test Journal`,
+          `Testing ${type} type`,
+          [type]
+        );
 
-    test('should create a journal with plan type', async ({
-      authenticatedPage,
-      testCleanup,
-    }) => {
-      const data = await createJournalWithCleanup(
-        authenticatedPage,
-        testCleanup,
-        'Plan Test Journal',
-        'Testing plan type',
-        ['plan']
-      );
+        expect(data.data.attributes.types).toContain(type);
+        expect(data.data.attributes.type_data).toHaveProperty(type);
+      }
 
-      // Verify journal was created with correct type
-      expect(data.data.attributes.types).toContain('plan');
-      expect(data.data.attributes.type_data).toHaveProperty('plan');
-    });
-
-    test('should create a journal with travel type', async ({
-      authenticatedPage,
-      testCleanup,
-    }) => {
-      const data = await createJournalWithCleanup(
-        authenticatedPage,
-        testCleanup,
-        'Travel Test Journal',
-        'Testing travel type',
-        ['travel'],
-        {
-          start: '2024-01-15T09:00:00Z',
-          end: '2024-01-20T10:00:00Z',
-        }
-      );
-
-      // Verify journal was created with correct type
-      expect(data.data.attributes.types).toContain('travel');
-      expect(data.data.attributes.type_data).toHaveProperty('travel');
-    });
-
-    test('should create a journal with multiple types', async ({
-      authenticatedPage,
-      testCleanup,
-    }) => {
-      const data = await createJournalWithCleanup(
+      // Multiple types on a single journal
+      const multi = await createJournalWithCleanup(
         authenticatedPage,
         testCleanup,
         'Multi-Type Test Journal',
         'Testing multiple types',
-        ['mood_rating', 'plan'] // NOTE is only added when no other types are present
+        ['mood_rating', 'plan']
       );
-
-      // Verify journal was created with all types
-      expect(data.data.attributes.types).toContain('mood_rating');
-      expect(data.data.attributes.types).toContain('plan');
-      expect(data.data.attributes.type_data).toHaveProperty('mood_rating');
-      expect(data.data.attributes.type_data).toHaveProperty('plan');
+      expect(multi.data.attributes.types).toContain('mood_rating');
+      expect(multi.data.attributes.types).toContain('plan');
+      expect(multi.data.attributes.type_data).toHaveProperty('mood_rating');
+      expect(multi.data.attributes.type_data).toHaveProperty('plan');
     });
 
-    test('should create a journal with outdoor_activity type', async ({
-      authenticatedPage,
-      testCleanup,
-    }) => {
-      const data = await createJournalWithCleanup(
-        authenticatedPage,
-        testCleanup,
-        'Outdoor Test Journal',
-        'Testing outdoor activity type',
-        ['outdoor_activity']
-      );
-
-      expect(data.data.attributes.types).toContain('outdoor_activity');
-      expect(data.data.attributes.type_data).toHaveProperty('outdoor_activity');
-    });
-
-    test('should create a journal with jogging type', async ({
-      authenticatedPage,
-      testCleanup,
-    }) => {
-      const data = await createJournalWithCleanup(
-        authenticatedPage,
-        testCleanup,
-        'Jogging Test Journal',
-        'Testing jogging type',
-        ['jogging']
-      );
-
-      expect(data.data.attributes.types).toContain('jogging');
-      expect(data.data.attributes.type_data).toHaveProperty('jogging');
-    });
-
-    test('should create a journal with bushwalking type', async ({
-      authenticatedPage,
-      testCleanup,
-    }) => {
-      const data = await createJournalWithCleanup(
-        authenticatedPage,
-        testCleanup,
-        'Bushwalking Test Journal',
-        'Testing bushwalking type',
-        ['bushwalking']
-      );
-
-      expect(data.data.attributes.types).toContain('bushwalking');
-      expect(data.data.attributes.type_data).toHaveProperty('bushwalking');
-    });
-
-    test('should create a journal with outdoor_training type', async ({
+    test('should create a journal with outdoor_training type and custom focus areas', async ({
       authenticatedPage,
       testCleanup,
     }) => {

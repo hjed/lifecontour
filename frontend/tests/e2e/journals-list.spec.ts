@@ -62,6 +62,28 @@ test.describe('Journal List Page', () => {
   });
 
   test.describe('Filtering', () => {
+    test('should toggle filters visibility', async ({ journalsWithData }) => {
+      const { page } = journalsWithData;
+
+      await page.goto('/journals');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
+
+      const filterToggle = page.getByRole('button', { name: /filter/i });
+      const filtersSection = page.locator('[data-testid="journal-filters"]');
+
+      // Toggle filters off
+      await expect(filterToggle).toBeVisible();
+      await filterToggle.click();
+      await expect(filtersSection).toBeHidden();
+
+      // Toggle filters back on
+      await filterToggle.click();
+      await expect(filtersSection).toBeVisible();
+      await expect(
+        filtersSection.getByText(/date range/i).first()
+      ).toBeVisible();
+    });
+
     test('should filter journals by search text', async ({
       journalsWithData,
     }) => {

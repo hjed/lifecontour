@@ -108,6 +108,48 @@ test.describe('Tag Filtering via Main Contacts List', () => {
     await expect(heading).toBeVisible();
   });
 
+  test('should display empty state when tag has no contacts', async ({
+    authenticatedPage,
+  }) => {
+    // Create a tag first, then navigate to it (it will have no contacts)
+    const response = await authenticatedPage.request.post('/api/tags', {
+      data: {
+        data: {
+          type: 'tags',
+          attributes: {
+            name: 'Empty-Test-Tag-' + Date.now(),
+          },
+        },
+      },
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    expect(response.ok()).toBe(true);
+    const responseData = await response.json();
+    const tagId = responseData.data.id;
+
+    try {
+      // Navigate to the empty tag via unified contacts URL
+      await authenticatedPage.goto(`/contacts?tag=${tagId}`);
+      await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
+
+      // Should show the standard empty state on the unified contacts page
+      await expect(
+        authenticatedPage.getByText(/no contacts found/i)
+      ).toBeVisible();
+
+      // Should not show any contact cards
+      await expect(
+        authenticatedPage.locator('[data-testid^="contact-"]')
+      ).toHaveCount(0);
+    } finally {
+      // Clean up the tag
+      await authenticatedPage.request.delete(`/api/tags/${tagId}`);
+    }
+  });
+
   test('parent tag filter should show contacts tagged with child tags', async ({
     authenticatedPage,
   }) => {

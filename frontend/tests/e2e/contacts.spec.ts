@@ -18,6 +18,32 @@ test.describe('Contact Management - Authenticated User', () => {
     expect(pageContent).toContain('Contacts');
   });
 
+  test('should display empty state when no contacts exist', async ({
+    emptyContactsPage,
+  }) => {
+    await emptyContactsPage.goto('/contacts');
+    await expect(emptyContactsPage).toHaveTitle(/Personal Management System/);
+
+    // Wait for the page to finish loading
+    await expect(
+      emptyContactsPage.locator('main, [role="main"]').first()
+    ).toBeVisible();
+
+    // Should show the empty contacts state with count, heading and CTA
+    await expect(emptyContactsPage.getByText('0 contacts found')).toBeVisible();
+    await expect(
+      emptyContactsPage.getByRole('heading', { name: /no contacts found/i })
+    ).toBeVisible();
+    await expect(
+      emptyContactsPage.getByTestId('add-contact-button')
+    ).toBeVisible();
+
+    // Should not render any contact cards
+    await expect(
+      emptyContactsPage.locator('[data-testid^="contact-"]')
+    ).toHaveCount(0);
+  });
+
   test('should load create contact page successfully when authenticated', async ({
     authenticatedPage,
   }) => {

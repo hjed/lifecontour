@@ -54,12 +54,63 @@ test.describe('Contact Favourites and Filtering', () => {
       const emptyState = page.locator('[data-testid="empty-state"]');
       await expect(emptyState).toBeVisible();
 
-      // Verify the empty state contains the expected text
+      // Verify the empty state contains the expected text and helpful messaging
       await expect(emptyState).toContainText('No favourite contacts found');
+      await expect(emptyState).toContainText(
+        'Star some contacts to see them here'
+      );
 
       // Should not show any contact cards (exclude empty state card)
       const contactCards = page.locator('[data-testid^="contact-"]');
       await expect(contactCards).toHaveCount(0);
+    });
+
+    test('should allow navigation back to all contacts from empty state', async ({
+      regularContacts,
+    }) => {
+      const { page } = regularContacts;
+
+      await page.goto('/contacts/favourites');
+      await expect(page).toHaveTitle(/Personal Management System/);
+
+      // Empty state should offer a link back to all contacts
+      const emptyStateLink = page.locator(
+        '[data-testid="empty-state"] a[href="/contacts"]'
+      );
+      await expect(emptyStateLink).toBeVisible();
+      await expect(emptyStateLink).toBeEnabled();
+
+      await Promise.all([
+        page.waitForURL('**/contacts'),
+        emptyStateLink.click(),
+      ]);
+      await expect(page).toHaveURL(/\/contacts$/);
+    });
+
+    test('should expose accessible aria labels on favourite toggles', async ({
+      favouriteContacts,
+    }) => {
+      const { page, contacts } = favouriteContacts;
+
+      await page.goto('/contacts/favourites');
+      await expect(page).toHaveTitle(/Personal Management System/);
+
+      // Fixture guarantees favourite contacts are rendered
+      expect(contacts.length).toBeGreaterThan(0);
+      for (const contact of contacts) {
+        await expect(
+          page.locator(`[data-testid="contact-${contact.id}"]`)
+        ).toBeVisible();
+      }
+
+      // Favourite toggle buttons must carry an accessible aria-label
+      const favouriteButtons = page.locator(
+        'button[aria-label*="favourite" i]'
+      );
+      await expect(favouriteButtons.first()).toHaveAttribute(
+        'aria-label',
+        /favourite/i
+      );
     });
 
     test('should redirect to login when not authenticated', async ({
@@ -145,89 +196,8 @@ test.describe('Contact Favourites and Filtering', () => {
     });
   });
 
-  test.describe('Tag-based Filtering', () => {
-    test('should display contacts filtered by tag when tag exists', async ({
-      taggedContactsData,
-    }) => {
-      const { page, contacts, tags } = taggedContactsData;
-
-      // Navigate to contacts with tag filter (unified URL)
-      const firstTag = tags[0];
-      await page.goto(`/contacts?tag=${firstTag.id}`);
-      await expect(page).toHaveTitle(/Personal Management System/);
-
-      // Should show contacts with this tag (guaranteed by fixture)
-      const contactsWithTag = contacts.filter(
-        c => c.tags && c.tags.includes(firstTag.name)
-      );
-      expect(contactsWithTag.length).toBeGreaterThan(0);
-
-      // Verify contacts are displayed
-      for (const contact of contactsWithTag) {
-        const contactCard = page.locator(
-          `[data-testid="contact-${contact.id}"]`
-        );
-        await expect(contactCard).toBeVisible();
-      }
-
-      // Page should indicate it's showing the tag
-      const heading = page.locator('h1');
-      await expect(heading).toContainText(new RegExp(firstTag.name, 'i'));
-    });
-
-    test('should display empty state when tag has no contacts', async ({
-      authenticatedPage,
-    }) => {
-      // Create a tag first, then navigate to it (it will have no contacts)
-      const response = await authenticatedPage.request.post('/api/tags', {
-        data: {
-          data: {
-            type: 'tags',
-            attributes: {
-              name: 'Empty-Test-Tag-' + Date.now(),
-            },
-          },
-        },
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      expect(response.ok()).toBe(true);
-      const responseData = await response.json();
-      const tagId = responseData.data.id;
-
-      // Navigate to the empty tag via unified contacts URL
-      await authenticatedPage.goto(`/contacts?tag=${tagId}`);
-      await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
-
-      // Should show the standard empty state on the unified contacts page
-      const emptyState = authenticatedPage.getByText(/no contacts found/i);
-      await expect(emptyState).toBeVisible();
-
-      // Should not show any contact cards
-      const contactCards = authenticatedPage.locator(
-        '[data-testid^="contact-"]'
-      );
-      await expect(contactCards).toHaveCount(0);
-
-      // Clean up the tag
-      await authenticatedPage.request.delete(`/api/tags/${tagId}`);
-    });
-
-    test('should handle non-existent tag gracefully', async ({
-      authenticatedPage,
-    }) => {
-      // Navigate to a non-existent tag via unified contacts URL
-      await authenticatedPage.goto('/contacts?tag=non-existent-tag-999');
-      await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
-
-      // The page should load without errors — contacts list shows
-      // with no results since the tag ID does not match any real tag
-      const heading = authenticatedPage.locator('h1');
-      await expect(heading).toBeVisible();
-    });
-  });
+  // Note: tag-based filtering scenarios live in contacts-tag-filtering.spec.ts
+  // (the canonical home for tag filtering), so they are not duplicated here.
 
   test.describe('Integration Tests', () => {
     test('should maintain consistent navigation between contact pages', async ({
