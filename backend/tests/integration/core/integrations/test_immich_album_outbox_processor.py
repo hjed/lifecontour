@@ -51,6 +51,7 @@ def _event(
     content: str = "An album",
     start: datetime = START,
     end: datetime = END,
+    asset_count: int = 3,
 ) -> OutboxEvent:
     return OutboxEvent(
         id=uuid.uuid4(),
@@ -70,7 +71,7 @@ def _event(
             },
             "album_metadata": {
                 "album_name": title,
-                "asset_count": 3,
+                "asset_count": asset_count,
             },
             "sync_timestamp": datetime.now(UTC).isoformat(),
         },
@@ -86,6 +87,20 @@ async def _journal_row(connection: AsyncConnection, journal_id: int):
             FROM journals WHERE id = :id
         """),
         {"id": journal_id},
+    )
+    return result.fetchone()
+
+
+async def _album_ref(connection: AsyncConnection, album_id: str):
+    result = await connection.execute(
+        text("""
+            SELECT internal_entity_id, reference_data, updated_at
+            FROM external_references
+            WHERE external_system = 'immich'
+              AND external_entity_type = 'album'
+              AND external_entity_id = :id
+        """),
+        {"id": album_id},
     )
     return result.fetchone()
 
@@ -249,3 +264,135 @@ async def test_resync_preserves_locally_edited_fields(
     ).fetchone()
     assert meta is not None
     assert meta.version_hash == "v2"
+
+
+@pytest.mark.asyncio
+async def test_protected_resync_refreshes_display_metadata_but_keeps_anchor(
+    async_connection: AsyncConnection,
+    clean_database: None,  # noqa: ARG001
+) -> None:
+    """A protected re-sync refreshes album display data without losing protection.
+
+    The album's display metadata (name / asset count) must stay current even
+    when the journal's title/content/date are protected, but the merge anchor
+    (external_reference.updated_at) must NOT advance, so the journal remains
+    protected on subsequent syncs.
+    """
+    album_id = str(uuid.uuid4())
+    processor = _processor(async_connection)
+
+    created = await processor.process_event(
+        _event(
+            EVENT_TYPE_IMMICH_ALBUM_CREATED,
+            album_id=album_id,
+            version_hash="v1",
+            asset_count=3,
+        )
+    )
+    journal_id = created["journal_id"]
+    anchor_before = (await _album_ref(async_connection, album_id)).updated_at
+
+    # Local edit after the last sync.
+    await async_connection.execute(
+        text("""
+            UPDATE journals
+            SET title = 'Local Title', updated_at = now() + interval '1 hour'
+            WHERE id = :id
+        """),
+        {"id": journal_id},
+    )
+
+    # Album changed in Immich (new name + asset count) → protected re-sync.
+    result = await processor.process_event(
+        _event(
+            EVENT_TYPE_IMMICH_ALBUM_UPDATED,
+            album_id=album_id,
+            version_hash="v2",
+            title="Renamed In Immich",
+            asset_count=12,
+        )
+    )
+    assert result["status"] == "protected"
+
+    ref = await _album_ref(async_connection, album_id)
+    # Display metadata refreshed despite protection...
+    assert json.loads(ref.reference_data)["album_name"] == "Renamed In Immich"
+    assert json.loads(ref.reference_data)["asset_count"] == 12
+    # ...but the merge anchor was preserved (not advanced).
+    assert ref.updated_at == anchor_before
+
+    # A subsequent change is therefore still protected.
+    result2 = await processor.process_event(
+        _event(
+            EVENT_TYPE_IMMICH_ALBUM_UPDATED,
+            album_id=album_id,
+            version_hash="v3",
+            title="Renamed Again",
+        )
+    )
+    assert result2["status"] == "protected"
+    assert (await _journal_row(async_connection, journal_id)).title == "Local Title"
+
+
+@pytest.mark.asyncio
+async def test_created_retry_without_external_reference_does_not_duplicate(
+    async_connection: AsyncConnection,
+    clean_database: None,  # noqa: ARG001
+) -> None:
+    """A retried create is idempotent even if only sync_metadata survives.
+
+    If the external_reference row is missing but sync_metadata still links the
+    album to a journal, re-processing a created event must update that journal
+    rather than creating a duplicate.
+    """
+    album_id = str(uuid.uuid4())
+    processor = _processor(async_connection)
+
+    created = await processor.process_event(
+        _event(EVENT_TYPE_IMMICH_ALBUM_CREATED, album_id=album_id, version_hash="v1")
+    )
+    journal_id = created["journal_id"]
+
+    # Simulate a lost external_reference row (sync_metadata still present).
+    await async_connection.execute(
+        text("""
+            DELETE FROM external_references
+            WHERE external_system = 'immich'
+              AND external_entity_type = 'album'
+              AND external_entity_id = :id
+        """),
+        {"id": album_id},
+    )
+
+    # Re-send a created event with changed metadata.
+    result = await processor.process_event(
+        _event(
+            EVENT_TYPE_IMMICH_ALBUM_CREATED,
+            album_id=album_id,
+            version_hash="v2",
+            title="Retried",
+        )
+    )
+
+    # Same journal updated, not a duplicate.
+    assert result["journal_id"] == journal_id
+    count = (
+        await async_connection.execute(
+            text("""
+                SELECT count(*) AS n FROM sync_metadata
+                WHERE integration_source = 'immich_album' AND external_id = :id
+            """),
+            {"id": album_id},
+        )
+    ).fetchone()
+    assert count is not None
+    assert count.n == 1
+
+    journal_count = (
+        await async_connection.execute(
+            text("SELECT count(*) AS n FROM journals WHERE user_id = :u"),
+            {"u": USER_ID},
+        )
+    ).fetchone()
+    assert journal_count is not None
+    assert journal_count.n == 1

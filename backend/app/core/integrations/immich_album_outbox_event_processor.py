@@ -87,17 +87,72 @@ class ImmichAlbumOutboxEventProcessor:
             f"Unknown Immich album event type: {event.event_type}"
         )
 
-    # -- Create -----------------------------------------------------------
+    # -- Create / Update dispatch ----------------------------------------
 
     async def _process_created(
         self, payload: ImmichAlbumSyncEventData
     ) -> dict[str, Any]:
-        """Create a PHOTO_ALBUM journal, or update if the album already links."""
-        existing_ref = await self._find_external_reference(payload.external_id)
-        if existing_ref is not None:
-            # Already linked (e.g. a retried create) — treat as an update.
-            return await self._process_updated(payload)
+        """Handle an ``immich_album.created`` event.
 
+        Resolves any existing journal already linked to this album (via
+        external_reference *or* sync_metadata) so a retried create cannot
+        duplicate the journal; otherwise creates a new one.
+        """
+        journal_id = await self._existing_journal_id(payload)
+        if journal_id is not None:
+            return await self._apply_update(payload, journal_id)
+        return await self._apply_create(payload)
+
+    async def _process_updated(
+        self, payload: ImmichAlbumSyncEventData
+    ) -> dict[str, Any]:
+        """Handle an ``immich_album.updated`` event.
+
+        Updates the linked journal, or creates one if the album has not been
+        imported yet.
+        """
+        journal_id = await self._existing_journal_id(payload)
+        if journal_id is None:
+            return await self._apply_create(payload)
+        return await self._apply_update(payload, journal_id)
+
+    async def _existing_journal_id(
+        self, payload: ImmichAlbumSyncEventData
+    ) -> int | None:
+        """Resolve the existing, still-present journal id for this album.
+
+        Checks the album external_reference, then the sync_metadata link, then
+        the event's ``existing_journal_id`` — returning the first that points at
+        a journal that still exists. This makes create/update idempotent even if
+        one of the link rows is missing or corrupted.
+        """
+        ref = await self._find_external_reference(payload.external_id)
+        if ref is not None and await self._journal_exists(ref.internal_entity_id):
+            return int(ref.internal_entity_id)
+
+        metadata = await self.sync_metadata_repo.find_by_external_id(
+            INTEGRATION_SOURCE, payload.external_id
+        )
+        if (
+            metadata is not None
+            and metadata.internal_id is not None
+            and await self._journal_exists(metadata.internal_id)
+        ):
+            return int(metadata.internal_id)
+
+        if payload.existing_journal_id is not None and await self._journal_exists(
+            payload.existing_journal_id
+        ):
+            return payload.existing_journal_id
+
+        return None
+
+    async def _journal_exists(self, journal_id: int) -> bool:
+        """Return True if a journal with this id still exists."""
+        return await self.journal_repo.find_by_id(journal_id) is not None
+
+    async def _apply_create(self, payload: ImmichAlbumSyncEventData) -> dict[str, Any]:
+        """Create a new PHOTO_ALBUM journal and its sync links."""
         journal = self._build_journal(payload.journal_data)
         created = await self.journal_service.create_journal(journal, self.connection)
         if created.id is None:
@@ -109,7 +164,7 @@ class ImmichAlbumOutboxEventProcessor:
             version_hash=payload.version_hash,
             internal_id=created.id,
         )
-        await self._create_external_reference(created.id, payload)
+        await self._upsert_external_reference(created.id, payload, bump_anchor=True)
 
         logger.info(
             "Created PHOTO_ALBUM journal from Immich album",
@@ -123,23 +178,14 @@ class ImmichAlbumOutboxEventProcessor:
             "album_id": payload.external_id,
         }
 
-    # -- Update -----------------------------------------------------------
-
-    async def _process_updated(
-        self, payload: ImmichAlbumSyncEventData
+    async def _apply_update(
+        self, payload: ImmichAlbumSyncEventData, journal_id: int
     ) -> dict[str, Any]:
-        """Update an album journal, honouring local-edit merge protection."""
-        ref = await self._find_external_reference(payload.external_id)
-        journal_id = ref.internal_entity_id if ref else payload.existing_journal_id
-
-        if journal_id is None:
-            # No link yet — fall back to creating the journal.
-            return await self._process_created(payload)
-
+        """Update a linked album journal, honouring local-edit merge protection."""
         existing = await self.journal_repo.find_by_id(journal_id)
         if existing is None:
-            # Link points at a deleted journal — recreate it.
-            return await self._process_created(payload)
+            # Journal vanished between checks — recreate it.
+            return await self._apply_create(payload)
 
         metadata = await self.sync_metadata_repo.find_by_external_id(
             INTEGRATION_SOURCE, payload.external_id
@@ -153,6 +199,7 @@ class ImmichAlbumOutboxEventProcessor:
                 "album_id": payload.external_id,
             }
 
+        ref = await self._find_external_reference(payload.external_id)
         link_updated_at = ref.updated_at if ref else None
         has_local_edits = self._has_local_edits(existing.updated_at, link_updated_at)
 
@@ -166,11 +213,15 @@ class ImmichAlbumOutboxEventProcessor:
                 changed_fields=dict.fromkeys(_PROTECTED_FIELDS, True),
                 transaction=self.connection,
             )
-            await self._touch_external_reference(payload, journal_id)
 
-        # Always record that we have processed this album version so we do not
-        # reprocess it; protected journals keep their (older) link timestamp so
-        # local edits remain protected on future syncs.
+        # Always refresh album display metadata (name / asset count / url) so it
+        # cannot go stale. Only advance the merge anchor (updated_at) when we
+        # actually applied inbound changes, so a locally edited journal stays
+        # protected on future syncs.
+        await self._upsert_external_reference(
+            journal_id, payload, bump_anchor=not has_local_edits
+        )
+
         await self.sync_metadata_repo.upsert(
             integration_source=INTEGRATION_SOURCE,
             external_id=payload.external_id,
@@ -253,61 +304,60 @@ class ImmichAlbumOutboxEventProcessor:
         )
         return result.fetchone()
 
-    async def _create_external_reference(
-        self, journal_id: int, payload: ImmichAlbumSyncEventData
+    async def _upsert_external_reference(
+        self,
+        journal_id: int,
+        payload: ImmichAlbumSyncEventData,
+        *,
+        bump_anchor: bool,
     ) -> None:
-        """Insert the journal-to-album external reference."""
-        now = datetime.now(UTC)
-        await self.connection.execute(
-            text("""
-                INSERT INTO external_references
-                    (internal_entity_type, internal_entity_id, external_system,
-                     external_entity_type, external_entity_id, reference_data,
-                     created_at, updated_at)
-                VALUES
-                    (:internal_entity_type, :internal_entity_id, :external_system,
-                     :external_entity_type, :external_entity_id, :reference_data,
-                     :created_at, :updated_at)
-            """),
-            {
-                "internal_entity_type": INTERNAL_ENTITY_TYPE,
-                "internal_entity_id": journal_id,
-                "external_system": EXTERNAL_SYSTEM,
-                "external_entity_type": EXTERNAL_ENTITY_TYPE,
-                "external_entity_id": payload.external_id,
-                "reference_data": self._reference_data(payload),
-                "created_at": now,
-                "updated_at": now,
-            },
-        )
+        """Insert or update the journal-to-album external reference.
 
-    async def _touch_external_reference(
-        self, payload: ImmichAlbumSyncEventData, journal_id: int
-    ) -> None:
-        """Refresh reference_data and updated_at after applying an album update.
+        Refreshes ``reference_data`` (album display metadata) and repoints the
+        link to ``journal_id``. ``updated_at`` — the merge-protection anchor —
+        is only advanced when ``bump_anchor`` is True (i.e. inbound changes were
+        applied); when False the existing anchor is preserved so a locally
+        edited journal stays protected.
 
-        Bumping ``updated_at`` marks "last synced now" so the next sync only
-        treats the journal as locally edited if it changes again afterwards.
+        ``external_references.updated_at`` uses an app-level (not DB) ``onupdate``
+        default, so a raw UPDATE that omits the column leaves it untouched.
         """
         now = datetime.now(UTC)
-        await self.connection.execute(
-            text("""
+        params: dict[str, Any] = {
+            "journal_id": journal_id,
+            "reference_data": self._reference_data(payload),
+            "external_system": EXTERNAL_SYSTEM,
+            "external_entity_type": EXTERNAL_ENTITY_TYPE,
+            "external_entity_id": payload.external_id,
+            "internal_entity_type": INTERNAL_ENTITY_TYPE,
+            "now": now,
+        }
+
+        anchor_assignment = ", updated_at = :now" if bump_anchor else ""
+        result = await self.connection.execute(
+            text(f"""
                 UPDATE external_references
-                SET reference_data = :reference_data,
-                    updated_at = :updated_at
+                SET internal_entity_id = :journal_id,
+                    reference_data = :reference_data{anchor_assignment}
                 WHERE external_system = :external_system
                   AND external_entity_type = :external_entity_type
                   AND external_entity_id = :external_entity_id
                   AND internal_entity_type = :internal_entity_type
-                  AND internal_entity_id = :internal_entity_id
             """),
-            {
-                "reference_data": self._reference_data(payload),
-                "updated_at": now,
-                "external_system": EXTERNAL_SYSTEM,
-                "external_entity_type": EXTERNAL_ENTITY_TYPE,
-                "external_entity_id": payload.external_id,
-                "internal_entity_type": INTERNAL_ENTITY_TYPE,
-                "internal_entity_id": journal_id,
-            },
+            params,
         )
+
+        if result.rowcount == 0:
+            await self.connection.execute(
+                text("""
+                    INSERT INTO external_references
+                        (internal_entity_type, internal_entity_id, external_system,
+                         external_entity_type, external_entity_id, reference_data,
+                         created_at, updated_at)
+                    VALUES
+                        (:internal_entity_type, :journal_id, :external_system,
+                         :external_entity_type, :external_entity_id, :reference_data,
+                         :now, :now)
+                """),
+                params,
+            )

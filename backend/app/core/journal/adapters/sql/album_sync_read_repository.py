@@ -11,8 +11,11 @@ and updated by Immich album sync.
 import json
 from typing import Any
 
+import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
+
+logger = structlog.get_logger()
 
 INTEGRATION_SOURCE = "immich_album"
 
@@ -53,15 +56,41 @@ class AlbumSyncReadRepository:
             return None
 
         data: dict[str, Any] = {"immich_album_id": row.immich_album_id}
-        if row.reference_data:
-            ref = json.loads(row.reference_data)
-            if ref.get("album_name"):
-                data["album_name"] = ref["album_name"]
-            if ref.get("album_url"):
-                data["album_url"] = ref["album_url"]
-            if ref.get("asset_count") is not None:
-                data["asset_count"] = ref["asset_count"]
+        ref = self._decode_reference_data(row.reference_data, journal_id)
+        if ref.get("album_name"):
+            data["album_name"] = ref["album_name"]
+        if ref.get("album_url"):
+            data["album_url"] = ref["album_url"]
+        if ref.get("asset_count") is not None:
+            data["asset_count"] = ref["asset_count"]
         return data
+
+    @staticmethod
+    def _decode_reference_data(
+        reference_data: str | None, journal_id: int
+    ) -> dict[str, Any]:
+        """Decode the album reference_data JSON, tolerating malformed rows.
+
+        A single corrupted ``external_references.reference_data`` value must not
+        turn a journal fetch/list into a 500; fall back to the bare album id.
+        """
+        if not reference_data:
+            return {}
+        try:
+            decoded = json.loads(reference_data)
+        except ValueError, TypeError:
+            logger.warning(
+                "Malformed album reference_data; ignoring",
+                journal_id=journal_id,
+            )
+            return {}
+        if not isinstance(decoded, dict):
+            logger.warning(
+                "Unexpected album reference_data shape; ignoring",
+                journal_id=journal_id,
+            )
+            return {}
+        return decoded
 
     async def delete(self, journal_id: int) -> None:
         """Remove a journal's album sync metadata and external reference.

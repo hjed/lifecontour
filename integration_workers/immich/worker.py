@@ -348,11 +348,11 @@ async def sync_immich_albums(
     user_id: str,
     sync_type: str = "full",
 ) -> dict[str, Any]:
-    """ARQ task: sync Immich albums to PHOTO_ALBUM journals.
+    """ARQ task: orchestrate Immich album sync.
 
-    Fetches all albums for the user, derives date ranges, and emits
-    ``immich_album.*`` outbox events for the backend to process. Album
-    writes happen in a single transaction.
+    Lists album-ID batches from Immich and enqueues a ``sync_immich_album_batch``
+    job for each batch so a large account cannot time out a single task. Each
+    batch commits independently.
 
     Args:
         ctx: ARQ worker context (must contain ``session_factory``).
@@ -378,6 +378,13 @@ async def sync_immich_albums(
     )
 
     try:
+        import asyncio
+
+        from arq.jobs import Job
+
+        batch_jobs: list[Any] = []
+        batches_enqueued = 0
+
         async with session_factory() as session:
             conn = await session.connection()
 
@@ -405,13 +412,56 @@ async def sync_immich_albums(
                 sync_service = ImmichSyncService(
                     api_client=api_client, connection=conn, user_id=user_id
                 )
-                result = await sync_service.sync_albums()
-                await session.commit()
-            except Exception:
-                await session.rollback()
-                raise
+
+                batch_number = 0
+                async for album_batch in sync_service.list_album_id_batches():
+                    batch_number += 1
+                    batch_job_id = f"immich-album-batch-{job_id}-b{batch_number}"
+
+                    job = await ctx["redis"].enqueue_job(
+                        "sync_immich_album_batch",
+                        user_id,
+                        album_batch,
+                        _job_id=batch_job_id,
+                        _queue_name=IMMICH_ARQ_QUEUE_NAME,
+                    )
+                    if job:
+                        batches_enqueued += 1
+                        batch_jobs.append(job)
+                        logger.info(
+                            "Enqueued album batch job",
+                            job_id=job.job_id,
+                            batch_size=len(album_batch),
+                            batch_number=batch_number,
+                        )
+                    else:
+                        batch_jobs.append(
+                            Job(
+                                batch_job_id,
+                                ctx["redis"],
+                                _queue_name=IMMICH_ARQ_QUEUE_NAME,
+                            )
+                        )
+                        logger.info(
+                            "Album batch job already enqueued",
+                            batch_job_id=batch_job_id,
+                            batch_number=batch_number,
+                        )
             finally:
                 await api_client.close()
+
+        if batch_jobs:
+            logger.info(
+                "Waiting for album batch jobs to complete",
+                job_id=job_id,
+                count=len(batch_jobs),
+            )
+            results = await asyncio.gather(
+                *[j.result(timeout=290) for j in batch_jobs], return_exceptions=True
+            )
+            for res in results:
+                if isinstance(res, Exception):
+                    raise res
 
         await _update_sync_job_status(
             session_factory,
@@ -422,13 +472,10 @@ async def sync_immich_albums(
         )
 
         return {
-            "status": "completed",
+            "status": "enqueued",
             "user_id": user_id,
             "sync_type": sync_type,
-            "created": result.created,
-            "updated": result.updated,
-            "unchanged": result.unchanged,
-            "errors": result.errors,
+            "batches_enqueued": batches_enqueued,
         }
 
     except Exception as e:
@@ -446,6 +493,66 @@ async def sync_immich_albums(
             "message": error_msg,
             "user_id": user_id,
         }
+
+
+@trace_arq_job
+async def sync_immich_album_batch(
+    ctx: dict[str, Any],
+    user_id: str,
+    album_ids: list[str],
+) -> dict[str, Any]:
+    """ARQ task: process a batch of Immich albums.
+
+    Args:
+        ctx: ARQ worker context.
+        user_id: Internal user ID.
+        album_ids: Immich album UUIDs to process.
+    """
+    session_factory = ctx["session_factory"]
+
+    logger.info(
+        "sync_immich_album_batch started",
+        user_id=user_id,
+        batch_size=len(album_ids),
+    )
+
+    try:
+        async with session_factory() as session:
+            conn = await session.connection()
+
+            auth_service = ImmichAuthService(settings.encryption_key)
+            api_key = await auth_service.get_api_key(user_id, conn)
+            server_url = await auth_service.get_server_url(user_id, conn)
+
+            if not api_key or not server_url:
+                raise ValueError("Immich credentials missing")
+
+            api_client = ImmichApiClient.create(server_url, api_key)
+            try:
+                sync_service = ImmichSyncService(
+                    api_client=api_client, connection=conn, user_id=user_id
+                )
+                result = await sync_service.sync_albums_batch(album_ids)
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+            finally:
+                await api_client.close()
+
+        return {
+            "status": "success",
+            "user_id": user_id,
+            "created": result.created,
+            "updated": result.updated,
+            "unchanged": result.unchanged,
+            "errors": result.errors,
+        }
+    except Exception as e:
+        logger.exception(
+            "sync_immich_album_batch failed", user_id=user_id, error=str(e)
+        )
+        raise
 
 
 @trace_arq_job
@@ -728,6 +835,7 @@ class WorkerSettings:
         sync_immich_people,
         sync_immich_people_batch,
         sync_immich_albums,
+        sync_immich_album_batch,
         periodic_sync_all_immich_accounts,
         process_contact_event,
     ]

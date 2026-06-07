@@ -106,6 +106,8 @@ class ImmichSyncService:
     _EXTERNAL_ENTITY_TYPE = "person"
     _INTERNAL_ENTITY_TYPE = "contact"
     _ALBUM_INTEGRATION_SOURCE = "immich_album"
+    # Number of albums processed per fanned-out batch job.
+    _ALBUM_BATCH_SIZE = 50
 
     def __init__(
         self,
@@ -173,34 +175,43 @@ class ImmichSyncService:
 
         return result
 
-    async def sync_albums(self) -> AlbumSyncResult:
-        """Sync all Immich albums to PHOTO_ALBUM journals.
+    async def list_album_id_batches(self) -> AsyncIterator[list[str]]:
+        """Yield batches of Immich album IDs for fan-out processing.
 
-        Fetches every album, derives its date range from photo timestamps,
-        and emits an ``immich_album.created`` / ``immich_album.updated`` outbox
-        event when the album is new or its metadata changed. The backend
+        Fetching each album's assets (`get_album`) is a per-album network call,
+        so album sync is fanned out across batch jobs (mirroring people sync) to
+        avoid a single task timing out on accounts with many albums.
+        """
+        albums = await self._api.get_all_albums()
+        album_ids = [album.id for album in albums]
+        logger.info("Listed albums for sync", total=len(album_ids))
+
+        for start in range(0, len(album_ids), self._ALBUM_BATCH_SIZE):
+            yield album_ids[start : start + self._ALBUM_BATCH_SIZE]
+
+    async def sync_albums_batch(self, album_ids: list[str]) -> AlbumSyncResult:
+        """Sync a batch of Immich albums to PHOTO_ALBUM journals.
+
+        For each album, derives its date range from photo timestamps and emits
+        an ``immich_album.created`` / ``immich_album.updated`` outbox event when
+        the album is new or its metadata changed. The backend
         ``ImmichAlbumOutboxEventProcessor`` performs the journal writes.
 
         Returns:
-            An :class:`AlbumSyncResult` summarising the sync.
+            An :class:`AlbumSyncResult` summarising the batch.
         """
         result = AlbumSyncResult()
 
-        albums = await self._api.get_all_albums()
-        for summary in albums:
+        for album_id in album_ids:
             try:
-                await self._process_album(summary.id, result)
+                await self._process_album(album_id, result)
             except Exception as e:  # noqa: BLE001
                 result.errors += 1
-                result.error_details.append(
-                    f"Error processing album {summary.id}: {e!s}"
-                )
-                logger.error(
-                    "Error processing album", album_id=summary.id, error=str(e)
-                )
+                result.error_details.append(f"Error processing album {album_id}: {e!s}")
+                logger.error("Error processing album", album_id=album_id, error=str(e))
 
         logger.info(
-            "Album sync complete",
+            "Album batch sync complete",
             created=result.created,
             updated=result.updated,
             unchanged=result.unchanged,

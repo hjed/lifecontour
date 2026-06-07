@@ -29,10 +29,11 @@ class TestWorkerSettings:
 
     def test_functions_list_has_sync_tasks(self) -> None:
         """Functions list contains the people, album, and event sync tasks."""
-        assert len(WorkerSettings.functions) == 5
+        assert len(WorkerSettings.functions) == 6
         func_names = [f.__name__ for f in WorkerSettings.functions]
         assert "sync_immich_people" in func_names
         assert "sync_immich_albums" in func_names
+        assert "sync_immich_album_batch" in func_names
         assert "periodic_sync_all_immich_accounts" in func_names
         assert "process_contact_event" in func_names
 

@@ -227,16 +227,15 @@ def _full_album() -> ImmichAlbum:
 
 
 @pytest.mark.asyncio
-class TestSyncAlbums:
+class TestSyncAlbumsBatch:
     async def test_new_album_emits_created_event(self) -> None:
         api = AsyncMock()
-        api.get_all_albums.return_value = [ImmichAlbum(id="album-1")]
         api.get_album.return_value = _full_album()
         conn = AsyncMock()
         # _find_album_sync_metadata → None (new); INSERT outbox → ignored result
         conn.execute.side_effect = [_fetchone(None), MagicMock()]
 
-        result = await _service(api, conn).sync_albums()
+        result = await _service(api, conn).sync_albums_batch(["album-1"])
 
         assert result.created == 1
         events = _extract_album_events(conn)
@@ -249,14 +248,13 @@ class TestSyncAlbums:
 
     async def test_changed_album_emits_updated_event(self) -> None:
         api = AsyncMock()
-        api.get_all_albums.return_value = [ImmichAlbum(id="album-1")]
         api.get_album.return_value = _full_album()
         conn = AsyncMock()
         existing = MagicMock()
         existing.version_hash = "stale-hash"
         conn.execute.side_effect = [_fetchone(existing), MagicMock()]
 
-        result = await _service(api, conn).sync_albums()
+        result = await _service(api, conn).sync_albums_batch(["album-1"])
 
         assert result.updated == 1
         events = _extract_album_events(conn)
@@ -264,7 +262,6 @@ class TestSyncAlbums:
 
     async def test_unchanged_album_emits_no_event(self) -> None:
         api = AsyncMock()
-        api.get_all_albums.return_value = [ImmichAlbum(id="album-1")]
         album = _full_album()
         api.get_album.return_value = album
         conn = AsyncMock()
@@ -272,7 +269,45 @@ class TestSyncAlbums:
         existing.version_hash = ImmichSyncService.calculate_album_version_hash(album)
         conn.execute.side_effect = [_fetchone(existing)]
 
-        result = await _service(api, conn).sync_albums()
+        result = await _service(api, conn).sync_albums_batch(["album-1"])
 
         assert result.unchanged == 1
         assert _extract_album_events(conn) == []
+
+    async def test_one_album_failure_does_not_abort_batch(self) -> None:
+        api = AsyncMock()
+        api.get_album.side_effect = [RuntimeError("boom"), _full_album()]
+        conn = AsyncMock()
+        # First album errors before any DB call; second: find (None) + insert.
+        conn.execute.side_effect = [_fetchone(None), MagicMock()]
+
+        result = await _service(api, conn).sync_albums_batch(["bad", "album-1"])
+
+        assert result.errors == 1
+        assert result.created == 1
+
+
+@pytest.mark.asyncio
+class TestListAlbumIdBatches:
+    async def test_chunks_album_ids_by_batch_size(self) -> None:
+        api = AsyncMock()
+        api.get_all_albums.return_value = [
+            ImmichAlbum(id=f"album-{i}") for i in range(120)
+        ]
+        conn = AsyncMock()
+
+        batches = [batch async for batch in _service(api, conn).list_album_id_batches()]
+
+        # Default batch size is 50 → 50 + 50 + 20.
+        assert [len(b) for b in batches] == [50, 50, 20]
+        assert batches[0][0] == "album-0"
+        assert batches[-1][-1] == "album-119"
+
+    async def test_no_albums_yields_no_batches(self) -> None:
+        api = AsyncMock()
+        api.get_all_albums.return_value = []
+        conn = AsyncMock()
+
+        batches = [batch async for batch in _service(api, conn).list_album_id_batches()]
+
+        assert batches == []
