@@ -107,32 +107,6 @@ const stravaConnected = {
   },
 };
 
-const snipeitConnected = {
-  id: 'snipeit',
-  type: 'integration',
-  attributes: {
-    name: 'Snipe-IT',
-    status: 'connected',
-    capabilities: ['gear_sync', 'maintenance_sync', 'checkout_sync'],
-    sync_summary: {
-      last_sync_time: '2026-01-01T12:00:00Z',
-      sync_count: 10,
-      error_count: 0,
-    },
-    needs_reauth: false,
-    needs_reconsent: false,
-  },
-};
-
-const googleDisconnected = {
-  ...googleConnected,
-  attributes: {
-    ...googleConnected.attributes,
-    status: 'disconnected',
-    sync_summary: { last_sync_time: null, sync_count: 0, error_count: 0 },
-  },
-};
-
 test.describe('Integration Actions - Webhook Re-registration', () => {
   test('Google: re-register webhooks button triggers API call and shows success toast', async ({
     authenticatedPage,
@@ -215,56 +189,10 @@ test.describe('Integration Actions - Webhook Re-registration', () => {
     await expect.poll(() => reregisterCalled).toBeTruthy();
   });
 
-  test('Snipe-IT: shows webhook URL button that copies URL', async ({
-    authenticatedPage,
-  }) => {
-    await setupCommonMocks(authenticatedPage, [snipeitConnected]);
-
-    await authenticatedPage.route(
-      '**/api/integrations/snipeit/webhook-url',
-      async (route: Route) => {
-        return route.fulfill(
-          json({
-            data: {
-              type: 'webhook-url',
-              attributes: {
-                webhook_url:
-                  'https://example.com/api/integrations/snipeit/webhook',
-                message:
-                  'Configure this URL in your Snipe-IT instance under Admin > Settings > Webhooks.',
-              },
-            },
-          })
-        );
-      }
-    );
-
-    await authenticatedPage.goto('/integrations');
-
-    const panel = authenticatedPage.getByTestId('integration-panel-snipeit');
-    await expect(panel).toBeVisible();
-
-    // Snipe-IT should have a "Get Webhook URL" button instead of re-register
-    const webhookUrlButton = panel.getByTestId('get-webhook-url-snipeit');
-    await expect(webhookUrlButton).toBeVisible();
-  });
-
-  test('disconnected integration: does not show webhook/reauth buttons', async ({
-    authenticatedPage,
-  }) => {
-    await setupCommonMocks(authenticatedPage, [googleDisconnected]);
-
-    await authenticatedPage.goto('/integrations');
-
-    const panel = authenticatedPage.getByTestId('integration-panel-google');
-    await expect(panel).toBeVisible();
-
-    // Re-register and re-auth buttons should not be visible
-    await expect(panel.getByTestId('reregister-webhooks-google')).toHaveCount(
-      0
-    );
-    await expect(panel.getByTestId('reauth-google')).toHaveCount(0);
-  });
+  // Note: button visibility by connection state (snipeit webhook-URL vs
+  // reregister, and hiding webhook/reauth when disconnected) is unit-tested in
+  // IntegrationPanel.test.tsx. The tests here cover the real action request
+  // contracts (re-register POST, re-auth OAuth) instead.
 });
 
 test.describe('Integration Actions - Re-authentication', () => {

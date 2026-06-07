@@ -113,61 +113,12 @@ async function setupBaseRoutes(page: import('@playwright/test').Page) {
   );
 }
 
+// Note: panel visibility and "settings modal opens + shows form" are covered
+// generically in provider-settings.spec.ts. Pure form rendering, invalid-URL
+// validation, and existing-settings pre-population are unit-tested in
+// SnipeItSettings.test.tsx. The tests here cover the real save/connect/disconnect
+// request contracts.
 test.describe('Snipe-IT Integration Settings', () => {
-  test('snipeit panel is visible in integration list', async ({
-    authenticatedPage,
-  }) => {
-    await setupBaseRoutes(authenticatedPage);
-
-    await authenticatedPage.goto('/integrations');
-
-    // Verify the Snipe-IT panel exists and shows disconnected status
-    const snipeitPanel = authenticatedPage.locator(
-      '[data-testid="integration-panel-snipeit"]'
-    );
-    await expect(snipeitPanel).toBeVisible();
-    await expect(snipeitPanel).toContainText('Snipe-IT');
-    await expect(snipeitPanel).toContainText('Disconnected');
-  });
-
-  test('settings modal opens and shows the Snipe-IT configuration form', async ({
-    authenticatedPage,
-  }) => {
-    await setupBaseRoutes(authenticatedPage);
-
-    // Mock 404 for settings (no settings configured yet)
-    await page_mockSnipeItSettingsNotFound(authenticatedPage);
-
-    await authenticatedPage.goto('/integrations');
-
-    // Click the Settings button on the Snipe-IT panel
-    const snipeitPanel = authenticatedPage.locator(
-      '[data-testid="integration-panel-snipeit"]'
-    );
-    await expect(snipeitPanel).toBeVisible();
-
-    const settingsButton = snipeitPanel.getByRole('button', {
-      name: /settings/i,
-    });
-    await settingsButton.click();
-
-    // Verify modal opens and has the correct form fields
-    const form = authenticatedPage.locator(
-      '[data-testid="snipeit-settings-form"]'
-    );
-    await expect(form).toBeVisible();
-
-    await expect(
-      authenticatedPage.locator('[data-testid="snipeit-base-url-input"]')
-    ).toBeVisible();
-    await expect(
-      authenticatedPage.locator('[data-testid="snipeit-user-id-input"]')
-    ).toBeVisible();
-    await expect(
-      authenticatedPage.locator('[data-testid="snipeit-settings-save-button"]')
-    ).toBeVisible();
-  });
-
   test('settings modal submits Base URL cleanly', async ({
     authenticatedPage,
   }) => {
@@ -244,94 +195,6 @@ test.describe('Snipe-IT Integration Settings', () => {
       expect(savedPayload?.base_url).toBe('https://snipeit.example.com');
       expect(savedPayload?.snipeit_user_id).toBe('42');
     }).toPass({ timeout: 5000 });
-  });
-
-  test('settings modal shows validation error for invalid URL', async ({
-    authenticatedPage,
-  }) => {
-    await setupBaseRoutes(authenticatedPage);
-    await page_mockSnipeItSettingsNotFound(authenticatedPage);
-
-    await authenticatedPage.goto('/integrations');
-
-    // Open settings modal
-    const snipeitPanel = authenticatedPage.locator(
-      '[data-testid="integration-panel-snipeit"]'
-    );
-    await expect(snipeitPanel).toBeVisible();
-
-    const settingsButton = snipeitPanel.getByRole('button', {
-      name: /settings/i,
-    });
-    await settingsButton.click();
-
-    // Enter invalid URL
-    const baseUrlInput = authenticatedPage.locator(
-      '[data-testid="snipeit-base-url-input"]'
-    );
-    await expect(baseUrlInput).toBeVisible();
-    await baseUrlInput.fill('not-a-valid-url');
-
-    // Try to submit
-    const saveButton = authenticatedPage.locator(
-      '[data-testid="snipeit-settings-save-button"]'
-    );
-    await saveButton.click();
-
-    // Verify validation error appears
-    await expect(
-      authenticatedPage.getByText(/must be a valid url/i)
-    ).toBeVisible();
-  });
-
-  test('settings modal populates existing settings on open', async ({
-    authenticatedPage,
-  }) => {
-    await setupBaseRoutes(authenticatedPage);
-
-    // Mock existing settings
-    await authenticatedPage.route(
-      '**/api/integrations/snipeit/settings',
-      route =>
-        route.fulfill(
-          json({
-            data: {
-              id: '123',
-              type: 'snipeit_settings',
-              attributes: {
-                base_url: 'https://existing-snipeit.example.com',
-                snipeit_user_id: '99',
-              },
-            },
-          })
-        )
-    );
-
-    await authenticatedPage.goto('/integrations');
-
-    // Open settings modal
-    const snipeitPanel = authenticatedPage.locator(
-      '[data-testid="integration-panel-snipeit"]'
-    );
-    await expect(snipeitPanel).toBeVisible();
-
-    const settingsButton = snipeitPanel.getByRole('button', {
-      name: /settings/i,
-    });
-    await settingsButton.click();
-
-    // Verify form is pre-populated with existing settings
-    const baseUrlInput = authenticatedPage.locator(
-      '[data-testid="snipeit-base-url-input"]'
-    );
-    await expect(baseUrlInput).toHaveValue(
-      'https://existing-snipeit.example.com'
-    );
-
-    const userIdInput = authenticatedPage.locator(
-      '[data-testid="snipeit-user-id-input"]'
-    );
-    await expect(userIdInput).toHaveValue('99');
   });
 
   test('settings modal submits API Key and triggers connect flow', async ({

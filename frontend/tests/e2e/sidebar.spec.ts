@@ -71,69 +71,8 @@ test.describe('Sidebar Navigation', () => {
       expect(await tagLinks.count()).toBeGreaterThan(0);
     });
 
-    test('shows journals section collapsed by default', async ({
-      authenticatedPage: page,
-    }) => {
-      // Set viewport to desktop size
-      await page.setViewportSize({ width: 1024, height: 768 });
-
-      // Navigate to contacts page
-      await page.goto('/contacts');
-      await expect(page).toHaveTitle(/Personal Management System/);
-
-      // Journals section should be collapsed
-      const journalsButton = page.getByRole('button', { name: /journals/i });
-      await expect(journalsButton).toHaveAttribute('aria-expanded', 'false');
-
-      // Journal navigation items should not be visible
-      await expect(
-        page.getByRole('link', { name: 'All Journals' })
-      ).toBeHidden();
-    });
-
-    test('can toggle section expansion', async ({
-      authenticatedPage: page,
-    }) => {
-      // Set viewport to desktop size
-      await page.setViewportSize({ width: 1024, height: 768 });
-
-      // Navigate to contacts page
-      await page.goto('/contacts');
-      await expect(page).toHaveTitle(/Personal Management System/);
-
-      const journalsButton = page.getByRole('button', { name: /journals/i });
-
-      // Initially collapsed
-      await expect(journalsButton).toHaveAttribute('aria-expanded', 'false');
-      await expect(
-        page.getByRole('link', { name: 'All Journals' })
-      ).toBeHidden();
-
-      // Click to expand — use toPass() to retry. Only click if not already
-      // expanded to prevent toggling back on retry iterations.
-      await expect(async () => {
-        const expanded = await journalsButton.getAttribute('aria-expanded');
-        if (expanded !== 'true') {
-          await journalsButton.click();
-        }
-        await expect(journalsButton).toHaveAttribute('aria-expanded', 'true');
-      }).toPass({ timeout: 15000 });
-      await expect(
-        page.getByRole('link', { name: 'All Journals' })
-      ).toBeVisible();
-
-      // Click to collapse — only click if not already collapsed.
-      await expect(async () => {
-        const expanded = await journalsButton.getAttribute('aria-expanded');
-        if (expanded !== 'false') {
-          await journalsButton.click();
-        }
-        await expect(journalsButton).toHaveAttribute('aria-expanded', 'false');
-      }).toPass({ timeout: 15000 });
-      await expect(
-        page.getByRole('link', { name: 'All Journals' })
-      ).toBeHidden();
-    });
+    // Note: journals-section collapsed-by-default and toggle-expansion behavior
+    // is unit-tested in Sidebar.test.tsx (pure client-side state, no backend).
 
     test('highlights active navigation item', async ({
       authenticatedPage: page,
@@ -350,23 +289,10 @@ test.describe('Sidebar Navigation', () => {
   });
 
   test.describe('Accessibility', () => {
-    test('has proper ARIA attributes', async ({ authenticatedPage: page }) => {
-      await page.setViewportSize({ width: 1024, height: 768 });
-      await page.goto('/contacts');
-
-      // Check main navigation has proper role and label
-      const nav = page.getByRole('navigation', { name: 'Main navigation' });
-      await expect(nav).toBeVisible();
-
-      // Check section buttons have proper ARIA attributes
-      const contactsButton = page.getByRole('button', { name: /contacts/i });
-      await expect(contactsButton).toBeVisible();
-      await expect(contactsButton).toHaveAttribute('aria-expanded');
-      await expect(contactsButton).toHaveAttribute(
-        'aria-controls',
-        'section-contacts'
-      );
-    });
+    // Note: static ARIA attributes (nav role/label, section-button aria-expanded
+    // and aria-controls) are unit-tested in Sidebar.test.tsx. The keyboard test
+    // below stays as e2e because real Tab focus traversal cannot be exercised in
+    // jsdom.
 
     test('supports keyboard navigation', async ({
       authenticatedPage: page,

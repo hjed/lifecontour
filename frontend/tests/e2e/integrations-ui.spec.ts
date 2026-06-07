@@ -16,82 +16,11 @@ function json(data: unknown) {
   };
 }
 
+// Note: pure connected/disconnected control-visibility rendering (Connect vs
+// Disconnect buttons, sync-button presence, scope-upgrade banner) is unit-tested
+// in IntegrationPanel.test.tsx. The tests below cover real request contracts
+// (sync POST payloads, disconnect, OAuth redirect) that the component test mocks.
 test.describe('Integrations Page UI (mocked API)', () => {
-  test('disconnected: shows Connect button and hides sync controls', async ({
-    authenticatedPage,
-  }) => {
-    await authenticatedPage.route('**/api/integrations/health', route =>
-      route.fulfill(
-        json({
-          data: {
-            id: 'integrations',
-            type: 'integration-health',
-            attributes: {
-              overall: 'healthy',
-              lastChecked: new Date().toISOString(),
-              redis: { status: 'healthy', latency: 1, lastSeen: null },
-              worker: { status: 'healthy', latency: 1, lastSeen: null },
-            },
-          },
-        })
-      )
-    );
-
-    await authenticatedPage.route('**/api/integrations', route =>
-      route.fulfill(
-        json({
-          data: [
-            {
-              id: 'google',
-              type: 'integration',
-              attributes: {
-                name: 'Google',
-                status: 'disconnected',
-                capabilities: ['contacts_sync', 'calendar_sync'],
-                sync_summary: {
-                  last_sync_time: null,
-                  sync_count: 0,
-                  error_count: 0,
-                },
-                needs_reauth: false,
-                needs_reconsent: false,
-              },
-            },
-          ],
-        })
-      )
-    );
-
-    await authenticatedPage.route(
-      '**/api/integrations/google/sync-history**',
-      route =>
-        route.fulfill(
-          json({
-            data: [],
-            meta: { total: 0, page: 1, pageSize: 5 },
-          })
-        )
-    );
-
-    await authenticatedPage.goto('/integrations');
-
-    await expect(
-      authenticatedPage.locator('[data-testid="integration-panel-google"]')
-    ).toContainText('Disconnected');
-
-    await expect(
-      authenticatedPage.locator('[data-testid="connect-google"]')
-    ).toBeVisible();
-
-    await expect(
-      authenticatedPage.locator('[data-testid="disconnect-google"]')
-    ).toHaveCount(0);
-
-    await expect(
-      authenticatedPage.locator('[data-testid="trigger-google-sync"]')
-    ).toHaveCount(0);
-  });
-
   test('connected: can trigger sync, renders 0 processed/created, and disconnect flips UI', async ({
     authenticatedPage,
   }) => {
@@ -343,75 +272,6 @@ test.describe('Integrations Page UI (mocked API)', () => {
     await expect.poll(() => oauthAuthorizePayload).toBeTruthy();
     expect(oauthAuthorizePayload).toEqual({ redirect_url: '/integrations' });
   });
-
-  test('connected without needsReconsent: does not show scope upgrade banner', async ({
-    authenticatedPage,
-  }) => {
-    await authenticatedPage.route('**/api/integrations/health', route =>
-      route.fulfill(
-        json({
-          data: {
-            id: 'integrations',
-            type: 'integration-health',
-            attributes: {
-              overall: 'healthy',
-              lastChecked: new Date().toISOString(),
-              redis: { status: 'healthy', latency: 1, lastSeen: null },
-              worker: { status: 'healthy', latency: 1, lastSeen: null },
-            },
-          },
-        })
-      )
-    );
-
-    await authenticatedPage.route('**/api/integrations', route =>
-      route.fulfill(
-        json({
-          data: [
-            {
-              id: 'google',
-              type: 'integration',
-              attributes: {
-                name: 'Google',
-                status: 'connected',
-                capabilities: ['contacts_sync', 'calendar_sync'],
-                sync_summary: {
-                  last_sync_time: new Date().toISOString(),
-                  sync_count: 42,
-                  error_count: 0,
-                },
-                needs_reauth: false,
-                needs_reconsent: false,
-              },
-            },
-          ],
-        })
-      )
-    );
-
-    await authenticatedPage.route(
-      '**/api/integrations/google/sync-history**',
-      route =>
-        route.fulfill(
-          json({
-            data: [],
-            meta: { total: 0, page: 1, pageSize: 5 },
-          })
-        )
-    );
-
-    await authenticatedPage.goto('/integrations');
-
-    // Status should show Connected
-    await expect(
-      authenticatedPage.locator('[data-testid="integration-panel-google"]')
-    ).toContainText('Connected');
-
-    // Banner should NOT be visible
-    await expect(
-      authenticatedPage.locator('[data-testid="scope-upgrade-banner-google"]')
-    ).toHaveCount(0);
-  });
 });
 
 test.describe('Strava Integration Panel (mocked API)', () => {
@@ -492,36 +352,9 @@ test.describe('Strava Integration Panel (mocked API)', () => {
     },
   };
 
-  test('strava disconnected: shows Connect button', async ({
-    authenticatedPage,
-  }) => {
-    await setupIntegrationsMocks(authenticatedPage, [stravaDisconnected]);
-    await authenticatedPage.goto('/integrations');
-
-    const panel = authenticatedPage.locator(
-      '[data-testid="integration-panel-strava"]'
-    );
-    await expect(panel).toBeVisible();
-    await expect(panel).toContainText('Strava');
-    await expect(panel).toContainText('Disconnected');
-    await expect(panel.getByRole('button', { name: /connect/i })).toBeVisible();
-  });
-
-  test('strava connected: shows Disconnect button', async ({
-    authenticatedPage,
-  }) => {
-    await setupIntegrationsMocks(authenticatedPage, [stravaConnected]);
-    await authenticatedPage.goto('/integrations');
-
-    const panel = authenticatedPage.locator(
-      '[data-testid="integration-panel-strava"]'
-    );
-    await expect(panel).toBeVisible();
-    await expect(panel).toContainText('Connected');
-    await expect(
-      panel.getByRole('button', { name: /disconnect/i })
-    ).toBeVisible();
-  });
+  // Note: strava connected/disconnected control visibility is unit-tested in
+  // IntegrationPanel.test.tsx. The tests below cover the real OAuth-redirect and
+  // sync POST request contracts.
 
   test('strava connect initiates OAuth redirect', async ({
     authenticatedPage,
@@ -560,25 +393,6 @@ test.describe('Strava Integration Panel (mocked API)', () => {
     expect(authorizeRequest.method()).toBe('POST');
     const body = JSON.parse(authorizeRequest.postData() ?? '{}');
     expect(body.redirect_url).toBe('/integrations');
-  });
-
-  test('strava connected: shows sync controls with Import Activities', async ({
-    authenticatedPage,
-  }) => {
-    await setupIntegrationsMocks(authenticatedPage, [stravaConnected]);
-    await authenticatedPage.goto('/integrations');
-
-    const panel = authenticatedPage.locator(
-      '[data-testid="integration-panel-strava"]'
-    );
-    await expect(panel).toBeVisible();
-
-    // The sync button should be visible for connected Strava
-    const syncButton = panel.locator(
-      '[data-testid="trigger-strava-activity_import-sync"]'
-    );
-    await expect(syncButton).toBeVisible();
-    await expect(syncButton).toContainText(/sync/i);
   });
 
   test('strava import triggers POST to activity_import/sync endpoint', async ({
