@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from core_shared.models.outbox_events import (
     ContactSyncEventData,
+    ImmichAlbumSyncEventData,
     JournalStatusEventData,
     JournalSyncEventData,
     MatchDetectionEventData,
@@ -21,6 +22,26 @@ from core_shared.models.outbox_events import (
     SyncCompletedEventData,
     parse_outbox_event_data,
 )
+
+
+@pytest.fixture
+def immich_album_data() -> dict[str, Any]:
+    """Minimal valid ImmichAlbumSyncEventData payload."""
+    return {
+        "external_id": "album-uuid-1",
+        "version_hash": "hash-1",
+        "sync_action": "created",
+        "journal_data": {
+            "user_id": "user-1",
+            "title": "Trip",
+            "content": "An album",
+            "event_date_range_start": datetime.now(UTC).isoformat(),
+            "event_date_range_end": datetime.now(UTC).isoformat(),
+        },
+        "album_metadata": {"album_name": "Trip", "asset_count": 3},
+        "sync_timestamp": datetime.now(UTC).isoformat(),
+    }
+
 
 # ── Fixtures ──────────────────────────────────────────────────────────
 
@@ -505,6 +526,21 @@ class TestParseOutboxEventData:
             "journal_review.detect_matches", match_detection_data
         )
         assert isinstance(result, MatchDetectionEventData)
+
+    def test_immich_album_created_dispatches(
+        self, immich_album_data: dict[str, Any]
+    ) -> None:
+        """immich_album.created dispatches to ImmichAlbumSyncEventData."""
+        result = parse_outbox_event_data("immich_album.created", immich_album_data)
+        assert isinstance(result, ImmichAlbumSyncEventData)
+        assert result.integration_source == "immich_album"
+
+    def test_immich_album_updated_dispatches(
+        self, immich_album_data: dict[str, Any]
+    ) -> None:
+        """immich_album.updated dispatches to ImmichAlbumSyncEventData."""
+        result = parse_outbox_event_data("immich_album.updated", immich_album_data)
+        assert isinstance(result, ImmichAlbumSyncEventData)
 
     def test_unknown_event_type_raises(self) -> None:
         """Unknown event type raises ValueError."""

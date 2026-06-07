@@ -223,30 +223,32 @@ Wire the `ContactAvatar` component to display Immich photos.
 - [Part 3: Cleanup — PhotoAlbumData Entity](../product-specifications/immich-integration-product-specification.md#cleanup-photoalbumdata-entity)
 
 **Acceptance Criteria (task-level):**
-- [ ] Immich albums imported as PHOTO_ALBUM journals.
-- [ ] Date ranges derived from photo timestamps.
-- [ ] Participants detected from people tags.
-- [ ] Album cover photo displayed as banner.
-- [ ] PhotoAlbumData entity cleaned up.
+- [x] Immich albums imported as PHOTO_ALBUM journals. *(Phase 1)*
+- [x] Date ranges derived from photo timestamps. *(Phase 1)*
+- [ ] Participants detected from people tags. *(Phase 2)*
+- [ ] Album cover photo displayed as banner. *(Phase 2)*
+- [x] PhotoAlbumData entity cleaned up. *(Phase 1)*
 
 #### Phase 1: PhotoAlbumData Cleanup and Album Sync Backend
 **PR Size:** ~8–10 files
 
 Remove the scaffolding `PhotoAlbumData` entity and implement album import using standard integration patterns.
 
+**Architecture note (as implemented):** Album import follows the worker→outbox→backend pattern used by contact sync (the calendar-coupled `JournalOutboxEventProcessor` is *not* reused). The worker emits new `immich_album.created` / `immich_album.updated` outbox events; the backend `InboundEventConsumer` routes the `immich_album.*` prefix to a new `ImmichAlbumOutboxEventProcessor` which creates/updates the journal and records `SyncMetadata` (`integration_source="immich_album"`) + an `external_references` album link. PHOTO_ALBUM type detection now derives from that `SyncMetadata` row. Date-range timezone uses each photo's EXIF timezone with a UTC fallback. The manual `PhotoAlbumTypeEditor` was removed (albums are integration-managed, not user-entered); `PhotoAlbumDataDisplay` now shows the synced album name/link. Album sync is triggerable via `POST /api/integrations/immich/album/sync` and the `sync_immich_albums` ARQ task.
+
 **Acceptance Criteria:**
-- [ ] Migration removes `journal_photo_album_data` table
-- [ ] `PhotoAlbumData` entity, `SqlPhotoAlbumDataRepository`, and related tests removed
-- [ ] `PHOTO_ALBUM` type enum value preserved — type detection now based on `SyncMetadata` with `integration_source="immich_album"`
-- [ ] Frontend `PhotoAlbumTypeEditor` and `PhotoAlbumDataDisplay` updated to work with `ExternalReference` data instead of `PhotoAlbumData`
-- [ ] `ImmichSyncService.sync_albums(user_id)` — fetches all albums, creates/updates journals
-- [ ] Date range derivation: earliest/latest `takenAt` from album photos → `event_date_range` (with timezone conversion)
-- [ ] Field merge protection: title, content, date range protected when `journal.updated_at > link.updated_at`
-- [ ] `SyncMetadata` records: `integration_source="immich_album"`, `external_id`=album UUID, `version_hash`=hash of album metadata
+- [x] Migration removes `journal_photo_album_data` table
+- [x] `PhotoAlbumData` entity, `SqlPhotoAlbumDataRepository`, and related tests removed
+- [x] `PHOTO_ALBUM` type enum value preserved — type detection now based on `SyncMetadata` with `integration_source="immich_album"`
+- [x] Frontend `PhotoAlbumTypeEditor` removed and `PhotoAlbumDataDisplay` updated to render synced album data (`ExternalReference`/`SyncMetadata`) instead of `PhotoAlbumData`
+- [x] `ImmichSyncService.sync_albums()` — fetches all albums, emits create/update events that create/update journals
+- [x] Date range derivation: earliest/latest `takenAt` from album photos → `event_date_range` (with timezone conversion)
+- [x] Field merge protection: title, content, date range protected when `journal.updated_at > link.updated_at`
+- [x] `SyncMetadata` records: `integration_source="immich_album"`, `external_id`=album UUID, `version_hash`=hash of album metadata
 
 **Required Test Coverage:**
-- **Unit:** Date range derivation from photo timestamps, timezone conversion, merge protection logic, version hash calculation.
-- **Integration:** Album sync creates journal with correct date range. Re-sync with local edits preserves protected fields. PhotoAlbumData removal migration succeeds.
+- **Unit:** Date range derivation from photo timestamps, timezone conversion, merge protection logic, version hash calculation. ✅ 16 worker tests (`test_immich_album_sync.py`) + 7 processor-logic tests (`test_immich_album_outbox_processor.py`) + 2 payload-dispatch tests (`test_outbox_events.py`)
+- **Integration:** Album sync creates journal with correct date range. Re-sync with local edits preserves protected fields. PhotoAlbumData removal migration succeeds. ✅ 4 processor tests (`test_immich_album_outbox_processor.py`) + 7 type-detection/migration tests (`test_journal_type_detection.py`) + album-sync trigger endpoint test
 
 #### Phase 2: Participant Detection and Album Cover Display
 **PR Size:** ~6–8 files

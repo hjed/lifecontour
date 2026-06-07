@@ -20,8 +20,8 @@ _JOURNAL_TYPE_TABLE_MAP = {
     "plan": "journal_plan_data",
     "TRAVEL": "journal_travel_data",
     "travel": "journal_travel_data",
-    "PHOTO_ALBUM": "journal_photo_album_data",
-    "photo_album": "journal_photo_album_data",
+    # PHOTO_ALBUM is integration-managed: detected via a sync_metadata row with
+    # integration_source='immich_album' rather than a dedicated data table.
     "FITNESS": "journal_fitness_data",
     "fitness": "journal_fitness_data",
     "OUTDOOR_ACTIVITY": "journal_outdoor_activity_data",
@@ -57,6 +57,21 @@ _JOURNAL_TYPE_TABLE_MAP = {
     "GEAR_USAGE": "journal_gear_usage_data",
     "gear_usage": "journal_gear_usage_data",
 }
+
+# PHOTO_ALBUM is integration-managed: a journal is a PHOTO_ALBUM when it has a
+# sync_metadata row with integration_source='immich_album' (set by Immich album
+# sync), rather than a row in a dedicated type-data table.
+_IMMICH_ALBUM_SOURCE = "immich_album"
+_PHOTO_ALBUM_LEFT_JOIN = (
+    "LEFT JOIN sync_metadata sm_pa "
+    "ON sm_pa.internal_id = j.id "
+    "AND sm_pa.integration_source = 'immich_album'"
+)
+_PHOTO_ALBUM_INNER_JOIN = (
+    "INNER JOIN sync_metadata sm_pa "
+    "ON sm_pa.internal_id = j.id "
+    "AND sm_pa.integration_source = 'immich_album'"
+)
 
 
 class SqlJournalRepository(JournalRepository):
@@ -108,7 +123,7 @@ class SqlJournalRepository(JournalRepository):
                     "LEFT JOIN journal_mood_data jmd ON j.id = jmd.journal_id",
                     "LEFT JOIN journal_plan_data jpd ON j.id = jpd.journal_id",
                     "LEFT JOIN journal_travel_data jtd ON j.id = jtd.journal_id",
-                    "LEFT JOIN journal_photo_album_data jpad ON j.id = jpad.journal_id",
+                    _PHOTO_ALBUM_LEFT_JOIN,
                     "LEFT JOIN journal_fitness_data jfd ON j.id = jfd.journal_id",
                     "LEFT JOIN journal_outdoor_activity_data joad ON j.id = joad.journal_id",
                     "LEFT JOIN journal_bushwalking_data jbwd ON j.id = jbwd.journal_id",
@@ -134,7 +149,7 @@ class SqlJournalRepository(JournalRepository):
                     "jmd.journal_id IS NULL",
                     "jpd.journal_id IS NULL",
                     "jtd.journal_id IS NULL",
-                    "jpad.journal_id IS NULL",
+                    "sm_pa.internal_id IS NULL",
                     "jfd.journal_id IS NULL",
                     "joad.journal_id IS NULL",
                     "jbwd.journal_id IS NULL",
@@ -154,6 +169,12 @@ class SqlJournalRepository(JournalRepository):
                     "jgud.journal_id IS NULL",
                 ]
             )
+            return joins, where_clauses
+
+        # PHOTO_ALBUM is integration-managed (Immich albums): filter via a
+        # sync_metadata join rather than a dedicated type-data table.
+        if journal_type.upper() == "PHOTO_ALBUM":
+            joins.append(_PHOTO_ALBUM_INNER_JOIN)
             return joins, where_clauses
 
         # Handle other types with explicit table mapping
@@ -184,7 +205,6 @@ class SqlJournalRepository(JournalRepository):
             "journal_calendar_info": "INNER JOIN journal_calendar_info t ON j.id = t.journal_id",
             "journal_plan_data": "INNER JOIN journal_plan_data t ON j.id = t.journal_id",
             "journal_travel_data": "INNER JOIN journal_travel_data t ON j.id = t.journal_id",
-            "journal_photo_album_data": "INNER JOIN journal_photo_album_data t ON j.id = t.journal_id",
             "journal_fitness_data": "INNER JOIN journal_fitness_data t ON j.id = t.journal_id",
             "journal_outdoor_activity_data": "INNER JOIN journal_outdoor_activity_data t ON j.id = t.journal_id",
             "journal_bushwalking_data": "INNER JOIN journal_bushwalking_data t ON j.id = t.journal_id",
@@ -322,7 +342,7 @@ class SqlJournalRepository(JournalRepository):
                 CASE WHEN jmd.journal_id IS NOT NULL THEN 'MOOD_RATING' END as mood_type,
                 CASE WHEN jpd.journal_id IS NOT NULL THEN 'PLAN' END as plan_type,
                 CASE WHEN jtd.journal_id IS NOT NULL THEN 'TRAVEL' END as travel_type,
-                CASE WHEN jpad.journal_id IS NOT NULL THEN 'PHOTO_ALBUM' END as photo_type,
+                CASE WHEN sm_pa.internal_id IS NOT NULL THEN 'PHOTO_ALBUM' END as photo_type,
                 CASE WHEN jfd.journal_id IS NOT NULL THEN 'FITNESS' END as fitness_type,
                 CASE WHEN joad.journal_id IS NOT NULL THEN 'OUTDOOR_ACTIVITY' END as outdoor_activity_type,
                 CASE WHEN jbwd.journal_id IS NOT NULL THEN 'BUSHWALKING' END as bushwalking_type,
@@ -345,7 +365,8 @@ class SqlJournalRepository(JournalRepository):
             LEFT JOIN journal_mood_data jmd ON j.id = jmd.journal_id
             LEFT JOIN journal_plan_data jpd ON j.id = jpd.journal_id
             LEFT JOIN journal_travel_data jtd ON j.id = jtd.journal_id
-            LEFT JOIN journal_photo_album_data jpad ON j.id = jpad.journal_id
+            LEFT JOIN sync_metadata sm_pa ON sm_pa.internal_id = j.id
+                AND sm_pa.integration_source = 'immich_album'
             LEFT JOIN journal_fitness_data jfd ON j.id = jfd.journal_id
             LEFT JOIN journal_outdoor_activity_data joad ON j.id = joad.journal_id
             LEFT JOIN journal_bushwalking_data jbwd ON j.id = jbwd.journal_id

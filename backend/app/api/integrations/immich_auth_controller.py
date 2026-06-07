@@ -97,15 +97,6 @@ async def disconnect_immich(
     },
 )
 @router.post(
-    "/album/sync",
-    summary="Trigger Immich album sync",
-    responses={
-        400: {"description": "Immich not connected or invalid parameters"},
-        503: {"description": "Task queue service unavailable"},
-        500: {"description": "An unexpected error occurred"},
-    },
-)
-@router.post(
     "/sync",
     summary="Trigger Immich sync",
     responses={
@@ -122,16 +113,64 @@ async def trigger_immich_sync(
     task_queue_service: FromDishka[TaskQueueService],
 ) -> SyncJobJsonApiResponse:
     """
-    Trigger an Immich sync job.
+    Trigger an Immich people sync job.
 
-    Enqueues a background sync job that syncs people and albums from Immich.
-    The sync type may be ``full`` (all data) or ``smart`` (only changes
-    since last sync).
-
-    Note: All capability routes (``/contacts/sync``, ``/album/sync``,
-    ``/sync``) currently enqueue the same ``sync_immich_people`` task.
-    Capability-specific task routing will be added in ITER11-002+.
+    Enqueues a background sync job that syncs people from Immich. The sync
+    type may be ``full`` (all data) or ``smart`` (only changes since last
+    sync). Use ``/album/sync`` to trigger album import.
     """
+    return await _enqueue_immich_sync(
+        request,
+        user,
+        connection,
+        task_queue_service,
+        task_name="sync_immich_people",
+        integration_source="immich",
+    )
+
+
+@router.post(
+    "/album/sync",
+    summary="Trigger Immich album sync",
+    responses={
+        400: {"description": "Immich not connected or invalid parameters"},
+        503: {"description": "Task queue service unavailable"},
+        500: {"description": "An unexpected error occurred"},
+    },
+)
+@inject
+async def trigger_immich_album_sync(
+    request: SyncJobRequest,
+    user: FromDishka[SessionUser],
+    connection: FromDishka[AsyncConnection],
+    task_queue_service: FromDishka[TaskQueueService],
+) -> SyncJobJsonApiResponse:
+    """
+    Trigger an Immich album sync job.
+
+    Enqueues a background job that imports Immich albums as PHOTO_ALBUM
+    journals (ITER11-004).
+    """
+    return await _enqueue_immich_sync(
+        request,
+        user,
+        connection,
+        task_queue_service,
+        task_name="sync_immich_albums",
+        integration_source="immich_album",
+    )
+
+
+async def _enqueue_immich_sync(
+    request: SyncJobRequest,
+    user: SessionUser,
+    connection: AsyncConnection,
+    task_queue_service: TaskQueueService,
+    *,
+    task_name: str,
+    integration_source: str,
+) -> SyncJobJsonApiResponse:
+    """Shared logic for the Immich people and album sync trigger endpoints."""
     try:
         # Verify Immich is connected via repository
         repo = SqlImmichAuthRepository(connection)
@@ -151,6 +190,8 @@ async def trigger_immich_sync(
         job_id = await task_queue_service.enqueue_immich_sync(
             user_id=user.id,
             sync_type=sync_type,
+            task_name=task_name,
+            integration_source=integration_source,
         )
 
         job = await task_queue_service.get_sync_job_details(

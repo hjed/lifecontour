@@ -213,7 +213,32 @@ describe('JournalTypeDataDisplay', () => {
   });
 
   describe('PHOTO_ALBUM Data Display', () => {
-    it('renders photo album data when PHOTO_ALBUM type is present', () => {
+    it('renders the album name and link when PHOTO_ALBUM type is present', () => {
+      const photoData: PhotoAlbumData = {
+        immich_album_id: 'album-123',
+        album_name: 'Summer Trip',
+        album_url: 'https://immich.example.com/albums/album-123',
+        asset_count: 12,
+      };
+
+      render(
+        <JournalTypeDataDisplay
+          types={[JournalType.PHOTO_ALBUM]}
+          typeData={{ PHOTO_ALBUM: photoData }}
+        />
+      );
+
+      expect(screen.getByTestId('photo-album-data')).toBeInTheDocument();
+      expect(screen.getByText('Photo Album')).toBeInTheDocument();
+      const link = screen.getByRole('link', { name: 'Summer Trip' });
+      expect(link).toHaveAttribute(
+        'href',
+        'https://immich.example.com/albums/album-123'
+      );
+      expect(screen.getByText(/12 photos/)).toBeInTheDocument();
+    });
+
+    it('falls back to a default label when the album has no name', () => {
       const photoData: PhotoAlbumData = {
         immich_album_id: 'album-123',
       };
@@ -226,8 +251,7 @@ describe('JournalTypeDataDisplay', () => {
       );
 
       expect(screen.getByTestId('photo-album-data')).toBeInTheDocument();
-      expect(screen.getByText('Photo Album')).toBeInTheDocument();
-      expect(screen.getByText('Album ID: album-123')).toBeInTheDocument();
+      expect(screen.getByText('Immich album')).toBeInTheDocument();
     });
 
     it('renders nothing when no album id', () => {

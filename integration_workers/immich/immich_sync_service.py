@@ -18,9 +18,10 @@ import hashlib
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, tzinfo
 from typing import Any
 from uuid import uuid4
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import structlog
 from core_shared.contact_name_matcher import ContactNameMatcher
@@ -37,7 +38,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from immich_api_client import ImmichApiClient
-from immich_models import ImmichPerson
+from immich_models import ImmichAlbum, ImmichAsset, ImmichPerson
 
 logger = structlog.get_logger(__name__)
 
@@ -67,6 +68,25 @@ class PeopleSyncResult:
     error_details: list[str] = field(default_factory=list)
 
 
+@dataclass
+class AlbumSyncResult:
+    """Summary of an album sync operation.
+
+    Attributes:
+        created: New PHOTO_ALBUM journals emitted.
+        updated: Albums whose metadata changed since the last sync.
+        unchanged: Albums already up-to-date (no event emitted).
+        errors: Albums that failed to sync.
+        error_details: Per-album error messages.
+    """
+
+    created: int = 0
+    updated: int = 0
+    unchanged: int = 0
+    errors: int = 0
+    error_details: list[str] = field(default_factory=list)
+
+
 class ImmichSyncService:
     """Inbound people sync from Immich to local contacts.
 
@@ -85,6 +105,7 @@ class ImmichSyncService:
     _INTEGRATION_SOURCE = "immich"
     _EXTERNAL_ENTITY_TYPE = "person"
     _INTERNAL_ENTITY_TYPE = "contact"
+    _ALBUM_INTEGRATION_SOURCE = "immich_album"
 
     def __init__(
         self,
@@ -151,6 +172,145 @@ class ImmichSyncService:
                 )
 
         return result
+
+    async def sync_albums(self) -> AlbumSyncResult:
+        """Sync all Immich albums to PHOTO_ALBUM journals.
+
+        Fetches every album, derives its date range from photo timestamps,
+        and emits an ``immich_album.created`` / ``immich_album.updated`` outbox
+        event when the album is new or its metadata changed. The backend
+        ``ImmichAlbumOutboxEventProcessor`` performs the journal writes.
+
+        Returns:
+            An :class:`AlbumSyncResult` summarising the sync.
+        """
+        result = AlbumSyncResult()
+
+        albums = await self._api.get_all_albums()
+        for summary in albums:
+            try:
+                await self._process_album(summary.id, result)
+            except Exception as e:  # noqa: BLE001
+                result.errors += 1
+                result.error_details.append(
+                    f"Error processing album {summary.id}: {e!s}"
+                )
+                logger.error(
+                    "Error processing album", album_id=summary.id, error=str(e)
+                )
+
+        logger.info(
+            "Album sync complete",
+            created=result.created,
+            updated=result.updated,
+            unchanged=result.unchanged,
+            errors=result.errors,
+        )
+        return result
+
+    async def _process_album(self, album_id: str, result: AlbumSyncResult) -> None:
+        """Fetch one album with assets and emit a sync event if it changed."""
+        album = await self._api.get_album(album_id)
+
+        date_range = self.derive_album_date_range(album.assets)
+        if date_range is None:
+            # No dated photos — fall back to the album's updated time so the
+            # journal still has a (point-in-time) event date range.
+            fallback = album.updated_at or datetime.now(UTC)
+            date_range = (fallback, fallback)
+
+        version_hash = self.calculate_album_version_hash(album)
+        existing = await self._find_album_sync_metadata(album.id)
+
+        if existing is None:
+            await self._emit_album_outbox_event(
+                "created", album, date_range, version_hash
+            )
+            result.created += 1
+        elif existing.version_hash != version_hash:
+            await self._emit_album_outbox_event(
+                "updated", album, date_range, version_hash
+            )
+            result.updated += 1
+        else:
+            result.unchanged += 1
+
+    async def _find_album_sync_metadata(self, album_id: str) -> Any | None:
+        """Look up album SyncMetadata by Immich album ID."""
+        query = text("""
+            SELECT id, version_hash, sync_status
+            FROM sync_metadata
+            WHERE integration_source = :integration_source
+              AND external_id = :external_id
+        """)
+        result = await self._conn.execute(
+            query,
+            {
+                "integration_source": self._ALBUM_INTEGRATION_SOURCE,
+                "external_id": album_id,
+            },
+        )
+        return result.fetchone()
+
+    async def _emit_album_outbox_event(
+        self,
+        sync_action: str,
+        album: ImmichAlbum,
+        date_range: tuple[datetime, datetime],
+        version_hash: str,
+    ) -> None:
+        """Insert an ``immich_album.{created|updated}`` outbox event."""
+        event_id = str(uuid4())
+        now = datetime.now(UTC)
+        start, end = date_range
+        event_data = {
+            "integration_source": self._ALBUM_INTEGRATION_SOURCE,
+            "external_id": album.id,
+            "version_hash": version_hash,
+            "sync_action": sync_action,
+            "journal_data": {
+                "user_id": self._user_id,
+                "title": album.album_name or "Untitled album",
+                "content": album.description or "",
+                "event_date_range_start": start.isoformat(),
+                "event_date_range_end": end.isoformat(),
+            },
+            "album_metadata": {
+                "album_name": album.album_name,
+                "description": album.description,
+                "asset_count": album.asset_count,
+                "updated_at": (
+                    album.updated_at.isoformat() if album.updated_at else None
+                ),
+                "thumbnail_asset_id": album.album_thumbnail_asset_id,
+            },
+            "sync_timestamp": now.isoformat(),
+        }
+
+        query = text("""
+            INSERT INTO outbox_events
+                (event_id, event_type, aggregate_id, event_data,
+                 occurred_at, created_at, retry_count)
+            VALUES
+                (:event_id, :event_type, 0, :event_data,
+                 :occurred_at, :created_at, 0)
+        """)
+        await self._conn.execute(
+            query,
+            {
+                "event_id": event_id,
+                "event_type": f"immich_album.{sync_action}",
+                "event_data": json.dumps(event_data),
+                "occurred_at": now,
+                "created_at": now,
+            },
+        )
+        logger.debug(
+            "Emitted outbox event for Immich album sync",
+            event_id=event_id,
+            sync_action=sync_action,
+            album_id=album.id,
+        )
 
     async def sync_contact_outbound(self, contact_id: int) -> dict[str, Any]:
         """Sync a local contact update to Immich.
@@ -245,6 +405,76 @@ class ImmichSyncService:
     def calculate_version_hash(person: ImmichPerson) -> str:
         """Calculate a SHA-256 hash for an Immich person's mutable fields."""
         data = f"{person.name}|{person.birth_date or ''}"
+        return hashlib.sha256(data.encode()).hexdigest()
+
+    # -- Album sync helpers ----------------------------------------------
+
+    @staticmethod
+    def _asset_timestamp(asset: ImmichAsset) -> datetime | None:
+        """Return an asset's capture instant as a tz-aware UTC datetime.
+
+        Prefers ``takenAt`` and falls back to EXIF ``dateTimeOriginal``.
+        Naive timestamps are assumed to be UTC.
+        """
+        ts = asset.taken_at
+        if ts is None and asset.exif_info is not None:
+            ts = asset.exif_info.date_time_original
+        if ts is None:
+            return None
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=UTC)
+        return ts
+
+    @staticmethod
+    def _asset_timezone(asset: ImmichAsset) -> tzinfo:
+        """Resolve an asset's local timezone from EXIF, defaulting to UTC."""
+        if asset.exif_info is not None and asset.exif_info.timezone:
+            try:
+                return ZoneInfo(asset.exif_info.timezone)
+            except (ZoneInfoNotFoundError, ValueError):
+                logger.warning(
+                    "Invalid EXIF timezone, defaulting to UTC",
+                    timezone=asset.exif_info.timezone,
+                )
+        return UTC
+
+    @staticmethod
+    def derive_album_date_range(
+        assets: list[ImmichAsset],
+    ) -> tuple[datetime, datetime] | None:
+        """Derive an album's event date range from its photo timestamps.
+
+        The range covers full days in each boundary photo's local timezone:
+        the start of the earliest photo's day to the end of the latest photo's
+        day. Per-photo EXIF timezones are honoured (UTC fallback) so a photo
+        taken at 23:00 UTC is dated by its local day, not the UTC day.
+
+        Returns ``None`` when no asset has a usable timestamp.
+        """
+        timed: list[tuple[datetime, tzinfo]] = []
+        for asset in assets:
+            ts = ImmichSyncService._asset_timestamp(asset)
+            if ts is not None:
+                timed.append((ts, ImmichSyncService._asset_timezone(asset)))
+
+        if not timed:
+            return None
+
+        earliest_ts, earliest_tz = min(timed, key=lambda item: item[0])
+        latest_ts, latest_tz = max(timed, key=lambda item: item[0])
+
+        start_local = earliest_ts.astimezone(earliest_tz)
+        end_local = latest_ts.astimezone(latest_tz)
+
+        start = start_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        end = end_local.replace(hour=23, minute=59, second=59, microsecond=999999)
+        return (start, end)
+
+    @staticmethod
+    def calculate_album_version_hash(album: ImmichAlbum) -> str:
+        """Calculate a SHA-256 hash of an album's mutable metadata."""
+        updated = album.updated_at.isoformat() if album.updated_at else ""
+        data = f"{album.album_name}|{album.description}|{album.asset_count}|{updated}"
         return hashlib.sha256(data.encode()).hexdigest()
 
     @staticmethod

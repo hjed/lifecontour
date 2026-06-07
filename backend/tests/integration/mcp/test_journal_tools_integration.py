@@ -712,6 +712,9 @@ class TestFetchJournalTypesAndDataNewActivityTypes:
         from app.core.journal.adapters.sql.abseiling_data_repository import (
             SqlAbseilingDataRepository,
         )
+        from app.core.journal.adapters.sql.album_sync_read_repository import (
+            AlbumSyncReadRepository,
+        )
         from app.core.journal.adapters.sql.calendar_info_repository import (
             SqlCalendarInfoRepository,
         )
@@ -739,9 +742,6 @@ class TestFetchJournalTypesAndDataNewActivityTypes:
         from app.core.journal.adapters.sql.mood_data_repository import (
             SqlMoodDataRepository,
         )
-        from app.core.journal.adapters.sql.photo_album_data_repository import (
-            SqlPhotoAlbumDataRepository,
-        )
         from app.core.journal.adapters.sql.plan_data_repository import (
             SqlPlanDataRepository,
         )
@@ -755,7 +755,7 @@ class TestFetchJournalTypesAndDataNewActivityTypes:
             SqlMoodDataRepository(conn),
             SqlPlanDataRepository(conn),
             SqlTravelDataRepository(conn),
-            SqlPhotoAlbumDataRepository(conn),
+            AlbumSyncReadRepository(conn),
             SqlFitnessDataRepository(conn),
             SqlOutdoorActivityDataRepository(conn),
             SqlBushwalkingDataRepository(conn),

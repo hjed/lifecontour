@@ -1,0 +1,251 @@
+"""Integration tests for ImmichAlbumOutboxEventProcessor.
+
+Covers album-to-journal creation with the derived date range and
+sync_metadata/external_reference links, idempotent re-sync, and field merge
+protection (local edits preserved on re-sync).
+"""
+
+import json
+import uuid
+from datetime import UTC, datetime, timedelta
+
+import pytest
+from core_shared.models.outbox import OutboxEvent
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
+
+from app.core.integrations.immich_album_outbox_event_processor import (
+    EVENT_TYPE_IMMICH_ALBUM_CREATED,
+    EVENT_TYPE_IMMICH_ALBUM_UPDATED,
+    ImmichAlbumOutboxEventProcessor,
+)
+from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
+    SqlJournalContactRelationshipRepository,
+)
+from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+from app.core.journal.services.journal_service import JournalService
+from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+
+USER_ID = "album-test-user"
+START = datetime(2026, 1, 15, 0, 0, 0, 0, tzinfo=UTC)
+END = datetime(2026, 1, 17, 23, 59, 59, 999999, tzinfo=UTC)
+
+
+def _processor(connection: AsyncConnection) -> ImmichAlbumOutboxEventProcessor:
+    service = JournalService(
+        journal_repo=SqlJournalRepository(connection),
+        event_publisher=OutboxEventPublisher(connection),
+        contact_relationship_repo=SqlJournalContactRelationshipRepository(connection),
+    )
+    return ImmichAlbumOutboxEventProcessor(
+        journal_service=service, connection=connection
+    )
+
+
+def _event(
+    event_type: str,
+    *,
+    album_id: str,
+    version_hash: str,
+    title: str = "Summer Trip",
+    content: str = "An album",
+    start: datetime = START,
+    end: datetime = END,
+) -> OutboxEvent:
+    return OutboxEvent(
+        id=uuid.uuid4(),
+        event_type=event_type,
+        aggregate_id="0",
+        event_data={
+            "integration_source": "immich_album",
+            "external_id": album_id,
+            "version_hash": version_hash,
+            "sync_action": event_type.split(".")[1],
+            "journal_data": {
+                "user_id": USER_ID,
+                "title": title,
+                "content": content,
+                "event_date_range_start": start.isoformat(),
+                "event_date_range_end": end.isoformat(),
+            },
+            "album_metadata": {
+                "album_name": title,
+                "asset_count": 3,
+            },
+            "sync_timestamp": datetime.now(UTC).isoformat(),
+        },
+        occurred_at=datetime.now(UTC),
+        retry_count=0,
+    )
+
+
+async def _journal_row(connection: AsyncConnection, journal_id: int):
+    result = await connection.execute(
+        text("""
+            SELECT title, content, event_date_range_start, event_date_range_end
+            FROM journals WHERE id = :id
+        """),
+        {"id": journal_id},
+    )
+    return result.fetchone()
+
+
+@pytest.mark.asyncio
+async def test_create_album_journal_sets_date_range_and_links(
+    async_connection: AsyncConnection,
+    clean_database: None,  # noqa: ARG001
+) -> None:
+    """A created event makes a journal with the date range + sync links."""
+    album_id = str(uuid.uuid4())
+    processor = _processor(async_connection)
+
+    result = await processor.process_event(
+        _event(EVENT_TYPE_IMMICH_ALBUM_CREATED, album_id=album_id, version_hash="v1")
+    )
+
+    assert result["status"] == "created"
+    journal_id = result["journal_id"]
+
+    row = await _journal_row(async_connection, journal_id)
+    assert row.title == "Summer Trip"
+    assert row.event_date_range_start == START
+    assert row.event_date_range_end == END
+
+    # sync_metadata link
+    meta = (
+        await async_connection.execute(
+            text("""
+                SELECT internal_id, version_hash FROM sync_metadata
+                WHERE integration_source = 'immich_album' AND external_id = :id
+            """),
+            {"id": album_id},
+        )
+    ).fetchone()
+    assert meta is not None
+    assert meta.internal_id == journal_id
+    assert meta.version_hash == "v1"
+
+    # external_reference link with album metadata
+    ref = (
+        await async_connection.execute(
+            text("""
+                SELECT internal_entity_id, reference_data FROM external_references
+                WHERE external_system = 'immich'
+                  AND external_entity_type = 'album'
+                  AND external_entity_id = :id
+            """),
+            {"id": album_id},
+        )
+    ).fetchone()
+    assert ref is not None
+    assert ref.internal_entity_id == journal_id
+    assert json.loads(ref.reference_data)["album_name"] == "Summer Trip"
+
+    # PHOTO_ALBUM is detectable via the repository
+    types = await SqlJournalRepository(async_connection).get_types(journal_id)
+    assert "PHOTO_ALBUM" in types
+
+
+@pytest.mark.asyncio
+async def test_resync_unchanged_version_hash_is_skipped(
+    async_connection: AsyncConnection,
+    clean_database: None,  # noqa: ARG001
+) -> None:
+    """Re-syncing the same album version is a no-op (idempotent)."""
+    album_id = str(uuid.uuid4())
+    processor = _processor(async_connection)
+
+    created = await processor.process_event(
+        _event(EVENT_TYPE_IMMICH_ALBUM_CREATED, album_id=album_id, version_hash="v1")
+    )
+    journal_id = created["journal_id"]
+
+    result = await processor.process_event(
+        _event(EVENT_TYPE_IMMICH_ALBUM_UPDATED, album_id=album_id, version_hash="v1")
+    )
+
+    assert result["status"] == "skipped"
+    assert result["journal_id"] == journal_id
+
+
+@pytest.mark.asyncio
+async def test_resync_updates_when_not_locally_edited(
+    async_connection: AsyncConnection,
+    clean_database: None,  # noqa: ARG001
+) -> None:
+    """A changed album version updates the journal when not edited locally."""
+    album_id = str(uuid.uuid4())
+    processor = _processor(async_connection)
+
+    created = await processor.process_event(
+        _event(EVENT_TYPE_IMMICH_ALBUM_CREATED, album_id=album_id, version_hash="v1")
+    )
+    journal_id = created["journal_id"]
+
+    new_end = END + timedelta(days=1)
+    result = await processor.process_event(
+        _event(
+            EVENT_TYPE_IMMICH_ALBUM_UPDATED,
+            album_id=album_id,
+            version_hash="v2",
+            title="Renamed Trip",
+            end=new_end,
+        )
+    )
+
+    assert result["status"] == "updated"
+    row = await _journal_row(async_connection, journal_id)
+    assert row.title == "Renamed Trip"
+    assert row.event_date_range_end == new_end
+
+
+@pytest.mark.asyncio
+async def test_resync_preserves_locally_edited_fields(
+    async_connection: AsyncConnection,
+    clean_database: None,  # noqa: ARG001
+) -> None:
+    """Local edits to title/content/date range survive a re-sync."""
+    album_id = str(uuid.uuid4())
+    processor = _processor(async_connection)
+
+    created = await processor.process_event(
+        _event(EVENT_TYPE_IMMICH_ALBUM_CREATED, album_id=album_id, version_hash="v1")
+    )
+    journal_id = created["journal_id"]
+
+    # Simulate a local edit AFTER the last sync: bump journal.updated_at past
+    # the external reference's updated_at and change the title locally.
+    await async_connection.execute(
+        text("""
+            UPDATE journals
+            SET title = 'Local Title', updated_at = now() + interval '1 hour'
+            WHERE id = :id
+        """),
+        {"id": journal_id},
+    )
+
+    result = await processor.process_event(
+        _event(
+            EVENT_TYPE_IMMICH_ALBUM_UPDATED,
+            album_id=album_id,
+            version_hash="v2",
+            title="Immich Title",
+        )
+    )
+
+    assert result["status"] == "protected"
+    row = await _journal_row(async_connection, journal_id)
+    assert row.title == "Local Title"
+
+    # The album version is still recorded so it is not reprocessed endlessly.
+    meta = (
+        await async_connection.execute(
+            text("""
+                SELECT version_hash FROM sync_metadata
+                WHERE integration_source = 'immich_album' AND external_id = :id
+            """),
+            {"id": album_id},
+        )
+    ).fetchone()
+    assert meta is not None
+    assert meta.version_hash == "v2"

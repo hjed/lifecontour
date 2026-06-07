@@ -153,8 +153,15 @@ export interface TravelData {
   transportation: TravelTransportation[];
 }
 
+/**
+ * PHOTO_ALBUM type data. Read-only: albums are managed by Immich album sync,
+ * not entered by the user. Sourced from the album sync metadata.
+ */
 export interface PhotoAlbumData {
   immich_album_id?: string | null;
+  album_name?: string | null;
+  album_url?: string | null;
+  asset_count?: number | null;
 }
 
 export interface FitnessData {

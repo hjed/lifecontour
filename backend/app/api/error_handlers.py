@@ -26,7 +26,6 @@ from core_shared.models.journals import (
     JournalTypeDependencyError,
     JournalValidationError,
     MoodDataValidationError,
-    PhotoAlbumDataValidationError,
     PlanDataValidationError,
     PlanDocumentValidationError,
     RouteInUseError,
@@ -147,7 +146,6 @@ def create_domain_error_response(domain_error: DomainError) -> JsonApiErrorRespo
         CalendarInfoValidationError: "CALENDAR_INFO_VALIDATION_ERROR",
         # Type-specific validation errors
         MoodDataValidationError: "MOOD_DATA_VALIDATION_ERROR",
-        PhotoAlbumDataValidationError: "PHOTO_ALBUM_DATA_VALIDATION_ERROR",
         PlanDataValidationError: "PLAN_DATA_VALIDATION_ERROR",
         PlanDocumentValidationError: "PLAN_DOCUMENT_VALIDATION_ERROR",
         TravelDataValidationError: "TRAVEL_DATA_VALIDATION_ERROR",

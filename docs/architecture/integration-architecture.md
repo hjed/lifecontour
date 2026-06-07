@@ -861,7 +861,7 @@ table via the `DeadLetterConsumerMixin`.
 |-----------|--------|----------------|----------------|
 | `SearchIndexerConsumer` | `app.infrastructure.events.search_indexer_consumer` | `search-indexer` | MeiliSearch indexing + daily summary invalidation |
 | `SummaryConsumer` | `app.infrastructure.events.summary_consumer` | `summary-generator` | AI contact summary generation + post-generation index update |
-| `InboundEventConsumer` | `app.infrastructure.events.inbound_event_consumer` | `inbound-processor` | Contact sync, journal sync, match detection from Google |
+| `InboundEventConsumer` | `app.infrastructure.events.inbound_event_consumer` | `inbound-processor` | Contact sync (`contact.*`), journal sync (`journal_event.*`), Immich album import (`immich_album.*`), and match detection (`journal_review.*`) |
 | `GoogleWorkerStreamConsumer` | `integration_workers/google` | `google-worker` | Journal/tag event processing for Google Calendar sync |
 | `StreamConsumer` (base) | `core_shared.stream_client` | — | XREADGROUP loop, event filtering, XACK |
 | `stream_event_to_outbox_event` | `app.infrastructure.events.stream_event_adapter` | — | Converts `StreamEvent` → `OutboxEvent` for reuse of existing processors |

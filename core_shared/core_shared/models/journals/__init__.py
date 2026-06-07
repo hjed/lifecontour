@@ -26,7 +26,6 @@ from .constants import (
     MAX_GEAR_ITEM_NAME_LENGTH,
     MAX_GOOGLE_CALENDAR_ID_LENGTH,
     MAX_HIERARCHY_DEPTH,
-    MAX_IMMICH_ALBUM_ID_LENGTH,
     MAX_LOCATION_LENGTH,
     MAX_MOOD_LABEL_LENGTH,
     MAX_MOOD_VALUE,
@@ -93,7 +92,6 @@ from .exceptions import (
     OutdoorActivityDataValidationError,
     OutdoorPlanningDataValidationError,
     OutdoorTrainingDataValidationError,
-    PhotoAlbumDataValidationError,
     PlanDataValidationError,
     PlanDocumentValidationError,
     RouteInUseError,
@@ -131,7 +129,6 @@ from .outdoor_activity_data import OutdoorActivityData
 from .outdoor_activity_subtypes import OutdoorActivitySubtype
 from .outdoor_planning_data import OutdoorPlanningData
 from .outdoor_training_data import OutdoorTrainingData
-from .photo_album_data import PhotoAlbumData
 from .plan_data import PlanData, PlanDocument
 from .review_item import ReviewItem, ReviewReason
 from .snorkelling_data import SnorkellingData
@@ -159,7 +156,6 @@ __all__ = [
     "MIN_ENERGY_LEVEL",
     "MAX_ENERGY_LEVEL",
     "MAX_MOOD_LABEL_LENGTH",
-    "MAX_IMMICH_ALBUM_ID_LENGTH",
     "MAX_PLAN_DOCUMENT_URL_LENGTH",
     "MAX_PLAN_DOCUMENT_TITLE_LENGTH",
     "MAX_FLIGHT_NUMBER_LENGTH",
@@ -192,7 +188,6 @@ __all__ = [
     "CalendarInfo",
     "FitnessData",
     "MoodData",
-    "PhotoAlbumData",
     "PlanData",
     "PlanDocument",
     "TravelData",
@@ -250,7 +245,6 @@ __all__ = [
     "CalendarInfoValidationError",
     "FitnessDataValidationError",
     "MoodDataValidationError",
-    "PhotoAlbumDataValidationError",
     "PlanDataValidationError",
     "PlanDocumentValidationError",
     "TravelDataValidationError",

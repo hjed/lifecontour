@@ -40,7 +40,6 @@ from core_shared.models.journals import (
     OutdoorActivityData,
     OutdoorPlanningData,
     OutdoorTrainingData,
-    PhotoAlbumData,
     PlanData,
     PlanDocument,
     SnorkellingData,
@@ -618,54 +617,6 @@ class FitnessDataRepository(ABC):
 
         Args:
             journal_id: The journal ID to delete fitness data for
-        """
-        pass
-
-
-class PhotoAlbumDataRepository(ABC):
-    """
-    Repository interface for photo album data (PHOTO_ALBUM type) operations.
-
-    A journal has the PHOTO_ALBUM type if a PhotoAlbumData row exists for its journal_id.
-    """
-
-    @abstractmethod
-    async def find_by_journal_id(self, journal_id: int) -> PhotoAlbumData | None:
-        """
-        Find photo album data by journal ID.
-
-        Args:
-            journal_id: The journal ID to look up
-
-        Returns:
-            The PhotoAlbumData if found (journal has PHOTO_ALBUM type), None otherwise
-        """
-        pass
-
-    @abstractmethod
-    async def save(self, photo_album_data: PhotoAlbumData) -> PhotoAlbumData:
-        """
-        Save photo album data (insert or update).
-
-        This effectively adds or updates the PHOTO_ALBUM type for a journal.
-
-        Args:
-            photo_album_data: The photo album data to save
-
-        Returns:
-            The saved photo album data with updated timestamps
-        """
-        pass
-
-    @abstractmethod
-    async def delete(self, journal_id: int) -> None:
-        """
-        Delete photo album data by journal ID.
-
-        This effectively removes the PHOTO_ALBUM type from a journal.
-
-        Args:
-            journal_id: The journal ID to delete photo album data for
         """
         pass
 

@@ -34,7 +34,6 @@ from core_shared.models.journals import (
     OutdoorActivityData,
     OutdoorPlanningData,
     OutdoorTrainingData,
-    PhotoAlbumData,
     PlanData,
     SnorkellingData,
     TravelData,
@@ -422,11 +421,16 @@ class TypeDataConverter:
         ).model_dump(exclude_none=True)
 
     @staticmethod
-    def photo_album_data_to_schema(photo_album_data: PhotoAlbumData) -> dict[str, Any]:
-        """Convert PhotoAlbumData domain entity to API schema."""
-        return PhotoAlbumDataSchema(
-            immich_album_id=photo_album_data.immich_album_id,
-        ).model_dump(exclude_none=True)
+    def photo_album_data_to_schema(
+        photo_album_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Convert Immich album sync data (a dict) to the API schema.
+
+        ``photo_album_data`` comes from ``AlbumSyncReadRepository`` and may
+        contain ``immich_album_id`` plus optional ``album_name``, ``album_url``
+        and ``asset_count``.
+        """
+        return PhotoAlbumDataSchema(**photo_album_data).model_dump(exclude_none=True)
 
     @staticmethod
     def fitness_data_to_schema(fitness_data: FitnessData) -> dict[str, Any]:

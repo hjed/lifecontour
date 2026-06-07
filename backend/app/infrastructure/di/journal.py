@@ -16,6 +16,9 @@ from app.core.journal.adapters.sql.abseiling_data_repository import (
 from app.core.journal.adapters.sql.activity_template_repository import (
     SqlActivityTemplateRepository,
 )
+from app.core.journal.adapters.sql.album_sync_read_repository import (
+    AlbumSyncReadRepository,
+)
 from app.core.journal.adapters.sql.bushwalking_data_repository import (
     SqlBushwalkingDataRepository,
 )
@@ -83,9 +86,6 @@ from app.core.journal.adapters.sql.outdoor_planning_data_repository import (
 from app.core.journal.adapters.sql.outdoor_training_data_repository import (
     SqlOutdoorTrainingDataRepository,
 )
-from app.core.journal.adapters.sql.photo_album_data_repository import (
-    SqlPhotoAlbumDataRepository,
-)
 from app.core.journal.adapters.sql.plan_data_repository import SqlPlanDataRepository
 from app.core.journal.adapters.sql.review_item_repository import (
     SqlReviewItemRepository,
@@ -123,7 +123,6 @@ from app.core.journal.models.repositories import (
     OutdoorActivityDataRepository,
     OutdoorPlanningDataRepository,
     OutdoorTrainingDataRepository,
-    PhotoAlbumDataRepository,
     PlanDataRepository,
     ReviewItemRepository,
     RouteRepository,
@@ -185,11 +184,11 @@ class JournalProvider(Provider):
         return SqlFitnessDataRepository(connection)
 
     @provide(scope=Scope.REQUEST)
-    def photo_album_data_repository(
+    def album_sync_read_repository(
         self, connection: AsyncConnection
-    ) -> PhotoAlbumDataRepository:
-        """Provide a PhotoAlbumDataRepository instance."""
-        return SqlPhotoAlbumDataRepository(connection)
+    ) -> AlbumSyncReadRepository:
+        """Provide an AlbumSyncReadRepository for PHOTO_ALBUM type data."""
+        return AlbumSyncReadRepository(connection)
 
     @provide(scope=Scope.REQUEST)
     def plan_data_repository(self, connection: AsyncConnection) -> PlanDataRepository:

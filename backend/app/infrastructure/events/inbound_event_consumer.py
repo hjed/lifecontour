@@ -36,6 +36,7 @@ _INBOUND_EVENT_PATTERNS: list[str] = [
     "contact.",
     "journal_event.",
     "journal_review.",
+    "immich_album.",
 ]
 
 
@@ -106,6 +107,8 @@ class InboundEventConsumer(DeadLetterConsumerMixin, StreamConsumer):
                 await self._process_journal_sync_event(outbox_event, conn)
             elif event.event_type.startswith("journal_review."):
                 await self._process_journal_review_event(outbox_event, conn)
+            elif event.event_type.startswith("immich_album."):
+                await self._process_immich_album_event(outbox_event, conn)
 
         logger.debug(
             "Inbound consumer processed event",
@@ -270,6 +273,54 @@ class InboundEventConsumer(DeadLetterConsumerMixin, StreamConsumer):
 
         logger.info(
             "Processed journal sync event (stream consumer)",
+            event_id=event.event_id,
+            event_type=event.event_type,
+            result=result,
+        )
+
+    async def _process_immich_album_event(
+        self, event: OutboxEvent, connection: AsyncConnection
+    ) -> None:
+        """Process inbound Immich album sync events.
+
+        Creates/updates PHOTO_ALBUM journals via
+        ``ImmichAlbumOutboxEventProcessor`` for ``immich_album.*`` events.
+
+        Args:
+            event: Adapted OutboxEvent
+            connection: Database connection for transaction
+        """
+        from app.core.integrations.immich_album_outbox_event_processor import (
+            ImmichAlbumOutboxEventProcessor,
+        )
+        from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
+            SqlJournalContactRelationshipRepository,
+        )
+        from app.core.journal.adapters.sql.journal_repository import (
+            SqlJournalRepository,
+        )
+        from app.core.journal.services.journal_service import JournalService
+        from app.infrastructure.events.outbox_event_publisher import (
+            OutboxEventPublisher,
+        )
+
+        journal_repo = SqlJournalRepository(connection)
+        event_publisher = OutboxEventPublisher(connection)
+        contact_relationship_repo = SqlJournalContactRelationshipRepository(connection)
+        journal_service = JournalService(
+            journal_repo=journal_repo,
+            event_publisher=event_publisher,
+            contact_relationship_repo=contact_relationship_repo,
+        )
+
+        processor = ImmichAlbumOutboxEventProcessor(
+            journal_service=journal_service,
+            connection=connection,
+        )
+        result = await processor.process_event(event)  # type: ignore[arg-type]
+
+        logger.info(
+            "Processed Immich album sync event (stream consumer)",
             event_id=event.event_id,
             event_type=event.event_type,
             result=result,

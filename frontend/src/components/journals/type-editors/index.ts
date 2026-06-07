@@ -6,7 +6,6 @@
 
 export { EventTypeEditor } from './EventTypeEditor';
 export { MoodRatingTypeEditor } from './MoodRatingTypeEditor';
-export { PhotoAlbumTypeEditor } from './PhotoAlbumTypeEditor';
 export { PlanTypeEditor } from './PlanTypeEditor';
 export { TravelTypeEditor } from './TravelTypeEditor';
 export { FitnessTypeEditor } from './FitnessTypeEditor';
