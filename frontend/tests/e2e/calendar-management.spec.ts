@@ -33,9 +33,19 @@ test.describe('Calendar Management', () => {
       })
       .click();
 
+    // Wait for the dialog to populate with the existing values before editing.
+    // The form is reset asynchronously when the dialog opens (react-hook-form
+    // useEffect), and the dialog is already mounted so its inputs become
+    // fillable immediately. Filling before the reset commits lets the reset
+    // silently overwrite our input back to the original name — a race that
+    // surfaces as Firefox flakiness. Asserting the populated value first makes
+    // the test wait for the reset to land.
+    const nameInput = page.getByLabel(/name/i);
+    await expect(nameInput).toHaveValue(calendarName);
+
     // Change the name
     const updatedName = `${calendarName} (Updated)`;
-    await page.getByLabel(/name/i).fill(updatedName);
+    await nameInput.fill(updatedName);
 
     // Submit and wait for update
     await expect(async () => {
