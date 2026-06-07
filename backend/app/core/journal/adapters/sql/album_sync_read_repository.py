@@ -27,6 +27,10 @@ EXTERNAL_SYSTEM = "immich"
 EXTERNAL_ENTITY_TYPE = "album"
 INTERNAL_ENTITY_TYPE = "journal"
 
+# Far-past merge anchor used when a link row is (re)created without applying
+# inbound changes, so a locally edited journal stays protected on the next sync.
+_UNSYNCED_ANCHOR = datetime(1970, 1, 1, tzinfo=UTC)
+
 
 class AlbumSyncReadRepository:
     """Reads, links, and cleans up Immich album links for PHOTO_ALBUM journals."""
@@ -83,8 +87,16 @@ class AlbumSyncReadRepository:
         are never repointed or duplicated. ``updated_at`` (the merge-protection
         anchor) is only advanced when ``bump_anchor`` is True; when False the
         existing anchor is preserved so a locally edited journal stays protected.
+
+        On the INSERT path (the link row was lost), the anchor is set to ``now``
+        only when ``bump_anchor`` is True; otherwise it is set to a far-past
+        sentinel so a re-established link during a *protected* update keeps the
+        journal protected on the next sync rather than re-enabling overwrite.
         """
         now = datetime.now(UTC)
+        # The merge anchor for a freshly inserted row: advancing it (now) is only
+        # correct when we applied inbound changes. Otherwise keep it in the past.
+        insert_anchor = now if bump_anchor else _UNSYNCED_ANCHOR
         params: dict[str, Any] = {
             "journal_id": journal_id,
             "reference_data": json.dumps(reference_data),
@@ -93,6 +105,7 @@ class AlbumSyncReadRepository:
             "external_entity_id": album_id,
             "internal_entity_type": INTERNAL_ENTITY_TYPE,
             "now": now,
+            "insert_anchor": insert_anchor,
             "bump_anchor": bump_anchor,
         }
 
@@ -122,7 +135,7 @@ class AlbumSyncReadRepository:
                     VALUES
                         (:internal_entity_type, :journal_id, :external_system,
                          :external_entity_type, :external_entity_id,
-                         :reference_data, :now, :now)
+                         :reference_data, :now, :insert_anchor)
                 """),
                 params,
             )

@@ -1776,9 +1776,14 @@ async def _update_type_specific_data(
     elif journal_type == JournalType.PHOTO_ALBUM:
         # PHOTO_ALBUM data is managed by Immich album sync. Fail fast rather than
         # silently dropping the update so callers don't believe it succeeded
-        # (mirrors the REST API behaviour).
-        raise ValueError(
-            "PHOTO_ALBUM data is managed by Immich sync and cannot be edited"
+        # (mirrors the REST API behaviour). JournalValidationError is a
+        # JournalDomainError, so mcp_unified_error_handler surfaces a clear
+        # validation message rather than a generic internal error.
+        from core_shared.models.journals import JournalValidationError
+
+        raise JournalValidationError(
+            "journal_type",
+            "PHOTO_ALBUM data is managed by Immich sync and cannot be edited",
         )
     elif journal_type == JournalType.FITNESS:
         await _update_fitness_data(journal_id, type_data_dict, fitness_data_repo)

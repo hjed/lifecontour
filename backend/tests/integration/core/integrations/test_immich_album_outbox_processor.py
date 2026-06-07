@@ -462,6 +462,19 @@ async def test_missing_link_anchor_protects_local_edits(
     # The link anchor was re-established for subsequent syncs.
     assert await _album_ref(async_connection, album_id) is not None
 
+    # The re-established anchor must be far-past (not "now"), so a *further*
+    # album change still protects the local edit rather than overwriting it.
+    result2 = await processor.process_event(
+        _event(
+            EVENT_TYPE_IMMICH_ALBUM_UPDATED,
+            album_id=album_id,
+            version_hash="v3",
+            title="Immich Overwrite Again",
+        )
+    )
+    assert result2["status"] == "protected"
+    assert (await _journal_row(async_connection, journal_id)).title == "Local Title"
+
 
 @pytest.mark.asyncio
 async def test_merge_protection_uses_the_anchor_for_the_target_journal(
