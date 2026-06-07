@@ -213,6 +213,23 @@ async def test_resync_updates_when_not_locally_edited(
     assert row.title == "Renamed Trip"
     assert row.event_date_range_end == new_end
 
+    # The emitted JournalUpdated event uses the repo-wide changed_fields
+    # convention (a single ``event_date_range`` key), not ``_start`` / ``_end``.
+    evt = (
+        await async_connection.execute(
+            text("""
+                SELECT event_data FROM outbox_events
+                WHERE event_type = 'JournalUpdated' AND aggregate_id = :jid
+                ORDER BY id DESC LIMIT 1
+            """),
+            {"jid": journal_id},
+        )
+    ).fetchone()
+    assert evt is not None
+    changed_fields = json.loads(evt.event_data).get("changed_fields", {})
+    assert "event_date_range" in changed_fields
+    assert "event_date_range_start" not in changed_fields
+
 
 @pytest.mark.asyncio
 async def test_resync_preserves_locally_edited_fields(

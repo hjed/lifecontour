@@ -196,6 +196,16 @@ class TestCalculateAlbumVersionHash:
             base
         ) != ImmichSyncService.calculate_album_version_hash(changed)
 
+    def test_hash_normalises_whitespace_and_empty_fields(self) -> None:
+        # Surrounding whitespace and empty-vs-missing optional fields must not
+        # change the hash, to avoid spurious update events.
+        a = _album(name="Trip", description="")
+        b = _album(name="  Trip  ", description="   ")
+
+        assert ImmichSyncService.calculate_album_version_hash(
+            a
+        ) == ImmichSyncService.calculate_album_version_hash(b)
+
 
 # ---------------------------------------------------------------------------
 # sync_albums — emits outbox events

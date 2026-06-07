@@ -1774,8 +1774,12 @@ async def _update_type_specific_data(
     elif journal_type == JournalType.MOOD_RATING:
         await _update_mood_data(journal_id, type_data_dict, mood_data_repo)
     elif journal_type == JournalType.PHOTO_ALBUM:
-        # PHOTO_ALBUM data is managed by Immich album sync and is read-only here.
-        pass
+        # PHOTO_ALBUM data is managed by Immich album sync. Fail fast rather than
+        # silently dropping the update so callers don't believe it succeeded
+        # (mirrors the REST API behaviour).
+        raise ValueError(
+            "PHOTO_ALBUM data is managed by Immich sync and cannot be edited"
+        )
     elif journal_type == JournalType.FITNESS:
         await _update_fitness_data(journal_id, type_data_dict, fitness_data_repo)
     elif journal_type == JournalType.OUTDOOR_ACTIVITY:

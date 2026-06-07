@@ -491,9 +491,16 @@ class ImmichSyncService:
 
     @staticmethod
     def calculate_album_version_hash(album: ImmichAlbum) -> str:
-        """Calculate a SHA-256 hash of an album's mutable metadata."""
+        """Calculate a SHA-256 hash of an album's mutable metadata.
+
+        Name and description are normalised (``None`` -> ``""`` and stripped) so
+        that equivalent albums hash identically and missing optional fields do
+        not cause spurious ``immich_album.updated`` events.
+        """
+        name = (album.album_name or "").strip()
+        description = (album.description or "").strip()
         updated = album.updated_at.isoformat() if album.updated_at else ""
-        data = f"{album.album_name}|{album.description}|{album.asset_count}|{updated}"
+        data = f"{name}|{description}|{album.asset_count}|{updated}"
         return hashlib.sha256(data.encode()).hexdigest()
 
     @staticmethod
