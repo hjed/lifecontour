@@ -3558,6 +3558,17 @@ async def remove_type_from_journal(
             "journal_type", f"Invalid journal type: {journal_type}"
         ) from e
 
+    # PHOTO_ALBUM is managed by Immich album sync. Removing it would drop the
+    # sync_metadata / external_reference link, and the next sync would re-import
+    # the album as a *new* duplicate journal — so it cannot be removed manually.
+    if jtype == JournalType.PHOTO_ALBUM:
+        from core_shared.models.journals import JournalValidationError
+
+        raise JournalValidationError(
+            "journal_type",
+            "PHOTO_ALBUM is managed by Immich sync and cannot be removed",
+        )
+
     # Remove type (publish event)
     await journal_service.remove_type_from_journal(journal_id, jtype, connection)
 

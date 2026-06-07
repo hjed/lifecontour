@@ -199,9 +199,19 @@ class ImmichAlbumOutboxEventProcessor:
                 "album_id": payload.external_id,
             }
 
-        ref = await self._find_external_reference(payload.external_id)
-        link_updated_at = ref.updated_at if ref else None
-        has_local_edits = self._has_local_edits(existing.updated_at, link_updated_at)
+        # Look up the anchor for *this* journal specifically: if several album
+        # references somehow exist, we must compare against the one pointing at
+        # the journal we are updating, not just the newest.
+        ref = await self._find_external_reference(
+            payload.external_id, journal_id=journal_id
+        )
+        # Without a link anchor we cannot tell whether the journal was edited
+        # locally, so treat it as protected to avoid overwriting user data (the
+        # anchor is re-established below and normal sync resumes next cycle).
+        if ref is None:
+            has_local_edits = True
+        else:
+            has_local_edits = self._has_local_edits(existing.updated_at, ref.updated_at)
 
         if not has_local_edits:
             merged = self._build_journal(payload.journal_data, journal_id=journal_id)
@@ -282,25 +292,39 @@ class ImmichAlbumOutboxEventProcessor:
         }
         return json.dumps({k: v for k, v in data.items() if v is not None})
 
-    async def _find_external_reference(self, album_id: str) -> Any | None:
-        """Find the album external reference row by Immich album ID."""
+    async def _find_external_reference(
+        self, album_id: str, journal_id: int | None = None
+    ) -> Any | None:
+        """Find the album external reference row by Immich album ID.
+
+        When ``journal_id`` is given, the lookup is constrained to the reference
+        pointing at that journal, so merge protection compares against the right
+        anchor even if multiple references exist for the same album.
+        """
+        params: dict[str, Any] = {
+            "external_system": EXTERNAL_SYSTEM,
+            "external_entity_type": EXTERNAL_ENTITY_TYPE,
+            "external_entity_id": album_id,
+            "internal_entity_type": INTERNAL_ENTITY_TYPE,
+        }
+        journal_filter = ""
+        if journal_id is not None:
+            journal_filter = "AND internal_entity_id = :internal_entity_id"
+            params["internal_entity_id"] = journal_id
+
         result = await self.connection.execute(
-            text("""
+            text(f"""
                 SELECT id, internal_entity_id, updated_at
                 FROM external_references
                 WHERE external_system = :external_system
                   AND external_entity_type = :external_entity_type
                   AND external_entity_id = :external_entity_id
                   AND internal_entity_type = :internal_entity_type
+                  {journal_filter}
                 ORDER BY id DESC
                 LIMIT 1
             """),
-            {
-                "external_system": EXTERNAL_SYSTEM,
-                "external_entity_type": EXTERNAL_ENTITY_TYPE,
-                "external_entity_id": album_id,
-                "internal_entity_type": INTERNAL_ENTITY_TYPE,
-            },
+            params,
         )
         return result.fetchone()
 

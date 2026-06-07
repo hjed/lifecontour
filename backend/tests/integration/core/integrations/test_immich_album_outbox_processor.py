@@ -396,3 +396,110 @@ async def test_created_retry_without_external_reference_does_not_duplicate(
     ).fetchone()
     assert journal_count is not None
     assert journal_count.n == 1
+
+
+@pytest.mark.asyncio
+async def test_missing_link_anchor_protects_local_edits(
+    async_connection: AsyncConnection,
+    clean_database: None,  # noqa: ARG001
+) -> None:
+    """A re-sync with a missing link anchor must not overwrite local edits.
+
+    If the album external_reference is lost, we cannot tell whether the journal
+    was edited locally, so the safe default is to protect it (no data loss).
+    """
+    album_id = str(uuid.uuid4())
+    processor = _processor(async_connection)
+
+    created = await processor.process_event(
+        _event(EVENT_TYPE_IMMICH_ALBUM_CREATED, album_id=album_id, version_hash="v1")
+    )
+    journal_id = created["journal_id"]
+
+    # User edits the journal locally, then the link row is lost.
+    await async_connection.execute(
+        text("UPDATE journals SET title = 'Local Title' WHERE id = :id"),
+        {"id": journal_id},
+    )
+    await async_connection.execute(
+        text("""
+            DELETE FROM external_references
+            WHERE external_system = 'immich'
+              AND external_entity_type = 'album'
+              AND external_entity_id = :id
+        """),
+        {"id": album_id},
+    )
+
+    result = await processor.process_event(
+        _event(
+            EVENT_TYPE_IMMICH_ALBUM_UPDATED,
+            album_id=album_id,
+            version_hash="v2",
+            title="Immich Overwrite",
+        )
+    )
+
+    assert result["status"] == "protected"
+    assert (await _journal_row(async_connection, journal_id)).title == "Local Title"
+    # The link anchor was re-established for subsequent syncs.
+    assert await _album_ref(async_connection, album_id) is not None
+
+
+@pytest.mark.asyncio
+async def test_merge_protection_uses_the_anchor_for_the_target_journal(
+    async_connection: AsyncConnection,
+    clean_database: None,  # noqa: ARG001
+) -> None:
+    """Merge protection must compare against this journal's own anchor.
+
+    If a stray, newer external_reference exists for the same album (pointing at
+    a different entity), the protection decision must still use the anchor of
+    the journal actually being updated — not the newest row.
+    """
+    album_id = str(uuid.uuid4())
+    processor = _processor(async_connection)
+
+    created = await processor.process_event(
+        _event(EVENT_TYPE_IMMICH_ALBUM_CREATED, album_id=album_id, version_hash="v1")
+    )
+    journal_id = created["journal_id"]
+
+    # Local edit after the last sync (advances journal.updated_at past anchor).
+    await async_connection.execute(
+        text("""
+            UPDATE journals
+            SET title = 'Local Title', updated_at = now() + interval '1 hour'
+            WHERE id = :id
+        """),
+        {"id": journal_id},
+    )
+
+    # A stray, newer reference for the same album pointing at a different (here
+    # non-existent) entity, with a far-future anchor that would defeat
+    # protection if it were (incorrectly) selected.
+    await async_connection.execute(
+        text("""
+            INSERT INTO external_references (
+                internal_entity_type, internal_entity_id, external_system,
+                external_entity_type, external_entity_id, reference_data,
+                created_at, updated_at
+            ) VALUES (
+                'journal', 99999999, 'immich', 'album', :id, '{}',
+                now(), now() + interval '1 day'
+            )
+        """),
+        {"id": album_id},
+    )
+
+    result = await processor.process_event(
+        _event(
+            EVENT_TYPE_IMMICH_ALBUM_UPDATED,
+            album_id=album_id,
+            version_hash="v2",
+            title="Immich Overwrite",
+        )
+    )
+
+    assert result["status"] == "protected"
+    assert (await _journal_row(async_connection, journal_id)).title == "Local Title"
