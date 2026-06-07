@@ -241,3 +241,13 @@ class TestSummaryPromptBuilder:
 
         assert "Current System Time" in prompt
         assert "UTC" in prompt
+
+    def test_prompt_current_time_uses_user_timezone(self):
+        """Current system time is rendered in the user's timezone with a label."""
+        builder = SummaryPromptBuilder()
+        prompt = builder.build(_make_input(), timezone="Australia/Sydney")
+
+        assert "Current System Time" in prompt
+        # Explicit timezone label and offset, not a bare UTC timestamp
+        assert "AEST" in prompt
+        assert "+10:00" in prompt

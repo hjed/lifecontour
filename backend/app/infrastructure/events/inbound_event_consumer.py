@@ -231,9 +231,17 @@ class InboundEventConsumer(DeadLetterConsumerMixin, StreamConsumer):
         # Need optional detector for gating Phase 2 emission
         match_detector = None
         if self._settings.gemini_api_key:
+            from app.core.settings.adapters.sql.user_settings_repository import (
+                SqlUserSettingsRepository,
+            )
+
+            timezone = await SqlUserSettingsRepository(
+                connection
+            ).get_default_timezone()
             similarity_assessor = GeminiTitleSimilarityAssessor(
                 api_key=self._settings.gemini_api_key,
                 model=self._settings.gemini_model,
+                timezone=timezone,
             )
             match_detector = MatchCandidateDetector(
                 similarity_assessor=similarity_assessor,
@@ -295,9 +303,17 @@ class InboundEventConsumer(DeadLetterConsumerMixin, StreamConsumer):
         review_item_repo = SqlReviewItemRepository(connection)
         match_detector = None
         if self._settings.gemini_api_key:
+            from app.core.settings.adapters.sql.user_settings_repository import (
+                SqlUserSettingsRepository,
+            )
+
+            timezone = await SqlUserSettingsRepository(
+                connection
+            ).get_default_timezone()
             similarity_assessor = GeminiTitleSimilarityAssessor(
                 api_key=self._settings.gemini_api_key,
                 model=self._settings.gemini_model,
+                timezone=timezone,
             )
             match_detector = MatchCandidateDetector(
                 similarity_assessor=similarity_assessor,

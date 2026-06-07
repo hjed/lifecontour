@@ -26,6 +26,8 @@ from app.core.journal.services.daily_summary_prompt_builder import (
 from app.core.journal.services.daily_summary_repository import (
     JournalDailySummaryRepository,
 )
+from app.core.settings.models import UserSettingsRepository
+from app.core.settings.timezone_utils import DEFAULT_TIMEZONE
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +43,7 @@ class DailySummaryService:
         summary_repo: JournalDailySummaryRepository,
         gemini_api_key: str,
         gemini_model: str,
+        user_settings_repo: UserSettingsRepository | None = None,
         _gemini_response_override: str | None = None,
     ) -> None:
         self._input_assembler = input_assembler
@@ -49,7 +52,14 @@ class DailySummaryService:
         self._summary_repo = summary_repo
         self._gemini_api_key = gemini_api_key
         self._gemini_model = gemini_model
+        self._user_settings_repo = user_settings_repo
         self._gemini_response_override = _gemini_response_override
+
+    async def _resolve_timezone(self, user_id: str) -> str:
+        """Resolve the user's timezone, falling back to UTC."""
+        if self._user_settings_repo is None:
+            return DEFAULT_TIMEZONE
+        return await self._user_settings_repo.get_timezone(user_id)
 
     async def get_or_generate(
         self, user_id: str, summary_date: date
@@ -84,8 +94,11 @@ class DailySummaryService:
             )
             return existing
 
-        # 2. Assemble input
-        summary_input = await self._input_assembler.assemble(user_id, summary_date)
+        # 2. Assemble input (scoped to the user's local day)
+        timezone = await self._resolve_timezone(user_id)
+        summary_input = await self._input_assembler.assemble(
+            user_id, summary_date, timezone
+        )
 
         # 3. Check eligibility
         if not self._eligibility_checker.is_eligible(summary_input.journal_count):
@@ -121,7 +134,7 @@ class DailySummaryService:
 
         # 5. Build prompt and call Gemini
         try:
-            prompt = self._prompt_builder.build(summary_input)
+            prompt = self._prompt_builder.build(summary_input, timezone=timezone)
             raw_response = await self._call_gemini(prompt)
             result = self._parse_response(raw_response)
         except Exception as e:

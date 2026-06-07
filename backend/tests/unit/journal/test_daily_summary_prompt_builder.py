@@ -168,3 +168,38 @@ class TestDailySummaryPromptBuilder:
             _make_input(summary_date=now_date + timedelta(days=1)), now=now_time
         )
         assert "(Future)" in prompt_future
+
+    def test_current_time_uses_user_timezone(self) -> None:
+        """Current system time is rendered in the user's timezone with a label."""
+        from datetime import UTC, datetime
+
+        builder = DailySummaryPromptBuilder()
+        now_time = datetime(2026, 6, 7, 0, 0, 0, tzinfo=UTC)
+
+        prompt = builder.build(
+            _make_input(summary_date=datetime(2026, 6, 7).date()),
+            now=now_time,
+            timezone="Australia/Sydney",
+        )
+
+        # Sydney is UTC+10 in June: midnight UTC -> 10:00 local
+        assert "2026-06-07 10:00:00" in prompt
+        assert "AEST" in prompt
+        assert "+10:00" in prompt
+        assert "UTC" not in prompt.replace("(UTC+10:00)", "")
+
+    def test_temporal_context_uses_user_timezone_date(self) -> None:
+        """Temporal context is computed against the date in the user's timezone."""
+        from datetime import UTC, datetime
+
+        builder = DailySummaryPromptBuilder()
+        # 23:00 UTC on the 6th is already the 7th (09:00) in Sydney.
+        now_time = datetime(2026, 6, 6, 23, 0, 0, tzinfo=UTC)
+
+        prompt = builder.build(
+            _make_input(summary_date=datetime(2026, 6, 7).date()),
+            now=now_time,
+            timezone="Australia/Sydney",
+        )
+        # In Sydney it is the 7th, so summarising the 7th is "Today".
+        assert "(Today)" in prompt

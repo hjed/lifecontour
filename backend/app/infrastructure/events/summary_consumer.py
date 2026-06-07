@@ -130,6 +130,9 @@ class SummaryConsumer(DeadLetterConsumerMixin, StreamConsumer):
         from app.core.journal.adapters.sql.journal_repository import (
             SqlJournalRepository,
         )
+        from app.core.settings.adapters.sql.user_settings_repository import (
+            SqlUserSettingsRepository,
+        )
 
         settings = get_settings()
 
@@ -191,6 +194,12 @@ class SummaryConsumer(DeadLetterConsumerMixin, StreamConsumer):
         activity_checker = LowActivityChecker()
         prompt_builder = SummaryPromptBuilder()
 
+        # Resolve the user's timezone so generated summaries render dates/times
+        # in local time. This is a background worker with no request user, so we
+        # use the single-user fallback.
+        user_settings_repo = SqlUserSettingsRepository(connection)
+        timezone = await user_settings_repo.get_default_timezone()
+
         generator = SummaryGenerator(
             input_assembler=input_assembler,
             activity_checker=activity_checker,
@@ -199,6 +208,7 @@ class SummaryConsumer(DeadLetterConsumerMixin, StreamConsumer):
             gemini_api_key=settings.gemini_api_key,
             gemini_model=settings.gemini_summary_model,
             history_service=history_service,
+            timezone=timezone,
         )
 
         result = await generator.generate(contact_id=contact_id)

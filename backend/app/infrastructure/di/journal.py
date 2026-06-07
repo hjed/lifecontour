@@ -149,6 +149,7 @@ from app.core.journal.services.journal_service import JournalService
 from app.core.journal.services.logbook_data_service import LogbookDataService
 from app.core.journal.services.logbook_pdf_renderer import LogbookPdfRenderer
 from app.core.journal.services.route_service import RouteService
+from app.core.settings.models import UserSettingsRepository
 from app.infrastructure.config import Settings
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 
@@ -456,6 +457,7 @@ class JournalProvider(Provider):
         eligibility_checker: DailySummaryEligibilityChecker,
         prompt_builder: DailySummaryPromptBuilder,
         summary_repo: JournalDailySummaryRepository,
+        user_settings_repo: UserSettingsRepository,
         settings: Settings,
     ) -> DailySummaryService:
         """Provide a DailySummaryService instance."""
@@ -466,6 +468,7 @@ class JournalProvider(Provider):
             summary_repo=summary_repo,
             gemini_api_key=settings.gemini_api_key,
             gemini_model=settings.gemini_summary_model,
+            user_settings_repo=user_settings_repo,
         )
 
     @provide(scope=Scope.REQUEST)

@@ -1,19 +1,15 @@
 /**
- * TimezoneSettings component for managing default timezone preference.
+ * TimezoneSettings component for managing the default timezone preference.
  *
- * Stores the user's preferred timezone in localStorage. When set, new events
- * will default to this timezone. The EventTypeEditor allows overriding per event.
+ * The timezone is persisted on the backend (so server-side AI prompt
+ * generation can render dates/times in the user's local time) and mirrored
+ * into localStorage as a cache. New events default to this timezone via
+ * {@link getDefaultTimezone}; the EventTypeEditor allows overriding per event.
  */
 
 'use client';
 
-import {
-  useState,
-  useEffect,
-  useRef,
-  useCallback,
-  useSyncExternalStore,
-} from 'react';
+import { useEffect, useState } from 'react';
 import { Globe } from 'lucide-react';
 import {
   Card,
@@ -25,12 +21,16 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-
-const TIMEZONE_STORAGE_KEY = 'pms-default-timezone';
+import {
+  TIMEZONE_STORAGE_KEY,
+  useUpdateTimezone,
+  useUserSettings,
+} from '@/lib/api/settings';
 
 /**
- * Get the user's default timezone from localStorage.
- * Falls back to the browser's timezone.
+ * Get the user's default timezone from the localStorage cache.
+ * Falls back to the browser's timezone. Synchronous so it can be used when
+ * constructing new events without an async fetch.
  */
 export function getDefaultTimezone(): string {
   if (typeof window === 'undefined') {
@@ -38,24 +38,6 @@ export function getDefaultTimezone(): string {
   }
   const stored = localStorage.getItem(TIMEZONE_STORAGE_KEY);
   return stored || Intl.DateTimeFormat().resolvedOptions().timeZone;
-}
-
-/** Read stored timezone from localStorage (client snapshot). */
-function getStoredTimezoneSnapshot(): string | null {
-  return localStorage.getItem(TIMEZONE_STORAGE_KEY);
-}
-
-/** Server snapshot always returns null. */
-function getStoredTimezoneServerSnapshot(): null {
-  return null;
-}
-
-/** Subscribe is a no-op — we don't need live storage events for this component. */
-function subscribeToNothing(callback: () => void): () => void {
-  // We don't subscribe to storage events because the component
-  // manages its own writes via handleSave/handleReset.
-  void callback;
-  return () => {};
 }
 
 /**
@@ -67,42 +49,33 @@ function getBrowserTimezone(): string {
 }
 
 export function TimezoneSettings() {
-  // Read stored timezone without useEffect — hydration-safe via useSyncExternalStore
-  const storedTimezone = useSyncExternalStore(
-    subscribeToNothing,
-    getStoredTimezoneSnapshot,
-    getStoredTimezoneServerSnapshot
-  );
-
   const browserTimezone = getBrowserTimezone();
-  const initialTimezone = storedTimezone ?? browserTimezone;
+  const { data, isLoading } = useUserSettings();
+  const { mutate: saveTimezone, isPending } = useUpdateTimezone();
 
-  const [timezone, setTimezone] = useState(initialTimezone);
-  const [saved, setSaved] = useState(false);
-  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The displayed value is the user's edit (draft) if any, otherwise the
+  // persisted value, otherwise the browser timezone. Deriving it avoids
+  // syncing query data into state via an effect.
+  const persisted = data?.data.attributes.timezone;
+  const [draft, setDraft] = useState<string | null>(null);
+  const timezone = draft ?? persisted ?? browserTimezone;
 
+  // Mirror the persisted value into the localStorage cache so the synchronous
+  // getDefaultTimezone() helper stays current. Writes only — no state update.
   useEffect(() => {
-    return () => {
-      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
-    };
-  }, []);
+    if (persisted) {
+      localStorage.setItem(TIMEZONE_STORAGE_KEY, persisted);
+    }
+  }, [persisted]);
 
-  const flashSaved = useCallback(() => {
-    setSaved(true);
-    if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
-    savedTimerRef.current = setTimeout(() => setSaved(false), 2000);
-  }, []);
+  const handleSave = () => {
+    saveTimezone(timezone);
+  };
 
-  const handleSave = useCallback(() => {
-    localStorage.setItem(TIMEZONE_STORAGE_KEY, timezone);
-    flashSaved();
-  }, [timezone, flashSaved]);
-
-  const handleReset = useCallback(() => {
-    localStorage.removeItem(TIMEZONE_STORAGE_KEY);
-    setTimezone(browserTimezone);
-    flashSaved();
-  }, [browserTimezone, flashSaved]);
+  const handleReset = () => {
+    setDraft(browserTimezone);
+    saveTimezone(browserTimezone);
+  };
 
   return (
     <Card data-testid='timezone-settings'>
@@ -112,7 +85,8 @@ export function TimezoneSettings() {
           Timezone
         </CardTitle>
         <CardDescription>
-          Set your default timezone for new journal events. This can be
+          Set your default timezone. It is used for new journal events and so
+          AI-generated summaries show times in your local timezone. This can be
           overridden per event in the event editor.
         </CardDescription>
       </CardHeader>
@@ -122,8 +96,9 @@ export function TimezoneSettings() {
           <Input
             id='default-timezone'
             value={timezone}
-            onChange={e => setTimezone(e.target.value)}
+            onChange={e => setDraft(e.target.value)}
             placeholder={browserTimezone}
+            disabled={isLoading}
             data-testid='default-timezone-input'
           />
           {timezone !== browserTimezone && (
@@ -136,14 +111,16 @@ export function TimezoneSettings() {
           <Button
             onClick={handleSave}
             size='sm'
+            disabled={isPending || isLoading}
             data-testid='save-timezone-btn'
           >
-            {saved ? 'Saved!' : 'Save'}
+            {isPending ? 'Saving…' : 'Save'}
           </Button>
           <Button
             onClick={handleReset}
             variant='outline'
             size='sm'
+            disabled={isPending || isLoading}
             data-testid='reset-timezone-btn'
           >
             Reset to browser

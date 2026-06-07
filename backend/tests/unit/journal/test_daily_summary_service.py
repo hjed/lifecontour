@@ -95,7 +95,7 @@ class TestDailySummaryServiceGeneration:
         assert result.mood_average == 7.5
         assert result.generated_at is not None
         mock_input_assembler.assemble.assert_called_once_with(
-            "user123", date(2026, 4, 27)
+            "user123", date(2026, 4, 27), "UTC"
         )
         mock_prompt_builder.build.assert_called_once()
 

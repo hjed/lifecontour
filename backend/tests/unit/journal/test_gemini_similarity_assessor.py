@@ -89,6 +89,39 @@ class TestGeminiTitleSimilarityAssessor:
         # Dates should be present in some format
         assert "2024" in captured_prompt
 
+    async def test_prompt_renders_dates_in_user_timezone(
+        self,
+        sample_dates: dict[str, datetime],
+    ) -> None:
+        """Event datetimes are rendered in the configured timezone with offset."""
+        assessor = GeminiTitleSimilarityAssessor(
+            api_key="test-api-key",
+            model="gemini-2.5-flash",
+            timezone="Australia/Sydney",
+        )
+        captured_prompt = None
+
+        async def capture_prompt(prompt: str) -> float:
+            nonlocal captured_prompt
+            captured_prompt = prompt
+            return 0.5
+
+        with patch.object(assessor, "_call_gemini", side_effect=capture_prompt):
+            await assessor.assess_similarity(
+                title_a="A",
+                content_a="",
+                start_a=sample_dates["start_a"],
+                end_a=sample_dates["end_a"],
+                title_b="B",
+                content_b="",
+                start_b=sample_dates["start_b"],
+                end_b=sample_dates["end_b"],
+            )
+
+        assert captured_prompt is not None
+        # 10:00 UTC -> 21:00 Sydney (AEDT, +11:00 in March)
+        assert "2024-03-15T21:00:00+11:00" in captured_prompt
+
     async def test_handles_gemini_error(
         self,
         assessor: GeminiTitleSimilarityAssessor,

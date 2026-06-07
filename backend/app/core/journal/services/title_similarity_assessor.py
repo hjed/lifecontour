@@ -11,6 +11,8 @@ from typing import Protocol, runtime_checkable
 
 import structlog
 
+from app.core.settings.timezone_utils import DEFAULT_TIMEZONE, isoformat_in_tz
+
 logger = structlog.get_logger()
 
 
@@ -71,15 +73,22 @@ class GeminiTitleSimilarityAssessor:
 
     TIMEOUT_SECONDS = 10.0
 
-    def __init__(self, api_key: str, model: str = "gemini-2.5-flash") -> None:
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "gemini-2.5-flash",
+        timezone: str = DEFAULT_TIMEZONE,
+    ) -> None:
         """Initialize with Gemini API credentials.
 
         Args:
             api_key: Google API key for Gemini access
             model: Gemini model to use (default: gemini-2.5-flash)
+            timezone: IANA timezone used to render event datetimes in prompts
         """
         self._api_key = api_key
         self._model = model
+        self._timezone = timezone
 
     # Maximum characters of content/description to include in prompts.
     # Keeps prompt size bounded to avoid exceeding model token limits,
@@ -122,6 +131,8 @@ class GeminiTitleSimilarityAssessor:
         desc_a = self._truncate_content(content_a) if content_a else "(no description)"
         desc_b = self._truncate_content(content_b) if content_b else "(no description)"
 
+        tz = self._timezone
+
         return f"""You are evaluating whether two calendar events refer to the same real-world event.
 Compare the following two events and respond with ONLY a decimal number between 0.0 and 1.0
 representing your confidence that they are the same event.
@@ -131,18 +142,19 @@ representing your confidence that they are the same event.
 1.0 = Definitely the same event
 
 Consider: titles, descriptions, timing overlap, and duration similarity.
+All times are shown in the user's local timezone with an explicit UTC offset.
 
 Event A:
 - Title: {title_a}
 - Description: {desc_a}
-- Start: {start_a.isoformat()}
-- End: {end_a.isoformat()}
+- Start: {isoformat_in_tz(start_a, tz)}
+- End: {isoformat_in_tz(end_a, tz)}
 
 Event B:
 - Title: {title_b}
 - Description: {desc_b}
-- Start: {start_b.isoformat()}
-- End: {end_b.isoformat()}
+- Start: {isoformat_in_tz(start_b, tz)}
+- End: {isoformat_in_tz(end_b, tz)}
 
 Confidence score (0.0-1.0):"""
 
