@@ -32,6 +32,7 @@ from app.core.journal.models.repositories import (
     JournalContactRelationshipRepository,
     JournalRepository,
 )
+from app.core.settings.timezone_utils import DEFAULT_TIMEZONE, isoformat_in_tz
 
 if TYPE_CHECKING:
     from app.core.contacts.services.contact_history_service import (
@@ -82,8 +83,13 @@ class SummaryInputAssembler:
         self._journal_repo = journal_repo
         self._summary_repo = summary_repo
 
-    async def assemble(self, contact_id: int) -> SummaryInput | None:
+    async def assemble(
+        self, contact_id: int, timezone: str = DEFAULT_TIMEZONE
+    ) -> SummaryInput | None:
         """Assemble bounded input data for summary generation.
+
+        Journal event dates are rendered in the user's ``timezone`` with an
+        explicit offset so the model never has to assume UTC.
 
         Returns None if the contact does not exist.
         """
@@ -185,13 +191,14 @@ class SummaryInputAssembler:
             if hasattr(journal, "event_date_range") and journal.event_date_range:
                 start = getattr(journal.event_date_range, "start", None)
                 if start:
-                    journal_date_str = (
-                        start.isoformat() if hasattr(start, "isoformat") else str(start)
-                    )
                     if isinstance(start, datetime):
+                        journal_date_str = isoformat_in_tz(start, timezone)
                         is_future = start > now
-                    else:
+                    elif hasattr(start, "isoformat"):
+                        journal_date_str = start.isoformat()
                         is_future = start > now.date()
+                    else:
+                        journal_date_str = str(start)
 
             if hasattr(self._journal_repo, "get_types"):
                 journal_types = await self._journal_repo.get_types(jr.journal_id)
@@ -364,6 +371,7 @@ class SummaryGenerator:
         gemini_model: str,
         _gemini_response_override: str | None = None,
         history_service: ContactHistoryService | None = None,
+        timezone: str = DEFAULT_TIMEZONE,
     ) -> None:
         self._input_assembler = input_assembler
         self._activity_checker = activity_checker
@@ -373,6 +381,7 @@ class SummaryGenerator:
         self._gemini_model = gemini_model
         self._gemini_response_override = _gemini_response_override
         self._history_service = history_service
+        self._timezone = timezone
 
     async def generate(self, contact_id: int) -> ContactSummary | None:
         """Generate or regenerate an AI summary for a contact.
@@ -395,7 +404,7 @@ class SummaryGenerator:
             return existing
 
         # Assemble input first to verify contact exists
-        summary_input = await self._input_assembler.assemble(contact_id)
+        summary_input = await self._input_assembler.assemble(contact_id, self._timezone)
         if summary_input is None:
             logger.warning("Contact %d not found, cannot generate summary", contact_id)
             return None
@@ -461,7 +470,7 @@ class SummaryGenerator:
             return result_summary
 
         # Build prompt
-        prompt = self._prompt_builder.build(summary_input)
+        prompt = self._prompt_builder.build(summary_input, timezone=self._timezone)
 
         # Call AI
         try:

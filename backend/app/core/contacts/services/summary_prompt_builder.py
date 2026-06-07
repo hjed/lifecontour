@@ -11,6 +11,11 @@ from typing import Any
 from app.core.contacts.services.summary_models import (
     SummaryInput,
 )
+from app.core.settings.timezone_utils import (
+    DEFAULT_TIMEZONE,
+    format_datetime,
+    now_in_tz,
+)
 
 
 class SummaryPromptBuilder:
@@ -20,16 +25,20 @@ class SummaryPromptBuilder:
     _MAX_NOTE_CHARS = 500
     _MAX_JOURNAL_CONTENT_CHARS = 1000
 
-    def build(self, summary_input: SummaryInput) -> str:
-        """Build a structured prompt from assembled input data."""
+    def build(
+        self, summary_input: SummaryInput, timezone: str = DEFAULT_TIMEZONE
+    ) -> str:
+        """Build a structured prompt from assembled input data.
+
+        All times/dates are rendered in ``timezone`` (the user's preferred
+        timezone) with explicit timezone labels so the model never assumes UTC.
+        """
         sections: list[str] = []
 
-        from datetime import UTC, datetime
-
-        now = datetime.now(tz=UTC)
+        now = now_in_tz(timezone)
 
         # System instructions
-        sections.append(self._system_instructions(now))
+        sections.append(self._system_instructions(now, timezone))
 
         # Contact identity
         sections.append(self._contact_section(summary_input))
@@ -92,12 +101,13 @@ class SummaryPromptBuilder:
 
         return prompt
 
-    def _system_instructions(self, now: datetime) -> str:
-        current_time = now.strftime("%Y-%m-%d %H:%M:%S UTC")
+    def _system_instructions(self, now: datetime, timezone: str) -> str:
+        current_time = format_datetime(now, timezone)
         return (
             "You are an AI assistant that generates concise, evidence-grounded "
             "interaction summaries for a personal contact management system.\n\n"
             f"Current System Time: {current_time}\n"
+            "All times and dates are shown in the user's local timezone.\n"
             "Use this time context to differentiate between past and future events.\n\n"
             "Guidelines:\n"
             "- Be conservative and grounded in the evidence provided\n"

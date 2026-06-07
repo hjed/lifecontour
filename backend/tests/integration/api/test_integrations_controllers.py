@@ -24,6 +24,7 @@ from app.infrastructure.di.contacts import ContactProvider
 from app.infrastructure.di.infrastructure import InfrastructureProvider
 from app.infrastructure.di.integrations import IntegrationProvider
 from app.infrastructure.di.journal import JournalProvider
+from app.infrastructure.di.settings import SettingsProvider
 from app.main import create_app
 
 
@@ -90,6 +91,7 @@ class TestIntegrationsControllers:
             TestAuthProvider(),  # Override auth with test user and provide settings
             ContactProvider(),
             JournalProvider(),
+            SettingsProvider(),
             IntegrationProvider(),
             FastapiProvider(),
         )

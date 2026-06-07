@@ -9,6 +9,11 @@ from __future__ import annotations
 from datetime import datetime
 
 from app.core.journal.services.daily_summary_models import DailySummaryInput
+from app.core.settings.timezone_utils import (
+    DEFAULT_TIMEZONE,
+    format_datetime,
+    now_in_tz,
+)
 
 # Truncate content beyond this length to keep prompts bounded
 MAX_CONTENT_LENGTH = 500
@@ -18,9 +23,15 @@ class DailySummaryPromptBuilder:
     """Builds structured prompts for daily summary generation."""
 
     def build(
-        self, summary_input: DailySummaryInput, now: datetime | None = None
+        self,
+        summary_input: DailySummaryInput,
+        now: datetime | None = None,
+        timezone: str = DEFAULT_TIMEZONE,
     ) -> str:
         """Build a complete prompt from the assembled day input.
+
+        All times/dates are rendered in ``timezone`` (the user's preferred
+        timezone) with explicit timezone labels so the model never assumes UTC.
 
         Sections:
         1. System instructions
@@ -31,18 +42,13 @@ class DailySummaryPromptBuilder:
         """
         sections: list[str] = []
 
-        # 1. System instructions
-        from datetime import UTC, datetime
+        # 1. System instructions — current time in the user's timezone
+        now_local = now_in_tz(timezone, now)
 
-        if now is None:
-            now = datetime.now(tz=UTC)
-        else:
-            now = now.astimezone(UTC) if now.tzinfo else now.replace(tzinfo=UTC)
+        sections.append(self._build_system_instructions(now_local, timezone))
 
-        sections.append(self._build_system_instructions(now))
-
-        # 2. Day overview
-        sections.append(self._build_day_overview(summary_input, now))
+        # 2. Day overview (temporal context is relative to the user's local date)
+        sections.append(self._build_day_overview(summary_input, now_local))
 
         # 3. Journal entries
         entries_section = self._build_journal_entries(summary_input)
@@ -60,11 +66,12 @@ class DailySummaryPromptBuilder:
 
         return "\n\n".join(sections)
 
-    def _build_system_instructions(self, now: datetime) -> str:
-        current_time = now.strftime("%Y-%m-%d %H:%M:%S UTC")
+    def _build_system_instructions(self, now: datetime, timezone: str) -> str:
+        current_time = format_datetime(now, timezone)
         return (
             "You are summarising a user's day based on their journal entries.\n"
             f"Current System Time: {current_time}\n"
+            "All times and dates are shown in the user's local timezone.\n"
             "Use this time context to differentiate between past events, today's events, and upcoming future events.\n"
             "Be short, practical, and descriptive rather than speculative.\n"
             "Do not invent information not present in the journals.\n"

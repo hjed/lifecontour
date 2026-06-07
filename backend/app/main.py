@@ -253,6 +253,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     from app.api.routes.controllers import router as routes_router
     from app.api.search.controllers import router as search_router
+    from app.api.settings.controllers import router as user_settings_router
     from app.api.tags.controllers import router as tags_router
 
     # Session middleware (must be added before other middleware that uses sessions)
@@ -298,6 +299,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(routes_router, prefix="/api")
     app.include_router(calendars_router, prefix="/api", tags=["calendars"])
     app.include_router(tags_router, prefix="/api", tags=["tags"])
+    app.include_router(user_settings_router, prefix="/api", tags=["settings"])
     app.include_router(integrations_router, prefix="/api", tags=["integrations"])
     app.include_router(strava_router, prefix="/api", tags=["integrations-strava"])
     app.include_router(snipeit_router, prefix="/api", tags=["integrations-snipeit"])

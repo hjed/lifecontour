@@ -419,6 +419,7 @@ async def _authenticated_client_context(
     from app.infrastructure.di.infrastructure import InfrastructureProvider
     from app.infrastructure.di.integrations import IntegrationProvider
     from app.infrastructure.di.journal import JournalProvider
+    from app.infrastructure.di.settings import SettingsProvider
     from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
     from app.infrastructure.search.search_service import SearchService
     from app.main import create_app
@@ -476,6 +477,7 @@ async def _authenticated_client_context(
         ContactProvider(),
         JournalProvider(),
         IntegrationProvider(),
+        SettingsProvider(),
         FastapiProvider(),
     )
 
@@ -812,6 +814,7 @@ def authenticated_search_client(
     from app.infrastructure.di.infrastructure import InfrastructureProvider
     from app.infrastructure.di.integrations import IntegrationProvider
     from app.infrastructure.di.journal import JournalProvider
+    from app.infrastructure.di.settings import SettingsProvider
     from app.main import create_app
 
     app = create_app(settings=test_settings)
@@ -827,6 +830,7 @@ def authenticated_search_client(
         ContactProvider(),
         JournalProvider(),
         IntegrationProvider(),
+        SettingsProvider(),
         TestAuthSearchProvider(),  # Must be after ContactProvider to override SearchService
         FastapiProvider(),
     )

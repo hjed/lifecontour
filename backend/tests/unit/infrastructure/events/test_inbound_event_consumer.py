@@ -269,6 +269,11 @@ class TestInboundEventConsumerHandleEvent:
                 "app.core.integrations.journal_outbox_event_processor.JournalOutboxEventProcessor",
                 return_value=mock_journal_processor,
             ),
+            patch(
+                "app.core.settings.adapters.sql.user_settings_repository.SqlUserSettingsRepository.get_default_timezone",
+                new_callable=AsyncMock,
+                return_value="UTC",
+            ),
         ):
             await consumer._handle_event(event)
 
@@ -307,6 +312,11 @@ class TestInboundEventConsumerHandleEvent:
             patch(
                 "app.core.integrations.match_detection_event_processor.MatchDetectionEventProcessor",
                 return_value=mock_match_processor,
+            ),
+            patch(
+                "app.core.settings.adapters.sql.user_settings_repository.SqlUserSettingsRepository.get_default_timezone",
+                new_callable=AsyncMock,
+                return_value="UTC",
             ),
         ):
             await consumer._handle_event(event)

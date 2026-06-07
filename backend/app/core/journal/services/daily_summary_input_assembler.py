@@ -16,6 +16,7 @@ from app.core.journal.services.daily_summary_models import (
     DailySummaryInput,
     DailySummaryJournalEntry,
 )
+from app.core.settings.timezone_utils import DEFAULT_TIMEZONE, resolve_timezone
 
 if TYPE_CHECKING:
     from app.core.journal.models.repositories import (
@@ -44,28 +45,45 @@ class DailySummaryInputAssembler:
         self._contact_relationship_repo = contact_relationship_repo
         self._summary_repo = summary_repo
 
-    async def assemble(self, user_id: str, summary_date: date) -> DailySummaryInput:
+    async def assemble(
+        self,
+        user_id: str,
+        summary_date: date,
+        timezone: str = DEFAULT_TIMEZONE,
+    ) -> DailySummaryInput:
         """Assemble input data for a single day's summary.
 
         Fetches all journals for the given date, along with their types,
-        contact relationships, and mood data.
+        contact relationships, and mood data. The day boundaries are computed
+        in the user's ``timezone`` (then converted to UTC for the query) so the
+        summary covers the user's local day rather than the UTC day.
         """
-        # Build ISO date strings for the date range query
-        start_date = datetime(
-            summary_date.year,
-            summary_date.month,
-            summary_date.day,
-            tzinfo=UTC,
-        ).isoformat()
-        end_date = datetime(
-            summary_date.year,
-            summary_date.month,
-            summary_date.day,
-            23,
-            59,
-            59,
-            tzinfo=UTC,
-        ).isoformat()
+        # Build the day's bounds in the user's timezone, then convert to UTC
+        # for the (UTC-stored) query.
+        tz = resolve_timezone(timezone)
+        start_date = (
+            datetime(
+                summary_date.year,
+                summary_date.month,
+                summary_date.day,
+                tzinfo=tz,
+            )
+            .astimezone(UTC)
+            .isoformat()
+        )
+        end_date = (
+            datetime(
+                summary_date.year,
+                summary_date.month,
+                summary_date.day,
+                23,
+                59,
+                59,
+                tzinfo=tz,
+            )
+            .astimezone(UTC)
+            .isoformat()
+        )
 
         # Fetch journals for the day
         journals = await self._journal_repo.get_all(

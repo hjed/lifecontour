@@ -14,6 +14,7 @@ from app.infrastructure.di.database import DatabaseProvider
 from app.infrastructure.di.infrastructure import InfrastructureProvider
 from app.infrastructure.di.integrations import IntegrationProvider
 from app.infrastructure.di.journal import JournalProvider
+from app.infrastructure.di.settings import SettingsProvider
 
 
 def create_container(settings: Settings | None = None) -> AsyncContainer:
@@ -33,5 +34,6 @@ def create_container(settings: Settings | None = None) -> AsyncContainer:
         ContactProvider(),
         JournalProvider(),
         IntegrationProvider(),
+        SettingsProvider(),
         FastapiProvider(),  # Provides FastAPI Request/WebSocket objects
     )

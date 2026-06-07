@@ -133,6 +133,11 @@ class TestSummaryConsumerHandleEvent:
                 return_value=mock_generator,
             ),
             patch(
+                "app.core.settings.adapters.sql.user_settings_repository.SqlUserSettingsRepository.get_default_timezone",
+                new_callable=AsyncMock,
+                return_value="UTC",
+            ),
+            patch(
                 "app.infrastructure.events.summary_consumer.SearchIndexer",
                 return_value=mock_search_indexer,
             ),
@@ -169,6 +174,11 @@ class TestSummaryConsumerHandleEvent:
             patch(
                 "app.core.contacts.services.summary_generation_service.SummaryGenerator",
                 return_value=mock_generator,
+            ),
+            patch(
+                "app.core.settings.adapters.sql.user_settings_repository.SqlUserSettingsRepository.get_default_timezone",
+                new_callable=AsyncMock,
+                return_value="UTC",
             ),
             patch(
                 "app.infrastructure.events.summary_consumer.SearchIndexer",
