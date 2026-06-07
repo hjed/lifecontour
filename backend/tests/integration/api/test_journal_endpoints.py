@@ -3350,3 +3350,73 @@ class TestJournalCalendarSyncEvents:
             "JournalUpdated event must include calendar_info in changed_fields "
             "for Google Calendar sync to trigger"
         )
+
+
+@pytest.mark.integration
+class TestPhotoAlbumTypeManagement:
+    """PHOTO_ALBUM is integration-managed and cannot be removed manually."""
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def setup_method(self, clean_database):  # noqa: ARG002
+        """Ensure a clean database for each test."""
+
+    async def test_cannot_remove_photo_album_type(
+        self, integration_api_client, async_connection
+    ):
+        """Removing PHOTO_ALBUM is rejected and the sync link is preserved.
+
+        Allowing removal would drop the album sync link, and the next Immich
+        sync would re-import the album as a duplicate journal.
+        """
+        from sqlalchemy import text
+
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_journal_request_data()
+        )
+        journal_id = int(create_response.json()["data"]["id"])
+
+        # Mark the journal as a PHOTO_ALBUM the way Immich album sync does.
+        await async_connection.execute(
+            text("""
+                INSERT INTO sync_metadata (
+                    internal_id, integration_source, external_id,
+                    last_synced_at, version_hash, sync_status
+                ) VALUES (
+                    :id, 'immich_album', 'album-x', now(), 'h', 'success'
+                )
+            """),
+            {"id": journal_id},
+        )
+
+        response = await integration_api_client.delete(
+            f"/api/journals/{journal_id}/types/photo_album"
+        )
+
+        assert response.status_code == 400
+
+        # The sync link must survive so the album is not "unimported".
+        row = (
+            await async_connection.execute(
+                text("""
+                    SELECT count(*) AS n FROM sync_metadata
+                    WHERE integration_source = 'immich_album' AND internal_id = :id
+                """),
+                {"id": journal_id},
+            )
+        ).fetchone()
+        assert row is not None
+        assert row.n == 1
+
+    async def test_cannot_set_photo_album_type_data_on_create(
+        self, integration_api_client
+    ):
+        """Submitting photo_album type_data fails fast (it is sync-managed)."""
+        create_data = create_journal_request_data(
+            title="Album attempt",
+            types=["photo_album"],
+            type_data={"photo_album": {"immich_album_id": "album-123"}},
+        )
+
+        response = await integration_api_client.post("/api/journals", json=create_data)
+
+        assert response.status_code == 400

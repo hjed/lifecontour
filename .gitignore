@@ -106,3 +106,4 @@ docker-compose.override.yml
 
 .serena/
 playwright/.auth/
+.claude/settings.local.json

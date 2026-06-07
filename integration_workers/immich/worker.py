@@ -343,6 +343,220 @@ async def sync_immich_people_batch(
 
 
 @trace_arq_job
+async def sync_immich_albums(
+    ctx: dict[str, Any],
+    user_id: str,
+    sync_type: str = "full",
+) -> dict[str, Any]:
+    """ARQ task: orchestrate Immich album sync.
+
+    Lists album-ID batches from Immich and enqueues a ``sync_immich_album_batch``
+    job for each batch (mirroring ``sync_immich_people``), so the heavy per-album
+    work is fanned out and no single batch times out. It then waits for the
+    batches and marks the sync job ``completed`` only if they all succeed, or
+    ``failed`` if any batch fails — so the job status reflects the real outcome
+    rather than just dispatch.
+
+    Args:
+        ctx: ARQ worker context (must contain ``session_factory``).
+        user_id: Internal user ID.
+        sync_type: 'full' or 'smart'.
+
+    Returns:
+        Dictionary with album sync summary.
+    """
+    job_id = ctx.get("job_id", "unknown")
+    session_factory = ctx["session_factory"]
+    started_at = datetime.now(UTC)
+
+    logger.info(
+        "sync_immich_albums started",
+        user_id=user_id,
+        sync_type=sync_type,
+        job_id=job_id,
+    )
+
+    await _update_sync_job_status(
+        session_factory, job_id, "running", started_at=started_at, progress=0
+    )
+
+    try:
+        import asyncio
+
+        from arq.jobs import Job
+
+        batch_jobs: list[Any] = []
+        batches_enqueued = 0
+
+        async with session_factory() as session:
+            conn = await session.connection()
+
+            auth_service = ImmichAuthService(settings.encryption_key)
+            api_key = await auth_service.get_api_key(user_id, conn)
+            server_url = await auth_service.get_server_url(user_id, conn)
+
+            if not api_key or not server_url:
+                logger.warning("Immich credentials not found for user", user_id=user_id)
+                await _update_sync_job_status(
+                    session_factory,
+                    job_id,
+                    "failed",
+                    completed_at=datetime.now(UTC),
+                    error_message="Immich credentials not configured",
+                )
+                return {
+                    "status": "error",
+                    "message": "Immich credentials not configured",
+                    "user_id": user_id,
+                }
+
+            api_client = ImmichApiClient.create(server_url, api_key)
+            try:
+                sync_service = ImmichSyncService(
+                    api_client=api_client, connection=conn, user_id=user_id
+                )
+
+                batch_number = 0
+                async for album_batch in sync_service.list_album_id_batches():
+                    batch_number += 1
+                    batch_job_id = f"immich-album-batch-{job_id}-b{batch_number}"
+
+                    job = await ctx["redis"].enqueue_job(
+                        "sync_immich_album_batch",
+                        user_id,
+                        album_batch,
+                        _job_id=batch_job_id,
+                        _queue_name=IMMICH_ARQ_QUEUE_NAME,
+                    )
+                    if job:
+                        batches_enqueued += 1
+                        batch_jobs.append(job)
+                        logger.info(
+                            "Enqueued album batch job",
+                            job_id=job.job_id,
+                            batch_size=len(album_batch),
+                            batch_number=batch_number,
+                        )
+                    else:
+                        batch_jobs.append(
+                            Job(
+                                batch_job_id,
+                                ctx["redis"],
+                                _queue_name=IMMICH_ARQ_QUEUE_NAME,
+                            )
+                        )
+                        logger.info(
+                            "Album batch job already enqueued",
+                            batch_job_id=batch_job_id,
+                            batch_number=batch_number,
+                        )
+            finally:
+                await api_client.close()
+
+        # Wait for the fanned-out batches so the sync job status reflects whether
+        # the albums actually synced; a failed batch propagates and marks the
+        # job failed below.
+        if batch_jobs:
+            results = await asyncio.gather(
+                *[j.result(timeout=290) for j in batch_jobs], return_exceptions=True
+            )
+            for res in results:
+                if isinstance(res, Exception):
+                    raise res
+
+        await _update_sync_job_status(
+            session_factory,
+            job_id,
+            "completed",
+            completed_at=datetime.now(UTC),
+            progress=100,
+        )
+
+        return {
+            "status": "completed",
+            "user_id": user_id,
+            "sync_type": sync_type,
+            "batches_enqueued": batches_enqueued,
+        }
+
+    except Exception as e:
+        logger.exception("sync_immich_albums failed", user_id=user_id, error=str(e))
+        error_msg = "Immich album sync failed due to an internal error"
+        await _update_sync_job_status(
+            session_factory,
+            job_id,
+            "failed",
+            completed_at=datetime.now(UTC),
+            error_message=error_msg,
+        )
+        return {
+            "status": "error",
+            "message": error_msg,
+            "user_id": user_id,
+        }
+
+
+@trace_arq_job
+async def sync_immich_album_batch(
+    ctx: dict[str, Any],
+    user_id: str,
+    album_ids: list[str],
+) -> dict[str, Any]:
+    """ARQ task: process a batch of Immich albums.
+
+    Args:
+        ctx: ARQ worker context.
+        user_id: Internal user ID.
+        album_ids: Immich album UUIDs to process.
+    """
+    session_factory = ctx["session_factory"]
+
+    logger.info(
+        "sync_immich_album_batch started",
+        user_id=user_id,
+        batch_size=len(album_ids),
+    )
+
+    try:
+        async with session_factory() as session:
+            conn = await session.connection()
+
+            auth_service = ImmichAuthService(settings.encryption_key)
+            api_key = await auth_service.get_api_key(user_id, conn)
+            server_url = await auth_service.get_server_url(user_id, conn)
+
+            if not api_key or not server_url:
+                raise ValueError("Immich credentials missing")
+
+            api_client = ImmichApiClient.create(server_url, api_key)
+            try:
+                sync_service = ImmichSyncService(
+                    api_client=api_client, connection=conn, user_id=user_id
+                )
+                result = await sync_service.sync_albums_batch(album_ids)
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+            finally:
+                await api_client.close()
+
+        return {
+            "status": "success",
+            "user_id": user_id,
+            "created": result.created,
+            "updated": result.updated,
+            "unchanged": result.unchanged,
+            "errors": result.errors,
+        }
+    except Exception as e:
+        logger.exception(
+            "sync_immich_album_batch failed", user_id=user_id, error=str(e)
+        )
+        raise
+
+
+@trace_arq_job
 async def process_contact_event(
     ctx: dict[str, Any], event_type: str, event_data: dict[str, Any]
 ) -> dict[str, Any]:
@@ -621,6 +835,8 @@ class WorkerSettings:
     functions: list[Any] = [
         sync_immich_people,
         sync_immich_people_batch,
+        sync_immich_albums,
+        sync_immich_album_batch,
         periodic_sync_all_immich_accounts,
         process_contact_event,
     ]

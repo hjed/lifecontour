@@ -54,7 +54,6 @@ import {
   KayakingTypeEditor,
   MoodRatingTypeEditor,
   OutdoorActivityTypeEditor,
-  PhotoAlbumTypeEditor,
   PlanTypeEditor,
   TravelTypeEditor,
   SnorkellingTypeEditor,
@@ -246,14 +245,20 @@ function TypeSpecificContent({
           onSave={makeEditorSave<MoodData>(onSave, type)}
         />
       );
-    case JournalType.PHOTO_ALBUM:
+    case JournalType.PHOTO_ALBUM: {
+      // PHOTO_ALBUM is managed by Immich album sync and is read-only here.
+      const album = typeData as PhotoAlbumData | undefined;
       return (
-        <PhotoAlbumTypeEditor
-          journalId={journalId}
-          data={typeData as PhotoAlbumData | undefined}
-          onSave={makeEditorSave<PhotoAlbumData>(onSave, type)}
-        />
+        <div
+          className='text-muted-foreground text-sm'
+          data-testid='photo-album-readonly'
+        >
+          {(album?.album_name ?? album?.immich_album_id)
+            ? `Synced from Immich album: ${album?.album_name ?? album?.immich_album_id}`
+            : 'Synced from Immich. Album details are managed by Immich.'}
+        </div>
       );
+    }
     case JournalType.PLAN:
       return (
         <PlanTypeEditor

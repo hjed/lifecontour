@@ -67,6 +67,9 @@ from app.core.contacts.services import ContactService
 from app.core.contacts.services.contact_history_service import ContactHistoryService
 from app.core.integrations.avatar_proxy_service import AvatarProxyService
 from app.core.integrations.external_link_helpers import build_contact_external_links
+from app.core.journal.adapters.sql.album_sync_read_repository import (
+    AlbumSyncReadRepository,
+)
 from app.core.journal.models.repositories import (
     AbseilingDataRepository,
     AbseilPitchRepository,
@@ -90,7 +93,6 @@ from app.core.journal.models.repositories import (
     OutdoorActivityDataRepository,
     OutdoorPlanningDataRepository,
     OutdoorTrainingDataRepository,
-    PhotoAlbumDataRepository,
     PlanDataRepository,
     RouteRepository,
     SnorkellingDataRepository,
@@ -940,7 +942,7 @@ async def get_contact_journals(
     mood_data_repo: FromDishka[MoodDataRepository],
     plan_data_repo: FromDishka[PlanDataRepository],
     travel_data_repo: FromDishka[TravelDataRepository],
-    photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    photo_album_data_repo: FromDishka[AlbumSyncReadRepository],
     fitness_data_repo: FromDishka[FitnessDataRepository],
     outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
     bushwalking_data_repo: FromDishka[BushwalkingDataRepository],

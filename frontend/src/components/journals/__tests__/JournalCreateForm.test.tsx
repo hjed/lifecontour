@@ -97,7 +97,13 @@ describe('JournalCreateForm', () => {
       expect(screen.getByLabelText(/mood rating/i)).toBeInTheDocument();
       expect(screen.getByLabelText(/^plan$/i)).toBeInTheDocument();
       expect(screen.getByLabelText(/travel/i)).toBeInTheDocument();
-      expect(screen.getByLabelText(/photo album/i)).toBeInTheDocument();
+    });
+
+    it('does not offer PHOTO_ALBUM as a user-creatable type', () => {
+      // PHOTO_ALBUM journals are created by Immich album sync, not manually.
+      renderWithClient(<JournalCreateForm />);
+
+      expect(screen.queryByLabelText(/photo album/i)).not.toBeInTheDocument();
     });
 
     it('renders cancel button', () => {
@@ -167,25 +173,6 @@ describe('JournalCreateForm', () => {
         expect(mockMutateAsync).not.toHaveBeenCalled();
       });
     });
-
-    it('prevents submission when PHOTO_ALBUM is selected but Immich Album ID is missing', async () => {
-      const user = userEvent.setup();
-      renderWithClient(<JournalCreateForm />);
-
-      await user.type(screen.getByLabelText(/title/i), 'Photo Journal');
-      await user.click(screen.getByLabelText(/^photo album$/i));
-
-      // Do NOT fill in photo URL / album ID
-
-      await user.click(screen.getByRole('button', { name: /create journal/i }));
-
-      await waitFor(() => {
-        expect(
-          screen.getByText(/Photo Album requires an Immich Album ID/i)
-        ).toBeInTheDocument();
-        expect(mockMutateAsync).not.toHaveBeenCalled();
-      });
-    });
   });
 
   describe('Type Selection', () => {
@@ -227,7 +214,6 @@ describe('JournalCreateForm', () => {
       expect(screen.getByLabelText(/^mood rating$/i)).toBeInTheDocument();
       expect(screen.getByLabelText(/^plan$/i)).toBeInTheDocument();
       expect(screen.getByLabelText(/^travel$/i)).toBeInTheDocument();
-      expect(screen.getByLabelText(/^photo album$/i)).toBeInTheDocument();
 
       // Activity types
       expect(screen.getByLabelText(/^fitness$/i)).toBeInTheDocument();
@@ -263,16 +249,6 @@ describe('JournalCreateForm', () => {
       await user.click(moodCheckbox);
 
       expect(screen.getByTestId('mood-rating-type-editor')).toBeInTheDocument();
-    });
-
-    it('shows photo album type editor when PHOTO_ALBUM is selected', async () => {
-      const user = userEvent.setup();
-      renderWithClient(<JournalCreateForm />);
-
-      const photoCheckbox = screen.getByLabelText(/^photo album$/i);
-      await user.click(photoCheckbox);
-
-      expect(screen.getByTestId('photo-album-type-editor')).toBeInTheDocument();
     });
 
     it('shows plan type editor when PLAN is selected', async () => {
@@ -523,38 +499,6 @@ describe('JournalCreateForm', () => {
             types: [JournalType.MOOD_RATING],
             type_data: expect.objectContaining({
               [JournalType.MOOD_RATING]: expect.any(Object),
-            }),
-          })
-        );
-      });
-    });
-
-    it('includes photo album data in type_data when PHOTO_ALBUM is selected', async () => {
-      const user = userEvent.setup();
-      mockMutateAsync.mockResolvedValueOnce({
-        data: { id: '1', type: 'journals', attributes: {} },
-      });
-
-      renderWithClient(<JournalCreateForm />);
-
-      await user.type(screen.getByLabelText(/title/i), 'Photo Journal');
-
-      const photoCheckbox = screen.getByLabelText(/^photo album$/i);
-      await user.click(photoCheckbox);
-
-      const albumInput = screen.getByTestId('immich-album-id-input');
-      await user.type(albumInput, 'album-uuid-123');
-
-      await user.click(screen.getByRole('button', { name: /create journal/i }));
-
-      await waitFor(() => {
-        expect(mockMutateAsync).toHaveBeenCalledWith(
-          expect.objectContaining({
-            types: [JournalType.PHOTO_ALBUM],
-            type_data: expect.objectContaining({
-              [JournalType.PHOTO_ALBUM]: expect.objectContaining({
-                immich_album_id: 'album-uuid-123',
-              }),
             }),
           })
         );

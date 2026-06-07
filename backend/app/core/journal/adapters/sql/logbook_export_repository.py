@@ -193,7 +193,7 @@ class SqlLogbookExportRepository(LogbookExportRepository):
                 CASE WHEN jmd.journal_id IS NOT NULL THEN 'MOOD_RATING' END as mood_type,
                 CASE WHEN jpd.journal_id IS NOT NULL THEN 'PLAN' END as plan_type,
                 CASE WHEN jtd.journal_id IS NOT NULL THEN 'TRAVEL' END as travel_type,
-                CASE WHEN jpad.journal_id IS NOT NULL THEN 'PHOTO_ALBUM' END as photo_type,
+                CASE WHEN sm_pa.internal_id IS NOT NULL THEN 'PHOTO_ALBUM' END as photo_type,
                 CASE WHEN jfd.journal_id IS NOT NULL THEN 'FITNESS' END as fitness_type,
                 CASE WHEN joad.journal_id IS NOT NULL THEN 'OUTDOOR_ACTIVITY' END as outdoor_activity_type,
                 CASE WHEN jbwd.journal_id IS NOT NULL THEN 'BUSHWALKING' END as bushwalking_type,
@@ -216,7 +216,8 @@ class SqlLogbookExportRepository(LogbookExportRepository):
             LEFT JOIN journal_mood_data jmd ON j.id = jmd.journal_id
             LEFT JOIN journal_plan_data jpd ON j.id = jpd.journal_id
             LEFT JOIN journal_travel_data jtd ON j.id = jtd.journal_id
-            LEFT JOIN journal_photo_album_data jpad ON j.id = jpad.journal_id
+            LEFT JOIN sync_metadata sm_pa ON sm_pa.internal_id = j.id
+                AND sm_pa.integration_source = 'immich_album'
             LEFT JOIN journal_fitness_data jfd ON j.id = jfd.journal_id
             LEFT JOIN journal_outdoor_activity_data joad ON j.id = joad.journal_id
             LEFT JOIN journal_bushwalking_data jbwd ON j.id = jbwd.journal_id

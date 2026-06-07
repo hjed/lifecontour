@@ -79,7 +79,6 @@ import {
   type MoodData,
   type PlanData,
   type TravelData,
-  type PhotoAlbumData,
   type FitnessData,
   type OutdoorActivityData,
   type JoggingData,
@@ -107,7 +106,6 @@ import {
   OutdoorActivityTypeEditor,
   PlanTypeEditor,
   TravelTypeEditor,
-  PhotoAlbumTypeEditor,
   SnorkellingTypeEditor,
   DivingTypeEditor,
   DownhillSkiingTypeEditor,
@@ -143,7 +141,6 @@ interface TypeDataState {
   [JournalType.MOOD_RATING]?: MoodData;
   [JournalType.PLAN]?: PlanData;
   [JournalType.TRAVEL]?: TravelData;
-  [JournalType.PHOTO_ALBUM]?: PhotoAlbumData;
   [JournalType.FITNESS]?: FitnessData;
   [JournalType.OUTDOOR_ACTIVITY]?: OutdoorActivityData;
   [JournalType.JOGGING]?: JoggingData;
@@ -171,7 +168,6 @@ const TYPE_DATA_JOURNAL_TYPES = new Set<TypeDataJournalType>([
   JournalType.MOOD_RATING,
   JournalType.PLAN,
   JournalType.TRAVEL,
-  JournalType.PHOTO_ALBUM,
   JournalType.FITNESS,
   JournalType.OUTDOOR_ACTIVITY,
   JournalType.JOGGING,
@@ -204,7 +200,6 @@ const typeOptions = [
   { value: JournalType.MOOD_RATING, label: 'Mood Rating' },
   { value: JournalType.PLAN, label: 'Plan' },
   { value: JournalType.TRAVEL, label: 'Travel' },
-  { value: JournalType.PHOTO_ALBUM, label: 'Photo Album' },
   { value: JournalType.FITNESS, label: 'Fitness' },
   { value: JournalType.OUTDOOR_ACTIVITY, label: 'Outdoor Activity' },
   { value: JournalType.BUSHWALKING, label: 'Bushwalking' },
@@ -392,14 +387,6 @@ function hasRequiredTypeData(
     }
   }
 
-  if (type === JournalType.PHOTO_ALBUM) {
-    const albumData = data as PhotoAlbumData | undefined;
-    if (!albumData?.immich_album_id?.trim()) {
-      setTypesError(setError, 'Photo Album requires an Immich Album ID.');
-      return false;
-    }
-  }
-
   if (type === JournalType.GEAR_USAGE) {
     const gearData = data as GearUsageData | undefined;
     if (!gearData?.gear_item_id || !gearData.gear_item_id.trim()) {
@@ -546,12 +533,6 @@ export function JournalCreateForm({
   const handleTravelChange = useCallback(
     (data: unknown) =>
       handleTypeDataChange(JournalType.TRAVEL, data as TravelData),
-    [handleTypeDataChange]
-  );
-
-  const handlePhotoAlbumChange = useCallback(
-    (data: unknown) =>
-      handleTypeDataChange(JournalType.PHOTO_ALBUM, data as PhotoAlbumData),
     [handleTypeDataChange]
   );
 
@@ -1018,12 +999,6 @@ export function JournalCreateForm({
                       <TravelTypeEditor
                         createMode
                         onChange={handleTravelChange}
-                      />
-                    )}
-                    {type === JournalType.PHOTO_ALBUM && (
-                      <PhotoAlbumTypeEditor
-                        createMode
-                        onChange={handlePhotoAlbumChange}
                       />
                     )}
                     {type === JournalType.FITNESS && (

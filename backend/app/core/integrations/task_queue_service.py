@@ -993,14 +993,23 @@ class TaskQueueService:
             raise
 
     async def enqueue_immich_sync(
-        self, user_id: str | int, sync_type: str = "full"
+        self,
+        user_id: str | int,
+        sync_type: str = "full",
+        *,
+        task_name: str = "sync_immich_people",
+        integration_source: str = "immich",
     ) -> str:
         """
-        Enqueue an Immich people sync job.
+        Enqueue an Immich sync job (people or albums).
 
         Args:
             user_id: ID of the user requesting the sync (string or integer)
             sync_type: Type of sync ('full' or 'smart')
+            task_name: ARQ task to enqueue ('sync_immich_people' or
+                'sync_immich_albums')
+            integration_source: Sync job source label ('immich' or
+                'immich_album')
 
         Returns:
             Job ID for tracking the job status
@@ -1018,6 +1027,7 @@ class TaskQueueService:
             "Enqueueing Immich sync job",
             user_id=user_id,
             sync_type=sync_type,
+            task_name=task_name,
         )
 
         try:
@@ -1032,7 +1042,7 @@ class TaskQueueService:
                 pass
 
             job = await pool.enqueue_job(
-                "sync_immich_people",
+                task_name,
                 str(user_id),
                 sync_type,
                 otel_carrier=carrier,
@@ -1043,7 +1053,7 @@ class TaskQueueService:
             if not job:
                 raise JobEnqueueError(
                     message="Failed to enqueue Immich sync job - no job returned",
-                    integration_source="immich",
+                    integration_source=integration_source,
                     reason="ARQ pool returned None",
                 )
 
@@ -1053,6 +1063,7 @@ class TaskQueueService:
                 job_id=job_id,
                 user_id=user_id,
                 sync_type=sync_type,
+                task_name=task_name,
             )
 
             # Store user-job association for security
@@ -1066,7 +1077,7 @@ class TaskQueueService:
                     await repo.create(
                         job_id=job_id,
                         user_id=str(user_id),
-                        integration_source="immich",
+                        integration_source=integration_source,
                         sync_type=sync_type,
                         status="queued",
                     )

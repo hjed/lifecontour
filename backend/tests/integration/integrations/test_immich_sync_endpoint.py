@@ -71,6 +71,64 @@ async def test_trigger_immich_sync_creates_sync_job(
     mock_enqueue.assert_awaited_once_with(
         user_id="test-user-123",
         sync_type="smart",
+        task_name="sync_immich_people",
+        integration_source="immich",
+    )
+
+
+@pytest.mark.asyncio
+async def test_trigger_immich_album_sync_enqueues_album_task(
+    authenticated_client,
+    clean_database: AsyncConnection,
+) -> None:
+    """The /album/sync trigger should enqueue the album sync task."""
+    await clean_database.execute(
+        text(
+            "INSERT INTO user_immich_auth "
+            "(user_id, server_url, encrypted_api_key, created_at, updated_at) "
+            "VALUES ('test-user-123', 'https://immich.example.com', "
+            "'encrypted_key_data', now(), now())"
+        )
+    )
+
+    with patch(
+        "app.core.integrations.task_queue_service.TaskQueueService.enqueue_immich_sync",
+        new_callable=AsyncMock,
+    ) as mock_enqueue:
+        mock_enqueue.return_value = "test-album-job-1"
+
+        with patch(
+            "app.core.integrations.task_queue_service.TaskQueueService.get_sync_job_details",
+            new_callable=AsyncMock,
+        ) as mock_details:
+            mock_details.return_value = {
+                "job_id": "test-album-job-1",
+                "user_id": "test-user-123",
+                "integration_source": "immich_album",
+                "sync_type": "smart",
+                "status": "queued",
+                "created_at": "2026-01-01T00:00:00",
+                "started_at": None,
+                "completed_at": None,
+                "error_message": None,
+                "contacts_processed": None,
+                "contacts_created": None,
+                "contacts_updated": None,
+                "contacts_deleted": None,
+                "progress": None,
+            }
+
+            response = await authenticated_client.post(
+                "/api/integrations/immich/album/sync",
+                json={"sync_type": "smart"},
+            )
+
+    assert response.status_code == 200
+    mock_enqueue.assert_awaited_once_with(
+        user_id="test-user-123",
+        sync_type="smart",
+        task_name="sync_immich_albums",
+        integration_source="immich_album",
     )
 
 
@@ -144,6 +202,8 @@ async def test_trigger_immich_sync_force_full(
     mock_enqueue.assert_awaited_once_with(
         user_id="test-user-123",
         sync_type="full",
+        task_name="sync_immich_people",
+        integration_source="immich",
     )
 
 

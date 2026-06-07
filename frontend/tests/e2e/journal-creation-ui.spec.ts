@@ -321,29 +321,9 @@ test.describe('Journal Creation UI Flow', () => {
     await awaitCreationAndAssertBadge(page, 'manage-type-travel');
   });
 
-  test('should create a PHOTO_ALBUM journal with immich ID', async ({
-    authenticatedPage,
-  }) => {
-    const page = authenticatedPage;
-    await navigateToNewJournal(page);
-
-    await page.getByLabel(/title/i).fill(`Photos ${Date.now()}`);
-    await page
-      .getByLabel(/content/i)
-      .fill('A collection of photos from the recent trip.');
-    await page.getByLabel(/^photo album$/i).check();
-
-    await expect(page.getByTestId('photo-album-type-editor')).toBeVisible();
-    await page
-      .getByTestId('immich-album-id-input')
-      .waitFor({ state: 'visible' });
-    await page
-      .getByTestId('immich-album-id-input')
-      .fill('223e4567-e89b-12d3-a456-426614174001');
-
-    await page.getByRole('button', { name: /create journal/i }).click();
-    await awaitCreationAndAssertBadge(page, 'manage-type-photo_album');
-  });
+  // PHOTO_ALBUM journals are no longer user-creatable — they are imported by
+  // Immich album sync (ITER11-004). The manual-creation flow was removed; an
+  // album-banner E2E is covered in ITER11-004 Phase 2.
 
   test('should create a FITNESS journal and verify ActivityStats render', async ({
     authenticatedPage,

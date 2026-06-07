@@ -34,7 +34,6 @@ from core_shared.models.journals import (
     KayakingData,
     MoodData,
     OutdoorActivityData,
-    PhotoAlbumData,
     PlanData,
     TemplatePitch,
     TravelData,
@@ -54,6 +53,9 @@ from app.core.journal.adapters.sql.abseiling_data_repository import (
 )
 from app.core.journal.adapters.sql.activity_template_repository import (
     SqlActivityTemplateRepository,
+)
+from app.core.journal.adapters.sql.album_sync_read_repository import (
+    AlbumSyncReadRepository,
 )
 from app.core.journal.adapters.sql.bushwalking_data_repository import (
     SqlBushwalkingDataRepository,
@@ -100,9 +102,6 @@ from app.core.journal.adapters.sql.kayaking_data_repository import (
 from app.core.journal.adapters.sql.mood_data_repository import SqlMoodDataRepository
 from app.core.journal.adapters.sql.outdoor_activity_data_repository import (
     SqlOutdoorActivityDataRepository,
-)
-from app.core.journal.adapters.sql.photo_album_data_repository import (
-    SqlPhotoAlbumDataRepository,
 )
 from app.core.journal.adapters.sql.plan_data_repository import SqlPlanDataRepository
 from app.core.journal.adapters.sql.review_item_repository import SqlReviewItemRepository
@@ -165,7 +164,7 @@ class _JournalToolRepositories:
     mood_data_repo: SqlMoodDataRepository
     plan_data_repo: SqlPlanDataRepository
     travel_data_repo: SqlTravelDataRepository
-    photo_album_data_repo: SqlPhotoAlbumDataRepository
+    photo_album_data_repo: AlbumSyncReadRepository
     fitness_data_repo: SqlFitnessDataRepository
     outdoor_activity_data_repo: SqlOutdoorActivityDataRepository
     bushwalking_data_repo: SqlBushwalkingDataRepository
@@ -223,7 +222,7 @@ def _create_journal_tool_repositories(
         mood_data_repo=SqlMoodDataRepository(db_connection),
         plan_data_repo=SqlPlanDataRepository(db_connection),
         travel_data_repo=SqlTravelDataRepository(db_connection),
-        photo_album_data_repo=SqlPhotoAlbumDataRepository(db_connection),
+        photo_album_data_repo=AlbumSyncReadRepository(db_connection),
         fitness_data_repo=SqlFitnessDataRepository(db_connection),
         outdoor_activity_data_repo=SqlOutdoorActivityDataRepository(db_connection),
         bushwalking_data_repo=SqlBushwalkingDataRepository(db_connection),
@@ -1109,11 +1108,13 @@ def _build_travel_data(travel_data: Any) -> dict[str, Any]:
     }
 
 
-def _build_photo_album_data(photo_album_data: Any) -> dict[str, Any]:
-    """Build photo album data dictionary."""
-    return {
-        "immich_album_id": str(photo_album_data.immich_album_id),
-    }
+def _build_photo_album_data(photo_album_data: dict[str, Any]) -> dict[str, Any]:
+    """Build photo album data dictionary from Immich album sync data.
+
+    ``photo_album_data`` comes from ``AlbumSyncReadRepository.find_by_journal_id``
+    and contains ``immich_album_id`` plus optional album display fields.
+    """
+    return dict(photo_album_data)
 
 
 def _build_fitness_data(fitness_data: Any) -> dict[str, Any]:
@@ -1223,7 +1224,7 @@ async def _fetch_journal_types_and_data(
     mood_data_repo: SqlMoodDataRepository,
     plan_data_repo: SqlPlanDataRepository,
     travel_data_repo: SqlTravelDataRepository,
-    photo_album_data_repo: SqlPhotoAlbumDataRepository,
+    photo_album_data_repo: AlbumSyncReadRepository,
     fitness_data_repo: SqlFitnessDataRepository,
     outdoor_activity_data_repo: SqlOutdoorActivityDataRepository,
     bushwalking_data_repo: SqlBushwalkingDataRepository,
@@ -1545,20 +1546,6 @@ async def _update_mood_data(
         await mood_data_repo.save(existing_mood)
 
 
-async def _update_photo_album_data(
-    journal_id: int,
-    type_data_dict: dict[str, Any],
-    photo_album_data_repo: SqlPhotoAlbumDataRepository,
-) -> None:
-    immich_album_id = type_data_dict.get("immich_album_id")
-    if immich_album_id is not None:
-        photo_album_data = PhotoAlbumData(
-            journal_id=journal_id,
-            immich_album_id=str(immich_album_id),
-        )
-        await photo_album_data_repo.save(photo_album_data)
-
-
 async def _update_fitness_data(
     journal_id: int,
     type_data_dict: dict[str, Any],
@@ -1742,7 +1729,7 @@ async def _update_type_specific_data(
     type_data_dict: dict[str, Any],
     calendar_info_repo: SqlCalendarInfoRepository,
     mood_data_repo: SqlMoodDataRepository,
-    photo_album_data_repo: SqlPhotoAlbumDataRepository,
+    photo_album_data_repo: AlbumSyncReadRepository,
     fitness_data_repo: SqlFitnessDataRepository,
     outdoor_activity_data_repo: SqlOutdoorActivityDataRepository,
     bushwalking_data_repo: SqlBushwalkingDataRepository,
@@ -1787,8 +1774,16 @@ async def _update_type_specific_data(
     elif journal_type == JournalType.MOOD_RATING:
         await _update_mood_data(journal_id, type_data_dict, mood_data_repo)
     elif journal_type == JournalType.PHOTO_ALBUM:
-        await _update_photo_album_data(
-            journal_id, type_data_dict, photo_album_data_repo
+        # PHOTO_ALBUM data is managed by Immich album sync. Fail fast rather than
+        # silently dropping the update so callers don't believe it succeeded
+        # (mirrors the REST API behaviour). JournalValidationError is a
+        # JournalDomainError, so mcp_unified_error_handler surfaces a clear
+        # validation message rather than a generic internal error.
+        from core_shared.models.journals import JournalValidationError
+
+        raise JournalValidationError(
+            "journal_type",
+            "PHOTO_ALBUM data is managed by Immich sync and cannot be edited",
         )
     elif journal_type == JournalType.FITNESS:
         await _update_fitness_data(journal_id, type_data_dict, fitness_data_repo)
@@ -2093,7 +2088,7 @@ async def _fetch_enrichment_data(
     mood_data_repo: SqlMoodDataRepository,
     plan_data_repo: SqlPlanDataRepository,
     travel_data_repo: SqlTravelDataRepository,
-    photo_album_data_repo: SqlPhotoAlbumDataRepository,
+    photo_album_data_repo: AlbumSyncReadRepository,
     fitness_data_repo: SqlFitnessDataRepository,
     outdoor_activity_data_repo: SqlOutdoorActivityDataRepository,
     bushwalking_data_repo: SqlBushwalkingDataRepository,

@@ -68,6 +68,9 @@ from app.api.journals.schemas import (
 )
 from app.core.contacts.models.repositories import ContactRepository
 from app.core.integrations.external_link_helpers import build_journal_external_links
+from app.core.journal.adapters.sql.album_sync_read_repository import (
+    AlbumSyncReadRepository,
+)
 from app.core.journal.models.repositories import (
     AbseilingDataRepository,
     AbseilPitchRepository,
@@ -92,7 +95,6 @@ from app.core.journal.models.repositories import (
     OutdoorActivityDataRepository,
     OutdoorPlanningDataRepository,
     OutdoorTrainingDataRepository,
-    PhotoAlbumDataRepository,
     PlanDataRepository,
     ReviewItemRepository,
     RouteRepository,
@@ -447,7 +449,7 @@ async def _delete_type_specific_data(
     mood_data_repo: MoodDataRepository,
     plan_data_repo: PlanDataRepository,
     travel_data_repo: TravelDataRepository,
-    photo_album_data_repo: PhotoAlbumDataRepository,
+    photo_album_data_repo: AlbumSyncReadRepository,
     fitness_data_repo: FitnessDataRepository,
     outdoor_activity_data_repo: OutdoorActivityDataRepository,
     bushwalking_data_repo: BushwalkingDataRepository,
@@ -550,7 +552,7 @@ async def _enrich_journal_data(
     mood_data_repo: MoodDataRepository,
     plan_data_repo: PlanDataRepository,
     travel_data_repo: TravelDataRepository,
-    photo_album_data_repo: PhotoAlbumDataRepository,
+    photo_album_data_repo: AlbumSyncReadRepository,
     fitness_data_repo: FitnessDataRepository,
     contact_relationship_repo: JournalContactRelationshipRepository,
     tag_repo: JournalTagRepository,
@@ -1014,7 +1016,7 @@ async def _fetch_children_types(
     mood_data_repo: MoodDataRepository,
     plan_data_repo: PlanDataRepository,
     travel_data_repo: TravelDataRepository,
-    photo_album_data_repo: PhotoAlbumDataRepository,
+    photo_album_data_repo: AlbumSyncReadRepository,
     fitness_data_repo: FitnessDataRepository,
     outdoor_activity_data_repo: OutdoorActivityDataRepository,
     bushwalking_data_repo: BushwalkingDataRepository,
@@ -1111,7 +1113,7 @@ async def _build_journal_list_resources(
     mood_data_repo: MoodDataRepository,
     plan_data_repo: PlanDataRepository,
     travel_data_repo: TravelDataRepository,
-    photo_album_data_repo: PhotoAlbumDataRepository,
+    photo_album_data_repo: AlbumSyncReadRepository,
     fitness_data_repo: FitnessDataRepository,
     outdoor_activity_data_repo: OutdoorActivityDataRepository,
     bushwalking_data_repo: BushwalkingDataRepository,
@@ -1251,7 +1253,7 @@ async def list_journals(
     mood_data_repo: FromDishka[MoodDataRepository],
     plan_data_repo: FromDishka[PlanDataRepository],
     travel_data_repo: FromDishka[TravelDataRepository],
-    photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    photo_album_data_repo: FromDishka[AlbumSyncReadRepository],
     fitness_data_repo: FromDishka[FitnessDataRepository],
     outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
     bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
@@ -1853,7 +1855,7 @@ async def get_journal(
     mood_data_repo: FromDishka[MoodDataRepository],
     plan_data_repo: FromDishka[PlanDataRepository],
     travel_data_repo: FromDishka[TravelDataRepository],
-    photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    photo_album_data_repo: FromDishka[AlbumSyncReadRepository],
     fitness_data_repo: FromDishka[FitnessDataRepository],
     outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
     bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
@@ -2099,7 +2101,7 @@ async def _process_journal_type_data(
     journal_id: int,
     type_data: dict[str, Any],
     calendar_info_repo: CalendarInfoRepository,
-    photo_album_data_repo: PhotoAlbumDataRepository,
+    photo_album_data_repo: AlbumSyncReadRepository,
     plan_data_repo: PlanDataRepository | None = None,
     travel_data_repo: TravelDataRepository | None = None,
     mood_data_repo: MoodDataRepository | None = None,
@@ -2213,16 +2215,16 @@ async def _process_journal_type_data(
                 detail=f"Invalid EVENT type_data: {exc}",
             ) from exc
 
-    # Process PHOTO_ALBUM type data
+    # PHOTO_ALBUM type data is integration-managed (Immich album sync) and is
+    # not writable through this API. Fail fast rather than silently dropping the
+    # payload so callers don't believe a write succeeded.
     if "photo_album" in normalized_type_data:
-        from core_shared.models.journals import PhotoAlbumData
+        from core_shared.models.journals import JournalValidationError
 
-        photo_data = normalized_type_data["photo_album"]
-        photo_album_data = PhotoAlbumData(
-            journal_id=journal_id,
-            immich_album_id=photo_data["immich_album_id"],
+        raise JournalValidationError(
+            "photo_album",
+            "PHOTO_ALBUM data is managed by Immich sync and cannot be set",
         )
-        await photo_album_data_repo.save(photo_album_data)
 
     # Process PLAN type data
     if "plan" in normalized_type_data and plan_data_repo:
@@ -2606,7 +2608,7 @@ async def create_journal(
     mood_data_repo: FromDishka[MoodDataRepository],
     plan_data_repo: FromDishka[PlanDataRepository],
     travel_data_repo: FromDishka[TravelDataRepository],
-    photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    photo_album_data_repo: FromDishka[AlbumSyncReadRepository],
     fitness_data_repo: FromDishka[FitnessDataRepository],
     outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
     bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
@@ -2797,7 +2799,7 @@ async def update_journal(
     mood_data_repo: FromDishka[MoodDataRepository],
     plan_data_repo: FromDishka[PlanDataRepository],
     travel_data_repo: FromDishka[TravelDataRepository],
-    photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    photo_album_data_repo: FromDishka[AlbumSyncReadRepository],
     fitness_data_repo: FromDishka[FitnessDataRepository],
     outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
     bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
@@ -2959,7 +2961,7 @@ async def partial_update_journal(
     mood_data_repo: FromDishka[MoodDataRepository],
     plan_data_repo: FromDishka[PlanDataRepository],
     travel_data_repo: FromDishka[TravelDataRepository],
-    photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    photo_album_data_repo: FromDishka[AlbumSyncReadRepository],
     fitness_data_repo: FromDishka[FitnessDataRepository],
     outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
     bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
@@ -3189,7 +3191,7 @@ async def merge_journal(
     mood_data_repo: FromDishka[MoodDataRepository],
     plan_data_repo: FromDishka[PlanDataRepository],
     travel_data_repo: FromDishka[TravelDataRepository],
-    photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    photo_album_data_repo: FromDishka[AlbumSyncReadRepository],
     fitness_data_repo: FromDishka[FitnessDataRepository],
     outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
     bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
@@ -3333,7 +3335,7 @@ async def add_type_to_journal(
     mood_data_repo: FromDishka[MoodDataRepository],
     plan_data_repo: FromDishka[PlanDataRepository],
     travel_data_repo: FromDishka[TravelDataRepository],
-    photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    photo_album_data_repo: FromDishka[AlbumSyncReadRepository],
     fitness_data_repo: FromDishka[FitnessDataRepository],
     outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
     bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
@@ -3516,7 +3518,7 @@ async def remove_type_from_journal(
     mood_data_repo: FromDishka[MoodDataRepository],
     plan_data_repo: FromDishka[PlanDataRepository],
     travel_data_repo: FromDishka[TravelDataRepository],
-    photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    photo_album_data_repo: FromDishka[AlbumSyncReadRepository],
     fitness_data_repo: FromDishka[FitnessDataRepository],
     outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
     bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
@@ -3563,6 +3565,17 @@ async def remove_type_from_journal(
         raise JournalValidationError(
             "journal_type", f"Invalid journal type: {journal_type}"
         ) from e
+
+    # PHOTO_ALBUM is managed by Immich album sync. Removing it would drop the
+    # sync_metadata / external_reference link, and the next sync would re-import
+    # the album as a *new* duplicate journal — so it cannot be removed manually.
+    if jtype == JournalType.PHOTO_ALBUM:
+        from core_shared.models.journals import JournalValidationError
+
+        raise JournalValidationError(
+            "journal_type",
+            "PHOTO_ALBUM is managed by Immich sync and cannot be removed",
+        )
 
     # Remove type (publish event)
     await journal_service.remove_type_from_journal(journal_id, jtype, connection)
@@ -3728,26 +3741,6 @@ async def _update_mood_type_data(
         mood_data.energy_level = attrs["energy_level"]
 
     await mood_data_repo.save(mood_data)
-
-
-async def _update_photo_album_type_data(
-    journal_id: int,
-    journal_type: str,
-    attrs: dict[str, Any],
-    photo_album_data_repo: PhotoAlbumDataRepository,
-) -> None:
-    """Update PHOTO_ALBUM type-specific data."""
-    photo_album_data = await photo_album_data_repo.find_by_journal_id(journal_id)
-    if not photo_album_data:
-        raise JournalValidationError(
-            "journal_type", f"Journal does not have type {journal_type}"
-        )
-
-    # Update fields from request
-    if "immich_album_id" in attrs:
-        photo_album_data.immich_album_id = attrs["immich_album_id"]
-
-    await photo_album_data_repo.save(photo_album_data)
 
 
 async def _update_fitness_type_data(
@@ -4311,7 +4304,7 @@ async def update_type_data(
     mood_data_repo: FromDishka[MoodDataRepository],
     plan_data_repo: FromDishka[PlanDataRepository],
     travel_data_repo: FromDishka[TravelDataRepository],
-    photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    photo_album_data_repo: FromDishka[AlbumSyncReadRepository],
     fitness_data_repo: FromDishka[FitnessDataRepository],
     outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
     bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
@@ -4377,8 +4370,11 @@ async def update_type_data(
     elif jtype == JournalType.MOOD_RATING:
         await _update_mood_type_data(journal_id, journal_type, attrs, mood_data_repo)
     elif jtype == JournalType.PHOTO_ALBUM:
-        await _update_photo_album_type_data(
-            journal_id, journal_type, attrs, photo_album_data_repo
+        # PHOTO_ALBUM data is managed by Immich album sync and cannot be edited
+        # through this API.
+        raise JournalValidationError(
+            "journal_type",
+            "PHOTO_ALBUM data is managed by Immich sync and cannot be edited",
         )
     elif jtype == JournalType.FITNESS:
         await _update_fitness_type_data(
@@ -4535,7 +4531,7 @@ async def add_contact_to_journal(
     mood_data_repo: FromDishka[MoodDataRepository],
     plan_data_repo: FromDishka[PlanDataRepository],
     travel_data_repo: FromDishka[TravelDataRepository],
-    photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    photo_album_data_repo: FromDishka[AlbumSyncReadRepository],
     fitness_data_repo: FromDishka[FitnessDataRepository],
     outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
     bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
@@ -4687,7 +4683,7 @@ async def update_journal_contact_relationship(
     mood_data_repo: FromDishka[MoodDataRepository],
     plan_data_repo: FromDishka[PlanDataRepository],
     travel_data_repo: FromDishka[TravelDataRepository],
-    photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    photo_album_data_repo: FromDishka[AlbumSyncReadRepository],
     fitness_data_repo: FromDishka[FitnessDataRepository],
     outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
     bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
@@ -4850,7 +4846,7 @@ async def remove_contact_from_journal(
     mood_data_repo: FromDishka[MoodDataRepository],
     plan_data_repo: FromDishka[PlanDataRepository],
     travel_data_repo: FromDishka[TravelDataRepository],
-    photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    photo_album_data_repo: FromDishka[AlbumSyncReadRepository],
     fitness_data_repo: FromDishka[FitnessDataRepository],
     outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
     bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
@@ -4970,7 +4966,7 @@ async def add_tag_to_journal(
     mood_data_repo: FromDishka[MoodDataRepository],
     plan_data_repo: FromDishka[PlanDataRepository],
     travel_data_repo: FromDishka[TravelDataRepository],
-    photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    photo_album_data_repo: FromDishka[AlbumSyncReadRepository],
     fitness_data_repo: FromDishka[FitnessDataRepository],
     outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
     bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
@@ -5081,7 +5077,7 @@ async def remove_tag_from_journal(
     mood_data_repo: FromDishka[MoodDataRepository],
     plan_data_repo: FromDishka[PlanDataRepository],
     travel_data_repo: FromDishka[TravelDataRepository],
-    photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    photo_album_data_repo: FromDishka[AlbumSyncReadRepository],
     fitness_data_repo: FromDishka[FitnessDataRepository],
     outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
     bushwalking_data_repo: FromDishka[BushwalkingDataRepository],

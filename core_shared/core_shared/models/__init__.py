@@ -15,6 +15,7 @@ from core_shared.models.journal_external_event_link import (
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.outbox_events import (
     ContactSyncEventData,
+    ImmichAlbumSyncEventData,
     JournalStatusEventData,
     JournalSyncEventData,
     MatchDetectionEventData,
@@ -40,6 +41,7 @@ __all__ = [
     "JournalExternalEventLink",
     "ExternalEventLinkSyncCapability",
     "ExternalEventLinkSyncStatus",
+    "ImmichAlbumSyncEventData",
     "JournalStatusEventData",
     "JournalSyncEventData",
     "MatchDetectionEventData",

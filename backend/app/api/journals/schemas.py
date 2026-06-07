@@ -170,10 +170,21 @@ class TravelDataSchema(BaseModel):
 
 
 class PhotoAlbumDataSchema(BaseModel):
-    """Photo album data for PHOTO_ALBUM type journals."""
+    """Photo album data for PHOTO_ALBUM type journals.
+
+    Sourced from the Immich album sync metadata and external reference rather
+    than a dedicated data table. Read-only — albums are managed by sync.
+    """
 
     immich_album_id: str | None = Field(
-        default=None, description="Immich album identifier"
+        default=None, description="Immich album identifier (UUID)"
+    )
+    album_name: str | None = Field(default=None, description="Immich album name")
+    album_url: str | None = Field(
+        default=None, description="Link to the album in the Immich web UI"
+    )
+    asset_count: int | None = Field(
+        default=None, description="Number of photos in the album"
     )
 
 

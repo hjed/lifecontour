@@ -123,6 +123,48 @@ class JournalStatusEventData(BaseModel):
     )
 
 
+# ── Immich Album Sync ────────────────────────────────────────────────
+
+
+class ImmichAlbumSyncEventData(BaseModel):
+    """Payload for ``immich_album.created`` and ``immich_album.updated`` events.
+
+    Published by the Immich worker when an album is imported as a
+    ``PHOTO_ALBUM`` journal. The backend ``ImmichAlbumOutboxEventProcessor``
+    creates/updates the journal and records ``sync_metadata`` /
+    ``external_references`` links. Unlike calendar journals, albums use
+    ``sync_metadata`` (no calendar or external event link).
+    """
+
+    integration_source: str = Field(
+        default="immich_album",
+        description="Always 'immich_album' for album sync events",
+    )
+    external_id: str = Field(description="Immich album UUID")
+    version_hash: str = Field(description="Hash of album metadata for change detection")
+    sync_action: str = Field(description="Type of sync action ('created', 'updated')")
+    existing_journal_id: int | None = Field(
+        default=None,
+        description="ID of the existing journal when updating",
+    )
+    journal_data: dict[str, Any] = Field(
+        description=(
+            "Journal fields: 'user_id', 'title', 'content', "
+            "'event_date_range_start', 'event_date_range_end' (ISO-8601)"
+        )
+    )
+    album_metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Album display metadata: 'album_name', 'description', "
+            "'asset_count', 'updated_at', 'thumbnail_asset_id', 'album_url'"
+        ),
+    )
+    sync_timestamp: str = Field(
+        description="ISO-8601 timestamp of when the sync occurred"
+    )
+
+
 # ── Match Detection ──────────────────────────────────────────────────
 
 
@@ -157,6 +199,7 @@ OutboxEventData = (
     | SyncCompletedEventData
     | JournalSyncEventData
     | JournalStatusEventData
+    | ImmichAlbumSyncEventData
     | MatchDetectionEventData
 )
 """Union of all outbox event payload types."""
@@ -171,6 +214,7 @@ _EVENT_TYPE_DISPATCH: list[tuple[str, type[BaseModel]]] = [
     ("journal_event.updated", JournalSyncEventData),
     ("journal_event.conflicted", JournalStatusEventData),
     ("journal_event.cancelled", JournalStatusEventData),
+    ("immich_album.", ImmichAlbumSyncEventData),
     ("journal_review.", MatchDetectionEventData),
 ]
 

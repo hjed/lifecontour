@@ -252,11 +252,13 @@ function TravelDataDisplay({ data }: { readonly data: TravelData }) {
   );
 }
 
-// PHOTO_ALBUM Data Display
+// PHOTO_ALBUM Data Display — read-only, sourced from Immich album sync.
 function PhotoAlbumDataDisplay({ data }: { readonly data: PhotoAlbumData }) {
   if (!data.immich_album_id) {
     return null;
   }
+
+  const label = data.album_name ?? 'Immich album';
 
   return (
     <Card data-testid='photo-album-data'>
@@ -268,7 +270,21 @@ function PhotoAlbumDataDisplay({ data }: { readonly data: PhotoAlbumData }) {
       </CardHeader>
       <CardContent>
         <div className='text-muted-foreground text-sm'>
-          Album ID: {data.immich_album_id}
+          {data.album_url ? (
+            <a
+              href={data.album_url}
+              target='_blank'
+              rel='noopener noreferrer'
+              className='underline'
+            >
+              {label}
+            </a>
+          ) : (
+            label
+          )}
+          {typeof data.asset_count === 'number' && (
+            <span> · {data.asset_count} photos</span>
+          )}
         </div>
       </CardContent>
     </Card>

@@ -110,14 +110,6 @@ class JournalTypeDependencyError(JournalDomainError):
         super().__init__(message, 400)
 
 
-class PhotoAlbumDataValidationError(JournalDomainError):
-    """Exception raised when photo album data (PHOTO_ALBUM type) validation fails."""
-
-    def __init__(self, field: str, message: str):
-        super().__init__(f"{field}: {message}", 400)
-        self.field = field
-
-
 class PlanDataValidationError(JournalDomainError):
     """Exception raised when plan data (PLAN type) validation fails."""
 
