@@ -137,6 +137,19 @@ test.describe('OAuth Error Handling', () => {
     // Note: No cleanup needed - Playwright automatically cleans up routes when the page/context is closed
   });
 
+  test('should show an explicit error when OAuth parameters are missing', async ({
+    unauthenticatedPage: page,
+  }) => {
+    // Navigate to the callback without any required parameters
+    await page.goto('/auth/callback');
+
+    // The callback page should surface a specific missing-parameters error
+    await expect(page.locator('body')).toContainText(
+      'Missing required OAuth parameters',
+      { timeout: 10000 }
+    );
+  });
+
   test('should handle malformed OAuth callback URLs', async ({
     unauthenticatedPage: page,
   }) => {

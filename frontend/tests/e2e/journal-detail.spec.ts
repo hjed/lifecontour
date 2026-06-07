@@ -8,6 +8,7 @@
 import { test, expect } from './fixtures';
 import { TestDataManager } from './data-management';
 import { waitForContactSearchIndexing } from './utils/test-helpers';
+import { JournalType } from '../../src/types/journals';
 
 // Helper to get ordinal suffix for a day number (e.g., 1 -> 'st')
 function getOrdinal(n: number) {
@@ -217,6 +218,113 @@ test.describe('Journal Detail Page', () => {
   });
 
   test.describe('Type Sections', () => {
+    test('can add and remove journal types via UI', async ({
+      authenticatedPage: page,
+      testCleanup,
+      isMobile,
+    }) => {
+      // Create a test journal via API directly to test type management UI
+      const response = await page.request.post('/api/journals', {
+        data: {
+          data: {
+            type: 'journal',
+            attributes: {
+              title: 'Test Journal for Type Management',
+              content:
+                'This journal will be used to test adding/removing types.',
+              journal_types: [JournalType.NOTE],
+              event_date_range: {
+                start: new Date().toISOString(),
+                end: new Date().toISOString(),
+              },
+            },
+          },
+        },
+      });
+
+      expect(response.ok()).toBeTruthy();
+      const data = await response.json();
+      const testJournalId = data.data.id;
+
+      // Register cleanup
+      testCleanup(async () => {
+        if (testJournalId) {
+          await page.request.delete(`/api/journals/${testJournalId}`);
+        }
+      });
+
+      // Go to the journal detail page
+      await page.goto(`/journals/${testJournalId}`);
+
+      // Check initial state - NOTE type should be present
+      const typeManager = page.getByTestId('journal-type-manager');
+      await expect(typeManager).toBeVisible();
+      await expect(
+        page.getByTestId(`manage-type-${JournalType.NOTE}`)
+      ).toBeVisible();
+
+      // Add a new type (PLAN)
+      await page.getByTestId('add-type-button').click();
+
+      // Wait for the API response after clicking the option
+      await Promise.all([
+        page.waitForResponse(
+          resp =>
+            resp.url().includes(`/api/journals/${testJournalId}/types`) &&
+            resp.request().method() === 'POST' &&
+            resp.ok()
+        ),
+        page.getByTestId(`add-type-option-${JournalType.PLAN}`).click(),
+      ]);
+
+      // Verify PLAN type was added (badge appears)
+      await expect(
+        page.getByTestId(`manage-type-${JournalType.PLAN}`)
+      ).toBeVisible();
+
+      // We mock window.confirm since it blocks Playwright
+      // Register dialog handler BEFORE the action that triggers it
+      page.on('dialog', dialog => dialog.accept());
+
+      // Hover (or tap on mobile) over PLAN to reveal remove button
+      if (isMobile) {
+        await page.getByTestId(`manage-type-${JournalType.PLAN}`).tap();
+      } else {
+        await page.getByTestId(`manage-type-${JournalType.PLAN}`).hover();
+      }
+
+      // Wait for the HoverCard to fully appear before clicking
+      await expect(
+        page.getByTestId(`remove-type-${JournalType.PLAN}`)
+      ).toBeVisible();
+
+      // Click remove and wait for both DELETE and the subsequent GET refetch
+      await Promise.all([
+        page.waitForResponse(
+          resp =>
+            resp
+              .url()
+              .includes(
+                `/api/journals/${testJournalId}/types/${JournalType.PLAN}`
+              ) &&
+            resp.request().method() === 'DELETE' &&
+            resp.ok()
+        ),
+        page.waitForResponse(
+          resp =>
+            resp.url().endsWith(`/api/journals/${testJournalId}`) &&
+            resp.request().method() === 'GET' &&
+            resp.ok()
+        ),
+        page.getByTestId(`remove-type-${JournalType.PLAN}`).click(),
+      ]);
+
+      // Verify it was removed successfully
+      await expect(
+        page.getByTestId(`manage-type-${JournalType.PLAN}`)
+      ).toBeHidden();
+    });
+
     test('should display journal type badges', async ({ journalsWithData }) => {
       const { page, journals } = journalsWithData;
       const journal = journals.find(j => j.types && j.types.length > 0);

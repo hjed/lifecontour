@@ -27,34 +27,6 @@ const googleStatusConnected = {
   },
 };
 
-const googleStatusDisconnected = {
-  data: {
-    id: 'google',
-    type: 'integration-status',
-    attributes: {
-      connected: false,
-      lastSync: null,
-      syncCount: 0,
-      status: 'disconnected',
-      needsReconsent: false,
-    },
-  },
-};
-
-const googleStatusNeedsReconsent = {
-  data: {
-    id: 'google',
-    type: 'integration-status',
-    attributes: {
-      connected: true,
-      lastSync: new Date().toISOString(),
-      syncCount: 10,
-      status: 'active',
-      needsReconsent: true,
-    },
-  },
-};
-
 const googleCalendars = {
   data: [
     {
@@ -80,67 +52,9 @@ const googleCalendars = {
 };
 
 test.describe('Calendar Google Sync Settings', () => {
-  test('sync toggle is enabled when Google is connected with calendar scopes', async ({
-    authenticatedPage: page,
-  }) => {
-    // Mock Google status as connected
-    await page.route('**/api/integrations/google/contacts/status', route =>
-      route.fulfill(json(googleStatusConnected))
-    );
-    await page.route('**/api/integrations/google/calendars', route =>
-      route.fulfill(json(googleCalendars))
-    );
-
-    await page.goto('/settings');
-    await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
-
-    // Open Create Calendar dialog
-    await page.getByRole('button', { name: 'Add Calendar' }).click();
-    await expect(page.getByRole('dialog')).toBeVisible();
-
-    // Sync toggle should be enabled
-    const toggle = page.getByTestId('google-sync-toggle');
-    await expect(toggle).toBeVisible();
-    await expect(toggle).toBeEnabled();
-  });
-
-  test('sync toggle is disabled when Google is not connected', async ({
-    authenticatedPage: page,
-  }) => {
-    // Mock Google status as disconnected
-    await page.route('**/api/integrations/google/contacts/status', route =>
-      route.fulfill(json(googleStatusDisconnected))
-    );
-
-    await page.goto('/settings');
-    await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
-
-    await page.getByRole('button', { name: 'Add Calendar' }).click();
-    await expect(page.getByRole('dialog')).toBeVisible();
-
-    // Sync toggle should be disabled
-    const toggle = page.getByTestId('google-sync-toggle');
-    await expect(toggle).toBeVisible();
-    await expect(toggle).toBeDisabled();
-  });
-
-  test('sync toggle is disabled when needsReconsent is true', async ({
-    authenticatedPage: page,
-  }) => {
-    await page.route('**/api/integrations/google/contacts/status', route =>
-      route.fulfill(json(googleStatusNeedsReconsent))
-    );
-
-    await page.goto('/settings');
-    await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
-
-    await page.getByRole('button', { name: 'Add Calendar' }).click();
-    await expect(page.getByRole('dialog')).toBeVisible();
-
-    const toggle = page.getByTestId('google-sync-toggle');
-    await expect(toggle).toBeVisible();
-    await expect(toggle).toBeDisabled();
-  });
+  // Note: google-sync-toggle enabled/disabled state (connected / disconnected /
+  // needsReconsent) is unit-tested in CalendarSettingsDialog.test.tsx. This file
+  // keeps only the real submit-payload contract that the component test cannot cover.
 
   test('enabling sync shows Google Calendar dropdown and submits with google_calendar_id', async ({
     authenticatedPage: page,
