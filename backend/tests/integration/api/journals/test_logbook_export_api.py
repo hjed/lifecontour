@@ -44,6 +44,7 @@ async def unauthenticated_client(test_settings, async_connection: AsyncConnectio
     from app.infrastructure.di.infrastructure import InfrastructureProvider
     from app.infrastructure.di.integrations import IntegrationProvider
     from app.infrastructure.di.journal import JournalProvider
+    from app.infrastructure.di.settings import SettingsProvider
     from app.main import create_app
 
     class TestDatabaseProvider(Provider):
@@ -59,6 +60,7 @@ async def unauthenticated_client(test_settings, async_connection: AsyncConnectio
         AuthProvider(),
         ContactProvider(),
         JournalProvider(),
+        SettingsProvider(),
         IntegrationProvider(),
         FastapiProvider(),
         context={"settings": test_settings},
