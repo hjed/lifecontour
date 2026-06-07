@@ -3406,3 +3406,17 @@ class TestPhotoAlbumTypeManagement:
         ).fetchone()
         assert row is not None
         assert row.n == 1
+
+    async def test_cannot_set_photo_album_type_data_on_create(
+        self, integration_api_client
+    ):
+        """Submitting photo_album type_data fails fast (it is sync-managed)."""
+        create_data = create_journal_request_data(
+            title="Album attempt",
+            types=["photo_album"],
+            type_data={"photo_album": {"immich_album_id": "album-123"}},
+        )
+
+        response = await integration_api_client.post("/api/journals", json=create_data)
+
+        assert response.status_code == 400

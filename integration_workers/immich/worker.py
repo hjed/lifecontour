@@ -351,8 +351,10 @@ async def sync_immich_albums(
     """ARQ task: orchestrate Immich album sync.
 
     Lists album-ID batches from Immich and enqueues a ``sync_immich_album_batch``
-    job for each batch so a large account cannot time out a single task. Each
-    batch commits independently.
+    job for each batch. The orchestrator only dispatches work — it does **not**
+    block waiting for the batches to finish, so it cannot hit its own
+    ``job_timeout`` regardless of how many albums an account has. Each batch
+    processes and commits independently (with its own retries).
 
     Args:
         ctx: ARQ worker context (must contain ``session_factory``).
@@ -360,7 +362,7 @@ async def sync_immich_albums(
         sync_type: 'full' or 'smart'.
 
     Returns:
-        Dictionary with album sync summary.
+        Dictionary with the number of batches dispatched.
     """
     job_id = ctx.get("job_id", "unknown")
     session_factory = ctx["session_factory"]
@@ -378,11 +380,6 @@ async def sync_immich_albums(
     )
 
     try:
-        import asyncio
-
-        from arq.jobs import Job
-
-        batch_jobs: list[Any] = []
         batches_enqueued = 0
 
         async with session_factory() as session:
@@ -425,44 +422,19 @@ async def sync_immich_albums(
                         _job_id=batch_job_id,
                         _queue_name=IMMICH_ARQ_QUEUE_NAME,
                     )
-                    if job:
-                        batches_enqueued += 1
-                        batch_jobs.append(job)
-                        logger.info(
-                            "Enqueued album batch job",
-                            job_id=job.job_id,
-                            batch_size=len(album_batch),
-                            batch_number=batch_number,
-                        )
-                    else:
-                        batch_jobs.append(
-                            Job(
-                                batch_job_id,
-                                ctx["redis"],
-                                _queue_name=IMMICH_ARQ_QUEUE_NAME,
-                            )
-                        )
-                        logger.info(
-                            "Album batch job already enqueued",
-                            batch_job_id=batch_job_id,
-                            batch_number=batch_number,
-                        )
+                    batches_enqueued += 1
+                    logger.info(
+                        "Enqueued album batch job",
+                        job_id=job.job_id if job else batch_job_id,
+                        batch_size=len(album_batch),
+                        batch_number=batch_number,
+                        already_enqueued=job is None,
+                    )
             finally:
                 await api_client.close()
 
-        if batch_jobs:
-            logger.info(
-                "Waiting for album batch jobs to complete",
-                job_id=job_id,
-                count=len(batch_jobs),
-            )
-            results = await asyncio.gather(
-                *[j.result(timeout=290) for j in batch_jobs], return_exceptions=True
-            )
-            for res in results:
-                if isinstance(res, Exception):
-                    raise res
-
+        # The orchestrator is done once all batches are dispatched; the batches
+        # run independently. Mark the job completed to reflect that.
         await _update_sync_job_status(
             session_factory,
             job_id,
@@ -472,7 +444,7 @@ async def sync_immich_albums(
         )
 
         return {
-            "status": "enqueued",
+            "status": "completed",
             "user_id": user_id,
             "sync_type": sync_type,
             "batches_enqueued": batches_enqueued,

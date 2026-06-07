@@ -2216,7 +2216,15 @@ async def _process_journal_type_data(
             ) from exc
 
     # PHOTO_ALBUM type data is integration-managed (Immich album sync) and is
-    # not writable through this API — any inbound photo_album payload is ignored.
+    # not writable through this API. Fail fast rather than silently dropping the
+    # payload so callers don't believe a write succeeded.
+    if "photo_album" in normalized_type_data:
+        from core_shared.models.journals import JournalValidationError
+
+        raise JournalValidationError(
+            "photo_album",
+            "PHOTO_ALBUM data is managed by Immich sync and cannot be set",
+        )
 
     # Process PLAN type data
     if "plan" in normalized_type_data and plan_data_repo:
