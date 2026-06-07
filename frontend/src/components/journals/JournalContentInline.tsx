@@ -7,11 +7,11 @@
 
 'use client';
 
-import { useEffect, useRef } from 'react';
 import { Check, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
+import { MarkdownEditor } from '@/components/journals/MarkdownEditor';
+import { MarkdownRenderer } from '@/components/journals/MarkdownRenderer';
 import { useInlineEdit } from '@/hooks/useInlineEdit';
 
 export interface JournalContentInlineProps {
@@ -44,8 +44,6 @@ export function JournalContentInline({
   'data-testid': testId,
   'aria-label': ariaLabel,
 }: JournalContentInlineProps) {
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
   const {
     value: editValue,
     displayValue,
@@ -60,67 +58,64 @@ export function JournalContentInline({
     showErrorToast: false, // Show errors inline
   });
 
-  // Focus textarea when entering edit mode
-  useEffect(() => {
-    if (isEditing && textareaRef.current) {
-      textareaRef.current.focus();
-      // Move cursor to end
-      const length = textareaRef.current.value.length;
-      textareaRef.current.setSelectionRange(length, length);
-    }
-  }, [isEditing]);
-
   const isEmpty = !displayValue || displayValue.trim() === '';
 
   // View mode - clickable display with markdown rendering
   if (!isEditing) {
     return (
-      <div className={cn('group relative', className)} data-testid={testId}>
+      <div
+        className={cn('group relative rounded-md', className)}
+        data-testid={testId}
+      >
+        {/* Full-area edit affordance kept as a sibling (not a wrapper) so the
+            rendered markdown — which contains block elements and links — is
+            never nested inside a <button> (invalid HTML, breaks link clicks). */}
         <button
           type='button'
           className={cn(
-            'w-full rounded-md px-3 py-2 text-left text-sm transition-colors',
+            'absolute inset-0 z-0 w-full rounded-md transition-colors',
             'hover:bg-muted focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none',
-            disabled && 'cursor-not-allowed opacity-50 hover:bg-transparent',
-            isEmpty && 'text-muted-foreground italic'
+            disabled && 'cursor-not-allowed hover:bg-transparent'
           )}
           disabled={disabled}
           onClick={startEdit}
           aria-label={ariaLabel || `Click to edit content`}
+        />
+        {/* Content sits above the button but is transparent to pointer events,
+            so clicking anywhere enters edit mode — except links, which stay
+            clickable so users can follow them without triggering an edit. */}
+        <div
+          className={cn(
+            'pointer-events-none relative z-10 px-3 py-2 text-sm [&_a]:pointer-events-auto',
+            disabled && 'opacity-50',
+            isEmpty && 'text-muted-foreground italic'
+          )}
         >
-          {/* Simple text display for now - future: render markdown */}
-          <div className='prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap'>
-            {isEmpty ? placeholder : displayValue}
-          </div>
-        </button>
+          {isEmpty ? (
+            <span>{placeholder}</span>
+          ) : (
+            <MarkdownRenderer content={displayValue} />
+          )}
+        </div>
       </div>
     );
   }
 
-  // Edit mode - textarea with save/cancel buttons
+  // Edit mode - markdown editor with save/cancel buttons
   return (
     <div className={cn('space-y-2', className)} data-testid={testId}>
-      <Textarea
-        ref={textareaRef}
+      <MarkdownEditor
         value={editValue}
-        onChange={e => setValue(e.target.value)}
-        onKeyDown={e => {
-          // Don't handle Enter for textarea (allow newlines)
-          // Only handle Escape
-          if (e.key === 'Escape') {
-            e.preventDefault();
-            cancelEdit();
-          }
-        }}
+        onChange={setValue}
+        onEscape={cancelEdit}
+        focusOnMount
         placeholder={placeholder}
         disabled={isLoading}
-        className={cn(
-          'min-h-[200px] resize-y font-mono text-sm',
-          error && 'border-destructive'
-        )}
+        className={cn(error && 'border-destructive')}
         aria-label={ariaLabel || 'Edit content'}
         aria-invalid={!!error}
         aria-describedby={error ? `${testId}-error` : undefined}
+        data-testid={testId ? `${testId}-editor` : undefined}
       />
 
       {/* Action buttons */}

@@ -60,7 +60,7 @@ import {
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
+import { MarkdownEditor } from '@/components/journals/MarkdownEditor';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useCreateJournal, useJournal } from '@/lib/api/journals';
 import { useCreateRoute } from '@/lib/api/routes';
@@ -901,10 +901,11 @@ export function JournalCreateForm({
             <FormItem>
               <FormLabel>Content</FormLabel>
               <FormControl>
-                <Textarea
+                <MarkdownEditor
+                  value={field.value ?? ''}
+                  onChange={field.onChange}
                   placeholder='Write your journal entry...'
-                  className='min-h-[200px]'
-                  {...field}
+                  aria-label='Content'
                 />
               </FormControl>
               <FormMessage />

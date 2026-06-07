@@ -1,9 +1,10 @@
 /**
  * Tests for JournalContentInline component.
  *
- * Tests the journal content inline editing behavior using a simple textarea,
- * including save/cancel functionality and integration with the useInlineEdit hook.
- * Note: Markdown rendering/preview will be added in a future enhancement.
+ * Tests the journal content inline editing behavior using the markdown WYSIWYG
+ * editor (mocked — see src/__mocks__/@tiptap), including markdown rendering in
+ * view mode, XSS safety, save/cancel functionality, and integration with the
+ * useInlineEdit hook.
  */
 
 import { render, screen } from '@testing-library/react';
@@ -32,6 +33,32 @@ describe('JournalContentInline', () => {
       render(<JournalContentInline value='test content' onSave={mockOnSave} />);
 
       expect(screen.getByText('test content')).toBeInTheDocument();
+    });
+
+    it('renders the content as markdown', () => {
+      Object.assign(mockUseInlineEdit, {
+        displayValue: '# My heading',
+      });
+
+      render(<JournalContentInline value='# My heading' onSave={mockOnSave} />);
+
+      const heading = screen.getByRole('heading', { level: 1 });
+      expect(heading).toHaveTextContent('My heading');
+    });
+
+    it('does not render embedded raw HTML as live nodes (XSS)', () => {
+      Object.assign(mockUseInlineEdit, {
+        displayValue:
+          'Hello <script>alert(1)</script><img src=x onerror="alert(1)">',
+      });
+
+      const { container } = render(
+        <JournalContentInline value='unused' onSave={mockOnSave} />
+      );
+
+      expect(document.querySelector('script')).not.toBeInTheDocument();
+      expect(container.querySelector('img')).not.toBeInTheDocument();
+      expect(container.querySelector('[onerror]')).not.toBeInTheDocument();
     });
 
     it('displays placeholder when content is empty', () => {
@@ -83,10 +110,11 @@ describe('JournalContentInline', () => {
       });
     });
 
-    it('renders textarea in edit mode', () => {
+    it('renders the markdown editor in edit mode', () => {
       render(<JournalContentInline value='test content' onSave={mockOnSave} />);
 
       expect(screen.getByRole('textbox')).toBeInTheDocument();
+      expect(screen.getByRole('toolbar')).toBeInTheDocument();
     });
 
     it('shows save and cancel buttons in edit mode', () => {
