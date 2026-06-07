@@ -4,7 +4,6 @@ Covers field merge protection (local-edit detection), journal building from
 album payload data, and reference_data construction — without a database.
 """
 
-import json
 from datetime import UTC, datetime
 
 from core_shared.models.outbox_events import ImmichAlbumSyncEventData
@@ -60,7 +59,7 @@ class TestBuildJournal:
 
 
 class TestReferenceData:
-    """Album external reference reference_data JSON construction."""
+    """Album external reference display-metadata construction."""
 
     def _payload(self, **metadata: object) -> ImmichAlbumSyncEventData:
         return ImmichAlbumSyncEventData(
@@ -80,13 +79,13 @@ class TestReferenceData:
 
     def test_includes_album_id_and_present_metadata(self) -> None:
         payload = self._payload(album_name="Trip", asset_count=3)
-        data = json.loads(ImmichAlbumOutboxEventProcessor._reference_data(payload))
+        data = ImmichAlbumOutboxEventProcessor._reference_data(payload)
         assert data["album_id"] == "album-1"
         assert data["album_name"] == "Trip"
         assert data["asset_count"] == 3
 
     def test_omits_missing_metadata_fields(self) -> None:
         payload = self._payload(album_name="Trip")
-        data = json.loads(ImmichAlbumOutboxEventProcessor._reference_data(payload))
+        data = ImmichAlbumOutboxEventProcessor._reference_data(payload)
         assert "album_url" not in data
         assert "thumbnail_asset_id" not in data

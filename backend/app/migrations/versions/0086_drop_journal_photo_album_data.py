@@ -1,7 +1,7 @@
 """Drop journal_photo_album_data table and allow immich_album sync source
 
-Revision ID: 0085
-Revises: 0084
+Revision ID: 0086
+Revises: 0085
 Create Date: 2026-06-07 00:00:00.000000
 
 ITER11-004 Phase 1: The ``journal_photo_album_data`` table and ``PhotoAlbumData``
@@ -22,8 +22,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "0085"
-down_revision: str | None = "0084"
+revision: str = "0086"
+down_revision: str | None = "0085"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

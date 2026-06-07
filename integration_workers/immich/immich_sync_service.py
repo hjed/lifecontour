@@ -421,22 +421,6 @@ class ImmichSyncService:
     # -- Album sync helpers ----------------------------------------------
 
     @staticmethod
-    def _asset_timestamp(asset: ImmichAsset) -> datetime | None:
-        """Return an asset's capture instant as a tz-aware UTC datetime.
-
-        Prefers ``takenAt`` and falls back to EXIF ``dateTimeOriginal``.
-        Naive timestamps are assumed to be UTC.
-        """
-        ts = asset.taken_at
-        if ts is None and asset.exif_info is not None:
-            ts = asset.exif_info.date_time_original
-        if ts is None:
-            return None
-        if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=UTC)
-        return ts
-
-    @staticmethod
     def _asset_timezone(asset: ImmichAsset) -> tzinfo:
         """Resolve an asset's local timezone from EXIF, defaulting to UTC."""
         if asset.exif_info is not None and asset.exif_info.timezone:
@@ -448,6 +432,30 @@ class ImmichSyncService:
                     timezone=asset.exif_info.timezone,
                 )
         return UTC
+
+    @staticmethod
+    def _asset_instant_and_tz(
+        asset: ImmichAsset,
+    ) -> tuple[datetime, tzinfo] | None:
+        """Return an asset's capture instant and its local timezone.
+
+        Prefers ``takenAt`` (a UTC instant) and falls back to EXIF
+        ``dateTimeOriginal``. A *naive* timestamp's wall clock is local time in
+        the asset's own EXIF timezone, so it is localized to that timezone
+        rather than assumed to be UTC — otherwise the derived day could shift by
+        the timezone offset. The timezone (UTC fallback) is also used for the
+        day boundary.
+        """
+        ts = asset.taken_at
+        if ts is None and asset.exif_info is not None:
+            ts = asset.exif_info.date_time_original
+        if ts is None:
+            return None
+
+        local_tz = ImmichSyncService._asset_timezone(asset)
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=local_tz)
+        return (ts, local_tz)
 
     @staticmethod
     def derive_album_date_range(
@@ -464,9 +472,9 @@ class ImmichSyncService:
         """
         timed: list[tuple[datetime, tzinfo]] = []
         for asset in assets:
-            ts = ImmichSyncService._asset_timestamp(asset)
-            if ts is not None:
-                timed.append((ts, ImmichSyncService._asset_timezone(asset)))
+            item = ImmichSyncService._asset_instant_and_tz(asset)
+            if item is not None:
+                timed.append(item)
 
         if not timed:
             return None

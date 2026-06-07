@@ -123,13 +123,30 @@ class TestDeriveAlbumDateRange:
         assert start == datetime(2026, 1, 15, 0, 0, 0, 0, tzinfo=UTC)
         assert end == datetime(2026, 1, 15, 23, 59, 59, 999999, tzinfo=UTC)
 
-    def test_naive_timestamp_is_treated_as_utc(self) -> None:
+    def test_naive_timestamp_without_tz_is_treated_as_utc(self) -> None:
         assets = [_asset(taken_at=datetime(2026, 1, 15, 10, 0))]  # noqa: DTZ001
 
         start, end = ImmichSyncService.derive_album_date_range(assets)  # type: ignore[misc]
 
         assert start == datetime(2026, 1, 15, 0, 0, 0, 0, tzinfo=UTC)
         assert end == datetime(2026, 1, 15, 23, 59, 59, 999999, tzinfo=UTC)
+
+    def test_naive_exif_timestamp_is_localized_to_exif_timezone(self) -> None:
+        # A naive EXIF wall clock of 23:30 on 15 Jan is local time in Sydney.
+        # It must stay on 15 Jan — not be assumed UTC (which would convert to
+        # 16 Jan AEDT and shift the album to the wrong day).
+        assets = [
+            _asset(
+                exif_taken=datetime(2026, 1, 15, 23, 30),  # noqa: DTZ001
+                timezone="Australia/Sydney",
+            )
+        ]
+
+        start, end = ImmichSyncService.derive_album_date_range(assets)  # type: ignore[misc]
+
+        syd = ZoneInfo("Australia/Sydney")
+        assert start == datetime(2026, 1, 15, 0, 0, 0, 0, tzinfo=syd)
+        assert end == datetime(2026, 1, 15, 23, 59, 59, 999999, tzinfo=syd)
 
 
 # ---------------------------------------------------------------------------
