@@ -19,6 +19,7 @@ from datetime import datetime
 from typing import Any
 
 import structlog
+from core_shared.models.history import Provenance
 from core_shared.models.journals import (
     EventDateRange,
     Journal,
@@ -181,7 +182,12 @@ class ImmichAlbumOutboxEventProcessor:
     async def _apply_create(self, payload: ImmichAlbumSyncEventData) -> dict[str, Any]:
         """Create a new PHOTO_ALBUM journal and its sync links."""
         journal = self._build_journal(payload.journal_data)
-        created = await self.journal_service.create_journal(journal, self.connection)
+        created = await self.journal_service.create_journal(
+            journal,
+            self.connection,
+            changed_by=INTEGRATION_SOURCE,
+            source=Provenance.IMMICH,
+        )
         if created.id is None:
             raise ImmichAlbumOutboxEventProcessingError("Created journal has no ID")
 
@@ -266,6 +272,8 @@ class ImmichAlbumOutboxEventProcessor:
                 merged,
                 changed_fields=dict.fromkeys(_CHANGED_FIELDS, True),
                 transaction=self.connection,
+                changed_by=INTEGRATION_SOURCE,
+                source=Provenance.IMMICH,
             )
 
         # Participants are reconciled regardless of merge protection: newly

@@ -26,6 +26,21 @@ def test_contact_strategy_is_registered() -> None:
     assert "contact_summary" in strategy.where_clause
 
 
+def test_journal_strategy_is_registered() -> None:
+    """The 'journal' strategy aggregates rows tagged to the journal itself.
+
+    Journal/route/gear/type changes are all projected with
+    entity_type='journal', entity_id=journal_id, so the predicate keys on the
+    journal directly (parameterised on :root_id).
+    """
+    strategy = get_aggregation_strategy("journal")
+
+    assert strategy.root_type == "journal"
+    assert ":root_id" in strategy.where_clause
+    assert "entity_type = 'journal'" in strategy.where_clause
+    assert "entity_id = :root_id" in strategy.where_clause
+
+
 def test_unknown_root_type_raises() -> None:
     """Requesting an unregistered root type fails clearly rather than silently."""
     with pytest.raises(UnknownAggregationRootError):

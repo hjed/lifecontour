@@ -5,6 +5,7 @@ from uuid import UUID
 
 import structlog
 from core_shared.models import Route
+from core_shared.models.history import Provenance
 from core_shared.models.journals import (
     RouteNotFoundError,
     RouteValidationError,
@@ -70,7 +71,13 @@ class RouteService:
             offset=offset,
         )
 
-    async def create_route(self, route: Route, transaction: AsyncConnection) -> Route:
+    async def create_route(
+        self,
+        route: Route,
+        transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
+    ) -> Route:
         """
         Create a new route with validation.
 
@@ -79,6 +86,8 @@ class RouteService:
         Args:
             route: The route to create
             transaction: Database transaction
+            changed_by: Who/what made the change (for history provenance)
+            source: Provenance of the change (for history provenance)
 
         Returns:
             The created route with ID and timestamps
@@ -111,6 +120,8 @@ class RouteService:
             str(saved_route.id),
             saved_route.journal_id,
             saved_route.name,
+            source=source,
+            changed_by=changed_by,
             transaction=transaction,
         )
         await self.event_publisher.publish(event)
@@ -129,6 +140,8 @@ class RouteService:
         route: Route,
         changed_fields: dict[str, Any],
         transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> Route:
         """
         Update an existing route.
@@ -139,6 +152,8 @@ class RouteService:
             route: The route to update (must have id set)
             changed_fields: Dictionary of changed fields for event tracking
             transaction: Database transaction
+            changed_by: Who/what made the change (for history provenance)
+            source: Provenance of the change (for history provenance)
 
         Returns:
             The updated route
@@ -169,7 +184,10 @@ class RouteService:
         # Publish update event
         event = RouteUpdated(
             str(saved_route.id),
+            saved_route.journal_id,
             changed_fields,
+            source=source,
+            changed_by=changed_by,
             transaction=transaction,
         )
         await self.event_publisher.publish(event)
@@ -182,7 +200,13 @@ class RouteService:
 
         return saved_route
 
-    async def delete_route(self, route_id: UUID, transaction: AsyncConnection) -> None:
+    async def delete_route(
+        self,
+        route_id: UUID,
+        transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
+    ) -> None:
         """
         Delete a route after checking it's not in use.
 
@@ -191,21 +215,31 @@ class RouteService:
         Args:
             route_id: The ID of the route to delete
             transaction: Database transaction
+            changed_by: Who/what made the change (for history provenance)
+            source: Provenance of the change (for history provenance)
 
         Raises:
             RouteNotFoundError: If route doesn't exist
             RouteInUseError: If route is in use by journals
         """
-        # Validate route exists
+        # Validate route exists (loaded before deletion so journal_id is available)
         route = await self.route_repo.find_by_id(route_id)
         if route is None:
             raise RouteNotFoundError(str(route_id))
+
+        journal_id = route.journal_id
 
         # Delete the route
         await self.route_repo.delete(route_id)
 
         # Publish deletion event
-        event = RouteDeleted(str(route_id), transaction=transaction)
+        event = RouteDeleted(
+            str(route_id),
+            journal_id,
+            source=source,
+            changed_by=changed_by,
+            transaction=transaction,
+        )
         await self.event_publisher.publish(event)
 
         logger.info("Route deleted", route_id=str(route_id))

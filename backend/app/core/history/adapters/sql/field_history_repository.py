@@ -1,5 +1,7 @@
 """SQL implementation of the entity-agnostic FieldHistoryRepository."""
 
+from datetime import datetime
+
 from core_shared.models.history import Provenance
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -21,6 +23,20 @@ class SqlFieldHistoryRepository(FieldHistoryRepository):
 
     def __init__(self, connection: AsyncConnection):
         self.conn = connection
+
+    @staticmethod
+    def _coerce_created_at(created_at: str | datetime | None) -> datetime | None:
+        """Normalise an entry's created_at to a datetime for binding.
+
+        ``record_change`` writes back the persisted ``created_at`` as an ISO
+        string, so a re-recorded (reused) instance arrives here as a string;
+        parse it so the COALESCE bind stays a timestamp. Projection callers pass
+        a ``datetime`` (the event's occurred_at); the contact dual-write passes
+        ``None`` and falls through to the DB default.
+        """
+        if isinstance(created_at, str):
+            return datetime.fromisoformat(created_at)
+        return created_at
 
     @staticmethod
     def _parse_provenance(source: str | None) -> Provenance:
@@ -61,9 +77,9 @@ class SqlFieldHistoryRepository(FieldHistoryRepository):
             """
             INSERT INTO field_history
             (entity_type, entity_id, field_name, old_value, new_value,
-             changed_by, source, event_id)
+             changed_by, source, event_id, created_at)
             VALUES (:entity_type, :entity_id, :field_name, :old_value, :new_value,
-                    :changed_by, :source, :event_id)
+                    :changed_by, :source, :event_id, COALESCE(:created_at, now()))
             ON CONFLICT (event_id, entity_type, entity_id, field_name) DO NOTHING
             RETURNING id, created_at
             """
@@ -79,6 +95,11 @@ class SqlFieldHistoryRepository(FieldHistoryRepository):
                 "changed_by": entry.changed_by,
                 "source": entry.source.value,
                 "event_id": entry.event_id,
+                # When projecting a domain event the caller sets created_at to the
+                # event's occurred_at so history reflects when the change actually
+                # happened. The synchronous contact dual-write passes None and the
+                # COALESCE falls through to the DB default (now()), unchanged.
+                "created_at": self._coerce_created_at(entry.created_at),
             },
         )
         row = result.fetchone()

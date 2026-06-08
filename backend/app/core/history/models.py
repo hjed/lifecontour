@@ -8,6 +8,7 @@ domain ``event_id`` used to make projection idempotent.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from datetime import datetime
 
 from core_shared.models.history import Provenance
 
@@ -26,7 +27,7 @@ class FieldHistoryEntry:
         source: Provenance = Provenance.SYSTEM,
         event_id: str | None = None,
         id: int | None = None,
-        created_at: str | None = None,
+        created_at: str | datetime | None = None,
     ):
         self.id = id
         self.entity_type = entity_type
@@ -97,6 +98,25 @@ register_aggregation_strategy(
     HistoryAggregationStrategy(
         root_type="contact",
         where_clause=_CONTACT_AGGREGATION_WHERE,
+    )
+)
+
+
+# The journal aggregation predicate. The history projection tags every journal,
+# route, gear, and type change to the journal itself (entity_type='journal',
+# entity_id=journal_id) — route/gear ids are UUIDs and cannot live in the integer
+# entity_id column, and tagging to the journal keeps route/gear history readable
+# after the route/gear row is deleted — so the predicate keys on the journal
+# directly with no joins.
+_JOURNAL_AGGREGATION_WHERE = """
+    entity_type = 'journal' AND entity_id = :root_id
+"""
+
+
+register_aggregation_strategy(
+    HistoryAggregationStrategy(
+        root_type="journal",
+        where_clause=_JOURNAL_AGGREGATION_WHERE,
     )
 )
 

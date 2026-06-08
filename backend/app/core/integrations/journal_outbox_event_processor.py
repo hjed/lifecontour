@@ -11,6 +11,7 @@ from typing import Any
 from uuid import UUID
 
 import structlog
+from core_shared.models.history import Provenance
 from core_shared.models.journals import (
     AttendeeStatus,
     ContactEventRole,
@@ -59,6 +60,21 @@ EVENT_TYPE_JOURNAL_EVENT_UPDATED = "journal_event.updated"
 EVENT_TYPE_JOURNAL_EVENT_CONFLICTED = "journal_event.conflicted"
 EVENT_TYPE_JOURNAL_EVENT_CANCELLED = "journal_event.cancelled"
 EVENT_TYPE_JOURNAL_REVIEW_DETECT_MATCHES = "journal_review.detect_matches"
+
+# Maps an inbound sync event's integration_source to the history Provenance
+# recorded for the journal changes it produces.
+_PROVENANCE_BY_INTEGRATION_SOURCE: dict[str, Provenance] = {
+    "strava": Provenance.STRAVA,
+    "google": Provenance.GOOGLE_CALENDAR,
+}
+
+
+def _provenance_for_source(integration_source: str | None) -> Provenance:
+    """Resolve the history Provenance for an inbound integration source."""
+    if not integration_source:
+        return Provenance.SYSTEM
+    return _PROVENANCE_BY_INTEGRATION_SOURCE.get(integration_source, Provenance.SYSTEM)
+
 
 # Mapping from JournalType value to the database table name for types that
 # need a default data row.  FITNESS is handled separately via
@@ -279,8 +295,12 @@ class JournalOutboxEventProcessor:
         journal = self._build_journal_from_data(journal_data)
 
         # Create the journal via service
+        provenance = _provenance_for_source(payload.integration_source)
         created_journal = await self.journal_service.create_journal(
-            journal, self.connection
+            journal,
+            self.connection,
+            changed_by=payload.integration_source or "system",
+            source=provenance,
         )
 
         if created_journal.id is None:
@@ -502,8 +522,13 @@ class JournalOutboxEventProcessor:
 
         # Update via journal service (only if fields actually changed)
         if changed_fields:
+            provenance = _provenance_for_source(payload.integration_source)
             saved_journal = await self.journal_service.update_journal(
-                updated_journal, changed_fields, self.connection
+                updated_journal,
+                changed_fields,
+                self.connection,
+                changed_by=payload.integration_source or "system",
+                source=provenance,
             )
         else:
             saved_journal = existing_journal
@@ -789,10 +814,13 @@ class JournalOutboxEventProcessor:
             for type_str in raw_types:
                 try:
                     journal_type = JournalType(type_str)
+                    # journal_types are only present on Strava-sourced events.
                     await self.journal_service.add_type_to_journal(
                         journal_id=journal_id,
                         journal_type=journal_type,
                         transaction=self.connection,
+                        changed_by="strava",
+                        source=Provenance.STRAVA,
                     )
                 except ValueError:
                     logger.warning(

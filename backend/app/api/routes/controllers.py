@@ -8,6 +8,7 @@ Controllers act as adapters between HTTP and domain services.
 from typing import Annotated
 from uuid import UUID
 
+from core_shared.models.history import Provenance
 from core_shared.models.journals import JournalNotFoundError, RouteNotFoundError
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Query, Request, status
@@ -169,7 +170,9 @@ async def create_route(
     )
 
     # Create the route
-    created_route = await route_service.create_route(route, connection)
+    created_route = await route_service.create_route(
+        route, connection, changed_by="ui", source=Provenance.UI
+    )
 
     # Convert to resource
     route_resource = RouteConverter.to_resource(created_route, base_url)
@@ -219,7 +222,11 @@ async def update_route(
 
     # Update the route
     saved_route = await route_service.update_route(
-        updated_route, changed_fields, connection
+        updated_route,
+        changed_fields,
+        connection,
+        changed_by="ui",
+        source=Provenance.UI,
     )
 
     # Convert to resource
@@ -264,4 +271,6 @@ async def delete_route(
         raise RouteNotFoundError(route_id)
 
     # Delete the route (will check for usage)
-    await route_service.delete_route(route_uuid, connection)
+    await route_service.delete_route(
+        route_uuid, connection, changed_by="ui", source=Provenance.UI
+    )

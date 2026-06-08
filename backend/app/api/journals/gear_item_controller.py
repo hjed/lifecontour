@@ -5,6 +5,7 @@ Gear Item REST API controller.
 import uuid
 from typing import Annotated
 
+from core_shared.models.history import Provenance
 from core_shared.models.journals.gear_item import GearItem
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, Query, Request, status
@@ -170,9 +171,15 @@ async def update_gear_item(
 
             changed_fields[field] = (old_val, new_val)
 
+        # A plain gear edit is not scoped to a single journal (gear is shared
+        # across journals), so journal_id is left unset and the history
+        # projection skips it. Provenance is still carried for any future
+        # journal-scoped gear edit path.
         event = GearItemUpdated(
             gear_item_id=str(updated.id),
             changed_fields=changed_fields,
+            source=Provenance.UI,
+            changed_by="ui",
             transaction=transaction,
         )
         await event_publisher.publish(event)

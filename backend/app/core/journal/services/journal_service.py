@@ -3,6 +3,7 @@
 from typing import Any
 
 import structlog
+from core_shared.models.history import Provenance
 from core_shared.models.journals import (
     MAX_HIERARCHY_DEPTH,
     Journal,
@@ -63,7 +64,11 @@ class JournalService:
         self.contact_relationship_repo = contact_relationship_repo
 
     async def create_journal(
-        self, journal: Journal, transaction: AsyncConnection
+        self,
+        journal: Journal,
+        transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> Journal:
         """
         Create a new journal with validation.
@@ -74,6 +79,8 @@ class JournalService:
         Args:
             journal: The journal to create
             transaction: Database transaction
+            changed_by: Who/what made the change (for history provenance)
+            source: Provenance of the change (for history provenance)
 
         Returns:
             The created journal with ID and timestamps
@@ -106,6 +113,8 @@ class JournalService:
             saved_journal.id,
             saved_journal.user_id,
             saved_journal.title,
+            source=source,
+            changed_by=changed_by,
             transaction=transaction,
         )
         await self.event_publisher.publish(event)
@@ -124,6 +133,8 @@ class JournalService:
         journal: Journal,
         changed_fields: dict[str, Any],
         transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> Journal:
         """
         Update an existing journal.
@@ -135,6 +146,8 @@ class JournalService:
             journal: The journal to update (must have id set)
             changed_fields: Dictionary of changed fields for event tracking
             transaction: Database transaction
+            changed_by: Who/what made the change (for history provenance)
+            source: Provenance of the change (for history provenance)
 
         Returns:
             The updated journal
@@ -167,6 +180,8 @@ class JournalService:
         event = JournalUpdated(
             saved_journal.id,
             changed_fields,
+            source=source,
+            changed_by=changed_by,
             transaction=transaction,
         )
         await self.event_publisher.publish(event)
@@ -192,7 +207,11 @@ class JournalService:
         return saved_journal
 
     async def delete_journal(
-        self, journal_id: int, transaction: AsyncConnection
+        self,
+        journal_id: int,
+        transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> None:
         """
         Delete a journal.
@@ -203,6 +222,8 @@ class JournalService:
         Args:
             journal_id: The ID of the journal to delete
             transaction: Database transaction
+            changed_by: Who/what made the change (for history provenance)
+            source: Provenance of the change (for history provenance)
 
         Raises:
             JournalNotFoundError: If journal doesn't exist
@@ -240,6 +261,8 @@ class JournalService:
             journal_id,
             user_id=journal.user_id,
             external_identifiers=external_identifiers,
+            source=source,
+            changed_by=changed_by,
             transaction=transaction,
         )
         await self.event_publisher.publish(event)
@@ -466,6 +489,8 @@ class JournalService:
         journal_id: int,
         journal_type: JournalType,
         transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> list[JournalType]:
         """
         Add a type to a journal with automatic dependency resolution.
@@ -520,7 +545,13 @@ class JournalService:
         # Note: Type-specific data creation is handled by the caller
         # This service only tracks which types are added
         for jtype in types_to_add:
-            event = JournalTypeAdded(journal_id, jtype.value, transaction=transaction)
+            event = JournalTypeAdded(
+                journal_id,
+                jtype.value,
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
+            )
             await self.event_publisher.publish(event)
 
             logger.info(
@@ -536,6 +567,8 @@ class JournalService:
         journal_id: int,
         journal_type: JournalType,
         transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> None:
         """
         Remove a type from a journal.
@@ -560,7 +593,11 @@ class JournalService:
         # Publish type removed event
         # Note: Type-specific data deletion is handled by database CASCADE
         event = JournalTypeRemoved(
-            journal_id, journal_type.value, transaction=transaction
+            journal_id,
+            journal_type.value,
+            source=source,
+            changed_by=changed_by,
+            transaction=transaction,
         )
         await self.event_publisher.publish(event)
 

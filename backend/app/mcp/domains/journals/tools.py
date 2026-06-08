@@ -13,6 +13,7 @@ from typing import Annotated, Any
 from uuid import UUID
 
 import structlog
+from core_shared.models.history import Provenance
 from core_shared.models.journals import (
     AbseilingData,
     ActivityTemplate,
@@ -2473,7 +2474,9 @@ async def create_journal_entry(
     )
 
     # Create journal
-    created_journal = await journal_service.create_journal(journal, db_connection)
+    created_journal = await journal_service.create_journal(
+        journal, db_connection, changed_by="mcp", source=Provenance.MCP
+    )
 
     # Ensure journal_id is not None (it should always be set after creation)
     if created_journal.id is None:
@@ -2489,7 +2492,11 @@ async def create_journal_entry(
             # Capture the return value: includes all types added (requested +
             # auto-resolved dependencies like FITNESS for OUTDOOR_ACTIVITY).
             added_types = await journal_service.add_type_to_journal(
-                journal_id, journal_type, db_connection
+                journal_id,
+                journal_type,
+                db_connection,
+                changed_by="mcp",
+                source=Provenance.MCP,
             )
 
             # Create type-specific data rows for ALL added types (including
@@ -2685,7 +2692,11 @@ async def update_journal_entry(
 
     # Update journal
     updated_journal = await journal_service.update_journal(
-        existing_journal, changed_fields, db_connection
+        existing_journal,
+        changed_fields,
+        db_connection,
+        changed_by="mcp",
+        source=Provenance.MCP,
     )
 
     # Update types if provided (replace all types, already validated upfront)
@@ -2717,7 +2728,11 @@ async def update_journal_entry(
             if current_type_str not in [t.upper() for t in request.types]:
                 current_type = JournalType[current_type_str.upper()]
                 await journal_service.remove_type_from_journal(
-                    journal_id, current_type, db_connection
+                    journal_id,
+                    current_type,
+                    db_connection,
+                    changed_by="mcp",
+                    source=Provenance.MCP,
                 )
 
         # Add new types
@@ -2742,7 +2757,11 @@ async def update_journal_entry(
                 # Capture the return value: includes all types added (requested +
                 # auto-resolved dependencies like FITNESS for OUTDOOR_ACTIVITY).
                 added_types = await journal_service.add_type_to_journal(
-                    journal_id, journal_type, db_connection
+                    journal_id,
+                    journal_type,
+                    db_connection,
+                    changed_by="mcp",
+                    source=Provenance.MCP,
                 )
 
                 # Create type-specific data rows for ALL added types (including
@@ -3590,7 +3609,9 @@ async def delete_journal(
     )
 
     # Delete journal
-    await journal_service.delete_journal(journal_id, db_connection)
+    await journal_service.delete_journal(
+        journal_id, db_connection, changed_by="mcp", source=Provenance.MCP
+    )
 
     class DeleteResponse(BaseModel):
         journal_id: int
