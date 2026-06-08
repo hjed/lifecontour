@@ -1428,14 +1428,37 @@ export function useDismissReviewItem() {
 
   return useMutation({
     mutationFn: dismissReviewItem,
+    // Optimistically drop the dismissed item from every cached review-items
+    // list so the sidebar updates immediately. The backend commits the dismiss
+    // at request teardown, so the invalidation-triggered refetch can otherwise
+    // still return the item (read-after-write) and leave it on screen.
+    onMutate: async (id: string) => {
+      await queryClient.cancelQueries({ queryKey: reviewItemKeys.lists() });
+      const previousLists = queryClient.getQueriesData<ReviewItemsListResponse>(
+        {
+          queryKey: reviewItemKeys.lists(),
+        }
+      );
+      queryClient.setQueriesData<ReviewItemsListResponse>(
+        { queryKey: reviewItemKeys.lists() },
+        old =>
+          old ? { ...old, data: old.data.filter(item => item.id !== id) } : old
+      );
+      return { previousLists };
+    },
+    onError: (error: Error, _id, context) => {
+      context?.previousLists?.forEach(([key, data]) => {
+        queryClient.setQueryData(key, data);
+      });
+      toast.error(error.message);
+    },
     onSuccess: () => {
+      toast.success('Review item dismissed');
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: reviewItemKeys.all });
       queryClient.invalidateQueries({ queryKey: journalKeys.lists() });
       queryClient.invalidateQueries({ queryKey: journalKeys.details() });
-      toast.success('Review item dismissed');
-    },
-    onError: (error: Error) => {
-      toast.error(error.message);
     },
   });
 }

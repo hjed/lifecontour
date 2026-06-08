@@ -77,30 +77,32 @@ test.describe('Contact Journals Display', () => {
         contacts: [{ contact_id: contact.id, relationship_type: 'ABOUT' }],
       });
 
-      // Navigate to contact detail page
-      await page.goto(`/contacts/${contact.id}`);
-
-      // Wait for page to load by checking for contact name
-      await expect(
-        page.getByText(`${contact.firstName} ${contact.lastName}`).first()
-      ).toBeVisible();
-
-      // Verify journals section is visible
-      await navigateToContactAndWaitForJournals(page, contact.id);
-
-      // Verify participant journal is displayed. The reload busts any stale
-      // "empty" React Query cache from a fetch that raced journal creation; give
-      // each reload enough time to re-fetch and render before retrying, since a
-      // 2s inner timeout was too tight for firefox to settle under CI load.
+      // Ensure the backend has both journal-contact relationships durably
+      // readable before asserting on the UI. The journal + relationship create
+      // commits at request teardown (after the create response is sent), so an
+      // immediate page load can race ahead of the write — poll the API until it
+      // is consistent, then the single UI load below is deterministic.
       await expect(async () => {
-        await page.reload();
-        await expect(
-          page.getByRole('heading', { name: participantJournal.title })
-        ).toBeVisible({ timeout: 10000 });
-        await expect(
-          page.getByRole('heading', { name: aboutJournal.title })
-        ).toBeVisible({ timeout: 10000 });
-      }).toPass({ timeout: 60000 });
+        const response = await page.request.get(
+          `/api/contacts/${contact.id}/journals`
+        );
+        expect(response.ok()).toBeTruthy();
+        const body = (await response.json()) as {
+          data?: { id: string | number }[];
+        };
+        const ids = (body.data ?? []).map(journal => String(journal.id));
+        expect(ids).toContain(String(participantJournal.id));
+        expect(ids).toContain(String(aboutJournal.id));
+      }).toPass({ timeout: 30000 });
+
+      // Verify the journals section and both journals are displayed.
+      await navigateToContactAndWaitForJournals(page, contact.id);
+      await expect(
+        page.getByRole('heading', { name: participantJournal.title })
+      ).toBeVisible();
+      await expect(
+        page.getByRole('heading', { name: aboutJournal.title })
+      ).toBeVisible();
     });
 
     test('should display contact name instead of Contact <id> on related journals', async ({

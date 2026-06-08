@@ -276,6 +276,66 @@ describe('Contact Tag Mutation Hooks', () => {
         })
       ).rejects.toThrow('Tag not found on contact');
     });
+
+    it('should optimistically remove the tag from the cache before the request resolves', async () => {
+      queryClient.setQueryData(contactKeys.tags('42'), {
+        data: [
+          { id: '7', type: 'tags', attributes: { name: 'Keep me out' } },
+          { id: '8', type: 'tags', attributes: { name: 'Stay' } },
+        ],
+      });
+
+      // Resolve only when we choose, so we can observe the optimistic state.
+      let resolveFetch: (value: Response) => void = () => {};
+      mockFetch.mockReturnValueOnce(
+        new Promise<Response>(resolve => {
+          resolveFetch = resolve;
+        })
+      );
+
+      const { result } = renderHook(() => useRemoveContactTag(), {
+        wrapper: createWrapper,
+      });
+
+      result.current.mutate({ contactId: '42', tagId: '7' });
+
+      await waitFor(() => {
+        const cached = queryClient.getQueryData(contactKeys.tags('42')) as {
+          data: { id: string }[];
+        };
+        expect(cached.data.map(t => t.id)).toEqual(['8']);
+      });
+
+      resolveFetch({ ok: true } as Response);
+    });
+
+    it('should roll back the optimistic removal when the request fails', async () => {
+      const original = {
+        data: [
+          { id: '7', type: 'tags', attributes: { name: 'Keep me out' } },
+          { id: '8', type: 'tags', attributes: { name: 'Stay' } },
+        ],
+      };
+      queryClient.setQueryData(contactKeys.tags('42'), original);
+
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ errors: [{ detail: 'Boom' }] }),
+      } as Response);
+
+      const { result } = renderHook(() => useRemoveContactTag(), {
+        wrapper: createWrapper,
+      });
+
+      await expect(
+        result.current.mutateAsync({ contactId: '42', tagId: '7' })
+      ).rejects.toThrow('Boom');
+
+      const cached = queryClient.getQueryData(contactKeys.tags('42')) as {
+        data: { id: string }[];
+      };
+      expect(cached.data.map(t => t.id)).toEqual(['7', '8']);
+    });
   });
 
   describe('useCreateTag', () => {

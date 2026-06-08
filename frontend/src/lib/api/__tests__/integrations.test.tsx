@@ -21,6 +21,8 @@ import {
   fetchSyncJobStatus,
   fetchIntegrationHealth,
   triggerGoogleSync,
+  useDeleteStravaMapping,
+  integrationKeys,
 } from '../integrations';
 
 // Mock fetch globally
@@ -377,6 +379,100 @@ describe('Integration React Query Hooks', () => {
       });
 
       expect(result.current.data).toEqual(mockResponse);
+    });
+  });
+
+  describe('useDeleteStravaMapping optimistic updates', () => {
+    function createWrapperWithClient() {
+      const queryClient = new QueryClient({
+        defaultOptions: {
+          queries: { retry: false },
+          mutations: { retry: false },
+        },
+      });
+      const TestWrapper = ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={queryClient}>
+          {children}
+        </QueryClientProvider>
+      );
+      return { queryClient, TestWrapper };
+    }
+
+    const seed = (queryClient: QueryClient) =>
+      queryClient.setQueryData(integrationKeys.stravaMappings(), {
+        data: [
+          {
+            id: 'm1',
+            type: 'strava-athlete-mapping',
+            attributes: {
+              strava_athlete_id: 'a1',
+              strava_athlete_name: 'Speedy',
+              contact_id: 1,
+            },
+          },
+          {
+            id: 'm2',
+            type: 'strava-athlete-mapping',
+            attributes: {
+              strava_athlete_id: 'a2',
+              strava_athlete_name: 'Keep',
+              contact_id: 2,
+            },
+          },
+        ],
+      });
+
+    it('removes the mapping row before the request resolves', async () => {
+      const { queryClient, TestWrapper } = createWrapperWithClient();
+      seed(queryClient);
+
+      let resolveFetch: (value: Response) => void = () => {};
+      mockFetch.mockReturnValueOnce(
+        new Promise<Response>(resolve => {
+          resolveFetch = resolve;
+        })
+      );
+
+      const { result } = renderHook(() => useDeleteStravaMapping(), {
+        wrapper: TestWrapper,
+      });
+
+      result.current.mutate('a1');
+
+      await waitFor(() => {
+        const cached = queryClient.getQueryData(
+          integrationKeys.stravaMappings()
+        ) as { data: { attributes: { strava_athlete_id: string } }[] };
+        expect(cached.data.map(m => m.attributes.strava_athlete_id)).toEqual([
+          'a2',
+        ]);
+      });
+
+      resolveFetch({ ok: true } as Response);
+    });
+
+    it('rolls back the mapping row when the delete fails', async () => {
+      const { queryClient, TestWrapper } = createWrapperWithClient();
+      seed(queryClient);
+
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ errors: [{ detail: 'Boom' }] }),
+      } as Response);
+
+      const { result } = renderHook(() => useDeleteStravaMapping(), {
+        wrapper: TestWrapper,
+      });
+
+      await expect(result.current.mutateAsync('a1')).rejects.toThrow();
+
+      const cached = queryClient.getQueryData(
+        integrationKeys.stravaMappings()
+      ) as { data: { attributes: { strava_athlete_id: string } }[] };
+      expect(cached.data.map(m => m.attributes.strava_athlete_id)).toEqual([
+        'a1',
+        'a2',
+      ]);
     });
   });
 });
