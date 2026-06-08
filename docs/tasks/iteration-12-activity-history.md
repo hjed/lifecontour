@@ -1,6 +1,6 @@
 # Iteration 12: Activity History (Journals + Unified Foundation)
 
-**Status:** 🟡 PLANNED
+**Status:** 🟡 IN PROGRESS — ITER12-001 Phase 1 (backend foundation) complete
 **Dependencies:** Iteration 4 (Journal core + events), Iteration 5 (Redis Streams event bus, transactional outbox relay, stream consumers), existing contact activity history
 **Goal:** Deliver field-level activity history for journals of all types, displayed at the bottom of the journal UI with full provenance, by generalising the existing contact-history infrastructure into a single shared, **event-driven** system — and migrating contacts onto that same foundation.
 
@@ -87,27 +87,28 @@ The work is split into three chunks, each independently shippable and valuable. 
 - [Activity History — Scope](../product-specifications/activity-history-product-specification.md#scope)
 
 **Acceptance Criteria (task-level):**
-- [ ] History table, domain model, repository, API schemas, and frontend components are entity-agnostic and shared.
-- [ ] `Provenance` lives in a shared module usable by both domains.
-- [ ] The contact activity feed behaves and looks identically (regression gate green).
+- [ ] History table, domain model, repository, API schemas, and frontend components are entity-agnostic and shared. *(Backend table/model/repository done in Phase 1; API schemas + frontend components in Phase 2.)*
+- [x] `Provenance` lives in a shared module usable by both domains. *(Moved to `core_shared/core_shared/models/history/`, re-exported from contacts for compatibility.)*
+- [ ] The contact activity feed behaves and looks identically (regression gate green). *(Backend regression suites green in Phase 1; full E2E gate confirmed in Phase 2.)*
 
-#### Phase 1: Backend — Generalise Table, Model, and Repository
+#### Phase 1: Backend — Generalise Table, Model, and Repository ✅
 **PR Size:** ~8–10 files
+**Status:** ✅ COMPLETE
 
 Generalise the data layer while keeping the existing contact write/read paths working unchanged.
 
 **Acceptance Criteria:**
-- [ ] Alembic migration renames `contact_field_history` → `field_history` (table is already entity-agnostic via `entity_type` + `entity_id`); existing rows preserved.
-- [ ] Migration adds nullable `event_id VARCHAR` column and a unique index on `(event_id, entity_type, entity_id, field_name)` for projection idempotency (existing rows keep `event_id = NULL`).
-- [ ] `Provenance` enum relocated from `core_shared/.../contacts/value_objects.py` to a shared module (e.g. `core_shared/.../history/`), re-exported from the old path for compatibility; add any journal-relevant sources (e.g. `GOOGLE_CALENDAR`).
-- [ ] `ContactFieldHistoryEntry` generalised to `FieldHistoryEntry` (shared), with a compatibility alias.
-- [ ] Repository generalised (`field_history_repository.py`) with `record_change` using `INSERT ... ON CONFLICT DO NOTHING`, and `get_history_for_aggregate(root_type, root_id, limit, offset)` backed by a per-root **aggregation strategy** (the current hard-coded contact `WHERE` becomes the "contact" strategy).
-- [ ] Contact history endpoint and `ContactHistoryService` continue to work via the generalised repository.
+- [x] Alembic migration renames `contact_field_history` → `field_history` (table is already entity-agnostic via `entity_type` + `entity_id`); existing rows preserved. *(`0087_rename_contact_field_history_to_field_history.py`; `rename_table` preserves rows.)*
+- [x] Migration adds nullable `event_id VARCHAR` column and a unique index on `(event_id, entity_type, entity_id, field_name)` for projection idempotency (existing rows keep `event_id = NULL`). *(Index `ux_field_history_event_dedup`.)*
+- [x] `Provenance` enum relocated from `core_shared/.../contacts/value_objects.py` to a shared module (e.g. `core_shared/.../history/`), re-exported from the old path for compatibility; add any journal-relevant sources (e.g. `GOOGLE_CALENDAR`). *(Added `GOOGLE_CALENDAR`.)*
+- [x] `ContactFieldHistoryEntry` generalised to `FieldHistoryEntry` (shared), with a compatibility alias. *(`app/core/history/models.py`; alias kept in `contacts/models/repositories.py`.)*
+- [x] Repository generalised (`field_history_repository.py`) with `record_change` using `INSERT ... ON CONFLICT DO NOTHING`, and `get_history_for_aggregate(root_type, root_id, limit, offset)` backed by a per-root **aggregation strategy** (the current hard-coded contact `WHERE` becomes the "contact" strategy). *(`SqlFieldHistoryRepository` + `HistoryAggregationStrategy` registry.)*
+- [x] Contact history endpoint and `ContactHistoryService` continue to work via the generalised repository. *(`SqlContactFieldHistoryRepository` is now a thin façade over the shared repo; no API/service changes.)*
 
 **Required Test Coverage:**
-- **Integration:** migration applies and preserves existing rows; unique index rejects duplicate `(event_id, entity_type, entity_id, field_name)`; `record_change` is idempotent on re-insert; `get_history_for_aggregate` returns correct aggregation + pagination for the contact strategy. Use `async_connection` / `clean_database` fixtures from `tests/integration/conftest.py` (never a new `DatabaseProvider`).
-- **Unit:** `Provenance` re-export, `FieldHistoryEntry` construction/alias.
-- **Regression:** existing contact history unit + integration tests remain green unchanged.
+- [x] **Integration:** migration applies and preserves existing rows; unique index rejects duplicate `(event_id, entity_type, entity_id, field_name)`; `record_change` is idempotent on re-insert; `get_history_for_aggregate` returns correct aggregation + pagination for the contact strategy. Use `async_connection` / `clean_database` fixtures from `tests/integration/conftest.py` (never a new `DatabaseProvider`). *(`tests/integration/history/`.)*
+- [x] **Unit:** `Provenance` re-export, `FieldHistoryEntry` construction/alias. *(`tests/unit/history/`.)*
+- [x] **Regression:** existing contact history unit + integration tests remain green unchanged. *(1778 unit + contact history integration + search-indexer suites green.)*
 
 #### Phase 2: Frontend — Generalise Activity Feed Components and Types
 **PR Size:** ~6–8 files

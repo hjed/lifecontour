@@ -97,20 +97,40 @@ CREATE TABLE contact_tags (
 );
 ```
 
-#### Contact History Table
+#### Field History Table (shared, entity-agnostic)
+
+Field-level activity history is recorded in a single entity-agnostic `field_history`
+table shared by both the contacts and journals domains (introduced as
+`contact_field_history` and generalised/renamed to `field_history` in migration
+`0087` — see [Iteration 12](../tasks/iteration-12-activity-history.md)). Every row
+records a single field change to some entity, identified by an
+`(entity_type, entity_id)` pair, with provenance (`source`) and an optional
+originating `event_id`.
+
 ```sql
-CREATE TABLE contact_history (
+CREATE TABLE field_history (
     id SERIAL PRIMARY KEY,
-    entity_type VARCHAR(50) NOT NULL, -- 'contact', 'contact_method', 'contact_note', 'contact_tag'
+    entity_type VARCHAR(50) NOT NULL, -- 'contact', 'contact_method', 'journal', 'route', 'gear_item', ...
     entity_id INTEGER NOT NULL,
-    action VARCHAR(20) NOT NULL CHECK (action IN ('created', 'updated', 'deleted')),
-    field_name VARCHAR(100), -- specific field that changed (for updates)
+    field_name VARCHAR(100) NOT NULL, -- field that changed; marker fields for create/delete/type changes
     old_value TEXT,
     new_value TEXT,
-    changed_by VARCHAR(100), -- user identifier (for future auth)
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    changed_by VARCHAR(100), -- user/agent identifier
+    source VARCHAR(50) NOT NULL DEFAULT 'system', -- Provenance: ui, mcp, google_contacts, google_calendar, strava, immich, summary_regeneration, system
+    event_id VARCHAR, -- originating domain event id; NULL for the synchronous contact dual-write
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() -- set from event.occurred_at by the projection
 );
+
+-- Idempotency for the event-driven history projection: re-delivered events never
+-- duplicate rows. NULL event_ids are treated as distinct by PostgreSQL, so the
+-- synchronous contact dual-write (event_id = NULL) is never deduplicated.
+CREATE UNIQUE INDEX ux_field_history_event_dedup
+    ON field_history (event_id, entity_type, entity_id, field_name);
 ```
+
+Reads are aggregated per root entity via a pluggable aggregation strategy
+(`HistoryAggregationStrategy`): the `contact` strategy resolves the contact plus all
+its related sub-entities; a `journal` strategy is added in ITER12-002.
 
 #### Event Outbox Table (Transactional Event Publishing)
 ```sql
@@ -165,9 +185,11 @@ CREATE INDEX idx_tags_parent_id ON tags(parent_id);
 CREATE INDEX idx_contact_tags_contact_id ON contact_tags(contact_id);
 CREATE INDEX idx_contact_tags_tag_id ON contact_tags(tag_id);
 
--- History indexes
-CREATE INDEX idx_contact_history_entity ON contact_history(entity_type, entity_id);
-CREATE INDEX idx_contact_history_created_at ON contact_history(created_at);
+-- Field history indexes
+CREATE INDEX idx_field_history_field_name ON field_history(field_name);
+CREATE INDEX idx_field_history_created_at ON field_history(created_at);
+-- Unique idempotency index (see Field History Table above)
+-- CREATE UNIQUE INDEX ux_field_history_event_dedup ON field_history(event_id, entity_type, entity_id, field_name);
 
 -- Event outbox indexes
 CREATE INDEX idx_event_outbox_unprocessed ON event_outbox(processed_at) WHERE processed_at IS NULL;

@@ -103,7 +103,7 @@ async def test_fetch_complete_contact_data_captures_signals(
     history_date = datetime.now(UTC) - timedelta(days=10)
     await async_connection.execute(
         text("""
-            INSERT INTO contact_field_history (entity_id, entity_type, field_name, new_value, created_at)
+            INSERT INTO field_history (entity_id, entity_type, field_name, new_value, created_at)
             VALUES (:id, 'contact', 'first_name', 'new_name', :created_at)
         """),
         {"id": contact_id, "created_at": history_date},

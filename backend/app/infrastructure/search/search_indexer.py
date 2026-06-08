@@ -396,7 +396,7 @@ class SearchIndexer:
             # to include changes to contact methods, addresses, notes, and tags
             history_query = text("""
                 SELECT created_at
-                FROM contact_field_history
+                FROM field_history
                 WHERE
                     (entity_type = 'contact' AND entity_id = :contact_id)
                     OR (entity_type IN ('contact_method', 'contact_address', 'contact_note', 'contact_tag')
