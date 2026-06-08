@@ -30,6 +30,7 @@ import {
   CustomDateTypeListResponse,
 } from '@/types/contacts';
 import { JsonApiErrorResponse, JsonApiMeta } from '@/types/api';
+import type { HistoryFilters } from '@/types/history';
 import {
   API_ENDPOINTS,
   ERROR_MESSAGES,
@@ -618,11 +619,6 @@ export const historyKeys = {
   list: (contactId: string, page?: number, limit?: number) =>
     [...historyKeys.all, contactId, { page, limit }] as const,
 };
-
-export interface HistoryFilters {
-  page?: number;
-  limit?: number;
-}
 
 export async function fetchContactHistory(
   contactId: string,

@@ -412,33 +412,12 @@ export const TAG_COLORS = [
 
 export type TagColor = (typeof TAG_COLORS)[number];
 
-// Contact History/Activity Types
-export interface ContactHistoryAttributes {
-  entity_type: string;
-  entity_id: number;
-  field_name: string;
-  old_value: string | null;
-  new_value: string | null;
-  changed_by: string | null;
-  source: string;
-  created_at: string | null;
-}
-
-export interface ContactHistoryResource {
-  type: 'contact_history';
-  id: string;
-  attributes: ContactHistoryAttributes;
-}
-
-export interface ContactHistoryPaginationMeta {
-  total_count: number;
-  page_count: number;
-  current_page: number;
-  per_page: number;
-}
-
-export interface ContactHistoryListResponse {
-  data: ContactHistoryResource[];
-  meta?: ContactHistoryPaginationMeta;
-  links?: JsonApiLinks;
-}
+// Contact History/Activity Types.
+// History is entity-agnostic and lives in `types/history.ts`; these aliases are
+// retained for backward compatibility.
+export type {
+  HistoryAttributes as ContactHistoryAttributes,
+  HistoryResource as ContactHistoryResource,
+  HistoryPaginationMeta as ContactHistoryPaginationMeta,
+  HistoryListResponse as ContactHistoryListResponse,
+} from './history';

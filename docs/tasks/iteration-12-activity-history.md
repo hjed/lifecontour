@@ -1,6 +1,6 @@
 # Iteration 12: Activity History (Journals + Unified Foundation)
 
-**Status:** 🟡 IN PROGRESS — ITER12-001 Phase 1 (backend foundation) complete
+**Status:** 🟡 IN PROGRESS — ITER12-001 (shared foundation) complete (Phase 1 backend + Phase 2 frontend)
 **Dependencies:** Iteration 4 (Journal core + events), Iteration 5 (Redis Streams event bus, transactional outbox relay, stream consumers), existing contact activity history
 **Goal:** Deliver field-level activity history for journals of all types, displayed at the bottom of the journal UI with full provenance, by generalising the existing contact-history infrastructure into a single shared, **event-driven** system — and migrating contacts onto that same foundation.
 
@@ -87,9 +87,9 @@ The work is split into three chunks, each independently shippable and valuable. 
 - [Activity History — Scope](../product-specifications/activity-history-product-specification.md#scope)
 
 **Acceptance Criteria (task-level):**
-- [ ] History table, domain model, repository, API schemas, and frontend components are entity-agnostic and shared. *(Backend table/model/repository done in Phase 1; API schemas + frontend components in Phase 2.)*
+- [x] History table, domain model, repository, API schemas, and frontend components are entity-agnostic and shared. *(Backend table/model/repository done in Phase 1; frontend components + types generalised in Phase 2. Note: REST `ContactHistory*` API schemas remain the contact endpoint's response shape and adopt the shared `History*` schemas in ITER12-002 Phase 2 when the journal history endpoint lands.)*
 - [x] `Provenance` lives in a shared module usable by both domains. *(Moved to `core_shared/core_shared/models/history/`, re-exported from contacts for compatibility.)*
-- [ ] The contact activity feed behaves and looks identically (regression gate green). *(Backend regression suites green in Phase 1; full E2E gate confirmed in Phase 2.)*
+- [x] The contact activity feed behaves and looks identically (regression gate green). *(Backend regression suites green in Phase 1; full `contact-activity-feed.spec.ts` E2E + RTL gate confirmed green in Phase 2.)*
 
 #### Phase 1: Backend — Generalise Table, Model, and Repository ✅
 **PR Size:** ~8–10 files
@@ -110,20 +110,21 @@ Generalise the data layer while keeping the existing contact write/read paths wo
 - [x] **Unit:** `Provenance` re-export, `FieldHistoryEntry` construction/alias. *(`tests/unit/history/`.)*
 - [x] **Regression:** existing contact history unit + integration tests remain green unchanged. *(1778 unit + contact history integration + search-indexer suites green.)*
 
-#### Phase 2: Frontend — Generalise Activity Feed Components and Types
+#### Phase 2: Frontend — Generalise Activity Feed Components and Types ✅
 **PR Size:** ~6–8 files
+**Status:** ✅ COMPLETE
 
 Move the activity-feed components and types to a shared location, parameterised by entity, with a thin contact wrapper.
 
 **Acceptance Criteria:**
-- [ ] `ActivityFeed.tsx` and `ActivityItem.tsx` moved from `components/contacts/` to `components/history/`, parameterised by entity type and data hook.
-- [ ] History types promoted from `types/contacts.ts` to a shared `types/history.ts` (re-exported for compatibility).
-- [ ] Provenance icon/label map extended for any new sources.
-- [ ] Existing contact usage rewired through the shared component with no visual or behavioural change.
+- [x] `ActivityFeed.tsx` and `ActivityItem.tsx` moved from `components/contacts/` to `components/history/`, parameterised by entity type and data hook. *(`ActivityFeed` takes an injected `useHistory` hook + `entity` prop; `ActivityItem` is entity-agnostic via `HistoryResource`.)*
+- [x] History types promoted from `types/contacts.ts` to a shared `types/history.ts` (re-exported for compatibility). *(`HistoryAttributes`/`HistoryResource`/`HistoryPaginationMeta`/`HistoryListResponse`/`HistoryFilters`; old `ContactHistory*` names re-exported as aliases.)*
+- [x] Provenance icon/label map extended for any new sources. *(Added `google_calendar` (Calendar) and `immich` (Camera); all spec-listed sources covered.)*
+- [x] Existing contact usage rewired through the shared component with no visual or behavioural change. *(Thin `components/contacts/ActivityFeed.tsx` wrapper supplies `entity="contact"` + `useContactHistory`; the contact detail page import is unchanged.)*
 
 **Required Test Coverage:**
-- **Unit (RTL):** shared `ActivityFeed`/`ActivityItem` render entries, provenance icons/labels, Load-More pagination, loading/empty/error states.
-- **Regression:** existing contact activity-feed component tests and the `contact-activity-feed.spec.ts` E2E remain green.
+- [x] **Unit (RTL):** shared `ActivityFeed`/`ActivityItem` render entries, provenance icons/labels, Load-More pagination, loading/empty/error states. *(`components/history/__tests__/`; provenance labels covered via the exported `getProvenanceLabel` mapping, triggers via `data-testid`.)*
+- [x] **Regression:** existing contact activity-feed component tests and the `contact-activity-feed.spec.ts` E2E remain green. *(Contact wrapper RTL parity test + full E2E spec green; 1339 frontend unit tests + 7 E2E tests passing.)*
 
 ---
 
