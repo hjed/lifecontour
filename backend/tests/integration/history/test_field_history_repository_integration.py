@@ -1,5 +1,7 @@
 """Integration tests for the generalised SqlFieldHistoryRepository."""
 
+from datetime import UTC, datetime
+
 import pytest
 from core_shared.models.history import Provenance
 from sqlalchemy import text
@@ -266,3 +268,52 @@ class TestSqlFieldHistoryRepositoryIntegration:
     ) -> None:
         with pytest.raises(UnknownAggregationRootError):
             await history_repo.get_history_for_aggregate("nope", 1)
+
+    async def test_record_change_persists_explicit_created_at(
+        self, history_repo: SqlFieldHistoryRepository, clean_database: AsyncConnection
+    ) -> None:
+        """Projection passes event.occurred_at so history reflects when the change
+        actually happened, not wall-clock at projection time."""
+        occurred_at = datetime(2023, 6, 1, 9, 30, 0, tzinfo=UTC)
+        entry = FieldHistoryEntry(
+            entity_type="journal",
+            entity_id=4242,
+            field_name="title",
+            old_value="a",
+            new_value="b",
+            event_id="evt-occurred-at",
+            created_at=occurred_at,
+        )
+
+        await history_repo.record_change(entry)
+
+        result = await clean_database.execute(
+            text("SELECT created_at FROM field_history WHERE entity_id = 4242"),
+        )
+        stored = result.scalar_one()
+        assert stored == occurred_at
+
+    async def test_record_change_falls_back_to_db_default_created_at(
+        self, history_repo: SqlFieldHistoryRepository, clean_database: AsyncConnection
+    ) -> None:
+        """The synchronous contact dual-write passes no created_at and must keep
+        using the database default (now()) rather than NULL."""
+        entry = FieldHistoryEntry(
+            entity_type="contact",
+            entity_id=4243,
+            field_name="first_name",
+            old_value="John",
+            new_value="Jane",
+        )
+
+        saved = await history_repo.record_change(entry)
+
+        assert saved.created_at is not None
+        result = await clean_database.execute(
+            text("SELECT created_at FROM field_history WHERE entity_id = 4243"),
+        )
+        stored = result.scalar_one()
+        # Falls back to a DB-generated timestamp (now()), never NULL. Exact value
+        # is the transaction time, unreliable to compare against wall clock under
+        # the savepoint fixture, so we assert it is a populated datetime.
+        assert isinstance(stored, datetime)

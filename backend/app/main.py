@@ -52,6 +52,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     search_consumer_task = None
     summary_consumer_task = None
     inbound_consumer_task = None
+    history_consumer_task = None
     try:
         # Start attendance transition background task (hourly)
         attendance_task = asyncio.create_task(
@@ -123,12 +124,29 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             stream=settings.stream_name,
         )
 
+        # Start stream consumer that projects journal events into field history
+        from app.infrastructure.events.history_projection_consumer import (
+            HistoryProjectionConsumer,
+        )
+
+        history_consumer = HistoryProjectionConsumer(
+            stream_client=stream_client,
+            stream_name=settings.stream_name,
+        )
+        history_consumer_task = asyncio.create_task(history_consumer.start())
+        logger.info(
+            "History projection consumer started",
+            group="history-projection",
+            stream=settings.stream_name,
+        )
+
         yield
 
     finally:
         # Collect all active background tasks for cleanup
         active_tasks: list[tuple[asyncio.Task[None], str]] = []
         for task, name in [
+            (history_consumer_task, "History projection consumer"),
             (inbound_consumer_task, "Inbound event consumer"),
             (summary_consumer_task, "Summary generator consumer"),
             (search_consumer_task, "Search indexer consumer"),

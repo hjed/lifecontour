@@ -11,6 +11,7 @@ from typing import Annotated, Any
 from uuid import UUID
 
 import structlog
+from core_shared.models.history import Provenance
 from core_shared.models.journals import (
     Journal,
     JournalContactRelationship,
@@ -2108,7 +2109,11 @@ async def _process_journal_types(
 
             # Returns all types added, including auto-resolved dependencies
             added_types = await journal_service.add_type_to_journal(
-                journal_id, journal_type, connection
+                journal_id,
+                journal_type,
+                connection,
+                changed_by="ui",
+                source=Provenance.UI,
             )
 
             # Create type-specific data rows for ALL added types (including dependencies)
@@ -2689,7 +2694,9 @@ async def create_journal(
 
     journal = JournalRequestConverter.from_create_request(journal_request.data, user.id)
 
-    created_journal = await journal_service.create_journal(journal, connection)
+    created_journal = await journal_service.create_journal(
+        journal, connection, changed_by="ui", source=Provenance.UI
+    )
 
     # Ensure journal_id is not None (it should always be set after creation)
     if created_journal.id is None:
@@ -2904,7 +2911,11 @@ async def update_journal(
         changed_fields["order"] = updated_journal.order
 
     saved_journal = await journal_service.update_journal(
-        updated_journal, changed_fields, connection
+        updated_journal,
+        changed_fields,
+        connection,
+        changed_by="ui",
+        source=Provenance.UI,
     )
 
     # Fetch all enrichment data
@@ -3112,7 +3123,11 @@ async def partial_update_journal(
         changed_fields["order"] = journal_request.data.attributes.order
 
     saved_journal = await journal_service.update_journal(
-        updated_journal, changed_fields, connection
+        updated_journal,
+        changed_fields,
+        connection,
+        changed_by="ui",
+        source=Provenance.UI,
     )
 
     # Fetch all enrichment data
@@ -3220,7 +3235,9 @@ async def delete_journal(
     if not existing_journal:
         raise JournalNotFoundError(journal_id)
 
-    await journal_service.delete_journal(journal_id, connection)
+    await journal_service.delete_journal(
+        journal_id, connection, changed_by="ui", source=Provenance.UI
+    )
 
 
 # Merge Endpoint
@@ -3445,7 +3462,11 @@ async def add_type_to_journal(
     # Add type with automatic dependency resolution.
     # Returns all types actually added (requested type + auto-resolved dependencies).
     added_types = await journal_service.add_type_to_journal(
-        journal_id, journal_type, connection
+        journal_id,
+        journal_type,
+        connection,
+        changed_by="ui",
+        source=Provenance.UI,
     )
 
     # Create type-specific data rows for ALL added types (including dependencies)
@@ -3624,7 +3645,9 @@ async def remove_type_from_journal(
         )
 
     # Remove type (publish event)
-    await journal_service.remove_type_from_journal(journal_id, jtype, connection)
+    await journal_service.remove_type_from_journal(
+        journal_id, jtype, connection, changed_by="ui", source=Provenance.UI
+    )
 
     # Delete the type-specific data row so it no longer appears in the response.
     # (CASCADE only fires when the whole journal is deleted, not on type removal.)

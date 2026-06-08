@@ -1,6 +1,6 @@
 # Iteration 12: Activity History (Journals + Unified Foundation)
 
-**Status:** 🟡 IN PROGRESS — ITER12-001 (shared foundation) complete (Phase 1 backend + Phase 2 frontend)
+**Status:** 🟡 IN PROGRESS — ITER12-001 (shared foundation) complete (Phase 1 backend + Phase 2 frontend); ITER12-002 Phase 1 (journal event enrichment + projection consumer) complete
 **Dependencies:** Iteration 4 (Journal core + events), Iteration 5 (Redis Streams event bus, transactional outbox relay, stream consumers), existing contact activity history
 **Goal:** Deliver field-level activity history for journals of all types, displayed at the bottom of the journal UI with full provenance, by generalising the existing contact-history infrastructure into a single shared, **event-driven** system — and migrating contacts onto that same foundation.
 
@@ -141,30 +141,45 @@ Move the activity-feed components and types to a shared location, parameterised 
 - [ ] Journal history is available via API and MCP and rendered at the bottom of the journal detail screen.
 - [ ] Projection is idempotent (no duplicates on stream redelivery).
 
-#### Phase 1: Event Enrichment + History Projection Consumer (Journal Events)
-**PR Size:** ~8–10 files
+#### Phase 1: Event Enrichment + History Projection Consumer (Journal Events) ✅
+**PR Size:** ~8–10 files (exceeded: full UI/MCP/worker provenance plumbing landed in this PR by request)
+**Status:** ✅ COMPLETE
 
 Add provenance to journal events and build the consumer that writes history from them.
 
 **Acceptance Criteria:**
-- [ ] Journal domain events (`JournalCreated`, `JournalUpdated`, `JournalDeleted`, `JournalTypeAdded`, `JournalTypeRemoved`, `RouteCreated/Updated/Deleted`, `GearItemUpdated`) carry `source: Provenance` and `changed_by: str` in `event_data`; provenance is plumbed from the API/MCP/worker boundary into the service → event.
-- [ ] `RouteUpdated`, `RouteDeleted`, and `GearItemUpdated` additionally carry `journal_id` so route/gear changes can be grouped to their parent journal.
-- [ ] `HistoryService.project_event(event)` maps each journal event type → one or more `FieldHistoryEntry` rows (updates → one row per `changed_fields` entry; create/delete → marker row; type add/remove → `field_name="types"`), with `created_at = event.occurred_at`.
-- [ ] A "journal" aggregation strategy resolves the `(entity_type, entity_id)` set for a journal (journal + type-specific data + routes + gear).
-- [ ] `HistoryProjectionConsumer` (`app.infrastructure.events.history_projection_consumer`, group `history-projection`) consumes the relevant journal event types from `pms:domain-events`, subclassing `DeadLetterConsumerMixin, StreamConsumer`; writes rows idempotently.
-- [ ] Consumer registered in `backend/app/main.py` and DI wiring alongside the other consumers.
+- [x] Journal domain events (`JournalCreated`, `JournalUpdated`, `JournalDeleted`, `JournalTypeAdded`, `JournalTypeRemoved`, `RouteCreated/Updated/Deleted`, `GearItemUpdated`) carry `source: Provenance` and `changed_by: str` in `event_data`; provenance is plumbed from the API/MCP/worker boundary into the service → event. *(Events default to `SYSTEM`; UI controllers pass `Provenance.UI`, MCP tools `Provenance.MCP`, the inbound sync processor maps `integration_source` → `STRAVA`/`GOOGLE_CALENDAR`, and the Immich processor passes `Provenance.IMMICH`.)*
+- [x] `RouteUpdated`, `RouteDeleted`, and `GearItemUpdated` additionally carry `journal_id` so route/gear changes can be grouped to their parent journal. *(`GearItemUpdated.journal_id` is optional — gear is many-to-many with journals, so a plain gear edit has no single parent and the projection skips it; `delete_route` reads `route.journal_id` before deletion.)*
+- [x] `HistoryService.project_event(event)` maps each journal event type → one or more `FieldHistoryEntry` rows (updates → one row per `changed_fields` entry; create/delete → marker row `__created__`/`__deleted__`; type add/remove → `field_name="types"`), with `created_at = event.occurred_at`. *(`app/core/history/services/history_service.py`; pure mapping. Route/gear rows are tagged to the journal with context in `field_name` (`route:<id>:<field>`, `gear:<id>:<field>`). Non-pair `changed_fields` signals — e.g. `{"calendar_info": True}` calendar-sync triggers — produce no history, honouring "meaningful changes only".)*
+- [x] A "journal" aggregation strategy resolves the `(entity_type, entity_id)` set for a journal. *(`entity_type='journal' AND entity_id=:root_id` in `core/history/models.py`; route/gear/type changes are all tagged to the journal itself — route/gear ids are UUIDs that cannot live in the integer `entity_id` column, and journal-tagging is deletion-safe — so no joins are needed.)*
+- [x] `HistoryProjectionConsumer` (`app.infrastructure.events.history_projection_consumer`, group `history-projection`) consumes the relevant journal event types from `pms:domain-events`, subclassing `DeadLetterConsumerMixin, StreamConsumer`; writes rows idempotently. *(Mirrors `SearchIndexerConsumer`; `record_change` now also writes `created_at = event.occurred_at` via `COALESCE(:created_at, now())`, backward-compatible with the contact dual-write.)*
+- [x] Consumer registered in `backend/app/main.py` alongside the other consumers (self-manages its connection like `SearchIndexerConsumer`, so no new Dishka provider).
 
 **Required Test Coverage:**
-- **Unit:** each journal event carries `source`/`changed_by` (and `journal_id` for route/gear); `project_event` produces exactly the expected rows per event type, carrying provenance and `occurred_at` (mirror `tests/unit/contacts/test_events.py`).
-- **Integration:** publishing journal events to the stream → consumer writes correct `field_history` rows; **redelivery of the same event writes no duplicates**; malformed event → dead-letter. Mirror the search-indexer consumer integration tests.
+- [x] **Unit:** each journal event carries `source`/`changed_by` (and `journal_id` for route/gear); `project_event` produces exactly the expected rows per event type, carrying provenance and `occurred_at` (mirrors `tests/unit/contacts/test_events.py`). *(`tests/unit/journal/test_events.py`, `tests/unit/history/test_history_service.py`, `tests/unit/infrastructure/events/test_history_projection_consumer.py`.)*
+- [x] **Integration:** publishing journal events to the stream → consumer writes correct `field_history` rows; **redelivery of the same event writes no duplicates**; malformed event → dead-letter; plus a backend end-to-end test through the real service → outbox → relay → consumer path. *(`tests/integration/infrastructure/events/test_history_projection_consumer_integration.py`, `tests/integration/infrastructure/events/test_journal_history_projection_e2e.py`, and `created_at` coverage in `tests/integration/history/test_field_history_repository_integration.py`.)*
+- [x] **Regression:** full unit suite (1852), contact-history + contact-service, search-indexer/outbox-relay, journal/route/gear/MCP integration suites green; `ruff` + `mypy` clean.
 
 #### Phase 2: Journal Changed-Fields Coverage (All Types) + History API
 **PR Size:** ~7–9 files
 
 Ensure every journal mutation publishes accurate `changed_fields`, and expose the read API.
 
+> **Carried over from ITER12-002 Phase 1 (must be completed here):** the
+> projection (`HistoryService.project_event`) only emits history for `changed_fields`
+> entries shaped as `(old, new)` pairs; non-pair values are treated as internal
+> signals and skipped ("meaningful changes only"). The journal mutation producers
+> do **not** yet emit pairs — the UI update controllers build scalar new-values
+> (e.g. `changed_fields["title"] = updated_journal.title` in
+> `api/journals/controllers.py`), and the Immich processor uses marker dicts
+> (`dict.fromkeys(_CHANGED_FIELDS, True)` in `immich_album_outbox_event_processor.py`).
+> **Until they emit `(old, new)` pairs, journal-update and Immich-driven history
+> rows are produced for none of these fields.** Converting every producer to pairs
+> is the core of this phase.
+
 **Acceptance Criteria:**
 - [ ] Journal service computes `changed_fields` as `{field: (old, new)}` for base fields **and** type-specific data tables (covering all journal types), routes, and gear — modelled on the contact `_calculate_changed_fields` pattern.
+- [ ] The existing scalar/marker `changed_fields` producers are converted to emit `(old, new)` pairs: the UI update controllers (`api/journals/controllers.py`), the MCP update tool, the inbound sync processor, and the Immich album processor — so their mutations actually appear in `field_history`.
 - [ ] Every journal create/update/delete/type/route/gear mutation publishes an event with accurate `changed_fields` + provenance, and produces no history when nothing changed.
 - [ ] `GET /api/journals/{journal_id}/history?page=&limit=` returns paginated JSON:API history (mirrors the contact history endpoint), 404 for a missing journal, with shared `HistoryAttributes`/`HistoryResource`/`HistoryListResponse` schemas and converter.
 
