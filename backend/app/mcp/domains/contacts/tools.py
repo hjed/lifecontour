@@ -59,6 +59,8 @@ from app.mcp.shared.dependencies import (
     get_async_connection,
     get_contact_relationship_service,
     get_contact_service,
+    get_current_user_id,
+    get_immich_token_service,
     get_search_service,
     get_tag_repository,
     get_tag_service,
@@ -186,8 +188,15 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             await contact_service.contact_repo.get_external_references(contact_id)
         )
 
+        # Resolve the user's Immich server URL (no API-key decryption) so Immich
+        # person references can be rendered as clickable links.
+        user_id = await get_current_user_id()
+        immich_token_service = await get_immich_token_service()
+        immich_server_url = await immich_token_service.get_server_url(user_id)
+
         link_infos = build_contact_external_links(
-            external_references=external_references
+            external_references=external_references,
+            immich_server_url=immich_server_url,
         )
         external_links = [
             ExternalLinkSchema(

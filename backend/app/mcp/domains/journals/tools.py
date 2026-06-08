@@ -323,6 +323,7 @@ _VALID_INTEGRATION_SOURCES = {
     "google_calendar",
     "snipeit",
     "snipeit_maintenance",
+    "immich_album",
 }
 
 
@@ -468,6 +469,14 @@ async def _fetch_journal_external_links(
     journal_repo = SqlJournalRepository(db_connection)
     snipeit_links = await journal_repo.get_snipeit_links(journal_id, user_id)
 
+    # Fetch Immich album links and the user's Immich server URL (reusing the
+    # canonical read-only server-URL accessor — no API-key decryption).
+    from app.mcp.shared.dependencies import get_immich_token_service
+
+    immich_album_links = await journal_repo.get_immich_album_links(journal_id)
+    immich_token_service = await get_immich_token_service()
+    immich_server_url = await immich_token_service.get_server_url(user_id)
+
     # Fetch Google Calendar external event links
     result = await db_connection.execute(
         text(
@@ -494,6 +503,8 @@ async def _fetch_journal_external_links(
         strava_activity_id=strava_activity_id,
         external_event_links=external_event_links,
         snipeit_links=snipeit_links,
+        immich_album_links=immich_album_links,
+        immich_server_url=immich_server_url,
     )
 
 
@@ -507,7 +518,7 @@ async def _fetch_journal_ids_by_integration_source(
     Args:
         db_connection: Database connection
         user_id: The user ID to filter by
-        integration_source: 'strava', 'google_calendar', 'snipeit', 'snipeit_maintenance', or 'snipeit_checkout'
+        integration_source: 'strava', 'google_calendar', 'snipeit', 'snipeit_maintenance', 'snipeit_checkout', or 'immich_album'
 
     Returns:
         Set of journal IDs linked to the specified source.
@@ -552,6 +563,20 @@ async def _fetch_journal_ids_by_integration_source(
                 "AND internal_uuid IS NOT NULL"
             ),
             {"integration_source": mapped_source},
+        )
+    elif integration_source == "immich_album":
+        # Immich albums track the journal via the integer internal_id (not the
+        # UUID column used by Snipe-IT), so join journals to scope by user.
+        result = await db_connection.execute(
+            text(
+                "SELECT m.internal_id AS journal_id "
+                "FROM sync_metadata m "
+                "JOIN journals j ON j.id = m.internal_id "
+                "WHERE m.integration_source = 'immich_album' "
+                "AND m.internal_id IS NOT NULL "
+                "AND j.user_id = :user_id"
+            ),
+            {"user_id": user_id},
         )
     else:
         return set()
@@ -3101,7 +3126,8 @@ async def search_journals(
         str | None,
         Field(
             default=None,
-            description="Optional: Filter by integration source (e.g. 'strava', 'google_calendar'). "
+            description="Optional: Filter by integration source (e.g. 'strava', "
+            "'google_calendar', 'immich_album'). "
             "Returns only journals linked to the specified external system.",
         ),
     ] = None,

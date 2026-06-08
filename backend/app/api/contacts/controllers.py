@@ -99,6 +99,7 @@ from app.core.journal.models.repositories import (
     TravelDataRepository,
 )
 from app.core.journal.services.journal_service import JournalService
+from app.infrastructure.auth.immich_token_service import ImmichTokenService
 from app.infrastructure.auth.models import SessionUser
 
 logger = structlog.get_logger()
@@ -184,12 +185,13 @@ async def get_contact_external_links(
     contact_id: int,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    _user: FromDishka[SessionUser],
+    immich_token_service: FromDishka[ImmichTokenService],
+    user: FromDishka[SessionUser],
 ) -> ExternalLinksResponse:
     """
     Get external system links for a contact.
 
-    Returns links to external systems (Google Contacts, Strava) that
+    Returns links to external systems (Google Contacts, Strava, Immich) that
     are associated with this contact, derived from existing reference data.
     """
     contact = await contact_service.get_contact_by_id(contact_id)
@@ -217,7 +219,12 @@ async def get_contact_external_links(
         for row in result
     ]
 
-    links = build_contact_external_links(external_references=external_references)
+    immich_server_url = await immich_token_service.get_server_url(user.id)
+
+    links = build_contact_external_links(
+        external_references=external_references,
+        immich_server_url=immich_server_url,
+    )
 
     return ExternalLinksResponse(
         data=[

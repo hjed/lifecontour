@@ -183,6 +183,52 @@ class AlbumSyncReadRepository:
             data["cover_url"] = f"/api/journals/{journal_id}/album-cover"
         return data
 
+    async def find_external_links(self, journal_id: int) -> list[dict[str, Any]]:
+        """Return Immich album external-link data for a journal.
+
+        One entry per linked album, each ``{"album_id", "shared_link_url"}``.
+        ``shared_link_url`` is the public share URL from the album reference
+        when present (and a string), otherwise ``None``. The album web URL is
+        built downstream from the user's Immich server URL, so it is not
+        returned here.
+        """
+        result = await self.conn.execute(
+            text("""
+                SELECT sm.external_id AS album_id,
+                       er.reference_data AS reference_data
+                FROM sync_metadata sm
+                LEFT JOIN external_references er
+                    ON er.external_system = :external_system
+                    AND er.external_entity_type = :external_entity_type
+                    AND er.external_entity_id = sm.external_id
+                    AND er.internal_entity_type = :internal_entity_type
+                    AND er.internal_entity_id = sm.internal_id
+                WHERE sm.integration_source = :source
+                  AND sm.internal_id = :journal_id
+            """),
+            {
+                "source": INTEGRATION_SOURCE,
+                "external_system": EXTERNAL_SYSTEM,
+                "external_entity_type": EXTERNAL_ENTITY_TYPE,
+                "internal_entity_type": INTERNAL_ENTITY_TYPE,
+                "journal_id": journal_id,
+            },
+        )
+
+        links: list[dict[str, Any]] = []
+        for row in result.fetchall():
+            ref = self._decode_reference_data(row.reference_data, journal_id)
+            shared_link_url = ref.get("shared_link_url")
+            links.append(
+                {
+                    "album_id": row.album_id,
+                    "shared_link_url": (
+                        shared_link_url if isinstance(shared_link_url, str) else None
+                    ),
+                }
+            )
+        return links
+
     async def find_cover_asset(self, journal_id: int) -> tuple[str, str | None] | None:
         """Return ``(album_id, thumbnail_asset_id)`` for a PHOTO_ALBUM journal.
 

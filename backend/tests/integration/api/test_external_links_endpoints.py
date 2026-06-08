@@ -1,7 +1,61 @@
 """Integration tests for external links API endpoints."""
 
+import json
+
 import pytest
 from sqlalchemy import text
+
+_TEST_USER_ID = "test-user-123"
+_IMMICH_SERVER_URL = "https://immich.example.com"
+
+
+async def _connect_immich(async_connection, server_url=_IMMICH_SERVER_URL):
+    """Seed a user_immich_auth row so the user has a configured server URL."""
+    await async_connection.execute(
+        text(
+            "INSERT INTO user_immich_auth "
+            "(user_id, server_url, encrypted_api_key) "
+            "VALUES (:user_id, :server_url, :api_key)"
+        ),
+        {
+            "user_id": _TEST_USER_ID,
+            "server_url": server_url,
+            "api_key": b"encrypted-placeholder",
+        },
+    )
+
+
+async def _link_immich_album(
+    async_connection, journal_id, album_id, *, shared_link_url=None
+):
+    """Seed an Immich album link (sync_metadata + external_references) for a journal."""
+    await async_connection.execute(
+        text(
+            "INSERT INTO sync_metadata "
+            "(internal_id, integration_source, external_id, last_synced_at, "
+            "version_hash, sync_status) "
+            "VALUES (:journal_id, 'immich_album', :album_id, now(), "
+            "'hash-1', 'success')"
+        ),
+        {"journal_id": journal_id, "album_id": album_id},
+    )
+    reference_data = {"album_id": album_id, "album_name": "Holiday"}
+    if shared_link_url is not None:
+        reference_data["shared_link_url"] = shared_link_url
+    await async_connection.execute(
+        text(
+            "INSERT INTO external_references "
+            "(internal_entity_type, internal_entity_id, external_system, "
+            "external_entity_id, external_entity_type, reference_data) "
+            "VALUES ('journal', :journal_id, 'immich', :album_id, 'album', "
+            ":reference_data)"
+        ),
+        {
+            "journal_id": journal_id,
+            "album_id": album_id,
+            "reference_data": json.dumps(reference_data),
+        },
+    )
 
 
 @pytest.mark.integration
@@ -191,6 +245,60 @@ class TestJournalExternalLinks:
         sources = {link["attributes"]["source"] for link in data["data"]}
         assert sources == {"strava", "google_calendar"}
 
+    async def test_returns_immich_album_link_with_shared_link(
+        self, integration_api_client, async_connection
+    ):
+        """Album with a public shared link returns immich_album and immich_shared."""
+        journal_id = await self._create_journal(integration_api_client)
+        await _connect_immich(async_connection)
+        await _link_immich_album(
+            async_connection,
+            journal_id,
+            "album-uuid-1",
+            shared_link_url="https://immich.example.com/share/tok123",
+        )
+
+        response = await integration_api_client.get(
+            f"/api/journals/{journal_id}/external-links"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        by_source = {
+            link["attributes"]["source"]: link["attributes"] for link in data["data"]
+        }
+        assert set(by_source) == {"immich_album", "immich_shared"}
+        assert by_source["immich_album"]["external_id"] == "album-uuid-1"
+        assert (
+            by_source["immich_album"]["url"]
+            == "https://immich.example.com/albums/album-uuid-1"
+        )
+        assert (
+            by_source["immich_shared"]["url"]
+            == "https://immich.example.com/share/tok123"
+        )
+
+    async def test_returns_immich_album_link_without_shared_link(
+        self, integration_api_client, async_connection
+    ):
+        """Album without a shared link returns only the immich_album link."""
+        journal_id = await self._create_journal(integration_api_client)
+        await _connect_immich(async_connection)
+        await _link_immich_album(async_connection, journal_id, "album-uuid-2")
+
+        response = await integration_api_client.get(
+            f"/api/journals/{journal_id}/external-links"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        sources = [link["attributes"]["source"] for link in data["data"]]
+        assert sources == ["immich_album"]
+        assert (
+            data["data"][0]["attributes"]["url"]
+            == "https://immich.example.com/albums/album-uuid-2"
+        )
+
     async def test_returns_404_for_nonexistent_journal(self, integration_api_client):
         """External links endpoint returns 404 for a journal that doesn't exist."""
         response = await integration_api_client.get(
@@ -270,6 +378,38 @@ class TestContactExternalLinks:
         assert link["attributes"]["source"] == "google_contacts"
         assert link["attributes"]["external_id"] == "people/c123456"
         assert "contacts.google.com" in link["attributes"]["url"]
+
+    async def test_returns_immich_person_link_from_external_reference(
+        self, integration_api_client, async_connection
+    ):
+        """External links endpoint returns an Immich person link with a person URL."""
+        contact_id = await self._create_contact(integration_api_client)
+        await _connect_immich(async_connection)
+        await async_connection.execute(
+            text(
+                "INSERT INTO external_references "
+                "(internal_entity_type, internal_entity_id, "
+                "external_system, external_entity_id, external_entity_type) "
+                "VALUES ('contact', :contact_id, 'immich', "
+                ":external_id, 'person')"
+            ),
+            {"contact_id": contact_id, "external_id": "person-uuid-1"},
+        )
+
+        response = await integration_api_client.get(
+            f"/api/contacts/{contact_id}/external-links"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["data"]) == 1
+        link = data["data"][0]
+        assert link["attributes"]["source"] == "immich"
+        assert link["attributes"]["external_id"] == "person-uuid-1"
+        assert (
+            link["attributes"]["url"]
+            == "https://immich.example.com/people/person-uuid-1"
+        )
 
     async def test_returns_404_for_nonexistent_contact(self, integration_api_client):
         """External links endpoint returns 404 for a contact that doesn't exist."""

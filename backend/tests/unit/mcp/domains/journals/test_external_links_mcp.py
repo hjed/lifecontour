@@ -181,6 +181,40 @@ class TestJournalConverterExternalLinks:
             == "https://snipeit.example.com/hardware/42/maintenances/10"
         )
 
+    def test_includes_immich_album_and_shared_links(self) -> None:
+        """Converter surfaces Immich album and shared external links."""
+        journal = self._make_journal()
+        external_links = [
+            ExternalLinkInfo(
+                source="immich_album",
+                url="https://immich.example.com/albums/album-uuid",
+                external_id="album-uuid",
+                unique_key="album-album-uuid",
+            ),
+            ExternalLinkInfo(
+                source="immich_shared",
+                url="https://immich.example.com/share/tok",
+                external_id="album-uuid",
+                unique_key="shared-album-uuid",
+            ),
+        ]
+
+        response = JournalConverter.to_response(
+            journal=journal,
+            types=["photo_album"],
+            type_data={},
+            contacts=[],
+            tags=[],
+            external_links=external_links,
+        )
+
+        by_source = {link.source: link for link in response.external_links}
+        assert set(by_source) == {"immich_album", "immich_shared"}
+        assert by_source["immich_album"].url == (
+            "https://immich.example.com/albums/album-uuid"
+        )
+        assert by_source["immich_shared"].url == "https://immich.example.com/share/tok"
+
     def test_returns_empty_external_links_when_not_provided(self) -> None:
         """Converter returns empty external_links when parameter is not provided."""
         journal = self._make_journal()
@@ -255,12 +289,27 @@ class TestIntegrationSourceFilterParsing:
             == "snipeit_maintenance"
         )
 
+    def test_normalizes_valid_immich_album_source(self) -> None:
+        """Normalizes 'immich_album' source correctly."""
+        from app.mcp.domains.journals.tools import _parse_integration_source_filter
+
+        assert _parse_integration_source_filter("immich_album") == "immich_album"
+        assert _parse_integration_source_filter("Immich_Album") == "immich_album"
+        assert _parse_integration_source_filter("  IMMICH_ALBUM  ") == "immich_album"
+
     def test_rejects_invalid_source(self) -> None:
         """Raises ValueError for unrecognized integration source."""
         from app.mcp.domains.journals.tools import _parse_integration_source_filter
 
         with pytest.raises(ValueError, match="Invalid integration_source"):
             _parse_integration_source_filter("invalid_source")
+
+    def test_invalid_source_message_lists_immich_album(self) -> None:
+        """The error message advertises immich_album as an allowed source."""
+        from app.mcp.domains.journals.tools import _parse_integration_source_filter
+
+        with pytest.raises(ValueError, match="immich_album"):
+            _parse_integration_source_filter("not_a_source")
 
     def test_rejects_empty_string(self) -> None:
         """Raises ValueError for empty string integration source."""

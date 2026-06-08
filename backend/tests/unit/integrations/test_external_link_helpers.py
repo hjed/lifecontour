@@ -13,6 +13,8 @@ from app.core.integrations.external_link_helpers import (
     build_contact_external_links,
     build_google_calendar_event_url,
     build_google_contacts_url,
+    build_immich_album_url,
+    build_immich_person_url,
     build_journal_external_links,
     build_strava_activity_url,
 )
@@ -112,6 +114,60 @@ class TestGoogleContactsUrl:
         """Resource name with 'people/' prefix strips the prefix."""
         url = build_google_contacts_url("people/c12345678")
         assert url == "https://contacts.google.com/person/c12345678"
+
+
+class TestImmichPersonUrl:
+    """Tests for Immich person URL construction."""
+
+    def test_valid_inputs_return_url(self) -> None:
+        """Valid server URL and person ID produce correct URL."""
+        url = build_immich_person_url("https://immich.example.com", "person-uuid")
+        assert url == "https://immich.example.com/people/person-uuid"
+
+    def test_trailing_slash_stripped(self) -> None:
+        """Trailing slash on the server URL is removed."""
+        url = build_immich_person_url("https://immich.example.com/", "person-uuid")
+        assert url == "https://immich.example.com/people/person-uuid"
+
+    def test_none_server_url_returns_none(self) -> None:
+        """Missing server URL returns None."""
+        assert build_immich_person_url(None, "person-uuid") is None
+
+    def test_none_person_id_returns_none(self) -> None:
+        """Missing person ID returns None."""
+        assert build_immich_person_url("https://immich.example.com", None) is None
+
+    def test_blank_inputs_return_none(self) -> None:
+        """Whitespace-only inputs return None."""
+        assert build_immich_person_url("   ", "person-uuid") is None
+        assert build_immich_person_url("https://immich.example.com", "  ") is None
+
+
+class TestImmichAlbumUrl:
+    """Tests for Immich album URL construction."""
+
+    def test_valid_inputs_return_url(self) -> None:
+        """Valid server URL and album ID produce correct URL."""
+        url = build_immich_album_url("https://immich.example.com", "album-uuid")
+        assert url == "https://immich.example.com/albums/album-uuid"
+
+    def test_trailing_slash_stripped(self) -> None:
+        """Trailing slash on the server URL is removed."""
+        url = build_immich_album_url("https://immich.example.com/", "album-uuid")
+        assert url == "https://immich.example.com/albums/album-uuid"
+
+    def test_none_server_url_returns_none(self) -> None:
+        """Missing server URL returns None."""
+        assert build_immich_album_url(None, "album-uuid") is None
+
+    def test_none_album_id_returns_none(self) -> None:
+        """Missing album ID returns None."""
+        assert build_immich_album_url("https://immich.example.com", None) is None
+
+    def test_blank_inputs_return_none(self) -> None:
+        """Whitespace-only inputs return None."""
+        assert build_immich_album_url("   ", "album-uuid") is None
+        assert build_immich_album_url("https://immich.example.com", "  ") is None
 
 
 class TestExternalLinkInfo:
@@ -215,6 +271,78 @@ class TestBuildJournalExternalLinks:
         assert len(google_links) == 2
 
 
+class TestBuildJournalExternalLinksImmich:
+    """Tests for Immich album links on journals."""
+
+    def test_album_link_only(self) -> None:
+        """Album with no shared link produces a single immich_album link."""
+        links = build_journal_external_links(
+            strava_activity_id=None,
+            external_event_links=[],
+            immich_album_links=[{"album_id": "album-uuid", "shared_link_url": None}],
+            immich_server_url="https://immich.example.com",
+        )
+        assert len(links) == 1
+        assert links[0].source == "immich_album"
+        assert links[0].external_id == "album-uuid"
+        assert links[0].url == "https://immich.example.com/albums/album-uuid"
+        assert links[0].unique_key == "album-album-uuid"
+
+    def test_album_with_shared_link(self) -> None:
+        """Album with a shared link produces both immich_album and immich_shared."""
+        links = build_journal_external_links(
+            strava_activity_id=None,
+            external_event_links=[],
+            immich_album_links=[
+                {
+                    "album_id": "album-uuid",
+                    "shared_link_url": "https://immich.example.com/share/tok",
+                }
+            ],
+            immich_server_url="https://immich.example.com",
+        )
+        by_source = {link.source: link for link in links}
+        assert set(by_source) == {"immich_album", "immich_shared"}
+        assert by_source["immich_album"].url == (
+            "https://immich.example.com/albums/album-uuid"
+        )
+        shared = by_source["immich_shared"]
+        assert shared.url == "https://immich.example.com/share/tok"
+        assert shared.external_id == "album-uuid"
+        assert shared.unique_key == "shared-album-uuid"
+
+    def test_album_link_without_server_url_has_no_url(self) -> None:
+        """Without a server URL the album link is icon-only (url None)."""
+        links = build_journal_external_links(
+            strava_activity_id=None,
+            external_event_links=[],
+            immich_album_links=[{"album_id": "album-uuid", "shared_link_url": None}],
+            immich_server_url=None,
+        )
+        assert len(links) == 1
+        assert links[0].source == "immich_album"
+        assert links[0].url is None
+
+    def test_album_alongside_strava(self) -> None:
+        """Immich album link is aggregated with other source links."""
+        links = build_journal_external_links(
+            strava_activity_id="12345678",
+            external_event_links=[],
+            immich_album_links=[{"album_id": "album-uuid", "shared_link_url": None}],
+            immich_server_url="https://immich.example.com",
+        )
+        sources = {link.source for link in links}
+        assert sources == {"strava", "immich_album"}
+
+    def test_no_immich_links_when_omitted(self) -> None:
+        """Omitting immich params keeps backward-compatible behaviour."""
+        links = build_journal_external_links(
+            strava_activity_id=None,
+            external_event_links=[],
+        )
+        assert links == []
+
+
 class TestBuildContactExternalLinks:
     """Tests for aggregating contact external links."""
 
@@ -289,4 +417,36 @@ class TestBuildContactExternalLinks:
         )
         assert len(links) == 1
         assert links[0].source == "unknown_system"
+        assert links[0].url is None
+
+    def test_immich_person_link(self) -> None:
+        """Immich person reference produces an immich link with a person URL."""
+        links = build_contact_external_links(
+            external_references=[
+                {
+                    "external_system": "immich",
+                    "external_entity_id": "person-uuid",
+                    "external_entity_type": "person",
+                }
+            ],
+            immich_server_url="https://immich.example.com",
+        )
+        assert len(links) == 1
+        assert links[0].source == "immich"
+        assert links[0].external_id == "person-uuid"
+        assert links[0].url == "https://immich.example.com/people/person-uuid"
+
+    def test_immich_person_link_without_server_url(self) -> None:
+        """Without a server URL the immich person link is icon-only (url None)."""
+        links = build_contact_external_links(
+            external_references=[
+                {
+                    "external_system": "immich",
+                    "external_entity_id": "person-uuid",
+                    "external_entity_type": "person",
+                }
+            ],
+        )
+        assert len(links) == 1
+        assert links[0].source == "immich"
         assert links[0].url is None

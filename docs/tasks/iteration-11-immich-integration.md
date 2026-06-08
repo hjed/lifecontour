@@ -284,28 +284,30 @@ The Immich worker aggregates the unique people tagged across an album's photos (
 - [Part 6: Logbook Export Enhancement](../product-specifications/immich-integration-product-specification.md#part-6-logbook-export-enhancement)
 
 **Acceptance Criteria (task-level):**
-- [ ] External links displayed for Immich-linked journals and contacts.
-- [ ] MCP responses include Immich external links and support search filters.
-- [ ] Logbook PDF export includes album shared links.
+- [x] External links displayed for Immich-linked journals and contacts. *(Phase 1)*
+- [x] MCP responses include Immich external links and support search filters. *(Phase 1)*
+- [ ] Logbook PDF export includes album shared links. *(Phase 2)*
 
 #### Phase 1: External Links and MCP
 **PR Size:** ~5–7 files
 
 Extend external link helpers and MCP tools for Immich.
 
+**Architecture note (as implemented):** Three Immich link sources are surfaced through the existing external-link plumbing: `immich` (contact → person, URL `{server_url}/people/{person_id}`), `immich_album` (journal → album, URL `{server_url}/albums/{album_id}`), and `immich_shared` (the full public `shared_link_url` from the album `external_references.reference_data`). The shared helpers in `external_link_helpers.py` gained `build_immich_person_url`/`build_immich_album_url` plus new `immich_album_links`/`immich_server_url` (journals) and `immich_server_url` (contacts) params; the URL is built from the server URL rather than re-using the stored `album_url` so people and album links share one construction path. The user's Immich server URL is read via a new read-only `ImmichTokenService.get_server_url` (no API-key decryption, so link display never fails on a decrypt error) — used by the REST controllers directly and by the MCP tools via a new `get_immich_token_service` MCP dependency resolver, so the lookup has a single implementation. The album id + shared link come from `SqlJournalRepository.get_immich_album_links`, which delegates to `AlbumSyncReadRepository.find_external_links` (the repo that already owns all album `external_references` SQL and the `_decode_reference_data` JSON decoder); `shared_link_url` is coerced to `str | None` so a malformed/non-string value can never reach `.strip()`. REST controllers (`get_journal_external_links`, `get_contact_external_links`) and the MCP tools (`_fetch_journal_external_links`, `get_contact`) all feed the same helpers. `search_journals` adds `immich_album` to `_VALID_INTEGRATION_SOURCES` and a `_fetch_journal_ids_by_integration_source` branch that scopes by `sync_metadata.internal_id` joined to `journals.user_id` (Immich albums key on the integer `internal_id`, not the UUID column Snipe-IT uses). The frontend `ExternalLinksDisplay` is unchanged (it renders any source); only `external-links.ts` gained icons/labels (`Immich Photo`/`Immich Album`/`Immich Shared Link`). E2E follows the repo's Immich convention (real page nav + `page.route` stub of the `external-links` endpoint, since Immich link data is sync-derived and not seedable via `TestDataManager`).
+
 **Acceptance Criteria:**
-- [ ] `build_journal_external_links` and `build_contact_external_links` in `external_link_helpers.py` extended for Immich sources
-- [ ] URL construction: People → `{server_url}/people/{person_id}`, Albums → `{server_url}/albums/{album_id}`
-- [ ] Journal detail page: Immich album link displayed alongside other external links
-- [ ] Contact detail page: Immich person link displayed
-- [ ] If public shared link exists: displayed as additional link with source `"immich_shared"`
-- [ ] MCP: `get_journal` and `get_contact` responses include Immich external links via `ExternalLinkSchema`
-- [ ] MCP: `search_journals` supports `integration_source=immich_album` filter
+- [x] `build_journal_external_links` and `build_contact_external_links` in `external_link_helpers.py` extended for Immich sources
+- [x] URL construction: People → `{server_url}/people/{person_id}`, Albums → `{server_url}/albums/{album_id}`
+- [x] Journal detail page: Immich album link displayed alongside other external links
+- [x] Contact detail page: Immich person link displayed
+- [x] If public shared link exists: displayed as additional link with source `"immich_shared"`
+- [x] MCP: `get_journal` and `get_contact` responses include Immich external links via `ExternalLinkSchema`
+- [x] MCP: `search_journals` supports `integration_source=immich_album` filter
 
 **Required Test Coverage:**
-- **Unit:** URL construction for Immich people and albums, external link helper extension, MCP schema updates.
-- **Integration:** API returns correct external links for Immich-linked journals and contacts, MCP search filters work.
-- **E2E:** PHOTO_ALBUM journal shows Immich album link. Immich-linked contact shows person link.
+- **Unit:** URL construction for Immich people and albums, external link helper extension, MCP schema updates. ✅ 17 helper tests (`test_external_link_helpers.py`: person/album URL builders + journal album/shared + contact person links) + 3 MCP tests (`test_external_links_mcp.py`: `immich_album` filter parse, error-message advertises it, converter surfaces album/shared links) + 6 frontend unit tests (`external-links.test.ts`: immich/immich_album/immich_shared icon+label)
+- **Integration:** API returns correct external links for Immich-linked journals and contacts, MCP search filters work. ✅ 3 REST tests (`test_external_links_endpoints.py`: journal album+shared, journal album-only, contact person) + 3 MCP tests (`test_journal_external_links_mcp.py`: `get_journal` album+shared, `search_journals` immich_album filter; `test_contact_tools_integration.py`: `get_contact` immich person link)
+- **E2E:** PHOTO_ALBUM journal shows Immich album link. Immich-linked contact shows person link. ✅ 2 Playwright specs (`journal-detail.spec.ts`: album+shared links render with href/target/rel/aria-label; `contacts.spec.ts`: person link renders) + 3 component tests (`ExternalLinksDisplay.test.tsx`: album/shared/person link render with accessible labels)
 
 #### Phase 2: Logbook Export Enhancement
 **PR Size:** ~3–5 files

@@ -107,6 +107,7 @@ from app.core.journal.services.journal_contact_service import JournalContactServ
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_service import JournalService
 from app.core.search.exceptions import SearchServiceUnavailableError
+from app.infrastructure.auth.immich_token_service import ImmichTokenService
 from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.config import Settings
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
@@ -1837,12 +1838,13 @@ async def get_journal_external_links(
     journal_service: FromDishka[JournalService],
     fitness_data_repo: FromDishka[FitnessDataRepository],
     journal_repo: FromDishka[JournalRepository],
+    immich_token_service: FromDishka[ImmichTokenService],
     user: FromDishka[SessionUser],
 ) -> ExternalLinksResponse:
     """
     Get external system links for a journal.
 
-    Returns links to external systems (Strava, Google Calendar) that
+    Returns links to external systems (Strava, Google Calendar, Immich) that
     are associated with this journal, derived from existing sync data.
     """
     journal = await journal_service.get_journal(journal_id)
@@ -1861,10 +1863,16 @@ async def get_journal_external_links(
     # Fetch Snipe-IT links (maintenance and checkout asset)
     snipeit_links = await journal_repo.get_snipeit_links(journal_id, user.id)
 
+    # Fetch Immich album links and the user's Immich server URL
+    immich_album_links = await journal_repo.get_immich_album_links(journal_id)
+    immich_server_url = await immich_token_service.get_server_url(user.id)
+
     links = build_journal_external_links(
         strava_activity_id=strava_activity_id,
         external_event_links=external_event_links,
         snipeit_links=snipeit_links,
+        immich_album_links=immich_album_links,
+        immich_server_url=immich_server_url,
     )
 
     return ExternalLinksResponse(

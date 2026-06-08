@@ -712,6 +712,65 @@ class TestSearchJournalsIntegrationSourceFilter:
             {"journal_id": empty_gcal_id, "calendar_id": calendar_id},
         )
 
+        # Journal linked to an Immich album
+        await clean_database.execute(
+            text("""
+                INSERT INTO user_immich_auth (user_id, server_url, encrypted_api_key)
+                VALUES (:user_id, :server_url, :api_key)
+                ON CONFLICT (user_id) DO NOTHING
+            """),
+            {
+                "user_id": "test-user-123",
+                "server_url": "https://immich.example.com",
+                "api_key": b"encrypted-placeholder",
+            },
+        )
+
+        result = await clean_database.execute(
+            text("""
+                INSERT INTO journals (user_id, title, content, event_date_range_start, event_date_range_end)
+                VALUES (:user_id, 'Holiday Album', 'Imported Immich album', :start, :end)
+                RETURNING id
+            """),
+            {
+                "user_id": "test-user-123",
+                "start": now + timedelta(hours=10),
+                "end": now + timedelta(hours=11),
+            },
+        )
+        row = result.fetchone()
+        assert row is not None
+        immich_album_id = int(row[0])
+        ids["immich_album"] = immich_album_id
+
+        await clean_database.execute(
+            text("""
+                INSERT INTO sync_metadata
+                    (internal_id, integration_source, external_id, last_synced_at,
+                     version_hash, sync_status)
+                VALUES (:journal_id, 'immich_album', 'album-uuid-mixed', now(),
+                        'hash-mixed', 'success')
+            """),
+            {"journal_id": immich_album_id},
+        )
+
+        await clean_database.execute(
+            text("""
+                INSERT INTO external_references
+                    (internal_entity_type, internal_entity_id, external_system,
+                     external_entity_id, external_entity_type, reference_data)
+                VALUES ('journal', :journal_id, 'immich', 'album-uuid-mixed', 'album',
+                        :reference_data)
+            """),
+            {
+                "journal_id": immich_album_id,
+                "reference_data": (
+                    '{"album_id": "album-uuid-mixed", '
+                    '"shared_link_url": "https://immich.example.com/share/mix"}'
+                ),
+            },
+        )
+
         return ids
 
     @pytest.mark.asyncio
@@ -745,6 +804,78 @@ class TestSearchJournalsIntegrationSourceFilter:
             assert len(payload["results"]) == 1
             assert payload["results"][0]["title"] == "Strava Run"
             assert "strava" in payload["summary"]
+
+    @pytest.mark.asyncio
+    async def test_get_journal_with_immich_album_link(
+        self,
+        authenticated_lifespan_client,
+        journals_with_mixed_sources: dict[str, int],
+    ) -> None:
+        """get_journal returns Immich album and shared external links."""
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            response = await client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "get_journal",
+                        "arguments": {
+                            "journal_id": journals_with_mixed_sources["immich_album"]
+                        },
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+
+            assert response.status_code == 200
+            payload = extract_mcp_json_payload(response.text)
+
+            assert "error" not in payload
+            by_source = {link["source"]: link for link in payload["external_links"]}
+            assert set(by_source) == {"immich_album", "immich_shared"}
+            assert by_source["immich_album"]["external_id"] == "album-uuid-mixed"
+            assert (
+                by_source["immich_album"]["url"]
+                == "https://immich.example.com/albums/album-uuid-mixed"
+            )
+            assert (
+                by_source["immich_shared"]["url"]
+                == "https://immich.example.com/share/mix"
+            )
+
+    @pytest.mark.asyncio
+    async def test_search_journals_with_immich_album_filter(
+        self,
+        authenticated_lifespan_client,
+        journals_with_mixed_sources: dict[str, int],
+    ) -> None:
+        """search_journals with integration_source=immich_album returns only albums."""
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            response = await client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "search_journals",
+                        "arguments": {"integration_source": "immich_album"},
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+
+            assert response.status_code == 200
+            payload = extract_mcp_json_payload(response.text)
+
+            assert "error" not in payload
+            assert payload["total_hits"] == 1
+            assert len(payload["results"]) == 1
+            assert payload["results"][0]["title"] == "Holiday Album"
 
     @pytest.mark.asyncio
     async def test_search_journals_with_google_calendar_filter(

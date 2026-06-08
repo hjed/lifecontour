@@ -393,6 +393,19 @@ class JournalRepository(ABC):
         """
         pass
 
+    @abstractmethod
+    async def get_immich_album_links(self, journal_id: int) -> list[dict[str, Any]]:
+        """
+        Get Immich album external links for a journal.
+
+        Args:
+            journal_id: The journal ID
+
+        Returns:
+            List of dictionaries with 'album_id' and 'shared_link_url' keys
+        """
+        pass
+
 
 class CalendarRepository(ABC):
     """

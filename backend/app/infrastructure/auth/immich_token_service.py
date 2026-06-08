@@ -144,3 +144,27 @@ class ImmichTokenService:
 
         api_key = self.fernet.decrypt(row.encrypted_api_key).decode()
         return row.server_url, api_key
+
+    async def get_server_url(self, user_id: str) -> str | None:
+        """Fetch the user's Immich server URL without decrypting the API key.
+
+        Used to build external links for display, where only the server URL is
+        needed. Avoids decryption so link display never fails on a decrypt error.
+
+        Args:
+            user_id: The internal user ID.
+
+        Returns:
+            The Immich server URL, or None if not configured.
+        """
+        query = text("""
+            SELECT server_url
+            FROM user_immich_auth
+            WHERE user_id = :user_id
+        """)
+        result = await self._connection.execute(query, {"user_id": user_id})
+        row = result.fetchone()
+        if row is None:
+            return None
+        server_url: str | None = row.server_url
+        return server_url

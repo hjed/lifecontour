@@ -2,7 +2,15 @@
  * Tests for external links utility functions.
  */
 
-import { Activity, Calendar, Users, Link } from 'lucide-react';
+import {
+  Activity,
+  Calendar,
+  Users,
+  Link,
+  Camera,
+  Image,
+  Share2,
+} from 'lucide-react';
 
 import {
   getExternalLinkIcon,
@@ -22,6 +30,18 @@ describe('getExternalLinkIcon', () => {
     expect(getExternalLinkIcon('google_contacts')).toBe(Users);
   });
 
+  it('returns Camera icon for immich', () => {
+    expect(getExternalLinkIcon('immich')).toBe(Camera);
+  });
+
+  it('returns Image icon for immich_album', () => {
+    expect(getExternalLinkIcon('immich_album')).toBe(Image);
+  });
+
+  it('returns Share2 icon for immich_shared', () => {
+    expect(getExternalLinkIcon('immich_shared')).toBe(Share2);
+  });
+
   it('returns Link icon for unknown source', () => {
     expect(getExternalLinkIcon('unknown_source')).toBe(Link);
   });
@@ -38,6 +58,18 @@ describe('getExternalLinkLabel', () => {
 
   it('returns "Google Contacts" for google_contacts', () => {
     expect(getExternalLinkLabel('google_contacts')).toBe('Google Contacts');
+  });
+
+  it('returns "Immich Photo" for immich', () => {
+    expect(getExternalLinkLabel('immich')).toBe('Immich Photo');
+  });
+
+  it('returns "Immich Album" for immich_album', () => {
+    expect(getExternalLinkLabel('immich_album')).toBe('Immich Album');
+  });
+
+  it('returns "Immich Shared Link" for immich_shared', () => {
+    expect(getExternalLinkLabel('immich_shared')).toBe('Immich Shared Link');
   });
 
   it('returns raw source for unknown source', () => {
