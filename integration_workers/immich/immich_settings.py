@@ -25,4 +25,10 @@ class ImmichWorkerSettings(BaseSettings):
     enable_periodic_sync: bool = False
     sync_interval_hours: int = 6
 
+    # Observability
+    enable_telemetry: bool = False
+    otel_exporter_otlp_endpoint: str = ""
+    otel_service_name: str = "immich-worker"
+    otel_resource_attributes: str = ""
+
     model_config = {"env_file": ".env", "extra": "ignore"}
