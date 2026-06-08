@@ -290,6 +290,10 @@ class InboundEventConsumer(DeadLetterConsumerMixin, StreamConsumer):
             event: Adapted OutboxEvent
             connection: Database connection for transaction
         """
+        from core_shared.repositories.external_reference_repository import (
+            ExternalReferenceRepository,
+        )
+
         from app.core.integrations.immich_album_outbox_event_processor import (
             ImmichAlbumOutboxEventProcessor,
         )
@@ -316,6 +320,8 @@ class InboundEventConsumer(DeadLetterConsumerMixin, StreamConsumer):
         processor = ImmichAlbumOutboxEventProcessor(
             journal_service=journal_service,
             connection=connection,
+            relationship_repo=contact_relationship_repo,
+            ext_ref_repo=ExternalReferenceRepository(connection),
         )
         result = await processor.process_event(event)  # type: ignore[arg-type]
 

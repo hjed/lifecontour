@@ -15,8 +15,16 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from immich_models import ImmichAlbum, ImmichAsset, ImmichExifInfo
+from immich_models import (
+    ImmichAlbum,
+    ImmichAsset,
+    ImmichAssetPerson,
+    ImmichExifInfo,
+    ImmichSharedLink,
+)
 from immich_sync_service import ImmichSyncService
+
+_SERVER_URL = "https://immich.example.com"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -235,8 +243,12 @@ def _fetchone(result_row: MagicMock | None) -> MagicMock:
     return result
 
 
-def _service(api: AsyncMock, conn: AsyncMock) -> ImmichSyncService:
-    return ImmichSyncService(api_client=api, connection=conn, user_id="user-1")
+def _service(
+    api: AsyncMock, conn: AsyncMock, server_url: str | None = _SERVER_URL
+) -> ImmichSyncService:
+    return ImmichSyncService(
+        api_client=api, connection=conn, user_id="user-1", server_url=server_url
+    )
 
 
 def _full_album() -> ImmichAlbum:
@@ -258,6 +270,7 @@ class TestSyncAlbumsBatch:
     async def test_new_album_emits_created_event(self) -> None:
         api = AsyncMock()
         api.get_album.return_value = _full_album()
+        api.get_shared_links.return_value = []
         conn = AsyncMock()
         # _find_album_sync_metadata → None (new); INSERT outbox → ignored result
         conn.execute.side_effect = [_fetchone(None), MagicMock()]
@@ -276,6 +289,7 @@ class TestSyncAlbumsBatch:
     async def test_changed_album_emits_updated_event(self) -> None:
         api = AsyncMock()
         api.get_album.return_value = _full_album()
+        api.get_shared_links.return_value = []
         conn = AsyncMock()
         existing = MagicMock()
         existing.version_hash = "stale-hash"
@@ -291,6 +305,7 @@ class TestSyncAlbumsBatch:
         api = AsyncMock()
         album = _full_album()
         api.get_album.return_value = album
+        api.get_shared_links.return_value = []
         conn = AsyncMock()
         existing = MagicMock()
         existing.version_hash = ImmichSyncService.calculate_album_version_hash(album)
@@ -304,6 +319,7 @@ class TestSyncAlbumsBatch:
     async def test_one_album_failure_does_not_abort_batch(self) -> None:
         api = AsyncMock()
         api.get_album.side_effect = [RuntimeError("boom"), _full_album()]
+        api.get_shared_links.return_value = []
         conn = AsyncMock()
         # First album errors before any DB call; second: find (None) + insert.
         conn.execute.side_effect = [_fetchone(None), MagicMock()]
@@ -338,3 +354,234 @@ class TestListAlbumIdBatches:
         batches = [batch async for batch in _service(api, conn).list_album_id_batches()]
 
         assert batches == []
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: people aggregation
+# ---------------------------------------------------------------------------
+
+
+def _person(person_id: str, name: str = "") -> ImmichAssetPerson:
+    return ImmichAssetPerson(id=person_id, name=name)
+
+
+def _asset_with_people(asset_id: str, people: list[ImmichAssetPerson]) -> ImmichAsset:
+    return ImmichAsset(id=asset_id, people=people)
+
+
+class TestAggregateAlbumPeople:
+    def test_dedupes_people_across_assets(self) -> None:
+        album = ImmichAlbum(
+            id="album-1",
+            assets=[
+                _asset_with_people(
+                    "a1", [_person("p1", "Alice"), _person("p2", "Bob")]
+                ),
+                _asset_with_people("a2", [_person("p1", "Alice")]),
+            ],
+        )
+
+        people = ImmichSyncService.aggregate_album_people(album)
+
+        assert people == [
+            {"id": "p1", "name": "Alice"},
+            {"id": "p2", "name": "Bob"},
+        ]
+
+    def test_skips_people_without_id(self) -> None:
+        album = ImmichAlbum(
+            id="album-1",
+            assets=[_asset_with_people("a1", [_person("", "Ghost")])],
+        )
+
+        assert ImmichSyncService.aggregate_album_people(album) == []
+
+    def test_keeps_first_non_empty_name_for_a_person(self) -> None:
+        album = ImmichAlbum(
+            id="album-1",
+            assets=[
+                _asset_with_people("a1", [_person("p1", "")]),
+                _asset_with_people("a2", [_person("p1", "Alice")]),
+            ],
+        )
+
+        assert ImmichSyncService.aggregate_album_people(album) == [
+            {"id": "p1", "name": "Alice"}
+        ]
+
+    def test_empty_when_no_people_tagged(self) -> None:
+        assert ImmichSyncService.aggregate_album_people(_full_album()) == []
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: version hash includes people + shared link
+# ---------------------------------------------------------------------------
+
+
+class TestCalculateAlbumVersionHashPhase2:
+    def test_hash_changes_when_person_tag_added(self) -> None:
+        base = _full_album()
+        tagged = _full_album()
+        tagged.assets[0].people = [_person("p1", "Alice")]
+
+        assert ImmichSyncService.calculate_album_version_hash(
+            base
+        ) != ImmichSyncService.calculate_album_version_hash(tagged)
+
+    def test_hash_changes_when_shared_link_added(self) -> None:
+        album = _full_album()
+
+        assert ImmichSyncService.calculate_album_version_hash(
+            album
+        ) != ImmichSyncService.calculate_album_version_hash(
+            album, shared_link_url=f"{_SERVER_URL}/share/abc"
+        )
+
+    def test_hash_stable_for_same_people_regardless_of_asset_order(self) -> None:
+        a1 = _full_album()
+        a1.assets[0].people = [_person("p1", "Alice"), _person("p2", "Bob")]
+        a2 = _full_album()
+        a2.assets[0].people = [_person("p2", "Bob")]
+        a2.assets[1].people = [_person("p1", "Alice")]
+
+        assert ImmichSyncService.calculate_album_version_hash(
+            a1
+        ) == ImmichSyncService.calculate_album_version_hash(a2)
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: shared-link URL map
+# ---------------------------------------------------------------------------
+
+
+class TestBuildAlbumShareUrls:
+    def test_maps_album_links_to_share_urls(self) -> None:
+        links = [
+            ImmichSharedLink(
+                id="s1", key="abc", type="ALBUM", album=ImmichAlbum(id="album-1")
+            )
+        ]
+
+        result = ImmichSyncService.build_album_share_urls(_SERVER_URL, links)
+
+        assert result == {"album-1": f"{_SERVER_URL}/share/abc"}
+
+    def test_ignores_non_album_and_albumless_links(self) -> None:
+        links = [
+            ImmichSharedLink(id="s1", key="abc", type="INDIVIDUAL", album=None),
+            ImmichSharedLink(id="s2", key="def", type="ALBUM", album=None),
+        ]
+
+        assert ImmichSyncService.build_album_share_urls(_SERVER_URL, links) == {}
+
+    def test_first_link_wins_for_duplicate_album(self) -> None:
+        links = [
+            ImmichSharedLink(
+                id="s1", key="first", type="ALBUM", album=ImmichAlbum(id="album-1")
+            ),
+            ImmichSharedLink(
+                id="s2", key="second", type="ALBUM", album=ImmichAlbum(id="album-1")
+            ),
+        ]
+
+        result = ImmichSyncService.build_album_share_urls(_SERVER_URL, links)
+
+        assert result == {"album-1": f"{_SERVER_URL}/share/first"}
+
+    def test_strips_trailing_slash_on_server_url(self) -> None:
+        links = [
+            ImmichSharedLink(
+                id="s1", key="abc", type="ALBUM", album=ImmichAlbum(id="album-1")
+            )
+        ]
+
+        result = ImmichSyncService.build_album_share_urls(
+            "https://immich.example.com/", links
+        )
+
+        assert result == {"album-1": "https://immich.example.com/share/abc"}
+
+    def test_empty_map_when_no_server_url(self) -> None:
+        links = [
+            ImmichSharedLink(
+                id="s1", key="abc", type="ALBUM", album=ImmichAlbum(id="album-1")
+            )
+        ]
+
+        assert ImmichSyncService.build_album_share_urls(None, links) == {}
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: emitted album_metadata (people / album_url / shared_link_url)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestAlbumMetadataPhase2:
+    async def test_created_event_includes_people_album_url_shared_link(self) -> None:
+        api = AsyncMock()
+        album = _full_album()
+        album.album_thumbnail_asset_id = "thumb-1"
+        album.assets[0].people = [_person("p1", "Alice")]
+        api.get_album.return_value = album
+        api.get_shared_links.return_value = [
+            ImmichSharedLink(
+                id="s1", key="abc", type="ALBUM", album=ImmichAlbum(id="album-1")
+            )
+        ]
+        conn = AsyncMock()
+        conn.execute.side_effect = [_fetchone(None), MagicMock()]
+
+        await _service(api, conn).sync_albums_batch(["album-1"])
+
+        events = _extract_album_events(conn)
+        meta = events[0]["event_data"]["album_metadata"]
+        assert meta["people"] == [{"id": "p1", "name": "Alice"}]
+        assert meta["album_url"] == f"{_SERVER_URL}/albums/album-1"
+        assert meta["shared_link_url"] == f"{_SERVER_URL}/share/abc"
+        assert meta["thumbnail_asset_id"] == "thumb-1"
+
+    async def test_shared_link_url_omitted_when_no_match(self) -> None:
+        api = AsyncMock()
+        api.get_album.return_value = _full_album()
+        api.get_shared_links.return_value = []
+        conn = AsyncMock()
+        conn.execute.side_effect = [_fetchone(None), MagicMock()]
+
+        await _service(api, conn).sync_albums_batch(["album-1"])
+
+        meta = _extract_album_events(conn)[0]["event_data"]["album_metadata"]
+        assert meta.get("shared_link_url") is None
+        assert meta["album_url"] == f"{_SERVER_URL}/albums/album-1"
+
+    async def test_get_shared_links_fetched_once_per_batch(self) -> None:
+        api = AsyncMock()
+        api.get_album.return_value = _full_album()
+        api.get_shared_links.return_value = []
+        conn = AsyncMock()
+        conn.execute.side_effect = [
+            _fetchone(None),
+            MagicMock(),
+            _fetchone(None),
+            MagicMock(),
+        ]
+
+        await _service(api, conn).sync_albums_batch(["album-1", "album-2"])
+
+        assert api.get_shared_links.await_count == 1
+
+    async def test_shared_links_failure_does_not_abort_batch(self) -> None:
+        # A shared-links fetch error must be best-effort: albums still sync,
+        # just without a shared_link_url.
+        api = AsyncMock()
+        api.get_album.return_value = _full_album()
+        api.get_shared_links.side_effect = RuntimeError("boom")
+        conn = AsyncMock()
+        conn.execute.side_effect = [_fetchone(None), MagicMock()]
+
+        result = await _service(api, conn).sync_albums_batch(["album-1"])
+
+        assert result.created == 1
+        assert result.errors == 0
+        meta = _extract_album_events(conn)[0]["event_data"]["album_metadata"]
+        assert meta.get("shared_link_url") is None

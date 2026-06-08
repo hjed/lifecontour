@@ -50,7 +50,7 @@ class AlbumSyncReadRepository:
         """
         result = await self.conn.execute(
             text("""
-                SELECT id, internal_entity_id, updated_at
+                SELECT id, internal_entity_id, updated_at, reference_data
                 FROM external_references
                 WHERE external_system = :external_system
                   AND external_entity_type = :external_entity_type
@@ -176,7 +176,43 @@ class AlbumSyncReadRepository:
             data["album_url"] = ref["album_url"]
         if ref.get("asset_count") is not None:
             data["asset_count"] = ref["asset_count"]
+        # The album cover is served on-demand via the backend proxy (the asset
+        # thumbnail is not persisted). Expose the proxy URL only when the album
+        # actually has a cover asset, so the UI can skip the banner otherwise.
+        if ref.get("thumbnail_asset_id"):
+            data["cover_url"] = f"/api/journals/{journal_id}/album-cover"
         return data
+
+    async def find_cover_asset(self, journal_id: int) -> tuple[str, str | None] | None:
+        """Return ``(album_id, thumbnail_asset_id)`` for a PHOTO_ALBUM journal.
+
+        Used by the album-cover proxy. Returns ``None`` when the journal is not
+        an Immich album; ``thumbnail_asset_id`` is ``None`` when the album has no
+        cover photo recorded.
+        """
+        result = await self.conn.execute(
+            text("""
+                SELECT sm.external_id AS album_id,
+                       er.reference_data AS reference_data
+                FROM sync_metadata sm
+                LEFT JOIN external_references er
+                    ON er.external_system = 'immich'
+                    AND er.external_entity_type = 'album'
+                    AND er.external_entity_id = sm.external_id
+                    AND er.internal_entity_type = 'journal'
+                    AND er.internal_entity_id = sm.internal_id
+                WHERE sm.integration_source = :source
+                  AND sm.internal_id = :journal_id
+                LIMIT 1
+            """),
+            {"source": INTEGRATION_SOURCE, "journal_id": journal_id},
+        )
+        row = result.fetchone()
+        if row is None:
+            return None
+        ref = self._decode_reference_data(row.reference_data, journal_id)
+        thumbnail = ref.get("thumbnail_asset_id")
+        return (row.album_id, thumbnail if isinstance(thumbnail, str) else None)
 
     @staticmethod
     def _decode_reference_data(

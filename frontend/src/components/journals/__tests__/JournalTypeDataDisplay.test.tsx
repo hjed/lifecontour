@@ -4,7 +4,7 @@
  * Tests type-specific data display for different journal types.
  */
 
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { JournalTypeDataDisplay } from '../JournalTypeDataDisplay';
 import {
   JournalType,
@@ -267,6 +267,72 @@ describe('JournalTypeDataDisplay', () => {
       );
 
       expect(screen.queryByTestId('photo-album-data')).not.toBeInTheDocument();
+    });
+
+    it('renders a clickable cover banner linking to the album when cover_url is present', () => {
+      const photoData: PhotoAlbumData = {
+        immich_album_id: 'album-123',
+        album_name: 'Summer Trip',
+        album_url: 'https://immich.example.com/albums/album-123',
+        cover_url: '/api/journals/7/album-cover',
+        asset_count: 12,
+      };
+
+      render(
+        <JournalTypeDataDisplay
+          types={[JournalType.PHOTO_ALBUM]}
+          typeData={{ PHOTO_ALBUM: photoData }}
+        />
+      );
+
+      const banner = screen.getByTestId('photo-album-cover');
+      expect(banner).toHaveAttribute('src', '/api/journals/7/album-cover');
+      // Has accessible alt text describing the album.
+      expect(banner).toHaveAccessibleName(/Summer Trip/);
+      // The banner is wrapped in a link to the Immich album.
+      const bannerLink = screen.getByTestId('photo-album-cover-link');
+      expect(bannerLink).toHaveAttribute(
+        'href',
+        'https://immich.example.com/albums/album-123'
+      );
+    });
+
+    it('does not render a cover banner when cover_url is absent', () => {
+      const photoData: PhotoAlbumData = {
+        immich_album_id: 'album-123',
+        album_name: 'Summer Trip',
+      };
+
+      render(
+        <JournalTypeDataDisplay
+          types={[JournalType.PHOTO_ALBUM]}
+          typeData={{ PHOTO_ALBUM: photoData }}
+        />
+      );
+
+      expect(screen.queryByTestId('photo-album-cover')).not.toBeInTheDocument();
+    });
+
+    it('hides the cover banner gracefully when the image fails to load', () => {
+      const photoData: PhotoAlbumData = {
+        immich_album_id: 'album-123',
+        album_name: 'Summer Trip',
+        cover_url: '/api/journals/7/album-cover',
+      };
+
+      render(
+        <JournalTypeDataDisplay
+          types={[JournalType.PHOTO_ALBUM]}
+          typeData={{ PHOTO_ALBUM: photoData }}
+        />
+      );
+
+      const banner = screen.getByTestId('photo-album-cover');
+      fireEvent.error(banner);
+
+      // The banner is hidden on error, but the album name/link remain visible.
+      expect(screen.queryByTestId('photo-album-cover')).not.toBeInTheDocument();
+      expect(screen.getByTestId('photo-album-data')).toBeInTheDocument();
     });
   });
 

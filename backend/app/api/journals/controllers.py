@@ -20,7 +20,7 @@ from core_shared.models.journals import (
     JournalValidationError,
 )
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from meilisearch.errors import MeilisearchError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -67,6 +67,7 @@ from app.api.journals.schemas import (
     ReviewSuggestionSchema,
 )
 from app.core.contacts.models.repositories import ContactRepository
+from app.core.integrations.album_cover_proxy_service import AlbumCoverProxyService
 from app.core.integrations.external_link_helpers import build_journal_external_links
 from app.core.journal.adapters.sql.album_sync_read_repository import (
     AlbumSyncReadRepository,
@@ -122,6 +123,43 @@ router = APIRouter(
     prefix="/journals",
     tags=["journals"],
 )
+
+
+@router.get("/{journal_id}/album-cover")
+@inject
+async def get_journal_album_cover(
+    journal_id: int,
+    album_cover_service: FromDishka[AlbumCoverProxyService],
+    user: FromDishka[SessionUser],
+) -> Response:
+    """Proxy a PHOTO_ALBUM journal's Immich album cover thumbnail.
+
+    Fetches the album cover from the Immich server using stored credentials and
+    streams it back to the client. Returns 404 if the journal has no linked
+    Immich album or the cover cannot be fetched. The image is served on-demand
+    and never persisted locally.
+    """
+    from app.core.integrations.album_cover_proxy_service import (
+        AlbumCoverNotFoundError,
+    )
+
+    try:
+        image_bytes, content_type = await album_cover_service.get_cover_bytes(
+            journal_id=journal_id,
+            user_id=user.id,
+        )
+        return Response(
+            content=image_bytes,
+            media_type=content_type,
+            headers={
+                "Cache-Control": "private, max-age=3600",
+            },
+        )
+    except AlbumCoverNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Album cover not available for this journal",
+        ) from None
 
 
 def _parse_journal_type(type_str: str) -> JournalType:

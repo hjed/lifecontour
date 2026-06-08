@@ -38,7 +38,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from immich_api_client import ImmichApiClient
-from immich_models import ImmichAlbum, ImmichAsset, ImmichPerson
+from immich_models import ImmichAlbum, ImmichAsset, ImmichPerson, ImmichSharedLink
 
 logger = structlog.get_logger(__name__)
 
@@ -115,11 +115,13 @@ class ImmichSyncService:
         connection: AsyncConnection,
         user_id: str,
         integration_source: str = "immich",
+        server_url: str | None = None,
     ) -> None:
         self._api = api_client
         self._conn = connection
         self._user_id = user_id
         self._integration_source = integration_source
+        self._server_url = server_url
         self._contacts_cache: list[Contact] | None = None
 
     # -- Public API -------------------------------------------------------
@@ -202,9 +204,24 @@ class ImmichSyncService:
         """
         result = AlbumSyncResult()
 
+        # Shared links are fetched once per batch (the Immich endpoint returns
+        # all of the user's links), then mapped album_id → public share URL.
+        # This is best-effort: a shared-links failure must not abort the whole
+        # batch — albums still sync, just without their public share URL.
+        try:
+            links = await self._api.get_shared_links()
+            share_urls = self.build_album_share_urls(self._server_url, links)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "Failed to fetch Immich shared links; "
+                "syncing albums without share URLs",
+                error=str(e),
+            )
+            share_urls = {}
+
         for album_id in album_ids:
             try:
-                await self._process_album(album_id, result)
+                await self._process_album(album_id, result, share_urls.get(album_id))
             except Exception as e:  # noqa: BLE001
                 result.errors += 1
                 result.error_details.append(f"Error processing album {album_id}: {e!s}")
@@ -219,7 +236,9 @@ class ImmichSyncService:
         )
         return result
 
-    async def _process_album(self, album_id: str, result: AlbumSyncResult) -> None:
+    async def _process_album(
+        self, album_id: str, result: AlbumSyncResult, shared_link_url: str | None
+    ) -> None:
         """Fetch one album with assets and emit a sync event if it changed."""
         album = await self._api.get_album(album_id)
 
@@ -230,17 +249,19 @@ class ImmichSyncService:
             fallback = album.updated_at or datetime.now(UTC)
             date_range = (fallback, fallback)
 
-        version_hash = self.calculate_album_version_hash(album)
+        version_hash = self.calculate_album_version_hash(
+            album, shared_link_url=shared_link_url
+        )
         existing = await self._find_album_sync_metadata(album.id)
 
         if existing is None:
             await self._emit_album_outbox_event(
-                "created", album, date_range, version_hash
+                "created", album, date_range, version_hash, shared_link_url
             )
             result.created += 1
         elif existing.version_hash != version_hash:
             await self._emit_album_outbox_event(
-                "updated", album, date_range, version_hash
+                "updated", album, date_range, version_hash, shared_link_url
             )
             result.updated += 1
         else:
@@ -269,11 +290,29 @@ class ImmichSyncService:
         album: ImmichAlbum,
         date_range: tuple[datetime, datetime],
         version_hash: str,
+        shared_link_url: str | None = None,
     ) -> None:
         """Insert an ``immich_album.{created|updated}`` outbox event."""
         event_id = str(uuid4())
         now = datetime.now(UTC)
         start, end = date_range
+        album_metadata: dict[str, Any] = {
+            "album_name": album.album_name,
+            "description": album.description,
+            "asset_count": album.asset_count,
+            "updated_at": (album.updated_at.isoformat() if album.updated_at else None),
+            "thumbnail_asset_id": album.album_thumbnail_asset_id,
+            # People tagged across the album's photos, resolved to participants
+            # by the backend ``ImmichAlbumOutboxEventProcessor``.
+            "people": self.aggregate_album_people(album),
+        }
+        if self._server_url:
+            album_metadata["album_url"] = (
+                f"{self._server_url.rstrip('/')}/albums/{album.id}"
+            )
+        if shared_link_url:
+            album_metadata["shared_link_url"] = shared_link_url
+
         event_data = {
             "integration_source": self._ALBUM_INTEGRATION_SOURCE,
             "external_id": album.id,
@@ -286,15 +325,7 @@ class ImmichSyncService:
                 "event_date_range_start": start.isoformat(),
                 "event_date_range_end": end.isoformat(),
             },
-            "album_metadata": {
-                "album_name": album.album_name,
-                "description": album.description,
-                "asset_count": album.asset_count,
-                "updated_at": (
-                    album.updated_at.isoformat() if album.updated_at else None
-                ),
-                "thumbnail_asset_id": album.album_thumbnail_asset_id,
-            },
+            "album_metadata": album_metadata,
             "sync_timestamp": now.isoformat(),
         }
 
@@ -490,17 +521,72 @@ class ImmichSyncService:
         return (start, end)
 
     @staticmethod
-    def calculate_album_version_hash(album: ImmichAlbum) -> str:
+    def aggregate_album_people(album: ImmichAlbum) -> list[dict[str, str]]:
+        """Collect the unique people tagged across an album's photos.
+
+        Deduplicates by person id (the first non-empty name wins) and returns
+        the list sorted by id so the payload — and any hash derived from it — is
+        deterministic regardless of asset/face ordering. People without an id
+        (which cannot be resolved to a contact) are skipped.
+        """
+        names: dict[str, str] = {}
+        for asset in album.assets:
+            for person in asset.people:
+                if not person.id:
+                    continue
+                existing = names.get(person.id, "")
+                if not existing and person.name:
+                    names[person.id] = person.name
+                else:
+                    names.setdefault(person.id, existing)
+        return [{"id": pid, "name": names[pid]} for pid in sorted(names)]
+
+    @staticmethod
+    def build_album_share_urls(
+        server_url: str | None, links: list[ImmichSharedLink]
+    ) -> dict[str, str]:
+        """Map album id → public share URL from a list of Immich shared links.
+
+        Only ``ALBUM`` links that reference an album are considered; the first
+        link for a given album wins. Returns an empty map when no server URL is
+        configured (the public URL cannot be constructed without it).
+        """
+        base = (server_url or "").rstrip("/")
+        if not base:
+            return {}
+        result: dict[str, str] = {}
+        for link in links:
+            if link.type != "ALBUM" or link.album is None or not link.album.id:
+                continue
+            result.setdefault(link.album.id, f"{base}/share/{link.key}")
+        return result
+
+    @staticmethod
+    def calculate_album_version_hash(
+        album: ImmichAlbum, *, shared_link_url: str | None = None
+    ) -> str:
         """Calculate a SHA-256 hash of an album's mutable metadata.
 
         Name and description are normalised (``None`` -> ``""`` and stripped) so
         that equivalent albums hash identically and missing optional fields do
-        not cause spurious ``immich_album.updated`` events.
+        not cause spurious ``immich_album.updated`` events. The sorted set of
+        tagged person ids and the shared-link URL are folded in so that a pure
+        face-tag or share-link change (which leaves name/description/asset
+        count/updatedAt untouched) still triggers a re-sync and recalculation
+        of participants.
         """
         name = (album.album_name or "").strip()
         description = (album.description or "").strip()
         updated = album.updated_at.isoformat() if album.updated_at else ""
-        data = f"{name}|{description}|{album.asset_count}|{updated}"
+        person_ids = sorted(
+            {p.id for asset in album.assets for p in asset.people if p.id}
+        )
+        people_part = ",".join(person_ids)
+        link_part = shared_link_url or ""
+        data = (
+            f"{name}|{description}|{album.asset_count}|{updated}"
+            f"|{people_part}|{link_part}"
+        )
         return hashlib.sha256(data.encode()).hexdigest()
 
     @staticmethod

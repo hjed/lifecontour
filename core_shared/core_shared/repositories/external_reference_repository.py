@@ -143,6 +143,38 @@ class ExternalReferenceRepository:
         row = result.fetchone()
         return row.external_entity_id if row else None
 
+    async def get_contact_ids_by_immich_person_ids(
+        self, person_ids: list[str]
+    ) -> dict[str, int]:
+        """Resolve Immich person ids to linked local contact ids.
+
+        Used for album participant detection: tagged Immich people are mapped to
+        the contacts they were linked to during contact sync. Person ids without
+        a contact link are simply omitted from the result, so unresolved people
+        never produce orphan participants.
+
+        Args:
+            person_ids: Immich person UUIDs to resolve.
+
+        Returns:
+            A mapping of ``{person_id: contact_id}`` for the linked people.
+        """
+        if not person_ids:
+            return {}
+
+        query = text("""
+            SELECT external_entity_id, internal_entity_id
+            FROM external_references
+            WHERE external_system = 'immich'
+              AND external_entity_type = 'person'
+              AND internal_entity_type = 'contact'
+              AND external_entity_id = ANY(:person_ids)
+        """)
+        result = await self._conn.execute(query, {"person_ids": person_ids})
+        return {
+            row.external_entity_id: row.internal_entity_id for row in result.fetchall()
+        }
+
     @staticmethod
     def _row_to_dict(row: Any) -> dict[str, Any]:
         """Convert a database row to a dictionary."""

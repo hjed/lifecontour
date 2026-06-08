@@ -14,13 +14,23 @@ journal has been edited locally since it was last synced
 content and date range are preserved and the inbound album values are ignored.
 """
 
+import json
 from datetime import datetime
 from typing import Any
 
 import structlog
-from core_shared.models.journals import EventDateRange, Journal
+from core_shared.models.journals import (
+    EventDateRange,
+    Journal,
+    JournalContactRelationship,
+    JournalContactRelationshipType,
+)
+from core_shared.models.journals.attendee_status import AttendeeStatus
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.outbox_events import ImmichAlbumSyncEventData
+from core_shared.repositories.external_reference_repository import (
+    ExternalReferenceRepository,
+)
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.integrations.adapters.sql.sync_metadata_repository import (
@@ -28,6 +38,9 @@ from app.core.integrations.adapters.sql.sync_metadata_repository import (
 )
 from app.core.journal.adapters.sql.album_sync_read_repository import (
     AlbumSyncReadRepository,
+)
+from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
+    SqlJournalContactRelationshipRepository,
 )
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.services.journal_service import JournalService
@@ -61,13 +74,25 @@ class ImmichAlbumOutboxEventProcessor:
         self,
         journal_service: JournalService,
         connection: AsyncConnection,
+        relationship_repo: SqlJournalContactRelationshipRepository | None = None,
+        ext_ref_repo: ExternalReferenceRepository | None = None,
     ) -> None:
-        """Initialize with a journal service and database connection."""
+        """Initialize with a journal service and database connection.
+
+        ``relationship_repo`` and ``ext_ref_repo`` are used for participant
+        detection (resolving tagged Immich people to local contacts and keeping
+        the journal's PARTICIPANT relationships in sync). They default to
+        connection-backed implementations so existing callers need not change.
+        """
         self.journal_service = journal_service
         self.connection = connection
         self.journal_repo = SqlJournalRepository(connection)
         self.sync_metadata_repo = SyncMetadataRepository(connection)
         self.album_link_repo = AlbumSyncReadRepository(connection)
+        self.relationship_repo = (
+            relationship_repo or SqlJournalContactRelationshipRepository(connection)
+        )
+        self.ext_ref_repo = ext_ref_repo or ExternalReferenceRepository(connection)
 
     async def process_event(self, event: OutboxEvent) -> dict[str, Any]:
         """Process a single Immich album outbox event."""
@@ -166,10 +191,18 @@ class ImmichAlbumOutboxEventProcessor:
             version_hash=payload.version_hash,
             internal_id=created.id,
         )
+
+        # Participants are not merge-protected, so a new album always reconciles
+        # its tagged people. There is no prior immich set on create.
+        reference_data = self._reference_data(payload)
+        reference_data["participant_contact_ids"] = await self._sync_participants(
+            created.id, payload, {}, has_local_edits=False
+        )
+
         await self.album_link_repo.upsert_link(
             created.id,
             payload.external_id,
-            self._reference_data(payload),
+            reference_data,
             bump_anchor=True,
         )
 
@@ -217,10 +250,12 @@ class ImmichAlbumOutboxEventProcessor:
         # anchor is re-established below and normal sync resumes next cycle).
         if link is None:
             has_local_edits = True
+            prev_reference_data: dict[str, Any] = {}
         else:
             has_local_edits = self._has_local_edits(
                 existing.updated_at, link.updated_at
             )
+            prev_reference_data = self._decode_reference_data(link.reference_data)
 
         if not has_local_edits:
             merged = self._build_journal(payload.journal_data, journal_id=journal_id)
@@ -233,6 +268,14 @@ class ImmichAlbumOutboxEventProcessor:
                 transaction=self.connection,
             )
 
+        # Participants are reconciled regardless of merge protection: newly
+        # tagged people are always added, but removals are skipped when the
+        # journal was edited locally (add-only), preserving a user-curated list.
+        reference_data = self._reference_data(payload)
+        reference_data["participant_contact_ids"] = await self._sync_participants(
+            journal_id, payload, prev_reference_data, has_local_edits=has_local_edits
+        )
+
         # Always refresh album display metadata (name / asset count / url) so it
         # cannot go stale. Only advance the merge anchor (updated_at) when we
         # actually applied inbound changes, so a locally edited journal stays
@@ -240,7 +283,7 @@ class ImmichAlbumOutboxEventProcessor:
         await self.album_link_repo.upsert_link(
             journal_id,
             payload.external_id,
-            self._reference_data(payload),
+            reference_data,
             bump_anchor=not has_local_edits,
         )
 
@@ -301,5 +344,99 @@ class ImmichAlbumOutboxEventProcessor:
             "asset_count": metadata.get("asset_count"),
             "album_url": metadata.get("album_url"),
             "thumbnail_asset_id": metadata.get("thumbnail_asset_id"),
+            "shared_link_url": metadata.get("shared_link_url"),
         }
         return {k: v for k, v in data.items() if v is not None}
+
+    @staticmethod
+    def _decode_reference_data(reference_data: str | None) -> dict[str, Any]:
+        """Decode an album reference_data JSON string, tolerating bad rows."""
+        if not reference_data:
+            return {}
+        try:
+            decoded = json.loads(reference_data)
+        except ValueError:
+            return {}
+        return decoded if isinstance(decoded, dict) else {}
+
+    @staticmethod
+    def _coerce_contact_ids(value: Any) -> set[int]:
+        """Parse a stored ``participant_contact_ids`` value into a set of ints.
+
+        Defensive like ``_decode_reference_data``: a malformed reference_data
+        list (nulls, non-numeric strings, wrong type) must not break album sync,
+        so anything that is not a clean integer id is skipped.
+        """
+        if not isinstance(value, list):
+            return set()
+        ids: set[int] = set()
+        for item in value:
+            # bool is a subclass of int but is never a valid contact id.
+            if isinstance(item, bool):
+                continue
+            if isinstance(item, int):
+                ids.add(item)
+            elif isinstance(item, str) and item.strip().lstrip("-").isdigit():
+                ids.add(int(item))
+        return ids
+
+    async def _sync_participants(
+        self,
+        journal_id: int,
+        payload: ImmichAlbumSyncEventData,
+        prev_reference_data: dict[str, Any],
+        *,
+        has_local_edits: bool,
+    ) -> list[int]:
+        """Reconcile journal PARTICIPANT relationships from album people tags.
+
+        Tagged Immich people are resolved to local contacts via
+        ``ExternalReference`` (unresolved people are skipped — no orphans).
+        Newly tagged contacts are always added. Removals (contacts that left the
+        immich-managed set) are applied only when the journal has not been edited
+        locally — otherwise the sync is add-only so a user-curated participant
+        list is preserved. Only contacts in the immich-managed set
+        (``participant_contact_ids`` from the prior reference_data) are ever
+        removed, so manually-added participants are never touched.
+
+        Returns the new immich-managed contact id set to persist in reference_data.
+        """
+        people = payload.album_metadata.get("people") or []
+        person_ids = [p["id"] for p in people if isinstance(p, dict) and p.get("id")]
+        resolved = await self.ext_ref_repo.get_contact_ids_by_immich_person_ids(
+            person_ids
+        )
+        desired = set(resolved.values())
+
+        existing_rows = await self.relationship_repo.get_by_journal_and_type(
+            journal_id, JournalContactRelationshipType.PARTICIPANT
+        )
+        existing_contact_ids = {row.contact_id for row in existing_rows}
+
+        # Additions always run (participants are not merge-protected).
+        for contact_id in sorted(desired - existing_contact_ids):
+            await self.relationship_repo.create(
+                JournalContactRelationship(
+                    journal_id=journal_id,
+                    contact_id=contact_id,
+                    relationship_type=JournalContactRelationshipType.PARTICIPANT,
+                    status=AttendeeStatus.ATTENDED,
+                )
+            )
+
+        prev = self._coerce_contact_ids(
+            prev_reference_data.get("participant_contact_ids")
+        )
+
+        if has_local_edits:
+            # Add-only: keep the un-removed immich participants and the new ones.
+            return sorted(prev | desired)
+
+        # Remove only contacts that were immich-managed and are now untagged.
+        for contact_id in sorted(prev - desired):
+            await self.relationship_repo.delete(
+                journal_id,
+                contact_id,
+                JournalContactRelationshipType.PARTICIPANT,
+            )
+        return sorted(desired)

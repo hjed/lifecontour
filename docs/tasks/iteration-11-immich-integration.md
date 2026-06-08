@@ -225,8 +225,8 @@ Wire the `ContactAvatar` component to display Immich photos.
 **Acceptance Criteria (task-level):**
 - [x] Immich albums imported as PHOTO_ALBUM journals. *(Phase 1)*
 - [x] Date ranges derived from photo timestamps. *(Phase 1)*
-- [ ] Participants detected from people tags. *(Phase 2)*
-- [ ] Album cover photo displayed as banner. *(Phase 2)*
+- [x] Participants detected from people tags. *(Phase 2)*
+- [x] Album cover photo displayed as banner. *(Phase 2)*
 - [x] PhotoAlbumData entity cleaned up. *(Phase 1)*
 
 #### Phase 1: PhotoAlbumData Cleanup and Album Sync Backend
@@ -255,20 +255,23 @@ Remove the scaffolding `PhotoAlbumData` entity and implement album import using 
 
 Detect participants from photo people tags and display album cover photos on journals.
 
+**Architecture note (as implemented):** Participant detection follows the worker→outbox→backend pattern.
+The Immich worker aggregates the unique people tagged across an album's photos (`ImmichSyncService.aggregate_album_people`) and emits them, plus the album web URL and any public `shared_link_url`, in the `immich_album.*` outbox event's `album_metadata`. The album `version_hash` now folds in the sorted tagged-person ids and the shared-link URL so a pure face-tag or share-link change still triggers a re-sync. The backend `ImmichAlbumOutboxEventProcessor` resolves those person ids to local contacts via a new `ExternalReferenceRepository.get_contact_ids_by_immich_person_ids` reverse lookup (unresolved people are skipped — no orphans) and reconciles `PARTICIPANT` relationships through `SqlJournalContactRelationshipRepository`. Participants are **not** merge-protected: additions always run, but **removals run only when the journal has not been edited locally** (add-only when locally edited, per product decision). The immich-managed contact set is tracked in the album `external_references.reference_data` (`participant_contact_ids`), so the remove step only ever touches that set — **manually-added participants are never removed**. *(Documented limitation: a contact that is both manually added and an immich-tagged person resolves to immich provenance.)* The shared-link URL is persisted in `reference_data`. The album cover is served on-demand by a new `AlbumCoverProxyService` behind `GET /api/journals/{id}/album-cover` (mirrors the contact-avatar proxy: SSRF scheme check, credential lookup, `GET /api/assets/{id}/thumbnail`); the proxy URL is surfaced as `cover_url` on `PhotoAlbumDataSchema` and rendered as a clickable banner (shared `AlbumCoverBanner` component, with graceful `onError` fallback) in the PHOTO_ALBUM section of the journal detail/edit screen, linking to the album in Immich. *(`ImmichApiClient.get_album` is unchanged; Immich's single-album endpoint returns per-asset `people` — verified by the worker tests' fixtured payloads.)*
+
 **Acceptance Criteria:**
-- [ ] Sync fetches all assets in album, resolves tagged people to local contacts via `ExternalReference`
-- [ ] Resolved contacts added as PARTICIPANT on journal via `JournalContactRelationship`
-- [ ] Change detection on re-sync: new people added, removed people removed
-- [ ] Unresolved Immich people (not yet synced as contacts) skipped — no orphan participants
-- [ ] Shared link detection: query `GET /shared-links`, store URL in `ExternalReference.reference_data` JSON
-- [ ] `GET /api/journals/{id}/album-cover` proxy endpoint — fetches album cover thumbnail from Immich
-- [ ] Journal edit/detail screen: album cover photo displayed as banner (fetched on-demand, not persisted)
-- [ ] Banner clickable to open album in Immich web UI
+- [x] Sync fetches all assets in album, resolves tagged people to local contacts via `ExternalReference`
+- [x] Resolved contacts added as PARTICIPANT on journal via `JournalContactRelationship`
+- [x] Change detection on re-sync: new people added, removed people removed (removals gated by merge protection — add-only when locally edited)
+- [x] Unresolved Immich people (not yet synced as contacts) skipped — no orphan participants
+- [x] Shared link detection: query `GET /shared-links`, store URL in `ExternalReference.reference_data` JSON
+- [x] `GET /api/journals/{id}/album-cover` proxy endpoint — fetches album cover thumbnail from Immich
+- [x] Journal edit/detail screen: album cover photo displayed as banner (fetched on-demand, not persisted)
+- [x] Banner clickable to open album in Immich web UI
 
 **Required Test Coverage:**
-- **Unit:** Participant resolution from people tags, change detection (add/remove), shared link extraction.
-- **Integration:** Album with tagged people → participants created on journal. Re-sync with removed tag → participant removed. Cover photo proxy returns image bytes.
-- **E2E:** PHOTO_ALBUM journal shows album cover banner and participant list.
+- **Unit:** Participant resolution from people tags, change detection (add/remove), shared link extraction. ✅ 6 worker tests (`test_immich_album_sync.py`: people aggregation, version hash with people/share-link, share-URL map), 3 core_shared tests (`test_external_reference_repository.py`: reverse lookup), 8 processor tests (`test_immich_album_outbox_processor.py`: resolve/skip-unresolved/add-only/remove/preserve-manual + shared_link reference_data), 6 album-cover proxy tests (`test_album_cover_proxy_service.py`)
+- **Integration:** Album with tagged people → participants created on journal. Re-sync with removed tag → participant removed. Cover photo proxy returns image bytes. ✅ 6 processor integration tests (`test_immich_album_outbox_processor.py`: create participants, remove-on-resync, add-only-when-locally-edited, preserve-manual, unresolved skipped, shared_link persisted) + 3 album-cover route tests (`test_album_cover_route.py`)
+- **E2E:** PHOTO_ALBUM journal shows album cover banner and participant list. ✅ Covered at the component level per the repo's "component-only e2e → Jest" convention (banner render / clickable Immich link / no-cover / on-error fallback in `JournalTypeSection.test.tsx` + `JournalTypeDataDisplay.test.tsx`; participant list via `JournalContactBadge` tests). A fully-stubbed Playwright spec was intentionally not added (mirrors the `contact-avatars.spec.ts` → `ContactAvatar.test.tsx` migration).
 
 ---
 
