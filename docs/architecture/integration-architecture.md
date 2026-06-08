@@ -860,6 +860,7 @@ table via the `DeadLetterConsumerMixin`.
 | Component | Module | Consumer Group | Responsibility |
 |-----------|--------|----------------|----------------|
 | `SearchIndexerConsumer` | `app.infrastructure.events.search_indexer_consumer` | `search-indexer` | MeiliSearch indexing + daily summary invalidation |
+| `HistoryProjectionConsumer` | `app.infrastructure.events.history_projection_consumer` | `history-projection` | Field-level activity history projection for contacts and journals (idempotent; see [Activity History Spec](../product-specifications/activity-history-product-specification.md) / [Iteration 12](../tasks/iteration-12-activity-history.md)) |
 | `SummaryConsumer` | `app.infrastructure.events.summary_consumer` | `summary-generator` | AI contact summary generation + post-generation index update |
 | `InboundEventConsumer` | `app.infrastructure.events.inbound_event_consumer` | `inbound-processor` | Contact sync (`contact.*`), journal sync (`journal_event.*`), Immich album import (`immich_album.*`), and match detection (`journal_review.*`) |
 | `GoogleWorkerStreamConsumer` | `integration_workers/google` | `google-worker` | Journal/tag event processing for Google Calendar sync |

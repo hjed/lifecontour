@@ -14,6 +14,7 @@ The Personal CRM & Journal System is a Python FastAPI backend with Next.js front
 - **Name-Based Matching**: Link contacts to Immich people by name or manual confirmation
 - **Global Search**: Fast, typo-tolerant search across all entities with MeiliSearch
 - **Transactional Events**: Reliable event publishing with outbox pattern
+- **Event-Driven History**: Field-level activity history for contacts and journals derived as a read-model projection of domain events (see the [Activity History Product Specification](./product-specifications/activity-history-product-specification.md))
 - **Clear Language Separation**: Python backend, TypeScript frontend for AI clarity
 - **Agile Development**: Feature-complete iterations delivering incremental value
 - **Proxy-Ready**: Support deployment behind nginx reverse proxy
@@ -30,6 +31,7 @@ These product specifications describe the target product behaviour that active i
 
 - **[Contacts Product Specification](./product-specifications/contacts-product-specification.md)** - target behaviour for contact organisation, sync, search, summaries, and MCP parity
 - **[Journals Product Specification](./product-specifications/journals-product-specification.md)** - target behaviour for journal sync, merge, hierarchy, list navigation, summaries, and MCP parity
+- **[Activity History Product Specification](./product-specifications/activity-history-product-specification.md)** - unified, event-driven field-level history across contacts and journals, with provenance and MCP parity
 
 ### 📋 **[Domain Architecture](./architecture/domain-architecture.md)**
 Detailed domain-driven design, component architecture, and project structure including:

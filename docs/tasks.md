@@ -36,6 +36,7 @@ Read these first when working on the active product-alignment streams:
 - **[Journals Product Specification](./product-specifications/journals-product-specification.md)** - target product behaviour for the journals improvement stream
 - **[Outdoor Logbook Product Specification](./product-specifications/outdoor-logbook-product-specification.md)** - target product behaviour for the outdoor logbook expansion
 - **[Integration Architecture & Strava Product Specification](./product-specifications/integration-architecture-and-strava-product-specification.md)** - event bus migration and Strava integration
+- **[Activity History Product Specification](./product-specifications/activity-history-product-specification.md)** - unified, event-driven activity history across contacts and journals
 
 ---
 
@@ -249,6 +250,24 @@ Read these first when working on the active product-alignment streams:
 - Gear items entity with future SnipeIT sync compatibility
 - PDF logbook export with yearly summaries and participant index
 - MCP parity for all new capabilities
+
+### [Iteration 12: Activity History (Journals + Unified Foundation)](./tasks/iteration-12-activity-history.md)
+**Status:** 🟡 PLANNED
+**Dependencies:** Iteration 4 (journal core + events), Iteration 5 (Redis Streams event bus, outbox relay, stream consumers), existing contact activity history
+**Goal:** Deliver field-level activity history for journals of all types, displayed at the bottom of the journal UI with full provenance, by generalising contact history into a single shared, event-driven system
+
+**Key Features:**
+- Unified, entity-agnostic history model, API shape, and activity-feed component shared by contacts and journals
+- Event-driven history projection: a `HistoryProjectionConsumer` derives history from the `pms:domain-events` stream (like the search indexer), replacing the synchronous dual-write
+- Journal history for all types — base, fitness, outdoor activity, supporting types, routes, and gear — with provenance (UI, MCP, system, integrations)
+- Journal history REST endpoint and MCP `get_journal_history` parity
+- Contacts migrated onto the same event-driven foundation (no user-visible change)
+
+**Architecture:**
+- History as a read-model projection of domain events (integrity by construction — single publish, no dual-write)
+- Idempotent projection (unique `event_id`-scoped key + `ON CONFLICT DO NOTHING`) for at-least-once stream delivery
+- Provenance carried in event payloads; row timestamps from `event.occurred_at`
+- See [Activity History Product Specification](./product-specifications/activity-history-product-specification.md) for full spec
 
 ---
 
