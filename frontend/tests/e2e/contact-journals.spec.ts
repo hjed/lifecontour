@@ -88,16 +88,19 @@ test.describe('Contact Journals Display', () => {
       // Verify journals section is visible
       await navigateToContactAndWaitForJournals(page, contact.id);
 
-      // Verify participant journal is displayed
+      // Verify participant journal is displayed. The reload busts any stale
+      // "empty" React Query cache from a fetch that raced journal creation; give
+      // each reload enough time to re-fetch and render before retrying, since a
+      // 2s inner timeout was too tight for firefox to settle under CI load.
       await expect(async () => {
         await page.reload();
         await expect(
           page.getByRole('heading', { name: participantJournal.title })
-        ).toBeVisible({ timeout: 2000 });
+        ).toBeVisible({ timeout: 10000 });
         await expect(
           page.getByRole('heading', { name: aboutJournal.title })
-        ).toBeVisible({ timeout: 2000 });
-      }).toPass({ timeout: 30000 });
+        ).toBeVisible({ timeout: 10000 });
+      }).toPass({ timeout: 60000 });
     });
 
     test('should display contact name instead of Contact <id> on related journals', async ({

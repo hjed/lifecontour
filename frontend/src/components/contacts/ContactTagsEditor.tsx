@@ -114,7 +114,11 @@ export function ContactTagsEditor({
         color: newTagColor,
       });
       const newTagId = response.data.id;
-      assignTag.mutate({ contactId, tagId: newTagId });
+      // Await the assignment so the contact's tag cache is invalidated (and the
+      // new badge rendered) before we close the popover. Fire-and-forget here
+      // let the editor settle into a "no tags" state when the assign request
+      // resolved late, which surfaced as a flaky missing badge.
+      await assignTag.mutateAsync({ contactId, tagId: newTagId });
       setIsAddOpen(false);
       setSearchQuery('');
       setIsCreating(false);

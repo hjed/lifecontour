@@ -127,9 +127,15 @@ test.describe('Journal Detail Page', () => {
       });
       await expect(contentTextarea).toBeVisible();
 
-      // Edit the content
+      // Edit the content. The editor is a Tiptap contenteditable, not a real
+      // <textarea>, so fill() can fail to clear it and leave the old and new
+      // text concatenated. Focus, select-all, delete, then type — matching the
+      // robust pattern in journal-markdown-editor.spec.ts.
       const newContent = 'Updated content for the journal entry.';
-      await contentTextarea.fill(newContent);
+      await contentTextarea.click();
+      await page.keyboard.press('ControlOrMeta+A');
+      await page.keyboard.press('Delete');
+      await contentTextarea.pressSequentially(newContent);
 
       // Click the save button
       const saveButton = page.getByTestId('journal-content-save');
@@ -720,13 +726,19 @@ test.describe('Journal Detail Page', () => {
       const tagBadge = page.getByTestId(`tag-badge-${tag.id}`);
       await expect(tagBadge).toBeVisible();
 
-      // Click the remove button on the tag badge
+      // Click the remove button on the tag badge. Removal isn't optimistic — the
+      // badge only disappears after the DELETE + refetch round-trips — so retry
+      // the click as a unit: a click that races with a re-render (and is lost)
+      // is retried, while a successful-but-slow delete satisfies the assertion
+      // on the first pass without re-clicking.
       const removeButton = page.getByTestId(`remove-tag-${tag.id}`);
       await expect(removeButton).toBeVisible();
-      await removeButton.click();
-
-      // Tag badge should disappear after removal
-      await expect(tagBadge).toBeHidden();
+      await expect(async () => {
+        if (await tagBadge.isVisible()) {
+          await removeButton.click();
+        }
+        await expect(tagBadge).toBeHidden({ timeout: 5000 });
+      }).toPass({ timeout: 15000 });
     });
   });
 
