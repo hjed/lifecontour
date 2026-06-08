@@ -81,63 +81,11 @@ async function setupBaseRoutes(page: import('@playwright/test').Page) {
   );
 }
 
+// Note: panel visibility and "settings modal opens + shows form" are covered
+// generically in provider-settings.spec.ts. Pure form rendering / validation is
+// unit-tested in ImmichSettings.test.tsx. The tests here cover the real connect
+// and sync request contracts.
 test.describe('Immich Integration Settings', () => {
-  test('immich panel is visible in integration list', async ({
-    authenticatedPage,
-  }) => {
-    await setupBaseRoutes(authenticatedPage);
-
-    await authenticatedPage.goto('/integrations');
-
-    // Verify the Immich panel exists and shows disconnected status
-    const immichPanel = authenticatedPage.locator(
-      '[data-testid="integration-panel-immich"]'
-    );
-    await expect(immichPanel).toBeVisible();
-    await expect(immichPanel).toContainText('Immich');
-    await expect(immichPanel).toContainText('Disconnected');
-  });
-
-  test('settings modal opens and shows the Immich configuration form', async ({
-    authenticatedPage,
-  }) => {
-    await setupBaseRoutes(authenticatedPage);
-
-    await authenticatedPage.goto('/integrations');
-
-    // Click the Settings button on the Immich panel
-    const immichPanel = authenticatedPage.locator(
-      '[data-testid="integration-panel-immich"]'
-    );
-    await expect(immichPanel).toBeVisible();
-
-    const settingsButton = immichPanel.getByRole('button', {
-      name: /settings/i,
-    });
-    await expect(settingsButton).toBeVisible();
-    await settingsButton.click();
-
-    // Verify the modal appears
-    const dialogContent = authenticatedPage.getByRole('dialog');
-    await expect(dialogContent).toBeVisible();
-
-    // Verify Immich form elements are present
-    await expect(dialogContent.getByText('Immich Configuration')).toBeVisible();
-
-    const form = dialogContent.locator('[data-testid="immich-settings-form"]');
-    await expect(form).toBeVisible();
-
-    await expect(
-      form.locator('[data-testid="immich-server-url-input"]')
-    ).toBeVisible();
-    await expect(
-      form.locator('[data-testid="immich-api-key-input"]')
-    ).toBeVisible();
-    await expect(
-      form.locator('[data-testid="immich-connect-button"]')
-    ).toBeVisible();
-  });
-
   test('can connect to Immich', async ({ authenticatedPage }) => {
     await setupBaseRoutes(authenticatedPage);
 
@@ -289,30 +237,8 @@ test.describe('Immich Sync Controls', () => {
     );
   }
 
-  test('sync buttons are visible when Immich is connected', async ({
-    authenticatedPage,
-  }) => {
-    await setupConnectedRoutes(authenticatedPage);
-
-    await authenticatedPage.goto('/integrations');
-
-    const immichPanel = authenticatedPage.locator(
-      '[data-testid="integration-panel-immich"]'
-    );
-    await expect(immichPanel).toBeVisible();
-
-    // When connected, sync controls should be visible
-    const contactsSyncButton = immichPanel.locator(
-      '[data-testid="trigger-immich-contacts-sync"]'
-    );
-    await expect(contactsSyncButton).toBeVisible();
-
-    const albumSyncButton = immichPanel.locator(
-      '[data-testid="trigger-immich-album-sync"]'
-    );
-    await expect(albumSyncButton).toBeVisible();
-  });
-
+  // Note: sync-control button visibility by connection state is unit-tested in
+  // IntegrationPanel.test.tsx. This test covers the real sync POST contract.
   test('clicking contacts sync button triggers API call', async ({
     authenticatedPage,
   }) => {
@@ -371,25 +297,5 @@ test.describe('Immich Sync Controls', () => {
 
     // Verify the API was called
     expect(syncRequestReceived).toBe(true);
-  });
-
-  test('sync buttons are not shown when Immich is disconnected', async ({
-    authenticatedPage,
-  }) => {
-    // Use the base routes (disconnected state)
-    await setupBaseRoutes(authenticatedPage);
-
-    await authenticatedPage.goto('/integrations');
-
-    const immichPanel = authenticatedPage.locator(
-      '[data-testid="integration-panel-immich"]'
-    );
-    await expect(immichPanel).toBeVisible();
-
-    // Sync controls should not be rendered when disconnected
-    const contactsSyncButton = immichPanel.locator(
-      '[data-testid="trigger-immich-contacts-sync"]'
-    );
-    await expect(contactsSyncButton).toHaveCount(0);
   });
 });

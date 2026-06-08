@@ -32,50 +32,11 @@ async function waitForFieldUpdateRequest(
   expect(requestBody.data.attributes).toHaveProperty('value', expectedValue);
 }
 
+// Note: inline-edit view/edit-mode toggling, click-to-edit, and Escape-to-cancel
+// are unit-tested in InlineEditField.test.tsx / InlineEditEmailField.test.tsx.
+// These e2e tests cover only the real PATCH /api/contacts/{id}/fields/{field}
+// save contract that the component tests mock out.
 test.describe('Contact Inline Editing', () => {
-  test('should display contact detail page', async ({ contactsWithData }) => {
-    const { page, contacts } = contactsWithData;
-    const contact = contacts[0];
-
-    await page.goto(`/contacts/${contact.id}`);
-    // Wait for the page to load and verify we're on the contact detail page
-    await expect(
-      page.locator('[data-testid="first-name-field"]')
-    ).toBeVisible();
-  });
-
-  test('should enter edit mode when clicking on first name field', async ({
-    contactsWithData,
-  }) => {
-    const { page, contacts } = contactsWithData;
-    const contact = contacts[0];
-
-    await page.goto(`/contacts/${contact.id}`);
-
-    const firstNameField = page.locator('[data-testid="first-name-field"]');
-    await firstNameField.click();
-
-    const input = page.locator('[data-testid="first-name-field"] input');
-    await expect(input).toBeVisible();
-  });
-
-  test('should cancel inline edit with Escape key', async ({
-    contactsWithData,
-  }) => {
-    const { page, contacts } = contactsWithData;
-    const contact = contacts[0];
-
-    await page.goto(`/contacts/${contact.id}`);
-
-    const firstNameField = page.locator('[data-testid="first-name-field"]');
-    await firstNameField.click();
-
-    await page.keyboard.press('Escape');
-
-    const input = page.locator('[data-testid="first-name-field"] input');
-    await expect(input).toBeHidden();
-  });
-
   test('should edit contact first name inline and save with correct API call', async ({
     contactsWithData,
   }) => {
