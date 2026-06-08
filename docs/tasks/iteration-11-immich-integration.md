@@ -271,7 +271,7 @@ The Immich worker aggregates the unique people tagged across an album's photos (
 **Required Test Coverage:**
 - **Unit:** Participant resolution from people tags, change detection (add/remove), shared link extraction. ✅ 6 worker tests (`test_immich_album_sync.py`: people aggregation, version hash with people/share-link, share-URL map), 3 core_shared tests (`test_external_reference_repository.py`: reverse lookup), 8 processor tests (`test_immich_album_outbox_processor.py`: resolve/skip-unresolved/add-only/remove/preserve-manual + shared_link reference_data), 6 album-cover proxy tests (`test_album_cover_proxy_service.py`)
 - **Integration:** Album with tagged people → participants created on journal. Re-sync with removed tag → participant removed. Cover photo proxy returns image bytes. ✅ 6 processor integration tests (`test_immich_album_outbox_processor.py`: create participants, remove-on-resync, add-only-when-locally-edited, preserve-manual, unresolved skipped, shared_link persisted) + 3 album-cover route tests (`test_album_cover_route.py`)
-- **E2E:** PHOTO_ALBUM journal shows album cover banner and participant list. ✅ `immich-album.spec.ts` (+ component unit tests `JournalTypeSection.test.tsx` / `JournalTypeDataDisplay.test.tsx`)
+- **E2E:** PHOTO_ALBUM journal shows album cover banner and participant list. ✅ Covered at the component level per the repo's "component-only e2e → Jest" convention (banner render / clickable Immich link / no-cover / on-error fallback in `JournalTypeSection.test.tsx` + `JournalTypeDataDisplay.test.tsx`; participant list via `JournalContactBadge` tests). A fully-stubbed Playwright spec was intentionally not added (mirrors the `contact-avatars.spec.ts` → `ContactAvatar.test.tsx` migration).
 
 ---
 
