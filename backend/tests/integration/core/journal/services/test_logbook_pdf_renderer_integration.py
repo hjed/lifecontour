@@ -227,6 +227,67 @@ async def test_pdf_generation_with_filters(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_pdf_generation_includes_album_shared_link(
+    journal_repo: SqlJournalRepository,
+    async_connection: AsyncConnection,
+    data_service: LogbookDataService,
+    renderer: LogbookPdfRenderer,
+) -> None:
+    """An Immich-linked PHOTO_ALBUM journal renders its shared link in the PDF."""
+    user_id = "user_pdf_album_link"
+
+    journal = Journal(
+        user_id=user_id,
+        title="Bushwalk With Photos",
+        content="A great day on the trails",
+        event_date_range=EventDateRange(
+            start=datetime(2024, 6, 1, tzinfo=UTC),
+            end=datetime(2024, 6, 1, tzinfo=UTC),
+        ),
+    )
+    journal = await journal_repo.save(journal)
+    await async_connection.execute(
+        text("INSERT INTO journal_bushwalking_data (journal_id) VALUES (:id)"),
+        {"id": journal.id},
+    )
+    # Link the journal to an Immich album with a public shared link.
+    await async_connection.execute(
+        text("""
+            INSERT INTO sync_metadata (
+                internal_id, integration_source, external_id,
+                last_synced_at, version_hash, sync_status
+            ) VALUES (:id, 'immich_album', 'album-pdf-1', now(), 'h', 'success')
+        """),
+        {"id": journal.id},
+    )
+    await async_connection.execute(
+        text("""
+            INSERT INTO external_references (
+                internal_entity_type, internal_entity_id, external_system,
+                external_entity_type, external_entity_id, reference_data,
+                created_at, updated_at
+            ) VALUES (
+                'journal', :id, 'immich', 'album', 'album-pdf-1', :ref, now(), now()
+            )
+        """),
+        {
+            "id": journal.id,
+            "ref": '{"shared_link_url": "https://immich.example.com/share/xyz"}',
+        },
+    )
+
+    export_data = await data_service.get_logbook_data(user_id=user_id)
+    pdf_bytes = renderer.render(export_data)
+
+    assert pdf_bytes[:5] == b"%PDF-"
+    text_content = _extract_pdf_text(pdf_bytes)
+    assert "Bushwalk With Photos" in text_content
+    assert "Photo Album:" in text_content
+    assert "https://immich.example.com/share/xyz" in text_content
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_pdf_generation_empty_result(
     data_service: LogbookDataService,
     renderer: LogbookPdfRenderer,

@@ -31,6 +31,13 @@ from core_shared.models.journals import (
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.journal.adapters.sql.album_sync_read_repository import (
+    EXTERNAL_ENTITY_TYPE,
+    EXTERNAL_SYSTEM,
+    INTEGRATION_SOURCE,
+    INTERNAL_ENTITY_TYPE,
+    AlbumSyncReadRepository,
+)
 from app.core.journal.models.repositories import LogbookExportRepository
 
 
@@ -358,6 +365,47 @@ class SqlLogbookExportRepository(LogbookExportRepository):
             )
             gear_item_names = {row.id: row.name for row in result.fetchall()}
 
+        # Immich photo album shared links (ITER11-005 Phase 2).
+        # Batched over all journal ids to avoid an N+1 (the rest of this method
+        # is batched too); mirrors AlbumSyncReadRepository's SQL/constants and
+        # reuses its malformed-tolerant reference_data decoder so a corrupt row
+        # can never 500 the export. The field is singular, so the first
+        # non-empty shared link per journal wins (ordered for determinism).
+        album_links_sql = """
+            SELECT sm.internal_id AS journal_id,
+                   er.reference_data AS reference_data
+            FROM sync_metadata sm
+            LEFT JOIN external_references er
+                ON er.external_system = :external_system
+                AND er.external_entity_type = :external_entity_type
+                AND er.external_entity_id = sm.external_id
+                AND er.internal_entity_type = :internal_entity_type
+                AND er.internal_entity_id = sm.internal_id
+            WHERE sm.integration_source = :source
+              AND sm.internal_id = ANY(:journal_ids)
+            ORDER BY er.id
+        """
+        result = await self.connection.execute(
+            text(album_links_sql),
+            {
+                "source": INTEGRATION_SOURCE,
+                "external_system": EXTERNAL_SYSTEM,
+                "external_entity_type": EXTERNAL_ENTITY_TYPE,
+                "internal_entity_type": INTERNAL_ENTITY_TYPE,
+                "journal_ids": final_journal_ids,
+            },
+        )
+        album_shared_links: dict[int, str] = {}
+        for row in result.fetchall():
+            if row.journal_id in album_shared_links:
+                continue  # first non-null share link wins
+            ref = AlbumSyncReadRepository._decode_reference_data(
+                row.reference_data, row.journal_id
+            )
+            shared_link_url = ref.get("shared_link_url")
+            if isinstance(shared_link_url, str) and shared_link_url:
+                album_shared_links[row.journal_id] = shared_link_url
+
         entries = []
         for row in final_journal_rows:
             # We instantiate domain models where possible but ignore strict validation if data is legacy/invalid.
@@ -479,6 +527,8 @@ class SqlLogbookExportRepository(LogbookExportRepository):
             gear = gear_maint_data.get(row.id)
             if gear and gear.get("gear_item_id"):
                 entry.gear_item_name = gear_item_names.get(gear["gear_item_id"])
+
+            entry.album_shared_link = album_shared_links.get(row.id)
 
             entries.append(entry)
 
