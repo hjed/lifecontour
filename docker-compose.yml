@@ -428,6 +428,10 @@ services:
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-KzC1vYhL3bQpT_x5Ue8q0Wl1MvX-oVwYwK9cQx7lKHg=}
       LOG_LEVEL: ${WORKER_LOG_LEVEL:-DEBUG}
       WORKER_ID: immich-worker
+      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
+      OTEL_SERVICE_NAME: immich-worker
+      OTEL_RESOURCE_ATTRIBUTES: service.name=immich-worker,service.version=0.2.0
     volumes:
       - ./core_shared:/core_shared:ro
       - ./integration_workers/immich:/app

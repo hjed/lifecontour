@@ -12,17 +12,20 @@ sync tasks. Actual sync logic will be implemented in ITER11-002+.
 from __future__ import annotations
 
 import asyncio
-import logging
 import sys
 from datetime import UTC, datetime
 from typing import Any
 
-import structlog
 from arq import cron
 from arq.connections import RedisSettings
 from core_shared.integration_constants import IMMICH_ARQ_QUEUE_NAME
-from core_shared.logging import set_job_id, set_worker_id
-from core_shared.telemetry import trace_arq_job
+from core_shared.logging import (
+    configure_logging,
+    get_logger,
+    set_job_id,
+    set_worker_id,
+)
+from core_shared.telemetry import setup_telemetry, trace_arq_job
 
 from immich_api_client import ImmichApiClient
 from immich_auth_service import ImmichAuthService
@@ -37,22 +40,13 @@ __version__ = "0.2.0"
 
 settings = ImmichWorkerSettings()
 
-log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
-
-structlog.configure(
-    processors=[
-        structlog.contextvars.merge_contextvars,
-        structlog.processors.add_log_level,
-        structlog.processors.StackInfoRenderer(),
-        structlog.dev.ConsoleRenderer(),
-    ],
-    wrapper_class=structlog.make_filtering_bound_logger(log_level),
-    context_class=dict,
-    logger_factory=structlog.PrintLoggerFactory(),
-    cache_logger_on_first_use=True,
+configure_logging(
+    log_level=settings.log_level,
+    service_name=settings.worker_id,
+    json_output=True,
 )
 
-logger = structlog.get_logger()
+logger = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # ARQ lifecycle hooks
@@ -867,6 +861,9 @@ class WorkerSettings:
 
 if __name__ == "__main__":
     from arq import run_worker
+
+    # Setup OpenTelemetry
+    setup_telemetry(settings)
 
     logger.info("Starting Immich worker process")
     sys.exit(run_worker(WorkerSettings))  # type: ignore[arg-type]
