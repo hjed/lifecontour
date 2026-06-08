@@ -16,6 +16,53 @@ from redis.exceptions import ResponseError
 
 logger = structlog.get_logger()
 
+# Extra seconds added to the XREADGROUP block duration when deriving the
+# connection's socket read timeout. redis-py 8.0.0 changed the default
+# socket_timeout from None to 5s; a blocking read of an idle stream holds the
+# socket open for the full block duration, so the socket timeout must exceed it
+# or every idle poll raises redis.exceptions.TimeoutError.
+STREAM_READ_TIMEOUT_BUFFER_S = 5.0
+
+
+def create_stream_redis(
+    redis_url: str,
+    block_ms: int = 5000,
+    *,
+    decode_responses: bool = False,
+) -> Redis:
+    """Create a Redis connection tuned for blocking Stream reads.
+
+    redis-py 8.0.0 ships a default ``socket_timeout`` of 5 seconds. Blocking
+    ``XREADGROUP`` calls use ``BLOCK block_ms`` and keep the socket open for the
+    full duration whenever the stream is idle, so the socket read timeout must
+    be larger than ``block_ms`` — otherwise the socket times out at the same
+    moment the block expires and raises
+    ``redis.exceptions.TimeoutError: Timeout reading from <host>`` on every
+    idle poll. This factory sets ``socket_timeout`` to ``block_ms`` plus a
+    safety buffer (or disables it entirely for an infinite block).
+
+    Args:
+        redis_url: Redis connection URL.
+        block_ms: Block duration (ms) the consumer passes to XREADGROUP.
+            ``0`` means block forever, which disables the socket read timeout.
+        decode_responses: Passed through to redis-py. Defaults to ``False`` to
+            match :class:`StreamClient`'s byte-based parsing.
+
+    Returns:
+        A configured async ``Redis`` client.
+    """
+    socket_timeout: float | None
+    if block_ms <= 0:
+        socket_timeout = None
+    else:
+        socket_timeout = block_ms / 1000 + STREAM_READ_TIMEOUT_BUFFER_S
+
+    return Redis.from_url(
+        redis_url,
+        decode_responses=decode_responses,
+        socket_timeout=socket_timeout,
+    )
+
 
 @dataclass
 class StreamEvent:
