@@ -22,7 +22,7 @@ dependencies = [
     "arq>=0.26",
 
     # Logging and monitoring
-    "structlog==25.5.0",
+    "structlog==26.1.0",
 
     # Configuration
     "pydantic==2.13.4",
