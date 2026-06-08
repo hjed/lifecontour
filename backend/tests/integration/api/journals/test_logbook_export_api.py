@@ -225,6 +225,68 @@ class TestLogbookExportEndpoint:
         assert "Claustral Canyon" in text_content
         assert "Blue Mountains Bushwalk" not in text_content
 
+    async def test_export_includes_photo_album_shared_link(
+        self,
+        authenticated_client,
+        async_connection: AsyncConnection,
+        journal_repo: SqlJournalRepository,
+    ) -> None:
+        """Exported PDF includes the Immich album shared link for linked journals."""
+        from core_shared.models.journals import EventDateRange, Journal
+
+        journal = Journal(
+            user_id="test-user-123",
+            title="Bushwalk With Album",
+            content="A great day on the trails",
+            event_date_range=EventDateRange(
+                start=datetime(2024, 2, 5, tzinfo=UTC),
+                end=datetime(2024, 2, 5, tzinfo=UTC),
+            ),
+        )
+        journal = await journal_repo.save(journal)
+        assert journal.id is not None
+        await async_connection.execute(
+            text("INSERT INTO journal_bushwalking_data (journal_id) VALUES (:id)"),
+            {"id": journal.id},
+        )
+        await async_connection.execute(
+            text("""
+                INSERT INTO sync_metadata (
+                    internal_id, integration_source, external_id,
+                    last_synced_at, version_hash, sync_status
+                ) VALUES (:id, 'immich_album', 'album-api-1', now(), 'h', 'success')
+            """),
+            {"id": journal.id},
+        )
+        await async_connection.execute(
+            text("""
+                INSERT INTO external_references (
+                    internal_entity_type, internal_entity_id, external_system,
+                    external_entity_type, external_entity_id, reference_data,
+                    created_at, updated_at
+                ) VALUES (
+                    'journal', :id, 'immich', 'album', 'album-api-1',
+                    :ref, now(), now()
+                )
+            """),
+            {
+                "id": journal.id,
+                "ref": '{"shared_link_url": "https://immich.example.com/share/xyz"}',
+            },
+        )
+
+        response = await authenticated_client.post(
+            "/api/journals/export/outdoor-logbook",
+            json={},
+        )
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/pdf"
+
+        text_content = _extract_pdf_text(response.content)
+        assert "Bushwalk With Album" in text_content
+        assert "Photo Album:" in text_content
+        assert "https://immich.example.com/share/xyz" in text_content
+
     async def test_export_empty_result(
         self,
         authenticated_client,

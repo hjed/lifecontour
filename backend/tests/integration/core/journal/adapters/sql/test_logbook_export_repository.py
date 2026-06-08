@@ -226,3 +226,120 @@ async def test_get_logbook_entries_date_and_type_filters(
 
     assert len(entries) == 1
     assert entries[0].id == journal1.id
+
+
+async def _link_immich_album(
+    connection: AsyncConnection,
+    *,
+    journal_id: int,
+    album_id: str,
+    reference_data: str | None,
+) -> None:
+    """Link a journal to an Immich album (PHOTO_ALBUM) with reference_data.
+
+    Mirrors the sync_metadata + external_references rows written by the Immich
+    album outbox processor, so the logbook export sees a real PHOTO_ALBUM link.
+    """
+    await connection.execute(
+        text("""
+            INSERT INTO sync_metadata (
+                internal_id, integration_source, external_id,
+                last_synced_at, version_hash, sync_status
+            ) VALUES (
+                :internal_id, 'immich_album', :external_id, now(), 'h', 'success'
+            )
+        """),
+        {"internal_id": journal_id, "external_id": album_id},
+    )
+    await connection.execute(
+        text("""
+            INSERT INTO external_references (
+                internal_entity_type, internal_entity_id, external_system,
+                external_entity_type, external_entity_id, reference_data,
+                created_at, updated_at
+            ) VALUES (
+                'journal', :internal_id, 'immich', 'album', :external_id,
+                :reference_data, now(), now()
+            )
+        """),
+        {
+            "internal_id": journal_id,
+            "external_id": album_id,
+            "reference_data": reference_data,
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_logbook_entries_includes_album_shared_link(
+    repo: SqlLogbookExportRepository,
+    journal_repo: JournalRepository,
+    async_connection: AsyncConnection,
+) -> None:
+    """A PHOTO_ALBUM journal's shared link is surfaced on the logbook entry."""
+    user_id = "user_album_shared_link"
+    now = datetime.now(UTC)
+
+    journal = Journal(
+        user_id=user_id,
+        title="Bushwalk With Album",
+        content="A great day on the trails",
+        event_date_range=EventDateRange(start=now, end=now),
+    )
+    journal = await journal_repo.save(journal)
+    assert journal.id is not None
+
+    # Must also be a logbook type to appear in the export.
+    await async_connection.execute(
+        text("INSERT INTO journal_bushwalking_data (journal_id) VALUES (:id)"),
+        {"id": journal.id},
+    )
+    await _link_immich_album(
+        async_connection,
+        journal_id=journal.id,
+        album_id="album-1",
+        reference_data='{"shared_link_url": "https://immich.example.com/share/xyz"}',
+    )
+
+    entries = await repo.get_logbook_entries(user_id=user_id)
+
+    assert len(entries) == 1
+    assert "PHOTO_ALBUM" in entries[0].journal_types
+    assert entries[0].album_shared_link == "https://immich.example.com/share/xyz"
+
+
+@pytest.mark.asyncio
+async def test_get_logbook_entries_album_without_shared_link(
+    repo: SqlLogbookExportRepository,
+    journal_repo: JournalRepository,
+    async_connection: AsyncConnection,
+) -> None:
+    """A PHOTO_ALBUM journal with no shared link leaves album_shared_link None."""
+    user_id = "user_album_no_link"
+    now = datetime.now(UTC)
+
+    journal = Journal(
+        user_id=user_id,
+        title="Bushwalk Album No Share",
+        content="",
+        event_date_range=EventDateRange(start=now, end=now),
+    )
+    journal = await journal_repo.save(journal)
+    assert journal.id is not None
+
+    await async_connection.execute(
+        text("INSERT INTO journal_bushwalking_data (journal_id) VALUES (:id)"),
+        {"id": journal.id},
+    )
+    await _link_immich_album(
+        async_connection,
+        journal_id=journal.id,
+        album_id="album-2",
+        reference_data='{"album_name": "Summer Trip", "asset_count": 9}',
+    )
+
+    entries = await repo.get_logbook_entries(user_id=user_id)
+
+    assert len(entries) == 1
+    assert "PHOTO_ALBUM" in entries[0].journal_types
+    assert entries[0].album_shared_link is None

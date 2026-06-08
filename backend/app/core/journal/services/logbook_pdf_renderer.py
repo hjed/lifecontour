@@ -340,6 +340,16 @@ class LogbookPdfRenderer:
             ]
             story.append(Paragraph(f"Participants: {', '.join(names)}", small_style))
 
+        # Immich photo album shared link (ITER11-005 Phase 2)
+        if entry.album_shared_link:
+            url = _safe_str(entry.album_shared_link)
+            story.append(
+                Paragraph(
+                    f'\U0001f4f7 Photo Album: <a href="{url}">{url}</a>',
+                    small_style,
+                )
+            )
+
         # Spacing between entries
         story.append(Spacer(1, 2 * mm))
 

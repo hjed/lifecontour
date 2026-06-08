@@ -286,7 +286,7 @@ The Immich worker aggregates the unique people tagged across an album's photos (
 **Acceptance Criteria (task-level):**
 - [x] External links displayed for Immich-linked journals and contacts. *(Phase 1)*
 - [x] MCP responses include Immich external links and support search filters. *(Phase 1)*
-- [ ] Logbook PDF export includes album shared links. *(Phase 2)*
+- [x] Logbook PDF export includes album shared links. *(Phase 2)*
 
 #### Phase 1: External Links and MCP
 **PR Size:** ~5–7 files
@@ -314,15 +314,18 @@ Extend external link helpers and MCP tools for Immich.
 
 Add album shared links to the logbook PDF export.
 
+**Architecture note (as implemented):** `LogbookEntryData` (the `@dataclass` in `core_shared/.../journals/logbook_export.py`) gained a singular `album_shared_link: str | None = None` field. `SqlLogbookExportRepository.get_logbook_entries` populates it with **one batched query** over all `final_journal_ids` (the method is batched throughout; a per-journal `AlbumSyncReadRepository.find_external_links` call would have been the only N+1). The query mirrors `AlbumSyncReadRepository`'s SQL/constants (`INTEGRATION_SOURCE`/`EXTERNAL_SYSTEM`/`EXTERNAL_ENTITY_TYPE`/`INTERNAL_ENTITY_TYPE`) and **reuses its malformed-tolerant `_decode_reference_data` static decoder**, so a corrupt `reference_data` row can never 500 the export. Rows are `ORDER BY er.id` and the first non-empty `shared_link_url` per journal wins (collapsing the multi-album case into the singular field). `LogbookPdfRenderer._render_entry` renders the link with the existing `small_style` immediately after the participants line and before the inter-entry `Spacer`, as `📷 Photo Album: <a href="{url}">{url}</a>` with the URL `_safe_str`-escaped (XML-safe) in both the `href` and the visible text; the line is omitted entirely when the field is `None`. The 📷 emoji has no Helvetica glyph (renders as a missing-glyph box) but the PDF text layer keeps `Photo Album: {url}`, so tests assert on the ASCII substrings only. Backend-only change — no UI/frontend or MCP changes (the album shared link is already exposed via the Phase 1 `immich_shared` external link).
+
 **Acceptance Criteria:**
-- [ ] `LogbookEntryData` extended with `album_shared_link: str | None` field
-- [ ] `LogbookExportRepository` populates `album_shared_link` from `ExternalReference.reference_data` for PHOTO_ALBUM journals
-- [ ] `LogbookPdfRenderer._render_entry` renders shared link as clickable hyperlink: `📷 Photo Album: {url}`
-- [ ] Link positioned after the contacts/participants line in entry layout
+- [x] `LogbookEntryData` extended with `album_shared_link: str | None` field
+- [x] `LogbookExportRepository` populates `album_shared_link` from `ExternalReference.reference_data` for PHOTO_ALBUM journals
+- [x] `LogbookPdfRenderer._render_entry` renders shared link as clickable hyperlink: `📷 Photo Album: {url}`
+- [x] Link positioned after the contacts/participants line in entry layout
 
 **Required Test Coverage:**
-- **Unit:** PDF renderer includes album link when present, omits when absent.
-- **Integration:** Logbook export with PHOTO_ALBUM journal includes shared link in PDF text.
+- **Unit:** PDF renderer includes album link when present, omits when absent. ✅ 2 renderer tests (`test_logbook_pdf_renderer.py`: `test_photo_album_link_rendered_when_present` asserts `Photo Album:` + URL in extracted PDF text; `test_photo_album_link_absent_when_none` asserts the line is omitted)
+- **Integration:** Logbook export with PHOTO_ALBUM journal includes shared link in PDF text. ✅ 2 repository tests (`test_logbook_export_repository.py`: `album_shared_link` populated from a seeded `sync_metadata`+`external_references` link; `None` when `reference_data` has no `shared_link_url`) + 1 full-pipeline test (`test_logbook_pdf_renderer_integration.py`: repo→data service→renderer renders the URL into the PDF) + 1 API test (`test_logbook_export_api.py`: `POST /api/journals/export/outdoor-logbook` returns a PDF whose text contains the shared link — end-to-end over HTTP)
+- **E2E:** ✅ Covered by the API integration test above (renders a real PDF over HTTP and asserts the shared-link URL). The existing `frontend/tests/e2e/logbook-export.spec.ts` (PDF download regression) re-runs unchanged. No new Playwright content assertion was added because the album/shared-link data is Immich-sync-derived (not seedable via `TestDataManager`) and PDF internals aren't assertable in Playwright — mirroring the Phase 1 sync-derived convention. No new UI is introduced, so there is no new accessibility surface.
 
 ---
 

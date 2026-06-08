@@ -75,6 +75,9 @@ class LogbookEntryData:
     template_name: str | None = None
     gear_item_name: str | None = None
 
+    # Immich photo album public shared link (ITER11-005 Phase 2)
+    album_shared_link: str | None = None
+
 
 @dataclass
 class LogbookYearlySummary:

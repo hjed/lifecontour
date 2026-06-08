@@ -467,6 +467,30 @@ class TestLogbookPdfRenderer:
         assert "Claustral Canyon" in text
         assert "10mm Static Rope" in text
 
+    # ── Immich photo album shared link ─────────────────────────
+
+    def test_photo_album_link_rendered_when_present(self) -> None:
+        """The album shared link is rendered after the participants line."""
+        entry = _make_entry(1, title="Trip With Photos")
+        entry.album_shared_link = "https://immich.example.com/share/abc123"
+        data = LogbookExportData(
+            entries=[entry], yearly_summaries=[], participant_index=[]
+        )
+        result = self._renderer().render(data)
+        text = _extract_pdf_text(result)
+        assert "Photo Album:" in text
+        assert "https://immich.example.com/share/abc123" in text
+
+    def test_photo_album_link_absent_when_none(self) -> None:
+        """No album link line is rendered when there is no shared link."""
+        entry = _make_entry(1, title="Trip Without Photos")
+        data = LogbookExportData(
+            entries=[entry], yearly_summaries=[], participant_index=[]
+        )
+        result = self._renderer().render(data)
+        text = _extract_pdf_text(result)
+        assert "Photo Album:" not in text
+
     # ── Yearly summaries ───────────────────────────────────────
 
     def test_yearly_summary_rendered(self) -> None:
