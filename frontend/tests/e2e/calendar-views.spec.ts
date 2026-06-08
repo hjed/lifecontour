@@ -152,8 +152,11 @@ test.describe('Calendar Views', () => {
       if (!detailUrl.test(page.url())) {
         await eventLink.click();
       }
-      await expect(page).toHaveURL(detailUrl, { timeout: 2000 });
-    }).toPass({ timeout: 15000 });
+      // Generous inner timeout so a slow-but-working navigation (Firefox under
+      // CI load) completes on the first click without forcing a retry; a
+      // genuinely lost click is still retried within the outer budget.
+      await expect(page).toHaveURL(detailUrl, { timeout: 10000 });
+    }).toPass({ timeout: 30000 });
 
     // Verify the journal detail page rendered
     await expect(

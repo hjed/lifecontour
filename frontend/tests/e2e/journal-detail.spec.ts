@@ -135,7 +135,11 @@ test.describe('Journal Detail Page', () => {
       await contentTextarea.click();
       await page.keyboard.press('ControlOrMeta+A');
       await page.keyboard.press('Delete');
-      await contentTextarea.pressSequentially(newContent);
+      // Type one character at a time with a delay — ProseMirror drops keystrokes
+      // under fast input, especially on Firefox (see journal-markdown-editor.spec.ts).
+      await contentTextarea.pressSequentially(newContent, { delay: 60 });
+      // Ensure the editor captured the full text before saving.
+      await expect(contentTextarea).toContainText(newContent);
 
       // Click the save button
       const saveButton = page.getByTestId('journal-content-save');
