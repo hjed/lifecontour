@@ -982,7 +982,11 @@ jobs:
 
       - name: Run Playwright tests
         working-directory: ./frontend
-        timeout-minutes: 30  # Prevent hanging indefinitely
+        # The suite runs serially (workers: 1) and the firefox project alone
+        # takes ~22-33 min, so 30 min left no headroom and tipped over whenever a
+        # flaky retry added time. Genuine hangs are still caught by the 3-minute
+        # per-test timeout in playwright.config.ts.
+        timeout-minutes: 45
         env:
           CI: true
           CLEANUP_AFTER_TESTS: true
