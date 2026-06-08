@@ -190,21 +190,19 @@ contact_tags_table = Table(
     ),
 )
 
-# Contact field history table
-contact_field_history_table = Table(
-    "contact_field_history",
+# Entity-agnostic field history table (shared by contacts and journals).
+field_history_table = Table(
+    "field_history",
     metadata,
     Column("id", Integer, primary_key=True),
-    Column(
-        "contact_id",
-        Integer,
-        ForeignKey("contacts.id", ondelete="CASCADE"),
-        nullable=False,
-    ),
+    Column("entity_type", String(50), nullable=False),
+    Column("entity_id", Integer, nullable=False),
     Column("field_name", String(100), nullable=False),
     Column("old_value", Text, nullable=True),
     Column("new_value", Text, nullable=True),
     Column("changed_by", String(100), nullable=True),
+    Column("source", String(50), nullable=False, server_default=text("'system'")),
+    Column("event_id", String, nullable=True),
     Column(
         "created_at",
         DateTime(timezone=True),

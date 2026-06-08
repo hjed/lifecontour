@@ -15,8 +15,9 @@ from core_shared.models.contacts.entities import (
     Tag,
 )
 from core_shared.models.contacts.important_date_types import CustomDateType
-from core_shared.models.contacts.value_objects import Provenance
 from sqlalchemy.ext.asyncio import AsyncConnection
+
+from app.core.history.models import FieldHistoryEntry, FieldHistoryRepository
 
 
 class DomainEventProtocol(Protocol):
@@ -339,30 +340,10 @@ class CustomDateTypeRepository(ABC):
         pass
 
 
-class ContactFieldHistoryEntry:
-    """Field-level change history entry model."""
-
-    def __init__(
-        self,
-        entity_type: str,
-        entity_id: int,
-        field_name: str,
-        old_value: str | None = None,
-        new_value: str | None = None,
-        changed_by: str | None = None,
-        source: Provenance = Provenance.SYSTEM,
-        id: int | None = None,
-        created_at: str | None = None,
-    ):
-        self.id = id
-        self.entity_type = entity_type
-        self.entity_id = entity_id
-        self.field_name = field_name
-        self.old_value = old_value
-        self.new_value = new_value
-        self.changed_by = changed_by
-        self.source = source
-        self.created_at = created_at
+# Field history is now an entity-agnostic, shared concept. ``ContactFieldHistoryEntry``
+# is kept as a compatibility alias over the shared ``FieldHistoryEntry`` so existing
+# contact imports continue to work unchanged.
+ContactFieldHistoryEntry = FieldHistoryEntry
 
 
 class ContactEditEvent:
@@ -387,34 +368,22 @@ class ContactEditEvent:
         self.correlation_id = correlation_id
 
 
-class ContactFieldHistoryRepository(ABC):
-    """Repository interface for field-level change history operations."""
+class ContactFieldHistoryRepository(FieldHistoryRepository):
+    """Repository interface for contact field-level change history.
+
+    Extends the shared, entity-agnostic ``FieldHistoryRepository`` with the
+    contact-rooted read helpers used by the contact history service and API.
+    """
 
     @abstractmethod
     async def get_contact_history(
         self, contact_id: int, limit: int = 50, offset: int = 0
-    ) -> list[ContactFieldHistoryEntry]:
+    ) -> list[FieldHistoryEntry]:
         """Get field history for a specific contact with pagination."""
-        pass
 
     @abstractmethod
     async def get_contact_history_count(self, contact_id: int) -> int:
         """Get total count of history entries for a specific contact."""
-        pass
-
-    @abstractmethod
-    async def get_entity_history(
-        self, entity_type: str, entity_id: int
-    ) -> list[ContactFieldHistoryEntry]:
-        """Get field history for a specific entity."""
-        pass
-
-    @abstractmethod
-    async def record_change(
-        self, entry: ContactFieldHistoryEntry
-    ) -> ContactFieldHistoryEntry:
-        """Record a field change in history."""
-        pass
 
 
 class ContactEditEventRepository(ABC):

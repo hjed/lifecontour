@@ -2,19 +2,19 @@
 
 import re
 from dataclasses import dataclass
-from enum import StrEnum
 
+# Provenance is now an entity-agnostic, shared value object. It is re-exported here
+# for backwards compatibility with existing contact imports.
+from core_shared.models.history import Provenance
 
-class Provenance(StrEnum):
-    """Source of a contact data change."""
-
-    UI = "ui"
-    MCP = "mcp"
-    GOOGLE_CONTACTS = "google_contacts"
-    STRAVA = "strava"
-    SUMMARY_REGENERATION = "summary_regeneration"
-    SYSTEM = "system"
-    IMMICH = "immich"
+__all__ = [
+    "Address",
+    "CountryCode",
+    "Email",
+    "PhoneNumber",
+    "Provenance",
+    "TagName",
+]
 
 
 @dataclass(frozen=True)
