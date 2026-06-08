@@ -569,3 +569,19 @@ class TestAlbumMetadataPhase2:
         await _service(api, conn).sync_albums_batch(["album-1", "album-2"])
 
         assert api.get_shared_links.await_count == 1
+
+    async def test_shared_links_failure_does_not_abort_batch(self) -> None:
+        # A shared-links fetch error must be best-effort: albums still sync,
+        # just without a shared_link_url.
+        api = AsyncMock()
+        api.get_album.return_value = _full_album()
+        api.get_shared_links.side_effect = RuntimeError("boom")
+        conn = AsyncMock()
+        conn.execute.side_effect = [_fetchone(None), MagicMock()]
+
+        result = await _service(api, conn).sync_albums_batch(["album-1"])
+
+        assert result.created == 1
+        assert result.errors == 0
+        meta = _extract_album_events(conn)[0]["event_data"]["album_metadata"]
+        assert meta.get("shared_link_url") is None

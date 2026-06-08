@@ -206,9 +206,18 @@ class ImmichSyncService:
 
         # Shared links are fetched once per batch (the Immich endpoint returns
         # all of the user's links), then mapped album_id → public share URL.
-        share_urls = self.build_album_share_urls(
-            self._server_url, await self._api.get_shared_links()
-        )
+        # This is best-effort: a shared-links failure must not abort the whole
+        # batch — albums still sync, just without their public share URL.
+        try:
+            links = await self._api.get_shared_links()
+            share_urls = self.build_album_share_urls(self._server_url, links)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "Failed to fetch Immich shared links; "
+                "syncing albums without share URLs",
+                error=str(e),
+            )
+            share_urls = {}
 
         for album_id in album_ids:
             try:

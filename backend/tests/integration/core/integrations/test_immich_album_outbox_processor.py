@@ -781,3 +781,50 @@ async def test_shared_link_url_persisted_in_reference_data(
 
     ref = await _album_ref(async_connection, album_id)
     assert json.loads(ref.reference_data)["shared_link_url"] == share_url
+
+
+@pytest.mark.asyncio
+async def test_resync_tolerates_malformed_participant_contact_ids(
+    async_connection: AsyncConnection,
+    clean_database: None,  # noqa: ARG001
+) -> None:
+    """A corrupted participant_contact_ids in reference_data must not break sync."""
+    album_id = str(uuid.uuid4())
+    alice = await _seed_contact_linked_to_person(async_connection, "Alice", "p1")
+    processor = _processor(async_connection)
+
+    created = await processor.process_event(
+        _event(
+            EVENT_TYPE_IMMICH_ALBUM_CREATED,
+            album_id=album_id,
+            version_hash="v1",
+            people=[{"id": "p1", "name": "Alice"}],
+        )
+    )
+    journal_id = created["journal_id"]
+
+    # Corrupt the stored immich-managed set with nulls / non-numeric values.
+    ref = await _album_ref(async_connection, album_id)
+    bad = json.loads(ref.reference_data)
+    bad["participant_contact_ids"] = [alice, None, "x", True]
+    await async_connection.execute(
+        text("""
+            UPDATE external_references SET reference_data = :rd
+            WHERE external_system = 'immich' AND external_entity_type = 'album'
+              AND external_entity_id = :id
+        """),
+        {"rd": json.dumps(bad), "id": album_id},
+    )
+
+    # Re-sync (new version hash) must succeed despite the malformed list.
+    result = await processor.process_event(
+        _event(
+            EVENT_TYPE_IMMICH_ALBUM_UPDATED,
+            album_id=album_id,
+            version_hash="v2",
+            people=[{"id": "p1", "name": "Alice"}],
+        )
+    )
+
+    assert result["status"] == "updated"
+    assert await _participant_ids(async_connection, journal_id) == {alice}

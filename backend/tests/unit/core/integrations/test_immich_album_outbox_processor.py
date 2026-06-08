@@ -264,3 +264,35 @@ class TestSyncParticipants:
         assert deleted == {1}  # only the immich-managed contact is removed
         assert 9 not in deleted
         assert result == []
+
+    async def test_tolerates_malformed_participant_contact_ids(self) -> None:
+        # A corrupted reference_data list (nulls / non-numeric / wrong types)
+        # must not break album sync — only clean integer ids are honoured.
+        processor, relationship = _participant_processor(
+            resolved={"p1": 1}, existing_contact_ids=[1, 2]
+        )
+
+        result = await processor._sync_participants(
+            7,
+            _people_payload("p1"),
+            {"participant_contact_ids": [1, 2, None, "3", "x", True]},
+            has_local_edits=False,
+        )
+
+        # Prev coerces to {1, 2, 3}; desired is {1} → remove {2, 3}.
+        deleted = {c.args[1] for c in relationship.delete.call_args_list}
+        assert deleted == {2, 3}
+        assert result == [1]
+
+
+class TestCoerceContactIds:
+    """Defensive parsing of stored participant_contact_ids."""
+
+    def test_keeps_ints_and_numeric_strings_drops_the_rest(self) -> None:
+        assert ImmichAlbumOutboxEventProcessor._coerce_contact_ids(
+            [1, "2", None, "x", True, 3.5, -4]
+        ) == {1, 2, -4}
+
+    def test_non_list_returns_empty_set(self) -> None:
+        assert ImmichAlbumOutboxEventProcessor._coerce_contact_ids(None) == set()
+        assert ImmichAlbumOutboxEventProcessor._coerce_contact_ids("nope") == set()

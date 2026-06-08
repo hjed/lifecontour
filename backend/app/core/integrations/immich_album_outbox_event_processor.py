@@ -359,6 +359,27 @@ class ImmichAlbumOutboxEventProcessor:
             return {}
         return decoded if isinstance(decoded, dict) else {}
 
+    @staticmethod
+    def _coerce_contact_ids(value: Any) -> set[int]:
+        """Parse a stored ``participant_contact_ids`` value into a set of ints.
+
+        Defensive like ``_decode_reference_data``: a malformed reference_data
+        list (nulls, non-numeric strings, wrong type) must not break album sync,
+        so anything that is not a clean integer id is skipped.
+        """
+        if not isinstance(value, list):
+            return set()
+        ids: set[int] = set()
+        for item in value:
+            # bool is a subclass of int but is never a valid contact id.
+            if isinstance(item, bool):
+                continue
+            if isinstance(item, int):
+                ids.add(item)
+            elif isinstance(item, str) and item.strip().lstrip("-").isdigit():
+                ids.add(int(item))
+        return ids
+
     async def _sync_participants(
         self,
         journal_id: int,
@@ -403,9 +424,9 @@ class ImmichAlbumOutboxEventProcessor:
                 )
             )
 
-        prev = {
-            int(cid) for cid in prev_reference_data.get("participant_contact_ids", [])
-        }
+        prev = self._coerce_contact_ids(
+            prev_reference_data.get("participant_contact_ids")
+        )
 
         if has_local_edits:
             # Add-only: keep the un-removed immich participants and the new ones.
