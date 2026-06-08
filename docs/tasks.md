@@ -252,7 +252,7 @@ Read these first when working on the active product-alignment streams:
 - MCP parity for all new capabilities
 
 ### [Iteration 12: Activity History (Journals + Unified Foundation)](./tasks/iteration-12-activity-history.md)
-**Status:** 🟡 PLANNED
+**Status:** 🟡 IN PROGRESS — ITER12-001 (shared foundation) complete
 **Dependencies:** Iteration 4 (journal core + events), Iteration 5 (Redis Streams event bus, outbox relay, stream consumers), existing contact activity history
 **Goal:** Deliver field-level activity history for journals of all types, displayed at the bottom of the journal UI with full provenance, by generalising contact history into a single shared, event-driven system
 
