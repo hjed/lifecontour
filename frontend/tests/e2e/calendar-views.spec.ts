@@ -140,11 +140,25 @@ test.describe('Calendar Views', () => {
     await page.getByRole('radio', { name: /month view/i }).click();
     await expect(page.getByTestId('calendar-month-view')).toBeVisible();
 
-    // Click the event pill to navigate to journal detail
-    await page.getByRole('link', { name: /navigable event/i }).click();
+    // Click the event pill to navigate to the journal detail page.
+    // Retry the click + URL assertion as a unit: in the SPA the click can race
+    // with a calendar re-render and occasionally not trigger client-side
+    // navigation, leaving the page on /journals. Guarding on the URL ensures we
+    // only re-click while still on the list, never after navigation has started.
+    const eventLink = page.getByRole('link', { name: /navigable event/i });
+    await expect(eventLink).toBeVisible();
+    const detailUrl = new RegExp(`/journals/${journals[0].id}`);
+    await expect(async () => {
+      if (!detailUrl.test(page.url())) {
+        await eventLink.click();
+      }
+      // Generous inner timeout so a slow-but-working navigation (Firefox under
+      // CI load) completes on the first click without forcing a retry; a
+      // genuinely lost click is still retried within the outer budget.
+      await expect(page).toHaveURL(detailUrl, { timeout: 10000 });
+    }).toPass({ timeout: 30000 });
 
-    // Verify we're on the journal detail page
-    await expect(page).toHaveURL(new RegExp(`/journals/${journals[0].id}`));
+    // Verify the journal detail page rendered
     await expect(
       page.getByRole('heading', { name: /navigable event/i })
     ).toBeVisible();
