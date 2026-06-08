@@ -132,6 +132,29 @@ class TestSqlFieldHistoryRepositoryIntegration:
             == 1
         )
 
+    async def test_record_change_clears_metadata_on_conflict_for_reused_instance(
+        self, history_repo: SqlFieldHistoryRepository
+    ) -> None:
+        """A reused, already-persisted instance must not report stale id/created_at."""
+        entry = FieldHistoryEntry(
+            entity_type="journal",
+            entity_id=123,
+            field_name="title",
+            old_value="a",
+            new_value="b",
+            event_id="evt-reuse",
+        )
+
+        saved = await history_repo.record_change(entry)
+        assert saved.id is not None
+        assert saved.created_at is not None
+
+        # Re-record the SAME instance: it conflicts and its stale metadata is cleared.
+        reprojected = await history_repo.record_change(entry)
+        assert reprojected is entry
+        assert reprojected.id is None
+        assert reprojected.created_at is None
+
     async def test_null_event_ids_are_not_deduplicated(
         self, history_repo: SqlFieldHistoryRepository, clean_database: AsyncConnection
     ) -> None:

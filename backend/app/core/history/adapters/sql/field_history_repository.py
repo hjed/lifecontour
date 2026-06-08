@@ -51,7 +51,9 @@ class SqlFieldHistoryRepository(FieldHistoryRepository):
         Uses ``INSERT ... ON CONFLICT DO NOTHING`` against the
         ``(event_id, entity_type, entity_id, field_name)`` unique index so that
         re-delivery of the same domain event never writes a duplicate row. On a
-        conflict no row is returned and the entry is returned with ``id`` unset.
+        conflict no row is returned and the entry is returned with ``id`` and
+        ``created_at`` cleared (even if the caller reused an already-persisted
+        instance), so the returned entry always reflects whether a row was written.
         Rows with a NULL ``event_id`` (e.g. the synchronous contact dual-write) are
         never deduplicated because PostgreSQL treats NULLs as distinct.
         """
@@ -83,6 +85,11 @@ class SqlFieldHistoryRepository(FieldHistoryRepository):
         if row is not None:
             entry.id = row.id
             entry.created_at = row.created_at.isoformat() if row.created_at else None
+        else:
+            # Conflict: this change was already recorded. Clear any pre-existing
+            # metadata so a reused instance never reports a stale id/created_at.
+            entry.id = None
+            entry.created_at = None
         return entry
 
     async def record_multiple_changes(
