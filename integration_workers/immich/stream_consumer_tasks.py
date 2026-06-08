@@ -13,7 +13,7 @@ import asyncio
 from typing import Any
 
 import structlog
-from core_shared.stream_client import StreamClient, StreamEvent
+from core_shared.stream_client import StreamClient, StreamEvent, create_stream_redis
 from core_shared.stream_consumer import StreamConsumer
 
 logger = structlog.get_logger(__name__)
@@ -108,9 +108,7 @@ async def run_immich_stream_consumer(
         redis_url: Redis connection URL.
         stream_name: Name of the domain events stream.
     """
-    from redis.asyncio import Redis
-
-    redis_client = Redis.from_url(redis_url)
+    redis_client = create_stream_redis(redis_url)
     stream_client = StreamClient(redis_client)
 
     consumer = ImmichWorkerStreamConsumer(

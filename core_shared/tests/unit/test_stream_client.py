@@ -9,7 +9,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from core_shared.stream_client import StreamClient, StreamEvent
+from core_shared.stream_client import (
+    StreamClient,
+    StreamEvent,
+    create_stream_redis,
+)
 
 
 class TestStreamClient:
@@ -277,3 +281,64 @@ class TestStreamEvent:
         assert event.event_data == {"contact_id": 42}
         assert event.occurred_at == "2024-01-01T12:00:00Z"
         assert event.trace_context == {"traceparent": "test"}
+
+
+class TestCreateStreamRedis:
+    """Tests for the create_stream_redis connection factory.
+
+    Regression coverage for redis-py 8.0.0, which changed the default
+    ``socket_timeout`` from ``None`` to 5 seconds. Blocking ``XREADGROUP``
+    calls hold the socket open for the full ``BLOCK block_ms`` duration when
+    a stream is idle, so the socket read timeout must exceed ``block_ms`` or
+    every idle poll raises ``redis.exceptions.TimeoutError``.
+    """
+
+    @staticmethod
+    def _socket_timeout(redis: object) -> float | None:
+        kwargs = redis.connection_pool.connection_kwargs  # type: ignore[attr-defined]
+        socket_timeout: float | None = kwargs.get("socket_timeout")
+        return socket_timeout
+
+    @pytest.mark.asyncio
+    async def test_socket_timeout_exceeds_default_block_duration(self) -> None:
+        """Default block_ms (5000) must yield a socket_timeout above 5 seconds."""
+        redis = create_stream_redis("redis://localhost:6379")
+        try:
+            socket_timeout = self._socket_timeout(redis)
+            assert socket_timeout is not None
+            # block_ms default is 5000ms == 5s; the socket read timeout must be
+            # strictly greater so a blocking read of an idle stream never races
+            # the socket timeout.
+            assert socket_timeout > 5.0
+        finally:
+            await redis.aclose()
+
+    @pytest.mark.asyncio
+    async def test_socket_timeout_scales_with_block_ms(self) -> None:
+        """socket_timeout must stay above the configured block duration."""
+        redis = create_stream_redis("redis://localhost:6379", block_ms=30000)
+        try:
+            socket_timeout = self._socket_timeout(redis)
+            assert socket_timeout is not None
+            assert socket_timeout > 30.0
+        finally:
+            await redis.aclose()
+
+    @pytest.mark.asyncio
+    async def test_infinite_block_disables_socket_timeout(self) -> None:
+        """block_ms=0 blocks forever, so socket_timeout must be disabled."""
+        redis = create_stream_redis("redis://localhost:6379", block_ms=0)
+        try:
+            assert self._socket_timeout(redis) is None
+        finally:
+            await redis.aclose()
+
+    @pytest.mark.asyncio
+    async def test_defaults_to_byte_responses(self) -> None:
+        """decode_responses defaults to False to match StreamClient parsing."""
+        redis = create_stream_redis("redis://localhost:6379")
+        try:
+            kwargs = redis.connection_pool.connection_kwargs
+            assert kwargs.get("decode_responses") is False
+        finally:
+            await redis.aclose()

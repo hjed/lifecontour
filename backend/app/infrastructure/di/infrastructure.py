@@ -6,9 +6,8 @@ Provides general infrastructure services like settings, search, and event publis
 
 from collections.abc import AsyncIterator
 
-from core_shared.stream_client import StreamClient
+from core_shared.stream_client import StreamClient, create_stream_redis
 from dishka import Provider, Scope, provide
-from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.infrastructure.config import Settings, get_settings
@@ -52,7 +51,7 @@ class InfrastructureProvider(Provider):
         and wraps it in a StreamClient. The Redis connection is properly
         closed when the Dishka container shuts down.
         """
-        redis = Redis.from_url(settings.redis_url, decode_responses=False)
+        redis = create_stream_redis(settings.redis_url, decode_responses=False)
         try:
             yield StreamClient(redis)
         finally:

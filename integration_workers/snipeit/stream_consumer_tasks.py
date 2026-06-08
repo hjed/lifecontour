@@ -10,7 +10,7 @@ import asyncio
 from typing import Any
 
 import structlog
-from core_shared.stream_client import StreamClient, StreamEvent
+from core_shared.stream_client import StreamClient, StreamEvent, create_stream_redis
 from core_shared.stream_consumer import StreamConsumer
 
 logger = structlog.get_logger()
@@ -472,9 +472,7 @@ async def run_snipeit_stream_consumer(
     stream_name: str = "pms:domain-events",
 ) -> None:
     """Run the Snipe-IT worker stream consumer loop."""
-    from redis.asyncio import Redis
-
-    redis_client = Redis.from_url(redis_url)
+    redis_client = create_stream_redis(redis_url)
     stream_client = StreamClient(redis_client)
 
     consumer = SnipeItWorkerStreamConsumer(
