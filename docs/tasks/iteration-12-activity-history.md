@@ -165,8 +165,21 @@ Add provenance to journal events and build the consumer that writes history from
 
 Ensure every journal mutation publishes accurate `changed_fields`, and expose the read API.
 
+> **Carried over from ITER12-002 Phase 1 (must be completed here):** the
+> projection (`HistoryService.project_event`) only emits history for `changed_fields`
+> entries shaped as `(old, new)` pairs; non-pair values are treated as internal
+> signals and skipped ("meaningful changes only"). The journal mutation producers
+> do **not** yet emit pairs — the UI update controllers build scalar new-values
+> (e.g. `changed_fields["title"] = updated_journal.title` in
+> `api/journals/controllers.py`), and the Immich processor uses marker dicts
+> (`dict.fromkeys(_CHANGED_FIELDS, True)` in `immich_album_outbox_event_processor.py`).
+> **Until they emit `(old, new)` pairs, journal-update and Immich-driven history
+> rows are produced for none of these fields.** Converting every producer to pairs
+> is the core of this phase.
+
 **Acceptance Criteria:**
 - [ ] Journal service computes `changed_fields` as `{field: (old, new)}` for base fields **and** type-specific data tables (covering all journal types), routes, and gear — modelled on the contact `_calculate_changed_fields` pattern.
+- [ ] The existing scalar/marker `changed_fields` producers are converted to emit `(old, new)` pairs: the UI update controllers (`api/journals/controllers.py`), the MCP update tool, the inbound sync processor, and the Immich album processor — so their mutations actually appear in `field_history`.
 - [ ] Every journal create/update/delete/type/route/gear mutation publishes an event with accurate `changed_fields` + provenance, and produces no history when nothing changed.
 - [ ] `GET /api/journals/{journal_id}/history?page=&limit=` returns paginated JSON:API history (mirrors the contact history endpoint), 404 for a missing journal, with shared `HistoryAttributes`/`HistoryResource`/`HistoryListResponse` schemas and converter.
 

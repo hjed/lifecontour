@@ -33,9 +33,16 @@ class SqlFieldHistoryRepository(FieldHistoryRepository):
         parse it so the COALESCE bind stays a timestamp. Projection callers pass
         a ``datetime`` (the event's occurred_at); the contact dual-write passes
         ``None`` and falls through to the DB default.
+
+        A malformed string falls back to ``None`` (DB default ``now()``) rather
+        than raising, so a single bad timestamp can never fail the projection and
+        dead-letter the event.
         """
         if isinstance(created_at, str):
-            return datetime.fromisoformat(created_at)
+            try:
+                return datetime.fromisoformat(created_at)
+            except ValueError:
+                return None
         return created_at
 
     @staticmethod
