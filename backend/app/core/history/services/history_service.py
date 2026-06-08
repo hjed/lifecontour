@@ -13,6 +13,11 @@ Design (ITER12-002 Phase 1):
   keys on an integer ``entity_id``; grouping route/gear changes under the journal
   (with the route/gear context encoded in ``field_name``) keeps them on the
   integer key, survives route deletion, and needs no join to read back.
+* Route/gear events without a ``journal_id`` are skipped rather than raising. The
+  ``history-projection`` group reads the stream from id ``0``, so it replays
+  historical route/gear events emitted *before* ``journal_id`` enrichment; those
+  cannot be attributed to a journal, and gear is many-to-many with journals so a
+  plain gear edit has no single parent either.
 * Provenance (``source`` + ``changed_by``) and the originating ``event_id`` travel
   in ``event_data`` and are copied onto every row. ``created_at`` is set to
   ``event.occurred_at`` so history reflects when the change happened, not when it
@@ -115,11 +120,14 @@ class HistoryService:
         self, event: OutboxEvent, data: dict[str, Any]
     ) -> list[FieldHistoryEntry]:
         route_id = data["route_id"]
+        journal_id = data.get("journal_id")
+        if journal_id is None:
+            return []
         return [
             self._row(
                 event,
                 data,
-                entity_id=data["journal_id"],
+                entity_id=journal_id,
                 field_name=f"route:{route_id}:__created__",
                 old_value=None,
                 new_value=data.get("name"),
@@ -130,10 +138,13 @@ class HistoryService:
         self, event: OutboxEvent, data: dict[str, Any]
     ) -> list[FieldHistoryEntry]:
         route_id = data["route_id"]
+        journal_id = data.get("journal_id")
+        if journal_id is None:
+            return []
         return self._rows_from_changed_fields(
             event,
             data,
-            entity_id=data["journal_id"],
+            entity_id=journal_id,
             changed_fields=data.get("changed_fields"),
             field_prefix=f"route:{route_id}:",
         )
@@ -142,11 +153,14 @@ class HistoryService:
         self, event: OutboxEvent, data: dict[str, Any]
     ) -> list[FieldHistoryEntry]:
         route_id = data["route_id"]
+        journal_id = data.get("journal_id")
+        if journal_id is None:
+            return []
         return [
             self._row(
                 event,
                 data,
-                entity_id=data["journal_id"],
+                entity_id=journal_id,
                 field_name=f"route:{route_id}:__deleted__",
                 old_value=None,
                 new_value=None,
@@ -157,8 +171,6 @@ class HistoryService:
         self, event: OutboxEvent, data: dict[str, Any]
     ) -> list[FieldHistoryEntry]:
         journal_id = data.get("journal_id")
-        # Gear is shared across journals; a gear edit with no journal context is
-        # not attributable to a single journal's history, so it is skipped.
         if journal_id is None:
             return []
         gear_item_id = data["gear_item_id"]

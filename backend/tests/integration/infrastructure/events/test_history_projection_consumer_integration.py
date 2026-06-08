@@ -225,6 +225,50 @@ class TestHistoryProjectionConsumerIntegration:
         assert record.field_name == f"route:{route_id}:__deleted__"
 
     @pytest.mark.asyncio
+    async def test_legacy_route_event_without_journal_id_is_skipped_not_dead_lettered(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+        redis_client: Redis,
+    ) -> None:
+        """A pre-enrichment RouteUpdated (no journal_id), replayed because the
+        group reads from id 0, is acked and writes nothing — it must NOT flood
+        the DLQ."""
+        await stream_client.publish(
+            stream_name=test_stream_name,
+            event_id=f"evt-{uuid.uuid4().hex[:8]}",
+            event_type="RouteUpdated",
+            aggregate_id=1,
+            event_data={
+                "route_id": str(uuid.uuid4()),
+                "changed_fields": {"name": ["Old", "New"]},
+                "source": "ui",
+                "changed_by": "ui",
+            },
+            occurred_at=OCCURRED_AT,
+        )
+
+        consumer = HistoryProjectionConsumer(
+            stream_client=stream_client,
+            stream_name=test_stream_name,
+            consumer_name="test-history-legacy",
+            block_ms=100,
+        )
+        await stream_client.ensure_consumer_group(test_stream_name, GROUP_NAME)
+
+        with patch(
+            "app.infrastructure.events.history_projection_consumer.get_async_database_engine",
+            return_value=_patched_engine(async_connection),
+        ):
+            count = await consumer._process_batch()
+
+        assert count == 1
+        # Acknowledged (not left pending for retry / dead-lettering).
+        pending_info = await redis_client.xpending(test_stream_name, GROUP_NAME)
+        assert pending_info["pending"] == 0
+
+    @pytest.mark.asyncio
     async def test_malformed_event_is_dead_lettered(
         self,
         test_stream_name: str,

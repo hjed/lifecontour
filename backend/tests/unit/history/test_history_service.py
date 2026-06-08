@@ -276,6 +276,28 @@ class TestRoute:
         assert rows[0].entity_id == 10
         assert rows[0].field_name == "route:r-abc:__deleted__"
 
+    @pytest.mark.parametrize(
+        "event_type",
+        ["RouteCreated", "RouteUpdated", "RouteDeleted"],
+    )
+    def test_route_event_without_journal_id_is_skipped(
+        self, service: HistoryService, event_type: str
+    ) -> None:
+        """Historical route events emitted before journal_id enrichment must be
+        skipped (not raise), since the group replays the stream from id 0."""
+        event = _event(
+            event_type,
+            {
+                "route_id": "r-old",
+                "name": "Legacy",
+                "changed_fields": {"name": ["a", "b"]},
+                "source": Provenance.UI.value,
+                "changed_by": "ui",
+            },
+        )
+
+        assert service.project_event(event) == []
+
 
 class TestGearItemUpdated:
     def test_grouped_to_journal_when_journal_id_present(
