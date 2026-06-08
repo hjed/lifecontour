@@ -129,6 +129,46 @@ describe('JournalTypeSection', () => {
     expect(screen.getByTestId('energy-level-display')).toHaveTextContent('7');
   });
 
+  it('renders the album cover banner for a PHOTO_ALBUM with a cover', () => {
+    render(
+      <JournalTypeSection
+        journalId={mockJournalId}
+        type={JournalType.PHOTO_ALBUM}
+        typeData={{
+          immich_album_id: 'album-123',
+          album_name: 'Summer Trip',
+          album_url: 'https://immich.example.com/albums/album-123',
+          cover_url: '/api/journals/123/album-cover',
+        }}
+        defaultOpen={true}
+      />
+    );
+
+    const banner = screen.getByTestId('photo-album-cover');
+    expect(banner).toHaveAttribute('src', '/api/journals/123/album-cover');
+    expect(screen.getByTestId('photo-album-cover-link')).toHaveAttribute(
+      'href',
+      'https://immich.example.com/albums/album-123'
+    );
+    expect(screen.getByTestId('photo-album-readonly')).toHaveTextContent(
+      'Summer Trip'
+    );
+  });
+
+  it('shows no album cover banner when the PHOTO_ALBUM has no cover', () => {
+    render(
+      <JournalTypeSection
+        journalId={mockJournalId}
+        type={JournalType.PHOTO_ALBUM}
+        typeData={{ immich_album_id: 'album-123', album_name: 'Summer Trip' }}
+        defaultOpen={true}
+      />
+    );
+
+    expect(screen.queryByTestId('photo-album-cover')).not.toBeInTheDocument();
+    expect(screen.getByTestId('photo-album-readonly')).toBeInTheDocument();
+  });
+
   it('renders canyoning content when expanded', () => {
     render(
       <JournalTypeSection

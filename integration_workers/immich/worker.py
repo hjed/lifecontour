@@ -531,7 +531,10 @@ async def sync_immich_album_batch(
             api_client = ImmichApiClient.create(server_url, api_key)
             try:
                 sync_service = ImmichSyncService(
-                    api_client=api_client, connection=conn, user_id=user_id
+                    api_client=api_client,
+                    connection=conn,
+                    user_id=user_id,
+                    server_url=server_url,
                 )
                 result = await sync_service.sync_albums_batch(album_ids)
                 await session.commit()

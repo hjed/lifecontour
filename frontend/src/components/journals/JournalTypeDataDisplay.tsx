@@ -7,6 +7,7 @@
 
 'use client';
 
+import { AlbumCoverBanner } from './AlbumCoverBanner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -268,7 +269,12 @@ function PhotoAlbumDataDisplay({ data }: { readonly data: PhotoAlbumData }) {
           Photo Album
         </CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent className='space-y-2'>
+        <AlbumCoverBanner
+          coverUrl={data.cover_url}
+          albumUrl={data.album_url}
+          label={label}
+        />
         <div className='text-muted-foreground text-sm'>
           {data.album_url ? (
             <a

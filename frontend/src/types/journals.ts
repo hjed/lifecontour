@@ -162,6 +162,11 @@ export interface PhotoAlbumData {
   album_name?: string | null;
   album_url?: string | null;
   asset_count?: number | null;
+  /**
+   * Backend proxy URL for the album cover photo, served on-demand and not
+   * persisted. Null/absent when the album has no cover. See ITER11-004 Phase 2.
+   */
+  cover_url?: string | null;
 }
 
 export interface FitnessData {

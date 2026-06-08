@@ -186,6 +186,13 @@ class PhotoAlbumDataSchema(BaseModel):
     asset_count: int | None = Field(
         default=None, description="Number of photos in the album"
     )
+    cover_url: str | None = Field(
+        default=None,
+        description=(
+            "Backend proxy URL for the album cover photo (served on-demand, "
+            "not persisted); null when the album has no cover"
+        ),
+    )
 
 
 class FitnessDataSchema(BaseModel):

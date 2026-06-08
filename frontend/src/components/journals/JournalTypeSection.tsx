@@ -40,6 +40,7 @@ import type {
   GearUsageData,
 } from '@/types/journals';
 import { cn } from '@/lib/utils';
+import { AlbumCoverBanner } from './AlbumCoverBanner';
 import {
   AbseilingTripTypeEditor,
   BushwalkingTypeEditor,
@@ -248,14 +249,19 @@ function TypeSpecificContent({
     case JournalType.PHOTO_ALBUM: {
       // PHOTO_ALBUM is managed by Immich album sync and is read-only here.
       const album = typeData as PhotoAlbumData | undefined;
+      const albumLabel = album?.album_name ?? album?.immich_album_id ?? null;
       return (
-        <div
-          className='text-muted-foreground text-sm'
-          data-testid='photo-album-readonly'
-        >
-          {(album?.album_name ?? album?.immich_album_id)
-            ? `Synced from Immich album: ${album?.album_name ?? album?.immich_album_id}`
-            : 'Synced from Immich. Album details are managed by Immich.'}
+        <div className='space-y-2' data-testid='photo-album-readonly'>
+          <AlbumCoverBanner
+            coverUrl={album?.cover_url}
+            albumUrl={album?.album_url}
+            label={albumLabel ?? 'Immich album'}
+          />
+          <div className='text-muted-foreground text-sm'>
+            {albumLabel
+              ? `Synced from Immich album: ${albumLabel}`
+              : 'Synced from Immich. Album details are managed by Immich.'}
+          </div>
         </div>
       );
     }

@@ -24,6 +24,7 @@ from app.core.integrations.adapters.sql.snipeit_settings_repository import (
 from app.core.integrations.adapters.sql.strava_athlete_mapping_repository import (
     SqlStravaAthleteMappingRepository,
 )
+from app.core.integrations.album_cover_proxy_service import AlbumCoverProxyService
 from app.core.integrations.avatar_proxy_service import AvatarProxyService
 from app.core.integrations.database import IntegrationDatabaseManager
 from app.core.integrations.encryption import EncryptionService
@@ -343,6 +344,26 @@ class IntegrationProvider(Provider):
         """
         return AvatarProxyService(
             ext_ref_repo=ext_ref_repo,
+            immich_token_service=immich_token_service,
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def provide_album_cover_proxy_service(
+        self,
+        connection: AsyncConnection,
+        immich_token_service: ImmichTokenService,
+    ) -> AlbumCoverProxyService:
+        """Provide the album cover proxy service for request scope.
+
+        Returns:
+            AlbumCoverProxyService: Service for proxying Immich album covers
+        """
+        from app.core.journal.adapters.sql.album_sync_read_repository import (
+            AlbumSyncReadRepository,
+        )
+
+        return AlbumCoverProxyService(
+            album_repo=AlbumSyncReadRepository(connection),
             immich_token_service=immich_token_service,
         )
 

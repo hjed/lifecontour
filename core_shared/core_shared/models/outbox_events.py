@@ -156,8 +156,12 @@ class ImmichAlbumSyncEventData(BaseModel):
     album_metadata: dict[str, Any] = Field(
         default_factory=dict,
         description=(
-            "Album display metadata: 'album_name', 'description', "
-            "'asset_count', 'updated_at', 'thumbnail_asset_id', 'album_url'"
+            "Album display + sync metadata: 'album_name', 'description', "
+            "'asset_count', 'updated_at', 'thumbnail_asset_id', 'album_url', "
+            "'shared_link_url' (public share URL, when the album is shared), and "
+            "'people' (list of {'id', 'name'} for the unique Immich people tagged "
+            "across the album's photos, resolved to journal participants by the "
+            "backend)"
         ),
     )
     sync_timestamp: str = Field(
