@@ -143,11 +143,50 @@ def build_snipeit_maintenance_url(
     return f"{clean_base}/hardware/maintenances/{clean_maintenance_id}"
 
 
+def build_immich_person_url(
+    server_url: str | None, person_id: str | None
+) -> str | None:
+    """Build an Immich People URL from a server URL and person ID.
+
+    Args:
+        server_url: The user's Immich server base URL, or None.
+        person_id: The Immich person UUID, or None.
+
+    Returns:
+        Full Immich person URL, or None if either parameter is missing/empty.
+    """
+    if (
+        not server_url
+        or not server_url.strip()
+        or not person_id
+        or not person_id.strip()
+    ):
+        return None
+    return f"{server_url.strip().rstrip('/')}/people/{person_id.strip()}"
+
+
+def build_immich_album_url(server_url: str | None, album_id: str | None) -> str | None:
+    """Build an Immich album URL from a server URL and album ID.
+
+    Args:
+        server_url: The user's Immich server base URL, or None.
+        album_id: The Immich album UUID, or None.
+
+    Returns:
+        Full Immich album URL, or None if either parameter is missing/empty.
+    """
+    if not server_url or not server_url.strip() or not album_id or not album_id.strip():
+        return None
+    return f"{server_url.strip().rstrip('/')}/albums/{album_id.strip()}"
+
+
 def build_journal_external_links(
     *,
     strava_activity_id: str | None,
     external_event_links: list[dict[str, Any]],
     snipeit_links: list[dict[str, Any]] | None = None,
+    immich_album_links: list[dict[str, Any]] | None = None,
+    immich_server_url: str | None = None,
 ) -> list[ExternalLinkInfo]:
     """Build a list of external links for a journal.
 
@@ -160,6 +199,10 @@ def build_journal_external_links(
             'calendar_id' keys from JournalExternalEventLink records.
         snipeit_links: List of dicts with 'integration_source', 'external_id',
             and 'base_url' keys from sync_metadata and snipeit_settings.
+        immich_album_links: List of dicts with 'album_id' and 'shared_link_url'
+            keys from sync_metadata and the album external reference.
+        immich_server_url: The user's Immich server base URL, used to build
+            album links, or None if Immich is not connected.
 
     Returns:
         List of ExternalLinkInfo objects for display.
@@ -218,12 +261,38 @@ def build_journal_external_links(
                     )
                 )
 
+    # Immich album links from sync metadata + album external reference
+    if immich_album_links:
+        for album_link in immich_album_links:
+            album_id = album_link.get("album_id")
+            if not album_id:
+                continue
+            links.append(
+                ExternalLinkInfo(
+                    source="immich_album",
+                    url=build_immich_album_url(immich_server_url, album_id),
+                    external_id=album_id,
+                    unique_key=f"album-{album_id}",
+                )
+            )
+            shared_link_url = album_link.get("shared_link_url")
+            if shared_link_url and shared_link_url.strip():
+                links.append(
+                    ExternalLinkInfo(
+                        source="immich_shared",
+                        url=shared_link_url.strip(),
+                        external_id=album_id,
+                        unique_key=f"shared-{album_id}",
+                    )
+                )
+
     return links
 
 
 def build_contact_external_links(
     *,
     external_references: list[dict[str, Any]],
+    immich_server_url: str | None = None,
 ) -> list[ExternalLinkInfo]:
     """Build a list of external links for a contact.
 
@@ -232,6 +301,8 @@ def build_contact_external_links(
     Args:
         external_references: List of dicts with 'external_system',
             'external_entity_id', and 'external_entity_type' keys.
+        immich_server_url: The user's Immich server base URL, used to build
+            person links, or None if Immich is not connected.
 
     Returns:
         List of ExternalLinkInfo objects for display.
@@ -241,6 +312,7 @@ def build_contact_external_links(
     for ref in external_references:
         system = ref.get("external_system", "")
         entity_id = ref.get("external_entity_id", "")
+        entity_type = ref.get("external_entity_type", "")
 
         if system == "google":
             links.append(
@@ -257,6 +329,15 @@ def build_contact_external_links(
                 ExternalLinkInfo(
                     source="strava",
                     url=None,
+                    external_id=entity_id,
+                    unique_key=entity_id,
+                )
+            )
+        elif system == "immich" and entity_type == "person":
+            links.append(
+                ExternalLinkInfo(
+                    source="immich",
+                    url=build_immich_person_url(immich_server_url, entity_id),
                     external_id=entity_id,
                     unique_key=entity_id,
                 )

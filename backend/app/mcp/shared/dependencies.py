@@ -17,6 +17,7 @@ from app.core.contacts.services import (
     TagService,
 )
 from app.core.journal.services.daily_summary_service import DailySummaryService
+from app.infrastructure.auth.immich_token_service import ImmichTokenService
 from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.search.search_service import SearchService
@@ -123,6 +124,11 @@ async def get_current_user_id() -> str:
 async def get_async_connection() -> AsyncConnection:
     """Resolve the active request-scoped database connection."""
     return cast(AsyncConnection, await _resolve_dependency(AsyncConnection))
+
+
+async def get_immich_token_service() -> ImmichTokenService:
+    """Resolve the Immich token service for the current MCP request."""
+    return cast(ImmichTokenService, await _resolve_dependency(ImmichTokenService))
 
 
 async def get_contact_service() -> ContactService:

@@ -14,6 +14,9 @@ import {
   Package,
   Wrench,
   ClipboardList,
+  Camera,
+  Image,
+  Share2,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -48,6 +51,9 @@ const SOURCE_ICONS: Record<string, LucideIcon> = {
   snipeit: Package,
   snipeit_maintenance: Wrench,
   snipeit_checkout: ClipboardList,
+  immich: Camera,
+  immich_album: Image,
+  immich_shared: Share2,
 };
 
 /** Map of source identifiers to human-readable labels */
@@ -58,6 +64,9 @@ const SOURCE_LABELS: Record<string, string> = {
   snipeit: 'Snipe-IT Asset',
   snipeit_maintenance: 'Snipe-IT Maintenance',
   snipeit_checkout: 'Snipe-IT Checkout',
+  immich: 'Immich Photo',
+  immich_album: 'Immich Album',
+  immich_shared: 'Immich Shared Link',
 };
 
 /**

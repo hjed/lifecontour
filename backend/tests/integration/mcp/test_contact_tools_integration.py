@@ -1206,3 +1206,65 @@ class TestContactConverterAISummaryIntegration:
             assert links[0]["source"] == "google_contacts"
             assert links[0]["external_id"] == "people/c123456789"
             assert links[0]["url"] == "https://contacts.google.com/person/c123456789"
+
+    @pytest.mark.asyncio
+    async def test_get_contact_includes_immich_person_link_via_http_session(
+        self,
+        authenticated_lifespan_client,
+        contact_service: ContactService,
+        clean_database: AsyncConnection,
+    ):
+        """get_contact returns an Immich person link with a server-derived URL."""
+        from core_shared.models.contacts.entities import Contact
+        from sqlalchemy import text
+
+        c1 = await contact_service.create_contact(
+            Contact(first_name="Imo", last_name="Immich"), clean_database
+        )
+        assert c1.id is not None
+
+        await clean_database.execute(
+            text(
+                "INSERT INTO user_immich_auth "
+                "(user_id, server_url, encrypted_api_key) "
+                "VALUES ('test-user-123', :server_url, :api_key)"
+            ),
+            {
+                "server_url": "https://immich.example.com",
+                "api_key": b"encrypted-placeholder",
+            },
+        )
+        await clean_database.execute(
+            text(
+                "INSERT INTO external_references (internal_entity_id, "
+                "internal_entity_type, external_system, external_entity_id, "
+                "external_entity_type) "
+                "VALUES (:internal_id, 'contact', 'immich', 'person-uuid-1', 'person')"
+            ),
+            {"internal_id": int(c1.id)},
+        )
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+
+            resp = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "get_contact",
+                        "arguments": {"contact_id": c1.id},
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+            assert resp.status_code == 200
+            payload = extract_mcp_json_payload(resp.text)
+
+            links = payload["external_links"]
+            assert len(links) == 1
+            assert links[0]["source"] == "immich"
+            assert links[0]["external_id"] == "person-uuid-1"
+            assert links[0]["url"] == "https://immich.example.com/people/person-uuid-1"

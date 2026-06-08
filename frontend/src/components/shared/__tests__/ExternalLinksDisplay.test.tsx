@@ -184,4 +184,74 @@ describe('ExternalLinksDisplay', () => {
 
     expect(screen.getByText('Linked Systems')).toBeInTheDocument();
   });
+
+  it('renders Immich album link with clickable URL and accessible label', () => {
+    const links: ExternalLink[] = [
+      {
+        source: 'immich_album',
+        url: 'https://immich.example.com/albums/album-uuid',
+        external_id: 'album-uuid',
+      },
+    ];
+
+    render(<ExternalLinksDisplay links={links} />);
+
+    const linkElement = screen.getByTestId('external-link-immich_album');
+    expect(linkElement).toHaveAttribute(
+      'href',
+      'https://immich.example.com/albums/album-uuid'
+    );
+    expect(linkElement).toHaveAttribute('target', '_blank');
+    expect(linkElement).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(linkElement).toHaveAttribute('aria-label', 'Open in Immich Album');
+    expect(screen.getByText('Immich Album')).toBeInTheDocument();
+  });
+
+  it('renders Immich shared link alongside the album link', () => {
+    const links: ExternalLink[] = [
+      {
+        source: 'immich_album',
+        url: 'https://immich.example.com/albums/album-uuid',
+        external_id: 'album-uuid',
+      },
+      {
+        source: 'immich_shared',
+        url: 'https://immich.example.com/share/tok',
+        external_id: 'album-uuid',
+      },
+    ];
+
+    render(<ExternalLinksDisplay links={links} />);
+
+    const sharedLink = screen.getByTestId('external-link-immich_shared');
+    expect(sharedLink).toHaveAttribute(
+      'href',
+      'https://immich.example.com/share/tok'
+    );
+    expect(sharedLink).toHaveAttribute(
+      'aria-label',
+      'Open in Immich Shared Link'
+    );
+    expect(screen.getByText('Immich Shared Link')).toBeInTheDocument();
+  });
+
+  it('renders Immich person link for a contact', () => {
+    const links: ExternalLink[] = [
+      {
+        source: 'immich',
+        url: 'https://immich.example.com/people/person-uuid',
+        external_id: 'person-uuid',
+      },
+    ];
+
+    render(<ExternalLinksDisplay links={links} />);
+
+    const linkElement = screen.getByTestId('external-link-immich');
+    expect(linkElement).toHaveAttribute(
+      'href',
+      'https://immich.example.com/people/person-uuid'
+    );
+    expect(linkElement).toHaveAttribute('aria-label', 'Open in Immich Photo');
+    expect(screen.getByText('Immich Photo')).toBeInTheDocument();
+  });
 });

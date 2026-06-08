@@ -1033,3 +1033,19 @@ class SqlJournalRepository(JournalRepository):
             )
 
         return snipeit_links
+
+    async def get_immich_album_links(self, journal_id: int) -> list[dict[str, Any]]:
+        """Get Immich album links for a journal.
+
+        Returns one entry per linked Immich album with the album UUID and the
+        public shared-link URL (when one has been created). The album URL itself
+        is built by the external-link helper from the user's Immich server URL.
+
+        Delegates to ``AlbumSyncReadRepository``, which owns all SQL for the
+        album ``external_references`` link and its reference_data decoding.
+        """
+        from app.core.journal.adapters.sql.album_sync_read_repository import (
+            AlbumSyncReadRepository,
+        )
+
+        return await AlbumSyncReadRepository(self.conn).find_external_links(journal_id)

@@ -1335,4 +1335,93 @@ test.describe('Journal Detail Page', () => {
       expect(page.url()).toContain(`/contacts/${contact.id}`);
     });
   });
+
+  test.describe('Immich External Links', () => {
+    test('should display Immich album and shared links for a PHOTO_ALBUM journal', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const dataManager = new TestDataManager(authenticatedPage);
+      testCleanup(async () => {
+        await dataManager.cleanup();
+      });
+
+      const today = new Date();
+      const journals = await dataManager.createJournals([
+        {
+          title: 'Holiday Album',
+          content: 'Imported from Immich',
+          event_date_range: {
+            start: today.toISOString(),
+            end: today.toISOString(),
+          },
+        },
+      ]);
+      const journalData = journals[0];
+
+      const page = authenticatedPage;
+
+      // Stub the external-links endpoint to return Immich album + shared links.
+      // Immich link data is sync-derived and not seedable via TestDataManager,
+      // so we drive the UI deterministically as the other Immich specs do.
+      await page.route(
+        `**/api/journals/${journalData.id}/external-links`,
+        route =>
+          route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              data: [
+                {
+                  type: 'external_links',
+                  id: 'immich_album-album-album-uuid',
+                  attributes: {
+                    source: 'immich_album',
+                    url: 'https://immich.example.com/albums/album-uuid',
+                    external_id: 'album-uuid',
+                  },
+                },
+                {
+                  type: 'external_links',
+                  id: 'immich_shared-shared-album-uuid',
+                  attributes: {
+                    source: 'immich_shared',
+                    url: 'https://immich.example.com/share/tok',
+                    external_id: 'album-uuid',
+                  },
+                },
+              ],
+            }),
+          })
+      );
+
+      await page.goto(`/journals/${journalData.id}`);
+      await expect(page.getByTestId('journal-detail-view')).toBeVisible();
+
+      const section = page.getByTestId('external-links-section');
+      await expect(section).toBeVisible();
+
+      const albumLink = page.getByTestId('external-link-immich_album');
+      await expect(albumLink).toHaveAttribute(
+        'href',
+        'https://immich.example.com/albums/album-uuid'
+      );
+      await expect(albumLink).toHaveAttribute('target', '_blank');
+      await expect(albumLink).toHaveAttribute('rel', 'noopener noreferrer');
+      await expect(albumLink).toHaveAttribute(
+        'aria-label',
+        'Open in Immich Album'
+      );
+
+      const sharedLink = page.getByTestId('external-link-immich_shared');
+      await expect(sharedLink).toHaveAttribute(
+        'href',
+        'https://immich.example.com/share/tok'
+      );
+      await expect(sharedLink).toHaveAttribute(
+        'aria-label',
+        'Open in Immich Shared Link'
+      );
+    });
+  });
 });

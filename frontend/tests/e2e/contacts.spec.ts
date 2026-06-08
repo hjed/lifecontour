@@ -291,6 +291,66 @@ test.describe('Contact Management - Authenticated User', () => {
       authenticatedPage.getByText(`${bob.firstName} ${bob.lastName}`).first()
     ).toBeVisible({ timeout: 10000 });
   });
+
+  test('should display an Immich person link for an Immich-linked contact', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const dataManager = new TestDataManager(authenticatedPage);
+
+    const contact = await dataManager.createContact({
+      firstName: 'Imo',
+      lastName: 'Immich',
+    });
+
+    testCleanup(async () => {
+      await authenticatedPage.request.delete(`/api/contacts/${contact.id}`);
+    });
+
+    // Stub the external-links endpoint to return an Immich person link.
+    // Immich link data is sync-derived and not seedable via TestDataManager,
+    // so we drive the UI deterministically as the other Immich specs do.
+    await authenticatedPage.route(
+      `**/api/contacts/${contact.id}/external-links`,
+      route =>
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: [
+              {
+                type: 'external_links',
+                id: 'immich-person-uuid',
+                attributes: {
+                  source: 'immich',
+                  url: 'https://immich.example.com/people/person-uuid',
+                  external_id: 'person-uuid',
+                },
+              },
+            ],
+          }),
+        })
+    );
+
+    await authenticatedPage.goto(`/contacts/${contact.id}`);
+
+    await expect(
+      authenticatedPage.getByText(`${contact.firstName} ${contact.lastName}`)
+    ).toBeVisible({ timeout: 10000 });
+
+    const personLink = authenticatedPage.getByTestId('external-link-immich');
+    await expect(personLink).toBeVisible();
+    await expect(personLink).toHaveAttribute(
+      'href',
+      'https://immich.example.com/people/person-uuid'
+    );
+    await expect(personLink).toHaveAttribute('target', '_blank');
+    await expect(personLink).toHaveAttribute('rel', 'noopener noreferrer');
+    await expect(personLink).toHaveAttribute(
+      'aria-label',
+      'Open in Immich Photo'
+    );
+  });
 });
 
 test.describe('Contact Management - Unauthenticated User', () => {
