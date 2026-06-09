@@ -162,7 +162,13 @@ class ImmichSyncService:
         for data in people_data:
             person = ImmichPerson.model_validate(data)
             try:
-                await self._process_person(person, result)
+                # Process each person inside a SAVEPOINT so a single failure
+                # rolls back only that person's writes. The whole batch shares
+                # one transaction, so without this a single error (e.g. a SQL
+                # failure) aborts the transaction and every subsequent person
+                # fails with InFailedSQLTransactionError.
+                async with self._conn.begin_nested():
+                    await self._process_person(person, result)
             except Exception as e:  # noqa: BLE001
                 result.errors += 1
                 result.error_details.append(
@@ -866,13 +872,23 @@ class ImmichSyncService:
 
     async def _create_external_reference(self, contact_id: int, person_id: str) -> None:
         """Create an ExternalReference linking a contact to an Immich person."""
+        # The parameters are projected bare in the SELECT list *and* reused in
+        # the WHERE NOT EXISTS comparison. Without explicit casts asyncpg
+        # deduces an unqualified ``text`` type for the projection but
+        # ``character varying`` for the column comparison, raising
+        # AmbiguousParameterError ("inconsistent types deduced for parameter").
+        # Pinning each parameter to its column type keeps the deduction
+        # consistent.
         query = text("""
             INSERT INTO external_references
                 (internal_entity_type, internal_entity_id, external_system,
                  external_entity_type, external_entity_id)
             SELECT
-                :internal_entity_type, :internal_entity_id, :external_system,
-                :external_entity_type, :external_entity_id
+                CAST(:internal_entity_type AS VARCHAR),
+                CAST(:internal_entity_id AS INTEGER),
+                CAST(:external_system AS VARCHAR),
+                CAST(:external_entity_type AS VARCHAR),
+                CAST(:external_entity_id AS VARCHAR)
             WHERE NOT EXISTS (
                 SELECT 1 FROM external_references
                 WHERE external_system = :external_system
