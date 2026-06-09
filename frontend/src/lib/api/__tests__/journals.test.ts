@@ -19,7 +19,9 @@ import {
   useUpdateCalendar,
   useDeleteCalendar,
   useInfiniteJournals,
+  useDismissReviewItem,
   journalKeys,
+  reviewItemKeys,
 } from '../journals';
 import { JournalType } from '@/types/journals';
 
@@ -804,5 +806,77 @@ describe('Journals API', () => {
         );
       });
     });
+  });
+});
+
+describe('useDismissReviewItem optimistic updates', () => {
+  let queryClient: QueryClient;
+
+  const createWrapper = ({ children }: { children: ReactNode }) =>
+    React.createElement(QueryClientProvider, { client: queryClient }, children);
+
+  beforeEach(() => {
+    queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    });
+    jest.clearAllMocks();
+  });
+
+  const listKey = reviewItemKeys.list('pending', 1, 20);
+  const seedList = () =>
+    queryClient.setQueryData(listKey, {
+      data: [
+        { id: 'r1', type: 'review-items', attributes: {} },
+        { id: 'r2', type: 'review-items', attributes: {} },
+      ],
+    });
+
+  it('removes the dismissed item from cached lists before the request resolves', async () => {
+    seedList();
+
+    let resolveFetch: (value: Response) => void = () => {};
+    mockFetch.mockReturnValueOnce(
+      new Promise<Response>(resolve => {
+        resolveFetch = resolve;
+      })
+    );
+
+    const { result } = renderHook(() => useDismissReviewItem(), {
+      wrapper: createWrapper,
+    });
+
+    result.current.mutate('r1');
+
+    await waitFor(() => {
+      const cached = queryClient.getQueryData(listKey) as {
+        data: { id: string }[];
+      };
+      expect(cached.data.map(i => i.id)).toEqual(['r2']);
+    });
+
+    resolveFetch({ ok: true, json: async () => ({}) } as Response);
+  });
+
+  it('rolls back the cached list when the dismiss request fails', async () => {
+    seedList();
+
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      json: async () => ({ errors: [{ detail: 'Boom' }] }),
+    } as Response);
+
+    const { result } = renderHook(() => useDismissReviewItem(), {
+      wrapper: createWrapper,
+    });
+
+    await expect(result.current.mutateAsync('r1')).rejects.toThrow('Boom');
+
+    const cached = queryClient.getQueryData(listKey) as {
+      data: { id: string }[];
+    };
+    expect(cached.data.map(i => i.id)).toEqual(['r1', 'r2']);
   });
 });

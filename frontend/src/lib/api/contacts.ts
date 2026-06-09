@@ -1041,7 +1041,38 @@ export function useRemoveContactTag() {
   return useMutation({
     mutationFn: ({ contactId, tagId }: { contactId: string; tagId: string }) =>
       removeTagFromContact(contactId, tagId),
-    onSuccess: (_, { contactId }) => {
+    // Optimistically remove the badge so the UI doesn't depend on the refetch
+    // landing (the backend commits the delete at request teardown, so an
+    // immediate refetch can still observe the tag — see the read-after-write
+    // note in the transaction-ordering issue).
+    onMutate: async ({ contactId, tagId }) => {
+      await queryClient.cancelQueries({
+        queryKey: contactKeys.tags(contactId),
+      });
+      const previousTags = queryClient.getQueryData<TagListResponse>(
+        contactKeys.tags(contactId)
+      );
+      if (previousTags) {
+        queryClient.setQueryData<TagListResponse>(contactKeys.tags(contactId), {
+          ...previousTags,
+          data: previousTags.data.filter(tag => tag.id !== tagId),
+        });
+      }
+      return { previousTags };
+    },
+    onError: (error: Error, { contactId }, context) => {
+      if (context?.previousTags) {
+        queryClient.setQueryData(
+          contactKeys.tags(contactId),
+          context.previousTags
+        );
+      }
+      toast.error(error.message);
+    },
+    onSuccess: () => {
+      toast.success(SUCCESS_MESSAGES.TAG_REMOVED);
+    },
+    onSettled: (_data, _error, { contactId }) => {
       queryClient.invalidateQueries({
         queryKey: contactKeys.detail(contactId),
       });
@@ -1049,10 +1080,6 @@ export function useRemoveContactTag() {
         queryKey: contactKeys.tags(contactId),
       });
       queryClient.invalidateQueries({ queryKey: contactKeys.lists() });
-      toast.success(SUCCESS_MESSAGES.TAG_REMOVED);
-    },
-    onError: (error: Error) => {
-      toast.error(error.message);
     },
   });
 }

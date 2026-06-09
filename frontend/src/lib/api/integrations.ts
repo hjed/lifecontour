@@ -738,14 +738,47 @@ export function useDeleteStravaMapping() {
 
   return useMutation({
     mutationFn: deleteStravaMapping,
+    // Optimistically remove the row so the table updates immediately. The
+    // backend commits the delete at request teardown, so the refetch can still
+    // return the mapping (read-after-write) and leave the row on screen.
+    onMutate: async (stravaAthleteId: string) => {
+      await queryClient.cancelQueries({
+        queryKey: integrationKeys.stravaMappings(),
+      });
+      const previousMappings =
+        queryClient.getQueryData<StravaAthleteMappingListResponse>(
+          integrationKeys.stravaMappings()
+        );
+      if (previousMappings) {
+        queryClient.setQueryData<StravaAthleteMappingListResponse>(
+          integrationKeys.stravaMappings(),
+          {
+            ...previousMappings,
+            data: previousMappings.data.filter(
+              mapping =>
+                mapping.attributes.strava_athlete_id !== stravaAthleteId
+            ),
+          }
+        );
+      }
+      return { previousMappings };
+    },
+    onError: (error: Error, _stravaAthleteId, context) => {
+      if (context?.previousMappings) {
+        queryClient.setQueryData(
+          integrationKeys.stravaMappings(),
+          context.previousMappings
+        );
+      }
+      toast.error(`Failed to delete mapping: ${error.message}`);
+    },
     onSuccess: () => {
+      toast.success('Mapping deleted successfully');
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({
         queryKey: integrationKeys.stravaMappings(),
       });
-      toast.success('Mapping deleted successfully');
-    },
-    onError: (error: Error) => {
-      toast.error(`Failed to delete mapping: ${error.message}`);
     },
   });
 }
