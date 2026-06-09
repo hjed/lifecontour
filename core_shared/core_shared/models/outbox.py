@@ -17,6 +17,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from .base import Base
 from .outbox_events import (
     ContactSyncEventData,
+    ImmichAlbumSyncEventData,
     JournalSyncEventData,
     MatchDetectionEventData,
     SyncCompletedEventData,
@@ -215,6 +216,55 @@ class OutboxEvent(Base):
         )
         return cls(
             event_type=f"journal_event.{sync_action}",
+            event_data=payload.model_dump(),
+            aggregate_id=existing_journal_id or 0,
+        )
+
+    @classmethod
+    def create_immich_album_sync_event(
+        cls,
+        external_id: str,
+        version_hash: str,
+        sync_action: str,
+        journal_data: dict[str, Any],
+        album_metadata: dict[str, Any],
+        integration_source: str = "immich_album",
+        existing_journal_id: int | None = None,
+    ) -> OutboxEvent:
+        """
+        Create an outbox event for Immich album synchronization.
+
+        Emitted by the Immich worker when an album is imported as a
+        ``PHOTO_ALBUM`` journal. The backend ``ImmichAlbumOutboxEventProcessor``
+        creates/updates the journal from the payload.
+
+        Args:
+            external_id: Immich album UUID.
+            version_hash: Hash of album metadata for change detection.
+            sync_action: Type of sync action ('created', 'updated').
+            journal_data: Journal fields (user_id, title, content, date range).
+            album_metadata: Album display + sync metadata.
+            integration_source: Source integration (default 'immich_album').
+            existing_journal_id: ID of the existing journal when updating.
+
+        Returns:
+            OutboxEvent instance ready to be saved.
+
+        Raises:
+            pydantic.ValidationError: If the payload is invalid.
+        """
+        payload = ImmichAlbumSyncEventData(
+            integration_source=integration_source,
+            external_id=external_id,
+            version_hash=version_hash,
+            sync_action=sync_action,
+            existing_journal_id=existing_journal_id,
+            journal_data=journal_data,
+            album_metadata=album_metadata,
+            sync_timestamp=datetime.now(UTC).isoformat(),
+        )
+        return cls(
+            event_type=f"immich_album.{sync_action}",
             event_data=payload.model_dump(),
             aggregate_id=existing_journal_id or 0,
         )
