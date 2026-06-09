@@ -5,10 +5,8 @@ Handles journal-related HTTP endpoints following JSON API specification.
 Controllers act as adapters between HTTP and domain services.
 """
 
-import dataclasses
-from datetime import UTC, datetime, time
+from datetime import UTC, datetime
 from typing import Annotated, Any
-from uuid import UUID
 
 import structlog
 from core_shared.models.history import Provenance
@@ -109,11 +107,14 @@ from app.core.journal.services.hierarchy_service import HierarchyService
 from app.core.journal.services.journal_contact_service import JournalContactService
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_service import JournalService
+from app.core.journal.services.journal_tag_service import JournalTagService
+from app.core.journal.services.journal_type_data_helpers import parse_journal_type
+from app.core.journal.services.journal_write_service import JournalWriteService
+from app.core.journal.services.review_item_service import ReviewItemService
 from app.core.search.exceptions import SearchServiceUnavailableError
 from app.infrastructure.auth.immich_token_service import ImmichTokenService
 from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.config import Settings
-from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.search.search_service import SearchService
 
 logger = structlog.get_logger()
@@ -164,31 +165,6 @@ async def get_journal_album_cover(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Album cover not available for this journal",
         ) from None
-
-
-def _parse_journal_type(type_str: str) -> JournalType:
-    """
-    Convert a type string to JournalType enum.
-
-    Handles both enum value (lowercase like "mood_rating") and
-    enum name (uppercase like "MOOD_RATING").
-
-    Args:
-        type_str: The type string to convert
-
-    Returns:
-        The corresponding JournalType enum value
-
-    Raises:
-        ValueError: If the type string is invalid
-        KeyError: If the type string doesn't match any enum
-    """
-    try:
-        # First try as enum value (lowercase like "mood_rating")
-        return JournalType(type_str)
-    except ValueError:
-        # Fall back to enum name (uppercase like "MOOD_RATING")
-        return JournalType[type_str.upper()]
 
 
 async def _populate_contact_names(
@@ -253,338 +229,6 @@ async def _build_journal_response(
     """
     await _populate_contact_names(journal_resource, contact_repo, {})
     return JournalResponse(data=journal_resource)
-
-
-def _parse_optional_uuid(value: Any, field_name: str) -> UUID | None:
-    """Parse an optional UUID field from request attributes."""
-    if value is None:
-        return None
-
-    try:
-        return UUID(str(value))
-    except ValueError as exc:
-        raise JournalValidationError(
-            field_name, f"{INVALID_UUID_FORMAT_MSG}: {value}"
-        ) from exc
-
-
-def _require_integer(value: Any, field_name: str) -> int:
-    """Validate that a field is an integer while rejecting booleans."""
-    if not isinstance(value, int) or isinstance(value, bool):
-        raise JournalValidationError(field_name, "Must be an integer")
-    return value
-
-
-def _parse_optional_integer(value: Any, field_name: str) -> int | None:
-    """Validate an optional integer field while rejecting booleans."""
-    if value is None:
-        return None
-    return _require_integer(value, field_name)
-
-
-def _parse_optional_time(value: Any, field_name: str) -> time | None:
-    """Parse an optional time field from request attributes."""
-    if value is None:
-        return None
-
-    if isinstance(value, str):
-        value = value.strip()
-        if value == "":
-            return None
-
-    try:
-        parsed_time = time.fromisoformat(str(value))
-    except (ValueError, TypeError) as exc:
-        raise JournalValidationError(
-            field_name,
-            f"Invalid time format for {field_name}. Expected format: HH:MM or HH:MM:SS with no timezone",
-        ) from exc
-
-    if parsed_time.tzinfo is not None:
-        raise JournalValidationError(
-            field_name,
-            f"Invalid time format for {field_name}. Expected format: HH:MM or HH:MM:SS with no timezone",
-        )
-
-    return parsed_time
-
-
-async def _create_type_specific_data(
-    journal_type: JournalType,
-    journal_id: int,
-    mood_data_repo: MoodDataRepository,
-    plan_data_repo: PlanDataRepository,
-    travel_data_repo: TravelDataRepository,
-    fitness_data_repo: FitnessDataRepository,
-    outdoor_activity_data_repo: OutdoorActivityDataRepository,
-    bushwalking_data_repo: BushwalkingDataRepository,
-    jogging_data_repo: JoggingDataRepository,
-    abseiling_data_repo: AbseilingDataRepository,
-    abseil_pitch_repo: AbseilPitchRepository,
-    canyoning_data_repo: CanyoningDataRepository,
-    caving_data_repo: CavingDataRepository,
-    canoeing_data_repo: CanoeingDataRepository,
-    climbing_data_repo: ClimbingDataRepository,
-    kayaking_data_repo: KayakingDataRepository,
-    skiing_data_repo: CrossCountrySkiingDataRepository,
-    snorkelling_data_repo: SnorkellingDataRepository,
-    diving_data_repo: DivingDataRepository,
-    downhill_skiing_data_repo: DownhillSkiingDataRepository,
-    outdoor_planning_data_repo: OutdoorPlanningDataRepository,
-    outdoor_training_data_repo: OutdoorTrainingDataRepository,
-    gear_maintenance_data_repo: GearMaintenanceDataRepository,
-) -> None:
-    """
-    Create type-specific data row with default values for the given journal type.
-
-    Args:
-        journal_type: The type of journal
-        journal_id: The ID of the journal
-        mood_data_repo: Repository for mood data
-        plan_data_repo: Repository for plan data
-        travel_data_repo: Repository for travel data
-        fitness_data_repo: Repository for fitness data
-        outdoor_activity_data_repo: Repository for outdoor activity data
-        bushwalking_data_repo: Repository for bushwalking data
-        jogging_data_repo: Repository for jogging data
-        abseiling_data_repo: Repository for abseiling data
-        canyoning_data_repo: Repository for canyoning data
-        climbing_data_repo: Repository for climbing data
-        kayaking_data_repo: Repository for kayaking data
-        skiing_data_repo: Repository for cross-country skiing data
-        snorkelling_data_repo: Repository for snorkelling data
-        diving_data_repo: Repository for diving data
-        downhill_skiing_data_repo: Repository for downhill skiing data
-        outdoor_planning_data_repo: Repository for outdoor planning data
-        outdoor_training_data_repo: Repository for outdoor training data
-    """
-    from core_shared.models.journals import JournalType
-
-    if journal_type == JournalType.MOOD_RATING:
-        from core_shared.models.journals import MoodData
-
-        if not await mood_data_repo.find_by_journal_id(journal_id):
-            mood_data = MoodData(journal_id=journal_id)
-            await mood_data_repo.save(mood_data)
-    elif journal_type == JournalType.PLAN:
-        from core_shared.models.journals import PlanData
-
-        if not await plan_data_repo.find_by_journal_id(journal_id):
-            plan_data = PlanData(journal_id=journal_id)
-            await plan_data_repo.save(plan_data)
-    elif journal_type == JournalType.TRAVEL:
-        from core_shared.models.journals import TravelData
-
-        if not await travel_data_repo.find_by_journal_id(journal_id):
-            travel_data = TravelData(journal_id=journal_id)
-            await travel_data_repo.save(travel_data)
-    elif journal_type == JournalType.FITNESS:
-        from core_shared.models.journals import FitnessData
-
-        if not await fitness_data_repo.find_by_journal_id(journal_id):
-            fitness_data = FitnessData(journal_id=journal_id)
-            await fitness_data_repo.save(fitness_data)
-    elif journal_type == JournalType.OUTDOOR_ACTIVITY:
-        from core_shared.models.journals import OutdoorActivityData
-
-        if not await outdoor_activity_data_repo.find_by_journal_id(journal_id):
-            outdoor_activity_data = OutdoorActivityData(journal_id=journal_id)
-            await outdoor_activity_data_repo.save(outdoor_activity_data)
-    elif journal_type == JournalType.BUSHWALKING:
-        from core_shared.models.journals import BushwalkingData
-
-        if not await bushwalking_data_repo.find_by_journal_id(journal_id):
-            bushwalking_data = BushwalkingData(journal_id=journal_id)
-            await bushwalking_data_repo.save(bushwalking_data)
-    elif journal_type == JournalType.JOGGING:
-        from core_shared.models.journals import JoggingData
-
-        if not await jogging_data_repo.find_by_journal_id(journal_id):
-            jogging_data = JoggingData(journal_id=journal_id)
-            await jogging_data_repo.save(jogging_data)
-    elif journal_type == JournalType.ABSEILING_TRIP:
-        from core_shared.models.journals import AbseilingData
-
-        if not await abseiling_data_repo.find_by_journal_id(journal_id):
-            abseiling_data = AbseilingData(journal_id=journal_id)
-            await abseiling_data_repo.save(abseiling_data)
-    elif journal_type == JournalType.CANYONING:
-        from core_shared.models.journals import CanyoningData
-
-        if not await canyoning_data_repo.find_by_journal_id(journal_id):
-            canyoning_data = CanyoningData(journal_id=journal_id)
-            await canyoning_data_repo.save(canyoning_data)
-    elif journal_type == JournalType.CLIMBING:
-        from core_shared.models.journals import ClimbingData
-
-        if not await climbing_data_repo.find_by_journal_id(journal_id):
-            climbing_data = ClimbingData(journal_id=journal_id)
-            await climbing_data_repo.save(climbing_data)
-    elif journal_type == JournalType.KAYAKING:
-        from core_shared.models.journals import KayakingData
-
-        if not await kayaking_data_repo.find_by_journal_id(journal_id):
-            kayaking_data = KayakingData(journal_id=journal_id)
-            await kayaking_data_repo.save(kayaking_data)
-    elif journal_type == JournalType.CROSS_COUNTRY_SKIING:
-        from core_shared.models.journals import (
-            CrossCountrySkiingData,
-        )
-
-        if not await skiing_data_repo.find_by_journal_id(journal_id):
-            skiing_data = CrossCountrySkiingData(journal_id=journal_id)
-            await skiing_data_repo.save(skiing_data)
-    elif journal_type == JournalType.CAVING:
-        from core_shared.models.journals import CavingData
-
-        if not await caving_data_repo.find_by_journal_id(journal_id):
-            caving_data = CavingData(journal_id=journal_id)
-            await caving_data_repo.save(caving_data)
-    elif journal_type == JournalType.CANOEING:
-        from core_shared.models.journals import CanoeingData
-
-        if not await canoeing_data_repo.find_by_journal_id(journal_id):
-            canoeing_data = CanoeingData(journal_id=journal_id)
-            await canoeing_data_repo.save(canoeing_data)
-    elif journal_type == JournalType.SNORKELLING:
-        from core_shared.models.journals import SnorkellingData
-
-        if not await snorkelling_data_repo.find_by_journal_id(journal_id):
-            snorkelling_data = SnorkellingData(journal_id=journal_id)
-            await snorkelling_data_repo.save(snorkelling_data)
-    elif journal_type == JournalType.DIVING:
-        from core_shared.models.journals import DivingData
-
-        if not await diving_data_repo.find_by_journal_id(journal_id):
-            diving_data = DivingData(journal_id=journal_id)
-            await diving_data_repo.save(diving_data)
-    elif journal_type == JournalType.DOWNHILL_SKIING:
-        from core_shared.models.journals import DownhillSkiingData
-
-        if not await downhill_skiing_data_repo.find_by_journal_id(journal_id):
-            downhill_skiing_data = DownhillSkiingData(journal_id=journal_id)
-            await downhill_skiing_data_repo.save(downhill_skiing_data)
-    elif journal_type == JournalType.OUTDOOR_PLANNING:
-        from core_shared.models.journals import OutdoorPlanningData
-
-        if not await outdoor_planning_data_repo.find_by_journal_id(journal_id):
-            outdoor_planning_data = OutdoorPlanningData(journal_id=journal_id)
-            await outdoor_planning_data_repo.save(outdoor_planning_data)
-    elif journal_type == JournalType.OUTDOOR_TRAINING:
-        from core_shared.models.journals import OutdoorTrainingData
-
-        if not await outdoor_training_data_repo.find_by_journal_id(journal_id):
-            outdoor_training_data = OutdoorTrainingData(journal_id=journal_id)
-            await outdoor_training_data_repo.save(outdoor_training_data)
-    elif journal_type == JournalType.GEAR_MAINTENANCE:
-        # GEAR_MAINTENANCE requires initial data and cannot be created with defaults.
-        # Data is either populated by _process_journal_type_data during creation
-        # or required in add_type_to_journal.
-        pass
-    # EVENT and PHOTO_ALBUM types require additional data (calendar_id, immich_album_id)
-    # These will be created when the user updates the type data
-
-
-async def _delete_type_specific_data(
-    journal_type: JournalType,
-    journal_id: int,
-    mood_data_repo: MoodDataRepository,
-    plan_data_repo: PlanDataRepository,
-    travel_data_repo: TravelDataRepository,
-    photo_album_data_repo: AlbumSyncReadRepository,
-    fitness_data_repo: FitnessDataRepository,
-    outdoor_activity_data_repo: OutdoorActivityDataRepository,
-    bushwalking_data_repo: BushwalkingDataRepository,
-    jogging_data_repo: JoggingDataRepository,
-    abseiling_data_repo: AbseilingDataRepository,
-    abseil_pitch_repo: AbseilPitchRepository,
-    canyoning_data_repo: CanyoningDataRepository,
-    caving_data_repo: CavingDataRepository,
-    canoeing_data_repo: CanoeingDataRepository,
-    climbing_data_repo: ClimbingDataRepository,
-    kayaking_data_repo: KayakingDataRepository,
-    skiing_data_repo: CrossCountrySkiingDataRepository,
-    snorkelling_data_repo: SnorkellingDataRepository,
-    diving_data_repo: DivingDataRepository,
-    downhill_skiing_data_repo: DownhillSkiingDataRepository,
-    outdoor_planning_data_repo: OutdoorPlanningDataRepository,
-    outdoor_training_data_repo: OutdoorTrainingDataRepository,
-    gear_maintenance_data_repo: GearMaintenanceDataRepository,
-) -> None:
-    """
-    Delete the type-specific data row for the given journal type.
-
-    Called when a type is removed from a journal so that the type row is cleaned
-    up and the type no longer appears in _enrich_journal_data() responses.
-
-    Args:
-        journal_type: The type of journal being removed
-        journal_id: The ID of the journal
-        mood_data_repo: Repository for mood data
-        plan_data_repo: Repository for plan data
-        travel_data_repo: Repository for travel data
-        photo_album_data_repo: Repository for photo album data
-        fitness_data_repo: Repository for fitness data
-        outdoor_activity_data_repo: Repository for outdoor activity data
-        bushwalking_data_repo: Repository for bushwalking data
-        jogging_data_repo: Repository for jogging data
-        abseiling_data_repo: Repository for abseiling data
-        canyoning_data_repo: Repository for canyoning data
-        climbing_data_repo: Repository for climbing data
-        kayaking_data_repo: Repository for kayaking data
-        skiing_data_repo: Repository for cross-country skiing data
-        snorkelling_data_repo: Repository for snorkelling data
-        diving_data_repo: Repository for diving data
-        downhill_skiing_data_repo: Repository for downhill skiing data
-        outdoor_planning_data_repo: Repository for outdoor planning data
-        outdoor_training_data_repo: Repository for outdoor training data
-    """
-    from core_shared.models.journals import JournalType
-
-    if journal_type == JournalType.MOOD_RATING:
-        await mood_data_repo.delete(journal_id)
-    elif journal_type == JournalType.PLAN:
-        await plan_data_repo.delete(journal_id)
-    elif journal_type == JournalType.TRAVEL:
-        await travel_data_repo.delete(journal_id)
-    elif journal_type == JournalType.PHOTO_ALBUM:
-        await photo_album_data_repo.delete(journal_id)
-    elif journal_type == JournalType.FITNESS:
-        await fitness_data_repo.delete(journal_id)
-    elif journal_type == JournalType.OUTDOOR_ACTIVITY:
-        await outdoor_activity_data_repo.delete(journal_id)
-    elif journal_type == JournalType.BUSHWALKING:
-        await bushwalking_data_repo.delete(journal_id)
-    elif journal_type == JournalType.JOGGING:
-        await jogging_data_repo.delete(journal_id)
-    elif journal_type == JournalType.ABSEILING_TRIP:
-        await abseiling_data_repo.delete(journal_id)
-    elif journal_type == JournalType.CANYONING:
-        await canyoning_data_repo.delete(journal_id)
-    elif journal_type == JournalType.CLIMBING:
-        await climbing_data_repo.delete(journal_id)
-    elif journal_type == JournalType.KAYAKING:
-        await kayaking_data_repo.delete(journal_id)
-    elif journal_type == JournalType.CROSS_COUNTRY_SKIING:
-        await skiing_data_repo.delete(journal_id)
-    elif journal_type == JournalType.CAVING:
-        await caving_data_repo.delete(journal_id)
-    elif journal_type == JournalType.CANOEING:
-        await canoeing_data_repo.delete(journal_id)
-    elif journal_type == JournalType.SNORKELLING:
-        await snorkelling_data_repo.delete(journal_id)
-    elif journal_type == JournalType.DIVING:
-        await diving_data_repo.delete(journal_id)
-    elif journal_type == JournalType.DOWNHILL_SKIING:
-        await downhill_skiing_data_repo.delete(journal_id)
-    elif journal_type == JournalType.OUTDOOR_PLANNING:
-        await outdoor_planning_data_repo.delete(journal_id)
-    elif journal_type == JournalType.OUTDOOR_TRAINING:
-        await outdoor_training_data_repo.delete(journal_id)
-    elif journal_type == JournalType.GEAR_MAINTENANCE:
-        await gear_maintenance_data_repo.delete(journal_id)
-    # EVENT has no dedicated type-specific table (uses calendar_info via CalendarInfo)
-    # and is handled by the service layer
 
 
 async def _enrich_journal_data(
@@ -870,7 +514,7 @@ async def list_journal_tags(
 async def create_journal_tag(
     request: Request,
     tag_request: JournalTagCreateRequest,
-    tag_repo: FromDishka[JournalTagRepository],
+    journal_tag_service: FromDishka[JournalTagService],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalTagResponse:
@@ -880,8 +524,6 @@ async def create_journal_tag(
     Creates a new journal tag with the provided data and returns the created resource.
     """
     from uuid import UUID
-
-    from sqlalchemy.exc import IntegrityError
 
     from app.core.journal.models.journal_tag import JournalTag
 
@@ -902,18 +544,8 @@ async def create_journal_tag(
         parent_id=parent_id,
     )
 
-    # Save tag
-    try:
-        created_tag = await tag_repo.save(tag)
-    except IntegrityError as e:
-        # Check if it's a duplicate name error
-        if "uq_journal_tags_name" in str(e) or "duplicate key" in str(e).lower():
-            raise JournalValidationError(
-                "name",
-                f"A journal tag with the name '{tag.name}' already exists. Tag names must be unique.",
-            ) from e
-        # Re-raise other integrity errors
-        raise
+    # Save tag as a committed unit of work (duplicate names map to a 400)
+    created_tag = await journal_tag_service.create_tag(tag, connection)
 
     # Convert to resource
     tag_resource = JournalTagResource(
@@ -939,6 +571,7 @@ async def create_journal_tag(
 async def delete_journal_tag(
     tag_id: str,
     tag_repo: FromDishka[JournalTagRepository],
+    journal_tag_service: FromDishka[JournalTagService],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> None:
@@ -969,8 +602,6 @@ async def delete_journal_tag(
     """
     from uuid import UUID
 
-    from sqlalchemy import text
-
     # Convert string ID to UUID
     try:
         tag_uuid = UUID(tag_id)
@@ -988,28 +619,9 @@ async def delete_journal_tag(
             detail="Tag not found",
         )
 
-    # Check if tag is in use by any journals
-    # This prevents accidental deletion of tags that are actively being used
-    check_query = text(
-        """
-        SELECT COUNT(*) as count
-        FROM journal_tag_assignments
-        WHERE tag_id = :tag_id
-        """
-    )
-    result = await connection.execute(check_query, {"tag_id": tag_uuid})
-    row = result.fetchone()
-    usage_count: int = row[0] if row else 0
-
-    if usage_count > 0:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Cannot delete tag '{tag.name}' because it is assigned to {usage_count} journal(s). "
-            "Remove the tag from all journals before deleting it.",
-        )
-
-    # Delete the tag
-    await tag_repo.delete(tag_uuid)
+    # Delete the tag as a committed unit of work. The service raises a 409 if the
+    # tag is still assigned to any journals.
+    await journal_tag_service.delete_tag(tag_uuid, connection)
 
     return None
 
@@ -1701,9 +1313,7 @@ def _build_review_item_resource(
 @router.post("/review-items/auto-merge", status_code=status.HTTP_200_OK)
 @inject
 async def auto_merge_review_items(
-    review_item_repo: FromDishka[ReviewItemRepository],
-    journal_service: FromDishka[JournalService],
-    journal_merge_service: FromDishka[JournalMergeService],
+    review_item_service: FromDishka[ReviewItemService],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],
 ) -> dict[str, Any]:
@@ -1716,60 +1326,12 @@ async def auto_merge_review_items(
 
     Returns the count of successfully merged items and remaining pending count.
     """
-    # Fetch all pending review items for the user (up to 100)
-    pending_items = await review_item_repo.find_pending_by_user(
-        user.id, limit=100, offset=0
-    )
-
-    merged_count = 0
-    skipped_count = 0
-    errors: list[str] = []
-
-    for item in pending_items:
-        # Fetch both journals
-        source_journal = await journal_service.get_journal(item.source_journal_id)
-        candidate_journal = await journal_service.get_journal(item.candidate_journal_id)
-
-        if not source_journal or not candidate_journal:
-            # One of the journals was deleted; dismiss the review item
-            if item.id is not None:
-                await review_item_repo.update_status(
-                    item.id, new_status="resolved", user_id=user.id
-                )
-            skipped_count += 1
-            continue
-
-        # Ensure we are not merging cross-tenant
-        if source_journal.user_id != user.id or candidate_journal.user_id != user.id:
-            skipped_count += 1
-            continue
-
-        # Check for base-field conflicts
-        if journal_merge_service.has_base_conflicts(candidate_journal, source_journal):
-            skipped_count += 1
-            continue
-
-        # No conflicts - auto-merge (source → candidate as target)
-        try:
-            async with connection.begin_nested():
-                await journal_merge_service.merge_journals(
-                    target_id=item.candidate_journal_id,
-                    source_id=item.source_journal_id,
-                    transaction=connection,
-                )
-            merged_count += 1
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "Auto-merge failed for review item",
-                review_item_id=item.id,
-                error=str(exc),
-            )
-            errors.append(
-                f"Failed to merge journals {item.source_journal_id} → "
-                f"{item.candidate_journal_id}: Internal error occurred."
-            )
-
-    remaining_count = await review_item_repo.count_pending_by_user(user.id)
+    (
+        merged_count,
+        skipped_count,
+        remaining_count,
+        errors,
+    ) = await review_item_service.auto_merge_review_items(user.id, connection)
 
     return {
         "data": {
@@ -1788,7 +1350,8 @@ async def auto_merge_review_items(
 @inject
 async def create_review_item(
     review_request: ReviewItemCreateRequest,
-    review_item_repo: FromDishka[ReviewItemRepository],
+    review_item_service: FromDishka[ReviewItemService],
+    connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],
     settings: FromDishka[Settings],
 ) -> dict[str, Any]:
@@ -1816,7 +1379,9 @@ async def create_review_item(
         details=attrs.details,
     )
 
-    created, is_new = await review_item_repo.create(review_item)
+    created, is_new = await review_item_service.create_review_item(
+        review_item, connection
+    )
 
     return {
         "data": {
@@ -2056,606 +1621,13 @@ async def get_journal(
     return await _build_journal_response(journal_resource, contact_repo)
 
 
-async def _process_journal_types(
-    journal_id: int,
-    types: list[str],
-    journal_service: JournalService,
-    mood_data_repo: MoodDataRepository,
-    plan_data_repo: PlanDataRepository,
-    travel_data_repo: TravelDataRepository,
-    fitness_data_repo: FitnessDataRepository,
-    outdoor_activity_data_repo: OutdoorActivityDataRepository,
-    bushwalking_data_repo: BushwalkingDataRepository,
-    jogging_data_repo: JoggingDataRepository,
-    abseiling_data_repo: AbseilingDataRepository,
-    abseil_pitch_repo: AbseilPitchRepository,
-    canyoning_data_repo: CanyoningDataRepository,
-    caving_data_repo: CavingDataRepository,
-    canoeing_data_repo: CanoeingDataRepository,
-    climbing_data_repo: ClimbingDataRepository,
-    kayaking_data_repo: KayakingDataRepository,
-    skiing_data_repo: CrossCountrySkiingDataRepository,
-    snorkelling_data_repo: SnorkellingDataRepository,
-    diving_data_repo: DivingDataRepository,
-    downhill_skiing_data_repo: DownhillSkiingDataRepository,
-    outdoor_planning_data_repo: OutdoorPlanningDataRepository,
-    outdoor_training_data_repo: OutdoorTrainingDataRepository,
-    gear_maintenance_data_repo: GearMaintenanceDataRepository,
-    connection: AsyncConnection,
-) -> None:
-    """
-    Process and add types to a journal.
-
-    Args:
-        journal_id: The ID of the journal
-        types: List of type strings to add
-        journal_service: Service for journal operations
-        mood_data_repo: Repository for mood data
-        plan_data_repo: Repository for plan data
-        travel_data_repo: Repository for travel data
-        fitness_data_repo: Repository for fitness data
-        outdoor_activity_data_repo: Repository for outdoor activity data
-        bushwalking_data_repo: Repository for bushwalking data
-        jogging_data_repo: Repository for jogging data
-        abseiling_data_repo: Repository for abseiling data
-        canyoning_data_repo: Repository for canyoning data
-        climbing_data_repo: Repository for climbing data
-        kayaking_data_repo: Repository for kayaking data
-        skiing_data_repo: Repository for cross-country skiing data
-        connection: Database connection
-    """
-    for type_str in types:
-        try:
-            # Convert type string to enum
-            journal_type = _parse_journal_type(type_str)
-
-            # Returns all types added, including auto-resolved dependencies
-            added_types = await journal_service.add_type_to_journal(
-                journal_id,
-                journal_type,
-                connection,
-                changed_by="ui",
-                source=Provenance.UI,
-            )
-
-            # Create type-specific data rows for ALL added types (including dependencies)
-            for added_type in added_types:
-                await _create_type_specific_data(
-                    added_type,
-                    journal_id,
-                    mood_data_repo,
-                    plan_data_repo,
-                    travel_data_repo,
-                    fitness_data_repo,
-                    outdoor_activity_data_repo,
-                    bushwalking_data_repo,
-                    jogging_data_repo,
-                    abseiling_data_repo,
-                    abseil_pitch_repo,
-                    canyoning_data_repo,
-                    caving_data_repo,
-                    canoeing_data_repo,
-                    climbing_data_repo,
-                    kayaking_data_repo,
-                    skiing_data_repo,
-                    snorkelling_data_repo,
-                    diving_data_repo,
-                    downhill_skiing_data_repo,
-                    outdoor_planning_data_repo,
-                    outdoor_training_data_repo,
-                    gear_maintenance_data_repo,
-                )
-        except ValueError, KeyError:
-            # Invalid type, skip
-            pass
-
-
-async def _process_journal_type_data(
-    journal_id: int,
-    type_data: dict[str, Any],
-    calendar_info_repo: CalendarInfoRepository,
-    photo_album_data_repo: AlbumSyncReadRepository,
-    plan_data_repo: PlanDataRepository | None = None,
-    travel_data_repo: TravelDataRepository | None = None,
-    mood_data_repo: MoodDataRepository | None = None,
-    fitness_data_repo: FitnessDataRepository | None = None,
-    outdoor_activity_data_repo: OutdoorActivityDataRepository | None = None,
-    bushwalking_data_repo: BushwalkingDataRepository | None = None,
-    jogging_data_repo: JoggingDataRepository | None = None,
-    abseiling_data_repo: AbseilingDataRepository | None = None,
-    abseil_pitch_repo: AbseilPitchRepository | None = None,
-    canyoning_data_repo: CanyoningDataRepository | None = None,
-    caving_data_repo: CavingDataRepository | None = None,
-    canoeing_data_repo: CanoeingDataRepository | None = None,
-    climbing_data_repo: ClimbingDataRepository | None = None,
-    kayaking_data_repo: KayakingDataRepository | None = None,
-    skiing_data_repo: CrossCountrySkiingDataRepository | None = None,
-    snorkelling_data_repo: SnorkellingDataRepository | None = None,
-    diving_data_repo: DivingDataRepository | None = None,
-    downhill_skiing_data_repo: DownhillSkiingDataRepository | None = None,
-    outdoor_planning_data_repo: OutdoorPlanningDataRepository | None = None,
-    outdoor_training_data_repo: OutdoorTrainingDataRepository | None = None,
-    gear_maintenance_data_repo: GearMaintenanceDataRepository | None = None,
-    event_publisher: OutboxEventPublisher | None = None,
-    connection: AsyncConnection | None = None,
-) -> None:
-    """
-    Process and save type-specific data for a journal.
-
-    Args:
-        journal_id: The ID of the journal
-        type_data: Dictionary of type-specific data (keys are case-insensitive)
-        calendar_info_repo: Repository for calendar info
-        photo_album_data_repo: Repository for photo album data
-        plan_data_repo: Optional repository for plan data
-        travel_data_repo: Optional repository for travel data
-        mood_data_repo: Optional repository for mood data
-        fitness_data_repo: Optional repository for fitness data
-        outdoor_activity_data_repo: Optional repository for outdoor activity data
-        bushwalking_data_repo: Optional repository for bushwalking data
-        jogging_data_repo: Optional repository for jogging data
-        abseiling_data_repo: Optional repository for abseiling data
-        canyoning_data_repo: Optional repository for canyoning data
-        caving_data_repo: Optional repository for caving data
-        climbing_data_repo: Optional repository for climbing data
-        kayaking_data_repo: Optional repository for kayaking data
-        skiing_data_repo: Optional repository for cross-country skiing data
-    """
-    # Normalize type_data keys to lowercase for case-insensitive matching
-    normalized_type_data = {k.lower(): v for k, v in type_data.items()}
-
-    # Process EVENT type data
-    if "event" in normalized_type_data:
-        from datetime import time as dt_time
-        from uuid import UUID
-
-        from core_shared.models.journals import CalendarInfo
-
-        event_data = normalized_type_data["event"]
-
-        try:
-
-            def _parse_time_str(time_str: str) -> dt_time:
-                """Parse HH:MM or HH:MM:SS time strings from HTML time inputs."""
-                parts = time_str.split(":")
-                if len(parts) == 2:  # noqa: PLR2004
-                    hours, minutes = map(int, parts)
-                    seconds = 0
-                elif len(parts) == 3:  # noqa: PLR2004
-                    hours, minutes, seconds = map(int, parts)
-                else:
-                    raise ValueError(f"Invalid time format: {time_str!r}")
-                return dt_time(hours, minutes, seconds)
-
-            # Convert string times to time objects if provided
-            start_time = None
-            if event_data.get("start_time"):
-                start_time = _parse_time_str(event_data["start_time"])
-
-            end_time = None
-            if event_data.get("end_time"):
-                end_time = _parse_time_str(event_data["end_time"])
-
-            calendar_info = CalendarInfo(
-                journal_id=journal_id,
-                calendar_id=UUID(event_data["calendar_id"]),
-                description=event_data.get("description"),
-                start_time=start_time,
-                end_time=end_time,
-                is_all_day=event_data.get("is_all_day", False),
-                location=event_data.get("location"),
-                timezone=event_data.get("timezone"),
-                sync_invitees=event_data.get("sync_invitees", False),
-                private_description=event_data.get("private_description", False),
-            )
-            await calendar_info_repo.save(calendar_info)
-
-            # Publish JournalUpdated event so Google Calendar worker can sync
-            if event_publisher is not None:
-                from app.core.journal.models.events import JournalUpdated
-
-                calendar_sync_event = JournalUpdated(
-                    journal_id=journal_id,
-                    changed_fields={"calendar_info": True},
-                    transaction=connection,
-                )
-                await event_publisher.publish(calendar_sync_event)
-        except (ValueError, KeyError) as exc:
-            from fastapi import HTTPException
-
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid EVENT type_data: {exc}",
-            ) from exc
-
-    # PHOTO_ALBUM type data is integration-managed (Immich album sync) and is
-    # not writable through this API. Fail fast rather than silently dropping the
-    # payload so callers don't believe a write succeeded.
-    if "photo_album" in normalized_type_data:
-        from core_shared.models.journals import JournalValidationError
-
-        raise JournalValidationError(
-            "photo_album",
-            "PHOTO_ALBUM data is managed by Immich sync and cannot be set",
-        )
-
-    # Process PLAN type data
-    if "plan" in normalized_type_data and plan_data_repo:
-        import uuid
-
-        from core_shared.models.journals import PlanData, PlanDocument
-
-        plan_payload = normalized_type_data["plan"]
-        plan_data = await plan_data_repo.find_by_journal_id(journal_id)
-        if not plan_data:
-            plan_data = PlanData(journal_id=journal_id)
-
-        if "documents" in plan_payload:
-            documents: list[PlanDocument] = []
-            for doc in plan_payload["documents"]:
-                doc_id = uuid.uuid4()
-                # Coerce null/blank title to "Untitled"
-                title_raw = doc.get("title")
-                if not title_raw or (
-                    isinstance(title_raw, str) and not title_raw.strip()
-                ):
-                    title = "Untitled"
-                else:
-                    title = title_raw
-                # Coerce null order to sequential index
-                order_raw = doc.get("order")
-                order = order_raw if isinstance(order_raw, int) else len(documents)
-                documents.append(
-                    PlanDocument(
-                        id=doc_id,
-                        journal_id=journal_id,
-                        url=doc["url"],
-                        title=title,
-                        description=doc.get("description"),
-                        order=order,
-                    )
-                )
-            plan_data.documents = documents
-
-        # Persist PlanData itself
-        await plan_data_repo.save(plan_data)
-
-        # Persist each PlanDocument explicitly (save() does not cascade documents)
-        for document in plan_data.documents:
-            await plan_data_repo.save_document(document)
-
-    # Process TRAVEL type data
-    if "travel" in normalized_type_data and travel_data_repo:
-        from core_shared.models.journals import TravelData
-
-        # Payload for travel currently empty in UI, but create data if valid
-        travel_data = await travel_data_repo.find_by_journal_id(journal_id)
-        if not travel_data:
-            travel_data = TravelData(journal_id=journal_id)
-        await travel_data_repo.save(travel_data)
-
-    # Process MOOD_RATING type data
-    if "mood_rating" in normalized_type_data and mood_data_repo:
-        from core_shared.models.journals import MoodData
-
-        mood_payload = normalized_type_data["mood_rating"]
-        mood_data = await mood_data_repo.find_by_journal_id(journal_id)
-        if mood_data is None:
-            mood_data = MoodData(journal_id=journal_id)
-
-        mood_value_raw = mood_payload.get("mood_value")
-        energy_level_raw = mood_payload.get("energy_level")
-
-        if mood_value_raw is not None:
-            try:
-                mood_data.mood_value = int(mood_value_raw)
-            except (TypeError, ValueError) as exc:
-                from fastapi import HTTPException
-
-                raise HTTPException(
-                    status_code=400,
-                    detail="mood_value must be an integer",
-                ) from exc
-        if energy_level_raw is not None:
-            try:
-                mood_data.energy_level = int(energy_level_raw)
-            except (TypeError, ValueError) as exc:
-                from fastapi import HTTPException
-
-                raise HTTPException(
-                    status_code=400,
-                    detail="energy_level must be an integer",
-                ) from exc
-        mood_data.mood_label = mood_payload.get("mood_label") or mood_data.mood_label
-
-        await mood_data_repo.save(mood_data)
-
-    # Process FITNESS type data
-    if "fitness" in normalized_type_data and fitness_data_repo:
-        from core_shared.models.journals import FitnessData
-
-        fitness_payload = normalized_type_data["fitness"]
-        fitness_data = await fitness_data_repo.find_by_journal_id(journal_id)
-        if fitness_data is None:
-            fitness_data = FitnessData(journal_id=journal_id)
-
-        numeric_fields = (
-            "distance",
-            "duration",
-            "heart_rate_avg",
-            "heart_rate_max",
-            "elevation_gain",
-            "elevation_loss",
-            "calories",
-        )
-        for field in numeric_fields:
-            if field in fitness_payload:
-                value = fitness_payload[field]
-                if value is None:
-                    setattr(fitness_data, field, None)
-                else:
-                    try:
-                        setattr(fitness_data, field, int(value))
-                    except (TypeError, ValueError) as exc:
-                        from fastapi import HTTPException
-
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"{field} must be an integer",
-                        ) from exc
-
-        if "strava_activity_id" in fitness_payload:
-            fitness_data.strava_activity_id = fitness_payload["strava_activity_id"]
-
-        await fitness_data_repo.save(fitness_data)
-
-    # Process OUTDOOR_ACTIVITY type data
-    if "outdoor_activity" in normalized_type_data and outdoor_activity_data_repo:
-        from core_shared.models.journals import OutdoorActivityData
-
-        outdoor_payload = normalized_type_data["outdoor_activity"]
-        outdoor_data = await outdoor_activity_data_repo.find_by_journal_id(journal_id)
-        if outdoor_data is None:
-            outdoor_data = OutdoorActivityData(journal_id=journal_id)
-
-        if "weather_conditions" in outdoor_payload:
-            outdoor_data.weather_conditions = outdoor_payload["weather_conditions"]
-        if "role" in outdoor_payload:
-            outdoor_data.role = outdoor_payload["role"]
-        if "in_leadership_role" in outdoor_payload:
-            outdoor_data.in_leadership_role = outdoor_payload["in_leadership_role"]
-        if "participant_notes" in outdoor_payload:
-            outdoor_data.participant_notes = outdoor_payload["participant_notes"]
-
-        await outdoor_activity_data_repo.save(outdoor_data)
-
-    # Process BUSHWALKING type data
-    if "bushwalking" in normalized_type_data and bushwalking_data_repo:
-        from core_shared.models.journals import BushwalkingData
-
-        bushwalking_payload = normalized_type_data["bushwalking"]
-        bushwalking_data = await bushwalking_data_repo.find_by_journal_id(journal_id)
-        if bushwalking_data is None:
-            bushwalking_data = BushwalkingData(journal_id=journal_id)
-
-        if "track_grading" in bushwalking_payload:
-            bushwalking_data.track_grading = bushwalking_payload["track_grading"]
-
-        await bushwalking_data_repo.save(bushwalking_data)
-
-    # Process JOGGING type data
-    if "jogging" in normalized_type_data and jogging_data_repo:
-        from core_shared.models.journals import JoggingData
-
-        jogging_payload = normalized_type_data["jogging"]
-        jogging_data = await jogging_data_repo.find_by_journal_id(journal_id)
-        if jogging_data is None:
-            jogging_data = JoggingData(journal_id=journal_id)
-
-        if "pace" in jogging_payload:
-            pace_raw = jogging_payload["pace"]
-            if pace_raw is None:
-                jogging_data.pace = None
-            else:
-                try:
-                    jogging_data.pace = int(pace_raw)
-                except (TypeError, ValueError) as exc:
-                    from fastapi import HTTPException
-
-                    raise HTTPException(
-                        status_code=400,
-                        detail="pace must be an integer (seconds per km)",
-                    ) from exc
-
-        await jogging_data_repo.save(jogging_data)
-
-    # Process ABSEILING_TRIP type data
-    if (
-        "abseiling_trip" in normalized_type_data
-        and abseiling_data_repo
-        and abseil_pitch_repo
-    ):
-        await _update_abseiling_type_data(
-            journal_id,
-            "ABSEILING_TRIP",
-            normalized_type_data["abseiling_trip"],
-            abseiling_data_repo,
-            abseil_pitch_repo,
-        )
-
-    # Process CANYONING type data
-    if "canyoning" in normalized_type_data and canyoning_data_repo:
-        await _update_canyoning_type_data(
-            journal_id,
-            "CANYONING",
-            normalized_type_data["canyoning"],
-            canyoning_data_repo,
-        )
-
-    # Process CAVING type data
-    if "caving" in normalized_type_data and caving_data_repo:
-        await _update_caving_type_data(
-            journal_id,
-            "CAVING",
-            normalized_type_data["caving"],
-            caving_data_repo,
-        )
-
-    # Process CANOEING type data
-    if "canoeing" in normalized_type_data and canoeing_data_repo:
-        await _update_canoeing_type_data(
-            journal_id,
-            "CANOEING",
-            normalized_type_data["canoeing"],
-            canoeing_data_repo,
-        )
-
-    # Process CLIMBING type data
-    if "climbing" in normalized_type_data and climbing_data_repo:
-        await _update_climbing_type_data(
-            journal_id,
-            "CLIMBING",
-            normalized_type_data["climbing"],
-            climbing_data_repo,
-        )
-
-    # Process KAYAKING type data
-    if "kayaking" in normalized_type_data and kayaking_data_repo:
-        await _update_kayaking_type_data(
-            journal_id,
-            "KAYAKING",
-            normalized_type_data["kayaking"],
-            kayaking_data_repo,
-        )
-
-    # Process CROSS_COUNTRY_SKIING type data
-    if "cross_country_skiing" in normalized_type_data and skiing_data_repo:
-        await _update_cross_country_skiing_type_data(
-            journal_id,
-            "CROSS_COUNTRY_SKIING",
-            normalized_type_data["cross_country_skiing"],
-            skiing_data_repo,
-        )
-
-    # Process OUTDOOR_PLANNING type data
-    if "outdoor_planning" in normalized_type_data and outdoor_planning_data_repo:
-        await _update_outdoor_planning_type_data(
-            journal_id,
-            "OUTDOOR_PLANNING",
-            normalized_type_data["outdoor_planning"],
-            outdoor_planning_data_repo,
-        )
-
-    # Process OUTDOOR_TRAINING type data
-    if "outdoor_training" in normalized_type_data and outdoor_training_data_repo:
-        await _update_outdoor_training_type_data(
-            journal_id,
-            normalized_type_data["outdoor_training"],
-            outdoor_training_data_repo,
-        )
-
-    # Process GEAR_MAINTENANCE type data
-    if "gear_maintenance" in normalized_type_data and gear_maintenance_data_repo:
-        await _update_gear_maintenance_type_data(
-            journal_id,
-            "GEAR_MAINTENANCE",
-            normalized_type_data["gear_maintenance"],
-            gear_maintenance_data_repo,
-        )
-
-
-async def _process_journal_contact_relationships(
-    journal_id: int,
-    contacts_data: list[dict[str, Any]],
-    journal_contact_service: JournalContactService,
-    connection: AsyncConnection,
-) -> None:
-    """
-    Process and create contact relationships for a journal.
-
-    Args:
-        journal_id: The ID of the journal
-        contacts_data: List of contact relationship data
-        journal_contact_service: Service for managing contact relationships
-        connection: Active database connection to manage savepoints
-    """
-    for contact_data in contacts_data:
-        try:
-            # Extract contact_id and relationship_type from attributes
-            # contact_data is a dict from JSON, not a Pydantic model
-            if "attributes" in contact_data:
-                attrs = contact_data["attributes"]
-                contact_id = int(attrs["contact_id"])
-                relationship_type = JournalContactRelationshipType[
-                    attrs["relationship_type"]
-                ]
-
-                # Parse status and role if present
-                from core_shared.models.journals.attendee_status import AttendeeStatus
-                from core_shared.models.journals.contact_event_role import (
-                    ContactEventRole,
-                )
-
-                status, role = None, None
-                status_raw = attrs.get("status")
-                if isinstance(status_raw, str):
-                    try:
-                        status = AttendeeStatus[status_raw.upper()]
-                    except KeyError:
-                        logger.warning(
-                            "Invalid AttendeeStatus",
-                            status=status_raw,
-                            journal_id=journal_id,
-                            contact_id=contact_id,
-                        )
-
-                role_raw = attrs.get("role")
-                if isinstance(role_raw, str):
-                    try:
-                        role = ContactEventRole[role_raw.upper()]
-                    except KeyError:
-                        logger.warning(
-                            "Invalid ContactEventRole",
-                            role=role_raw,
-                            journal_id=journal_id,
-                            contact_id=contact_id,
-                        )
-
-                # Create the relationship using a nested transaction (savepoint)
-                # to prevent aborting the main transaction if
-                # a contact is missing or a unique constraint is violated.
-                relationship = JournalContactRelationship(
-                    journal_id=journal_id,
-                    contact_id=contact_id,
-                    relationship_type=relationship_type,
-                    status=status,
-                    role=role,
-                )
-                try:
-                    async with connection.begin_nested():
-                        await journal_contact_service.add_contact_to_journal(
-                            relationship, transaction=connection
-                        )
-                except IntegrityError:
-                    # Log error and ignore, the context manager handles the rollback to the savepoint
-                    logger.warning(
-                        "Invalid journal contact relationship ignored",
-                        journal_id=journal_id,
-                        contact_id=contact_id,
-                    )
-
-        except ValueError, KeyError, AttributeError, TypeError:
-            # Invalid contact relationship payload, skip
-            pass
-
-
 @router.post("", status_code=status.HTTP_201_CREATED)
 @inject
 async def create_journal(
     request: Request,
     journal_request: JournalCreateRequest,
     journal_service: FromDishka[JournalService],
-    journal_contact_service: FromDishka[JournalContactService],
+    journal_write_service: FromDishka[JournalWriteService],
     calendar_info_repo: FromDishka[CalendarInfoRepository],
     calendar_repo: FromDishka[CalendarRepository],
     mood_data_repo: FromDishka[MoodDataRepository],
@@ -2696,92 +1668,29 @@ async def create_journal(
 
     journal = JournalRequestConverter.from_create_request(journal_request.data, user.id)
 
-    created_journal = await journal_service.create_journal(
-        journal, connection, changed_by="ui", source=Provenance.UI
+    # Extract optional contact relationships from the request (HTTP concern).
+    contacts_data: list[dict[str, Any]] | None = None
+    if (
+        hasattr(journal_request.data, "relationships")
+        and journal_request.data.relationships
+        and journal_request.data.relationships.contacts
+    ):
+        contacts_data = journal_request.data.relationships.contacts.get("data", [])
+
+    # The whole composite write commits as one unit of work in the service layer.
+    created_journal = await journal_write_service.create_journal(
+        journal,
+        journal_request.data.attributes.types,
+        journal_request.data.attributes.type_data,
+        contacts_data,
+        connection,
+        changed_by="ui",
+        source=Provenance.UI,
     )
 
     # Ensure journal_id is not None (it should always be set after creation)
     if created_journal.id is None:
         raise ValueError(JOURNAL_ID_NOT_SET_MSG)
-    journal_id = created_journal.id
-
-    # Add types if provided in the request
-    if journal_request.data.attributes.types:
-        await _process_journal_types(
-            journal_id,
-            journal_request.data.attributes.types,
-            journal_service,
-            mood_data_repo,
-            plan_data_repo,
-            travel_data_repo,
-            fitness_data_repo,
-            outdoor_activity_data_repo,
-            bushwalking_data_repo,
-            jogging_data_repo,
-            abseiling_data_repo,
-            abseil_pitch_repo,
-            canyoning_data_repo,
-            caving_data_repo,
-            canoeing_data_repo,
-            climbing_data_repo,
-            kayaking_data_repo,
-            skiing_data_repo,
-            snorkelling_data_repo,
-            diving_data_repo,
-            downhill_skiing_data_repo,
-            outdoor_planning_data_repo,
-            outdoor_training_data_repo,
-            gear_maintenance_data_repo,
-            connection,
-        )
-
-    # Process type_data if provided in the request
-    if journal_request.data.attributes.type_data:
-        await _process_journal_type_data(
-            journal_id,
-            journal_request.data.attributes.type_data,
-            calendar_info_repo,
-            photo_album_data_repo,
-            plan_data_repo,
-            travel_data_repo,
-            mood_data_repo,
-            fitness_data_repo,
-            outdoor_activity_data_repo,
-            bushwalking_data_repo,
-            jogging_data_repo,
-            abseiling_data_repo,
-            abseil_pitch_repo,
-            canyoning_data_repo,
-            caving_data_repo,
-            canoeing_data_repo,
-            climbing_data_repo,
-            kayaking_data_repo,
-            skiing_data_repo,
-            snorkelling_data_repo,
-            diving_data_repo,
-            downhill_skiing_data_repo,
-            outdoor_planning_data_repo,
-            outdoor_training_data_repo,
-            gear_maintenance_data_repo,
-            event_publisher=journal_service.event_publisher,
-            connection=connection,
-        )
-
-    # Add contact relationships if provided in the request (via relationships field)
-    if (
-        hasattr(journal_request.data, "relationships")
-        and journal_request.data.relationships
-    ):
-        relationships = journal_request.data.relationships
-        if relationships.contacts:
-            contacts_data = relationships.contacts.get("data", [])
-            if contacts_data:
-                await _process_journal_contact_relationships(
-                    journal_id,
-                    contacts_data,
-                    journal_contact_service,
-                    connection,
-                )
 
     # Fetch all enrichment data
     types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
@@ -2849,6 +1758,7 @@ async def update_journal(
     request: Request,
     journal_request: JournalUpdateRequest,
     journal_service: FromDishka[JournalService],
+    journal_write_service: FromDishka[JournalWriteService],
     calendar_info_repo: FromDishka[CalendarInfoRepository],
     calendar_repo: FromDishka[CalendarRepository],
     mood_data_repo: FromDishka[MoodDataRepository],
@@ -2912,7 +1822,7 @@ async def update_journal(
     if journal_request.data.attributes.order is not None:
         changed_fields["order"] = updated_journal.order
 
-    saved_journal = await journal_service.update_journal(
+    saved_journal = await journal_write_service.update_journal(
         updated_journal,
         changed_fields,
         connection,
@@ -3015,6 +1925,7 @@ async def partial_update_journal(
     request: Request,
     journal_request: JournalUpdateRequest,
     journal_service: FromDishka[JournalService],
+    journal_write_service: FromDishka[JournalWriteService],
     calendar_info_repo: FromDishka[CalendarInfoRepository],
     calendar_repo: FromDishka[CalendarRepository],
     mood_data_repo: FromDishka[MoodDataRepository],
@@ -3124,7 +2035,7 @@ async def partial_update_journal(
     if journal_request.data.attributes.order is not None:
         changed_fields["order"] = journal_request.data.attributes.order
 
-    saved_journal = await journal_service.update_journal(
+    saved_journal = await journal_write_service.update_journal(
         updated_journal,
         changed_fields,
         connection,
@@ -3225,6 +2136,7 @@ async def partial_update_journal(
 async def delete_journal(
     journal_id: int,
     journal_service: FromDishka[JournalService],
+    journal_write_service: FromDishka[JournalWriteService],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> None:
@@ -3237,7 +2149,7 @@ async def delete_journal(
     if not existing_journal:
         raise JournalNotFoundError(journal_id)
 
-    await journal_service.delete_journal(
+    await journal_write_service.delete_journal(
         journal_id, connection, changed_by="ui", source=Provenance.UI
     )
 
@@ -3395,6 +2307,7 @@ async def add_type_to_journal(
     request: Request,
     type_request: JournalTypeAddRequest,
     journal_service: FromDishka[JournalService],
+    journal_write_service: FromDishka[JournalWriteService],
     calendar_info_repo: FromDishka[CalendarInfoRepository],
     calendar_repo: FromDishka[CalendarRepository],
     mood_data_repo: FromDishka[MoodDataRepository],
@@ -3440,7 +2353,7 @@ async def add_type_to_journal(
 
     # Parse journal type
     try:
-        journal_type = _parse_journal_type(type_request.data.attributes.journal_type)
+        journal_type = parse_journal_type(type_request.data.attributes.journal_type)
     except (ValueError, KeyError) as e:
         from core_shared.models.journals import JournalValidationError
 
@@ -3461,74 +2374,16 @@ async def add_type_to_journal(
             "GEAR_MAINTENANCE type requires initial type data (gear_item_id) to be created.",
         )
 
-    # Add type with automatic dependency resolution.
-    # Returns all types actually added (requested type + auto-resolved dependencies).
-    added_types = await journal_service.add_type_to_journal(
+    # Add the type (with dependency resolution), create its default rows, and
+    # process any initial type data — all as a single committed unit of work.
+    await journal_write_service.add_type(
         journal_id,
         journal_type,
+        type_request.data.attributes.type_data,
         connection,
         changed_by="ui",
         source=Provenance.UI,
     )
-
-    # Create type-specific data rows for ALL added types (including dependencies)
-    for added_type in added_types:
-        await _create_type_specific_data(
-            added_type,
-            journal_id,
-            mood_data_repo,
-            plan_data_repo,
-            travel_data_repo,
-            fitness_data_repo,
-            outdoor_activity_data_repo,
-            bushwalking_data_repo,
-            jogging_data_repo,
-            abseiling_data_repo,
-            abseil_pitch_repo,
-            canyoning_data_repo,
-            caving_data_repo,
-            canoeing_data_repo,
-            climbing_data_repo,
-            kayaking_data_repo,
-            skiing_data_repo,
-            snorkelling_data_repo,
-            diving_data_repo,
-            downhill_skiing_data_repo,
-            outdoor_planning_data_repo,
-            outdoor_training_data_repo,
-            gear_maintenance_data_repo,
-        )
-
-    # Process initial type data if provided
-    if type_request.data.attributes.type_data:
-        wrapped_type_data = {journal_type.value: type_request.data.attributes.type_data}
-        await _process_journal_type_data(
-            journal_id,
-            wrapped_type_data,
-            calendar_info_repo,
-            photo_album_data_repo,
-            plan_data_repo,
-            travel_data_repo,
-            mood_data_repo,
-            fitness_data_repo,
-            outdoor_activity_data_repo,
-            bushwalking_data_repo,
-            jogging_data_repo,
-            abseiling_data_repo,
-            abseil_pitch_repo,
-            canyoning_data_repo,
-            caving_data_repo,
-            canoeing_data_repo,
-            climbing_data_repo,
-            kayaking_data_repo,
-            skiing_data_repo,
-            snorkelling_data_repo,
-            diving_data_repo,
-            downhill_skiing_data_repo,
-            outdoor_planning_data_repo,
-            outdoor_training_data_repo,
-            gear_maintenance_data_repo,
-        )
 
     # Get updated journal
     updated_journal = await journal_service.get_journal(journal_id)
@@ -3582,6 +2437,7 @@ async def remove_type_from_journal(
     journal_type: str,
     request: Request,
     journal_service: FromDishka[JournalService],
+    journal_write_service: FromDishka[JournalWriteService],
     calendar_info_repo: FromDishka[CalendarInfoRepository],
     calendar_repo: FromDishka[CalendarRepository],
     mood_data_repo: FromDishka[MoodDataRepository],
@@ -3627,7 +2483,7 @@ async def remove_type_from_journal(
 
     # Parse journal type
     try:
-        jtype = _parse_journal_type(journal_type)
+        jtype = parse_journal_type(journal_type)
     except (ValueError, KeyError) as e:
         from core_shared.models.journals import JournalValidationError
 
@@ -3646,38 +2502,10 @@ async def remove_type_from_journal(
             "PHOTO_ALBUM is managed by Immich sync and cannot be removed",
         )
 
-    # Remove type (publish event)
-    await journal_service.remove_type_from_journal(
-        journal_id, jtype, connection, changed_by="ui", source=Provenance.UI
-    )
-
-    # Delete the type-specific data row so it no longer appears in the response.
+    # Remove the type and delete its type-specific data row as one unit of work.
     # (CASCADE only fires when the whole journal is deleted, not on type removal.)
-    await _delete_type_specific_data(
-        jtype,
-        journal_id,
-        mood_data_repo,
-        plan_data_repo,
-        travel_data_repo,
-        photo_album_data_repo,
-        fitness_data_repo,
-        outdoor_activity_data_repo,
-        bushwalking_data_repo,
-        jogging_data_repo,
-        abseiling_data_repo,
-        abseil_pitch_repo,
-        canyoning_data_repo,
-        caving_data_repo,
-        canoeing_data_repo,
-        climbing_data_repo,
-        kayaking_data_repo,
-        skiing_data_repo,
-        snorkelling_data_repo,
-        diving_data_repo,
-        downhill_skiing_data_repo,
-        outdoor_planning_data_repo,
-        outdoor_training_data_repo,
-        gear_maintenance_data_repo,
+    await journal_write_service.remove_type(
+        journal_id, jtype, connection, changed_by="ui", source=Provenance.UI
     )
 
     # Get updated journal
@@ -3725,643 +2553,6 @@ async def remove_type_from_journal(
     return await _build_journal_response(journal_resource, contact_repo)
 
 
-async def _update_event_type_data(
-    journal_id: int,
-    journal_type: str,
-    attrs: dict[str, Any],
-    calendar_info_repo: CalendarInfoRepository,
-) -> None:
-    """Update EVENT type-specific data."""
-    from uuid import UUID
-
-    from core_shared.models.journals.event_state import EventState
-
-    calendar_info = await calendar_info_repo.find_by_journal_id(journal_id)
-    if not calendar_info:
-        raise JournalValidationError(
-            "journal_type", f"Journal does not have type {journal_type}"
-        )
-
-    updates: dict[str, Any] = {}
-    import dataclasses
-
-    if "calendar_id" in attrs:
-        updates["calendar_id"] = UUID(attrs["calendar_id"])
-    if "is_all_day" in attrs:
-        is_all_day = attrs["is_all_day"]
-        updates["is_all_day"] = is_all_day
-        if is_all_day:
-            # All-day updates must clear times if they aren't explicitly provided as None
-            if "start_time" not in attrs:
-                updates["start_time"] = None
-            if "end_time" not in attrs:
-                updates["end_time"] = None
-    if "start_time" in attrs:
-        updates["start_time"] = _parse_optional_time(attrs["start_time"], "start_time")
-    if "end_time" in attrs:
-        updates["end_time"] = _parse_optional_time(attrs["end_time"], "end_time")
-    if "location" in attrs:
-        updates["location"] = attrs["location"]
-    if "timezone" in attrs:
-        updates["timezone"] = attrs["timezone"]
-    if "description" in attrs:
-        updates["description"] = attrs["description"]
-    if "sync_invitees" in attrs:
-        updates["sync_invitees"] = attrs["sync_invitees"]
-    if "private_description" in attrs:
-        updates["private_description"] = attrs["private_description"]
-    if "event_state" in attrs:
-        try:
-            updates["event_state"] = EventState(attrs["event_state"])
-        except (ValueError, KeyError, TypeError) as e:
-            raise JournalValidationError(
-                "event_state",
-                f"Invalid event state: {attrs['event_state']}. "
-                f"Must be one of: {', '.join(e.value for e in EventState)}",
-            ) from e
-
-    try:
-        from core_shared.models.journals.exceptions import CalendarInfoValidationError
-
-        calendar_info = dataclasses.replace(calendar_info, **updates)
-    except CalendarInfoValidationError as e:
-        raise JournalValidationError("event_data", str(e.message)) from e
-
-    await calendar_info_repo.save(calendar_info)
-
-
-async def _update_mood_type_data(
-    journal_id: int,
-    journal_type: str,
-    attrs: dict[str, Any],
-    mood_data_repo: MoodDataRepository,
-) -> None:
-    """Update MOOD_RATING type-specific data."""
-    mood_data = await mood_data_repo.find_by_journal_id(journal_id)
-    if not mood_data:
-        raise JournalValidationError(
-            "journal_type", f"Journal does not have type {journal_type}"
-        )
-
-    # Update fields from request
-    if "mood_value" in attrs:
-        mood_data.mood_value = attrs["mood_value"]
-    if "mood_label" in attrs:
-        mood_data.mood_label = attrs["mood_label"]
-    if "energy_level" in attrs:
-        mood_data.energy_level = attrs["energy_level"]
-
-    await mood_data_repo.save(mood_data)
-
-
-async def _update_fitness_type_data(
-    journal_id: int,
-    journal_type: str,
-    attrs: dict[str, Any],
-    fitness_data_repo: FitnessDataRepository,
-) -> None:
-    """Update FITNESS type-specific data."""
-    fitness_data = await fitness_data_repo.find_by_journal_id(journal_id)
-    if not fitness_data:
-        raise JournalValidationError(
-            "journal_type", f"Journal does not have type {journal_type}"
-        )
-
-    # Update fields from request
-    if "heart_rate_avg" in attrs:
-        fitness_data.heart_rate_avg = attrs["heart_rate_avg"]
-    if "heart_rate_max" in attrs:
-        fitness_data.heart_rate_max = attrs["heart_rate_max"]
-    if "distance" in attrs:
-        fitness_data.distance = attrs["distance"]
-    if "elevation_gain" in attrs:
-        fitness_data.elevation_gain = attrs["elevation_gain"]
-    if "elevation_loss" in attrs:
-        fitness_data.elevation_loss = attrs["elevation_loss"]
-    if "duration" in attrs:
-        fitness_data.duration = attrs["duration"]
-    if "calories" in attrs:
-        fitness_data.calories = attrs["calories"]
-    if "strava_activity_id" in attrs:
-        fitness_data.strava_activity_id = attrs["strava_activity_id"]
-
-    await fitness_data_repo.save(fitness_data)
-
-
-async def _update_outdoor_activity_type_data(
-    journal_id: int,
-    journal_type: str,
-    attrs: dict[str, Any],
-    outdoor_activity_data_repo: OutdoorActivityDataRepository,
-) -> None:
-    """Update OUTDOOR_ACTIVITY type-specific data."""
-    outdoor_activity_data = await outdoor_activity_data_repo.find_by_journal_id(
-        journal_id
-    )
-    if not outdoor_activity_data:
-        raise JournalValidationError(
-            "journal_type", f"Journal does not have type {journal_type}"
-        )
-
-    # Build update kwargs and use dataclasses.replace() to trigger __post_init__ validation.
-    # This ensures domain validation (e.g. no empty/whitespace strings) is enforced.
-    updates: dict[str, Any] = {}
-    if "weather_conditions" in attrs:
-        updates["weather_conditions"] = attrs["weather_conditions"]
-    if "role" in attrs:
-        updates["role"] = attrs["role"]
-    if "in_leadership_role" in attrs:
-        updates["in_leadership_role"] = attrs["in_leadership_role"]
-    if "participant_notes" in attrs:
-        updates["participant_notes"] = attrs["participant_notes"]
-
-    validated_data = dataclasses.replace(outdoor_activity_data, **updates)
-    await outdoor_activity_data_repo.save(validated_data)
-
-
-async def _update_bushwalking_type_data(
-    journal_id: int,
-    journal_type: str,
-    attrs: dict[str, Any],
-    bushwalking_data_repo: BushwalkingDataRepository,
-) -> None:
-    """Update BUSHWALKING type-specific data."""
-    bushwalking_data = await bushwalking_data_repo.find_by_journal_id(journal_id)
-    if not bushwalking_data:
-        raise JournalValidationError(
-            "journal_type", f"Journal does not have type {journal_type}"
-        )
-
-    # Build update kwargs and use dataclasses.replace() to trigger __post_init__ validation.
-    # This ensures domain validation (e.g. valid track_grading) is enforced.
-    updates: dict[str, Any] = {}
-    if "route_id" in attrs:
-        updates["route_id"] = _parse_optional_uuid(attrs["route_id"], "route_id")
-    if "track_grading" in attrs:
-        updates["track_grading"] = attrs["track_grading"]
-
-    validated_data = dataclasses.replace(bushwalking_data, **updates)
-    await bushwalking_data_repo.save(validated_data)
-
-
-async def _update_jogging_type_data(
-    journal_id: int,
-    journal_type: str,
-    attrs: dict[str, Any],
-    jogging_data_repo: JoggingDataRepository,
-) -> None:
-    """Update JOGGING type-specific data."""
-    jogging_data = await jogging_data_repo.find_by_journal_id(journal_id)
-    if not jogging_data:
-        raise JournalValidationError(
-            "journal_type", f"Journal does not have type {journal_type}"
-        )
-
-    # Build update kwargs and use dataclasses.replace() to trigger __post_init__ validation.
-    updates: dict[str, Any] = {}
-    if "route_id" in attrs:
-        updates["route_id"] = _parse_optional_uuid(attrs["route_id"], "route_id")
-    if "pace" in attrs:
-        updates["pace"] = attrs["pace"]
-
-    validated_data = dataclasses.replace(jogging_data, **updates)
-    await jogging_data_repo.save(validated_data)
-
-
-async def _update_abseiling_type_data(
-    journal_id: int,
-    journal_type: str,
-    attrs: dict[str, Any],
-    abseiling_data_repo: AbseilingDataRepository,
-    abseil_pitch_repo: AbseilPitchRepository,
-) -> None:
-    """Update ABSEILING_TRIP type-specific data."""
-    abseiling_data = await abseiling_data_repo.find_by_journal_id(journal_id)
-    if not abseiling_data:
-        raise JournalValidationError(
-            "journal_type", f"Journal does not have type {journal_type}"
-        )
-
-    # Build update kwargs and use dataclasses.replace() to trigger __post_init__ validation.
-    # Validate types eagerly so mismatches return 400 rather than an unhandled TypeError.
-    updates: dict[str, Any] = {}
-    if "number_of_abseils" in attrs:
-        updates["number_of_abseils"] = _parse_optional_integer(
-            attrs["number_of_abseils"], "number_of_abseils"
-        )
-    if "total_length" in attrs:
-        updates["total_length"] = _parse_optional_integer(
-            attrs["total_length"], "total_length"
-        )
-    if "number_of_setups" in attrs:
-        updates["number_of_setups"] = _parse_optional_integer(
-            attrs["number_of_setups"], "number_of_setups"
-        )
-    if "number_of_rescues" in attrs:
-        updates["number_of_rescues"] = _parse_optional_integer(
-            attrs["number_of_rescues"], "number_of_rescues"
-        )
-
-    validated_data = dataclasses.replace(abseiling_data, **updates)
-
-    from core_shared.models.journals.abseil_pitch import AbseilPitch
-    from pydantic import ValidationError
-
-    from app.api.journals.schemas import AbseilPitchSchema
-    from app.core.journal.services.abseiling_service import AbseilingService
-
-    pitches: list[AbseilPitch] | None = None
-    if "pitches" in attrs:
-        raw_pitches = attrs["pitches"]
-        if raw_pitches is None:
-            pitches = []
-        elif not isinstance(raw_pitches, list):
-            raise JournalValidationError("pitches", "pitches must be an array")
-        else:
-            pitches = []
-            for i, pitch_data in enumerate(raw_pitches):
-                try:
-                    parsed_pitch = AbseilPitchSchema.model_validate(pitch_data)
-                    pitches.append(
-                        AbseilPitch(
-                            journal_id=journal_id,
-                            pitch_number=parsed_pitch.pitch_number,
-                            height=parsed_pitch.height,
-                            anchor_location=parsed_pitch.anchor_location,
-                            anchor_type=parsed_pitch.anchor_type,
-                            did_rescue=parsed_pitch.did_rescue,
-                            did_setup=parsed_pitch.did_setup,
-                        )
-                    )
-                except ValidationError as e:
-                    raise JournalValidationError(
-                        f"pitches[{i}]", f"Invalid pitch data: {str(e)}"
-                    ) from e
-
-    service = AbseilingService()
-    await service.update_abseiling_data(
-        abseiling_data_repo, abseil_pitch_repo, validated_data, pitches
-    )
-
-
-async def _update_canyoning_type_data(
-    journal_id: int,
-    journal_type: str,
-    attrs: dict[str, Any],
-    canyoning_data_repo: CanyoningDataRepository,
-) -> None:
-    """Update CANYONING type-specific data."""
-    canyoning_data = await canyoning_data_repo.find_by_journal_id(journal_id)
-    if not canyoning_data:
-        raise JournalValidationError(
-            "journal_type", f"Journal does not have type {journal_type}"
-        )
-
-    # Build update kwargs and use dataclasses.replace() to trigger __post_init__ validation.
-    updates: dict[str, Any] = {}
-    if "route_id" in attrs:
-        updates["route_id"] = _parse_optional_uuid(attrs["route_id"], "route_id")
-    if "template_id" in attrs:
-        updates["template_id"] = _parse_optional_uuid(
-            attrs["template_id"], "template_id"
-        )
-    if "french_grade" in attrs:
-        if not isinstance(attrs["french_grade"], str):
-            raise JournalValidationError("french_grade", "Must be a string")
-        updates["french_grade"] = attrs["french_grade"]
-    if "water_guage_name" in attrs:
-        updates["water_guage_name"] = attrs["water_guage_name"]
-    if "water_guage_level" in attrs:
-        updates["water_guage_level"] = _parse_optional_integer(
-            attrs["water_guage_level"], "water_guage_level"
-        )
-    if "is_vertical" in attrs:
-        raw_is_vertical = attrs["is_vertical"]
-        if raw_is_vertical is not None and not isinstance(raw_is_vertical, bool):
-            raise JournalValidationError("is_vertical", "Must be a boolean or null")
-        updates["is_vertical"] = raw_is_vertical
-    if "is_night_canyon" in attrs:
-        raw_is_night_canyon = attrs["is_night_canyon"]
-        if raw_is_night_canyon is not None and not isinstance(
-            raw_is_night_canyon, bool
-        ):
-            raise JournalValidationError("is_night_canyon", "Must be a boolean or null")
-        updates["is_night_canyon"] = raw_is_night_canyon
-    if "is_white_water" in attrs:
-        raw_is_white_water = attrs["is_white_water"]
-        if raw_is_white_water is not None and not isinstance(raw_is_white_water, bool):
-            raise JournalValidationError("is_white_water", "Must be a boolean or null")
-        updates["is_white_water"] = raw_is_white_water
-
-    validated_data = dataclasses.replace(canyoning_data, **updates)
-    await canyoning_data_repo.save(validated_data)
-
-
-async def _update_outdoor_training_type_data(
-    journal_id: int,
-    data: dict[str, Any],
-    outdoor_training_data_repo: OutdoorTrainingDataRepository,
-) -> None:
-    """Update outdoor training specific data."""
-    if not data:
-        return
-
-    entity = await outdoor_training_data_repo.find_by_journal_id(journal_id)
-    if not entity:
-        raise JournalValidationError(
-            "type_data", f"Journal {journal_id} is missing OUTDOOR_TRAINING type data"
-        )
-
-    from pydantic import ValidationError
-
-    from app.api.journals.schemas import OutdoorTrainingDataSchema
-
-    try:
-        validated_data = OutdoorTrainingDataSchema.model_validate(data)
-    except ValidationError as e:
-        error = e.errors()[0]
-        field_path = ".".join(str(loc) for loc in error["loc"])
-        raise JournalValidationError(field_path, error["msg"]) from e
-
-    if "focus_areas" in data:
-        from core_shared.models.journals.exceptions import (
-            OutdoorTrainingDataValidationError,
-        )
-
-        try:
-            entity = dataclasses.replace(entity, focus_areas=validated_data.focus_areas)
-        except OutdoorTrainingDataValidationError as e:
-            # e.message already contains the 'field: ' prefix, so we split it off
-            message_without_prefix = e.message.split(": ", 1)[-1]
-            raise JournalValidationError("focus_areas", message_without_prefix) from e
-
-    await outdoor_training_data_repo.save(entity)
-
-
-async def _update_outdoor_planning_type_data(
-    journal_id: int,
-    journal_type: str,
-    attrs: dict[str, Any],
-    outdoor_planning_data_repo: OutdoorPlanningDataRepository,
-) -> None:
-    """Update OUTDOOR_PLANNING type-specific data."""
-    data = await outdoor_planning_data_repo.find_by_journal_id(journal_id)
-    if not data:
-        raise JournalValidationError(
-            "journal_type", f"Journal does not have type {journal_type}"
-        )
-
-    import dataclasses
-
-    updates: dict[str, Any] = {}
-    if "topics" in attrs:
-        raw_topics = attrs["topics"]
-        if raw_topics is not None and not isinstance(raw_topics, str):
-            raise JournalValidationError("topics", "Must be a string or null")
-        updates["topics"] = raw_topics
-    if "activity_types" in attrs:
-        raw_activity_types = attrs["activity_types"]
-        if raw_activity_types is not None:
-            if not isinstance(raw_activity_types, list):
-                raise JournalValidationError("activity_types", "Must be a list or null")
-            if not all(isinstance(x, str) for x in raw_activity_types):
-                raise JournalValidationError(
-                    "activity_types", "All items must be strings"
-                )
-        updates["activity_types"] = raw_activity_types
-
-    validated_data = dataclasses.replace(data, **updates)
-    await outdoor_planning_data_repo.save(validated_data)
-
-
-async def _update_gear_maintenance_type_data(
-    journal_id: int,
-    journal_type: str,
-    attrs: dict[str, Any],
-    gear_maintenance_data_repo: GearMaintenanceDataRepository,
-) -> None:
-    """Update or create GEAR_MAINTENANCE type-specific data."""
-    import dataclasses
-    from uuid import UUID
-
-    from core_shared.models.journals import GearMaintenanceData
-    from core_shared.models.journals.exceptions import (
-        GearMaintenanceDataValidationError,
-    )
-
-    data = await gear_maintenance_data_repo.find_by_journal_id(journal_id)
-
-    updates: dict[str, Any] = {}
-    if "gear_item_id" in attrs:
-        raw_gear_item_id = attrs["gear_item_id"]
-        if not isinstance(raw_gear_item_id, str):
-            raise JournalValidationError("gear_item_id", "Must be a string")
-        try:
-            updates["gear_item_id"] = UUID(raw_gear_item_id)
-        except ValueError:
-            raise JournalValidationError(
-                "gear_item_id", "Must be a valid UUID"
-            ) from None
-    elif not data:
-        raise JournalValidationError("gear_item_id", "Required")
-
-    if "maintenance_type" in attrs:
-        raw_maintenance_type = attrs["maintenance_type"]
-        if not isinstance(raw_maintenance_type, str):
-            raise JournalValidationError("maintenance_type", "Must be a string")
-        updates["maintenance_type"] = raw_maintenance_type
-    elif not data:
-        raise JournalValidationError("maintenance_type", "Required")
-
-    if "activity_types" in attrs:
-        raw_activity_types = attrs["activity_types"]
-        if raw_activity_types is not None:
-            if not isinstance(raw_activity_types, list):
-                raise JournalValidationError("activity_types", "Must be a list or null")
-            if not all(isinstance(x, str) for x in raw_activity_types):
-                raise JournalValidationError(
-                    "activity_types", "All items must be strings"
-                )
-        updates["activity_types"] = raw_activity_types
-
-    if "retirement_reason" in attrs:
-        raw_retirement_reason = attrs["retirement_reason"]
-        if raw_retirement_reason is not None and not isinstance(
-            raw_retirement_reason, str
-        ):
-            raise JournalValidationError(
-                "retirement_reason", "Must be a string or null"
-            )
-        updates["retirement_reason"] = raw_retirement_reason
-
-    try:
-        if data:
-            new_params = dataclasses.asdict(data)
-            new_params.update(updates)
-            new_data = data.__class__(**new_params)
-        else:
-            new_data = GearMaintenanceData(journal_id=journal_id, **updates)
-        await gear_maintenance_data_repo.save(new_data)
-    except GearMaintenanceDataValidationError as e:
-        # Extract the original message to prevent "field: field: message" duplication
-        raw_msg = str(e)
-        prefix = f"{e.field}: "
-        if raw_msg.startswith(prefix):
-            raw_msg = raw_msg[len(prefix) :]
-        raise JournalValidationError(e.field, raw_msg) from e
-
-
-async def _update_caving_type_data(
-    journal_id: int,
-    journal_type: str,
-    attrs: dict[str, Any],
-    caving_data_repo: CavingDataRepository,
-) -> None:
-    """Update CAVING type-specific data."""
-    caving_data = await caving_data_repo.find_by_journal_id(journal_id)
-    if not caving_data:
-        raise JournalValidationError(
-            "journal_type", f"Journal does not have type {journal_type}"
-        )
-
-    # Build update kwargs and use dataclasses.replace() to trigger __post_init__ validation.
-    updates: dict[str, Any] = {}
-    if "template_id" in attrs:
-        updates["template_id"] = _parse_optional_uuid(
-            attrs["template_id"], "template_id"
-        )
-    if "is_vertical" in attrs:
-        raw_is_vertical = attrs["is_vertical"]
-        if raw_is_vertical is not None and not isinstance(raw_is_vertical, bool):
-            raise JournalValidationError("is_vertical", "Must be a boolean or null")
-        updates["is_vertical"] = raw_is_vertical
-    if "is_horizontal" in attrs:
-        raw_is_horizontal = attrs["is_horizontal"]
-        if raw_is_horizontal is not None and not isinstance(raw_is_horizontal, bool):
-            raise JournalValidationError("is_horizontal", "Must be a boolean or null")
-        updates["is_horizontal"] = raw_is_horizontal
-
-    validated_data = dataclasses.replace(caving_data, **updates)
-    await caving_data_repo.save(validated_data)
-
-
-async def _update_canoeing_type_data(
-    journal_id: int,
-    journal_type: str,
-    attrs: dict[str, Any],
-    canoeing_data_repo: CanoeingDataRepository,
-) -> None:
-    """Update CANOEING type-specific data."""
-    canoeing_data = await canoeing_data_repo.find_by_journal_id(journal_id)
-    if not canoeing_data:
-        raise JournalValidationError(
-            "journal_type", f"Journal does not have type {journal_type}"
-        )
-
-    # Build update kwargs and use dataclasses.replace() to trigger __post_init__ validation.
-    updates: dict[str, Any] = {}
-    if "water_type" in attrs:
-        raw_water_type = attrs["water_type"]
-        if raw_water_type is not None and not isinstance(raw_water_type, str):
-            raise JournalValidationError("water_type", "Must be a string or null")
-        updates["water_type"] = raw_water_type
-
-    validated_data = dataclasses.replace(canoeing_data, **updates)
-    await canoeing_data_repo.save(validated_data)
-
-
-async def _update_climbing_type_data(
-    journal_id: int,
-    journal_type: str,
-    attrs: dict[str, Any],
-    climbing_data_repo: ClimbingDataRepository,
-) -> None:
-    """Update CLIMBING type-specific data."""
-    climbing_data = await climbing_data_repo.find_by_journal_id(journal_id)
-    if not climbing_data:
-        raise JournalValidationError(
-            "journal_type", f"Journal does not have type {journal_type}"
-        )
-
-    # Build update kwargs and use dataclasses.replace() to trigger __post_init__ validation.
-    updates: dict[str, Any] = {}
-    if "template_id" in attrs:
-        updates["template_id"] = _parse_optional_uuid(
-            attrs["template_id"], "template_id"
-        )
-    if "climbing_type" in attrs:
-        if not isinstance(attrs["climbing_type"], str):
-            raise JournalValidationError("climbing_type", "Must be a string")
-        updates["climbing_type"] = attrs["climbing_type"]
-    if "grade" in attrs:
-        updates["grade"] = _parse_optional_integer(attrs["grade"], "grade")
-    if "length" in attrs:
-        updates["length"] = _parse_optional_integer(attrs["length"], "length")
-
-    validated_data = dataclasses.replace(climbing_data, **updates)
-    await climbing_data_repo.save(validated_data)
-
-
-async def _update_kayaking_type_data(
-    journal_id: int,
-    journal_type: str,
-    attrs: dict[str, Any],
-    kayaking_data_repo: KayakingDataRepository,
-) -> None:
-    """Update KAYAKING type-specific data."""
-    kayaking_data = await kayaking_data_repo.find_by_journal_id(journal_id)
-    if not kayaking_data:
-        raise JournalValidationError(
-            "journal_type", f"Journal does not have type {journal_type}"
-        )
-
-    updates: dict[str, Any] = {}
-    if "water_type" in attrs:
-        raw_water_type = attrs["water_type"]
-        if raw_water_type is not None and not isinstance(raw_water_type, str):
-            raise JournalValidationError("water_type", "Must be a string or null")
-        updates["water_type"] = raw_water_type
-    if "is_white_water" in attrs:
-        raw_is_white_water = attrs["is_white_water"]
-        if raw_is_white_water is not None and not isinstance(raw_is_white_water, bool):
-            raise JournalValidationError("is_white_water", "Must be a boolean or null")
-        updates["is_white_water"] = raw_is_white_water
-    if "rapids_grade" in attrs:
-        raw_rapids_grade = attrs["rapids_grade"]
-        if raw_rapids_grade is not None and not isinstance(raw_rapids_grade, str):
-            raise JournalValidationError("rapids_grade", "Must be a string or null")
-        updates["rapids_grade"] = raw_rapids_grade
-
-    validated_data = dataclasses.replace(kayaking_data, **updates)
-    await kayaking_data_repo.save(validated_data)
-
-
-async def _update_cross_country_skiing_type_data(
-    journal_id: int,
-    journal_type: str,
-    attrs: dict[str, Any],
-    skiing_data_repo: CrossCountrySkiingDataRepository,
-) -> None:
-    """Update CROSS_COUNTRY_SKIING type-specific data."""
-    skiing_data = await skiing_data_repo.find_by_journal_id(journal_id)
-    if not skiing_data:
-        raise JournalValidationError(
-            "journal_type", f"Journal does not have type {journal_type}"
-        )
-
-    updates: dict[str, Any] = {}
-    if "route_id" in attrs:
-        updates["route_id"] = _parse_optional_uuid(attrs["route_id"], "route_id")
-    if "snow_conditions" in attrs:
-        raw_snow_conditions = attrs["snow_conditions"]
-        if raw_snow_conditions is not None and not isinstance(raw_snow_conditions, str):
-            raise JournalValidationError("snow_conditions", "Must be a string or null")
-        updates["snow_conditions"] = raw_snow_conditions
-
-    validated_data = dataclasses.replace(skiing_data, **updates)
-    await skiing_data_repo.save(validated_data)
-
-
 @router.put("/{journal_id}/types/{journal_type}/data")
 @inject
 async def update_type_data(
@@ -4370,6 +2561,7 @@ async def update_type_data(
     request: Request,
     type_data_request: JournalTypeDataUpdateRequest,
     journal_service: FromDishka[JournalService],
+    journal_write_service: FromDishka[JournalWriteService],
     calendar_info_repo: FromDishka[CalendarInfoRepository],
     calendar_repo: FromDishka[CalendarRepository],
     mood_data_repo: FromDishka[MoodDataRepository],
@@ -4415,7 +2607,7 @@ async def update_type_data(
 
     # Parse journal type
     try:
-        jtype = _parse_journal_type(journal_type)
+        jtype = parse_journal_type(journal_type)
     except (ValueError, KeyError) as e:
         raise JournalValidationError(
             "journal_type", f"Invalid journal type: {journal_type}"
@@ -4424,125 +2616,8 @@ async def update_type_data(
     # Get the attributes from the request
     attrs = type_data_request.data.attributes
 
-    # Update type-specific data based on the type
-    if jtype == JournalType.EVENT:
-        await _update_event_type_data(
-            journal_id, journal_type, attrs, calendar_info_repo
-        )
-        # Publish JournalUpdated event so Google Calendar worker can sync
-        from app.core.journal.models.events import JournalUpdated
-
-        calendar_sync_event = JournalUpdated(
-            journal_id=journal_id,
-            changed_fields={"calendar_info": True},
-            transaction=connection,
-        )
-        await journal_service.event_publisher.publish(calendar_sync_event)
-    elif jtype == JournalType.MOOD_RATING:
-        await _update_mood_type_data(journal_id, journal_type, attrs, mood_data_repo)
-    elif jtype == JournalType.PHOTO_ALBUM:
-        # PHOTO_ALBUM data is managed by Immich album sync and cannot be edited
-        # through this API.
-        raise JournalValidationError(
-            "journal_type",
-            "PHOTO_ALBUM data is managed by Immich sync and cannot be edited",
-        )
-    elif jtype == JournalType.FITNESS:
-        await _update_fitness_type_data(
-            journal_id, journal_type, attrs, fitness_data_repo
-        )
-    elif jtype == JournalType.OUTDOOR_ACTIVITY:
-        await _update_outdoor_activity_type_data(
-            journal_id, journal_type, attrs, outdoor_activity_data_repo
-        )
-    elif jtype == JournalType.BUSHWALKING:
-        await _update_bushwalking_type_data(
-            journal_id, journal_type, attrs, bushwalking_data_repo
-        )
-    elif jtype == JournalType.JOGGING:
-        await _update_jogging_type_data(
-            journal_id, journal_type, attrs, jogging_data_repo
-        )
-    elif jtype == JournalType.ABSEILING_TRIP:
-        await _update_abseiling_type_data(
-            journal_id,
-            journal_type,
-            attrs,
-            abseiling_data_repo,
-            abseil_pitch_repo,
-        )
-    elif jtype == JournalType.CANYONING:
-        await _update_canyoning_type_data(
-            journal_id, journal_type, attrs, canyoning_data_repo
-        )
-    elif jtype == JournalType.CAVING:
-        await _update_caving_type_data(
-            journal_id, journal_type, attrs, caving_data_repo
-        )
-    elif jtype == JournalType.CANOEING:
-        await _update_canoeing_type_data(
-            journal_id, journal_type, attrs, canoeing_data_repo
-        )
-    elif jtype == JournalType.CLIMBING:
-        await _update_climbing_type_data(
-            journal_id, journal_type, attrs, climbing_data_repo
-        )
-    elif jtype == JournalType.KAYAKING:
-        await _update_kayaking_type_data(
-            journal_id, journal_type, attrs, kayaking_data_repo
-        )
-    elif jtype == JournalType.CROSS_COUNTRY_SKIING:
-        await _update_cross_country_skiing_type_data(
-            journal_id, journal_type, attrs, skiing_data_repo
-        )
-    elif jtype == JournalType.SNORKELLING:
-        if not await snorkelling_data_repo.find_by_journal_id(journal_id):
-            raise JournalValidationError(
-                "journal_type", f"Journal does not have type {journal_type}"
-            )
-    elif jtype == JournalType.DIVING:
-        if not await diving_data_repo.find_by_journal_id(journal_id):
-            raise JournalValidationError(
-                "journal_type", f"Journal does not have type {journal_type}"
-            )
-    elif jtype == JournalType.DOWNHILL_SKIING:
-        if not await downhill_skiing_data_repo.find_by_journal_id(journal_id):
-            raise JournalValidationError(
-                "journal_type", f"Journal does not have type {journal_type}"
-            )
-    elif jtype == JournalType.OUTDOOR_PLANNING:
-        await _update_outdoor_planning_type_data(
-            journal_id,
-            journal_type,
-            attrs,
-            outdoor_planning_data_repo,
-        )
-    elif jtype == JournalType.OUTDOOR_TRAINING:
-        await _update_outdoor_training_type_data(
-            journal_id,
-            attrs,
-            outdoor_training_data_repo,
-        )
-    elif jtype == JournalType.GEAR_MAINTENANCE:
-        await _update_gear_maintenance_type_data(
-            journal_id,
-            journal_type,
-            attrs,
-            gear_maintenance_data_repo,
-        )
-    elif jtype in (JournalType.PLAN, JournalType.TRAVEL):
-        # PLAN and TRAVEL types have complex nested data structures
-        # For now, return an error indicating this is not yet supported
-        raise JournalValidationError(
-            "journal_type",
-            f"Updating {journal_type} type data is not yet supported. "
-            "Please use the full journal update endpoint instead.",
-        )
-    else:
-        # NOTE type has no type-specific data
-        raise JournalValidationError(
-            "journal_type", f"Type {journal_type} has no type-specific data to update"
-        )
+    # Update type-specific data as a committed unit of work.
+    await journal_write_service.update_type_data(journal_id, jtype, attrs, connection)
 
     # Get updated journal
     updated_journal = await journal_service.get_journal(journal_id)
@@ -5032,6 +3107,7 @@ async def add_tag_to_journal(
     request: Request,
     tag_request: JournalTagAddRequest,
     journal_service: FromDishka[JournalService],
+    journal_tag_service: FromDishka[JournalTagService],
     calendar_info_repo: FromDishka[CalendarInfoRepository],
     calendar_repo: FromDishka[CalendarRepository],
     mood_data_repo: FromDishka[MoodDataRepository],
@@ -5088,8 +3164,8 @@ async def add_tag_to_journal(
     if not tag:
         raise JournalValidationError("tag_id", f"Tag not found: {tag_uuid}")
 
-    # Assign tag to journal
-    await tag_repo.assign_tag(journal_id, tag_uuid)
+    # Assign tag to journal as a committed unit of work
+    await journal_tag_service.assign_tag(journal_id, tag_uuid, connection)
 
     # Get updated journal
     updated_journal = await journal_service.get_journal(journal_id)
@@ -5143,6 +3219,7 @@ async def remove_tag_from_journal(
     tag_id: str,
     request: Request,
     journal_service: FromDishka[JournalService],
+    journal_tag_service: FromDishka[JournalTagService],
     calendar_info_repo: FromDishka[CalendarInfoRepository],
     calendar_repo: FromDishka[CalendarRepository],
     mood_data_repo: FromDishka[MoodDataRepository],
@@ -5194,8 +3271,8 @@ async def remove_tag_from_journal(
     except ValueError as e:
         raise JournalValidationError("tag_id", INVALID_UUID_FORMAT_MSG) from e
 
-    # Remove tag from journal
-    await tag_repo.remove_tag(journal_id, tag_uuid)
+    # Remove tag from journal as a committed unit of work
+    await journal_tag_service.remove_tag(journal_id, tag_uuid, connection)
 
     # Get updated journal
     updated_journal = await journal_service.get_journal(journal_id)

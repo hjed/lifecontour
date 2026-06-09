@@ -146,8 +146,11 @@ from app.core.journal.services.daily_summary_service import DailySummaryService
 from app.core.journal.services.journal_contact_service import JournalContactService
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_service import JournalService
+from app.core.journal.services.journal_tag_service import JournalTagService
+from app.core.journal.services.journal_write_service import JournalWriteService
 from app.core.journal.services.logbook_data_service import LogbookDataService
 from app.core.journal.services.logbook_pdf_renderer import LogbookPdfRenderer
+from app.core.journal.services.review_item_service import ReviewItemService
 from app.core.journal.services.route_service import RouteService
 from app.core.settings.models import UserSettingsRepository
 from app.infrastructure.config import Settings
@@ -419,6 +422,88 @@ class JournalProvider(Provider):
         """Provide a JournalContactService instance."""
         return JournalContactService(
             contact_relationship_repo=contact_relationship_repo,
+            event_publisher=event_publisher,
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def journal_tag_service(
+        self,
+        tag_repo: JournalTagRepository,
+    ) -> JournalTagService:
+        """Provide a JournalTagService instance."""
+        return JournalTagService(tag_repo=tag_repo)
+
+    @provide(scope=Scope.REQUEST)
+    def review_item_service(
+        self,
+        review_item_repo: ReviewItemRepository,
+        journal_service: JournalService,
+        journal_merge_service: JournalMergeService,
+    ) -> ReviewItemService:
+        """Provide a ReviewItemService instance."""
+        return ReviewItemService(
+            review_item_repo=review_item_repo,
+            journal_service=journal_service,
+            journal_merge_service=journal_merge_service,
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def journal_write_service(
+        self,
+        journal_service: JournalService,
+        journal_contact_service: JournalContactService,
+        calendar_info_repo: CalendarInfoRepository,
+        photo_album_data_repo: AlbumSyncReadRepository,
+        mood_data_repo: MoodDataRepository,
+        plan_data_repo: PlanDataRepository,
+        travel_data_repo: TravelDataRepository,
+        fitness_data_repo: FitnessDataRepository,
+        outdoor_activity_data_repo: OutdoorActivityDataRepository,
+        bushwalking_data_repo: BushwalkingDataRepository,
+        jogging_data_repo: JoggingDataRepository,
+        abseiling_data_repo: AbseilingDataRepository,
+        abseil_pitch_repo: AbseilPitchRepository,
+        canyoning_data_repo: CanyoningDataRepository,
+        caving_data_repo: CavingDataRepository,
+        canoeing_data_repo: CanoeingDataRepository,
+        climbing_data_repo: ClimbingDataRepository,
+        kayaking_data_repo: KayakingDataRepository,
+        skiing_data_repo: CrossCountrySkiingDataRepository,
+        snorkelling_data_repo: SnorkellingDataRepository,
+        diving_data_repo: DivingDataRepository,
+        downhill_skiing_data_repo: DownhillSkiingDataRepository,
+        outdoor_planning_data_repo: OutdoorPlanningDataRepository,
+        outdoor_training_data_repo: OutdoorTrainingDataRepository,
+        gear_maintenance_data_repo: GearMaintenanceDataRepository,
+        event_publisher: OutboxEventPublisher,
+    ) -> JournalWriteService:
+        """Provide a JournalWriteService instance (composite journal writes)."""
+        return JournalWriteService(
+            journal_service=journal_service,
+            journal_contact_service=journal_contact_service,
+            calendar_info_repo=calendar_info_repo,
+            photo_album_data_repo=photo_album_data_repo,
+            mood_data_repo=mood_data_repo,
+            plan_data_repo=plan_data_repo,
+            travel_data_repo=travel_data_repo,
+            fitness_data_repo=fitness_data_repo,
+            outdoor_activity_data_repo=outdoor_activity_data_repo,
+            bushwalking_data_repo=bushwalking_data_repo,
+            jogging_data_repo=jogging_data_repo,
+            abseiling_data_repo=abseiling_data_repo,
+            abseil_pitch_repo=abseil_pitch_repo,
+            canyoning_data_repo=canyoning_data_repo,
+            caving_data_repo=caving_data_repo,
+            canoeing_data_repo=canoeing_data_repo,
+            climbing_data_repo=climbing_data_repo,
+            kayaking_data_repo=kayaking_data_repo,
+            skiing_data_repo=skiing_data_repo,
+            snorkelling_data_repo=snorkelling_data_repo,
+            diving_data_repo=diving_data_repo,
+            downhill_skiing_data_repo=downhill_skiing_data_repo,
+            outdoor_planning_data_repo=outdoor_planning_data_repo,
+            outdoor_training_data_repo=outdoor_training_data_repo,
+            gear_maintenance_data_repo=gear_maintenance_data_repo,
             event_publisher=event_publisher,
         )
 
