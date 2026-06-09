@@ -354,33 +354,36 @@ export class TestDataHelpers {
 
 #### Test Isolation Patterns
 
-- **Transaction Rollback**: Each test runs in an outer transaction with a **nested savepoint**. The savepoint is rolled back after each test, restoring the database to a clean state.
+- **One outer transaction per test, rolled back at teardown**: Each test runs in a single outer transaction on a shared `async_connection` that is **never committed** — `rollback()` at teardown restores a clean state.
+- **Commit seam for commit-as-you-go app code**: Application code now commits during the request (see [Database Design → Transaction Management](./database-design.md#transaction-management--commit-timing)). To keep tests isolated, the fixture marks the connection with `EXTERNAL_TRANSACTION_MARKER` (`app/infrastructure/unit_of_work.py`). With the marker set:
+  - `unit_of_work` emulates commit/rollback with **SAVEPOINTs** instead of committing the real (test-owned) transaction, and
+  - the commit middleware and connection provider **skip** committing.
+  - Writes still become visible to later reads on the same connection (read-after-write within a test), while the outer `rollback()` discards everything.
 - **Schema Recreation**: Fresh database schema for each test session.
-- **Data Cleanup**: Automatic cleanup between tests via savepoint rollback.
 - **Connection Management**: Proper connection pooling and cleanup.
 
 > [!IMPORTANT]
-> **All database access during a test — including access via API test clients — must use the same `async_connection` savepoint fixture.** If a test client creates its own connection (e.g. via `DatabaseProvider`), data it writes will be committed to the real database and will leak into subsequent tests.
+> **All database access during a test — including access via API test clients — must use the same `async_connection` fixture.** If a test client creates its own connection (e.g. via `DatabaseProvider`), data it writes will be committed to the real database and will leak into subsequent tests.
 
 #### Integration Test Structure
 
-The actual isolation is implemented using SQLAlchemy nested savepoints (`begin_nested`):
+Isolation is implemented by one outer transaction plus the commit seam marker
+(`backend/tests/integration/conftest.py`):
 
 ```python
-@pytest.fixture(scope="session")
-async def async_connection(...):
-    """Session-scoped outer transaction; never committed."""
-    async with engine.connect() as conn:
-        await conn.begin()   # outer transaction — never committed
-        yield conn
-        await conn.rollback()
+@pytest_asyncio.fixture(scope="function")
+async def async_connection(async_engine):
+    """Outer transaction + commit seam; never really committed."""
+    from app.infrastructure.unit_of_work import EXTERNAL_TRANSACTION_MARKER
 
-@pytest.fixture
-async def clean_database(async_connection):
-    """Per-test savepoint. Rolls back after each test."""
-    nested = await async_connection.begin_nested()
-    yield async_connection
-    await nested.rollback()  # restores pre-test state
+    async with async_engine.connect() as conn:
+        await conn.begin()                          # outer transaction
+        conn.info[EXTERNAL_TRANSACTION_MARKER] = True  # uow -> savepoints; backstops skip
+        try:
+            yield conn
+        finally:
+            conn.info.pop(EXTERNAL_TRANSACTION_MARKER, None)
+            await conn.rollback()                   # discard everything
 ```
 
 #### API Test Clients Must Use the Savepoint Connection

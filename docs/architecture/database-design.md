@@ -611,6 +611,44 @@ class ContactHistoryRepository(ABC):
 
 _See [Domain Architecture](./domain-architecture.md) for detailed repository patterns and examples._
 
+### Transaction Management & Commit Timing
+
+The request-scoped `AsyncConnection` runs in **commit-as-you-go** mode
+(`engine.connect()` in `app/infrastructure/di/database.py`), *not* `engine.begin()`.
+This matters because FastAPI/Dishka run `yield`-dependency teardown **after** the
+HTTP response has been sent — so committing at teardown lets a client's immediate
+follow-up request read pre-commit state (the read-after-write race, issue #945).
+Writes are therefore committed **before the response is sent**.
+
+**Rules:**
+
+- **Writes** are an explicit unit of work in the **service layer**, via
+  `app/infrastructure/unit_of_work.py`:
+  - `@transactional` on a service write method, or `async with unit_of_work(connection):`
+    around the write. Commits on success, rolls back on error, and is
+    **re-entrant** (nested units join the outer one; only the outermost commits).
+    Re-entrancy is tracked with a depth counter on `connection.info`, not
+    `in_transaction()`, because a prior read autobegins a transaction.
+  - `savepoint(connection)` (a SAVEPOINT) for batch loops that roll back one item
+    and continue.
+- **Reads** use no transaction helper. Their autobegun transaction is rolled back
+  when the connection closes (a harmless no-op).
+- **Controllers never open transactions** — that is a smell; transaction
+  boundaries belong in the service layer.
+- **Commit backstop (transitional):** `CommitOnResponseMiddleware`
+  (`app/infrastructure/db_commit_middleware.py`, installed inside the Dishka
+  container scope) commits the request connection on a successful write response
+  *before the response is sent*, and the connection provider commits any
+  remainder at teardown as a final net (covers the mounted MCP sub-app). This
+  guarantees correctness for endpoints not yet migrated to explicit service-layer
+  units (e.g. controllers that still call repositories directly). As those are
+  migrated to `unit_of_work`/`@transactional`, reliance on the backstop is
+  removed; once all write paths are migrated the middleware can be deleted.
+
+The transactional outbox (`event_outbox`) is written on the **same** connection
+as the business data, so the same commit publishes events atomically with the
+write.
+
 ## Performance Considerations
 
 ### Query Optimization (PostgreSQL)

@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.journal.models.events import RouteCreated, RouteDeleted, RouteUpdated
 from app.core.journal.models.repositories import RouteRepository
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+from app.infrastructure.unit_of_work import transactional
 
 logger = structlog.get_logger()
 
@@ -71,6 +72,7 @@ class RouteService:
             offset=offset,
         )
 
+    @transactional
     async def create_route(
         self,
         route: Route,
@@ -135,6 +137,7 @@ class RouteService:
 
         return saved_route
 
+    @transactional
     async def update_route(
         self,
         route: Route,
@@ -200,6 +203,7 @@ class RouteService:
 
         return saved_route
 
+    @transactional
     async def delete_route(
         self,
         route_id: UUID,

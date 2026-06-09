@@ -10,6 +10,7 @@ from app.core.contacts.models.events import TagDeleted, TagUpdated
 from app.core.contacts.models.exceptions import TagNotFoundError
 from app.core.contacts.models.repositories import ContactEventPublisher, TagRepository
 from app.core.contacts.services.tag_hierarchy_service import TagHierarchyService
+from app.infrastructure.unit_of_work import transactional
 
 
 def _compute_path_string(path_tags: list[Tag], fallback_tag: Tag) -> str:
@@ -38,6 +39,7 @@ class TagService:
         self.tag_hierarchy_service = tag_hierarchy_service
         self.event_publisher = event_publisher
 
+    @transactional
     async def update_tag(
         self,
         tag_id: int,
@@ -162,6 +164,7 @@ class TagService:
             tag.parent_id = None
             changed_fields["parent_id"] = (old_parent, None)
 
+    @transactional
     async def delete_tag(self, tag_id: int, transaction: AsyncConnection) -> None:
         """
         Delete a tag cascade removing it from contacts, and publish TagDeleted event.
@@ -182,6 +185,7 @@ class TagService:
         )
         await self.event_publisher.publish(event)
 
+    @transactional
     async def merge_tags(
         self, source_id: int, target_id: int, transaction: AsyncConnection
     ) -> None:

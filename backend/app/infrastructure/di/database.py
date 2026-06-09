@@ -46,13 +46,36 @@ class DatabaseProvider(Provider):
         self, engine: AsyncEngine
     ) -> AsyncIterable[AsyncConnection]:
         """
-        Get async database connection for request scope.
+        Get async database connection for request scope (commit-as-you-go).
 
-        Uses transaction with automatic rollback/commit and proper cleanup.
-        Handles transaction failures gracefully to prevent aborted transaction errors.
+        Uses ``engine.connect()`` rather than ``engine.begin()`` so writes can be
+        committed *during* the request (before the response is sent) instead of
+        only at teardown — fixing the read-after-write race in issue #945.
+
+        Commit responsibility, in order:
+
+        1. Migrated endpoints commit explicitly in the service layer via
+           ``app.infrastructure.unit_of_work`` (``unit_of_work`` / ``@transactional``)
+           — this runs mid-handler, before the response.
+        2. ``CommitOnResponseMiddleware`` commits any remaining write before the
+           REST response is sent (covers endpoints not yet migrated).
+        3. As a final safety net, on a successful request we commit here at
+           teardown. This covers paths the middleware does not (e.g. the mounted
+           MCP sub-app). It is a no-op when the work was already committed above.
+
+        On error we roll back whatever the handler left uncommitted.
         """
-        async with engine.begin() as conn:
-            yield conn
+        async with engine.connect() as conn:
+            try:
+                yield conn
+            except BaseException:
+                if conn.in_transaction():
+                    await conn.rollback()
+                raise
+            else:
+                # Safety-net commit for any write not already committed above.
+                if conn.in_transaction():
+                    await conn.commit()
 
     @provide(scope=Scope.APP)
     def get_sync_engine(self) -> Engine:

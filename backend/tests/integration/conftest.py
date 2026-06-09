@@ -602,21 +602,35 @@ async def async_engine(setup_test_database) -> AsyncGenerator[AsyncEngine]:
 async def async_connection(
     async_engine: AsyncEngine,
 ) -> AsyncGenerator[AsyncConnection]:
-    """Create async database connection with transaction rollback.
+    """Create an async connection wrapped in a test-owned outer transaction.
+
+    Application code now commits as-you-go (issue #945): service-layer units of
+    work call ``connection.commit()``, and the commit backstops would commit the
+    request transaction. To keep tests isolated we open one outer transaction
+    here and mark the connection with ``EXTERNAL_TRANSACTION_MARKER`` so that:
+
+      * ``unit_of_work`` emulates commit/rollback with SAVEPOINTs, and
+      * the commit middleware / connection provider skip committing.
+
+    Writes therefore stay visible to later reads on this shared connection
+    (exercising read-after-write within a test) while the single ``rollback()``
+    at teardown discards everything — no DDL touched, no state leakage.
 
     Database schema is expected to be prepared (migrated) before tests run.
     In local development this is typically done when starting the test
     database (e.g. via setup_test_database / DockerManager.start_database()).
     In CI, migrations are applied by the workflow before pytest is invoked.
-    Each test gets its own savepoint so writes are rolled back without
-    touching DDL.
     """
-    async with async_engine.begin() as conn:
-        nested_trans = await conn.begin_nested()
+    from app.infrastructure.unit_of_work import EXTERNAL_TRANSACTION_MARKER
+
+    async with async_engine.connect() as conn:
+        await conn.begin()
+        conn.info[EXTERNAL_TRANSACTION_MARKER] = True
         try:
             yield conn
         finally:
-            await nested_trans.rollback()
+            conn.info.pop(EXTERNAL_TRANSACTION_MARKER, None)
+            await conn.rollback()
 
 
 @pytest_asyncio.fixture

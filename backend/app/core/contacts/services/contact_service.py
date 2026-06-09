@@ -51,6 +51,7 @@ from app.core.contacts.services.contact_validation_service import (
     ContactValidationService,
 )
 from app.core.contacts.services.tag_hierarchy_service import TagHierarchyService
+from app.infrastructure.unit_of_work import unit_of_work
 
 logger = structlog.get_logger()
 
@@ -188,8 +189,17 @@ class ContactService:
     async def _execute_with_retry(
         self, operation: Any, transaction: AsyncConnection
     ) -> Any:
-        """Execute operation without internal retries (delegated to outer transaction manager)."""
+        """Run a write operation as an explicit, committed unit of work.
+
+        Commits the transaction on success (before the response is sent) and
+        rolls back on failure. ``unit_of_work`` is re-entrant, so this stays
+        correct even when a caller has already opened a unit of work. Unit tests
+        pass a mock connection; transaction management is skipped there.
+        """
         try:
+            if isinstance(transaction, AsyncConnection):
+                async with unit_of_work(transaction):
+                    return await operation()
             return await operation()
         except IntegrityError as e:
             self._convert_integrity_error_to_domain_exception(e)
@@ -1376,8 +1386,13 @@ class ContactService:
 
         WARNING: This will delete ALL contacts. Only use in test environments.
         """
-        # Use the provided transaction for the bulk delete
-        await self.contact_repo.bulk_delete_all(transaction)
+        # Use the provided transaction for the bulk delete. This bypasses
+        # _execute_with_retry, so commit explicitly via the unit of work.
+        if isinstance(transaction, AsyncConnection):
+            async with unit_of_work(transaction):
+                await self.contact_repo.bulk_delete_all(transaction)
+        else:
+            await self.contact_repo.bulk_delete_all(transaction)
 
     async def assign_tag_to_contact(
         self,
