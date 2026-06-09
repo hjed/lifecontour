@@ -146,6 +146,14 @@ def mock_connection() -> AsyncMock:
     """Mock async database connection."""
     conn = AsyncMock()
     conn.commit = AsyncMock()
+
+    # ``begin_nested()`` returns an async context manager (a SAVEPOINT). Model
+    # it as a sync call returning an async CM so ``async with`` works in tests.
+    nested_cm = AsyncMock()
+    nested_cm.__aenter__ = AsyncMock(return_value=nested_cm)
+    nested_cm.__aexit__ = AsyncMock(return_value=False)
+    conn.begin_nested = MagicMock(return_value=nested_cm)
+
     return conn
 
 
@@ -479,6 +487,54 @@ class TestSyncPeopleFlow:
         assert len(contact_data["important_dates"]) == 1
         assert contact_data["important_dates"][0]["date_type"] == "birthday"
         assert contact_data["important_dates"][0]["year"] == 1985
+
+    @pytest.mark.asyncio
+    async def test_failed_person_does_not_abort_remaining_batch(
+        self,
+        service: ImmichSyncService,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """A DB error on one person is isolated; later people still process.
+
+        Each person runs inside its own SAVEPOINT (``begin_nested``), so a
+        single failure rolls back only that person rather than aborting the
+        shared batch transaction and cascading InFailedSQLTransactionError
+        onto every subsequent person.
+        """
+        failing = _make_person("p1", "Andrew Whitham")
+        succeeding = _make_person("p2", "Bob Jones", "1985-12-25")
+
+        service._contacts_cache = []
+
+        generic_result = MagicMock()
+
+        # Person 1: first DB call raises (simulating a SQL failure).
+        # Person 2: clean "create" flow (find -> none, outbox insert).
+        mock_connection.execute = AsyncMock(
+            side_effect=[
+                RuntimeError("boom"),  # person 1 _find_external_reference
+                _make_fetchone_none(),  # person 2 ext ref not found
+                generic_result,  # person 2 outbox event insert
+            ]
+        )
+
+        result = await service.sync_people_batch(
+            [failing.model_dump(), succeeding.model_dump()]
+        )
+
+        # The failure is recorded but the batch continues.
+        assert result.errors == 1
+        assert result.created == 1
+        assert any("p1" in detail for detail in result.error_details)
+
+        # Each person was wrapped in its own savepoint.
+        assert mock_connection.begin_nested.call_count == 2
+
+        # The surviving person still emitted its outbox event.
+        events = _extract_outbox_events(mock_connection)
+        assert len(events) == 1
+        assert events[0]["event_type"] == "contact.created"
+        assert events[0]["event_data"]["contact_data"]["first_name"] == "Bob"
 
 
 # ---------------------------------------------------------------------------
