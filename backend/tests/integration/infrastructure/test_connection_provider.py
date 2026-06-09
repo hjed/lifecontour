@@ -12,6 +12,7 @@ import pytest
 from sqlalchemy import text
 
 from app.infrastructure.di.database import DatabaseProvider
+from app.infrastructure.unit_of_work import request_connection
 
 
 @pytest.mark.asyncio
@@ -38,5 +39,23 @@ async def test_request_connection_has_active_transaction(test_settings) -> None:
             # Drive provider teardown (commits the read transaction as the net).
             with pytest.raises(StopAsyncIteration):
                 await anext(it)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_provider_publishes_request_connection_contextvar(test_settings) -> None:
+    """The provider publishes the live connection for the commit middleware,
+    and resets it on teardown (so non-DB requests never expose a stale one)."""
+    assert request_connection.get() is None
+    provider = DatabaseProvider(test_settings)
+    engine = provider.get_engine()
+    try:
+        it = aiter(provider.get_connection(engine))
+        conn = await anext(it)
+        assert request_connection.get() is conn
+        with pytest.raises(StopAsyncIteration):
+            await anext(it)
+        assert request_connection.get() is None  # reset on teardown
     finally:
         await engine.dispose()

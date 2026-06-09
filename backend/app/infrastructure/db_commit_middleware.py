@@ -15,18 +15,23 @@ As endpoints are converted to service-layer ``unit_of_work``/``@transactional``
 units, they stop relying on this backstop; once every write path is migrated
 this middleware can be removed.
 
-IMPORTANT: this must be installed *inside* the Dishka container scope (added to
-the app BEFORE ``setup_dishka`` so Dishka's ContainerMiddleware wraps it). That
-guarantees the request container — and therefore the request connection — is
-still open when we commit. Committing happens before forwarding
-``http.response.start``; if the commit fails, the error propagates and becomes a
-5xx instead of a false success.
+It only ever settles a connection the request actually opened: the connection
+provider publishes the live connection via the ``request_connection`` ContextVar
+when it creates one, and this middleware reads that. A request that never
+touched the DB (or failed validation before the handler) has no connection, so
+nothing is created or committed here — a DB outage can't turn a non-DB request
+into a 5xx, and invalid traffic doesn't cause spurious connection checkouts.
+
+Committing happens before forwarding ``http.response.start``; if the commit
+fails, the error propagates and becomes a 5xx instead of a false success.
 """
 
-from sqlalchemy.ext.asyncio import AsyncConnection
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from app.infrastructure.unit_of_work import in_external_transaction
+from app.infrastructure.unit_of_work import (
+    in_external_transaction,
+    request_connection,
+)
 
 # Reads never write, so never need a commit.
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})
@@ -37,8 +42,9 @@ class CommitOnResponseMiddleware:
 
     def __init__(self, app: ASGIApp, *, skip_path_prefix: str | None = None) -> None:
         self.app = app
-        # Requests under this prefix (the mounted MCP sub-app) use a different
-        # Dishka container and manage their own commits, so skip them.
+        # Requests under this prefix (the mounted MCP sub-app) manage their own
+        # commit timing (service-layer units + the provider teardown net), so
+        # skip them here.
         self.skip_path_prefix = skip_path_prefix
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -62,16 +68,16 @@ class CommitOnResponseMiddleware:
                 # commit on success, roll back on a 4xx/5xx (the handler failed
                 # or rejected the request — don't persist its writes, and don't
                 # leave them for the connection-provider teardown to commit).
-                await self._settle(scope, success=message["status"] < 400)
+                await self._settle(success=message["status"] < 400)
             await send(message)
 
         await self.app(scope, receive, send_wrapper)
 
-    async def _settle(self, scope: Scope, *, success: bool) -> None:
-        container = (scope.get("state") or {}).get("dishka_container")
-        if container is None:
+    async def _settle(self, *, success: bool) -> None:
+        connection = request_connection.get()
+        if connection is None:
+            # The request never opened a DB connection — nothing to settle.
             return
-        connection = await container.get(AsyncConnection)
         # Under the integration test fixture the connection is a shared,
         # test-owned transaction; committing/rolling it back would break
         # isolation. Writes are already visible on that connection within the

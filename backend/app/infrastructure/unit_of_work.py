@@ -2,10 +2,11 @@
 Service-layer unit-of-work helpers for explicit transaction management.
 
 The request-scoped :class:`AsyncConnection` is provided in *commit-as-you-go*
-mode (``engine.connect()`` in :mod:`app.infrastructure.di.database`). It does
-**not** commit at request teardown, so writes must be committed explicitly
-*inside* the request handler — before the HTTP response is sent — to avoid the
-read-after-write race documented in issue #945.
+mode (``engine.connect()`` + an explicit ``begin()`` in
+:mod:`app.infrastructure.di.database`). The provider does **not** commit during
+the handler, so writes must be committed explicitly *inside* the request handler
+— before the HTTP response is sent — to avoid the read-after-write race
+documented in issue #945.
 
 Usage (service layer)::
 
@@ -19,8 +20,9 @@ Rules of thumb:
 * **Writes** wrap their unit of work in :func:`unit_of_work`. Only the
   outermost ``unit_of_work`` on a connection commits, so services may freely
   call other services that also open one.
-* **Reads** run without any transaction helper. The autobegun read transaction
-  is rolled back when the connection closes (a harmless no-op).
+* **Reads** run without any transaction helper. Their (empty) transaction is
+  settled by the connection provider at request teardown — a harmless no-op,
+  since no rows changed.
 * **Controllers never open transactions** — that belongs in the service layer.
 * **Batch loops** that must roll back a single item and continue use
   :func:`savepoint` (a SAVEPOINT) *inside* an enclosing :func:`unit_of_work`.
@@ -30,8 +32,20 @@ import functools
 import inspect
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 
 from sqlalchemy.ext.asyncio import AsyncConnection
+
+# The request connection provider stores the live connection here when (and
+# only when) it actually creates one for a request. The commit middleware reads
+# this instead of force-resolving the connection from the DI container, so a
+# request that never touched the DB (or failed validation early) doesn't get a
+# pointless connection checkout — and a DB outage can't turn a non-DB request
+# into a 5xx. It is a per-request value (set on the request's asyncio task) and
+# reset on provider teardown.
+request_connection: ContextVar[AsyncConnection | None] = ContextVar(
+    "request_connection", default=None
+)
 
 # Keys stored on ``AsyncConnection.info`` (a per-connection dict that lives for
 # the lifetime of the connection).

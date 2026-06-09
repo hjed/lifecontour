@@ -78,12 +78,18 @@ class DatabaseProvider(Provider):
         would still be committed. MCP write tools are being migrated to explicit
         units of work as follow-up; until then this matches the prior behaviour.
         """
+        from app.infrastructure.unit_of_work import request_connection
+
         async with engine.connect() as conn:
             # Begin immediately so a transaction is active for the whole request
             # (matching the previous engine.begin() invariant). unit_of_work /
             # the commit middleware commit this before the response; any further
             # statements re-autobegin and are settled the same way.
             await conn.begin()
+            # Expose the live connection to CommitOnResponseMiddleware so it can
+            # settle this request without force-creating a connection for
+            # requests that never touch the DB.
+            token = request_connection.set(conn)
             try:
                 yield conn
             except BaseException:
@@ -94,6 +100,8 @@ class DatabaseProvider(Provider):
                 # Safety net for paths the middleware doesn't settle (MCP).
                 if conn.in_transaction():
                     await conn.commit()
+            finally:
+                request_connection.reset(token)
 
     @provide(scope=Scope.APP)
     def get_sync_engine(self) -> Engine:
