@@ -14,7 +14,7 @@ from core_shared.models.outbox import OutboxEvent
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.integrations.immich_album_outbox_event_processor import (
+from app.core.integrations.immich.album_outbox_event_processor import (
     EVENT_TYPE_IMMICH_ALBUM_CREATED,
     ImmichAlbumOutboxEventProcessor,
 )
@@ -87,7 +87,7 @@ async def test_album_cover_returns_image_bytes(
             return_value=_CREDS,
         ),
         patch(
-            "app.core.integrations.album_cover_proxy_service.AlbumCoverProxyService._fetch_thumbnail",
+            "app.core.integrations.immich.album_cover_proxy_service.AlbumCoverProxyService._fetch_thumbnail",
             new_callable=AsyncMock,
             return_value=(b"\xff\xd8\xff\xe0jpeg", "image/jpeg"),
         ),

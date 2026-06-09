@@ -12,7 +12,7 @@ import pytest
 from core_shared.models.journals import JournalContactRelationshipType
 from core_shared.models.outbox_events import ImmichAlbumSyncEventData
 
-from app.core.integrations.immich_album_outbox_event_processor import (
+from app.core.integrations.immich.album_outbox_event_processor import (
     ImmichAlbumOutboxEventProcessor,
 )
 

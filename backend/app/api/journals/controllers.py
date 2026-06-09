@@ -68,8 +68,10 @@ from app.api.journals.schemas import (
     ReviewSuggestionSchema,
 )
 from app.core.contacts.models.repositories import ContactRepository
-from app.core.integrations.album_cover_proxy_service import AlbumCoverProxyService
 from app.core.integrations.external_link_helpers import build_journal_external_links
+from app.core.integrations.immich.album_cover_proxy_service import (
+    AlbumCoverProxyService,
+)
 from app.core.journal.adapters.sql.album_sync_read_repository import (
     AlbumSyncReadRepository,
 )
@@ -141,7 +143,7 @@ async def get_journal_album_cover(
     Immich album or the cover cannot be fetched. The image is served on-demand
     and never persisted locally.
     """
-    from app.core.integrations.album_cover_proxy_service import (
+    from app.core.integrations.immich.album_cover_proxy_service import (
         AlbumCoverNotFoundError,
     )
 

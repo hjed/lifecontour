@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from app.core.integrations.album_cover_proxy_service import (
+from app.core.integrations.immich.album_cover_proxy_service import (
     AlbumCoverNotFoundError,
     AlbumCoverProxyService,
 )
@@ -47,7 +47,7 @@ class TestFetchThumbnail:
         fake_image = b"\xff\xd8\xff\xe0fake-jpeg-data"
 
         with patch(
-            "app.core.integrations.album_cover_proxy_service.httpx.AsyncClient"
+            "app.core.integrations.immich.album_cover_proxy_service.httpx.AsyncClient"
         ) as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock()
@@ -72,7 +72,7 @@ class TestFetchThumbnail:
 
     async def test_defaults_to_jpeg_content_type(self) -> None:
         with patch(
-            "app.core.integrations.album_cover_proxy_service.httpx.AsyncClient"
+            "app.core.integrations.immich.album_cover_proxy_service.httpx.AsyncClient"
         ) as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock()
@@ -92,7 +92,7 @@ class TestFetchThumbnail:
 
     async def test_raises_on_http_error(self) -> None:
         with patch(
-            "app.core.integrations.album_cover_proxy_service.httpx.AsyncClient"
+            "app.core.integrations.immich.album_cover_proxy_service.httpx.AsyncClient"
         ) as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock()
@@ -114,7 +114,7 @@ class TestFetchThumbnail:
 
     async def test_raises_on_connection_error(self) -> None:
         with patch(
-            "app.core.integrations.album_cover_proxy_service.httpx.AsyncClient"
+            "app.core.integrations.immich.album_cover_proxy_service.httpx.AsyncClient"
         ) as mock_client_class:
             mock_client = AsyncMock()
             mock_client.get.side_effect = httpx.RequestError("boom")
@@ -184,7 +184,7 @@ class TestGetCoverBytes:
 
         fake_image = b"\xff\xd8\xff\xe0fake-jpeg-data"
         with patch(
-            "app.core.integrations.album_cover_proxy_service.httpx.AsyncClient"
+            "app.core.integrations.immich.album_cover_proxy_service.httpx.AsyncClient"
         ) as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock()

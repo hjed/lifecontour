@@ -24,12 +24,21 @@ from app.core.integrations.adapters.sql.snipeit_settings_repository import (
 from app.core.integrations.adapters.sql.strava_athlete_mapping_repository import (
     SqlStravaAthleteMappingRepository,
 )
-from app.core.integrations.album_cover_proxy_service import AlbumCoverProxyService
-from app.core.integrations.avatar_proxy_service import AvatarProxyService
 from app.core.integrations.database import IntegrationDatabaseManager
 from app.core.integrations.encryption import EncryptionService
 from app.core.integrations.external_reference_service import ExternalReferenceService
 from app.core.integrations.health_service import IntegrationHealthService
+from app.core.integrations.immich.adapters.album_api_client import ImmichAlbumApiClient
+from app.core.integrations.immich.album_cover_proxy_service import (
+    AlbumCoverProxyService,
+)
+from app.core.integrations.immich.album_creation_service import (
+    ImmichAlbumCreationService,
+)
+from app.core.integrations.immich.asset_thumbnail_proxy_service import (
+    AssetThumbnailProxyService,
+)
+from app.core.integrations.immich.avatar_proxy_service import AvatarProxyService
 from app.core.integrations.outbox_event_processor import OutboxEventProcessor
 from app.core.integrations.registry.google_provider import GoogleIntegrationProvider
 from app.core.integrations.registry.immich_provider import ImmichIntegrationProvider
@@ -365,6 +374,49 @@ class IntegrationProvider(Provider):
         return AlbumCoverProxyService(
             album_repo=AlbumSyncReadRepository(connection),
             immich_token_service=immich_token_service,
+        )
+
+    @provide(scope=Scope.APP)
+    def provide_immich_album_api_client(self) -> ImmichAlbumApiClient:
+        """Provide the backend Immich album API client (stateless singleton)."""
+        return ImmichAlbumApiClient()
+
+    @provide(scope=Scope.REQUEST)
+    def provide_asset_thumbnail_proxy_service(
+        self, immich_token_service: ImmichTokenService
+    ) -> AssetThumbnailProxyService:
+        """Provide the Immich asset thumbnail proxy service for request scope."""
+        return AssetThumbnailProxyService(immich_token_service=immich_token_service)
+
+    @provide(scope=Scope.REQUEST)
+    def provide_immich_album_creation_service(
+        self,
+        connection: AsyncConnection,
+        immich_token_service: ImmichTokenService,
+        api_client: ImmichAlbumApiClient,
+    ) -> ImmichAlbumCreationService:
+        """Provide the Immich album creation service for request scope."""
+        from app.core.integrations.adapters.sql.sync_metadata_repository import (
+            SyncMetadataRepository,
+        )
+        from app.core.journal.adapters.sql.album_sync_read_repository import (
+            AlbumSyncReadRepository,
+        )
+        from app.core.journal.adapters.sql.journal_repository import (
+            SqlJournalRepository,
+        )
+        from app.core.settings.adapters.sql.user_settings_repository import (
+            SqlUserSettingsRepository,
+        )
+
+        return ImmichAlbumCreationService(
+            connection=connection,
+            token_service=immich_token_service,
+            api_client=api_client,
+            journal_repo=SqlJournalRepository(connection),
+            sync_metadata_repo=SyncMetadataRepository(connection),
+            album_link_repo=AlbumSyncReadRepository(connection),
+            user_settings_repo=SqlUserSettingsRepository(connection),
         )
 
     @provide(scope=Scope.REQUEST)

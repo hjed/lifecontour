@@ -13,6 +13,9 @@ from fastmcp import FastMCP
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.services import ContactService
+from app.core.integrations.immich.album_creation_service import (
+    ImmichAlbumCreationService,
+)
 from app.core.integrations.registry.service import IntegrationRegistryService
 from app.core.integrations.strava.athlete_mapping_service import (
     StravaAthleteMappingService,
@@ -23,6 +26,7 @@ from app.mcp.shared.dependencies import (
     get_async_connection,
     get_contact_service,
     get_current_user_id,
+    get_immich_album_creation_service,
     get_integration_registry_service,
     get_strava_athlete_mapping_service,
     get_task_queue_service,
@@ -449,4 +453,106 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
             contact_id=resolved_contact_id,
         )
 
+        return json.dumps(result, indent=2)
+
+    @mcp.tool
+    @mcp_unified_error_handler("search_immich_photos_for_journal", "integration")
+    async def search_immich_photos_for_journal(
+        journal_id: int,
+        user_id: str = mcp_depends(get_current_user_id),
+        service: ImmichAlbumCreationService = mcp_depends(
+            get_immich_album_creation_service
+        ),
+    ) -> str:
+        """
+        Find Immich photos taken within a journal's date range.
+
+        Searches the connected Immich instance for photos whose capture time
+        falls within the journal's event date range (expanded to full days in
+        the user's timezone). Use this before creating an album to see which
+        photos would be included.
+
+        Args:
+            journal_id: The ID of the journal whose date range to search.
+
+        Returns:
+            JSON string with the matching photos (asset_id, original_file_name,
+            taken_at) and a total count.
+        """
+        logger.info(
+            "MCP: Searching Immich photos for journal",
+            user_id=user_id,
+            journal_id=journal_id,
+        )
+
+        photos = await service.search_photos(journal_id, user_id)
+
+        result = {
+            "journal_id": journal_id,
+            "photos": [
+                {
+                    "asset_id": p.asset_id,
+                    "original_file_name": p.original_file_name,
+                    "taken_at": p.taken_at,
+                }
+                for p in photos
+            ],
+            "total_count": len(photos),
+        }
+        return json.dumps(result, indent=2)
+
+    @mcp.tool
+    @mcp_unified_error_handler("create_immich_album_for_journal", "integration")
+    async def create_immich_album_for_journal(
+        journal_id: int,
+        create_shared_link: bool = False,
+        exclude_asset_ids: list[str] | None = None,
+        user_id: str = mcp_depends(get_current_user_id),
+        service: ImmichAlbumCreationService = mcp_depends(
+            get_immich_album_creation_service
+        ),
+    ) -> str:
+        """
+        Create an Immich album from a journal's date range.
+
+        Searches for photos in the journal's date range and creates an Immich
+        album from them, named after the journal. All matching photos are
+        included by default; pass ``exclude_asset_ids`` to leave some out. The
+        new album is linked back to the journal (which marks it as a
+        PHOTO_ALBUM). Fails if the journal already has a linked album.
+
+        Args:
+            journal_id: The ID of the journal to create an album for.
+            create_shared_link: Whether to create a public shared link.
+            exclude_asset_ids: Immich asset IDs to omit from the album.
+
+        Returns:
+            JSON string with the created album_id, asset_count and optional
+            shared_link_url.
+        """
+        logger.info(
+            "MCP: Creating Immich album for journal",
+            user_id=user_id,
+            journal_id=journal_id,
+            create_shared_link=create_shared_link,
+        )
+
+        photos = await service.search_photos(journal_id, user_id)
+        excluded = set(exclude_asset_ids or [])
+        asset_ids = [p.asset_id for p in photos if p.asset_id not in excluded]
+
+        created = await service.create_album(
+            journal_id,
+            user_id,
+            asset_ids=asset_ids,
+            create_shared_link=create_shared_link,
+        )
+
+        result = {
+            "journal_id": created.journal_id,
+            "album_id": created.album_id,
+            "asset_count": created.asset_count,
+            "shared_link_url": created.shared_link_url,
+            "status": "created",
+        }
         return json.dumps(result, indent=2)

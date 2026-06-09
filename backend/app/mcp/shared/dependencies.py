@@ -131,6 +131,18 @@ async def get_immich_token_service() -> ImmichTokenService:
     return cast(ImmichTokenService, await _resolve_dependency(ImmichTokenService))
 
 
+async def get_immich_album_creation_service() -> Any:
+    """Resolve the Immich album creation service for the current MCP request."""
+    from app.core.integrations.immich.album_creation_service import (
+        ImmichAlbumCreationService,
+    )
+
+    return cast(
+        ImmichAlbumCreationService,
+        await _resolve_dependency(ImmichAlbumCreationService),
+    )
+
+
 async def get_contact_service() -> ContactService:
     """Resolve the contact service for the current MCP request."""
     return cast(ContactService, await _resolve_dependency(ContactService))

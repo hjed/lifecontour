@@ -65,8 +65,8 @@ from app.core.contacts.models.repositories import (
 )
 from app.core.contacts.services import ContactService
 from app.core.contacts.services.contact_history_service import ContactHistoryService
-from app.core.integrations.avatar_proxy_service import AvatarProxyService
 from app.core.integrations.external_link_helpers import build_contact_external_links
+from app.core.integrations.immich.avatar_proxy_service import AvatarProxyService
 from app.core.journal.adapters.sql.album_sync_read_repository import (
     AlbumSyncReadRepository,
 )
@@ -255,7 +255,7 @@ async def get_contact_avatar(
     and streams it back to the client. Returns 404 if the contact has no
     linked Immich person or the thumbnail cannot be fetched.
     """
-    from app.core.integrations.avatar_proxy_service import AvatarNotFoundError
+    from app.core.integrations.immich.avatar_proxy_service import AvatarNotFoundError
 
     try:
         image_bytes, content_type = await avatar_service.get_avatar_bytes(

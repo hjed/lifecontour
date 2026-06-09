@@ -484,3 +484,98 @@ class ImmichConflictResponse(BaseModel):
     """JSON API response for a single conflict."""
 
     data: ImmichConflictData = Field(description="Conflict data")
+
+
+# Album Creation Models (ITER11-006, JSON API format)
+class ImmichSearchPhotosRequest(BaseModel):
+    """Request to search Immich photos for a journal's date range."""
+
+    journal_id: int = Field(description="ID of the journal to search photos for")
+
+
+class ImmichPhotoAttributes(BaseModel):
+    """Attributes for a candidate Immich photo (JSON API format)."""
+
+    thumbnail_url: str = Field(
+        description="Backend proxy URL for the photo thumbnail",
+        serialization_alias="thumbnailUrl",
+    )
+    original_file_name: str = Field(
+        default="",
+        description="Original filename of the photo",
+        serialization_alias="originalFileName",
+    )
+    taken_at: str | None = Field(
+        default=None,
+        description="ISO timestamp when the photo was taken",
+        serialization_alias="takenAt",
+    )
+
+    model_config = {"populate_by_name": True}
+
+
+class ImmichPhotoData(BaseModel):
+    """Data wrapper for a candidate Immich photo (JSON API format)."""
+
+    id: str = Field(description="Immich asset ID")
+    type: str = Field(default="immich-photo", description="Resource type")
+    attributes: ImmichPhotoAttributes = Field(description="Photo attributes")
+
+
+class ImmichPhotoListMeta(BaseModel):
+    """Metadata for a photo search response."""
+
+    count: int = Field(description="Number of matching photos")
+
+
+class ImmichSearchPhotosResponse(BaseModel):
+    """JSON API response for an Immich photo search."""
+
+    data: list[ImmichPhotoData] = Field(description="Matching photos")
+    meta: ImmichPhotoListMeta = Field(description="Response metadata")
+
+
+class ImmichCreateAlbumRequest(BaseModel):
+    """Request to create an Immich album from a journal's selected photos."""
+
+    journal_id: int = Field(description="ID of the journal to create an album for")
+    asset_ids: list[str] = Field(
+        min_length=1,
+        description="Immich asset IDs to include in the album (at least one)",
+    )
+    create_shared_link: bool = Field(
+        default=False,
+        description="Whether to create a public shared link for the album",
+    )
+
+
+class ImmichCreatedAlbumAttributes(BaseModel):
+    """Attributes for a newly created Immich album (JSON API format)."""
+
+    journal_id: int = Field(
+        description="ID of the linked journal", serialization_alias="journalId"
+    )
+    asset_count: int = Field(
+        description="Number of photos in the album", serialization_alias="assetCount"
+    )
+    shared_link_url: str | None = Field(
+        default=None,
+        description="Public shared link URL, if one was created",
+        serialization_alias="sharedLinkUrl",
+    )
+
+    model_config = {"populate_by_name": True}
+
+
+class ImmichCreatedAlbumData(BaseModel):
+    """Data wrapper for a created Immich album (JSON API format)."""
+
+    id: str = Field(description="Immich album ID")
+    type: str = Field(default="immich-album", description="Resource type")
+    attributes: ImmichCreatedAlbumAttributes = Field(description="Album attributes")
+
+
+class ImmichCreateAlbumResponse(BaseModel):
+    """JSON API response for a created Immich album."""
+
+    data: ImmichCreatedAlbumData = Field(description="Created album data")

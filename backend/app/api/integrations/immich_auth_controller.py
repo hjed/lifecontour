@@ -11,7 +11,7 @@ from core_shared.repositories.pending_entity_mapping_repository import (
     PendingEntityMappingRepository,
 )
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response, status
 from pydantic import BaseModel, HttpUrl
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -23,6 +23,15 @@ from app.api.integrations.schemas import (
     ImmichConflictData,
     ImmichConflictListResponse,
     ImmichConflictResponse,
+    ImmichCreateAlbumRequest,
+    ImmichCreateAlbumResponse,
+    ImmichCreatedAlbumAttributes,
+    ImmichCreatedAlbumData,
+    ImmichPhotoAttributes,
+    ImmichPhotoData,
+    ImmichPhotoListMeta,
+    ImmichSearchPhotosRequest,
+    ImmichSearchPhotosResponse,
     SyncJobJsonApiResponse,
     SyncJobRequest,
     SyncType,
@@ -30,6 +39,18 @@ from app.api.integrations.schemas import (
 from app.core.contacts.services.contact_service import ContactService
 from app.core.integrations.adapters.sql.immich_auth_repository import (
     SqlImmichAuthRepository,
+)
+from app.core.integrations.immich.adapters.album_api_client import ImmichAlbumApiError
+from app.core.integrations.immich.album_creation_service import (
+    AlbumAlreadyLinkedError,
+    EmptyAlbumSelectionError,
+    ImmichAlbumCreationService,
+    ImmichNotConnectedError,
+    JournalNotFoundError,
+)
+from app.core.integrations.immich.asset_thumbnail_proxy_service import (
+    AssetThumbnailNotFoundError,
+    AssetThumbnailProxyService,
 )
 from app.core.integrations.task_queue_service import TaskQueueService
 from app.infrastructure.auth.immich_token_service import (
@@ -368,3 +389,143 @@ async def resolve_immich_conflict(
         )
 
         return ImmichConflictResponse(data=data)
+
+
+# ---------- Album Creation Endpoints (ITER11-006) ----------
+
+
+@router.post(
+    "/search-photos",
+    summary="Search Immich photos for a journal's date range",
+    response_model=ImmichSearchPhotosResponse,
+    responses={
+        400: {"description": "Immich not connected"},
+        404: {"description": "Journal not found"},
+        502: {"description": "Immich API error"},
+    },
+)
+@inject
+async def search_immich_photos(
+    request: ImmichSearchPhotosRequest,
+    user: FromDishka[SessionUser],
+    service: FromDishka[ImmichAlbumCreationService],
+) -> ImmichSearchPhotosResponse:
+    """Return Immich photos taken within a journal's (timezone-expanded) range.
+
+    Used by the album-creation UI to populate the photo-selection dialog. Photo
+    thumbnails are exposed as backend proxy URLs so the browser never sees the
+    Immich server URL or API key.
+    """
+    try:
+        photos = await service.search_photos(request.journal_id, user.id)
+    except JournalNotFoundError as e:
+        raise HTTPException(status_code=404, detail="Journal not found") from e
+    except ImmichNotConnectedError as e:
+        raise HTTPException(status_code=400, detail="Immich is not connected.") from e
+    except ImmichAlbumApiError as e:
+        raise HTTPException(
+            status_code=502, detail="Failed to search Immich photos."
+        ) from e
+
+    return ImmichSearchPhotosResponse(
+        data=[
+            ImmichPhotoData(
+                id=photo.asset_id,
+                attributes=ImmichPhotoAttributes(
+                    thumbnail_url=photo.thumbnail_url,
+                    original_file_name=photo.original_file_name,
+                    taken_at=photo.taken_at,
+                ),
+            )
+            for photo in photos
+        ],
+        meta=ImmichPhotoListMeta(count=len(photos)),
+    )
+
+
+@router.post(
+    "/create-album",
+    summary="Create an Immich album from a journal's selected photos",
+    response_model=ImmichCreateAlbumResponse,
+    responses={
+        400: {"description": "Immich not connected"},
+        404: {"description": "Journal not found"},
+        409: {"description": "Journal already has a linked album"},
+        502: {"description": "Immich API error"},
+    },
+)
+@inject
+async def create_immich_album(
+    request: ImmichCreateAlbumRequest,
+    user: FromDishka[SessionUser],
+    service: FromDishka[ImmichAlbumCreationService],
+) -> ImmichCreateAlbumResponse:
+    """Create an Immich album from the selected photos and link it to the journal.
+
+    Optionally creates a public shared link. Writes the SyncMetadata +
+    ExternalReference records that link the journal to the album (which also
+    marks the journal as a PHOTO_ALBUM).
+    """
+    try:
+        result = await service.create_album(
+            request.journal_id,
+            user.id,
+            asset_ids=request.asset_ids,
+            create_shared_link=request.create_shared_link,
+        )
+    except JournalNotFoundError as e:
+        raise HTTPException(status_code=404, detail="Journal not found") from e
+    except EmptyAlbumSelectionError as e:
+        raise HTTPException(
+            status_code=400, detail="At least one photo must be selected."
+        ) from e
+    except AlbumAlreadyLinkedError as e:
+        raise HTTPException(
+            status_code=409, detail="Journal already has a linked Immich album."
+        ) from e
+    except ImmichNotConnectedError as e:
+        raise HTTPException(status_code=400, detail="Immich is not connected.") from e
+    except ImmichAlbumApiError as e:
+        raise HTTPException(
+            status_code=502, detail="Failed to create Immich album."
+        ) from e
+
+    return ImmichCreateAlbumResponse(
+        data=ImmichCreatedAlbumData(
+            id=result.album_id,
+            attributes=ImmichCreatedAlbumAttributes(
+                journal_id=result.journal_id,
+                asset_count=result.asset_count,
+                shared_link_url=result.shared_link_url,
+            ),
+        )
+    )
+
+
+@router.get("/assets/{asset_id}/thumbnail", summary="Proxy an Immich asset thumbnail")
+@inject
+async def get_immich_asset_thumbnail(
+    asset_id: str,
+    user: FromDishka[SessionUser],
+    proxy: FromDishka[AssetThumbnailProxyService],
+) -> Response:
+    """Proxy an Immich asset thumbnail using the user's stored credentials.
+
+    Backs the thumbnails returned by ``/search-photos`` so the browser never
+    sees the Immich server URL or API key. Returns 404 if Immich is not
+    configured or the thumbnail cannot be fetched.
+    """
+    try:
+        image_bytes, content_type = await proxy.get_thumbnail_bytes(
+            asset_id=asset_id, user_id=user.id
+        )
+        return Response(
+            content=image_bytes,
+            media_type=content_type,
+            headers={"Cache-Control": "private, max-age=3600"},
+        )
+    except AssetThumbnailNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Thumbnail not available",
+        ) from None
