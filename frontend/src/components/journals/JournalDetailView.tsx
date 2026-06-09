@@ -55,6 +55,7 @@ import { JournalChildrenList } from './JournalChildrenList';
 import { JournalParentSelector } from './JournalParentSelector';
 import { JournalTypeSection } from './JournalTypeSection';
 import { JournalTypeManager } from './JournalTypeManager';
+import { CreateAlbumButton } from './CreateAlbumButton';
 import { InlineEditHeading } from './InlineEditHeading';
 import { JournalContentInline } from './JournalContentInline';
 import { InlineEditDateRange } from './InlineEditDateRange';
@@ -435,6 +436,7 @@ export function JournalDetailView({
 
             {/* Action Buttons */}
             <div className='flex items-center gap-2'>
+              <CreateAlbumButton journal={journal} />
               <MergeJournalDialog targetJournalId={journal.id} />
               <Button
                 variant='outline'

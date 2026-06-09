@@ -337,8 +337,8 @@ Add album shared links to the logbook PDF export.
 - [Part 5: Album Creation from Journal Date Range](../product-specifications/immich-integration-product-specification.md#part-5-album-creation-from-journal-date-range)
 
 **Acceptance Criteria (task-level):**
-- [x] Users can create Immich albums from journal date ranges. *(backend + MCP — Phase 1; journal-edit UI in Phase 2)*
-- [ ] Photo selection dialog with deselection. *(Phase 2)*
+- [x] Users can create Immich albums from journal date ranges. *(backend + MCP — Phase 1; journal-edit UI — Phase 2)*
+- [x] Photo selection dialog with deselection. *(Phase 2)*
 - [x] Optional public shared link creation. *(Phase 1)*
 - [x] MCP parity for album creation. *(Phase 1)*
 
@@ -369,18 +369,21 @@ Implement the backend APIs for searching photos by date range and creating album
 
 Build the UI for browsing photos and creating albums from journal edit screens.
 
+**Architecture note (as implemented):** Phase 2 is **pure frontend** — no backend, schema, or MCP changes; it wires the journal edit screen (`JournalDetailView`, which is the inline-edit surface) to the Phase 1 search/create endpoints. Three new components plus one API module: `frontend/src/lib/api/immich-albums.ts` exposes `searchImmichPhotos`/`createImmichAlbum` (mapping the caller's camelCase to the backend's snake_case body and flattening the JSON:API search response to a flat `ImmichPhoto[]`) and two React-Query mutation hooks — `useImmichPhotoSearch` (search is modelled as an **on-demand mutation** so the button gets its own loading state and the dialog opens with the result) and `useCreateImmichAlbum` (on success invalidates `journalKeys.detail(id)` **and** `externalLinkKeys.journal(id)` so the album banner + external links refresh without a reload). `CreateAlbumButton` owns the **visibility logic** — it renders only when Immich is `connected` (via the existing `useIntegrations()` hook), the journal has an `event_date_range.start`, and the journal does **not** already include the `PHOTO_ALBUM` type (the already-linked guard) — and on click fires the search then opens `CreateAlbumDialog` (if the search returns no photos it shows an informational toast instead of an empty dialog — honouring spec trigger condition #4 without an expensive per-render existence pre-check on every journal load); visibility requires a **complete** `event_date_range` (both `start` and `end`) so a half-open range can't surface a button that the backend search would reject. `CreateAlbumDialog` holds the **selection state** as a `Set<string>` seeded with **all** photo ids (deselect-not-select UX), renders the thumbnail grid as **selectable cards** — each whole tile is a single `role="checkbox"` control (so clicking anywhere on the thumbnail toggles it; the Radix `Checkbox` is a visual-only `aria-hidden` indicator, avoiding the native-`<label>`-can't-toggle-a-Radix-button trap) with `aria-label` = filename — inside a `ScrollArea`, offers the "Create public shared link" checkbox, disables confirm when the selection is empty, and closes on success. The banner + links display is **reused unchanged** (`AlbumCoverBanner` / `PhotoAlbumDataDisplay` via `JournalTypeSection`, and `ExternalLinksDisplay`). The thumbnails consume the Phase 1 backend proxy URLs so the browser never sees the Immich URL/key. For E2E, Immich data is sync-derived and not seedable via `TestDataManager`, so the journal is seeded for real and the Immich-backed endpoints (`/api/integrations`, search-photos, create-album, the thumbnail + album-cover proxies) plus the post-create journal/external-links responses are stubbed with `page.route` — the same convention as `immich-conflicts.spec.ts` / the ITER11-005 `journal-detail.spec.ts` PHOTO_ALBUM test; the create-album route flips a flag so the journal-detail stub injects the `PHOTO_ALBUM` type into the *real* backend response only after creation, exercising the genuine refresh path.
+
 **Acceptance Criteria:**
-- [ ] "Create Album" button visible on journal edit screen when: Immich connected, `event_date_range` set, no existing linked album
-- [ ] Button triggers photo search; loading state while fetching
-- [ ] Photo selection dialog: grid of photo thumbnails with checkboxes (all selected by default)
-- [ ] User can deselect individual photos
-- [ ] Checkbox option: "Create public shared link"
-- [ ] On confirm: calls create-album API, shows success state, journal refreshes to show album banner and external link
-- [ ] Button hidden when journal already has a linked album
+- [x] "Create Album" button visible on journal edit screen when: Immich connected, `event_date_range` set, no existing linked album
+- [x] Button triggers photo search; loading state while fetching
+- [x] Photo selection dialog: grid of photo thumbnails with checkboxes (all selected by default)
+- [x] User can deselect individual photos
+- [x] Checkbox option: "Create public shared link"
+- [x] On confirm: calls create-album API, shows success state, journal refreshes to show album banner and external link
+- [x] Button hidden when journal already has a linked album
 
 **Required Test Coverage:**
-- **Unit:** Create Album button visibility logic, photo selection state management.
-- **E2E:** Open journal without album, click Create Album, deselect a photo, confirm creation, verify album banner appears.
+- **Unit:** Create Album button visibility logic, photo selection state management. ✅ 9 button tests (`CreateAlbumButton.test.tsx`: renders when connected+date-range+no-album; hidden when disconnected / no date range / **incomplete range missing `end`** / already-linked; click triggers search; loading state disables + `aria-busy`; opens the dialog when the search returns photos; shows a toast instead of an empty dialog when no photos match — honouring spec trigger condition #4 without an expensive per-render pre-check) + 7 dialog tests (`CreateAlbumDialog.test.tsx`: all-selected-by-default, deselect toggles a photo + updates count, **clicking the whole thumbnail tile toggles it**, confirm sends only selected `assetIds`, shared-link choice passed through, confirm disabled when none selected) + 5 API-client tests (`immich-albums.test.ts`: search POSTs `journal_id` + flattens response, create maps camelCase→snake_case body, both surface `errors[0].detail`, **a non-numeric journal id throws before any network call**)
+- **Integration:** Full button→search→dialog→deselect→confirm wiring with real hooks and only the HTTP boundary mocked. ✅ 1 flow test (`CreateAlbumFlow.integration.test.tsx`: button appears once integrations resolve connected, search opens the dialog with both photos checked, deselecting one then confirming POSTs create-album with the reduced `asset_ids` + `create_shared_link`, and the journal-detail + external-links query caches are invalidated). The real backend search/create endpoints are covered by the Phase 1 REST integration tests above.
+- **E2E:** Open journal without album, click Create Album, deselect a photo, confirm creation, verify album banner appears. ✅ 1 Playwright spec (`journal-album-create.spec.ts`, Chromium): seeds a real dated journal, stubs the Immich endpoints, then opens the journal → asserts the button is visible + accessibly named → clicks it → asserts the dialog (accessible name) shows both photos checked by default and checkboxes are labelled → deselects one → ticks "Create public shared link" → confirms → asserts the create-album request succeeds, the dialog closes, the `immich_album` + `immich_shared` external links render, and (after expanding the PHOTO_ALBUM section) the album cover banner is visible.
 
 ---
 
