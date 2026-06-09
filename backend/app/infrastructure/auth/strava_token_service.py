@@ -16,6 +16,8 @@ from cryptography.fernet import Fernet
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.infrastructure.unit_of_work import unit_of_work
+
 logger = structlog.get_logger()
 
 
@@ -124,17 +126,18 @@ class StravaTokenService:
             """)
 
             now = datetime.now(UTC)
-            await self.connection.execute(
-                stmt,
-                {
-                    "user_id": user_id,
-                    "athlete_id": athlete_id,
-                    "encrypted_access_token": encrypted_access_token,
-                    "encrypted_refresh_token": encrypted_refresh_token,
-                    "expires_at": expires_at,
-                    "now": now,
-                },
-            )
+            async with unit_of_work(self.connection):
+                await self.connection.execute(
+                    stmt,
+                    {
+                        "user_id": user_id,
+                        "athlete_id": athlete_id,
+                        "encrypted_access_token": encrypted_access_token,
+                        "encrypted_refresh_token": encrypted_refresh_token,
+                        "expires_at": expires_at,
+                        "now": now,
+                    },
+                )
 
             logger.info(
                 "Stored Strava OAuth tokens",
@@ -203,8 +206,9 @@ class StravaTokenService:
             WHERE user_id = :user_id
         """)
 
-        result = await self.connection.execute(stmt, {"user_id": user_id})
-        deleted = result.rowcount > 0
+        async with unit_of_work(self.connection):
+            result = await self.connection.execute(stmt, {"user_id": user_id})
+            deleted = result.rowcount > 0
 
         if deleted:
             logger.info("Deleted Strava OAuth tokens", user_id=user_id)
@@ -249,15 +253,16 @@ class StravaTokenService:
                 updated_at = :now
             WHERE user_id = :user_id
         """)
-        await self.connection.execute(
-            stmt,
-            {
-                "user_id": user_id,
-                "subscription_id": subscription_id,
-                "verify_token": verify_token,
-                "now": datetime.now(UTC),
-            },
-        )
+        async with unit_of_work(self.connection):
+            await self.connection.execute(
+                stmt,
+                {
+                    "user_id": user_id,
+                    "subscription_id": subscription_id,
+                    "verify_token": verify_token,
+                    "now": datetime.now(UTC),
+                },
+            )
         logger.info(
             "Updated Strava webhook subscription",
             user_id=user_id,
@@ -286,28 +291,19 @@ class StravaTokenService:
                 updated_at = :now
             WHERE user_id = :user_id
         """)
-        await self.connection.execute(
-            stmt,
-            {
-                "user_id": user_id,
-                "verify_token": verify_token,
-                "now": datetime.now(UTC),
-            },
-        )
+        async with unit_of_work(self.connection):
+            await self.connection.execute(
+                stmt,
+                {
+                    "user_id": user_id,
+                    "verify_token": verify_token,
+                    "now": datetime.now(UTC),
+                },
+            )
         logger.info(
             "Updated Strava webhook verify token",
             user_id=user_id,
         )
-
-    async def commit(self) -> None:
-        """
-        Explicitly commit the current transaction.
-
-        Used to flush pending writes so that concurrent requests (e.g.
-        Strava's webhook handshake GET arriving while the OAuth callback
-        is still processing) can see the data.
-        """
-        await self.connection.commit()
 
     async def is_valid_webhook_verify_token(self, token: str) -> bool:
         """
