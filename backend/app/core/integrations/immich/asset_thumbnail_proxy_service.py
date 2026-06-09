@@ -14,8 +14,12 @@ from urllib.parse import urlparse
 
 import httpx
 import structlog
+from cryptography.fernet import InvalidToken
 
-from app.infrastructure.auth.immich_token_service import ImmichTokenService
+from app.infrastructure.auth.immich_token_service import (
+    ImmichTokenService,
+    ImmichTokenStorageError,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -43,7 +47,7 @@ class AssetThumbnailProxyService:
                 or the thumbnail fetch fails.
         """
         server_url, api_key = await self._get_immich_credentials(user_id)
-        if server_url is None or api_key is None:
+        if not server_url or not api_key:
             raise AssetThumbnailNotFoundError("Immich is not configured for this user")
         return await self._fetch_thumbnail(server_url, api_key, asset_id)
 
@@ -52,7 +56,10 @@ class AssetThumbnailProxyService:
     ) -> tuple[str | None, str | None]:
         try:
             return await self._token_service.get_credentials(user_id)
-        except Exception:  # noqa: BLE001
+        except ImmichTokenStorageError, InvalidToken:
+            # Credential-config problems degrade gracefully to "no thumbnail";
+            # unexpected failures (e.g. DB outage) propagate so they aren't
+            # masked as a 404.
             logger.warning(
                 "Failed to retrieve Immich credentials for asset thumbnail proxy",
                 user_id=user_id,

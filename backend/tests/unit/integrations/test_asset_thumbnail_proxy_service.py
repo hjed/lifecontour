@@ -50,6 +50,38 @@ async def test_not_connected_raises() -> None:
 
 
 @pytest.mark.asyncio
+async def test_empty_string_credentials_treated_as_not_connected() -> None:
+    service = _service(("", ""))
+
+    with pytest.raises(AssetThumbnailNotFoundError):
+        await service.get_thumbnail_bytes("asset-1", "user-1")
+
+
+@pytest.mark.asyncio
+async def test_credential_config_error_degrades_to_not_found() -> None:
+    from app.infrastructure.auth.immich_token_service import ImmichTokenStorageError
+
+    token_service = MagicMock()
+    token_service.get_credentials = AsyncMock(
+        side_effect=ImmichTokenStorageError("bad key")
+    )
+    service = AssetThumbnailProxyService(immich_token_service=token_service)
+
+    with pytest.raises(AssetThumbnailNotFoundError):
+        await service.get_thumbnail_bytes("asset-1", "user-1")
+
+
+@pytest.mark.asyncio
+async def test_unexpected_error_propagates_not_masked_as_404() -> None:
+    token_service = MagicMock()
+    token_service.get_credentials = AsyncMock(side_effect=RuntimeError("db down"))
+    service = AssetThumbnailProxyService(immich_token_service=token_service)
+
+    with pytest.raises(RuntimeError):
+        await service.get_thumbnail_bytes("asset-1", "user-1")
+
+
+@pytest.mark.asyncio
 async def test_invalid_scheme_raises() -> None:
     with pytest.raises(AssetThumbnailNotFoundError, match="scheme"):
         await AssetThumbnailProxyService._fetch_thumbnail(
