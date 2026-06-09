@@ -337,29 +337,32 @@ Add album shared links to the logbook PDF export.
 - [Part 5: Album Creation from Journal Date Range](../product-specifications/immich-integration-product-specification.md#part-5-album-creation-from-journal-date-range)
 
 **Acceptance Criteria (task-level):**
-- [ ] Users can create Immich albums from journal date ranges.
-- [ ] Photo selection dialog with deselection.
-- [ ] Optional public shared link creation.
-- [ ] MCP parity for album creation.
+- [x] Users can create Immich albums from journal date ranges. *(backend + MCP — Phase 1; journal-edit UI in Phase 2)*
+- [ ] Photo selection dialog with deselection. *(Phase 2)*
+- [x] Optional public shared link creation. *(Phase 1)*
+- [x] MCP parity for album creation. *(Phase 1)*
 
 #### Phase 1: Backend — Date Range Photo Search and Album Creation
 **PR Size:** ~6–8 files
 
 Implement the backend APIs for searching photos by date range and creating albums.
 
+**Architecture note (as implemented):** Album *creation* is a synchronous, user-initiated flow (search → pick → confirm), so — unlike album *import*'s worker→outbox→backend path — the backend talks to Immich directly via a new `ImmichAlbumApiClient` (httpx, SSRF scheme check, `x-api-key`), mirroring the existing avatar/album-cover proxies (the backend cannot import the isolated worker package). A new `ImmichAlbumCreationService` orchestrates both endpoints: it loads + ownership-checks the journal (`SqlJournalRepository.find_by_id`), reads the user's timezone (`SqlUserSettingsRepository.get_timezone`), and expands the journal's UTC `event_date_range` to full local-day boundaries back into UTC via a pure `compute_search_window` helper (the reverse of the worker's date-range derivation, so a 15 Jan Sydney journal captures photos taken late on 14 Jan UTC). Photo search returns each asset's id, original filename and capture time plus a **backend proxy** `thumbnail_url` (`GET /api/integrations/immich/assets/{id}/thumbnail`, served by a new `AssetThumbnailProxyService` cloned from the album-cover proxy) so the browser never sees the Immich URL/API key. Album creation **reuses the album-import persistence** — `SyncMetadataRepository.upsert` (`integration_source="immich_album"`) + `AlbumSyncReadRepository.upsert_link` (the same `reference_data` shape: `album_id`/`album_name`/`asset_count`/`album_url`/`thumbnail_asset_id`/`shared_link_url`) — so a created album is indistinguishable from an imported one, and because PHOTO_ALBUM type is derived from that `sync_metadata` row, **writing it is what adds the PHOTO_ALBUM type** (no separate type write). The album `version_hash` mirrors the worker's pipe-delimited format using the creation-time fields, so a later periodic worker sync reconciles cleanly. Creation is rejected with **409** when the journal already has a linked album (`find_external_links` non-empty), **404** when the journal is missing/not owned, **400** when Immich is not connected, and **502** on an upstream Immich error. The shared-link public URL is built as `{server_url}/share/{key}` (matching the worker's `build_album_share_urls`). The MCP `create_immich_album_for_journal` tool searches first then includes all matching assets minus `exclude_asset_ids` (the deselection inverse), so MCP needs no photo-grid UI. New REST routes hang off the existing `immich_auth_controller` router; new Dishka providers (`ImmichAlbumApiClient` APP-scope, `AssetThumbnailProxyService` + `ImmichAlbumCreationService` REQUEST-scope) and a `get_immich_album_creation_service` MCP resolver wire it up.
+
 **Acceptance Criteria:**
-- [ ] `POST /api/integrations/immich/search-photos` — queries Immich `POST /search/metadata` with `takenAfter`/`takenBefore` from journal's `event_date_range` (with timezone-aware day boundary expansion)
-- [ ] Returns photo thumbnails and metadata for UI display
-- [ ] `POST /api/integrations/immich/create-album` — accepts journal ID, selected asset IDs, and `create_shared_link` boolean
-- [ ] Creates album in Immich via `POST /albums` with `albumName` = journal title
-- [ ] If `create_shared_link=true`: creates shared link via `POST /shared-links`, stores URL in `ExternalReference.reference_data`
-- [ ] Creates `SyncMetadata` and `ExternalReference` records linking journal to new album
-- [ ] Adds `PHOTO_ALBUM` type to journal's type list
-- [ ] MCP tools: `search_immich_photos_for_journal(journal_id)`, `create_immich_album_for_journal(journal_id, create_shared_link, exclude_asset_ids)`
+- [x] `POST /api/integrations/immich/search-photos` — queries Immich `POST /search/metadata` with `takenAfter`/`takenBefore` from journal's `event_date_range` (with timezone-aware day boundary expansion)
+- [x] Returns photo thumbnails and metadata for UI display *(asset id + original filename + capture time + backend-proxied `thumbnail_url`)*
+- [x] `POST /api/integrations/immich/create-album` — accepts journal ID, selected asset IDs, and `create_shared_link` boolean
+- [x] Creates album in Immich via `POST /albums` with `albumName` = journal title
+- [x] If `create_shared_link=true`: creates shared link via `POST /shared-links`, stores URL in `ExternalReference.reference_data`
+- [x] Creates `SyncMetadata` and `ExternalReference` records linking journal to new album
+- [x] Adds `PHOTO_ALBUM` type to journal's type list *(derived from the `immich_album` `SyncMetadata` row)*
+- [x] MCP tools: `search_immich_photos_for_journal(journal_id)`, `create_immich_album_for_journal(journal_id, create_shared_link, exclude_asset_ids)`
 
 **Required Test Coverage:**
-- **Unit:** Timezone day boundary expansion, album creation request construction, shared link storage.
-- **Integration:** Search photos returns results from mocked Immich. Create album → SyncMetadata + ExternalReference + PHOTO_ALBUM type added.
+- **Unit:** Timezone day boundary expansion, album creation request construction, shared link storage. ✅ 5 timezone tests (`test_immich_album_creation_timezone.py`: +offset spec example / −offset / multi-day / naive-UTC / unknown-tz fallback) + 11 service tests (`test_immich_album_creation_service.py`: search mapping + window, not-found/not-owned/not-connected guards, create writes SyncMetadata+ExternalReference, shared-link URL, already-linked skip, album-name=title) + 6 API-client tests (`test_immich_album_api_client.py`: search `takenAfter`/`takenBefore` + unwrap, create-album/shared-link payloads, SSRF reject, 401/404/500 + connection error) + 4 proxy tests (`test_asset_thumbnail_proxy_service.py`)
+- **Integration:** Search photos returns results from mocked Immich. Create album → SyncMetadata + ExternalReference + PHOTO_ALBUM type added. ✅ 7 REST tests (`test_immich_album_creation_api.py`: search returns proxy thumbnail URLs, search 404 not-owned, search 400 not-connected, create links journal + writes SyncMetadata/ExternalReference + `get_types()` includes PHOTO_ALBUM, create with shared link persisted, create 409 already-linked, asset-thumbnail proxy returns bytes) + 2 MCP tests (`test_immich_album_creation_mcp.py`: search tool, create tool honours `exclude_asset_ids` + marks PHOTO_ALBUM)
+- **E2E:** The browser flow (open journal → Create Album → deselect → confirm → banner) is delivered in **Phase 2** (the spec lists E2E only under Phase 2). Phase 1 is backend-only; per the repo's ITER11-005 convention (Immich sync-derived data is not seedable via `TestDataManager`), the Phase-1 end-to-end guarantee is the full-HTTP integration test above (real app + DB, Immich stubbed via respx).
 
 #### Phase 2: Frontend — Photo Selection Dialog and Create Album Button
 **PR Size:** ~5–7 files
