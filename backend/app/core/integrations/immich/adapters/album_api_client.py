@@ -97,7 +97,13 @@ class ImmichAlbumApiClient:
         """Create an album via ``POST /albums`` and return the created album."""
         payload = {"albumName": album_name, "assetIds": asset_ids}
         data = await self._post(server_url, api_key, "albums", payload)
-        return data if isinstance(data, dict) else {}
+        if not isinstance(data, dict) or not data.get("id"):
+            # Unexpected shape / missing id is an upstream contract break;
+            # surface it as an API error (502) rather than a later 500.
+            raise ImmichAlbumApiError(
+                "Immich returned an unexpected album-creation response"
+            )
+        return data
 
     async def create_shared_link(
         self,
@@ -109,7 +115,11 @@ class ImmichAlbumApiClient:
         """Create a public album shared link via ``POST /shared-links``."""
         payload = {"type": "ALBUM", "albumId": album_id}
         data = await self._post(server_url, api_key, "shared-links", payload)
-        return data if isinstance(data, dict) else {}
+        if not isinstance(data, dict):
+            raise ImmichAlbumApiError(
+                "Immich returned an unexpected shared-link response"
+            )
+        return data
 
     @staticmethod
     def _unwrap_assets(data: Any) -> list[dict[str, Any]]:

@@ -91,8 +91,11 @@ def _build(
     user_settings_repo = MagicMock()
     user_settings_repo.get_timezone = AsyncMock(return_value="UTC")
 
+    connection = MagicMock()
+    connection.execute = AsyncMock()  # journal-row FOR UPDATE lock
+
     service = ImmichAlbumCreationService(
-        connection=MagicMock(),
+        connection=connection,
         token_service=token_service,
         api_client=api_client,
         journal_repo=journal_repo,

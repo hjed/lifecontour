@@ -301,6 +301,33 @@ async def test_create_album_rejects_empty_asset_ids(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_create_album_malformed_immich_response_returns_502(
+    authenticated_client,
+    clean_database: AsyncConnection,
+    respx_mock,
+) -> None:
+    journal_id = await _seed_journal(clean_database)
+    # Immich returns a 200 but a body with no album id (contract break).
+    respx_mock.post(f"{SERVER_URL}/api/albums").mock(
+        return_value=httpx.Response(200, json={"albumName": "Trip"})
+    )
+
+    with patch(_GET_CREDS, new_callable=AsyncMock, return_value=CREDS):
+        response = await authenticated_client.post(
+            "/api/integrations/immich/create-album",
+            json={
+                "journal_id": journal_id,
+                "asset_ids": ["asset-1"],
+                "create_shared_link": False,
+            },
+        )
+
+    # Upstream contract break surfaces as 502, never a 500.
+    assert response.status_code == 502
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_asset_thumbnail_proxy_returns_bytes(
     authenticated_client,
     clean_database: AsyncConnection,

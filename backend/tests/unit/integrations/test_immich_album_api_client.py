@@ -136,6 +136,26 @@ async def test_http_errors_raise_api_error(status_code: int) -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_album_non_dict_response_raises_api_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=["unexpected", "list"])
+
+    client = _client_with(handler)
+    with pytest.raises(ImmichAlbumApiError, match="unexpected"):
+        await client.create_album(SERVER_URL, API_KEY, album_name="x", asset_ids=["a"])
+
+
+@pytest.mark.asyncio
+async def test_create_album_missing_id_raises_api_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"albumName": "x"})
+
+    client = _client_with(handler)
+    with pytest.raises(ImmichAlbumApiError, match="unexpected"):
+        await client.create_album(SERVER_URL, API_KEY, album_name="x", asset_ids=["a"])
+
+
+@pytest.mark.asyncio
 async def test_non_json_response_raises_api_error() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(

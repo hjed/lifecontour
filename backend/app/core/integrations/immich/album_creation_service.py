@@ -21,6 +21,7 @@ from typing import Any
 import structlog
 from core_shared.immich_album_hash import compute_album_version_hash
 from core_shared.models.journals import Journal
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.integrations.adapters.sql.sync_metadata_repository import (
@@ -163,6 +164,15 @@ class ImmichAlbumCreationService:
 
         journal = await self._get_owned_journal(journal_id, user_id)
 
+        # Serialise concurrent create-album requests for the same journal: lock
+        # the journal row so two in-flight calls can't both pass the
+        # "already linked" check below and create duplicate Immich albums. The
+        # lock is held until the request transaction commits.
+        await self.connection.execute(
+            text("SELECT 1 FROM journals WHERE id = :journal_id FOR UPDATE"),
+            {"journal_id": journal_id},
+        )
+
         if await self.album_link_repo.find_external_links(journal_id):
             raise AlbumAlreadyLinkedError(
                 f"Journal {journal_id} already has a linked Immich album"
@@ -170,12 +180,11 @@ class ImmichAlbumCreationService:
 
         server_url, api_key = await self._require_credentials(user_id)
 
+        # The client guarantees a dict with a non-empty id (else ImmichAlbumApiError).
         album = await self.api_client.create_album(
             server_url, api_key, album_name=journal.title, asset_ids=asset_ids
         )
-        album_id = album.get("id")
-        if not album_id:
-            raise ImmichAlbumCreationError("Immich did not return an album id")
+        album_id = str(album["id"])
 
         shared_link_url: str | None = None
         if create_shared_link:
