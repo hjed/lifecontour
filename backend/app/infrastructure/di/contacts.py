@@ -30,6 +30,7 @@ from app.core.contacts.services import (
     ContactHistoryService,
     ContactRelationshipService,
     ContactService,
+    ContactSummaryService,
     ContactValidationService,
     TagHierarchyService,
     TagService,
@@ -163,6 +164,17 @@ class ContactProvider(Provider):
             contact_validation_service=contact_validation_service,
             history_service=history_service,
             tag_hierarchy_service=tag_hierarchy_service,
+        )
+
+    @provide
+    def get_contact_summary_service(
+        self,
+        summary_repo: ContactSummaryRepository,
+        event_publisher: ContactEventPublisher,
+    ) -> ContactSummaryService:
+        return ContactSummaryService(
+            summary_repo=summary_repo,
+            event_publisher=event_publisher,
         )
 
     # Search service (stateless, can be singleton)

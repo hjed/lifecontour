@@ -129,6 +129,7 @@ from app.core.journal.models.repositories import (
     SnorkellingDataRepository,
     TravelDataRepository,
 )
+from app.core.journal.services.calendar_service import CalendarService
 from app.core.journal.services.daily_summary_eligibility import (
     DailySummaryEligibilityChecker,
 )
@@ -163,6 +164,11 @@ class JournalProvider(Provider):
     def calendar_repository(self, connection: AsyncConnection) -> CalendarRepository:
         """Provide a CalendarRepository instance."""
         return SqlCalendarRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def calendar_service(self, calendar_repo: CalendarRepository) -> CalendarService:
+        """Provide a CalendarService instance."""
+        return CalendarService(calendar_repo)
 
     @provide(scope=Scope.REQUEST)
     def calendar_info_repository(
