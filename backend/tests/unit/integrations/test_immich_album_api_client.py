@@ -14,7 +14,7 @@ from typing import Any
 import httpx
 import pytest
 
-from app.core.integrations.immich_album_api_client import (
+from app.core.integrations.immich.adapters.album_api_client import (
     ImmichAlbumApiClient,
     ImmichAlbumApiError,
 )
@@ -133,6 +133,18 @@ async def test_http_errors_raise_api_error(status_code: int) -> None:
     with pytest.raises(ImmichAlbumApiError) as exc_info:
         await client.create_album(SERVER_URL, API_KEY, album_name="x", asset_ids=["a"])
     assert exc_info.value.status_code == status_code
+
+
+@pytest.mark.asyncio
+async def test_non_json_response_raises_api_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, text="<html>not json</html>", headers={"content-type": "text/html"}
+        )
+
+    client = _client_with(handler)
+    with pytest.raises(ImmichAlbumApiError, match="non-JSON"):
+        await client.create_album(SERVER_URL, API_KEY, album_name="x", asset_ids=["a"])
 
 
 @pytest.mark.asyncio

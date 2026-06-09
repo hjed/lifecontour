@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from app.core.integrations.immich_album_creation_service import compute_search_window
+from app.core.integrations.immich.album_creation_service import compute_search_window
 
 
 def test_positive_offset_timezone_expands_to_local_day() -> None:

@@ -14,19 +14,19 @@ writing that row is what adds the PHOTO_ALBUM type to the journal.
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
 import structlog
+from core_shared.immich_album_hash import compute_album_version_hash
 from core_shared.models.journals import Journal
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.integrations.adapters.sql.sync_metadata_repository import (
     SyncMetadataRepository,
 )
-from app.core.integrations.immich_album_api_client import ImmichAlbumApiClient
+from app.core.integrations.immich.adapters.album_api_client import ImmichAlbumApiClient
 from app.core.journal.adapters.sql.album_sync_read_repository import (
     INTEGRATION_SOURCE,
     AlbumSyncReadRepository,
@@ -55,6 +55,10 @@ class ImmichNotConnectedError(ImmichAlbumCreationError):
 
 class AlbumAlreadyLinkedError(ImmichAlbumCreationError):
     """The journal already has a linked Immich album."""
+
+
+class EmptyAlbumSelectionError(ImmichAlbumCreationError):
+    """No assets were selected for the album (nothing to create)."""
 
 
 @dataclass(frozen=True)
@@ -99,19 +103,6 @@ def compute_search_window(
         start_local.astimezone(UTC).isoformat(),
         end_local.astimezone(UTC).isoformat(),
     )
-
-
-def _album_version_hash(
-    album_name: str, asset_count: int, shared_link_url: str | None
-) -> str:
-    """Hash an album's mutable metadata for ``sync_metadata.version_hash``.
-
-    Mirrors the worker's pipe-delimited format (name|description|count|updated|
-    people|link) using the data available at creation time, so a later worker
-    re-sync reconciles cleanly rather than always detecting a phantom change.
-    """
-    data = f"{album_name.strip()}|||{asset_count}||{shared_link_url or ''}"
-    return hashlib.sha256(data.encode()).hexdigest()
 
 
 class ImmichAlbumCreationService:
@@ -165,6 +156,11 @@ class ImmichAlbumCreationService:
         create_shared_link: bool,
     ) -> AlbumCreationResult:
         """Create an Immich album from ``asset_ids`` and link it to the journal."""
+        if not asset_ids:
+            raise EmptyAlbumSelectionError(
+                "At least one photo must be selected to create an album"
+            )
+
         journal = await self._get_owned_journal(journal_id, user_id)
 
         if await self.album_link_repo.find_external_links(journal_id):
@@ -191,7 +187,11 @@ class ImmichAlbumCreationService:
                 shared_link_url = f"{server_url.rstrip('/')}/share/{key}"
 
         asset_count = album.get("assetCount") or len(asset_ids)
-        version_hash = _album_version_hash(journal.title, asset_count, shared_link_url)
+        version_hash = compute_album_version_hash(
+            name=journal.title,
+            asset_count=asset_count,
+            shared_link_url=shared_link_url,
+        )
 
         await self.sync_metadata_repo.upsert(
             integration_source=INTEGRATION_SOURCE,

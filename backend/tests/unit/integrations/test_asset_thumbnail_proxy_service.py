@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 
-from app.core.integrations.asset_thumbnail_proxy_service import (
+from app.core.integrations.immich.asset_thumbnail_proxy_service import (
     AssetThumbnailNotFoundError,
     AssetThumbnailProxyService,
 )

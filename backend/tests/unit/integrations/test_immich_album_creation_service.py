@@ -15,8 +15,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from core_shared.models.journals import EventDateRange, Journal
 
-from app.core.integrations.immich_album_creation_service import (
+from app.core.integrations.immich.album_creation_service import (
     AlbumAlreadyLinkedError,
+    EmptyAlbumSelectionError,
     ImmichAlbumCreationService,
     ImmichNotConnectedError,
     JournalNotFoundError,
@@ -221,6 +222,17 @@ async def test_create_album_already_linked_raises_and_skips_immich() -> None:
         await service.create_album(
             7, USER_ID, asset_ids=["asset-1"], create_shared_link=False
         )
+
+    mocks.api_client.create_album.assert_not_awaited()
+    mocks.sync_metadata_repo.upsert.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_album_empty_asset_ids_raises_before_immich() -> None:
+    service, mocks = _build()
+
+    with pytest.raises(EmptyAlbumSelectionError):
+        await service.create_album(7, USER_ID, asset_ids=[], create_shared_link=False)
 
     mocks.api_client.create_album.assert_not_awaited()
     mocks.sync_metadata_repo.upsert.assert_not_awaited()

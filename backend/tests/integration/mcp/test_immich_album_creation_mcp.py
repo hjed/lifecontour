@@ -134,3 +134,36 @@ async def test_create_immich_album_for_journal_mcp_excludes_assets(
 
     types = await SqlJournalRepository(clean_database).get_types(journal_id)
     assert "PHOTO_ALBUM" in types
+
+
+@pytest.mark.asyncio
+async def test_create_immich_album_for_journal_mcp_excluding_all_creates_nothing(
+    authenticated_lifespan_client,
+    clean_database: AsyncConnection,
+    respx_mock,
+) -> None:
+    journal_id = await _seed_journal(clean_database)
+    respx_mock.post(f"{SERVER_URL}/api/search/metadata").mock(
+        return_value=httpx.Response(200, json=_SEARCH_RESPONSE)
+    )
+    create_route = respx_mock.post(f"{SERVER_URL}/api/albums").mock(
+        return_value=httpx.Response(201, json={"id": "album-x"})
+    )
+
+    with patch(_GET_CREDS, new_callable=AsyncMock, return_value=CREDS):
+        async with authenticated_lifespan_client() as client:
+            payload = await _call_tool(
+                client,
+                "create_immich_album_for_journal",
+                {"journal_id": journal_id, "exclude_asset_ids": ["asset-1", "asset-2"]},
+            )
+
+    # Excluding every candidate must not create an album.
+    assert payload.get("status") != "created"
+    assert "album_id" not in payload
+    assert not create_route.called
+
+    from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+
+    types = await SqlJournalRepository(clean_database).get_types(journal_id)
+    assert "PHOTO_ALBUM" not in types

@@ -40,16 +40,17 @@ from app.core.contacts.services.contact_service import ContactService
 from app.core.integrations.adapters.sql.immich_auth_repository import (
     SqlImmichAuthRepository,
 )
-from app.core.integrations.asset_thumbnail_proxy_service import (
-    AssetThumbnailNotFoundError,
-    AssetThumbnailProxyService,
-)
-from app.core.integrations.immich_album_api_client import ImmichAlbumApiError
-from app.core.integrations.immich_album_creation_service import (
+from app.core.integrations.immich.adapters.album_api_client import ImmichAlbumApiError
+from app.core.integrations.immich.album_creation_service import (
     AlbumAlreadyLinkedError,
+    EmptyAlbumSelectionError,
     ImmichAlbumCreationService,
     ImmichNotConnectedError,
     JournalNotFoundError,
+)
+from app.core.integrations.immich.asset_thumbnail_proxy_service import (
+    AssetThumbnailNotFoundError,
+    AssetThumbnailProxyService,
 )
 from app.core.integrations.task_queue_service import TaskQueueService
 from app.infrastructure.auth.immich_token_service import (
@@ -474,6 +475,10 @@ async def create_immich_album(
         )
     except JournalNotFoundError as e:
         raise HTTPException(status_code=404, detail="Journal not found") from e
+    except EmptyAlbumSelectionError as e:
+        raise HTTPException(
+            status_code=400, detail="At least one photo must be selected."
+        ) from e
     except AlbumAlreadyLinkedError as e:
         raise HTTPException(
             status_code=409, detail="Journal already has a linked Immich album."

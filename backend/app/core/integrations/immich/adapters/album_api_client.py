@@ -158,7 +158,17 @@ class ImmichAlbumApiClient:
             async with self._build_client(server_url, api_key) as client:
                 response = await client.post(path, json=payload)
                 response.raise_for_status()
-                return response.json()
+                try:
+                    return response.json()
+                except ValueError as e:
+                    # Non-JSON body (e.g. an HTML error page from a reverse
+                    # proxy) — surface as an Immich API error, not a 500.
+                    logger.warning(
+                        "Immich album API returned a non-JSON body", path=path
+                    )
+                    raise ImmichAlbumApiError(
+                        f"Immich returned a non-JSON response for {path}"
+                    ) from e
         except httpx.HTTPStatusError as e:
             logger.warning(
                 "Immich album API request failed",

@@ -25,6 +25,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import structlog
 from core_shared.contact_name_matcher import ContactNameMatcher
+from core_shared.immich_album_hash import compute_album_version_hash
 from core_shared.models.contacts.entities import Contact, ImportantDate
 from core_shared.models.contacts.important_date_types import (
     DatePrecision,
@@ -575,19 +576,14 @@ class ImmichSyncService:
         count/updatedAt untouched) still triggers a re-sync and recalculation
         of participants.
         """
-        name = (album.album_name or "").strip()
-        description = (album.description or "").strip()
-        updated = album.updated_at.isoformat() if album.updated_at else ""
-        person_ids = sorted(
-            {p.id for asset in album.assets for p in asset.people if p.id}
+        return compute_album_version_hash(
+            name=album.album_name or "",
+            description=album.description or "",
+            asset_count=album.asset_count,
+            updated_iso=album.updated_at.isoformat() if album.updated_at else "",
+            person_ids={p.id for asset in album.assets for p in asset.people if p.id},
+            shared_link_url=shared_link_url,
         )
-        people_part = ",".join(person_ids)
-        link_part = shared_link_url or ""
-        data = (
-            f"{name}|{description}|{album.asset_count}|{updated}"
-            f"|{people_part}|{link_part}"
-        )
-        return hashlib.sha256(data.encode()).hexdigest()
 
     @staticmethod
     def parse_birth_date(

@@ -13,7 +13,7 @@ from fastmcp import FastMCP
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.services import ContactService
-from app.core.integrations.immich_album_creation_service import (
+from app.core.integrations.immich.album_creation_service import (
     ImmichAlbumCreationService,
 )
 from app.core.integrations.registry.service import IntegrationRegistryService

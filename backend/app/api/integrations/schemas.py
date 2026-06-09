@@ -539,7 +539,10 @@ class ImmichCreateAlbumRequest(BaseModel):
     """Request to create an Immich album from a journal's selected photos."""
 
     journal_id: int = Field(description="ID of the journal to create an album for")
-    asset_ids: list[str] = Field(description="Immich asset IDs to include in the album")
+    asset_ids: list[str] = Field(
+        min_length=1,
+        description="Immich asset IDs to include in the album (at least one)",
+    )
     create_shared_link: bool = Field(
         default=False,
         description="Whether to create a public shared link for the album",

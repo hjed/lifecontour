@@ -278,6 +278,29 @@ async def test_create_album_409_when_already_linked(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_create_album_rejects_empty_asset_ids(
+    authenticated_client,
+    clean_database: AsyncConnection,
+) -> None:
+    journal_id = await _seed_journal(clean_database)
+
+    with patch(_GET_CREDS, new_callable=AsyncMock, return_value=CREDS):
+        response = await authenticated_client.post(
+            "/api/integrations/immich/create-album",
+            json={
+                "journal_id": journal_id,
+                "asset_ids": [],
+                "create_shared_link": False,
+            },
+        )
+
+    # Rejected by request validation (asset_ids min_length=1); the app maps
+    # validation errors to 400.
+    assert response.status_code == 400
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_asset_thumbnail_proxy_returns_bytes(
     authenticated_client,
     clean_database: AsyncConnection,

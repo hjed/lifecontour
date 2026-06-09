@@ -133,7 +133,7 @@ async def get_immich_token_service() -> ImmichTokenService:
 
 async def get_immich_album_creation_service() -> Any:
     """Resolve the Immich album creation service for the current MCP request."""
-    from app.core.integrations.immich_album_creation_service import (
+    from app.core.integrations.immich.album_creation_service import (
         ImmichAlbumCreationService,
     )
 

@@ -294,7 +294,7 @@ class InboundEventConsumer(DeadLetterConsumerMixin, StreamConsumer):
             ExternalReferenceRepository,
         )
 
-        from app.core.integrations.immich_album_outbox_event_processor import (
+        from app.core.integrations.immich.album_outbox_event_processor import (
             ImmichAlbumOutboxEventProcessor,
         )
         from app.core.journal.adapters.sql.journal_contact_relationship_repository import (

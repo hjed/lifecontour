@@ -24,19 +24,21 @@ from app.core.integrations.adapters.sql.snipeit_settings_repository import (
 from app.core.integrations.adapters.sql.strava_athlete_mapping_repository import (
     SqlStravaAthleteMappingRepository,
 )
-from app.core.integrations.album_cover_proxy_service import AlbumCoverProxyService
-from app.core.integrations.asset_thumbnail_proxy_service import (
-    AssetThumbnailProxyService,
-)
-from app.core.integrations.avatar_proxy_service import AvatarProxyService
 from app.core.integrations.database import IntegrationDatabaseManager
 from app.core.integrations.encryption import EncryptionService
 from app.core.integrations.external_reference_service import ExternalReferenceService
 from app.core.integrations.health_service import IntegrationHealthService
-from app.core.integrations.immich_album_api_client import ImmichAlbumApiClient
-from app.core.integrations.immich_album_creation_service import (
+from app.core.integrations.immich.adapters.album_api_client import ImmichAlbumApiClient
+from app.core.integrations.immich.album_cover_proxy_service import (
+    AlbumCoverProxyService,
+)
+from app.core.integrations.immich.album_creation_service import (
     ImmichAlbumCreationService,
 )
+from app.core.integrations.immich.asset_thumbnail_proxy_service import (
+    AssetThumbnailProxyService,
+)
+from app.core.integrations.immich.avatar_proxy_service import AvatarProxyService
 from app.core.integrations.outbox_event_processor import OutboxEventProcessor
 from app.core.integrations.registry.google_provider import GoogleIntegrationProvider
 from app.core.integrations.registry.immich_provider import ImmichIntegrationProvider

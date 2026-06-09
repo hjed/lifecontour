@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from app.core.integrations.avatar_proxy_service import (
+from app.core.integrations.immich.avatar_proxy_service import (
     AvatarNotFoundError,
     AvatarProxyService,
 )
@@ -109,7 +109,7 @@ class TestFetchThumbnail:
         fake_image = b"\xff\xd8\xff\xe0fake-jpeg-data"
 
         with patch(
-            "app.core.integrations.avatar_proxy_service.httpx.AsyncClient"
+            "app.core.integrations.immich.avatar_proxy_service.httpx.AsyncClient"
         ) as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock()
@@ -139,7 +139,7 @@ class TestFetchThumbnail:
         fake_image = b"\xff\xd8\xff\xe0fake-jpeg-data"
 
         with patch(
-            "app.core.integrations.avatar_proxy_service.httpx.AsyncClient"
+            "app.core.integrations.immich.avatar_proxy_service.httpx.AsyncClient"
         ) as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock()
@@ -163,7 +163,7 @@ class TestFetchThumbnail:
     async def test_raises_on_http_error(self) -> None:
         """Should raise AvatarNotFoundError on HTTP errors."""
         with patch(
-            "app.core.integrations.avatar_proxy_service.httpx.AsyncClient"
+            "app.core.integrations.immich.avatar_proxy_service.httpx.AsyncClient"
         ) as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock()
@@ -237,7 +237,7 @@ class TestGetAvatarBytes:
 
         fake_image = b"\xff\xd8\xff\xe0fake-jpeg-data"
         with patch(
-            "app.core.integrations.avatar_proxy_service.httpx.AsyncClient"
+            "app.core.integrations.immich.avatar_proxy_service.httpx.AsyncClient"
         ) as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock()
