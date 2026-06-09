@@ -48,9 +48,14 @@ class DatabaseProvider(Provider):
         """
         Get async database connection for request scope (commit-as-you-go).
 
-        Uses ``engine.connect()`` rather than ``engine.begin()`` so writes can be
-        committed *during* the request (before the response is sent) instead of
-        only at teardown — fixing the read-after-write race in issue #945.
+        Uses ``engine.connect()`` + an explicit ``conn.begin()`` rather than
+        ``engine.begin()``. Both keep a transaction active for the whole request
+        (so repositories that require one — e.g. those asserting
+        ``conn.in_transaction()`` — keep working), but because we own the
+        transaction lifecycle (rather than ``engine.begin()``'s context manager,
+        which only commits at teardown), writes can be committed *during* the
+        request, before the response is sent — fixing the read-after-write race
+        in issue #945.
 
         Commit responsibility, in order:
 
@@ -74,6 +79,11 @@ class DatabaseProvider(Provider):
         units of work as follow-up; until then this matches the prior behaviour.
         """
         async with engine.connect() as conn:
+            # Begin immediately so a transaction is active for the whole request
+            # (matching the previous engine.begin() invariant). unit_of_work /
+            # the commit middleware commit this before the response; any further
+            # statements re-autobegin and are settled the same way.
+            await conn.begin()
             try:
                 yield conn
             except BaseException:
