@@ -3,6 +3,7 @@
 from core_shared.models.contacts.entities import ContactRelationship, RelationshipType
 from core_shared.models.contacts.exceptions import ContactValidationError
 from core_shared.models.contacts.value_objects import Provenance
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.events import (
     ContactRelationshipCreated,
@@ -18,6 +19,7 @@ from app.core.contacts.models.repositories import (
     ContactRepository,
 )
 from app.core.contacts.services.contact_history_service import ContactHistoryService
+from app.infrastructure.unit_of_work import transactional
 
 
 class ContactRelationshipService:
@@ -35,6 +37,7 @@ class ContactRelationshipService:
         self.event_publisher = event_publisher
         self.history_service = history_service
 
+    @transactional
     async def create_relationship(
         self,
         from_contact_id: int,
@@ -42,6 +45,7 @@ class ContactRelationshipService:
         relationship_type: RelationshipType,
         create_bidirectional: bool = False,
         *,
+        transaction: AsyncConnection,
         to_user: bool = False,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
@@ -255,10 +259,12 @@ class ContactRelationshipService:
         """
         return await self.relationship_repo.get_relationships_to_contact(contact_id)
 
+    @transactional
     async def update_relationship(
         self,
         relationship_id: int,
         relationship_type: RelationshipType,
+        transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
     ) -> ContactRelationship:
@@ -325,9 +331,11 @@ class ContactRelationshipService:
 
         return updated
 
+    @transactional
     async def delete_relationship(
         self,
         relationship_id: int,
+        transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
     ) -> None:
@@ -371,9 +379,11 @@ class ContactRelationshipService:
             source=source,
         )
 
+    @transactional
     async def delete_all_relationships_for_contact(
         self,
         contact_id: int,
+        transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
     ) -> None:

@@ -10,6 +10,7 @@ from core_shared.models.contacts.exceptions import ContactValidationError
 from core_shared.models.contacts.value_objects import Provenance
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Request, status
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.common.schemas import get_request_base_url
 from app.api.contacts.converters import (
@@ -114,6 +115,7 @@ async def create_contact_relationship(
     request: Request,
     relationship_request: ContactRelationshipCreateRequest,
     relationship_service: FromDishka[ContactRelationshipService],
+    connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> ContactRelationshipResponse:
     """
@@ -152,6 +154,7 @@ async def create_contact_relationship(
         from_contact_id=relationship.from_contact_id,
         to_contact_id=relationship.to_contact_id,
         relationship_type=relationship.relationship_type,
+        transaction=connection,
         to_user=relationship.to_user,
         changed_by="ui",
         source=Provenance.UI,
@@ -187,6 +190,7 @@ async def update_contact_relationship(
     request: Request,
     relationship_request: ContactRelationshipUpdateRequest,
     relationship_service: FromDishka[ContactRelationshipService],
+    connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> ContactRelationshipResponse:
     """
@@ -267,6 +271,7 @@ async def update_contact_relationship(
     updated_relationship = await relationship_service.update_relationship(
         relationship_id=relationship_id,
         relationship_type=rel_type,
+        transaction=connection,
         changed_by="ui",
         source=Provenance.UI,
     )
@@ -291,6 +296,7 @@ async def delete_contact_relationship(
     contact_id: int,
     relationship_id: int,
     relationship_service: FromDishka[ContactRelationshipService],
+    connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> None:
     """
@@ -319,6 +325,7 @@ async def delete_contact_relationship(
 
     await relationship_service.delete_relationship(
         relationship_id=relationship_id,
+        transaction=connection,
         changed_by="ui",
         source=Provenance.UI,
     )
