@@ -23,13 +23,10 @@ still open when we commit. Committing happens before forwarding
 5xx instead of a false success.
 """
 
-import structlog
 from sqlalchemy.ext.asyncio import AsyncConnection
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.infrastructure.unit_of_work import in_external_transaction
-
-logger = structlog.get_logger()
 
 # Reads never write, so never need a commit.
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})
@@ -55,30 +52,35 @@ class CommitOnResponseMiddleware:
             await self.app(scope, receive, send)
             return
 
-        committed = False
+        settled = False
 
         async def send_wrapper(message: Message) -> None:
-            nonlocal committed
-            if message["type"] == "http.response.start" and not committed:
-                committed = True
-                # Only commit successful responses. On a 4xx/5xx the handler
-                # failed (or rejected the request); leave the work to be rolled
-                # back when the connection closes.
-                if message["status"] < 400:
-                    await self._commit(scope)
+            nonlocal settled
+            if message["type"] == "http.response.start" and not settled:
+                settled = True
+                # Settle the request transaction before the response is sent:
+                # commit on success, roll back on a 4xx/5xx (the handler failed
+                # or rejected the request — don't persist its writes, and don't
+                # leave them for the connection-provider teardown to commit).
+                await self._settle(scope, success=message["status"] < 400)
             await send(message)
 
         await self.app(scope, receive, send_wrapper)
 
-    async def _commit(self, scope: Scope) -> None:
+    async def _settle(self, scope: Scope, *, success: bool) -> None:
         container = (scope.get("state") or {}).get("dishka_container")
         if container is None:
             return
         connection = await container.get(AsyncConnection)
         # Under the integration test fixture the connection is a shared,
-        # test-owned transaction; committing it would break isolation. Writes
-        # are already visible on that connection within the test, so skip.
+        # test-owned transaction; committing/rolling it back would break
+        # isolation. Writes are already visible on that connection within the
+        # test, so leave it untouched.
         if in_external_transaction(connection):
             return
-        if connection.in_transaction():
+        if not connection.in_transaction():
+            return
+        if success:
             await connection.commit()
+        else:
+            await connection.rollback()

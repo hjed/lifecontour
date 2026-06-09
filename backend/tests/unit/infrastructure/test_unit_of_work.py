@@ -8,6 +8,7 @@ from app.infrastructure.unit_of_work import (
     EXTERNAL_TRANSACTION_MARKER,
     in_external_transaction,
     savepoint,
+    transactional,
     unit_of_work,
 )
 
@@ -147,6 +148,28 @@ async def test_savepoint_helper_rolls_back_and_reraises_on_error() -> None:
         async with savepoint(conn):
             raise _Boom
     assert conn.savepoints[0].rolled_back == 1
+
+
+def test_transactional_fails_fast_without_transaction_param() -> None:
+    with pytest.raises(TypeError, match="requires a 'transaction' parameter"):
+
+        @transactional
+        async def writer(value: int) -> int:  # no `transaction` parameter
+            return value
+
+
+@pytest.mark.asyncio
+async def test_transactional_skips_uow_for_non_connection_arg() -> None:
+    conn = _conn()
+
+    @transactional
+    async def writer(transaction: Any) -> str:
+        return "ok"
+
+    # _FakeConnection is not an AsyncConnection, so the decorator skips the
+    # unit of work (the unit-test path) and the method still runs cleanly.
+    assert await writer(conn) == "ok"
+    assert conn.commits == 0
 
 
 def test_in_external_transaction_helper() -> None:

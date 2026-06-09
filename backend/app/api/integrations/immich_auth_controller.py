@@ -38,6 +38,7 @@ from app.infrastructure.auth.immich_token_service import (
     ImmichValidationException,
 )
 from app.infrastructure.auth.models import SessionUser
+from app.infrastructure.unit_of_work import unit_of_work
 
 logger = structlog.get_logger()
 
@@ -285,86 +286,88 @@ async def resolve_immich_conflict(
     repo = PendingEntityMappingRepository(connection)
     ext_ref_service = ExternalReferenceService(connection)
 
-    # NOTE: commit-as-you-go (issue #945) — create_contact commits its own
-    # unit of work; the conflict-resolution writes below are committed by the
-    # CommitOnResponseMiddleware backstop before the response is sent.
-    # Verify the conflict belongs to this user, is for immich, and is unresolved
-    conflict_row = await repo.get_unresolved_by_id(
-        conflict_id=conflict_id,
-        user_id=str(user.id),
-        integration_source="immich",
-    )
-
-    if not conflict_row:
-        raise HTTPException(
-            status_code=404, detail="Conflict not found or already resolved"
+    # Atomic unit of work (issue #945): create_contact joins re-entrantly,
+    # and the conflict-resolution writes commit together before the response.
+    async with unit_of_work(connection):
+        # Verify the conflict belongs to this user, is for immich, and is unresolved
+        conflict_row = await repo.get_unresolved_by_id(
+            conflict_id=conflict_id,
+            user_id=str(user.id),
+            integration_source="immich",
         )
 
-    external_id = conflict_row["external_entity_id"]
-    external_name = conflict_row["external_entity_name"]
-
-    contact_id = request.contact_id
-
-    if request.action == ConflictResolutionAction.CREATE:
-        # Create a new contact
-        # Strip whitespace and handle edge cases
-        name = (external_name or "").strip()
-        parts = name.split(" ", 1) if name else []
-        first_name = parts[0] if parts else "Unnamed"
-        last_name = parts[1].strip() if len(parts) > 1 else ""
-
-        new_contact = Contact(
-            first_name=first_name,
-            last_name=last_name,
-        )
-        saved_contact = await contact_service.create_contact(
-            contact=new_contact,
-            transaction=connection,
-            changed_by=str(user.id),
-            source=Provenance.UI,
-        )
-        contact_id = saved_contact.id
-
-    if contact_id is None:
-        raise HTTPException(
-            status_code=400, detail="contact_id is required when action is 'link'"
-        )
-
-    # Validate the contact exists before linking
-    if request.action == ConflictResolutionAction.LINK:
-        if not await ext_ref_service.contact_exists(contact_id):
+        if not conflict_row:
             raise HTTPException(
-                status_code=404,
-                detail=f"Contact {contact_id} not found",
+                status_code=404, detail="Conflict not found or already resolved"
             )
 
-    # Resolve the conflict in pending_entity_mappings
-    updated_conflict = await repo.resolve(
-        conflict_id=conflict_id, resolved_contact_id=contact_id
-    )
+        external_id = conflict_row["external_entity_id"]
+        external_name = conflict_row["external_entity_name"]
 
-    if not updated_conflict:
-        raise HTTPException(status_code=404, detail=f"Conflict {conflict_id} not found")
+        contact_id = request.contact_id
 
-    # Upsert external reference (find-or-create/update)
-    await ext_ref_service.upsert_contact_reference(
-        contact_id=contact_id,
-        external_system="immich",
-        external_entity_type="person",
-        external_entity_id=external_id,
-    )
+        if request.action == ConflictResolutionAction.CREATE:
+            # Create a new contact
+            # Strip whitespace and handle edge cases
+            name = (external_name or "").strip()
+            parts = name.split(" ", 1) if name else []
+            first_name = parts[0] if parts else "Unnamed"
+            last_name = parts[1].strip() if len(parts) > 1 else ""
 
-    data = ImmichConflictData(
-        id=str(updated_conflict["id"]),
-        attributes=ImmichConflictAttributes(
-            external_entity_id=updated_conflict["external_entity_id"],
-            external_entity_name=updated_conflict["external_entity_name"],
-            candidate_contact_ids=updated_conflict["candidate_contact_ids"],
-            status=updated_conflict["status"],
-            created_at=updated_conflict["created_at"].isoformat()
-            if updated_conflict["created_at"]
-            else "",
-        ),
-    )
+            new_contact = Contact(
+                first_name=first_name,
+                last_name=last_name,
+            )
+            saved_contact = await contact_service.create_contact(
+                contact=new_contact,
+                transaction=connection,
+                changed_by=str(user.id),
+                source=Provenance.UI,
+            )
+            contact_id = saved_contact.id
 
-    return ImmichConflictResponse(data=data)
+        if contact_id is None:
+            raise HTTPException(
+                status_code=400, detail="contact_id is required when action is 'link'"
+            )
+
+        # Validate the contact exists before linking
+        if request.action == ConflictResolutionAction.LINK:
+            if not await ext_ref_service.contact_exists(contact_id):
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Contact {contact_id} not found",
+                )
+
+        # Resolve the conflict in pending_entity_mappings
+        updated_conflict = await repo.resolve(
+            conflict_id=conflict_id, resolved_contact_id=contact_id
+        )
+
+        if not updated_conflict:
+            raise HTTPException(
+                status_code=404, detail=f"Conflict {conflict_id} not found"
+            )
+
+        # Upsert external reference (find-or-create/update)
+        await ext_ref_service.upsert_contact_reference(
+            contact_id=contact_id,
+            external_system="immich",
+            external_entity_type="person",
+            external_entity_id=external_id,
+        )
+
+        data = ImmichConflictData(
+            id=str(updated_conflict["id"]),
+            attributes=ImmichConflictAttributes(
+                external_entity_id=updated_conflict["external_entity_id"],
+                external_entity_name=updated_conflict["external_entity_name"],
+                candidate_contact_ids=updated_conflict["candidate_contact_ids"],
+                status=updated_conflict["status"],
+                created_at=updated_conflict["created_at"].isoformat()
+                if updated_conflict["created_at"]
+                else "",
+            ),
+        )
+
+        return ImmichConflictResponse(data=data)

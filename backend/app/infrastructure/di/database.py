@@ -57,13 +57,21 @@ class DatabaseProvider(Provider):
         1. Migrated endpoints commit explicitly in the service layer via
            ``app.infrastructure.unit_of_work`` (``unit_of_work`` / ``@transactional``)
            — this runs mid-handler, before the response.
-        2. ``CommitOnResponseMiddleware`` commits any remaining write before the
-           REST response is sent (covers endpoints not yet migrated).
-        3. As a final safety net, on a successful request we commit here at
-           teardown. This covers paths the middleware does not (e.g. the mounted
-           MCP sub-app). It is a no-op when the work was already committed above.
+        2. ``CommitOnResponseMiddleware`` settles the REST request transaction
+           before the response is sent: commit on success, roll back on a
+           4xx/5xx. This covers endpoints not yet migrated to (1).
+        3. As a final safety net, on a request that raised no exception we commit
+           here at teardown. After (2) the REST connection is no longer in a
+           transaction, so this is a no-op for REST; it exists to cover paths the
+           middleware does not run on (the mounted MCP sub-app).
 
-        On error we roll back whatever the handler left uncommitted.
+        On an unhandled exception we roll back whatever the handler left
+        uncommitted.
+
+        Caveat: the teardown commit is status-unaware, so for the MCP sub-app a
+        write performed on a request that *returns* (not raises) an error status
+        would still be committed. MCP write tools are being migrated to explicit
+        units of work as follow-up; until then this matches the prior behaviour.
         """
         async with engine.connect() as conn:
             try:
@@ -73,7 +81,7 @@ class DatabaseProvider(Provider):
                     await conn.rollback()
                 raise
             else:
-                # Safety-net commit for any write not already committed above.
+                # Safety net for paths the middleware doesn't settle (MCP).
                 if conn.in_transaction():
                     await conn.commit()
 

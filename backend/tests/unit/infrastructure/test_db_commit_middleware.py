@@ -16,12 +16,17 @@ class _FakeConn:
         )
         self._in_txn = in_txn
         self.commits = 0
+        self.rollbacks = 0
 
     def in_transaction(self) -> bool:
         return self._in_txn
 
     async def commit(self) -> None:
         self.commits += 1
+        self._in_txn = False
+
+    async def rollback(self) -> None:
+        self.rollbacks += 1
         self._in_txn = False
 
 
@@ -76,11 +81,12 @@ async def test_skips_get_requests() -> None:
 
 
 @pytest.mark.asyncio
-async def test_skips_error_responses() -> None:
+async def test_rolls_back_error_responses() -> None:
     conn = _FakeConn(in_txn=True)
     mw = CommitOnResponseMiddleware(_inner_app(500))
     await _run(mw, _scope("POST", conn=conn))
     assert conn.commits == 0
+    assert conn.rollbacks == 1  # error writes discarded, not left for teardown
 
 
 @pytest.mark.asyncio
@@ -89,6 +95,7 @@ async def test_skips_when_external_transaction_marker_set() -> None:
     mw = CommitOnResponseMiddleware(_inner_app(200))
     await _run(mw, _scope("POST", conn=conn))
     assert conn.commits == 0  # test isolation preserved
+    assert conn.rollbacks == 0  # connection left untouched
 
 
 @pytest.mark.asyncio
@@ -105,3 +112,4 @@ async def test_skips_configured_path_prefix() -> None:
     mw = CommitOnResponseMiddleware(_inner_app(200), skip_path_prefix="/mcp-server")
     await _run(mw, _scope("POST", path="/mcp-server/mcp", conn=conn))
     assert conn.commits == 0
+    assert conn.rollbacks == 0

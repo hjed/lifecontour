@@ -115,8 +115,17 @@ def transactional[**P, R](
     This is the declaration-site equivalent of wrapping the whole method body in
     ``async with unit_of_work(transaction):`` — preferred for write methods that
     don't already funnel through a shared wrapper.
+
+    Fails fast at decoration time if the function has no ``transaction``
+    parameter, so a misnamed/missing parameter can't silently skip the unit of
+    work (which would reintroduce the commit-timing bug) and ship unnoticed.
     """
     signature = inspect.signature(func)
+    if "transaction" not in signature.parameters:
+        raise TypeError(
+            f"@transactional requires a 'transaction' parameter on "
+            f"{func.__qualname__}; none found in {list(signature.parameters)}"
+        )
 
     @functools.wraps(func)
     async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
