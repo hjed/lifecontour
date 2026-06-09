@@ -191,13 +191,6 @@ personal-management-system/
 ├── core_shared/              # Shared python models, schemas, db logic (private package)
 ├── integration_workers/      # Isolated workers for each integration
 ├── frontend/                     # Next.js TypeScript application
-│   ├── src/
-│   │   ├── app/                  # Next.js app router
-│   │   ├── components/           # React components
-│   │   ├── lib/                  # Utilities and API clients
-│   │   └── types/                # TypeScript interfaces
-│   ├── tests/                    # React Testing Library tests
-│   └── package.json              # pnpm dependencies
 |── docker-compose.yml            # Multi-container setup
 |── docs/                         # All documentation
 ```
@@ -235,6 +228,7 @@ To avoid repetition, detailed guidelines are maintained in specialized documents
 ### Testing & Quality Assurance
 - **[Testing Strategy](docs/architecture/testing-strategy.md)**: Comprehensive guidelines for Worker Unit Tests, Backend Tests, Frontend Tests, Testing Organization (conftest usage), E2E fixtures, and Database Integration.
 - **[Code Quality Standards](docs/code-quality-standards.md)**: Strict rules for linting, formatting, type checking, Python Language Rules (ruff, mypy requirements) and pre-commit hooks. *Quality check failures must be fixed before task completion.*
+For e2e tests use Playwright best practices: avoid force:true, add typing delays for ProseMirror/contenteditable inputs, and validate on Chromium when Firefox is unsupported locally.
 
 ### Architecture & Design
 - **[Domain Architecture](docs/architecture/domain-architecture.md)**: Domain-driven design patterns, Domain Enum Patterns, Ports & Adapters implementation, business logic validation, and component structure.
