@@ -15,7 +15,7 @@ from core_shared.models.journals import Journal
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import Response
-from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.common.schemas import (
     ExternalLinkAttributes,
@@ -366,28 +366,25 @@ async def update_contact(
 async def delete_contact(
     contact_id: int,
     contact_service: FromDishka[ContactService],
-    engine: FromDishka[AsyncEngine],
+    connection: FromDishka[AsyncConnection],
     _user: FromDishka[SessionUser],  # Require authentication
 ) -> None:
     """
     Delete a contact.
 
-    Deletes the contact and all associated data.
-    Uses a fresh transaction to avoid aborted transaction issues.
+    Deletes the contact and all associated data. The service commits the
+    deletion as an explicit unit of work (before the response is sent).
     """
-    # Use a fresh transaction for the delete operation to avoid
-    # issues with aborted transactions from previous operations
-    async with engine.begin() as fresh_connection:
-        await contact_service.delete_contact(
-            contact_id, fresh_connection, changed_by="ui", source=Provenance.UI
-        )
+    await contact_service.delete_contact(
+        contact_id, connection, changed_by="ui", source=Provenance.UI
+    )
 
 
 @router.delete("/test/cleanup", status_code=status.HTTP_204_NO_CONTENT)
 @inject
 async def test_cleanup_contacts(
     contact_service: FromDishka[ContactService],
-    engine: FromDishka[AsyncEngine],
+    connection: FromDishka[AsyncConnection],
     _user: FromDishka[SessionUser],  # Require authentication
 ) -> None:
     """
@@ -400,8 +397,7 @@ async def test_cleanup_contacts(
     WARNING: This will delete ALL contacts for the authenticated user.
     Only use in test environments.
     """
-    async with engine.begin() as fresh_connection:
-        await contact_service.bulk_delete_all_contacts(fresh_connection)
+    await contact_service.bulk_delete_all_contacts(connection)
 
 
 @router.post("/{contact_id}/tags", status_code=status.HTTP_204_NO_CONTENT)

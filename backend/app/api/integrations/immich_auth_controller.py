@@ -59,6 +59,7 @@ from app.infrastructure.auth.immich_token_service import (
     ImmichValidationException,
 )
 from app.infrastructure.auth.models import SessionUser
+from app.infrastructure.unit_of_work import unit_of_work
 
 logger = structlog.get_logger()
 
@@ -306,7 +307,9 @@ async def resolve_immich_conflict(
     repo = PendingEntityMappingRepository(connection)
     ext_ref_service = ExternalReferenceService(connection)
 
-    async with connection.begin_nested():
+    # Atomic unit of work (issue #945): create_contact joins re-entrantly,
+    # and the conflict-resolution writes commit together before the response.
+    async with unit_of_work(connection):
         # Verify the conflict belongs to this user, is for immich, and is unresolved
         conflict_row = await repo.get_unresolved_by_id(
             conflict_id=conflict_id,

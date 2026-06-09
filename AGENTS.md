@@ -208,6 +208,7 @@ personal-management-system/
 
 - **Changed Fields Calculation**: Always calculate within service layer transactions for accuracy. Use tuple format `(old_value, new_value)` for history service compatibility.
 - **Service Method Signatures**: Keep business logic parameters minimal. E.g., `update_contact(contact, transaction)` where the service calculates changes internally.
+- **Transactions (commit-as-you-go)**: The request `AsyncConnection` does **not** auto-commit at teardown (that runs after the response is sent — the read-after-write race in #945). Commit writes **before the response** as an explicit unit of work in the **service layer**: decorate the write method with `@transactional` or wrap it in `async with unit_of_work(connection):` (from `app/infrastructure/unit_of_work.py`). It is re-entrant (only the outermost commits) and uses SAVEPOINTs under the test fixture. Use `savepoint(connection)` for batch loops that skip-and-continue on per-item failure. **Reads** use no transaction helper; **controllers never open transactions**. A transitional `CommitOnResponseMiddleware` backstop commits write endpoints not yet migrated to the service-layer pattern — see [Database Design → Transaction Management](docs/architecture/database-design.md#transaction-management--commit-timing).
 
 #### Dependency Injection with Dishka
 
