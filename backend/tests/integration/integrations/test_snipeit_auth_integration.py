@@ -3,13 +3,13 @@ Integration tests for Snipe-IT API key auth endpoints.
 
 Tests the full stack: controller → DI → token service → database.
 
-NOTE: The connect endpoint calls ``commit()`` explicitly so the
-worker can immediately read the key. This destroys the savepoint
-isolation that the standard ``authenticated_client`` fixture uses.
-
-For tests that verify DB state after commit, we use the ``async_engine``
-to open independent connections. An ``autouse`` cleanup fixture deletes
-leaked data between tests.
+The connect endpoint now commits in the service layer via ``unit_of_work``
+(issue #945), which under the test fixture is emulated with a SAVEPOINT on the
+shared ``async_connection``. Writes therefore stay visible to later reads on
+that same connection (read-after-write within a test) and are rolled back at
+teardown for isolation — so tests seed and verify DB state through
+``async_connection``, not an independent engine connection (which can't see
+the savepoint-scoped writes).
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ import pytest
 from cryptography.fernet import Fernet
 from httpx import AsyncClient
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 
 @pytest.fixture
@@ -28,28 +28,6 @@ def test_settings(test_settings):
     return test_settings
 
 
-@pytest.fixture(autouse=True)
-async def clean_snipeit_auth(async_engine: AsyncEngine):
-    """Clean up Snipe-IT auth data before and after each test.
-
-    Required because the connect endpoint commits outside the
-    test savepoint, leaking data between tests.
-    """
-    async with async_engine.begin() as conn:
-        await conn.execute(
-            text("DELETE FROM sync_jobs WHERE integration_source = 'snipeit'")
-        )
-        await conn.execute(text("DELETE FROM user_snipe_it_auth"))
-
-    yield
-
-    async with async_engine.begin() as conn:
-        await conn.execute(
-            text("DELETE FROM sync_jobs WHERE integration_source = 'snipeit'")
-        )
-        await conn.execute(text("DELETE FROM user_snipe_it_auth"))
-
-
 @pytest.mark.asyncio
 class TestSnipeItConnect:
     """Tests for POST /api/integrations/snipeit/connect."""
@@ -57,7 +35,7 @@ class TestSnipeItConnect:
     async def test_connect_stores_encrypted_api_key(
         self,
         authenticated_client: AsyncClient,
-        async_engine: AsyncEngine,
+        async_connection: AsyncConnection,
     ) -> None:
         """POST /connect encrypts and stores the API key."""
         response = await authenticated_client.post(
@@ -70,19 +48,18 @@ class TestSnipeItConnect:
         assert body["success"] is True
         assert "connected" in body["message"].lower()
 
-        # Verify key was saved using an independent connection
-        async with async_engine.begin() as conn:
-            result = await conn.execute(
-                text(
-                    "SELECT encrypted_api_key FROM user_snipe_it_auth"
-                    " WHERE user_id = :uid"
-                ),
-                {"uid": "test-user-123"},
-            )
-            row = result.fetchone()
-            assert row is not None
-            assert row.encrypted_api_key is not None
-            assert row.encrypted_api_key != b"test-api-key-abc123"
+        # Verify key was saved on the shared test connection (where the
+        # service's unit-of-work savepoint committed it).
+        result = await async_connection.execute(
+            text(
+                "SELECT encrypted_api_key FROM user_snipe_it_auth WHERE user_id = :uid"
+            ),
+            {"uid": "test-user-123"},
+        )
+        row = result.fetchone()
+        assert row is not None
+        assert row.encrypted_api_key is not None
+        assert row.encrypted_api_key != b"test-api-key-abc123"
 
     async def test_connect_rejects_empty_api_key(
         self,
@@ -102,29 +79,24 @@ class TestSnipeItConnect:
     async def test_connect_upserts_existing_key(
         self,
         authenticated_client: AsyncClient,
-        async_engine: AsyncEngine,
+        async_connection: AsyncConnection,
     ) -> None:
-        """POST /connect performs upsert when a key already exists.
-
-        Pre-seeds a row and then calls connect once. This avoids calling
-        connect twice in the same test (the first commit() destroys the
-        savepoint and breaks subsequent DI-injected requests).
-        """
-        # Pre-seed an existing auth row
-        async with async_engine.begin() as conn:
-            await conn.execute(
-                text("""
-                    INSERT INTO user_snipe_it_auth (
-                        user_id, encrypted_api_key
-                    ) VALUES (
-                        :user_id, :api_key
-                    )
-                """),
-                {
-                    "user_id": "test-user-123",
-                    "api_key": b"old-encrypted-key",
-                },
-            )
+        """POST /connect performs upsert when a key already exists."""
+        # Pre-seed an existing auth row on the shared test connection so the
+        # DI-injected request sees it.
+        await async_connection.execute(
+            text("""
+                INSERT INTO user_snipe_it_auth (
+                    user_id, encrypted_api_key
+                ) VALUES (
+                    :user_id, :api_key
+                )
+            """),
+            {
+                "user_id": "test-user-123",
+                "api_key": b"old-encrypted-key",
+            },
+        )
 
         # Call connect — should upsert, not conflict
         response = await authenticated_client.post(
@@ -135,19 +107,18 @@ class TestSnipeItConnect:
         assert response.json()["success"] is True
 
         # Verify only one row exists and key was updated
-        async with async_engine.begin() as conn:
-            result = await conn.execute(
-                text(
-                    "SELECT COUNT(*) as cnt, MAX(encrypted_api_key) as key"
-                    " FROM user_snipe_it_auth WHERE user_id = :uid"
-                ),
-                {"uid": "test-user-123"},
-            )
-            row = result.fetchone()
-            assert row is not None
-            assert row.cnt == 1
-            # Key should have changed from the pre-seeded value
-            assert row.key != b"old-encrypted-key"
+        result = await async_connection.execute(
+            text(
+                "SELECT COUNT(*) as cnt, MAX(encrypted_api_key) as key"
+                " FROM user_snipe_it_auth WHERE user_id = :uid"
+            ),
+            {"uid": "test-user-123"},
+        )
+        row = result.fetchone()
+        assert row is not None
+        assert row.cnt == 1
+        # Key should have changed from the pre-seeded value
+        assert row.key != b"old-encrypted-key"
 
 
 @pytest.mark.asyncio
@@ -157,31 +128,28 @@ class TestSnipeItDisconnect:
     async def test_disconnect_removes_auth_record(
         self,
         authenticated_client: AsyncClient,
-        async_engine: AsyncEngine,
+        async_connection: AsyncConnection,
     ) -> None:
         """DELETE /connect removes a pre-seeded auth row.
 
-        We pre-seed via the engine, then call disconnect. Since the
-        DI-injected connection can see the committed seed, the delete
-        executes correctly. We verify via response body (the token
-        service reports deletion) rather than querying a separate
-        connection that can't see savepoint-scoped changes.
+        Pre-seeds via the shared test connection so the DI-injected request
+        sees the row, then calls disconnect. We verify via the response body
+        (the token service reports deletion).
         """
         # Pre-seed an existing auth row
-        async with async_engine.begin() as conn:
-            await conn.execute(
-                text("""
-                    INSERT INTO user_snipe_it_auth (
-                        user_id, encrypted_api_key
-                    ) VALUES (
-                        :user_id, :api_key
-                    )
-                """),
-                {
-                    "user_id": "test-user-123",
-                    "api_key": b"key-to-remove",
-                },
-            )
+        await async_connection.execute(
+            text("""
+                INSERT INTO user_snipe_it_auth (
+                    user_id, encrypted_api_key
+                ) VALUES (
+                    :user_id, :api_key
+                )
+            """),
+            {
+                "user_id": "test-user-123",
+                "api_key": b"key-to-remove",
+            },
+        )
 
         # Disconnect — should find and delete the seeded row
         response = await authenticated_client.delete(
@@ -212,8 +180,9 @@ class TestSnipeItDisconnect:
 class TestSnipeItRegistryStatus:
     """Tests for GET /api/integrations registry status.
 
-    These tests seed data via the raw engine (committed, visible to the
-    DI connection) and then query the registry endpoint.
+    These tests seed data on the shared test connection (visible to the
+    DI-injected request on the same connection) and then query the registry
+    endpoint.
     """
 
     async def test_registry_returns_disconnected_when_no_auth(
@@ -232,23 +201,22 @@ class TestSnipeItRegistryStatus:
     async def test_registry_returns_connected_when_auth_exists(
         self,
         authenticated_client: AsyncClient,
-        async_engine: AsyncEngine,
+        async_connection: AsyncConnection,
     ) -> None:
         """GET /api/integrations shows snipeit as connected when auth row exists."""
-        async with async_engine.begin() as conn:
-            await conn.execute(
-                text("""
-                    INSERT INTO user_snipe_it_auth (
-                        user_id, encrypted_api_key
-                    ) VALUES (
-                        :user_id, :api_key
-                    )
-                """),
-                {
-                    "user_id": "test-user-123",
-                    "api_key": b"fake-encrypted-api-key",
-                },
-            )
+        await async_connection.execute(
+            text("""
+                INSERT INTO user_snipe_it_auth (
+                    user_id, encrypted_api_key
+                ) VALUES (
+                    :user_id, :api_key
+                )
+            """),
+            {
+                "user_id": "test-user-123",
+                "api_key": b"fake-encrypted-api-key",
+            },
+        )
 
         response = await authenticated_client.get("/api/integrations")
 
@@ -261,23 +229,22 @@ class TestSnipeItRegistryStatus:
     async def test_registry_returns_token_expired_when_needs_reauth(
         self,
         authenticated_client: AsyncClient,
-        async_engine: AsyncEngine,
+        async_connection: AsyncConnection,
     ) -> None:
         """GET /api/integrations shows snipeit as token_expired when needs_reauth."""
-        async with async_engine.begin() as conn:
-            await conn.execute(
-                text("""
-                    INSERT INTO user_snipe_it_auth (
-                        user_id, encrypted_api_key, needs_reauth
-                    ) VALUES (
-                        :user_id, :api_key, true
-                    )
-                """),
-                {
-                    "user_id": "test-user-123",
-                    "api_key": b"fake-encrypted-api-key",
-                },
-            )
+        await async_connection.execute(
+            text("""
+                INSERT INTO user_snipe_it_auth (
+                    user_id, encrypted_api_key, needs_reauth
+                ) VALUES (
+                    :user_id, :api_key, true
+                )
+            """),
+            {
+                "user_id": "test-user-123",
+                "api_key": b"fake-encrypted-api-key",
+            },
+        )
 
         response = await authenticated_client.get("/api/integrations")
 

@@ -81,14 +81,12 @@ async def snipeit_connect(
                 detail="API key is required",
             )
 
-        # Store encrypted API key
+        # Store encrypted API key. The service commits before this handler
+        # returns, so the worker can read the key.
         await snipeit_token_service.store_api_key(
             user_id=str(user.id),
             api_key=request_data.api_key.strip(),
         )
-
-        # Commit so the worker can read the key
-        await snipeit_token_service.commit()
 
         # Trigger initial full sync of assets
         try:

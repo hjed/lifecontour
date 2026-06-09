@@ -28,8 +28,17 @@ class TestGoogleTokenService:
 
     @pytest.fixture
     def mock_connection(self) -> AsyncMock:
-        """Create mock database connection."""
-        return AsyncMock()
+        """Create mock database connection.
+
+        ``info`` is a real dict (not an auto-generated child mock) so the
+        service-layer :func:`unit_of_work` helper — which reads/writes the
+        connection's ``info`` for re-entrancy bookkeeping — behaves correctly.
+        With no external-transaction marker present, the unit of work takes the
+        production path and awaits ``connection.commit()`` (a no-op AsyncMock).
+        """
+        connection = AsyncMock()
+        connection.info = {}
+        return connection
 
     @pytest.fixture
     def service(

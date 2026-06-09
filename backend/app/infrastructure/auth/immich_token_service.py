@@ -11,6 +11,8 @@ from cryptography.fernet import Fernet
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.infrastructure.unit_of_work import unit_of_work
+
 logger = structlog.get_logger()
 
 
@@ -102,14 +104,15 @@ class ImmichTokenService:
                 encrypted_api_key = EXCLUDED.encrypted_api_key,
                 updated_at = now()
         """)
-        await self._connection.execute(
-            stmt,
-            {
-                "user_id": user_id,
-                "server_url": server_url,
-                "encrypted_api_key": encrypted_key,
-            },
-        )
+        async with unit_of_work(self._connection):
+            await self._connection.execute(
+                stmt,
+                {
+                    "user_id": user_id,
+                    "server_url": server_url,
+                    "encrypted_api_key": encrypted_key,
+                },
+            )
 
     async def disconnect(self, user_id: str) -> None:
         """Disconnect the integration by removing the credentials.
@@ -118,7 +121,8 @@ class ImmichTokenService:
             user_id: The internal user ID
         """
         stmt = text("DELETE FROM user_immich_auth WHERE user_id = :user_id")
-        await self._connection.execute(stmt, {"user_id": user_id})
+        async with unit_of_work(self._connection):
+            await self._connection.execute(stmt, {"user_id": user_id})
 
     async def get_credentials(self, user_id: str) -> tuple[str | None, str | None]:
         """Fetch and decrypt the user's Immich server URL and API key.

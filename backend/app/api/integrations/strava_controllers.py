@@ -305,15 +305,13 @@ async def strava_oauth_callback(
                 # Only update the verify_token — preserve any existing
                 # subscription_id to avoid losing a valid ID if subscribe()
                 # fails (e.g. Strava 409 for an existing app subscription).
+                # The service commits before this handler returns, so the
+                # Strava handshake GET — which arrives as a separate HTTP
+                # request/transaction — can see the verify token just stored.
                 await strava_token_service.set_webhook_verify_token(
                     user_id=str(user.id),
                     verify_token=verify_token,
                 )
-
-                # Explicitly commit so the Strava handshake GET — which
-                # arrives as a separate HTTP request/transaction — can see
-                # the verify token we just stored.
-                await strava_token_service.commit()
 
                 webhook_service = StravaWebhookService(
                     client_id=settings.strava_client_id,
@@ -885,7 +883,6 @@ async def reregister_strava_webhook(
         user_id=str(user.id),
         verify_token=verify_token,
     )
-    await strava_token_service.commit()
 
     # Force resubscribe
     callback_url = f"{settings.webhook_base_url}/api/integrations/strava/webhook"
@@ -907,7 +904,6 @@ async def reregister_strava_webhook(
             subscription_id=new_sub_id,
             verify_token=verify_token,
         )
-        await strava_token_service.commit()
 
         logger.info(
             "Strava webhook re-registered",
