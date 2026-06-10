@@ -129,6 +129,7 @@ from app.core.journal.models.repositories import (
     SnorkellingDataRepository,
     TravelDataRepository,
 )
+from app.core.journal.services.activity_template_service import ActivityTemplateService
 from app.core.journal.services.calendar_service import CalendarService
 from app.core.journal.services.daily_summary_eligibility import (
     DailySummaryEligibilityChecker,
@@ -143,6 +144,7 @@ from app.core.journal.services.daily_summary_repository import (
     JournalDailySummaryRepository,
 )
 from app.core.journal.services.daily_summary_service import DailySummaryService
+from app.core.journal.services.gear_item_service import GearItemService
 from app.core.journal.services.journal_contact_service import JournalContactService
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_service import JournalService
@@ -350,6 +352,13 @@ class JournalProvider(Provider):
         return SqlActivityTemplateRepository(connection)
 
     @provide(scope=Scope.REQUEST)
+    def activity_template_service(
+        self, activity_template_repo: ActivityTemplateRepository
+    ) -> ActivityTemplateService:
+        """Provide an ActivityTemplateService instance."""
+        return ActivityTemplateService(activity_template_repo)
+
+    @provide(scope=Scope.REQUEST)
     def downhill_skiing_data_repository(
         self, connection: AsyncConnection
     ) -> DownhillSkiingDataRepository:
@@ -374,6 +383,18 @@ class JournalProvider(Provider):
     def gear_item_repository(self, connection: AsyncConnection) -> GearItemRepository:
         """Provide a GearItemRepository instance."""
         return SqlGearItemRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def gear_item_service(
+        self,
+        gear_item_repo: GearItemRepository,
+        event_publisher: OutboxEventPublisher,
+    ) -> GearItemService:
+        """Provide a GearItemService instance."""
+        return GearItemService(
+            gear_item_repo=gear_item_repo,
+            event_publisher=event_publisher,
+        )
 
     @provide(scope=Scope.REQUEST)
     def journal_service(

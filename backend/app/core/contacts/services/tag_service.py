@@ -40,6 +40,42 @@ class TagService:
         self.event_publisher = event_publisher
 
     @transactional
+    async def create_tag(
+        self,
+        name: str,
+        transaction: AsyncConnection,
+        color: str | None = None,
+        description: str | None = None,
+        parent_id: int | None = None,
+    ) -> Tag:
+        """
+        Create a new tag as a committed unit of work.
+
+        Args:
+            name: Tag name.
+            transaction: Request connection; the write commits before the response.
+            color: Optional color as hex string.
+            description: Optional description.
+            parent_id: Optional parent tag ID. When provided, the parent must
+                already exist.
+
+        Raises:
+            TagNotFoundError: ``parent_id`` was provided but no such tag exists.
+        """
+        if parent_id is not None:
+            parent_tag = await self.tag_repo.find_by_id(parent_id)
+            if not parent_tag:
+                raise TagNotFoundError(parent_id)
+
+        tag = Tag(
+            name=TagName(name),
+            color=color,
+            description=description,
+            parent_id=parent_id,
+        )
+        return await self.tag_repo.save(tag)
+
+    @transactional
     async def update_tag(
         self,
         tag_id: int,
