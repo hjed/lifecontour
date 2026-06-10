@@ -604,13 +604,12 @@ async def async_connection(
 ) -> AsyncGenerator[AsyncConnection]:
     """Create an async connection wrapped in a test-owned outer transaction.
 
-    Application code now commits as-you-go (issue #945): service-layer units of
-    work call ``connection.commit()``, and the commit backstops would commit the
-    request transaction. To keep tests isolated we open one outer transaction
-    here and mark the connection with ``EXTERNAL_TRANSACTION_MARKER`` so that:
-
-      * ``unit_of_work`` emulates commit/rollback with SAVEPOINTs, and
-      * the commit middleware / connection provider skip committing.
+    Application code commits as-you-go (issue #945): service-layer units of work
+    call ``connection.commit()``, which would end the test's transaction. To keep
+    tests isolated we open one outer transaction here and mark the connection with
+    ``EXTERNAL_TRANSACTION_MARKER`` so that ``unit_of_work`` / ``savepoint``
+    emulate commit/rollback with SAVEPOINTs instead, leaving the outer
+    transaction intact.
 
     Writes therefore stay visible to later reads on this shared connection
     (exercising read-after-write within a test) while the single ``rollback()``
