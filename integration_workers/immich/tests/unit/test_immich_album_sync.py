@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 from zoneinfo import ZoneInfo
 
 import pytest
+from sqlalchemy.sql.dml import Insert
 
 from immich_models import (
     ImmichAlbum,
@@ -221,19 +222,29 @@ class TestCalculateAlbumVersionHash:
 
 
 def _extract_album_events(mock_connection: AsyncMock) -> list[dict[str, Any]]:
-    """Extract immich_album outbox event payloads from execute calls."""
+    """Extract immich_album outbox event payloads from execute calls.
+
+    Outbox events are emitted as ``insert(OutboxEvent).values(...)`` Core
+    statements, so inspect each execute call for an Insert targeting the
+    ``outbox_events`` table and read its bound values.
+    """
     events = []
     for call in mock_connection.execute.call_args_list:
         args = call[0]
-        if len(args) >= 2 and isinstance(args[1], dict):
-            params = args[1]
-            if "event_type" in params and "event_data" in params:
-                events.append(
-                    {
-                        "event_type": params["event_type"],
-                        "event_data": json.loads(params["event_data"]),
-                    }
-                )
+        if not args:
+            continue
+        stmt = args[0]
+        if isinstance(stmt, Insert) and stmt.table.name == "outbox_events":
+            params = stmt.compile().params
+            event_data = params.get("event_data")
+            if isinstance(event_data, str):
+                event_data = json.loads(event_data)
+            events.append(
+                {
+                    "event_type": params.get("event_type"),
+                    "event_data": event_data,
+                }
+            )
     return events
 
 

@@ -32,10 +32,11 @@ from core_shared.models.contacts.important_date_types import (
     ImportantDateType,
 )
 from core_shared.models.contacts.serialization import serialize_contact
+from core_shared.models.outbox import OutboxEvent
 from core_shared.repositories.external_reference_repository import (
     ExternalReferenceRepository,
 )
-from sqlalchemy import text
+from sqlalchemy import insert, text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from immich_api_client import ImmichApiClient
@@ -300,8 +301,6 @@ class ImmichSyncService:
         shared_link_url: str | None = None,
     ) -> None:
         """Insert an ``immich_album.{created|updated}`` outbox event."""
-        event_id = str(uuid4())
-        now = datetime.now(UTC)
         start, end = date_range
         album_metadata: dict[str, Any] = {
             "album_name": album.album_name,
@@ -320,40 +319,21 @@ class ImmichSyncService:
         if shared_link_url:
             album_metadata["shared_link_url"] = shared_link_url
 
-        event_data = {
-            "integration_source": self._ALBUM_INTEGRATION_SOURCE,
-            "external_id": album.id,
-            "version_hash": version_hash,
-            "sync_action": sync_action,
-            "journal_data": {
+        event = OutboxEvent.create_immich_album_sync_event(
+            external_id=album.id,
+            version_hash=version_hash,
+            sync_action=sync_action,
+            integration_source=self._ALBUM_INTEGRATION_SOURCE,
+            journal_data={
                 "user_id": self._user_id,
                 "title": album.album_name or "Untitled album",
                 "content": album.description or "",
                 "event_date_range_start": start.isoformat(),
                 "event_date_range_end": end.isoformat(),
             },
-            "album_metadata": album_metadata,
-            "sync_timestamp": now.isoformat(),
-        }
-
-        query = text("""
-            INSERT INTO outbox_events
-                (event_id, event_type, aggregate_id, event_data,
-                 occurred_at, created_at, retry_count)
-            VALUES
-                (:event_id, :event_type, 0, :event_data,
-                 :occurred_at, :created_at, 0)
-        """)
-        await self._conn.execute(
-            query,
-            {
-                "event_id": event_id,
-                "event_type": f"immich_album.{sync_action}",
-                "event_data": json.dumps(event_data),
-                "occurred_at": now,
-                "created_at": now,
-            },
+            album_metadata=album_metadata,
         )
+        event_id = await self._insert_outbox_event(event)
         logger.debug(
             "Emitted outbox event for Immich album sync",
             event_id=event_id,
@@ -754,10 +734,10 @@ class ImmichSyncService:
         contact_data: dict[str, Any],
         version_hash: str,
     ) -> None:
-        """Insert a contact sync outbox event via raw SQL.
+        """Insert a contact sync outbox event via the shared OutboxEvent model.
 
-        Follows the same event structure as the Google worker's
-        ``OutboxEvent.create_contact_sync_event()``.
+        Uses the same factory as the Google worker
+        (``OutboxEvent.create_contact_sync_event()``).
 
         Args:
             sync_type: ``'created'`` or ``'updated'``.
@@ -765,41 +745,45 @@ class ImmichSyncService:
             contact_data: Serialized contact dict.
             version_hash: The calculated Immich person version hash.
         """
-        event_id = str(uuid4())
-        now = datetime.now(UTC)
-        event_data = {
-            "integration_source": self._integration_source,
-            "external_id": external_id,
-            "contact_data": contact_data,
-            "sync_timestamp": now.isoformat(),
-            "sync_type": sync_type,
-            "etag": version_hash,
-        }
-
-        query = text("""
-            INSERT INTO outbox_events
-                (event_id, event_type, aggregate_id, event_data,
-                 occurred_at, created_at, retry_count)
-            VALUES
-                (:event_id, :event_type, 0, :event_data,
-                 :occurred_at, :created_at, 0)
-        """)
-        await self._conn.execute(
-            query,
-            {
-                "event_id": event_id,
-                "event_type": f"contact.{sync_type}",
-                "event_data": json.dumps(event_data),
-                "occurred_at": now,
-                "created_at": now,
-            },
+        event = OutboxEvent.create_contact_sync_event(
+            contact_data=contact_data,
+            integration_source=self._integration_source,
+            external_id=external_id,
+            sync_type=sync_type,
+            etag=version_hash,
         )
+        event_id = await self._insert_outbox_event(event)
         logger.debug(
             "Emitted outbox event for Immich contact sync",
             event_id=event_id,
             sync_type=sync_type,
             external_id=external_id,
         )
+
+    async def _insert_outbox_event(self, event: OutboxEvent) -> str:
+        """Persist an ``OutboxEvent`` via a type-aware Core insert.
+
+        Routing through the mapped ``OutboxEvent`` columns (rather than a raw
+        ``text()`` INSERT) lets SQLAlchemy hand asyncpg the correct codecs.
+        ``occurred_at`` / ``created_at`` are populated by the model's column
+        defaults and bound through the ``DateTime(timezone=True)`` columns, so
+        asyncpg accepts them — a raw ``text()`` INSERT loses that type info and
+        fails on the timezone-aware value. Runs on the service's request
+        connection, so it shares the surrounding transaction / SAVEPOINT.
+
+        Returns:
+            The generated ``event_id``.
+        """
+        event_id = str(uuid4())
+        await self._conn.execute(
+            insert(OutboxEvent).values(
+                event_id=event_id,
+                event_type=event.event_type,
+                aggregate_id=event.aggregate_id,
+                event_data=event.event_data,
+            )
+        )
+        return event_id
 
     # -- Database operations (integration-specific) -----------------------
 
