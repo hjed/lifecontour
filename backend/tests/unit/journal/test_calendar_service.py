@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-from core_shared.models.journals import Calendar
+from core_shared.models.journals import Calendar, CalendarNotFoundError
 
 from app.core.journal.services.calendar_service import (
     CalendarInUseError,
@@ -121,6 +121,22 @@ class TestDeleteCalendar:
                 calendar, user_id="someone-else", transaction=mock_transaction
             )
 
+        mock_calendar_repo.delete.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_delete_calendar_rejects_unsaved_calendar(
+        self, calendar_service, mock_calendar_repo, mock_transaction
+    ):
+        """An unsaved calendar (id=None) fails up front, before the usage query."""
+        calendar = _calendar(id=None)
+
+        with pytest.raises(CalendarNotFoundError):
+            await calendar_service.delete_calendar(
+                calendar, user_id="user-1", transaction=mock_transaction
+            )
+
+        # Deterministic failure: no usage-count query with a NULL id, no delete.
+        mock_transaction.execute.assert_not_awaited()
         mock_calendar_repo.delete.assert_not_awaited()
 
     @pytest.mark.asyncio

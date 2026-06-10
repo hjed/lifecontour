@@ -44,7 +44,7 @@ class TestSaveSettings:
         )
 
         assert result is saved
-        mock_settings_repo.save.assert_called_once()
+        mock_settings_repo.save.assert_awaited_once()
         persisted = mock_settings_repo.save.call_args.args[0]
         assert persisted.user_id == "user-1"
         assert persisted.timezone == "Australia/Sydney"

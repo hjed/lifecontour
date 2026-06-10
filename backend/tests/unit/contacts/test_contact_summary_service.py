@@ -53,13 +53,13 @@ class TestRequestRefresh:
 
         await summary_service.request_refresh(42, transaction=mock_transaction)
 
-        mock_summary_repo.upsert.assert_called_once()
+        mock_summary_repo.upsert.assert_awaited_once()
         upserted = mock_summary_repo.upsert.call_args.args[0]
         assert upserted.contact_id == 42
         assert upserted.status == SummaryStatus.PENDING
-        mock_summary_repo.update_status.assert_not_called()
+        mock_summary_repo.update_status.assert_not_awaited()
 
-        mock_event_publisher.publish.assert_called_once()
+        mock_event_publisher.publish.assert_awaited_once()
         event = mock_event_publisher.publish.call_args.args[0]
         assert isinstance(event, ContactSummaryRefreshRequested)
         assert event.aggregate_id == 42
@@ -76,11 +76,11 @@ class TestRequestRefresh:
 
         await summary_service.request_refresh(42, transaction=mock_transaction)
 
-        mock_summary_repo.update_status.assert_called_once_with(
+        mock_summary_repo.update_status.assert_awaited_once_with(
             42, SummaryStatus.PENDING.value
         )
-        mock_summary_repo.upsert.assert_not_called()
-        mock_event_publisher.publish.assert_called_once()
+        mock_summary_repo.upsert.assert_not_awaited()
+        mock_event_publisher.publish.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_raises_when_disabled(
@@ -94,9 +94,9 @@ class TestRequestRefresh:
         with pytest.raises(ContactValidationError):
             await summary_service.request_refresh(42, transaction=mock_transaction)
 
-        mock_summary_repo.update_status.assert_not_called()
-        mock_summary_repo.upsert.assert_not_called()
-        mock_event_publisher.publish.assert_not_called()
+        mock_summary_repo.update_status.assert_not_awaited()
+        mock_summary_repo.upsert.assert_not_awaited()
+        mock_event_publisher.publish.assert_not_awaited()
 
 
 class TestUpdateSummary:
@@ -118,7 +118,7 @@ class TestUpdateSummary:
 
         assert result.is_disabled is True
         assert result.status == SummaryStatus.DISABLED
-        mock_summary_repo.upsert.assert_called_once()
+        mock_summary_repo.upsert.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_user_override_text_sets_generated(
@@ -175,4 +175,4 @@ class TestUpdateSummary:
         assert result.contact_id == 99
         assert result.is_disabled is True
         assert result.status == SummaryStatus.DISABLED
-        mock_summary_repo.upsert.assert_called_once()
+        mock_summary_repo.upsert.assert_awaited_once()

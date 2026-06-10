@@ -79,9 +79,15 @@ class CalendarService:
             transaction: Request connection; the write commits before the response.
 
         Raises:
+            CalendarNotFoundError: The calendar has no persisted id.
             CalendarPermissionError: The user does not own the calendar.
             CalendarInUseError: The calendar is still linked to one or more journals.
         """
+        # Validate the id up front so an unsaved calendar fails deterministically
+        # rather than running the usage-count query with a NULL calendar_id.
+        if calendar.id is None:
+            raise CalendarNotFoundError("unknown")
+
         if calendar.user_id != user_id:
             raise CalendarPermissionError(
                 "You don't have permission to delete this calendar"
@@ -116,6 +122,4 @@ class CalendarService:
                 "Remove the calendar from all journals before deleting it."
             )
 
-        if calendar.id is None:
-            raise CalendarNotFoundError("unknown")
         await self.calendar_repo.delete(calendar.id)
