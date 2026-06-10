@@ -38,6 +38,7 @@ from app.core.contacts.services import (
     TagService,
 )
 from app.infrastructure.search.search_service import SearchService
+from app.infrastructure.unit_of_work import unit_of_work
 from app.mcp.domains.contacts.schemas import (
     AddContactRelationshipRequest,
     ContactActionResponse,
@@ -393,25 +394,30 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 assert contact.important_dates is not None
                 contact.important_dates.append(important_date)
 
-        # Handle tags if provided - find or create tags by name
-        if request.tags:
-            for tag_name in request.tags:
-                # Try to find existing tag by name
-                existing_tag = await tag_repo.find_by_name(tag_name)
+        # Wrap the tag saves and contact creation in a single unit of work so
+        # newly-created tags and the contact commit together atomically before
+        # the response is sent (the service write self-commits, but the tag
+        # saves would otherwise escape it).
+        async with unit_of_work(connection):
+            # Handle tags if provided - find or create tags by name
+            if request.tags:
+                for tag_name in request.tags:
+                    # Try to find existing tag by name
+                    existing_tag = await tag_repo.find_by_name(tag_name)
 
-                if existing_tag:
-                    # Use existing tag (add_tag handles dedup and limit)
-                    contact.add_tag(existing_tag)
-                else:
-                    # Create new tag
-                    new_tag = Tag(name=TagName(tag_name))
-                    saved_tag = await tag_repo.save(new_tag)
-                    contact.add_tag(saved_tag)
+                    if existing_tag:
+                        # Use existing tag (add_tag handles dedup and limit)
+                        contact.add_tag(existing_tag)
+                    else:
+                        # Create new tag
+                        new_tag = Tag(name=TagName(tag_name))
+                        saved_tag = await tag_repo.save(new_tag)
+                        contact.add_tag(saved_tag)
 
-        # Create the contact with all methods, notes, and tags in a single transaction
-        final_contact = await contact_service.create_contact(
-            contact, connection, changed_by="mcp", source=Provenance.MCP
-        )
+            # Create the contact with all methods, notes, and tags in a single transaction
+            final_contact = await contact_service.create_contact(
+                contact, connection, changed_by="mcp", source=Provenance.MCP
+            )
 
         # Ensure contact was created with an ID
         if final_contact.id is None:
@@ -589,27 +595,32 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                     )
                     updated_contact.important_dates.append(important_date)
 
-            # Handle tags if provided - find or create tags by name (replacement strategy)
-            if request.tags is not None:
-                if updated_contact.tags is None:
-                    updated_contact.tags = []
-                for tag_name in request.tags:
-                    # Try to find existing tag by name
-                    existing_tag = await tag_repo.find_by_name(tag_name)
+            # Wrap the tag saves and contact update in a single unit of work so
+            # newly-created tags and the contact commit together atomically
+            # before the response is sent (the service write self-commits, but
+            # the tag saves would otherwise escape it).
+            async with unit_of_work(connection):
+                # Handle tags if provided - find or create tags by name (replacement strategy)
+                if request.tags is not None:
+                    if updated_contact.tags is None:
+                        updated_contact.tags = []
+                    for tag_name in request.tags:
+                        # Try to find existing tag by name
+                        existing_tag = await tag_repo.find_by_name(tag_name)
 
-                    if existing_tag:
-                        # Use existing tag (add_tag handles dedup and limit)
-                        updated_contact.add_tag(existing_tag)
-                    else:
-                        # Create new tag
-                        new_tag = Tag(name=TagName(tag_name))
-                        saved_tag = await tag_repo.save(new_tag)
-                        updated_contact.add_tag(saved_tag)
+                        if existing_tag:
+                            # Use existing tag (add_tag handles dedup and limit)
+                            updated_contact.add_tag(existing_tag)
+                        else:
+                            # Create new tag
+                            new_tag = Tag(name=TagName(tag_name))
+                            saved_tag = await tag_repo.save(new_tag)
+                            updated_contact.add_tag(saved_tag)
 
-            # Update the contact with all methods, notes, and tags in a single transaction
-            final_contact = await contact_service.update_contact(
-                updated_contact, connection, changed_by="mcp", source=Provenance.MCP
-            )
+                # Update the contact with all methods, notes, and tags in a single transaction
+                final_contact = await contact_service.update_contact(
+                    updated_contact, connection, changed_by="mcp", source=Provenance.MCP
+                )
 
         # Create AI-friendly response using shared converter
         response = ContactConverter.to_contact_response(
