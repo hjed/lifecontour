@@ -8,8 +8,6 @@ Controllers act as adapters between HTTP and domain services.
 from typing import Annotated
 
 import structlog
-from core_shared.models.contacts.entities import Tag
-from core_shared.models.contacts.value_objects import TagName
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -65,7 +63,7 @@ async def list_tags(
 async def create_tag(
     request: Request,
     tag_request: TagCreateRequest,
-    tag_repo: FromDishka[TagRepository],
+    tag_service: FromDishka[TagService],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> TagResponse:
@@ -78,24 +76,13 @@ async def create_tag(
     base_url = get_request_base_url(request)
     attrs = tag_request.data.attributes
 
-    # Validate parent tag exists if parent_id is provided
-    if attrs.parent_id is not None:
-        parent_tag = await tag_repo.find_by_id(attrs.parent_id)
-        if not parent_tag:
-            from app.core.contacts.models.exceptions import TagNotFoundError
-
-            raise TagNotFoundError(attrs.parent_id)
-
-    # Create tag entity
-    tag = Tag(
-        name=TagName(attrs.name),
+    created_tag = await tag_service.create_tag(
+        name=attrs.name,
+        transaction=connection,
         color=attrs.color,
         description=attrs.description,
         parent_id=attrs.parent_id,
     )
-
-    # Save tag
-    created_tag = await tag_repo.save(tag)
 
     tag_resource = TagConverter.to_resource(created_tag, base_url)
 

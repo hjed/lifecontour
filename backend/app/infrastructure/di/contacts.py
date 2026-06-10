@@ -32,6 +32,7 @@ from app.core.contacts.services import (
     ContactService,
     ContactSummaryService,
     ContactValidationService,
+    CustomDateTypeService,
     TagHierarchyService,
     TagService,
 )
@@ -114,6 +115,12 @@ class ContactProvider(Provider):
     @provide
     def get_tag_hierarchy_service(self, tag_repo: TagRepository) -> TagHierarchyService:
         return TagHierarchyService(tag_repo)
+
+    @provide
+    def get_custom_date_type_service(
+        self, custom_date_type_repo: CustomDateTypeRepository
+    ) -> CustomDateTypeService:
+        return CustomDateTypeService(custom_date_type_repo)
 
     @provide
     def get_tag_service(

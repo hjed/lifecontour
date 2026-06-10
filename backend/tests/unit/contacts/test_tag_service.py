@@ -87,6 +87,42 @@ def service(repo, hierarchy_service, publisher):
 
 
 @pytest.mark.asyncio
+async def test_create_tag_persists_and_returns(service, repo):
+    created = await service.create_tag(
+        name="New_Tag",
+        transaction=None,
+        color="#123456",
+        description="desc",
+    )
+
+    assert created.id is not None
+    assert str(created.name) == "New_Tag"
+    assert created.color == "#123456"
+    assert created.description == "desc"
+    assert repo.tags[created.id] is created
+
+
+@pytest.mark.asyncio
+async def test_create_tag_with_existing_parent(service, repo):
+    parent = Tag(id=1, name=TagName("Parent"))
+    await repo.save(parent)
+
+    created = await service.create_tag(
+        name="Child",
+        transaction=None,
+        parent_id=1,
+    )
+
+    assert created.parent_id == 1
+
+
+@pytest.mark.asyncio
+async def test_create_tag_missing_parent_raises(service):
+    with pytest.raises(TagNotFoundError):
+        await service.create_tag(name="Orphan", transaction=None, parent_id=99)
+
+
+@pytest.mark.asyncio
 async def test_update_tag_basic(service, repo, publisher):
     tag = Tag(id=1, name=TagName("Test"), color="#FFFFFF")
     await repo.save(tag)

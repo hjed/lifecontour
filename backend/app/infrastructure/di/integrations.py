@@ -45,6 +45,9 @@ from app.core.integrations.registry.immich_provider import ImmichIntegrationProv
 from app.core.integrations.registry.service import IntegrationRegistryService
 from app.core.integrations.registry.snipeit_provider import SnipeItIntegrationProvider
 from app.core.integrations.registry.strava_provider import StravaIntegrationProvider
+from app.core.integrations.services.snipeit_settings_service import (
+    SnipeItSettingsService,
+)
 from app.core.integrations.strava.athlete_mapping_service import (
     StravaAthleteMappingService,
 )
@@ -429,6 +432,13 @@ class IntegrationProvider(Provider):
         )
 
         return SqlSnipeItSettingsRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def provide_snipeit_settings_service(
+        self, settings_repo: SqlSnipeItSettingsRepository
+    ) -> SnipeItSettingsService:
+        """Provide a SnipeItSettingsService instance."""
+        return SnipeItSettingsService(settings_repo)
 
     @provide(scope=Scope.REQUEST)
     def provide_unmatched_strava_athlete_repository(

@@ -8,6 +8,7 @@ configuration (Base URL and user mapping).
 import structlog
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.integrations.schemas import (
     SyncJobAttributes,
@@ -26,6 +27,9 @@ from app.core.integrations.adapters.sql.snipeit_settings_repository import (
     SqlSnipeItSettingsRepository,
 )
 from app.core.integrations.models.snipeit import SnipeItSettings
+from app.core.integrations.services.snipeit_settings_service import (
+    SnipeItSettingsService,
+)
 from app.core.integrations.task_queue_service import TaskQueueService
 from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.config import Settings
@@ -98,7 +102,8 @@ async def get_snipeit_settings(
 async def save_snipeit_settings(
     request_data: SnipeItSettingsRequest,
     user: FromDishka[SessionUser],
-    repository: FromDishka[SqlSnipeItSettingsRepository],
+    service: FromDishka[SnipeItSettingsService],
+    connection: FromDishka[AsyncConnection],
 ) -> SnipeItSettingsResponse:
     """
     Create or update Snipe-IT settings for the authenticated user.
@@ -112,7 +117,10 @@ async def save_snipeit_settings(
             base_url=str(request_data.base_url),
             snipeit_user_id=request_data.snipeit_user_id,
         )
-        saved_settings = await repository.save(settings)
+        saved_settings = await service.save_settings(
+            settings=settings,
+            transaction=connection,
+        )
 
         logger.info(
             "Snipe-IT settings saved",
