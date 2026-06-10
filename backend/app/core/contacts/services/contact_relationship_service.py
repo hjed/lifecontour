@@ -264,6 +264,7 @@ class ContactRelationshipService:
         self,
         relationship_id: int,
         relationship_type: RelationshipType,
+        *,
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
@@ -335,6 +336,7 @@ class ContactRelationshipService:
     async def delete_relationship(
         self,
         relationship_id: int,
+        *,
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
@@ -383,6 +385,7 @@ class ContactRelationshipService:
     async def delete_all_relationships_for_contact(
         self,
         contact_id: int,
+        *,
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
