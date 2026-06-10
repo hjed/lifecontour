@@ -32,20 +32,8 @@ import functools
 import inspect
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from contextvars import ContextVar
 
 from sqlalchemy.ext.asyncio import AsyncConnection
-
-# The request connection provider stores the live connection here when (and
-# only when) it actually creates one for a request. The commit middleware reads
-# this instead of force-resolving the connection from the DI container, so a
-# request that never touched the DB (or failed validation early) doesn't get a
-# pointless connection checkout — and a DB outage can't turn a non-DB request
-# into a 5xx. It is a per-request value (set on the request's asyncio task) and
-# reset on provider teardown.
-request_connection: ContextVar[AsyncConnection | None] = ContextVar(
-    "request_connection", default=None
-)
 
 # Keys stored on ``AsyncConnection.info`` (a per-connection dict that lives for
 # the lifetime of the connection).
@@ -54,10 +42,10 @@ _DEPTH_KEY = "uow_depth"
 # Set by the integration test fixture on the single shared connection. When
 # present, the connection is already wrapped in an outer transaction owned by
 # the test (rolled back at teardown for isolation). Code that would normally
-# commit/rollback the real transaction must instead leave it intact:
-#   * the outermost unit of work emulates commit/rollback with a SAVEPOINT, and
-#   * the commit backstops (middleware + connection provider) skip committing.
-# Writes remain visible to later reads on the same connection within the test.
+# commit/rollback the real transaction must instead leave it intact: the
+# outermost unit of work (and ``savepoint``) emulate commit/rollback with a
+# SAVEPOINT so the test's outer transaction survives. Writes remain visible to
+# later reads on the same connection within the test.
 # See ``tests/integration/conftest.py``.
 EXTERNAL_TRANSACTION_MARKER = "external_transaction"
 
