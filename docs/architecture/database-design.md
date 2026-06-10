@@ -635,15 +635,20 @@ Writes are therefore committed **before the response is sent**.
   when the connection closes (a harmless no-op).
 - **Controllers never open transactions** — that is a smell; transaction
   boundaries belong in the service layer.
-- **Commit backstop (transitional):** `CommitOnResponseMiddleware`
-  (`app/infrastructure/db_commit_middleware.py`, installed inside the Dishka
-  container scope) commits the request connection on a successful write response
-  *before the response is sent*, and the connection provider commits any
-  remainder at teardown as a final net (covers the mounted MCP sub-app). This
-  guarantees correctness for endpoints not yet migrated to explicit service-layer
-  units (e.g. controllers that still call repositories directly). As those are
-  migrated to `unit_of_work`/`@transactional`, reliance on the backstop is
-  removed; once all write paths are migrated the middleware can be deleted.
+- **MCP tools** are the service-equivalent boundary for the mounted MCP sub-app:
+  a write tool wraps its work in `unit_of_work(connection)` (re-entrant, so a
+  call to an already-`@transactional` service joins it and the tool's unit of
+  work is the single commit) — the sub-app has no commit middleware, so it must
+  self-commit.
+- **No commit backstop:** the connection provider never commits at teardown.
+  Every write path — REST handlers (via services) and MCP tools — commits
+  explicitly in the service layer before the response. On normal exit the
+  connection closes and any still-open (read-only) transaction is rolled back;
+  on error the provider rolls back. A write that forgets its `unit_of_work` is
+  therefore *not* silently committed — it is discarded, which surfaces the bug
+  rather than hiding it. (Historically a `CommitOnResponseMiddleware` plus a
+  teardown-commit net covered un-migrated endpoints during the #945 migration;
+  both were removed once all write paths used explicit units of work.)
 
 The transactional outbox (`event_outbox`) is written on the **same** connection
 as the business data, so the same commit publishes events atomically with the
