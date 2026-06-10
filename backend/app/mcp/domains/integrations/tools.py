@@ -21,6 +21,7 @@ from app.core.integrations.strava.athlete_mapping_service import (
     StravaAthleteMappingService,
 )
 from app.core.integrations.task_queue_service import TaskQueueService
+from app.infrastructure.unit_of_work import unit_of_work
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
     get_async_connection,
@@ -383,7 +384,10 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
         repo = PendingEntityMappingRepository(connection)
         ext_ref_service = ExternalReferenceService(connection)
 
-        async with connection.begin_nested():
+        # Single atomic operation: resolve the conflict, (optionally) create the
+        # contact, and upsert the external reference must all commit together
+        # before the response is sent.
+        async with unit_of_work(connection):
             conflict_row = await repo.get_unresolved_by_id(
                 conflict_id=conflict_id,
                 user_id=user_id,
@@ -511,6 +515,7 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
         service: ImmichAlbumCreationService = mcp_depends(
             get_immich_album_creation_service
         ),
+        connection: AsyncConnection = mcp_depends(get_async_connection),
     ) -> str:
         """
         Create an Immich album from a journal's date range.
@@ -541,12 +546,14 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
         excluded = set(exclude_asset_ids or [])
         asset_ids = [p.asset_id for p in photos if p.asset_id not in excluded]
 
-        created = await service.create_album(
-            journal_id,
-            user_id,
-            asset_ids=asset_ids,
-            create_shared_link=create_shared_link,
-        )
+        # Commit the album link + sync metadata writes before the response.
+        async with unit_of_work(connection):
+            created = await service.create_album(
+                journal_id,
+                user_id,
+                asset_ids=asset_ids,
+                create_shared_link=create_shared_link,
+            )
 
         result = {
             "journal_id": created.journal_id,
