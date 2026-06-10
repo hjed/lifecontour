@@ -62,6 +62,22 @@ class ReviewItemService:
         return await self.review_item_repo.create(review_item)
 
     @transactional
+    async def dismiss(
+        self,
+        item_id: int,
+        user_id: str,
+        transaction: AsyncConnection,
+    ) -> ReviewItem | None:
+        """Dismiss a review item as a committed unit of work.
+
+        Returns the updated item, or ``None`` if no matching item exists for the
+        user (the controller maps that to a 404).
+        """
+        return await self.review_item_repo.update_status(
+            item_id, new_status="dismissed", user_id=user_id
+        )
+
+    @transactional
     async def auto_merge_review_items(
         self,
         user_id: str,

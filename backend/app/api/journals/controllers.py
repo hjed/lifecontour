@@ -1225,8 +1225,9 @@ async def list_review_items(
 async def dismiss_review_item(
     item_id: int,
     request: Request,
-    review_item_repo: FromDishka[ReviewItemRepository],
+    review_item_service: FromDishka[ReviewItemService],
     journal_service: FromDishka[JournalService],
+    connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],
 ) -> ReviewItemResponse:
     """
@@ -1234,10 +1235,10 @@ async def dismiss_review_item(
     """
     base_url = get_request_base_url(request)
 
-    item = await review_item_repo.update_status(
+    item = await review_item_service.dismiss(
         item_id,
-        new_status="dismissed",
-        user_id=user.id,
+        user.id,
+        connection,
     )
 
     if not item:
