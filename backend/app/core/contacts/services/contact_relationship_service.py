@@ -58,6 +58,8 @@ class ContactRelationshipService:
             to_contact_id: ID of the target contact (None when to_user=True)
             relationship_type: Type of relationship
             create_bidirectional: Whether to create the inverse relationship
+            transaction: Active request connection; required (keyword-only) so
+                @transactional commits this write before the response (#945).
             to_user: Whether this relationship targets the user
 
         Returns:
@@ -275,6 +277,8 @@ class ContactRelationshipService:
         Args:
             relationship_id: ID of the relationship to update
             relationship_type: New relationship type
+            transaction: Active request connection; required (keyword-only) so
+                @transactional commits this write before the response (#945).
 
         Returns:
             Updated relationship
@@ -346,6 +350,8 @@ class ContactRelationshipService:
 
         Args:
             relationship_id: ID of the relationship to delete
+            transaction: Active request connection; required (keyword-only) so
+                @transactional commits this write before the response (#945).
 
         Raises:
             ContactValidationError: If relationship doesn't exist
@@ -395,6 +401,8 @@ class ContactRelationshipService:
 
         Args:
             contact_id: ID of the contact
+            transaction: Active request connection; required (keyword-only) so
+                @transactional commits this write before the response (#945).
         """
         relationships = await self.get_relationships_for_contact(contact_id)
         for relationship in relationships:
