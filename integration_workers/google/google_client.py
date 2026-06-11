@@ -327,16 +327,21 @@ class GoogleAPIClient:
         Update an existing contact in Google People API.
 
         Uses optimistic concurrency control with ETags to detect conflicts.
-        The ETag should be included in the contact_data's metadata.sources.etag field.
-        If the contact has been modified by another client, Google will
-        return a 400 error with "failedPrecondition" reason.
+        The ETag is sent in the top-level ``person.etag`` field — this is the
+        person-level etag returned by Google's create/update responses (and
+        stored as ``sync_metadata.version_hash``). It must NOT be placed under
+        ``metadata.sources`` because the source etag is a different value.
+
+        If the stored etag is stale (the contact changed on Google's side since
+        our last sync), Google returns a 400 "failedPrecondition" error. In that
+        case this method re-fetches the latest person to obtain a fresh etag and
+        retries the update once.
 
         Args:
             resource_name: Resource name of the contact (e.g., "people/c123456789")
             contact_data: Updated contact data in Google People API format
-                         Should include metadata.sources with etag if conflict detection is needed
             etag: Optional ETag for optimistic concurrency control
-                 If provided, will be added to contact_data metadata
+                 If provided, will be set on contact_data's top-level ``etag`` field
 
         Returns:
             Updated contact data from Google People API including new etag
@@ -345,74 +350,110 @@ class GoogleAPIClient:
             HttpError: If API request fails (including 400 for conflicts)
             GoogleAuthTokensNotFoundError: If authentication tokens are missing
         """
+        logger.info(
+            "Updating Google contact",
+            google_account_email=self.google_account_email,
+            resource_name=resource_name,
+            has_etag=bool(etag),
+        )
+
+        # ETag goes in the top-level person.etag field for optimistic
+        # concurrency. The stored etag is the person-level etag from Google's
+        # create/update response; it does NOT correspond to a source etag, so
+        # it must not be placed under metadata.sources.
+        if etag:
+            contact_data["etag"] = etag
+
         try:
-            service = await self._get_people_service()
-
-            logger.info(
-                "Updating Google contact",
-                google_account_email=self.google_account_email,
-                resource_name=resource_name,
-                has_etag=bool(etag),
-            )
-
-            # Add ETag to metadata if provided
-            if etag:
-                if "metadata" not in contact_data:
-                    contact_data["metadata"] = {}
-                if "sources" not in contact_data["metadata"]:
-                    contact_data["metadata"]["sources"] = [{}]
-                contact_data["metadata"]["sources"][0]["etag"] = etag
-
-            # Build request parameters
-            # Extract field names from contact_data (excluding metadata, resourceName, and etag)
-            excluded_fields = {"metadata", "resourceName", "etag"}
-            update_fields = [
-                key for key in contact_data.keys() if key not in excluded_fields
-            ]
-
-            # Validate that we have fields to update
-            if not update_fields:
-                raise ValueError(
-                    "No fields to update in contact_data. "
-                    "contact_data must contain at least one field besides metadata, resourceName, or etag."
-                )
-
-            request_params = {
-                "resourceName": resource_name,
-                "updatePersonFields": ",".join(update_fields),
-                "body": contact_data,
-            }
-
-            # Make the API call
-            result = service.people().updateContact(**request_params).execute()
-
-            logger.info(
-                "Successfully updated Google contact",
-                google_account_email=self.google_account_email,
-                resource_name=resource_name,
-                new_etag=result.get("etag"),
-            )
-
-            return cast(dict[str, Any], result)
-
+            return await self._execute_update_contact(resource_name, contact_data)
         except HttpError as e:
-            # Google returns 400 with "failedPrecondition" for ETag conflicts
-            if e.resp.status == 400 and "failedPrecondition" in str(e):
-                logger.warning(
-                    "Conflict detected while updating Google contact (ETag mismatch)",
-                    google_account_email=self.google_account_email,
-                    resource_name=resource_name,
-                    error=str(e),
-                )
-            else:
-                logger.error(
-                    "Google API error while updating contact",
-                    google_account_email=self.google_account_email,
-                    resource_name=resource_name,
-                    error=str(e),
-                    status_code=e.resp.status,
-                )
-            raise e
+            if not self._is_etag_conflict(e):
+                self._log_update_http_error(e, resource_name)
+                raise e
+
+            # Stale etag — re-fetch the latest person and retry once with the
+            # fresh etag.
+            self._log_update_http_error(e, resource_name)
+            tried_etag = contact_data.get("etag")
+            fresh = await self.get_person(resource_name)
+            fresh_etag = fresh.get("etag")
+            if not fresh_etag or fresh_etag == tried_etag:
+                raise e
+
+            logger.warning(
+                "Refetched fresh etag after conflict, retrying contact update",
+                google_account_email=self.google_account_email,
+                resource_name=resource_name,
+            )
+            contact_data["etag"] = fresh_etag
+            try:
+                return await self._execute_update_contact(resource_name, contact_data)
+            except HttpError as retry_error:
+                self._log_update_http_error(retry_error, resource_name)
+                raise retry_error
+
+    async def _execute_update_contact(
+        self, resource_name: str, contact_data: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Build the update request and execute it against the People API."""
+        service = await self._get_people_service()
+
+        # Extract field names from contact_data (excluding metadata,
+        # resourceName, and etag — none of which are updatable person fields).
+        excluded_fields = {"metadata", "resourceName", "etag"}
+        update_fields = [
+            key for key in contact_data.keys() if key not in excluded_fields
+        ]
+
+        # Validate that we have fields to update
+        if not update_fields:
+            raise ValueError(
+                "No fields to update in contact_data. "
+                "contact_data must contain at least one field besides metadata, resourceName, or etag."
+            )
+
+        request_params = {
+            "resourceName": resource_name,
+            "updatePersonFields": ",".join(update_fields),
+            "body": contact_data,
+        }
+
+        result = service.people().updateContact(**request_params).execute()
+
+        logger.info(
+            "Successfully updated Google contact",
+            google_account_email=self.google_account_email,
+            resource_name=resource_name,
+            new_etag=result.get("etag"),
+        )
+
+        return cast(dict[str, Any], result)
+
+    @staticmethod
+    def _is_etag_conflict(error: HttpError) -> bool:
+        """Return True if the error is a 400 etag/precondition conflict."""
+        if error.resp.status != 400:
+            return False
+        message = str(error).lower()
+        return "failedprecondition" in message or "etag" in message
+
+    def _log_update_http_error(self, error: HttpError, resource_name: str) -> None:
+        """Log a Google update error, distinguishing etag conflicts."""
+        if error.resp.status == 400 and "failedPrecondition" in str(error):
+            logger.warning(
+                "Conflict detected while updating Google contact (ETag mismatch)",
+                google_account_email=self.google_account_email,
+                resource_name=resource_name,
+                error=str(error),
+            )
+        else:
+            logger.error(
+                "Google API error while updating contact",
+                google_account_email=self.google_account_email,
+                resource_name=resource_name,
+                error=str(error),
+                status_code=error.resp.status,
+            )
 
     async def create_contact_group(self, name: str) -> dict[str, Any]:
         """
