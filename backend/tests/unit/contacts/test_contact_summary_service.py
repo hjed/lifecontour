@@ -6,9 +6,11 @@ import pytest
 from core_shared.models.contacts.entities import ContactSummary, SummaryStatus
 from core_shared.models.contacts.exceptions import ContactValidationError
 
-from app.api.contacts.schemas import ContactSummaryUpdateData
 from app.core.contacts.models.events import ContactSummaryRefreshRequested
-from app.core.contacts.services.contact_summary_service import ContactSummaryService
+from app.core.contacts.services.contact_summary_service import (
+    ContactSummaryService,
+    ContactSummaryUpdate,
+)
 
 
 @pytest.fixture
@@ -110,7 +112,7 @@ class TestUpdateSummary:
         mock_summary_repo.find_by_contact_id.return_value = ContactSummary(
             contact_id=7, status=SummaryStatus.GENERATED
         )
-        update_data = ContactSummaryUpdateData(is_disabled=True)
+        update_data = ContactSummaryUpdate(is_disabled=True)
 
         result = await summary_service.update_summary(
             7, update_data, transaction=mock_transaction
@@ -128,7 +130,9 @@ class TestUpdateSummary:
         mock_summary_repo.find_by_contact_id.return_value = ContactSummary(
             contact_id=7, status=SummaryStatus.PENDING
         )
-        update_data = ContactSummaryUpdateData(user_override_text="Custom summary")
+        update_data = ContactSummaryUpdate(
+            user_override_text="Custom summary", override_text_provided=True
+        )
 
         result = await summary_service.update_summary(
             7, update_data, transaction=mock_transaction
@@ -150,7 +154,9 @@ class TestUpdateSummary:
             user_override_text="Old override",
         )
         # Explicitly set user_override_text to None so it is in model_fields_set.
-        update_data = ContactSummaryUpdateData(user_override_text=None)
+        update_data = ContactSummaryUpdate(
+            user_override_text=None, override_text_provided=True
+        )
 
         result = await summary_service.update_summary(
             7, update_data, transaction=mock_transaction
@@ -166,7 +172,7 @@ class TestUpdateSummary:
     ):
         """With no existing summary, a new one is created and upserted."""
         mock_summary_repo.find_by_contact_id.return_value = None
-        update_data = ContactSummaryUpdateData(is_disabled=True)
+        update_data = ContactSummaryUpdate(is_disabled=True)
 
         result = await summary_service.update_summary(
             99, update_data, transaction=mock_transaction

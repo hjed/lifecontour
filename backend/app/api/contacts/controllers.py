@@ -61,7 +61,11 @@ from app.core.contacts.models.exceptions import (
 from app.core.contacts.models.repositories import (
     ContactRepository,
 )
-from app.core.contacts.services import ContactService, ContactSummaryService
+from app.core.contacts.services import (
+    ContactService,
+    ContactSummaryService,
+    ContactSummaryUpdate,
+)
 from app.core.contacts.services.contact_history_service import ContactHistoryService
 from app.core.integrations.external_link_helpers import build_contact_external_links
 from app.core.integrations.immich.avatar_proxy_service import AvatarProxyService
@@ -1147,7 +1151,13 @@ async def update_contact_summary(
 
     await summary_service.update_summary(
         contact_id,
-        summary_request.data,
+        ContactSummaryUpdate(
+            is_disabled=summary_request.data.is_disabled,
+            user_override_text=summary_request.data.user_override_text,
+            override_text_provided=(
+                "user_override_text" in summary_request.data.model_fields_set
+            ),
+        ),
         transaction=connection,
     )
 

@@ -9,17 +9,33 @@ This service owns the simple persistence path for the summary API endpoints
 pipeline lives in :mod:`summary_generation_service`.
 """
 
+from dataclasses import dataclass
+
 from core_shared.models.contacts.entities import ContactSummary, SummaryStatus
 from core_shared.models.contacts.exceptions import ContactValidationError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.api.contacts.schemas import ContactSummaryUpdateData
 from app.core.contacts.models.events import ContactSummaryRefreshRequested
 from app.core.contacts.models.repositories import (
     ContactEventPublisher,
     ContactSummaryRepository,
 )
 from app.infrastructure.unit_of_work import transactional
+
+
+@dataclass(frozen=True)
+class ContactSummaryUpdate:
+    """API-agnostic payload for a contact-summary configuration change.
+
+    ``override_text_provided`` preserves the tri-state the API layer expresses
+    via ``model_fields_set``: ``True`` when the caller explicitly set
+    ``user_override_text`` (including to ``None`` to clear it), ``False`` when
+    the field was omitted (leave any existing override untouched).
+    """
+
+    is_disabled: bool | None = None
+    user_override_text: str | None = None
+    override_text_provided: bool = False
 
 
 class ContactSummaryService:
@@ -74,7 +90,7 @@ class ContactSummaryService:
     async def update_summary(
         self,
         contact_id: int,
-        update_data: ContactSummaryUpdateData,
+        update: ContactSummaryUpdate,
         transaction: AsyncConnection,
     ) -> ContactSummary:
         """Update a contact summary configuration (disable/override).
@@ -90,10 +106,10 @@ class ContactSummaryService:
                 status=SummaryStatus.PENDING,
             )
 
-        if update_data.is_disabled is not None:
+        if update.is_disabled is not None:
             was_disabled = existing.is_disabled
-            existing.is_disabled = update_data.is_disabled
-            if update_data.is_disabled:
+            existing.is_disabled = update.is_disabled
+            if update.is_disabled:
                 existing.status = SummaryStatus.DISABLED
             elif was_disabled:
                 # Re-enabling: reset status so the summary can be refreshed
@@ -104,14 +120,12 @@ class ContactSummaryService:
                     else SummaryStatus.PENDING
                 )
 
-        if update_data.user_override_text is not None:
+        if update.user_override_text is not None:
             existing.is_user_override = True
-            existing.user_override_text = update_data.user_override_text
+            existing.user_override_text = update.user_override_text
             if not existing.is_disabled:
                 existing.status = SummaryStatus.GENERATED
-        elif update_data.user_override_text is None and "user_override_text" in (
-            update_data.model_fields_set or set()
-        ):
+        elif update.override_text_provided and update.user_override_text is None:
             existing.is_user_override = False
             existing.user_override_text = None
             # Reset status: if no AI text exists, mark as PENDING for regeneration
