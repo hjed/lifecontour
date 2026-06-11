@@ -404,7 +404,8 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             # Handle tags if provided - find or create tags by name
             if request.tags:
                 for tag_name in request.tags:
-                    # Try to find existing tag by name (read; no transaction)
+                    # Look up an existing tag by name (a read; it runs inside the
+                    # unit of work opened above)
                     existing_tag = await tag_repo.find_by_name(tag_name)
 
                     if existing_tag:
@@ -613,7 +614,8 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                     if updated_contact.tags is None:
                         updated_contact.tags = []
                     for tag_name in request.tags:
-                        # Try to find existing tag by name (read; no transaction)
+                        # Look up an existing tag by name (a read; it runs inside
+                        # the unit of work opened above)
                         existing_tag = await tag_repo.find_by_name(tag_name)
 
                         if existing_tag:
