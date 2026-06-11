@@ -16,8 +16,12 @@ from app.core.contacts.services import (
     ContactService,
     TagService,
 )
+from app.core.journal.services.activity_template_service import (
+    ActivityTemplateService,
+)
 from app.core.journal.services.calendar_service import CalendarService
 from app.core.journal.services.daily_summary_service import DailySummaryService
+from app.core.journal.services.gear_item_service import GearItemService
 from app.core.journal.services.journal_contact_service import JournalContactService
 from app.core.journal.services.review_item_service import ReviewItemService
 from app.infrastructure.auth.immich_token_service import ImmichTokenService
@@ -197,6 +201,18 @@ async def get_review_item_service() -> ReviewItemService:
 async def get_journal_contact_service() -> JournalContactService:
     """Resolve the journal contact service for the current MCP request."""
     return cast(JournalContactService, await _resolve_dependency(JournalContactService))
+
+
+async def get_activity_template_service() -> ActivityTemplateService:
+    """Resolve the activity template service for the current MCP request."""
+    return cast(
+        ActivityTemplateService, await _resolve_dependency(ActivityTemplateService)
+    )
+
+
+async def get_gear_item_service() -> GearItemService:
+    """Resolve the gear item service for the current MCP request."""
+    return cast(GearItemService, await _resolve_dependency(GearItemService))
 
 
 async def get_integration_registry_service() -> Any:
