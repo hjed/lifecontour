@@ -926,6 +926,8 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                     to_contact_id=request.target_contact_id,
                     relationship_type=relationship_type,
                     transaction=connection,
+                    changed_by="mcp",
+                    source=Provenance.MCP,
                 ),
             )
 
@@ -1010,6 +1012,8 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 relationship_id=request.relationship_id,
                 relationship_type=rel_type,
                 transaction=connection,
+                changed_by="mcp",
+                source=Provenance.MCP,
             )
 
             [
@@ -1083,7 +1087,10 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 )
 
             await relationship_service.delete_relationship(
-                relationship_id, transaction=connection
+                relationship_id,
+                transaction=connection,
+                changed_by="mcp",
+                source=Provenance.MCP,
             )
 
             logger.info(
