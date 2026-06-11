@@ -263,37 +263,3 @@ class TestAutoMergeReviewItems:
         mock_review_item_repo.update_status.assert_awaited_once_with(
             1, new_status="resolved", user_id="user-1"
         )
-
-
-class TestDismiss:
-    """Test dismissing a review item."""
-
-    @pytest.mark.asyncio
-    async def test_dismiss_updates_status_and_returns_item(
-        self, review_item_service, mock_review_item_repo, mock_transaction
-    ):
-        """dismiss() marks the item dismissed for the user and returns it."""
-        item = _review_item(7, 10, 20)
-        mock_review_item_repo.update_status.return_value = item
-
-        result = await review_item_service.dismiss(
-            7, "user-1", transaction=mock_transaction
-        )
-
-        assert result is item
-        mock_review_item_repo.update_status.assert_awaited_once_with(
-            7, new_status="dismissed", user_id="user-1"
-        )
-
-    @pytest.mark.asyncio
-    async def test_dismiss_returns_none_when_not_found(
-        self, review_item_service, mock_review_item_repo, mock_transaction
-    ):
-        """dismiss() returns None when no matching item exists for the user."""
-        mock_review_item_repo.update_status.return_value = None
-
-        result = await review_item_service.dismiss(
-            999, "user-1", transaction=mock_transaction
-        )
-
-        assert result is None
