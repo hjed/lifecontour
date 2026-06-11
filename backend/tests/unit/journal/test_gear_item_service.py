@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from core_shared.models.journals import GearItemValidationError
 
 from app.core.journal.models.events import GearItemUpdated
 from app.core.journal.services.gear_item_service import GearItemService
@@ -112,6 +113,21 @@ class TestUpdate:
 
         assert result is saved
         mock_repo.save.assert_awaited_once_with(gear_item)
+        mock_publisher.publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_update_raises_and_does_not_save_when_item_missing(
+        self, service, mock_repo, mock_publisher, mock_transaction
+    ):
+        """update guards against the upsert silently creating an unknown item."""
+        gear_item = MagicMock()
+        gear_item.id = uuid4()
+        mock_repo.find_by_id.return_value = None
+
+        with pytest.raises(GearItemValidationError):
+            await service.update(gear_item, transaction=mock_transaction)
+
+        mock_repo.save.assert_not_awaited()
         mock_publisher.publish.assert_not_awaited()
 
 

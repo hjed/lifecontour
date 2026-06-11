@@ -10,6 +10,7 @@ from datetime import date, datetime
 from typing import Any
 
 from core_shared.models.history import Provenance
+from core_shared.models.journals import GearItemValidationError
 from core_shared.models.journals.gear_item import GearItem
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -74,17 +75,29 @@ class GearItemService:
             transaction: Request connection; the write commits before the response.
             changed_by: Who/what made the change (event provenance).
             source: Provenance of the change.
+
+        Raises:
+            GearItemValidationError: If the item has no id, or no gear item with
+                that id exists (so ``update`` can never silently create a record
+                via the repository upsert without the expected event/audit trail).
         """
+        if gear_item.id is None:
+            raise GearItemValidationError("id", "Gear item id is required for update")
+
         existing = await self.gear_item_repo.find_by_id(str(gear_item.id))
+        if existing is None:
+            raise GearItemValidationError(
+                "id", f"Gear item {gear_item.id} not found; cannot update"
+            )
+
         updated = await self.gear_item_repo.save(gear_item)
 
         changed_fields: dict[str, Any] = {}
-        if existing is not None:
-            for field in _TRACKED_FIELDS:
-                old_val = _to_event_value(getattr(existing, field, None))
-                new_val = _to_event_value(getattr(updated, field, None))
-                if old_val != new_val:
-                    changed_fields[field] = (old_val, new_val)
+        for field in _TRACKED_FIELDS:
+            old_val = _to_event_value(getattr(existing, field, None))
+            new_val = _to_event_value(getattr(updated, field, None))
+            if old_val != new_val:
+                changed_fields[field] = (old_val, new_val)
 
         if changed_fields:
             # A plain gear edit is not scoped to a single journal (gear is shared
