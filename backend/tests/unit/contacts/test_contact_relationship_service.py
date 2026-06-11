@@ -117,6 +117,7 @@ class TestContactRelationshipService:
             from_contact_id=1,
             to_contact_id=2,
             relationship_type=RelationshipType.FRIEND,
+            transaction=mock_transaction,
         )
 
         # Verify
@@ -145,6 +146,7 @@ class TestContactRelationshipService:
                 from_contact_id=999,
                 to_contact_id=2,
                 relationship_type=RelationshipType.FRIEND,
+                transaction=mock_transaction,
             )
 
         mock_relationship_repo.create.assert_not_called()
@@ -166,6 +168,7 @@ class TestContactRelationshipService:
                 from_contact_id=1,
                 to_contact_id=999,
                 relationship_type=RelationshipType.FRIEND,
+                transaction=mock_transaction,
             )
 
         mock_relationship_repo.create.assert_not_called()
@@ -188,6 +191,7 @@ class TestContactRelationshipService:
                 from_contact_id=1,
                 to_contact_id=1,
                 relationship_type=RelationshipType.FRIEND,
+                transaction=mock_transaction,
             )
 
         assert "cannot have a relationship with itself" in str(exc_info.value)
@@ -230,6 +234,7 @@ class TestContactRelationshipService:
             to_contact_id=2,
             relationship_type=RelationshipType.PARTNER,
             create_bidirectional=True,
+            transaction=mock_transaction,
         )
 
         # Verify both relationships created
@@ -282,6 +287,7 @@ class TestContactRelationshipService:
         result = await service.update_relationship(
             relationship_id=1,
             relationship_type=RelationshipType.COLLEAGUE,
+            transaction=mock_transaction,
         )
 
         assert result.relationship_type == RelationshipType.COLLEAGUE
@@ -304,6 +310,7 @@ class TestContactRelationshipService:
             await service.update_relationship(
                 relationship_id=999,
                 relationship_type=RelationshipType.COLLEAGUE,
+                transaction=mock_transaction,
             )
 
         assert "Relationship with ID 999 not found" in str(exc_info.value)
@@ -324,6 +331,7 @@ class TestContactRelationshipService:
 
         await service.delete_relationship(
             relationship_id=1,
+            transaction=mock_transaction,
         )
 
         mock_relationship_repo.get_by_id.assert_called_once_with(1)
@@ -344,6 +352,7 @@ class TestContactRelationshipService:
         with pytest.raises(ContactValidationError) as exc_info:
             await service.delete_relationship(
                 relationship_id=999,
+                transaction=mock_transaction,
             )
 
         assert "Relationship with ID 999 not found" in str(exc_info.value)

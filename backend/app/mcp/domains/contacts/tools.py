@@ -895,6 +895,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         relationship_service: ContactRelationshipService = mcp_depends(
             get_contact_relationship_service
         ),
+        connection: AsyncConnection = mcp_depends(get_async_connection),
     ) -> str:
         """
         Add a new relationship between two contacts.
@@ -924,6 +925,9 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                     from_contact_id=request.contact_id,
                     to_contact_id=request.target_contact_id,
                     relationship_type=relationship_type,
+                    transaction=connection,
+                    changed_by="mcp",
+                    source=Provenance.MCP,
                 ),
             )
 
@@ -959,6 +963,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         relationship_service: ContactRelationshipService = mcp_depends(
             get_contact_relationship_service
         ),
+        connection: AsyncConnection = mcp_depends(get_async_connection),
     ) -> str:
         """
         Update an existing contact relationship.
@@ -1006,6 +1011,9 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             updated_relationship = await relationship_service.update_relationship(
                 relationship_id=request.relationship_id,
                 relationship_type=rel_type,
+                transaction=connection,
+                changed_by="mcp",
+                source=Provenance.MCP,
             )
 
             [
@@ -1042,6 +1050,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         relationship_service: ContactRelationshipService = mcp_depends(
             get_contact_relationship_service
         ),
+        connection: AsyncConnection = mcp_depends(get_async_connection),
     ) -> str:
         """
         Remove a relationship between two contacts.
@@ -1077,7 +1086,12 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                     "relationship", "Relationship does not belong to the active contact"
                 )
 
-            await relationship_service.delete_relationship(relationship_id)
+            await relationship_service.delete_relationship(
+                relationship_id,
+                transaction=connection,
+                changed_by="mcp",
+                source=Provenance.MCP,
+            )
 
             logger.info(
                 "MCP: Contact relationship removed successfully",
