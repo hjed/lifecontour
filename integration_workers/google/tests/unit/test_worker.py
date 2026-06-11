@@ -718,36 +718,56 @@ class TestGoogleAPIClient:
             assert result["resourceName"] == "people/c123456789"
             assert result["etag"] == "updated_etag_456"
 
-            # Verify API was called correctly
+            # Verify API was called correctly — etag goes in the top-level
+            # person.etag field, NOT under metadata.sources.
             expected_body = {
                 **contact_data,
-                "metadata": {"sources": [{"etag": "old_etag_123"}]},
+                "etag": "old_etag_123",
             }
             mock_google_service.people().updateContact.assert_called_once_with(
                 resourceName="people/c123456789",
                 updatePersonFields="names,emailAddresses",
                 body=expected_body,
             )
+            # Regression guard for the "must set person.etag" 400 error: the
+            # etag must be top-level and never nested under metadata.sources.
+            sent_body = mock_google_service.people().updateContact.call_args.kwargs[
+                "body"
+            ]
+            assert sent_body["etag"] == "old_etag_123"
+            assert "metadata" not in sent_body
 
     @pytest.mark.asyncio
-    async def test_update_contact_conflict_400_failed_precondition(
+    async def test_update_contact_conflict_refetches_etag_and_retries(
         self, mock_auth_service, mock_google_service
     ):
-        """Test update contact handles 400 with failedPrecondition (ETag conflict)."""
+        """A stale-etag 400 triggers a re-fetch of the fresh etag and one retry."""
         from googleapiclient.errors import HttpError
 
         from google_client import GoogleAPIClient
 
-        # Mock 400 error response with failedPrecondition
+        # First update attempt fails with a stale-etag conflict; second succeeds.
         mock_response = MagicMock()
         mock_response.status = 400
-        mock_error = HttpError(
+        conflict_error = HttpError(
             resp=mock_response,
-            content=b'{"error": {"code": 400, "message": "Request person.metadata.sources.etag is different", "status": "FAILED_PRECONDITION"}}',
+            content=b'{"error": {"code": 400, "message": "Request etag is different", "status": "FAILED_PRECONDITION"}}',
         )
-        mock_google_service.people().updateContact().execute.side_effect = mock_error
+        success_result = {
+            "resourceName": "people/c123456789",
+            "etag": "updated_etag_after_retry",
+            "names": [{"givenName": "John", "familyName": "Doe"}],
+        }
+        mock_google_service.people().updateContact().execute.side_effect = [
+            conflict_error,
+            success_result,
+        ]
+        # get_person returns the fresh etag from Google.
+        mock_google_service.people().get().execute.return_value = {
+            "resourceName": "people/c123456789",
+            "etag": "fresh_etag_999",
+        }
 
-        # Create client
         client = GoogleAPIClient(
             auth_service=mock_auth_service,
             google_account_email="test@example.com",
@@ -756,15 +776,70 @@ class TestGoogleAPIClient:
             user_id=1,
         )
 
-        # Mock the service
         with patch.object(
             client, "_get_people_service", return_value=mock_google_service
         ):
-            contact_data = {
-                "names": [{"givenName": "John", "familyName": "Doe"}],
-            }
+            mock_google_service.people().updateContact.reset_mock()
+            mock_google_service.people().get.reset_mock()
 
-            # Execute update - should raise HttpError with 400
+            contact_data = {"names": [{"givenName": "John", "familyName": "Doe"}]}
+
+            result = await client.update_contact(
+                resource_name="people/c123456789",
+                contact_data=contact_data,
+                etag="stale_etag",
+            )
+
+            # The retry succeeded and returned the fresh result.
+            assert result["etag"] == "updated_etag_after_retry"
+            # We refetched exactly once and updated twice.
+            assert mock_google_service.people().get.call_count == 1
+            assert mock_google_service.people().updateContact.call_count == 2
+            # The retry used the freshly-fetched top-level etag.
+            retry_body = mock_google_service.people().updateContact.call_args.kwargs[
+                "body"
+            ]
+            assert retry_body["etag"] == "fresh_etag_999"
+
+    @pytest.mark.asyncio
+    async def test_update_contact_conflict_retry_exhausted_raises(
+        self, mock_auth_service, mock_google_service
+    ):
+        """When the retry also conflicts, the error propagates after one retry."""
+        from googleapiclient.errors import HttpError
+
+        from google_client import GoogleAPIClient
+
+        mock_response = MagicMock()
+        mock_response.status = 400
+        conflict_error = HttpError(
+            resp=mock_response,
+            content=b'{"error": {"code": 400, "message": "Request etag is different", "status": "FAILED_PRECONDITION"}}',
+        )
+        mock_google_service.people().updateContact().execute.side_effect = (
+            conflict_error
+        )
+        mock_google_service.people().get().execute.return_value = {
+            "resourceName": "people/c123456789",
+            "etag": "fresh_etag_999",
+        }
+
+        client = GoogleAPIClient(
+            auth_service=mock_auth_service,
+            google_account_email="test@example.com",
+            google_client_id="client_id",
+            google_client_secret="client_secret",
+            user_id=1,
+        )
+
+        with patch.object(
+            client, "_get_people_service", return_value=mock_google_service
+        ):
+            mock_google_service.people().updateContact.reset_mock()
+            mock_google_service.people().get.reset_mock()
+
+            contact_data = {"names": [{"givenName": "John", "familyName": "Doe"}]}
+
             with pytest.raises(HttpError) as exc_info:
                 await client.update_contact(
                     resource_name="people/c123456789",
@@ -772,9 +847,58 @@ class TestGoogleAPIClient:
                     etag="stale_etag",
                 )
 
-            # Verify it's a 400 error with failedPrecondition
             assert exc_info.value.resp.status == 400
             assert b"FAILED_PRECONDITION" in exc_info.value.content
+            # Exactly one retry: two update attempts, one refetch.
+            assert mock_google_service.people().get.call_count == 1
+            assert mock_google_service.people().updateContact.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_update_contact_non_conflict_400_not_retried(
+        self, mock_auth_service, mock_google_service
+    ):
+        """A non-etag 400 (e.g. bad request) raises immediately without a refetch."""
+        from googleapiclient.errors import HttpError
+
+        from google_client import GoogleAPIClient
+
+        mock_response = MagicMock()
+        mock_response.status = 400
+        bad_request_error = HttpError(
+            resp=mock_response,
+            content=b'{"error": {"code": 400, "message": "Invalid field mask", "status": "INVALID_ARGUMENT"}}',
+        )
+        mock_google_service.people().updateContact().execute.side_effect = (
+            bad_request_error
+        )
+
+        client = GoogleAPIClient(
+            auth_service=mock_auth_service,
+            google_account_email="test@example.com",
+            google_client_id="client_id",
+            google_client_secret="client_secret",
+            user_id=1,
+        )
+
+        with patch.object(
+            client, "_get_people_service", return_value=mock_google_service
+        ):
+            mock_google_service.people().updateContact.reset_mock()
+            mock_google_service.people().get.reset_mock()
+
+            contact_data = {"names": [{"givenName": "John", "familyName": "Doe"}]}
+
+            with pytest.raises(HttpError) as exc_info:
+                await client.update_contact(
+                    resource_name="people/c123456789",
+                    contact_data=contact_data,
+                    etag="some_etag",
+                )
+
+            assert exc_info.value.resp.status == 400
+            # No refetch, no retry.
+            assert mock_google_service.people().get.call_count == 0
+            assert mock_google_service.people().updateContact.call_count == 1
 
     @pytest.mark.asyncio
     async def test_update_contact_empty_fields_raises_error(
