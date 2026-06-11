@@ -16,14 +16,13 @@ from core_shared.models.contacts.entities import (
     ImportantDate,
     MethodType,
     RelationshipType,
-    Tag,
 )
 from core_shared.models.contacts.exceptions import ContactValidationError
 from core_shared.models.contacts.important_date_types import (
     DatePrecision,
     ImportantDateType,
 )
-from core_shared.models.contacts.value_objects import Provenance, TagName
+from core_shared.models.contacts.value_objects import Provenance
 from fastmcp import FastMCP
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -309,6 +308,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
     async def create_contact(
         request: ContactCreateRequest,
         contact_service: ContactService = mcp_depends(get_contact_service),
+        tag_service: TagService = mcp_depends(get_tag_service),
         tag_repo: TagRepository = mcp_depends(get_tag_repository),
         connection: AsyncConnection = mcp_depends(get_async_connection),
     ) -> str:
@@ -394,24 +394,29 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 assert contact.important_dates is not None
                 contact.important_dates.append(important_date)
 
-        # Wrap the tag saves and contact creation in a single unit of work so
-        # newly-created tags and the contact commit together atomically before
-        # the response is sent (the service write self-commits, but the tag
-        # saves would otherwise escape it).
+        # New-tag creation and the contact write are two @transactional service
+        # calls that must commit together. unit_of_work is re-entrant, so both
+        # join this single outer unit of work and commit exactly once, before
+        # the response is sent (issue #945). This is the minimum boundary needed
+        # to keep the two writes atomic given the existing service shapes; the
+        # tool itself performs no direct write-repo calls.
         async with unit_of_work(connection):
             # Handle tags if provided - find or create tags by name
             if request.tags:
                 for tag_name in request.tags:
-                    # Try to find existing tag by name
+                    # Look up an existing tag by name (a read; it runs inside the
+                    # unit of work opened above)
                     existing_tag = await tag_repo.find_by_name(tag_name)
 
                     if existing_tag:
                         # Use existing tag (add_tag handles dedup and limit)
                         contact.add_tag(existing_tag)
                     else:
-                        # Create new tag
-                        new_tag = Tag(name=TagName(tag_name))
-                        saved_tag = await tag_repo.save(new_tag)
+                        # Create new tag through the tag service so the write is
+                        # owned by a @transactional service, not a raw repo call.
+                        saved_tag = await tag_service.create_tag(
+                            tag_name, transaction=connection
+                        )
                         contact.add_tag(saved_tag)
 
             # Create the contact with all methods, notes, and tags in a single transaction
@@ -457,6 +462,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             ),
         ] = None,
         contact_service: ContactService = mcp_depends(get_contact_service),
+        tag_service: TagService = mcp_depends(get_tag_service),
         tag_repo: TagRepository = mcp_depends(get_tag_repository),
         connection: AsyncConnection = mcp_depends(get_async_connection),
     ) -> str:
@@ -595,26 +601,33 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                     )
                     updated_contact.important_dates.append(important_date)
 
-            # Wrap the tag saves and contact update in a single unit of work so
-            # newly-created tags and the contact commit together atomically
-            # before the response is sent (the service write self-commits, but
-            # the tag saves would otherwise escape it).
+            # New-tag creation and the contact write are two @transactional
+            # service calls that must commit together. unit_of_work is
+            # re-entrant, so both join this single outer unit of work and commit
+            # exactly once, before the response is sent (issue #945). This is the
+            # minimum boundary needed to keep the two writes atomic given the
+            # existing service shapes; the tool itself performs no direct
+            # write-repo calls.
             async with unit_of_work(connection):
                 # Handle tags if provided - find or create tags by name (replacement strategy)
                 if request.tags is not None:
                     if updated_contact.tags is None:
                         updated_contact.tags = []
                     for tag_name in request.tags:
-                        # Try to find existing tag by name
+                        # Look up an existing tag by name (a read; it runs inside
+                        # the unit of work opened above)
                         existing_tag = await tag_repo.find_by_name(tag_name)
 
                         if existing_tag:
                             # Use existing tag (add_tag handles dedup and limit)
                             updated_contact.add_tag(existing_tag)
                         else:
-                            # Create new tag
-                            new_tag = Tag(name=TagName(tag_name))
-                            saved_tag = await tag_repo.save(new_tag)
+                            # Create new tag through the tag service so the write
+                            # is owned by a @transactional service, not a raw
+                            # repo call.
+                            saved_tag = await tag_service.create_tag(
+                                tag_name, transaction=connection
+                            )
                             updated_contact.add_tag(saved_tag)
 
                 # Update the contact with all methods, notes, and tags in a single transaction

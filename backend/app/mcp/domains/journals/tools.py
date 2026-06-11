@@ -109,8 +109,12 @@ from app.core.journal.adapters.sql.review_item_repository import SqlReviewItemRe
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRepository
 from app.core.journal.models.journal_tag import JournalTag
+from app.core.journal.services.activity_template_service import (
+    ActivityTemplateService,
+)
 from app.core.journal.services.calendar_service import CalendarService
 from app.core.journal.services.daily_summary_service import DailySummaryService
+from app.core.journal.services.gear_item_service import GearItemService
 from app.core.journal.services.hierarchy_service import HierarchyNode, HierarchyService
 from app.core.journal.services.journal_contact_service import JournalContactService
 from app.core.journal.services.journal_merge_service import JournalMergeService
@@ -149,10 +153,12 @@ from app.mcp.domains.journals.schemas import (
 )
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
+    get_activity_template_service,
     get_async_connection,
     get_calendar_service,
     get_current_user_id,
     get_daily_summary_service,
+    get_gear_item_service,
     get_journal_contact_service,
     get_outbox_event_publisher,
     get_review_item_service,
@@ -4605,12 +4611,13 @@ async def create_template(
     ] = None,
     user_id: str = mcp_depends(get_current_user_id),
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    activity_template_service: ActivityTemplateService = mcp_depends(
+        get_activity_template_service
+    ),
 ) -> str:
     """
     Create a new activity template.
     """
-    repos = _create_journal_tool_repositories(db_connection)
-
     import uuid
 
     template_id = str(uuid.uuid4())
@@ -4649,8 +4656,9 @@ async def create_template(
         pitches=pitch_entities,
     )
 
-    async with unit_of_work(db_connection):
-        saved_template = await repos.activity_template_repo.save(template)
+    saved_template = await activity_template_service.create(
+        template, transaction=db_connection
+    )
 
     response = ActivityTemplateMCPConverter.to_mcp_response(saved_template)
     return MCPResponseBuilder.success_response(response)
@@ -4747,6 +4755,9 @@ async def update_template(
     ] = None,
     user_id: str = mcp_depends(get_current_user_id),
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    activity_template_service: ActivityTemplateService = mcp_depends(
+        get_activity_template_service
+    ),
 ) -> str:
     """
     Update an existing activity template.
@@ -4807,8 +4818,9 @@ async def update_template(
         except Exception as e:  # noqa: BLE001
             return MCPResponseBuilder.validation_error_response("template", str(e))
 
-        async with unit_of_work(db_connection):
-            saved_template = await repos.activity_template_repo.save(template)
+        saved_template = await activity_template_service.update(
+            template, transaction=db_connection
+        )
 
         response = ActivityTemplateMCPConverter.to_mcp_response(saved_template)
         return MCPResponseBuilder.success_response(response)
@@ -4835,12 +4847,11 @@ async def create_gear_item(
     ] = None,
     user_id: str = mcp_depends(get_current_user_id),
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    gear_item_service: GearItemService = mcp_depends(get_gear_item_service),
 ) -> str:
     """
     Create a new gear item for tracking equipment (ropes, harnesses, helmets, etc.).
     """
-    repos = _create_journal_tool_repositories(db_connection)
-
     parsed_purchase_date = None
     if purchase_date:
         try:
@@ -4859,8 +4870,7 @@ async def create_gear_item(
         manufacturer=manufacturer,
     )
 
-    async with unit_of_work(db_connection):
-        saved_item = await repos.gear_item_repo.save(item)
+    saved_item = await gear_item_service.create(item, transaction=db_connection)
 
     response = GearItemMCPConverter.to_mcp_response(saved_item)
     return MCPResponseBuilder.success_response(response)
@@ -4942,6 +4952,7 @@ async def update_gear_item(
     ] = None,
     user_id: str = mcp_depends(get_current_user_id),
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    gear_item_service: GearItemService = mcp_depends(get_gear_item_service),
 ) -> str:
     """
     Update an existing gear item.
@@ -4985,8 +4996,14 @@ async def update_gear_item(
     except Exception as e:  # noqa: BLE001
         return MCPResponseBuilder.validation_error_response("gear_item", str(e))
 
-    async with unit_of_work(db_connection):
-        saved_item = await repos.gear_item_repo.save(item)
+    # The service computes the changed-fields diff against the persisted state
+    # and publishes GearItemUpdated with MCP provenance.
+    saved_item = await gear_item_service.update(
+        item,
+        transaction=db_connection,
+        changed_by="mcp",
+        source=Provenance.MCP,
+    )
 
     response = GearItemMCPConverter.to_mcp_response(saved_item)
     return MCPResponseBuilder.success_response(response)
