@@ -55,7 +55,7 @@ class PendingEntityMappingRepository:
                  created_at, updated_at)
             VALUES
                 (:user_id, :integration_source, :external_entity_id,
-                 :external_entity_name, :candidate_contact_ids::jsonb,
+                 :external_entity_name, CAST(:candidate_contact_ids AS jsonb),
                  'unresolved', :now, :now)
             ON CONFLICT (user_id, integration_source, external_entity_id)
                 WHERE status = 'unresolved'
