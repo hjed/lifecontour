@@ -1,7 +1,67 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { ContactAvatar } from '../ContactAvatar';
 
+/**
+ * Radix's Avatar tracks image loading via a detached `new window.Image()` and only
+ * renders the <img> once it reports "loaded" (otherwise the initials fallback shows).
+ * jsdom never fires load/error events on images, so we mock window.Image to drive the
+ * load/error state machine deterministically. URLs containing "broken" simulate an
+ * error; any other URL simulates a successful load.
+ */
+class MockImage {
+  private listeners: Record<string, Array<() => void>> = {};
+  naturalWidth = 0;
+  complete = false;
+  referrerPolicy = '';
+  crossOrigin: string | null = null;
+  private _src = '';
+
+  addEventListener(event: string, cb: () => void): void {
+    (this.listeners[event] ??= []).push(cb);
+  }
+
+  removeEventListener(event: string, cb: () => void): void {
+    this.listeners[event] = (this.listeners[event] ?? []).filter(
+      listener => listener !== cb
+    );
+  }
+
+  private dispatch(event: string): void {
+    (this.listeners[event] ?? []).forEach(cb => cb());
+  }
+
+  set src(value: string) {
+    this._src = value;
+    const shouldFail = value.includes('broken');
+    // Defer so React's effects can register listeners before we dispatch.
+    queueMicrotask(() => {
+      if (shouldFail) {
+        this.dispatch('error');
+      } else {
+        this.naturalWidth = 100;
+        this.complete = true;
+        this.dispatch('load');
+      }
+    });
+  }
+
+  get src(): string {
+    return this._src;
+  }
+}
+
 describe('ContactAvatar', () => {
+  let originalImage: typeof window.Image;
+
+  beforeEach(() => {
+    originalImage = window.Image;
+    window.Image = MockImage as unknown as typeof window.Image;
+  });
+
+  afterEach(() => {
+    window.Image = originalImage;
+  });
+
   describe('initials generation', () => {
     it('renders initials correctly for full name', () => {
       render(<ContactAvatar firstName='John' lastName='Doe' />);
@@ -47,7 +107,7 @@ describe('ContactAvatar', () => {
   });
 
   describe('image display', () => {
-    it('displays image when imageUrl provided', () => {
+    it('displays image when imageUrl provided and loaded', async () => {
       render(
         <ContactAvatar
           firstName='John'
@@ -56,12 +116,29 @@ describe('ContactAvatar', () => {
         />
       );
 
-      const image = screen.getByAltText('John Doe');
+      const image = await screen.findByAltText('John Doe');
       expect(image).toHaveAttribute('src', 'https://example.com/avatar.jpg');
       expect(image).toHaveAttribute('alt', 'John Doe');
     });
 
-    it('falls back to initials when image fails to load', () => {
+    it('replaces initials with the image once it has loaded', async () => {
+      render(
+        <ContactAvatar
+          firstName='John'
+          lastName='Doe'
+          imageUrl='https://example.com/avatar.jpg'
+        />
+      );
+
+      // Once the image loads, the initials fallback must no longer be rendered
+      // (regression: image and initials previously rendered side-by-side).
+      await screen.findByAltText('John Doe');
+      await waitFor(() =>
+        expect(screen.queryByText('JD')).not.toBeInTheDocument()
+      );
+    });
+
+    it('falls back to initials when image fails to load', async () => {
       render(
         <ContactAvatar
           firstName='John'
@@ -70,12 +147,12 @@ describe('ContactAvatar', () => {
         />
       );
 
-      // Both image and fallback should be present (shadcn/ui handles the fallback)
-      expect(screen.getByAltText('John Doe')).toBeInTheDocument();
-      expect(screen.getByText('JD')).toBeInTheDocument();
+      // The image errors, so only the initials fallback is shown.
+      await waitFor(() => expect(screen.getByText('JD')).toBeInTheDocument());
+      expect(screen.queryByAltText('John Doe')).not.toBeInTheDocument();
     });
 
-    it('generates correct alt text for image', () => {
+    it('generates correct alt text for image', async () => {
       render(
         <ContactAvatar
           firstName='Jane'
@@ -84,11 +161,11 @@ describe('ContactAvatar', () => {
         />
       );
 
-      const image = screen.getByAltText('Jane Smith');
+      const image = await screen.findByAltText('Jane Smith');
       expect(image).toHaveAttribute('alt', 'Jane Smith');
     });
 
-    it('generates alt text with only first name', () => {
+    it('generates alt text with only first name', async () => {
       render(
         <ContactAvatar
           firstName='Jane'
@@ -96,7 +173,7 @@ describe('ContactAvatar', () => {
         />
       );
 
-      const image = screen.getByAltText('Jane');
+      const image = await screen.findByAltText('Jane');
       expect(image).toHaveAttribute('alt', 'Jane');
     });
   });
