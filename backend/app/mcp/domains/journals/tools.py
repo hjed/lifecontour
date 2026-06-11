@@ -109,10 +109,13 @@ from app.core.journal.adapters.sql.review_item_repository import SqlReviewItemRe
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRepository
 from app.core.journal.models.journal_tag import JournalTag
+from app.core.journal.services.calendar_service import CalendarService
 from app.core.journal.services.daily_summary_service import DailySummaryService
 from app.core.journal.services.hierarchy_service import HierarchyNode, HierarchyService
+from app.core.journal.services.journal_contact_service import JournalContactService
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_service import JournalService
+from app.core.journal.services.review_item_service import ReviewItemService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.unit_of_work import savepoint, unit_of_work
 from app.mcp.domains.journals.converters import (
@@ -147,9 +150,12 @@ from app.mcp.domains.journals.schemas import (
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
     get_async_connection,
+    get_calendar_service,
     get_current_user_id,
     get_daily_summary_service,
+    get_journal_contact_service,
     get_outbox_event_publisher,
+    get_review_item_service,
     mcp_depends,
 )
 from app.mcp.shared.response_builders import MCPResponseBuilder
@@ -3716,6 +3722,9 @@ async def link_journal_to_contact(
         Field(description="Event role: ORGANISER, FACILITATOR_HELPER"),
     ] = None,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    journal_contact_service: JournalContactService = mcp_depends(
+        get_journal_contact_service
+    ),
 ) -> str:
     """
     Link a journal to a contact with a specific relationship type.
@@ -3780,8 +3789,9 @@ async def link_journal_to_contact(
     import sqlalchemy.exc
 
     try:
-        async with unit_of_work(db_connection):
-            await repos.contact_relationship_repo.create(rel)
+        await journal_contact_service.add_contact_to_journal(
+            rel, transaction=db_connection
+        )
     except sqlalchemy.exc.IntegrityError as e:
         raise ValueError("Relationship already exists") from e
 
@@ -3853,12 +3863,12 @@ async def create_calendar(
         str | None, Field(description="Calendar color hex code", default=None)
     ] = None,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    calendar_service: CalendarService = mcp_depends(get_calendar_service),
 ) -> str:
     """
     Create a new calendar to be used with EVENT journals.
     """
     user_id = await get_current_user_id()
-    calendar_repo = SqlCalendarRepository(db_connection)
 
     new_calendar = Calendar(
         user_id=user_id,
@@ -3869,8 +3879,9 @@ async def create_calendar(
         google_calendar_id=None,
     )
 
-    async with unit_of_work(db_connection):
-        saved_calendar = await calendar_repo.save(new_calendar)
+    saved_calendar = await calendar_service.create_calendar(
+        new_calendar, transaction=db_connection
+    )
 
     class CalendarResponse(BaseModel):
         id: str
@@ -3899,6 +3910,7 @@ async def update_calendar(
         str | None, Field(description="Calendar color hex code", default=None)
     ] = None,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    calendar_service: CalendarService = mcp_depends(get_calendar_service),
 ) -> str:
     """
     Update an existing calendar.
@@ -3921,8 +3933,9 @@ async def update_calendar(
     if color is not None:
         calendar.color = color
 
-    async with unit_of_work(db_connection):
-        saved_calendar = await calendar_repo.save(calendar)
+    saved_calendar = await calendar_service.update_calendar(
+        calendar, transaction=db_connection
+    )
 
     class CalendarResponse(BaseModel):
         id: str
@@ -3942,6 +3955,7 @@ async def update_calendar(
 async def delete_calendar(
     calendar_id: Annotated[str, Field(description="Calendar UUID")],
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    calendar_service: CalendarService = mcp_depends(get_calendar_service),
 ) -> str:
     """
     Delete a calendar. Will fail if the calendar is in use.
@@ -3974,8 +3988,9 @@ async def delete_calendar(
         )
 
     if calendar.id is not None:
-        async with unit_of_work(db_connection):
-            await calendar_repo.delete(calendar.id)
+        await calendar_service.delete_calendar(
+            calendar, user_id, transaction=db_connection
+        )
 
     class DeleteCalendarResponse(BaseModel):
         summary: str
@@ -4476,6 +4491,7 @@ async def dismiss_review_item(
     item_id: int,
     user_id_override: str | None = None,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    review_item_service: ReviewItemService = mcp_depends(get_review_item_service),
 ) -> str:
     """
     Dismiss a journal review item.
@@ -4485,14 +4501,9 @@ async def dismiss_review_item(
     """
     user_id = user_id_override or "dev-system-user"
 
-    review_item_repo = SqlReviewItemRepository(db_connection)
-
-    async with unit_of_work(db_connection):
-        item = await review_item_repo.update_status(
-            review_item_id=item_id,
-            new_status="dismissed",
-            user_id=user_id,
-        )
+    item = await review_item_service.dismiss(
+        item_id, user_id, transaction=db_connection
+    )
 
     if not item:
         return json.dumps({"error": f"Review item {item_id} not found."})
