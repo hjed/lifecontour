@@ -66,7 +66,8 @@ class DatabaseProvider(Provider):
           transaction rolled back. For a write request that transaction was
           already committed by its service-layer unit of work, so only an
           autobegun read transaction (harmless, no rows changed) is discarded.
-          A *read* request leaves just that empty transaction, also discarded.
+          A *read* request leaves only a read-only transaction (it may have run
+          SELECTs / held locks, but changed no rows), likewise rolled back on close.
         * On an unhandled exception we roll back whatever the handler left
           uncommitted.
 
