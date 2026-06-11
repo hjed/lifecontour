@@ -4996,10 +4996,13 @@ async def update_gear_item(
     except Exception as e:  # noqa: BLE001
         return MCPResponseBuilder.validation_error_response("gear_item", str(e))
 
-    # No changed_fields are computed here, so the service publishes no
-    # GearItemUpdated event — matching this tool's prior behaviour.
+    # The service computes the changed-fields diff against the persisted state
+    # and publishes GearItemUpdated with MCP provenance.
     saved_item = await gear_item_service.update(
-        item, changed_fields={}, transaction=db_connection
+        item,
+        transaction=db_connection,
+        changed_by="mcp",
+        source=Provenance.MCP,
     )
 
     response = GearItemMCPConverter.to_mcp_response(saved_item)
