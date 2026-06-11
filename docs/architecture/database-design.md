@@ -643,7 +643,8 @@ Writes are therefore committed **before the response is sent**.
 - **No commit backstop:** the connection provider never commits at teardown.
   Every write path — REST handlers (via services) and MCP tools — commits
   explicitly in the service layer before the response. On normal exit the
-  connection closes and any still-open (read-only) transaction is rolled back;
+  connection closes and any still-open transaction (typically read-only, but
+  also an uncommitted write if a path forgot its `unit_of_work`) is rolled back;
   on error the provider rolls back. A write that forgets its `unit_of_work` is
   therefore *not* silently committed — it is discarded, which surfaces the bug
   rather than hiding it. (Historically a `CommitOnResponseMiddleware` plus a

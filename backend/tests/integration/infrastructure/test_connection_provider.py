@@ -43,3 +43,41 @@ async def test_request_connection_has_active_transaction(test_settings) -> None:
                 await anext(it)
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_teardown_discards_uncommitted_write(test_settings) -> None:
+    """The provider never commits at teardown.
+
+    A write made without a service-layer unit of work must be rolled back when
+    the connection closes — not silently persisted. This is the key guarantee
+    that replaced the old commit backstop, so a regression here would re-open
+    the "response before commit" / accidental-commit hole.
+    """
+    provider = DatabaseProvider(test_settings)
+    engine = provider.get_engine()
+    table = "conn_provider_uncommitted_write_test"
+    try:
+        # Arrange: a throwaway table, created and committed out of band.
+        async with engine.begin() as setup:
+            await setup.execute(text(f"DROP TABLE IF EXISTS {table}"))
+            await setup.execute(text(f"CREATE TABLE {table} (id integer)"))
+
+        # Act: write a row through a provider connection WITHOUT a unit of work,
+        # then drive teardown.
+        it = aiter(provider.get_connection(engine))
+        conn = await anext(it)
+        await conn.execute(text(f"INSERT INTO {table} (id) VALUES (1)"))
+        with pytest.raises(StopAsyncIteration):
+            await anext(it)  # teardown closes/rolls back; it commits nothing
+
+        # Assert: the write was discarded, not persisted.
+        async with engine.connect() as check:
+            count = (
+                await check.execute(text(f"SELECT count(*) FROM {table}"))
+            ).scalar()
+        assert count == 0, "teardown must not commit an uncommitted write"
+    finally:
+        async with engine.begin() as cleanup:
+            await cleanup.execute(text(f"DROP TABLE IF EXISTS {table}"))
+        await engine.dispose()
