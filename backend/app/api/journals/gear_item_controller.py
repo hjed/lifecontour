@@ -5,7 +5,6 @@ Gear Item REST API controller.
 import uuid
 from typing import Annotated
 
-from core_shared.models.history import Provenance
 from core_shared.models.journals.gear_item import GearItem
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, Query, Request, status
@@ -19,10 +18,9 @@ from app.api.journals.schemas import (
     GearItemResponse,
     GearItemUpdateRequest,
 )
-from app.core.journal.models.events import GearItemUpdated
 from app.core.journal.models.repositories import GearItemRepository
+from app.core.journal.services.gear_item_service import GearItemService
 from app.infrastructure.auth.models import SessionUser
-from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 
 router = APIRouter(prefix="/gear-items", tags=["Gear Items"])
 
@@ -31,7 +29,8 @@ router = APIRouter(prefix="/gear-items", tags=["Gear Items"])
 @inject
 async def create_gear_item(
     request: GearItemCreateRequest,
-    repo: FromDishka[GearItemRepository],
+    service: FromDishka[GearItemService],
+    connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],
     req: Request,
 ) -> GearItemResponse:
@@ -52,7 +51,7 @@ async def create_gear_item(
             detail=str(e),
         ) from e
 
-    created = await repo.save(gear_item)
+    created = await service.create(gear_item, transaction=connection)
     resource = GearItemConverter.to_resource(created, base_url=str(req.base_url))
     return GearItemResponse(data=resource)
 
@@ -103,9 +102,9 @@ async def update_gear_item(
     gear_item_id: uuid.UUID,
     request: GearItemUpdateRequest,
     repo: FromDishka[GearItemRepository],
+    service: FromDishka[GearItemService],
     user: FromDishka[SessionUser],
     req: Request,
-    event_publisher: FromDishka[OutboxEventPublisher],
     transaction: FromDishka[AsyncConnection],
 ) -> GearItemResponse:
     """Update a specific gear item."""
@@ -124,11 +123,6 @@ async def update_gear_item(
 
     attrs = request.data.attributes
     set_fields = attrs.model_fields_set
-
-    # Capture old values
-    old_values = {}
-    for field in set_fields:
-        old_values[field] = getattr(item, field)
 
     if "name" in set_fields:
         if attrs.name is None:
@@ -154,35 +148,7 @@ async def update_gear_item(
             detail=str(e),
         ) from e
 
-    updated = await repo.save(item)
-
-    if set_fields:
-        changed_fields = {}
-        for field in set_fields:
-            old_val = old_values[field]
-            new_val = getattr(updated, field)
-
-            from datetime import date, datetime
-
-            if isinstance(old_val, (date, datetime)):
-                old_val = old_val.isoformat()
-            if isinstance(new_val, (date, datetime)):
-                new_val = new_val.isoformat()
-
-            changed_fields[field] = (old_val, new_val)
-
-        # A plain gear edit is not scoped to a single journal (gear is shared
-        # across journals), so journal_id is left unset and the history
-        # projection skips it. Provenance is still carried for any future
-        # journal-scoped gear edit path.
-        event = GearItemUpdated(
-            gear_item_id=str(updated.id),
-            changed_fields=changed_fields,
-            source=Provenance.UI,
-            changed_by="ui",
-            transaction=transaction,
-        )
-        await event_publisher.publish(event)
+    updated = await service.update(item, transaction=transaction)
 
     resource = GearItemConverter.to_resource(updated, base_url=str(req.base_url))
     return GearItemResponse(data=resource)
@@ -193,6 +159,8 @@ async def update_gear_item(
 async def delete_gear_item(
     gear_item_id: uuid.UUID,
     repo: FromDishka[GearItemRepository],
+    service: FromDishka[GearItemService],
+    connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],
 ) -> None:
     """Delete a specific gear item."""
@@ -202,7 +170,7 @@ async def delete_gear_item(
             status_code=status.HTTP_404_NOT_FOUND, detail="Gear item not found"
         )
 
-    await repo.delete(str(gear_item_id))
+    await service.delete(str(gear_item_id), transaction=connection)
 
 
 @router.get("/{gear_item_id}/external-links")

@@ -19,6 +19,7 @@ from app.core.integrations.adapters.sql.strava_athlete_mapping_repository import
     SqlStravaAthleteMappingRepository,
 )
 from app.core.journal.models.repositories import JournalContactRelationshipRepository
+from app.infrastructure.unit_of_work import savepoint, unit_of_work
 
 logger = structlog.get_logger()
 
@@ -45,8 +46,11 @@ class StravaAthleteMappingService:
         return await self.mapping_repo.get_all_by_user_id(user_id)
 
     async def delete_mapping(self, user_id: str, strava_athlete_id: str) -> bool:
-        """Delete a mapping."""
-        return await self.mapping_repo.delete_by_strava_id(user_id, strava_athlete_id)
+        """Delete a mapping as a committed unit of work."""
+        async with unit_of_work(self.connection):
+            return await self.mapping_repo.delete_by_strava_id(
+                user_id, strava_athlete_id
+            )
 
     async def create_mapping(
         self,
@@ -71,7 +75,7 @@ class StravaAthleteMappingService:
             contact_id=contact_id,
         )
 
-        async with self.connection.begin_nested():
+        async with unit_of_work(self.connection):
             # 1. Save mapping
             saved_mapping = await self.mapping_repo.save(mapping)
 
@@ -83,8 +87,8 @@ class StravaAthleteMappingService:
             # 3. Add contact as participant to each journal
             for journal_id in journal_ids:
                 try:
-                    # Isolate insert so PK violations don't invalidate the main savepoint
-                    async with self.connection.begin_nested():
+                    # Isolate insert so PK violations don't invalidate the unit of work
+                    async with savepoint(self.connection):
                         relationship = JournalContactRelationship(
                             journal_id=journal_id,
                             contact_id=contact_id,

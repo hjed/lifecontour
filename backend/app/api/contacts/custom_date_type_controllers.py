@@ -6,6 +6,7 @@ Handles custom date type HTTP endpoints following JSON API specification.
 
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Request, status
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.common.schemas import get_request_base_url
 from app.api.contacts.converters import (
@@ -18,6 +19,7 @@ from app.api.contacts.schemas import (
     CustomDateTypeResponse,
 )
 from app.core.contacts.models.repositories import CustomDateTypeRepository
+from app.core.contacts.services import CustomDateTypeService
 from app.infrastructure.auth.models import SessionUser
 
 router = APIRouter(
@@ -50,7 +52,8 @@ async def list_custom_date_types(
 async def create_custom_date_type(
     request: Request,
     type_request: CustomDateTypeCreateRequest,
-    repository: FromDishka[CustomDateTypeRepository],
+    service: FromDishka[CustomDateTypeService],
+    connection: FromDishka[AsyncConnection],
     _user: FromDishka[SessionUser],  # Require authentication
 ) -> CustomDateTypeResponse:
     """
@@ -60,7 +63,7 @@ async def create_custom_date_type(
 
     date_type = CustomDateTypeRequestConverter.from_create_request(type_request.data)
 
-    created_type = await repository.create(date_type.name)
+    created_type = await service.create(date_type.name, transaction=connection)
 
     resource = CustomDateTypeConverter.to_resource(created_type, base_url)
 
@@ -71,10 +74,11 @@ async def create_custom_date_type(
 @inject
 async def delete_custom_date_type(
     type_id: int,
-    repository: FromDishka[CustomDateTypeRepository],
+    service: FromDishka[CustomDateTypeService],
+    connection: FromDishka[AsyncConnection],
     _user: FromDishka[SessionUser],  # Require authentication
 ) -> None:
     """
     Delete a custom date type.
     """
-    await repository.delete(type_id)
+    await service.delete(type_id, transaction=connection)

@@ -9,6 +9,7 @@ from core_shared.models.journals.activity_template import ActivityTemplate
 from core_shared.models.journals.template_pitch import TemplatePitch
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, Query, Request, status
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.journals.converters import ActivityTemplateConverter
 from app.api.journals.schemas import (
@@ -18,6 +19,7 @@ from app.api.journals.schemas import (
     ActivityTemplateUpdateRequest,
 )
 from app.core.journal.models.repositories import ActivityTemplateRepository
+from app.core.journal.services.activity_template_service import ActivityTemplateService
 from app.infrastructure.auth.models import SessionUser
 
 router = APIRouter(prefix="/templates", tags=["Templates"])
@@ -27,7 +29,8 @@ router = APIRouter(prefix="/templates", tags=["Templates"])
 @inject
 async def create_template(
     request: ActivityTemplateCreateRequest,
-    repo: FromDishka[ActivityTemplateRepository],
+    service: FromDishka[ActivityTemplateService],
+    connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],
     req: Request,
 ) -> ActivityTemplateResponse:
@@ -70,7 +73,7 @@ async def create_template(
             detail=str(e),
         ) from e
 
-    created = await repo.save(template)
+    created = await service.create(template, transaction=connection)
     resource = ActivityTemplateConverter.to_resource(
         created, base_url=str(req.base_url)
     )
@@ -127,6 +130,8 @@ async def update_template(
     template_id: uuid.UUID,
     request: ActivityTemplateUpdateRequest,
     repo: FromDishka[ActivityTemplateRepository],
+    service: FromDishka[ActivityTemplateService],
+    connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],
     req: Request,
 ) -> ActivityTemplateResponse:
@@ -197,7 +202,7 @@ async def update_template(
             detail=str(e),
         ) from e
 
-    updated = await repo.save(template)
+    updated = await service.update(template, transaction=connection)
     resource = ActivityTemplateConverter.to_resource(
         updated, base_url=str(req.base_url)
     )
@@ -209,6 +214,8 @@ async def update_template(
 async def delete_template(
     template_id: uuid.UUID,
     repo: FromDishka[ActivityTemplateRepository],
+    service: FromDishka[ActivityTemplateService],
+    connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],
 ) -> None:
     """Delete a specific activity template."""
@@ -218,4 +225,4 @@ async def delete_template(
             status_code=status.HTTP_404_NOT_FOUND, detail="ActivityTemplate not found"
         )
 
-    await repo.delete(str(template_id))
+    await service.delete(str(template_id), transaction=connection)
