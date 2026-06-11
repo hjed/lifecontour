@@ -8,11 +8,13 @@ request start) broke repositories that assert ``conn.in_transaction()``, e.g.
 (whose fixture begins a transaction) still passed.
 """
 
+from contextlib import suppress
+from uuid import uuid4
+
 import pytest
 from sqlalchemy import text
 
 from app.infrastructure.di.database import DatabaseProvider
-from app.infrastructure.unit_of_work import request_connection
 
 
 @pytest.mark.asyncio
@@ -21,7 +23,9 @@ async def test_request_connection_has_active_transaction(test_settings) -> None:
 
     Repositories such as ActivityTemplateRepository.save() assert this before
     issuing their first statement, so the provider must begin a transaction up
-    front (commit timing is still mid-request, not at teardown).
+    front. Commit timing is owned by the service layer (mid-request), and the
+    provider never commits at teardown — any still-open (e.g. read) transaction
+    is rolled back when the connection closes.
     """
     provider = DatabaseProvider(test_settings)
     engine = provider.get_engine()
@@ -36,7 +40,8 @@ async def test_request_connection_has_active_transaction(test_settings) -> None:
             result = await conn.execute(text("SELECT 1"))
             assert result.scalar() == 1
         finally:
-            # Drive provider teardown (commits the read transaction as the net).
+            # Drive provider teardown (closes the connection, rolling back the
+            # uncommitted read transaction — the provider commits nothing).
             with pytest.raises(StopAsyncIteration):
                 await anext(it)
     finally:
@@ -44,18 +49,43 @@ async def test_request_connection_has_active_transaction(test_settings) -> None:
 
 
 @pytest.mark.asyncio
-async def test_provider_publishes_request_connection_contextvar(test_settings) -> None:
-    """The provider publishes the live connection for the commit middleware,
-    and resets it on teardown (so non-DB requests never expose a stale one)."""
-    assert request_connection.get() is None
+async def test_teardown_discards_uncommitted_write(test_settings) -> None:
+    """The provider never commits at teardown.
+
+    A write made without a service-layer unit of work must be rolled back when
+    the connection closes — not silently persisted. This is the key guarantee
+    that replaced the old commit backstop, so a regression here would re-open
+    the "response before commit" / accidental-commit hole.
+    """
     provider = DatabaseProvider(test_settings)
     engine = provider.get_engine()
+    # Unique per run so parallel/xdist execution can't race on the same table.
+    table = f"conn_provider_uncommitted_write_test_{uuid4().hex}"
     try:
+        # Arrange: a throwaway table, created and committed out of band.
+        async with engine.begin() as setup:
+            await setup.execute(text(f"CREATE TABLE {table} (id integer)"))
+
+        # Act: write a row through a provider connection WITHOUT a unit of work,
+        # then drive teardown. The teardown runs in a finally so that even if the
+        # INSERT raises, the generator is always driven to completion and the
+        # connection/transaction is released (otherwise cleanup would deadlock on
+        # the open write lock).
         it = aiter(provider.get_connection(engine))
         conn = await anext(it)
-        assert request_connection.get() is conn
-        with pytest.raises(StopAsyncIteration):
-            await anext(it)
-        assert request_connection.get() is None  # reset on teardown
+        try:
+            await conn.execute(text(f"INSERT INTO {table} (id) VALUES (1)"))
+        finally:
+            with suppress(StopAsyncIteration):
+                await anext(it)  # teardown closes/rolls back; it commits nothing
+
+        # Assert: the write was discarded, not persisted.
+        async with engine.connect() as check:
+            count = (
+                await check.execute(text(f"SELECT count(*) FROM {table}"))
+            ).scalar()
+        assert count == 0, "teardown must not commit an uncommitted write"
     finally:
+        async with engine.begin() as cleanup:
+            await cleanup.execute(text(f"DROP TABLE IF EXISTS {table}"))
         await engine.dispose()

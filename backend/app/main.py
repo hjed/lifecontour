@@ -230,18 +230,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.dishka_container = container  # Store for lifespan access
     app.state.mcp_app = mcp_app
 
-    # Commit-before-response backstop. Added BEFORE setup_dishka so Dishka's
-    # ContainerMiddleware wraps it (the request connection is still open when we
-    # commit). Temporary safety net for write endpoints not yet migrated to
-    # explicit service-layer transactions — see app.infrastructure.unit_of_work
-    # and db_commit_middleware. Skips the mounted MCP sub-app (separate container).
-    from app.infrastructure.db_commit_middleware import CommitOnResponseMiddleware
-
-    app.add_middleware(
-        CommitOnResponseMiddleware,
-        skip_path_prefix=settings.mcp_mount_path if settings.mcp_enabled else None,
-    )
-
     setup_dishka(container, app)
 
     # Import routers after Dishka setup to avoid type annotation issues

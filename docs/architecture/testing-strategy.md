@@ -355,9 +355,8 @@ export class TestDataHelpers {
 #### Test Isolation Patterns
 
 - **One outer transaction per test, rolled back at teardown**: Each test runs in a single outer transaction on a shared `async_connection` that is **never committed** — `rollback()` at teardown restores a clean state.
-- **Commit seam for commit-as-you-go app code**: Application code now commits during the request (see [Database Design → Transaction Management](./database-design.md#transaction-management--commit-timing)). To keep tests isolated, the fixture marks the connection with `EXTERNAL_TRANSACTION_MARKER` (`app/infrastructure/unit_of_work.py`). With the marker set:
-  - `unit_of_work` emulates commit/rollback with **SAVEPOINTs** instead of committing the real (test-owned) transaction, and
-  - the commit middleware and connection provider **skip** committing.
+- **Commit seam for commit-as-you-go app code**: Application code commits during the request (see [Database Design → Transaction Management](./database-design.md#transaction-management--commit-timing)). To keep tests isolated, the fixture marks the connection with `EXTERNAL_TRANSACTION_MARKER` (`app/infrastructure/unit_of_work.py`). With the marker set:
+  - `unit_of_work` / `savepoint` emulate commit/rollback with **SAVEPOINTs** instead of committing the real (test-owned) transaction, so the outer transaction survives to be rolled back at teardown.
   - Writes still become visible to later reads on the same connection (read-after-write within a test), while the outer `rollback()` discards everything.
 - **Schema Recreation**: Fresh database schema for each test session.
 - **Connection Management**: Proper connection pooling and cleanup.
@@ -378,7 +377,7 @@ async def async_connection(async_engine):
 
     async with async_engine.connect() as conn:
         await conn.begin()                          # outer transaction
-        conn.info[EXTERNAL_TRANSACTION_MARKER] = True  # uow -> savepoints; backstops skip
+        conn.info[EXTERNAL_TRANSACTION_MARKER] = True  # uow/savepoint -> savepoints
         try:
             yield conn
         finally:
