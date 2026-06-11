@@ -59,11 +59,13 @@ from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
 )
 from app.core.contacts.models.repositories import (
-    ContactEventPublisher,
     ContactRepository,
-    ContactSummaryRepository,
 )
-from app.core.contacts.services import ContactService
+from app.core.contacts.services import (
+    ContactService,
+    ContactSummaryService,
+    ContactSummaryUpdate,
+)
 from app.core.contacts.services.contact_history_service import ContactHistoryService
 from app.core.integrations.external_link_helpers import build_contact_external_links
 from app.core.integrations.immich.avatar_proxy_service import AvatarProxyService
@@ -1103,8 +1105,8 @@ async def get_contact_journals(
 async def refresh_contact_summary(
     contact_id: int,
     contact_service: FromDishka[ContactService],
-    summary_repo: FromDishka[ContactSummaryRepository],
-    event_publisher: FromDishka[ContactEventPublisher],
+    summary_service: FromDishka[ContactSummaryService],
+    connection: FromDishka[AsyncConnection],
     _user: FromDishka[SessionUser],
 ) -> dict[str, str]:
     """
@@ -1119,28 +1121,7 @@ async def refresh_contact_summary(
     if not contact:
         raise ContactNotFoundError(contact_id)
 
-    from core_shared.models.contacts.entities import ContactSummary, SummaryStatus
-
-    from app.core.contacts.models.events import ContactSummaryRefreshRequested
-
-    existing = await summary_repo.find_by_contact_id(contact_id)
-    if existing and existing.is_disabled:
-        raise ContactValidationError(
-            "summary", "Summary generation is disabled for this contact"
-        )
-
-    if existing:
-        await summary_repo.update_status(contact_id, SummaryStatus.PENDING.value)
-    else:
-        new_summary = ContactSummary(
-            contact_id=contact_id,
-            status=SummaryStatus.PENDING,
-        )
-        await summary_repo.upsert(new_summary)
-
-    # Publish outbox event to trigger async generation
-    summary_event = ContactSummaryRefreshRequested(contact_id=contact_id)
-    await event_publisher.publish(summary_event)
+    await summary_service.request_refresh(contact_id, transaction=connection)
 
     return {"status": "accepted"}
 
@@ -1152,7 +1133,8 @@ async def update_contact_summary(
     request: Request,
     summary_request: ContactSummaryUpdateRequest,
     contact_service: FromDishka[ContactService],
-    summary_repo: FromDishka[ContactSummaryRepository],
+    summary_service: FromDishka[ContactSummaryService],
+    connection: FromDishka[AsyncConnection],
     _user: FromDishka[SessionUser],
 ) -> ContactResponse:
     """
@@ -1161,55 +1143,23 @@ async def update_contact_summary(
     Allows disabling AI generation or setting manual override text.
     Returns the full contact resource with updated summary.
     """
-    from core_shared.models.contacts.entities import ContactSummary, SummaryStatus
-
     base_url = get_request_base_url(request)
 
     contact = await contact_service.get_contact_by_id(contact_id)
     if not contact:
         raise ContactNotFoundError(contact_id)
 
-    update_data = summary_request.data
-
-    existing = await summary_repo.find_by_contact_id(contact_id)
-    if existing is None:
-        existing = ContactSummary(
-            contact_id=contact_id,
-            status=SummaryStatus.PENDING,
-        )
-
-    if update_data.is_disabled is not None:
-        was_disabled = existing.is_disabled
-        existing.is_disabled = update_data.is_disabled
-        if update_data.is_disabled:
-            existing.status = SummaryStatus.DISABLED
-        elif was_disabled:
-            # Re-enabling: reset status so the summary can be refreshed
-            existing.status = (
-                SummaryStatus.GENERATED
-                if existing.is_user_override and existing.user_override_text is not None
-                else SummaryStatus.PENDING
-            )
-
-    if update_data.user_override_text is not None:
-        existing.is_user_override = True
-        existing.user_override_text = update_data.user_override_text
-        if not existing.is_disabled:
-            existing.status = SummaryStatus.GENERATED
-    elif update_data.user_override_text is None and "user_override_text" in (
-        summary_request.data.model_fields_set or set()
-    ):
-        existing.is_user_override = False
-        existing.user_override_text = None
-        # Reset status: if no AI text exists, mark as PENDING for regeneration
-        if not existing.is_disabled:
-            existing.status = (
-                SummaryStatus.GENERATED
-                if existing.summary_text
-                else SummaryStatus.PENDING
-            )
-
-    await summary_repo.upsert(existing)
+    await summary_service.update_summary(
+        contact_id,
+        ContactSummaryUpdate(
+            is_disabled=summary_request.data.is_disabled,
+            user_override_text=summary_request.data.user_override_text,
+            override_text_provided=(
+                "user_override_text" in summary_request.data.model_fields_set
+            ),
+        ),
+        transaction=connection,
+    )
 
     # Re-fetch the contact with updated summary
     updated_contact = await contact_service.get_contact_by_id(contact_id)

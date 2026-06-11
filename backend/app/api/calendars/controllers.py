@@ -19,6 +19,11 @@ from app.api.journals.schemas import (
     CalendarUpdateRequest,
 )
 from app.core.journal.adapters.sql.calendar_repository import CalendarRepository
+from app.core.journal.services.calendar_service import (
+    CalendarInUseError,
+    CalendarPermissionError,
+    CalendarService,
+)
 from app.infrastructure.auth.models import SessionUser
 
 # Default color for calendars (blue)
@@ -77,7 +82,7 @@ async def list_calendars(
 async def create_calendar(
     request: Request,
     calendar_request: CalendarCreateRequest,
-    calendar_repo: FromDishka[CalendarRepository],
+    calendar_service: FromDishka[CalendarService],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> CalendarResponse:
@@ -103,8 +108,10 @@ async def create_calendar(
         google_calendar_id=calendar_request.data.attributes.google_calendar_id,
     )
 
-    # Save calendar
-    created_calendar = await calendar_repo.save(calendar)
+    # Save calendar (committed before the response by the service)
+    created_calendar = await calendar_service.create_calendar(
+        calendar, transaction=connection
+    )
 
     # Convert to resource - use created_calendar to include defaults
     from app.api.journals.schemas import CalendarAttributes
@@ -134,6 +141,8 @@ async def update_calendar(
     request: Request,
     calendar_request: CalendarUpdateRequest,
     calendar_repo: FromDishka[CalendarRepository],
+    calendar_service: FromDishka[CalendarService],
+    connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> CalendarResponse:
     """
@@ -213,8 +222,10 @@ async def update_calendar(
             detail=str(e),
         ) from e
 
-    # Save changes
-    updated_calendar = await calendar_repo.save(calendar)
+    # Save changes (committed before the response by the service)
+    updated_calendar = await calendar_service.update_calendar(
+        calendar, transaction=connection
+    )
 
     # Convert to resource
     calendar_attributes = CalendarAttributes(
@@ -240,6 +251,7 @@ async def update_calendar(
 async def delete_calendar(
     calendar_id: str,
     calendar_repo: FromDishka[CalendarRepository],
+    calendar_service: FromDishka[CalendarService],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> None:
@@ -251,8 +263,9 @@ async def delete_calendar(
 
     Args:
         calendar_id: UUID of the calendar to delete
-        calendar_repo: Calendar repository
-        connection: Database connection (to check if calendar is in use)
+        calendar_repo: Calendar repository (used to load the calendar)
+        calendar_service: Calendar service (owns the delete unit of work)
+        connection: Database connection (passed to the service as the transaction)
         user: Authenticated user
 
     Returns:
@@ -267,7 +280,6 @@ async def delete_calendar(
     from uuid import UUID
 
     from fastapi import HTTPException
-    from sqlalchemy import text
 
     # Convert string ID to UUID
     try:
@@ -286,43 +298,23 @@ async def delete_calendar(
             detail="Calendar not found",
         )
 
-    # Verify the calendar belongs to the user
-    if calendar.user_id != user.id:
+    # Delete the calendar (verifies ownership + in-use, committed before the
+    # response by the service).
+    try:
+        await calendar_service.delete_calendar(
+            calendar,
+            user_id=user.id,
+            transaction=connection,
+        )
+    except CalendarPermissionError as e:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have permission to delete this calendar",
-        )
-
-    # Check if calendar is in use by any journals
-    # This prevents accidental deletion of calendars that are actively being used
-    check_query = text(
-        """
-        SELECT COUNT(*) AS count
-        FROM (
-            SELECT journal_id
-            FROM journal_calendar_info
-            WHERE calendar_id = :calendar_id
-
-            UNION
-
-            SELECT journal_id
-            FROM journal_external_event_links
-            WHERE calendar_id = :calendar_id
-        ) AS linked_journals
-        """
-    )
-    result = await connection.execute(check_query, {"calendar_id": calendar_uuid})
-    row = result.fetchone()
-    usage_count: int = row[0] if row else 0
-
-    if usage_count > 0:
+            detail=str(e),
+        ) from e
+    except CalendarInUseError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Cannot delete calendar '{calendar.name}' because it is used by {usage_count} journal(s). "
-            "Remove the calendar from all journals before deleting it.",
-        )
-
-    # Delete the calendar
-    await calendar_repo.delete(calendar_uuid)
+            detail=str(e),
+        ) from e
 
     return None

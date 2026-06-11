@@ -9,6 +9,7 @@ local time.
 import structlog
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.settings.schemas import (
     UserSettingsAttributes,
@@ -16,7 +17,8 @@ from app.api.settings.schemas import (
     UserSettingsRequest,
     UserSettingsResponse,
 )
-from app.core.settings.models import UserSettings, UserSettingsRepository
+from app.core.settings.models import UserSettingsRepository
+from app.core.settings.services.user_settings_service import UserSettingsService
 from app.core.settings.timezone_utils import DEFAULT_TIMEZONE
 from app.infrastructure.auth.models import SessionUser
 
@@ -63,12 +65,15 @@ async def get_user_settings(
 async def save_user_settings(
     request_data: UserSettingsRequest,
     user: FromDishka[SessionUser],
-    repository: FromDishka[UserSettingsRepository],
+    service: FromDishka[UserSettingsService],
+    connection: FromDishka[AsyncConnection],
 ) -> UserSettingsResponse:
     """Create or update the authenticated user's settings (upsert)."""
     try:
-        saved = await repository.save(
-            UserSettings(user_id=str(user.id), timezone=request_data.timezone)
+        saved = await service.save_settings(
+            user_id=str(user.id),
+            timezone=request_data.timezone,
+            transaction=connection,
         )
 
         logger.info(
