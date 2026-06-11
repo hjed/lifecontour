@@ -16,7 +16,10 @@ from app.core.contacts.services import (
     ContactService,
     TagService,
 )
+from app.core.journal.services.calendar_service import CalendarService
 from app.core.journal.services.daily_summary_service import DailySummaryService
+from app.core.journal.services.journal_contact_service import JournalContactService
+from app.core.journal.services.review_item_service import ReviewItemService
 from app.infrastructure.auth.immich_token_service import ImmichTokenService
 from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
@@ -179,6 +182,21 @@ async def get_contact_relationship_service() -> ContactRelationshipService:
 async def get_daily_summary_service() -> DailySummaryService:
     """Resolve the daily summary service for the current MCP request."""
     return cast(DailySummaryService, await _resolve_dependency(DailySummaryService))
+
+
+async def get_calendar_service() -> CalendarService:
+    """Resolve the calendar service for the current MCP request."""
+    return cast(CalendarService, await _resolve_dependency(CalendarService))
+
+
+async def get_review_item_service() -> ReviewItemService:
+    """Resolve the review item service for the current MCP request."""
+    return cast(ReviewItemService, await _resolve_dependency(ReviewItemService))
+
+
+async def get_journal_contact_service() -> JournalContactService:
+    """Resolve the journal contact service for the current MCP request."""
+    return cast(JournalContactService, await _resolve_dependency(JournalContactService))
 
 
 async def get_integration_registry_service() -> Any:

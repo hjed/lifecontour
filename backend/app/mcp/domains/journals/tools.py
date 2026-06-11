@@ -109,11 +109,15 @@ from app.core.journal.adapters.sql.review_item_repository import SqlReviewItemRe
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRepository
 from app.core.journal.models.journal_tag import JournalTag
+from app.core.journal.services.calendar_service import CalendarService
 from app.core.journal.services.daily_summary_service import DailySummaryService
 from app.core.journal.services.hierarchy_service import HierarchyNode, HierarchyService
+from app.core.journal.services.journal_contact_service import JournalContactService
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_service import JournalService
+from app.core.journal.services.review_item_service import ReviewItemService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+from app.infrastructure.unit_of_work import savepoint, unit_of_work
 from app.mcp.domains.journals.converters import (
     ActivityTemplateMCPConverter,
     GearItemMCPConverter,
@@ -146,9 +150,12 @@ from app.mcp.domains.journals.schemas import (
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
     get_async_connection,
+    get_calendar_service,
     get_current_user_id,
     get_daily_summary_service,
+    get_journal_contact_service,
     get_outbox_event_publisher,
+    get_review_item_service,
     mcp_depends,
 )
 from app.mcp.shared.response_builders import MCPResponseBuilder
@@ -2062,7 +2069,7 @@ async def _persist_contact_relationships(
             status=status,
             role=role,
         )
-        async with db_connection.begin_nested():
+        async with savepoint(db_connection):
             await contact_relationship_repo.create(relationship)
 
 
@@ -2086,7 +2093,7 @@ async def _persist_tags(
         db_connection: Database connection for savepoint management
     """
     for tag_name in tags:
-        async with db_connection.begin_nested():
+        async with savepoint(db_connection):
             # Find or create tag by name
             all_tags = await tag_repo.get_all()
             tag: JournalTag | None = next(
@@ -2473,90 +2480,93 @@ async def create_journal_entry(
         parent_id=request.parent_id,
     )
 
-    # Create journal
-    created_journal = await journal_service.create_journal(
-        journal, db_connection, changed_by="mcp", source=Provenance.MCP
-    )
-
-    # Ensure journal_id is not None (it should always be set after creation)
-    if created_journal.id is None:
-        msg = "Journal ID should be set after creation"
-        raise ValueError(msg)
-    journal_id = created_journal.id
-
-    # Add types if provided in the request (already validated upfront)
-    if request.types:
-        for type_str in request.types:
-            journal_type = JournalType[type_str.upper()]
-
-            # Capture the return value: includes all types added (requested +
-            # auto-resolved dependencies like FITNESS for OUTDOOR_ACTIVITY).
-            added_types = await journal_service.add_type_to_journal(
-                journal_id,
-                journal_type,
-                db_connection,
-                changed_by="mcp",
-                source=Provenance.MCP,
-            )
-
-            # Create type-specific data rows for ALL added types (including
-            # dependency types like FITNESS). Mirrors REST controller behaviour.
-            for added_type in added_types:
-                await _create_type_specific_data(
-                    added_type,
-                    journal_id,
-                    repos.mood_data_repo,
-                    repos.plan_data_repo,
-                    repos.travel_data_repo,
-                    repos.fitness_data_repo,
-                    repos.outdoor_activity_data_repo,
-                    repos.bushwalking_data_repo,
-                    repos.jogging_data_repo,
-                    repos.abseiling_data_repo,
-                    repos.canyoning_data_repo,
-                    repos.caving_data_repo,
-                    repos.climbing_data_repo,
-                    repos.kayaking_data_repo,
-                    repos.cross_country_skiing_data_repo,
-                    repos.gear_maintenance_data_repo,
-                    repos.gear_usage_data_repo,
-                )
-
-            # Update type-specific data if provided
-            if request.type_data and type_str.upper() in request.type_data:
-                await _update_type_specific_data(
-                    journal_type,
-                    journal_id,
-                    request.type_data[type_str.upper()],
-                    repos.calendar_info_repo,
-                    repos.mood_data_repo,
-                    repos.photo_album_data_repo,
-                    repos.fitness_data_repo,
-                    repos.outdoor_activity_data_repo,
-                    repos.bushwalking_data_repo,
-                    repos.jogging_data_repo,
-                    repos.abseiling_data_repo,
-                    repos.canyoning_data_repo,
-                    repos.caving_data_repo,
-                    repos.climbing_data_repo,
-                    repos.kayaking_data_repo,
-                    repos.cross_country_skiing_data_repo,
-                    repos.gear_maintenance_data_repo,
-                    repos.gear_usage_data_repo,
-                )
-
-    # Add contact relationships if provided
-    if request.contact_relationships:
-        await _persist_contact_relationships(
-            journal_id,
-            request.contact_relationships,
-            repos.contact_relationship_repo,
-            db_connection,
+    # Create journal and all associated data atomically, committing before the
+    # response is returned (issue #945). unit_of_work is re-entrant, so the
+    # already-@transactional service calls below join this single unit of work.
+    async with unit_of_work(db_connection):
+        created_journal = await journal_service.create_journal(
+            journal, db_connection, changed_by="mcp", source=Provenance.MCP
         )
 
-    # Add tags if provided
-    if request.tags:
-        await _persist_tags(journal_id, request.tags, repos.tag_repo, db_connection)
+        # Ensure journal_id is not None (it should always be set after creation)
+        if created_journal.id is None:
+            msg = "Journal ID should be set after creation"
+            raise ValueError(msg)
+        journal_id = created_journal.id
+
+        # Add types if provided in the request (already validated upfront)
+        if request.types:
+            for type_str in request.types:
+                journal_type = JournalType[type_str.upper()]
+
+                # Capture the return value: includes all types added (requested +
+                # auto-resolved dependencies like FITNESS for OUTDOOR_ACTIVITY).
+                added_types = await journal_service.add_type_to_journal(
+                    journal_id,
+                    journal_type,
+                    db_connection,
+                    changed_by="mcp",
+                    source=Provenance.MCP,
+                )
+
+                # Create type-specific data rows for ALL added types (including
+                # dependency types like FITNESS). Mirrors REST controller behaviour.
+                for added_type in added_types:
+                    await _create_type_specific_data(
+                        added_type,
+                        journal_id,
+                        repos.mood_data_repo,
+                        repos.plan_data_repo,
+                        repos.travel_data_repo,
+                        repos.fitness_data_repo,
+                        repos.outdoor_activity_data_repo,
+                        repos.bushwalking_data_repo,
+                        repos.jogging_data_repo,
+                        repos.abseiling_data_repo,
+                        repos.canyoning_data_repo,
+                        repos.caving_data_repo,
+                        repos.climbing_data_repo,
+                        repos.kayaking_data_repo,
+                        repos.cross_country_skiing_data_repo,
+                        repos.gear_maintenance_data_repo,
+                        repos.gear_usage_data_repo,
+                    )
+
+                # Update type-specific data if provided
+                if request.type_data and type_str.upper() in request.type_data:
+                    await _update_type_specific_data(
+                        journal_type,
+                        journal_id,
+                        request.type_data[type_str.upper()],
+                        repos.calendar_info_repo,
+                        repos.mood_data_repo,
+                        repos.photo_album_data_repo,
+                        repos.fitness_data_repo,
+                        repos.outdoor_activity_data_repo,
+                        repos.bushwalking_data_repo,
+                        repos.jogging_data_repo,
+                        repos.abseiling_data_repo,
+                        repos.canyoning_data_repo,
+                        repos.caving_data_repo,
+                        repos.climbing_data_repo,
+                        repos.kayaking_data_repo,
+                        repos.cross_country_skiing_data_repo,
+                        repos.gear_maintenance_data_repo,
+                        repos.gear_usage_data_repo,
+                    )
+
+        # Add contact relationships if provided
+        if request.contact_relationships:
+            await _persist_contact_relationships(
+                journal_id,
+                request.contact_relationships,
+                repos.contact_relationship_repo,
+                db_connection,
+            )
+
+        # Add tags if provided
+        if request.tags:
+            await _persist_tags(journal_id, request.tags, repos.tag_repo, db_connection)
 
     # Fetch all enrichment data
     types, type_data, contacts, tags = await _fetch_enrichment_data(
@@ -2690,89 +2700,116 @@ async def update_journal_entry(
         existing_journal.parent_id = request.parent_id
         changed_fields["parent_id"] = request.parent_id
 
-    # Update journal
-    updated_journal = await journal_service.update_journal(
-        existing_journal,
-        changed_fields,
-        db_connection,
-        changed_by="mcp",
-        source=Provenance.MCP,
-    )
-
-    # Update types if provided (replace all types, already validated upfront)
-    if request.types is not None:
-        # Get current types
-        current_types, _ = await _fetch_journal_types_and_data(
-            journal_id,
-            repos.calendar_info_repo,
-            repos.mood_data_repo,
-            repos.plan_data_repo,
-            repos.travel_data_repo,
-            repos.photo_album_data_repo,
-            repos.fitness_data_repo,
-            repos.outdoor_activity_data_repo,
-            repos.bushwalking_data_repo,
-            repos.jogging_data_repo,
-            repos.abseiling_data_repo,
-            repos.canyoning_data_repo,
-            repos.caving_data_repo,
-            repos.climbing_data_repo,
-            repos.kayaking_data_repo,
-            repos.cross_country_skiing_data_repo,
-            repos.gear_maintenance_data_repo,
-            repos.gear_usage_data_repo,
+    # Apply all updates atomically, committing before the response is returned
+    # (issue #945). unit_of_work is re-entrant, so the already-@transactional
+    # service calls below join this single unit of work.
+    async with unit_of_work(db_connection):
+        # Update journal
+        updated_journal = await journal_service.update_journal(
+            existing_journal,
+            changed_fields,
+            db_connection,
+            changed_by="mcp",
+            source=Provenance.MCP,
         )
 
-        # Remove types that are not in the new list
-        for current_type_str in current_types:
-            if current_type_str not in [t.upper() for t in request.types]:
-                current_type = JournalType[current_type_str.upper()]
-                await journal_service.remove_type_from_journal(
-                    journal_id,
-                    current_type,
-                    db_connection,
-                    changed_by="mcp",
-                    source=Provenance.MCP,
-                )
+        # Update types if provided (replace all types, already validated upfront)
+        if request.types is not None:
+            # Get current types
+            current_types, _ = await _fetch_journal_types_and_data(
+                journal_id,
+                repos.calendar_info_repo,
+                repos.mood_data_repo,
+                repos.plan_data_repo,
+                repos.travel_data_repo,
+                repos.photo_album_data_repo,
+                repos.fitness_data_repo,
+                repos.outdoor_activity_data_repo,
+                repos.bushwalking_data_repo,
+                repos.jogging_data_repo,
+                repos.abseiling_data_repo,
+                repos.canyoning_data_repo,
+                repos.caving_data_repo,
+                repos.climbing_data_repo,
+                repos.kayaking_data_repo,
+                repos.cross_country_skiing_data_repo,
+                repos.gear_maintenance_data_repo,
+                repos.gear_usage_data_repo,
+            )
 
-        # Add new types
-        for type_str in request.types:
-            journal_type = JournalType[type_str.upper()]
+            # Remove types that are not in the new list
+            for current_type_str in current_types:
+                if current_type_str not in [t.upper() for t in request.types]:
+                    current_type = JournalType[current_type_str.upper()]
+                    await journal_service.remove_type_from_journal(
+                        journal_id,
+                        current_type,
+                        db_connection,
+                        changed_by="mcp",
+                        source=Provenance.MCP,
+                    )
 
-            # Only add if not already present
-            if type_str.upper() not in current_types:
-                if type_str.upper() in ("GEAR_MAINTENANCE", "GEAR_USAGE"):
-                    # ensure type_data is provided and is not falsy
-                    has_data = False
-                    if request.type_data:
-                        for k, v in request.type_data.items():
-                            if k.upper() == type_str.upper() and v:
-                                has_data = True
-                                break
-                    if not has_data:
-                        raise ValueError(
-                            f"Type {type_str.upper()} requires corresponding non-empty type_data to be provided when adding the type"
+            # Add new types
+            for type_str in request.types:
+                journal_type = JournalType[type_str.upper()]
+
+                # Only add if not already present
+                if type_str.upper() not in current_types:
+                    if type_str.upper() in ("GEAR_MAINTENANCE", "GEAR_USAGE"):
+                        # ensure type_data is provided and is not falsy
+                        has_data = False
+                        if request.type_data:
+                            for k, v in request.type_data.items():
+                                if k.upper() == type_str.upper() and v:
+                                    has_data = True
+                                    break
+                        if not has_data:
+                            raise ValueError(
+                                f"Type {type_str.upper()} requires corresponding non-empty type_data to be provided when adding the type"
+                            )
+
+                    # Capture the return value: includes all types added (requested +
+                    # auto-resolved dependencies like FITNESS for OUTDOOR_ACTIVITY).
+                    added_types = await journal_service.add_type_to_journal(
+                        journal_id,
+                        journal_type,
+                        db_connection,
+                        changed_by="mcp",
+                        source=Provenance.MCP,
+                    )
+
+                    # Create type-specific data rows for ALL added types (including
+                    # dependency types like FITNESS). Mirrors REST controller behaviour.
+                    for added_type in added_types:
+                        await _create_type_specific_data(
+                            added_type,
+                            journal_id,
+                            repos.mood_data_repo,
+                            repos.plan_data_repo,
+                            repos.travel_data_repo,
+                            repos.fitness_data_repo,
+                            repos.outdoor_activity_data_repo,
+                            repos.bushwalking_data_repo,
+                            repos.jogging_data_repo,
+                            repos.abseiling_data_repo,
+                            repos.canyoning_data_repo,
+                            repos.caving_data_repo,
+                            repos.climbing_data_repo,
+                            repos.kayaking_data_repo,
+                            repos.cross_country_skiing_data_repo,
+                            repos.gear_maintenance_data_repo,
+                            repos.gear_usage_data_repo,
                         )
 
-                # Capture the return value: includes all types added (requested +
-                # auto-resolved dependencies like FITNESS for OUTDOOR_ACTIVITY).
-                added_types = await journal_service.add_type_to_journal(
-                    journal_id,
-                    journal_type,
-                    db_connection,
-                    changed_by="mcp",
-                    source=Provenance.MCP,
-                )
-
-                # Create type-specific data rows for ALL added types (including
-                # dependency types like FITNESS). Mirrors REST controller behaviour.
-                for added_type in added_types:
-                    await _create_type_specific_data(
-                        added_type,
+                # Update type-specific data if provided
+                if request.type_data and type_str.upper() in request.type_data:
+                    await _update_type_specific_data(
+                        journal_type,
                         journal_id,
+                        request.type_data[type_str.upper()],
+                        repos.calendar_info_repo,
                         repos.mood_data_repo,
-                        repos.plan_data_repo,
-                        repos.travel_data_repo,
+                        repos.photo_album_data_repo,
                         repos.fitness_data_repo,
                         repos.outdoor_activity_data_repo,
                         repos.bushwalking_data_repo,
@@ -2787,12 +2824,14 @@ async def update_journal_entry(
                         repos.gear_usage_data_repo,
                     )
 
-            # Update type-specific data if provided
-            if request.type_data and type_str.upper() in request.type_data:
+        # Update type_data if provided (without changing types, already validated upfront)
+        elif request.type_data is not None:
+            for type_str, type_data_dict in request.type_data.items():
+                journal_type = JournalType[type_str.upper()]
                 await _update_type_specific_data(
                     journal_type,
                     journal_id,
-                    request.type_data[type_str.upper()],
+                    type_data_dict,
                     repos.calendar_info_repo,
                     repos.mood_data_repo,
                     repos.photo_album_data_repo,
@@ -2810,60 +2849,35 @@ async def update_journal_entry(
                     repos.gear_usage_data_repo,
                 )
 
-    # Update type_data if provided (without changing types, already validated upfront)
-    elif request.type_data is not None:
-        for type_str, type_data_dict in request.type_data.items():
-            journal_type = JournalType[type_str.upper()]
-            await _update_type_specific_data(
-                journal_type,
+        # Update contact relationships if provided (replace all relationships)
+        if request.contact_relationships is not None:
+            # Remove all existing relationships
+            existing_relationships = (
+                await repos.contact_relationship_repo.get_by_journal(journal_id)
+            )
+            for rel in existing_relationships:
+                await repos.contact_relationship_repo.delete(
+                    journal_id, rel.contact_id, rel.relationship_type
+                )
+
+            # Add new relationships
+            await _persist_contact_relationships(
                 journal_id,
-                type_data_dict,
-                repos.calendar_info_repo,
-                repos.mood_data_repo,
-                repos.photo_album_data_repo,
-                repos.fitness_data_repo,
-                repos.outdoor_activity_data_repo,
-                repos.bushwalking_data_repo,
-                repos.jogging_data_repo,
-                repos.abseiling_data_repo,
-                repos.canyoning_data_repo,
-                repos.caving_data_repo,
-                repos.climbing_data_repo,
-                repos.kayaking_data_repo,
-                repos.cross_country_skiing_data_repo,
-                repos.gear_maintenance_data_repo,
-                repos.gear_usage_data_repo,
+                request.contact_relationships,
+                repos.contact_relationship_repo,
+                db_connection,
             )
 
-    # Update contact relationships if provided (replace all relationships)
-    if request.contact_relationships is not None:
-        # Remove all existing relationships
-        existing_relationships = await repos.contact_relationship_repo.get_by_journal(
-            journal_id
-        )
-        for rel in existing_relationships:
-            await repos.contact_relationship_repo.delete(
-                journal_id, rel.contact_id, rel.relationship_type
-            )
+        # Update tags if provided (replace all tags)
+        if request.tags is not None:
+            # Remove all existing tags
+            existing_tags = await repos.tag_repo.get_tags_for_journal(journal_id)
+            for existing_tag in existing_tags:
+                if existing_tag.id is not None:
+                    await repos.tag_repo.remove_tag(journal_id, existing_tag.id)
 
-        # Add new relationships
-        await _persist_contact_relationships(
-            journal_id,
-            request.contact_relationships,
-            repos.contact_relationship_repo,
-            db_connection,
-        )
-
-    # Update tags if provided (replace all tags)
-    if request.tags is not None:
-        # Remove all existing tags
-        existing_tags = await repos.tag_repo.get_tags_for_journal(journal_id)
-        for existing_tag in existing_tags:
-            if existing_tag.id is not None:
-                await repos.tag_repo.remove_tag(journal_id, existing_tag.id)
-
-        # Add new tags
-        await _persist_tags(journal_id, request.tags, repos.tag_repo, db_connection)
+            # Add new tags
+            await _persist_tags(journal_id, request.tags, repos.tag_repo, db_connection)
 
     # Fetch all enrichment data
     types, type_data, contacts, tags = await _fetch_enrichment_data(
@@ -3708,6 +3722,9 @@ async def link_journal_to_contact(
         Field(description="Event role: ORGANISER, FACILITATOR_HELPER"),
     ] = None,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    journal_contact_service: JournalContactService = mcp_depends(
+        get_journal_contact_service
+    ),
 ) -> str:
     """
     Link a journal to a contact with a specific relationship type.
@@ -3772,7 +3789,9 @@ async def link_journal_to_contact(
     import sqlalchemy.exc
 
     try:
-        await repos.contact_relationship_repo.create(rel)
+        await journal_contact_service.add_contact_to_journal(
+            rel, transaction=db_connection
+        )
     except sqlalchemy.exc.IntegrityError as e:
         raise ValueError("Relationship already exists") from e
 
@@ -3844,12 +3863,12 @@ async def create_calendar(
         str | None, Field(description="Calendar color hex code", default=None)
     ] = None,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    calendar_service: CalendarService = mcp_depends(get_calendar_service),
 ) -> str:
     """
     Create a new calendar to be used with EVENT journals.
     """
     user_id = await get_current_user_id()
-    calendar_repo = SqlCalendarRepository(db_connection)
 
     new_calendar = Calendar(
         user_id=user_id,
@@ -3860,7 +3879,9 @@ async def create_calendar(
         google_calendar_id=None,
     )
 
-    saved_calendar = await calendar_repo.save(new_calendar)
+    saved_calendar = await calendar_service.create_calendar(
+        new_calendar, transaction=db_connection
+    )
 
     class CalendarResponse(BaseModel):
         id: str
@@ -3889,6 +3910,7 @@ async def update_calendar(
         str | None, Field(description="Calendar color hex code", default=None)
     ] = None,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    calendar_service: CalendarService = mcp_depends(get_calendar_service),
 ) -> str:
     """
     Update an existing calendar.
@@ -3911,7 +3933,9 @@ async def update_calendar(
     if color is not None:
         calendar.color = color
 
-    saved_calendar = await calendar_repo.save(calendar)
+    saved_calendar = await calendar_service.update_calendar(
+        calendar, transaction=db_connection
+    )
 
     class CalendarResponse(BaseModel):
         id: str
@@ -3931,6 +3955,7 @@ async def update_calendar(
 async def delete_calendar(
     calendar_id: Annotated[str, Field(description="Calendar UUID")],
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    calendar_service: CalendarService = mcp_depends(get_calendar_service),
 ) -> str:
     """
     Delete a calendar. Will fail if the calendar is in use.
@@ -3963,7 +3988,9 @@ async def delete_calendar(
         )
 
     if calendar.id is not None:
-        await calendar_repo.delete(calendar.id)
+        await calendar_service.delete_calendar(
+            calendar, user_id, transaction=db_connection
+        )
 
     class DeleteCalendarResponse(BaseModel):
         summary: str
@@ -4464,6 +4491,7 @@ async def dismiss_review_item(
     item_id: int,
     user_id_override: str | None = None,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    review_item_service: ReviewItemService = mcp_depends(get_review_item_service),
 ) -> str:
     """
     Dismiss a journal review item.
@@ -4473,12 +4501,8 @@ async def dismiss_review_item(
     """
     user_id = user_id_override or "dev-system-user"
 
-    review_item_repo = SqlReviewItemRepository(db_connection)
-
-    item = await review_item_repo.update_status(
-        review_item_id=item_id,
-        new_status="dismissed",
-        user_id=user_id,
+    item = await review_item_service.dismiss(
+        item_id, user_id, transaction=db_connection
     )
 
     if not item:
@@ -4498,6 +4522,7 @@ async def dismiss_review_item(
 async def get_daily_summary(
     summary_date: str,
     daily_summary_service: DailySummaryService = mcp_depends(get_daily_summary_service),
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
 ) -> str:
     """Get the AI-generated daily summary for a specific date.
 
@@ -4513,7 +4538,11 @@ async def get_daily_summary(
 
     user_id = await get_current_user_id()
 
-    result = await daily_summary_service.get_or_generate(user_id, parsed_date)
+    # get_or_generate may persist a new/updated summary; commit it before the
+    # response is returned (issue #945). The service shares this request's
+    # connection, so wrapping the call here is the single commit boundary.
+    async with unit_of_work(db_connection):
+        result = await daily_summary_service.get_or_generate(user_id, parsed_date)
 
     if result is None:
         return json.dumps({"data": None})
@@ -4620,7 +4649,8 @@ async def create_template(
         pitches=pitch_entities,
     )
 
-    saved_template = await repos.activity_template_repo.save(template)
+    async with unit_of_work(db_connection):
+        saved_template = await repos.activity_template_repo.save(template)
 
     response = ActivityTemplateMCPConverter.to_mcp_response(saved_template)
     return MCPResponseBuilder.success_response(response)
@@ -4777,7 +4807,8 @@ async def update_template(
         except Exception as e:  # noqa: BLE001
             return MCPResponseBuilder.validation_error_response("template", str(e))
 
-        saved_template = await repos.activity_template_repo.save(template)
+        async with unit_of_work(db_connection):
+            saved_template = await repos.activity_template_repo.save(template)
 
         response = ActivityTemplateMCPConverter.to_mcp_response(saved_template)
         return MCPResponseBuilder.success_response(response)
@@ -4828,7 +4859,8 @@ async def create_gear_item(
         manufacturer=manufacturer,
     )
 
-    saved_item = await repos.gear_item_repo.save(item)
+    async with unit_of_work(db_connection):
+        saved_item = await repos.gear_item_repo.save(item)
 
     response = GearItemMCPConverter.to_mcp_response(saved_item)
     return MCPResponseBuilder.success_response(response)
@@ -4953,7 +4985,8 @@ async def update_gear_item(
     except Exception as e:  # noqa: BLE001
         return MCPResponseBuilder.validation_error_response("gear_item", str(e))
 
-    saved_item = await repos.gear_item_repo.save(item)
+    async with unit_of_work(db_connection):
+        saved_item = await repos.gear_item_repo.save(item)
 
     response = GearItemMCPConverter.to_mcp_response(saved_item)
     return MCPResponseBuilder.success_response(response)

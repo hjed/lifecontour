@@ -31,6 +31,24 @@ class ReviewItemService:
         self.journal_merge_service = journal_merge_service
 
     @transactional
+    async def dismiss(
+        self,
+        item_id: int,
+        user_id: str,
+        transaction: AsyncConnection,
+    ) -> ReviewItem | None:
+        """Dismiss a review item as a committed unit of work.
+
+        Returns the updated review item, or ``None`` if no item with the given
+        id exists.
+        """
+        return await self.review_item_repo.update_status(
+            review_item_id=item_id,
+            new_status="dismissed",
+            user_id=user_id,
+        )
+
+    @transactional
     async def create_review_item(
         self,
         review_item: ReviewItem,
