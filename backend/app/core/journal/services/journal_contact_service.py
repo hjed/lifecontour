@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.contacts.models.events import ContactSummaryRefreshRequested
 from app.core.journal.models.repositories import JournalContactRelationshipRepository
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+from app.infrastructure.unit_of_work import transactional
 
 logger = structlog.get_logger()
 
@@ -39,6 +40,7 @@ class JournalContactService:
         self.contact_relationship_repo = contact_relationship_repo
         self.event_publisher = event_publisher
 
+    @transactional
     async def add_contact_to_journal(
         self, relationship: JournalContactRelationship, transaction: AsyncConnection
     ) -> JournalContactRelationship:
@@ -53,6 +55,7 @@ class JournalContactService:
         )
         return created
 
+    @transactional
     async def remove_contact_from_journal(
         self,
         journal_id: int,
@@ -74,6 +77,7 @@ class JournalContactService:
             ContactSummaryRefreshRequested(contact_id, transaction=transaction)
         )
 
+    @transactional
     async def update_attributes(
         self,
         journal_id: int,

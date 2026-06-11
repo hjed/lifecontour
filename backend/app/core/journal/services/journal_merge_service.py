@@ -18,6 +18,7 @@ from app.core.journal.models.events import (
 )
 from app.core.journal.models.repositories import JournalRepository
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+from app.infrastructure.unit_of_work import transactional
 
 logger = structlog.get_logger(__name__)
 
@@ -58,6 +59,7 @@ class JournalMergeService:
 
         return False
 
+    @transactional
     async def merge_journals(
         self,
         target_id: int,

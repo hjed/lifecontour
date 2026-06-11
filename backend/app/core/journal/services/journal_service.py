@@ -30,6 +30,7 @@ from app.core.journal.models.repositories import (
     JournalRepository,
 )
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+from app.infrastructure.unit_of_work import transactional
 
 logger = structlog.get_logger()
 
@@ -63,6 +64,7 @@ class JournalService:
         self.event_publisher = event_publisher
         self.contact_relationship_repo = contact_relationship_repo
 
+    @transactional
     async def create_journal(
         self,
         journal: Journal,
@@ -128,6 +130,7 @@ class JournalService:
 
         return saved_journal
 
+    @transactional
     async def update_journal(
         self,
         journal: Journal,
@@ -206,6 +209,7 @@ class JournalService:
 
         return saved_journal
 
+    @transactional
     async def delete_journal(
         self,
         journal_id: int,
@@ -484,6 +488,7 @@ class JournalService:
                     parent_id=parent_id,
                 )
 
+    @transactional
     async def add_type_to_journal(
         self,
         journal_id: int,
@@ -562,6 +567,7 @@ class JournalService:
 
         return types_to_add
 
+    @transactional
     async def remove_type_from_journal(
         self,
         journal_id: int,
