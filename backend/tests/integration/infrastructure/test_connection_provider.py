@@ -8,6 +8,9 @@ request start) broke repositories that assert ``conn.in_transaction()``, e.g.
 (whose fixture begins a transaction) still passed.
 """
 
+from contextlib import suppress
+from uuid import uuid4
+
 import pytest
 from sqlalchemy import text
 
@@ -56,20 +59,25 @@ async def test_teardown_discards_uncommitted_write(test_settings) -> None:
     """
     provider = DatabaseProvider(test_settings)
     engine = provider.get_engine()
-    table = "conn_provider_uncommitted_write_test"
+    # Unique per run so parallel/xdist execution can't race on the same table.
+    table = f"conn_provider_uncommitted_write_test_{uuid4().hex}"
     try:
         # Arrange: a throwaway table, created and committed out of band.
         async with engine.begin() as setup:
-            await setup.execute(text(f"DROP TABLE IF EXISTS {table}"))
             await setup.execute(text(f"CREATE TABLE {table} (id integer)"))
 
         # Act: write a row through a provider connection WITHOUT a unit of work,
-        # then drive teardown.
+        # then drive teardown. The teardown runs in a finally so that even if the
+        # INSERT raises, the generator is always driven to completion and the
+        # connection/transaction is released (otherwise cleanup would deadlock on
+        # the open write lock).
         it = aiter(provider.get_connection(engine))
         conn = await anext(it)
-        await conn.execute(text(f"INSERT INTO {table} (id) VALUES (1)"))
-        with pytest.raises(StopAsyncIteration):
-            await anext(it)  # teardown closes/rolls back; it commits nothing
+        try:
+            await conn.execute(text(f"INSERT INTO {table} (id) VALUES (1)"))
+        finally:
+            with suppress(StopAsyncIteration):
+                await anext(it)  # teardown closes/rolls back; it commits nothing
 
         # Assert: the write was discarded, not persisted.
         async with engine.connect() as check:
