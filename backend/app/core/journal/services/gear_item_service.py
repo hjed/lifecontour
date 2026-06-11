@@ -6,6 +6,7 @@ ownership in the service layer rather than the controller. The update path also
 publishes a ``GearItemUpdated`` event inside the same unit of work.
 """
 
+from datetime import date, datetime
 from typing import Any
 
 from core_shared.models.history import Provenance
@@ -16,6 +17,16 @@ from app.core.journal.models.events import GearItemUpdated
 from app.core.journal.models.repositories import GearItemRepository
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.unit_of_work import transactional
+
+# Fields whose changes are tracked in the GearItemUpdated event.
+_TRACKED_FIELDS = ("name", "model", "serial_number", "purchase_date", "manufacturer")
+
+
+def _to_event_value(value: Any) -> Any:
+    """Serialize a field value for the ``(old, new)`` changed-fields payload."""
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    return value
 
 
 class GearItemService:
@@ -45,32 +56,45 @@ class GearItemService:
     async def update(
         self,
         gear_item: GearItem,
-        changed_fields: dict[str, Any],
         transaction: AsyncConnection,
+        *,
+        changed_by: str = "ui",
+        source: Provenance = Provenance.UI,
     ) -> GearItem:
         """Persist changes to a gear item and publish a ``GearItemUpdated`` event.
 
-        The caller loads the gear item, applies the requested changes, runs domain
-        validation, and computes ``changed_fields`` before calling this method.
+        The caller loads the gear item, applies the requested changes and runs
+        domain validation. The changed-fields diff is computed **here**, inside
+        the unit of work, against the persisted state — so the event payload
+        always reflects what was actually saved (per the service-layer
+        changed-fields guideline) rather than depending on each call site.
 
         Args:
             gear_item: The mutated gear item to persist (must have an id).
-            changed_fields: Map of field name to ``(old, new)`` for the event;
-                when empty, no event is published.
             transaction: Request connection; the write commits before the response.
+            changed_by: Who/what made the change (event provenance).
+            source: Provenance of the change.
         """
+        existing = await self.gear_item_repo.find_by_id(str(gear_item.id))
         updated = await self.gear_item_repo.save(gear_item)
+
+        changed_fields: dict[str, Any] = {}
+        if existing is not None:
+            for field in _TRACKED_FIELDS:
+                old_val = _to_event_value(getattr(existing, field, None))
+                new_val = _to_event_value(getattr(updated, field, None))
+                if old_val != new_val:
+                    changed_fields[field] = (old_val, new_val)
 
         if changed_fields:
             # A plain gear edit is not scoped to a single journal (gear is shared
             # across journals), so journal_id is left unset and the history
-            # projection skips it. Provenance is still carried for any future
-            # journal-scoped gear edit path.
+            # projection skips it.
             event = GearItemUpdated(
                 gear_item_id=str(updated.id),
                 changed_fields=changed_fields,
-                source=Provenance.UI,
-                changed_by="ui",
+                source=source,
+                changed_by=changed_by,
                 transaction=transaction,
             )
             await self.event_publisher.publish(event)

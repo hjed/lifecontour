@@ -52,22 +52,39 @@ class TestCreate:
         mock_repo.save.assert_awaited_once_with(gear_item)
 
 
+def _gear(**fields: Any) -> MagicMock:
+    """A gear-item mock with explicit tracked-field values."""
+    item = MagicMock()
+    defaults = {
+        "name": "Tent",
+        "model": "X1",
+        "serial_number": "SN1",
+        "purchase_date": None,
+        "manufacturer": "Acme",
+    }
+    defaults.update(fields)
+    for k, v in defaults.items():
+        setattr(item, k, v)
+    return item
+
+
 class TestUpdate:
     """Test the update unit of work."""
 
     @pytest.mark.asyncio
-    async def test_update_publishes_event_when_changed(
+    async def test_update_publishes_event_with_computed_diff(
         self, service, mock_repo, mock_publisher, mock_transaction
     ):
-        """update saves and publishes a GearItemUpdated event when fields changed."""
+        """update computes changed_fields against the persisted state and emits it."""
         gear_item = MagicMock()
-        saved = MagicMock()
+        existing = _gear(name="Old Tent")
+        saved = _gear(name="New Tent")
         saved.id = uuid4()
+        mock_repo.find_by_id.return_value = existing
         mock_repo.save.return_value = saved
-        changed_fields: dict[str, Any] = {"name": ("old", "new")}
 
         result = await service.update(
-            gear_item, changed_fields=changed_fields, transaction=mock_transaction
+            gear_item, transaction=mock_transaction, changed_by="mcp"
         )
 
         assert result is saved
@@ -75,21 +92,23 @@ class TestUpdate:
         mock_publisher.publish.assert_awaited_once()
         event = mock_publisher.publish.await_args.args[0]
         assert isinstance(event, GearItemUpdated)
+        # diff computed in the service, not supplied by the caller
+        assert event.event_data["changed_fields"] == {"name": ("Old Tent", "New Tent")}
+        assert event.event_data["changed_by"] == "mcp"
 
     @pytest.mark.asyncio
-    async def test_update_skips_event_when_no_changes(
+    async def test_update_skips_event_when_nothing_changed(
         self, service, mock_repo, mock_publisher, mock_transaction
     ):
-        """update saves but publishes no event when changed_fields is empty."""
+        """update saves but publishes no event when no tracked field changed."""
         gear_item = MagicMock()
-        saved = MagicMock()
+        existing = _gear()
+        saved = _gear()
         saved.id = uuid4()
+        mock_repo.find_by_id.return_value = existing
         mock_repo.save.return_value = saved
-        changed_fields: dict[str, Any] = {}
 
-        result = await service.update(
-            gear_item, changed_fields=changed_fields, transaction=mock_transaction
-        )
+        result = await service.update(gear_item, transaction=mock_transaction)
 
         assert result is saved
         mock_repo.save.assert_awaited_once_with(gear_item)

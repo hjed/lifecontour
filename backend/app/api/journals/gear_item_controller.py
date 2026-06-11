@@ -124,11 +124,6 @@ async def update_gear_item(
     attrs = request.data.attributes
     set_fields = attrs.model_fields_set
 
-    # Capture old values
-    old_values = {}
-    for field in set_fields:
-        old_values[field] = getattr(item, field)
-
     if "name" in set_fields:
         if attrs.name is None:
             raise HTTPException(
@@ -153,24 +148,7 @@ async def update_gear_item(
             detail=str(e),
         ) from e
 
-    changed_fields = {}
-    if set_fields:
-        for field in set_fields:
-            old_val = old_values[field]
-            new_val = getattr(item, field)
-
-            from datetime import date, datetime
-
-            if isinstance(old_val, (date, datetime)):
-                old_val = old_val.isoformat()
-            if isinstance(new_val, (date, datetime)):
-                new_val = new_val.isoformat()
-
-            changed_fields[field] = (old_val, new_val)
-
-    updated = await service.update(
-        item, changed_fields=changed_fields, transaction=transaction
-    )
+    updated = await service.update(item, transaction=transaction)
 
     resource = GearItemConverter.to_resource(updated, base_url=str(req.base_url))
     return GearItemResponse(data=resource)
