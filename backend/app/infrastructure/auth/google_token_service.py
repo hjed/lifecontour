@@ -13,6 +13,8 @@ from cryptography.fernet import Fernet
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.infrastructure.unit_of_work import unit_of_work
+
 logger = structlog.get_logger()
 
 
@@ -109,19 +111,20 @@ class GoogleTokenService:
             """)
 
             now = datetime.now(UTC)
-            await self.connection.execute(
-                stmt,
-                {
-                    "user_id": user_id,
-                    "google_account_email": google_email,
-                    "encrypted_access_token": encrypted_access_token,
-                    "encrypted_refresh_token": encrypted_refresh_token,
-                    "expires_at": expires_at,
-                    "created_at": now,
-                    "updated_at": now,
-                    "granted_scopes": granted_scopes,
-                },
-            )
+            async with unit_of_work(self.connection):
+                await self.connection.execute(
+                    stmt,
+                    {
+                        "user_id": user_id,
+                        "google_account_email": google_email,
+                        "encrypted_access_token": encrypted_access_token,
+                        "encrypted_refresh_token": encrypted_refresh_token,
+                        "expires_at": expires_at,
+                        "created_at": now,
+                        "updated_at": now,
+                        "granted_scopes": granted_scopes,
+                    },
+                )
 
             logger.info(
                 "Stored Google OAuth tokens",
@@ -200,9 +203,10 @@ class GoogleTokenService:
             WHERE user_id = :user_id AND google_account_email = :google_email
         """)
 
-        result = await self.connection.execute(
-            stmt, {"user_id": user_id, "google_email": google_email}
-        )
+        async with unit_of_work(self.connection):
+            result = await self.connection.execute(
+                stmt, {"user_id": user_id, "google_email": google_email}
+            )
 
         deleted = result.rowcount > 0
         if deleted:

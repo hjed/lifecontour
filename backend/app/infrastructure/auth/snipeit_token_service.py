@@ -15,6 +15,8 @@ from cryptography.fernet import Fernet
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.infrastructure.unit_of_work import unit_of_work
+
 logger = structlog.get_logger()
 
 
@@ -113,14 +115,15 @@ class SnipeItTokenService:
             """)
 
             now = datetime.now(UTC)
-            await self.connection.execute(
-                stmt,
-                {
-                    "user_id": user_id,
-                    "encrypted_api_key": encrypted_api_key,
-                    "now": now,
-                },
-            )
+            async with unit_of_work(self.connection):
+                await self.connection.execute(
+                    stmt,
+                    {
+                        "user_id": user_id,
+                        "encrypted_api_key": encrypted_api_key,
+                        "now": now,
+                    },
+                )
 
             logger.info("Stored Snipe-IT API key", user_id=user_id)
 
@@ -179,8 +182,9 @@ class SnipeItTokenService:
             WHERE user_id = :user_id
         """)
 
-        result = await self.connection.execute(stmt, {"user_id": user_id})
-        deleted = result.rowcount > 0
+        async with unit_of_work(self.connection):
+            result = await self.connection.execute(stmt, {"user_id": user_id})
+            deleted = result.rowcount > 0
 
         if deleted:
             logger.info("Deleted Snipe-IT API key", user_id=user_id)
@@ -202,12 +206,3 @@ class SnipeItTokenService:
         """)
         result = await self.connection.execute(stmt, {"user_id": user_id})
         return result.fetchone() is not None
-
-    async def commit(self) -> None:
-        """
-        Explicitly commit the current transaction.
-
-        Used to flush pending writes so that concurrent requests can
-        see the data.
-        """
-        await self.connection.commit()
