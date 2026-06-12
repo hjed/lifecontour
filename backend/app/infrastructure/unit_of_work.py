@@ -158,12 +158,13 @@ async def savepoint(
     Does not affect the unit-of-work depth, so it never changes the outer commit
     decision.
 
-    When ``connection`` is ``None`` (the unit-test sentinel, mirroring how
-    :func:`transactional` skips a non-real connection) this is a no-op
-    passthrough, so service code can wrap a write in ``savepoint`` and still be
-    unit-tested with ``transaction=None``.
+    No-ops for a non-:class:`AsyncConnection` (``None`` or a unit-test mock),
+    mirroring how :func:`transactional` skips a non-real connection. This keeps
+    the guard consistent: a ``@transactional`` service method that wraps a write
+    in ``savepoint(transaction)`` (e.g. ``TagService.create_tag``) stays
+    unit-testable whether the test passes ``None`` or a mock connection.
     """
-    if connection is None:
+    if not isinstance(connection, AsyncConnection):
         yield connection
         return
     nested = await connection.begin_nested()
