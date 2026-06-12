@@ -4546,8 +4546,8 @@ async def get_daily_summary(
 
     # get_or_generate is @transactional: it commits any summary it persists
     # before the response is returned (issue #945). Pass the request connection
-    # and let the service own the commit boundary (MCP tools call services, they
-    # don't open transactions themselves).
+    # and let the service own the commit boundary — this tool opens no
+    # transaction itself (the required pattern; see AGENTS.md "Transactions").
     result = await daily_summary_service.get_or_generate(
         user_id, parsed_date, db_connection
     )

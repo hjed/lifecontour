@@ -635,11 +635,13 @@ Writes are therefore committed **before the response is sent**.
   when the connection closes (a harmless no-op).
 - **Controllers never open transactions** — that is a smell; transaction
   boundaries belong in the service layer.
-- **MCP tools** are the service-equivalent boundary for the mounted MCP sub-app:
-  a write tool wraps its work in `unit_of_work(connection)` (re-entrant, so a
-  call to an already-`@transactional` service joins it and the tool's unit of
-  work is the single commit) — the sub-app has no commit middleware, so it must
-  self-commit.
+- **MCP tools** are controller-equivalent and must **not** open transactions:
+  a write tool calls a `@transactional` service that owns the commit (the mounted
+  MCP sub-app has no commit middleware, so the *service* — never the tool — is
+  the commit boundary). A few legacy tools still self-commit by wrapping their
+  work in `unit_of_work(connection)` because no composite service method exists
+  for them yet; that is a transitional wart being removed (see issue #967), not a
+  pattern for new tools.
 - **No commit backstop:** the connection provider never commits at teardown.
   Every write path — REST handlers (via services) and MCP tools — commits
   explicitly in the service layer before the response. On normal exit the

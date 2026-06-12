@@ -393,7 +393,8 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
         # Create the contact, resolving any tag names (find-or-create) and writing
         # methods/notes/tags as one committed unit of work in the service layer
-        # (issue #945). MCP tools call services; they don't open transactions.
+        # (issue #945). This tool opens no transaction itself — the
+        # @transactional service owns the commit (see AGENTS.md "Transactions").
         final_contact = await contact_service.create_contact(
             contact,
             connection,
@@ -580,8 +581,8 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             # Update the contact, resolving any tag names (replacement strategy:
             # request.tags replaces all existing tags; None leaves them untouched)
             # and writing everything as one committed unit of work in the service
-            # layer (issue #945). MCP tools call services; they don't open
-            # transactions themselves.
+            # layer (issue #945). This tool opens no transaction itself — the
+            # @transactional service owns the commit (see AGENTS.md "Transactions").
             final_contact = await contact_service.update_contact(
                 updated_contact,
                 connection,
