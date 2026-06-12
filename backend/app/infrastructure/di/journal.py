@@ -515,6 +515,8 @@ class JournalProvider(Provider):
         outdoor_planning_data_repo: OutdoorPlanningDataRepository,
         outdoor_training_data_repo: OutdoorTrainingDataRepository,
         gear_maintenance_data_repo: GearMaintenanceDataRepository,
+        gear_usage_data_repo: GearUsageDataRepository,
+        tag_repo: JournalTagRepository,
         event_publisher: OutboxEventPublisher,
     ) -> JournalWriteService:
         """Provide a JournalWriteService instance (composite journal writes)."""
@@ -544,6 +546,8 @@ class JournalProvider(Provider):
             outdoor_planning_data_repo=outdoor_planning_data_repo,
             outdoor_training_data_repo=outdoor_training_data_repo,
             gear_maintenance_data_repo=gear_maintenance_data_repo,
+            gear_usage_data_repo=gear_usage_data_repo,
+            tag_repo=tag_repo,
             event_publisher=event_publisher,
         )
 

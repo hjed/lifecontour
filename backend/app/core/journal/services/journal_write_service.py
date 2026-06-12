@@ -35,6 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.journal.adapters.sql.album_sync_read_repository import (
     AlbumSyncReadRepository,
 )
+from app.core.journal.models.journal_tag import JournalTag
 from app.core.journal.models.repositories import (
     AbseilingDataRepository,
     AbseilPitchRepository,
@@ -49,7 +50,9 @@ from app.core.journal.models.repositories import (
     DownhillSkiingDataRepository,
     FitnessDataRepository,
     GearMaintenanceDataRepository,
+    GearUsageDataRepository,
     JoggingDataRepository,
+    JournalTagRepository,
     KayakingDataRepository,
     MoodDataRepository,
     OutdoorActivityDataRepository,
@@ -210,6 +213,8 @@ class JournalWriteService:
         outdoor_planning_data_repo: OutdoorPlanningDataRepository,
         outdoor_training_data_repo: OutdoorTrainingDataRepository,
         gear_maintenance_data_repo: GearMaintenanceDataRepository,
+        gear_usage_data_repo: GearUsageDataRepository,
+        tag_repo: JournalTagRepository,
         event_publisher: OutboxEventPublisher,
     ) -> None:
         self.journal_service = journal_service
@@ -237,6 +242,8 @@ class JournalWriteService:
         self.outdoor_planning_data_repo = outdoor_planning_data_repo
         self.outdoor_training_data_repo = outdoor_training_data_repo
         self.gear_maintenance_data_repo = gear_maintenance_data_repo
+        self.gear_usage_data_repo = gear_usage_data_repo
+        self.tag_repo = tag_repo
         self.event_publisher = event_publisher
 
     # ------------------------------------------------------------------ #
@@ -252,13 +259,16 @@ class JournalWriteService:
         relationships: list[dict[str, Any]] | None,
         transaction: AsyncConnection,
         *,
+        tags: list[str] | None = None,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
     ) -> Journal:
-        """Create a journal with its types, type-data and contact relationships.
+        """Create a journal with its types, type-data, contacts and tags.
 
         The entire operation runs inside a single unit of work, so a failure in
-        any step rolls back the whole journal.
+        any step rolls back the whole journal. ``tags`` is keyword-only and
+        defaults to ``None`` so existing positional callers (REST, which manages
+        tags via separate endpoints) are unaffected.
         """
         created_journal = await self.journal_service.create_journal(
             journal, transaction, changed_by=changed_by, source=source
@@ -283,6 +293,9 @@ class JournalWriteService:
                 journal_id, relationships, transaction
             )
 
+        if tags:
+            await self._process_journal_tags(journal_id, tags, transaction)
+
         return created_journal
 
     @transactional
@@ -305,6 +318,55 @@ class JournalWriteService:
             changed_by=changed_by,
             source=source,
         )
+
+    @transactional
+    async def update_journal_composite(
+        self,
+        journal: Journal,
+        transaction: AsyncConnection,
+        *,
+        types: list[str] | None = None,
+        type_data: dict[str, Any] | None = None,
+        relationships: list[dict[str, Any]] | None = None,
+        tags: list[str] | None = None,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
+    ) -> Journal:
+        """Update a journal's core fields and optionally replace its associations.
+
+        Tri-state per association: ``None`` leaves it untouched, while any list
+        (including ``[]``) REPLACES the current set. This is the composite behind
+        the MCP ``update_journal_entry`` tool; REST uses the thinner
+        :meth:`update_journal`. The whole operation is one unit of work.
+        """
+        updated = await self.journal_service.update_journal(
+            journal, transaction, changed_by=changed_by, source=source
+        )
+        if updated.id is None:
+            raise JournalValidationError("id", "Journal ID is required after update")
+        journal_id = updated.id
+
+        if types is not None:
+            await self._replace_journal_types(
+                journal_id,
+                types,
+                type_data,
+                transaction,
+                changed_by=changed_by,
+                source=source,
+            )
+        elif type_data is not None:
+            await self._process_journal_type_data(journal_id, type_data, transaction)
+
+        if relationships is not None:
+            await self._replace_contact_relationships(
+                journal_id, relationships, transaction
+            )
+
+        if tags is not None:
+            await self._replace_journal_tags(journal_id, tags, transaction)
+
+        return updated
 
     @transactional
     async def delete_journal(
@@ -993,6 +1055,15 @@ class JournalWriteService:
                 self.gear_maintenance_data_repo,
             )
 
+        # Process GEAR_USAGE type data
+        if "gear_usage" in normalized_type_data:
+            await helpers.update_gear_usage_type_data(
+                journal_id,
+                "GEAR_USAGE",
+                normalized_type_data["gear_usage"],
+                self.gear_usage_data_repo,
+            )
+
     async def _process_journal_contact_relationships(
         self,
         journal_id: int,
@@ -1076,6 +1147,164 @@ class JournalWriteService:
                 # Invalid contact relationship payload, skip
                 pass
 
+    async def _process_journal_tags(
+        self,
+        journal_id: int,
+        tags: list[str],
+        transaction: AsyncConnection,
+    ) -> None:
+        """Find-or-create each tag by name and assign it to the journal.
+
+        Each tag is wrapped in a SAVEPOINT so a duplicate-name race or a bad item
+        rolls back only that tag, not the whole composite write. Tag lookup is
+        case-insensitive (``tag_repo.find_by_name``); a missing tag is created
+        with the default grey colour, mirroring the previous MCP tool behaviour.
+        """
+        for tag_name in tags:
+            async with savepoint(transaction):
+                tag = await self.tag_repo.find_by_name(tag_name)
+                if tag is None:
+                    tag = await self.tag_repo.save(
+                        JournalTag(id=None, name=tag_name, color="#808080")
+                    )
+                if tag.id is not None:
+                    await self.tag_repo.assign_tag(journal_id, tag.id)
+
+    # Tables whose presence marks a journal type, used to detect current types
+    # for replace-all updates. Mirrors the read-side detection in the MCP
+    # enrichment helper. PHOTO_ALBUM is intentionally omitted: it is Immich-synced
+    # and must not be removed/created through this write path.
+    def _type_presence_repos(self) -> list[tuple[JournalType, Any]]:
+        return [
+            (JournalType.EVENT, self.calendar_info_repo),
+            (JournalType.MOOD_RATING, self.mood_data_repo),
+            (JournalType.PLAN, self.plan_data_repo),
+            (JournalType.TRAVEL, self.travel_data_repo),
+            (JournalType.FITNESS, self.fitness_data_repo),
+            (JournalType.OUTDOOR_ACTIVITY, self.outdoor_activity_data_repo),
+            (JournalType.BUSHWALKING, self.bushwalking_data_repo),
+            (JournalType.JOGGING, self.jogging_data_repo),
+            (JournalType.ABSEILING_TRIP, self.abseiling_data_repo),
+            (JournalType.CAVING, self.caving_data_repo),
+            (JournalType.CANYONING, self.canyoning_data_repo),
+            (JournalType.CLIMBING, self.climbing_data_repo),
+            (JournalType.KAYAKING, self.kayaking_data_repo),
+            (JournalType.CROSS_COUNTRY_SKIING, self.skiing_data_repo),
+            (JournalType.GEAR_MAINTENANCE, self.gear_maintenance_data_repo),
+            (JournalType.GEAR_USAGE, self.gear_usage_data_repo),
+        ]
+
+    async def _get_current_types(self, journal_id: int) -> set[JournalType]:
+        """Detect a journal's current types by which type-data rows exist.
+
+        Type membership is represented by the presence of a type-specific data
+        row (there is no dedicated types table).
+        """
+        current: set[JournalType] = set()
+        for journal_type, repo in self._type_presence_repos():
+            if await repo.find_by_journal_id(journal_id) is not None:
+                current.add(journal_type)
+        return current
+
+    async def _replace_journal_types(
+        self,
+        journal_id: int,
+        types: list[str],
+        type_data: dict[str, Any] | None,
+        transaction: AsyncConnection,
+        *,
+        changed_by: str,
+        source: Provenance,
+    ) -> None:
+        """Replace the journal's types with ``types`` (replace-all semantics).
+
+        Types present but no longer desired are removed (their type-data row
+        deleted); newly desired types are added (with auto-resolved dependencies)
+        and given default rows; finally any supplied ``type_data`` is applied.
+        Invalid type strings are validated upfront by the caller, so parsing
+        failures here are skipped defensively.
+        """
+        desired: set[JournalType] = set()
+        for type_str in types:
+            try:
+                desired.add(helpers.parse_journal_type(type_str))
+            except ValueError, KeyError:
+                pass
+
+        current = await self._get_current_types(journal_id)
+
+        # GEAR_* types cannot be created with a default row, so adding one without
+        # accompanying type_data would silently no-op. Fail fast with a clear error
+        # (mirrors the create tool's upfront validation).
+        normalized_type_data = {k.lower(): v for k, v in (type_data or {}).items()}
+        for journal_type in desired - current:
+            if journal_type in (
+                JournalType.GEAR_MAINTENANCE,
+                JournalType.GEAR_USAGE,
+            ) and not normalized_type_data.get(journal_type.value):
+                raise JournalValidationError(
+                    journal_type.value,
+                    f"Type {journal_type.value.upper()} requires corresponding "
+                    "non-empty type_data when added",
+                )
+
+        for journal_type in current - desired:
+            await self.journal_service.remove_type_from_journal(
+                journal_id,
+                journal_type,
+                transaction,
+                changed_by=changed_by,
+                source=source,
+            )
+            await self._delete_type_specific_data(journal_type, journal_id)
+
+        for journal_type in desired - current:
+            added_types = await self.journal_service.add_type_to_journal(
+                journal_id,
+                journal_type,
+                transaction,
+                changed_by=changed_by,
+                source=source,
+            )
+            for added_type in added_types:
+                await self._create_type_specific_data(added_type, journal_id)
+
+        if type_data:
+            await self._process_journal_type_data(journal_id, type_data, transaction)
+
+    async def _replace_contact_relationships(
+        self,
+        journal_id: int,
+        relationships: list[dict[str, Any]],
+        transaction: AsyncConnection,
+    ) -> None:
+        """Remove all existing contact relationships, then add the provided set."""
+        repo = self.journal_contact_service.contact_relationship_repo
+        existing = await repo.get_by_journal(journal_id)
+        for rel in existing:
+            await self.journal_contact_service.remove_contact_from_journal(
+                rel.journal_id if rel.journal_id is not None else journal_id,
+                rel.contact_id,
+                rel.relationship_type,
+                transaction=transaction,
+            )
+        await self._process_journal_contact_relationships(
+            journal_id, relationships, transaction
+        )
+
+    async def _replace_journal_tags(
+        self,
+        journal_id: int,
+        tags: list[str],
+        transaction: AsyncConnection,
+    ) -> None:
+        """Remove all existing tag assignments, then find-or-create + assign ``tags``."""
+        existing = await self.tag_repo.get_tags_for_journal(journal_id)
+        for tag in existing:
+            if tag.id is not None:
+                await self.tag_repo.remove_tag(journal_id, tag.id)
+        await self._process_journal_tags(journal_id, tags, transaction)
+
     async def _create_type_specific_data(
         self, journal_type: JournalType, journal_id: int
     ) -> None:
@@ -1104,6 +1333,7 @@ class JournalWriteService:
             self.outdoor_planning_data_repo,
             self.outdoor_training_data_repo,
             self.gear_maintenance_data_repo,
+            self.gear_usage_data_repo,
         )
 
     async def _delete_type_specific_data(
@@ -1135,4 +1365,5 @@ class JournalWriteService:
             self.outdoor_planning_data_repo,
             self.outdoor_training_data_repo,
             self.gear_maintenance_data_repo,
+            self.gear_usage_data_repo,
         )

@@ -10,7 +10,7 @@ service and the API controllers.
 """
 
 import dataclasses
-from datetime import time
+from datetime import datetime, time
 from typing import Any
 from uuid import UUID
 
@@ -36,6 +36,7 @@ from app.core.journal.models.repositories import (
     DownhillSkiingDataRepository,
     FitnessDataRepository,
     GearMaintenanceDataRepository,
+    GearUsageDataRepository,
     JoggingDataRepository,
     KayakingDataRepository,
     MoodDataRepository,
@@ -48,6 +49,22 @@ from app.core.journal.models.repositories import (
 )
 
 INVALID_UUID_FORMAT_MSG = "Invalid UUID format"
+
+
+def parse_optional_datetime(value: Any, field_name: str) -> datetime | None:
+    """Parse an optional ISO datetime field from request attributes."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError as exc:
+            raise JournalValidationError(
+                field_name, f"Invalid datetime format: {value}"
+            ) from exc
+    raise JournalValidationError(field_name, "Must be an ISO datetime string or null")
 
 
 def parse_journal_type(type_str: str) -> JournalType:
@@ -153,6 +170,7 @@ async def create_type_specific_data(
     outdoor_planning_data_repo: OutdoorPlanningDataRepository,
     outdoor_training_data_repo: OutdoorTrainingDataRepository,
     gear_maintenance_data_repo: GearMaintenanceDataRepository,
+    gear_usage_data_repo: GearUsageDataRepository,
 ) -> None:
     """
     Create type-specific data row with default values for the given journal type.
@@ -299,6 +317,10 @@ async def create_type_specific_data(
         # Data is either populated by process_journal_type_data during creation
         # or required in add_type_to_journal.
         pass
+    elif journal_type == JournalType.GEAR_USAGE:
+        # GEAR_USAGE requires a gear_item_id and cannot be created with defaults.
+        # Data is populated by process_journal_type_data during creation.
+        pass
     # EVENT and PHOTO_ALBUM types require additional data (calendar_id, immich_album_id)
     # These will be created when the user updates the type data
 
@@ -328,6 +350,7 @@ async def delete_type_specific_data(
     outdoor_planning_data_repo: OutdoorPlanningDataRepository,
     outdoor_training_data_repo: OutdoorTrainingDataRepository,
     gear_maintenance_data_repo: GearMaintenanceDataRepository,
+    gear_usage_data_repo: GearUsageDataRepository,
 ) -> None:
     """
     Delete the type-specific data row for the given journal type.
@@ -381,6 +404,8 @@ async def delete_type_specific_data(
         await outdoor_training_data_repo.delete(journal_id)
     elif journal_type == JournalType.GEAR_MAINTENANCE:
         await gear_maintenance_data_repo.delete(journal_id)
+    elif journal_type == JournalType.GEAR_USAGE:
+        await gear_usage_data_repo.delete(journal_id)
     # EVENT has no dedicated type-specific table (uses calendar_info via CalendarInfo)
     # and is handled by the service layer
 
@@ -856,6 +881,60 @@ async def update_gear_maintenance_type_data(
         await gear_maintenance_data_repo.save(new_data)
     except GearMaintenanceDataValidationError as e:
         # Extract the original message to prevent "field: field: message" duplication
+        raw_msg = str(e)
+        prefix = f"{e.field}: "
+        if raw_msg.startswith(prefix):
+            raw_msg = raw_msg[len(prefix) :]
+        raise JournalValidationError(e.field, raw_msg) from e
+
+
+async def update_gear_usage_type_data(
+    journal_id: int,
+    journal_type: str,
+    attrs: dict[str, Any],
+    gear_usage_data_repo: GearUsageDataRepository,
+) -> None:
+    """Update or create GEAR_USAGE type-specific data.
+
+    Mirrors the behaviour previously inlined in the MCP ``update_journal_entry``
+    tool: ``gear_item_id`` is required to create a new row, and the
+    ``checkout_date`` / ``checkin_date`` ISO strings are parsed to ``datetime``.
+    """
+    from core_shared.models.journals.exceptions import GearUsageDataValidationError
+    from core_shared.models.journals.gear_usage_data import GearUsageData
+
+    data = await gear_usage_data_repo.find_by_journal_id(journal_id)
+
+    updates: dict[str, Any] = {}
+    if "gear_item_id" in attrs and attrs["gear_item_id"]:
+        raw_gear_item_id = attrs["gear_item_id"]
+        if not isinstance(raw_gear_item_id, str):
+            raise JournalValidationError("gear_item_id", "Must be a string")
+        try:
+            updates["gear_item_id"] = UUID(raw_gear_item_id)
+        except ValueError:
+            raise JournalValidationError(
+                "gear_item_id", "Must be a valid UUID"
+            ) from None
+    elif not data:
+        raise JournalValidationError("gear_item_id", "Required")
+
+    if "checkout_date" in attrs:
+        updates["checkout_date"] = parse_optional_datetime(
+            attrs["checkout_date"], "checkout_date"
+        )
+    if "checkin_date" in attrs:
+        updates["checkin_date"] = parse_optional_datetime(
+            attrs["checkin_date"], "checkin_date"
+        )
+
+    try:
+        if data:
+            new_data = dataclasses.replace(data, **updates)
+        else:
+            new_data = GearUsageData(journal_id=journal_id, **updates)
+        await gear_usage_data_repo.save(new_data)
+    except GearUsageDataValidationError as e:
         raw_msg = str(e)
         prefix = f"{e.field}: "
         if raw_msg.startswith(prefix):

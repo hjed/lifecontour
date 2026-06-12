@@ -9,10 +9,17 @@ unit of work would roll the whole journal back) without running later steps.
 
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
-from core_shared.models.journals import EventDateRange, Journal, JournalType
+from core_shared.models.journals import (
+    EventDateRange,
+    Journal,
+    JournalContactRelationshipType,
+    JournalType,
+)
 
+from app.core.journal.models.journal_tag import JournalTag
 from app.core.journal.services.journal_write_service import JournalWriteService
 
 
@@ -69,6 +76,8 @@ _REPO_PARAM_NAMES = [
     "outdoor_planning_data_repo",
     "outdoor_training_data_repo",
     "gear_maintenance_data_repo",
+    "gear_usage_data_repo",
+    "tag_repo",
 ]
 
 
@@ -215,3 +224,199 @@ class TestUpdateTypeData:
         )
 
         write_service.mood_data_repo.save.assert_awaited_once()
+
+
+class TestCreateJournalTags:
+    @pytest.mark.asyncio
+    async def test_finds_existing_tag_and_assigns_without_saving(
+        self, write_service, mock_journal_service, mock_transaction
+    ):
+        """An existing tag (by name) is assigned, not re-created."""
+        mock_journal_service.create_journal.return_value = _journal(journal_id=42)
+        existing_tag = JournalTag(id=uuid4(), name="alpha", color="#123456")
+        write_service.tag_repo.find_by_name.return_value = existing_tag
+
+        await write_service.create_journal(
+            _journal(), None, None, None, mock_transaction, tags=["alpha"]
+        )
+
+        write_service.tag_repo.save.assert_not_awaited()
+        write_service.tag_repo.assign_tag.assert_awaited_once_with(42, existing_tag.id)
+
+    @pytest.mark.asyncio
+    async def test_creates_missing_tag_then_assigns(
+        self, write_service, mock_journal_service, mock_transaction
+    ):
+        """A tag name with no existing row is created (grey default) then assigned."""
+        mock_journal_service.create_journal.return_value = _journal(journal_id=42)
+        write_service.tag_repo.find_by_name.return_value = None
+        created_tag = JournalTag(id=uuid4(), name="beta", color="#808080")
+        write_service.tag_repo.save.return_value = created_tag
+
+        await write_service.create_journal(
+            _journal(), None, None, None, mock_transaction, tags=["beta"]
+        )
+
+        write_service.tag_repo.save.assert_awaited_once()
+        saved = write_service.tag_repo.save.await_args.args[0]
+        assert saved.name == "beta"
+        assert saved.color == "#808080"
+        write_service.tag_repo.assign_tag.assert_awaited_once_with(42, created_tag.id)
+
+    @pytest.mark.asyncio
+    async def test_no_tags_means_no_tag_calls(
+        self, write_service, mock_journal_service, mock_transaction
+    ):
+        """Default tags=None leaves the tag repo untouched (REST back-compat)."""
+        mock_journal_service.create_journal.return_value = _journal(journal_id=42)
+
+        await write_service.create_journal(
+            _journal(), None, None, None, mock_transaction
+        )
+
+        write_service.tag_repo.find_by_name.assert_not_awaited()
+        write_service.tag_repo.assign_tag.assert_not_awaited()
+
+
+class TestCreateJournalGearUsage:
+    @pytest.mark.asyncio
+    async def test_gear_usage_type_data_persisted(
+        self, write_service, mock_journal_service, mock_transaction
+    ):
+        """GEAR_USAGE type_data is written through the gear-usage repo on create."""
+        mock_journal_service.create_journal.return_value = _journal(journal_id=42)
+        mock_journal_service.add_type_to_journal.return_value = [JournalType.GEAR_USAGE]
+        write_service.gear_usage_data_repo.find_by_journal_id.return_value = None
+        gear_item_id = uuid4()
+
+        await write_service.create_journal(
+            _journal(),
+            ["gear_usage"],
+            {
+                "gear_usage": {
+                    "gear_item_id": str(gear_item_id),
+                    "checkout_date": "2024-01-01T08:00:00+00:00",
+                }
+            },
+            None,
+            mock_transaction,
+        )
+
+        write_service.gear_usage_data_repo.save.assert_awaited_once()
+        saved = write_service.gear_usage_data_repo.save.await_args.args[0]
+        assert saved.gear_item_id == gear_item_id
+
+
+class TestUpdateJournalComposite:
+    """The composite replace-all update behind the MCP update_journal_entry tool."""
+
+    @pytest.mark.asyncio
+    async def test_core_only_leaves_associations_untouched(
+        self, write_service, mock_journal_service, mock_transaction
+    ):
+        """types/type_data/relationships/tags=None → only core fields update."""
+        updated = _journal(journal_id=9)
+        mock_journal_service.update_journal.return_value = updated
+        write_service._get_current_types = AsyncMock(return_value=set())
+
+        result = await write_service.update_journal_composite(
+            _journal(journal_id=9), mock_transaction
+        )
+
+        assert result is updated
+        mock_journal_service.update_journal.assert_awaited_once()
+        mock_journal_service.add_type_to_journal.assert_not_awaited()
+        mock_journal_service.remove_type_from_journal.assert_not_awaited()
+        write_service.tag_repo.get_tags_for_journal.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_types_replace_removes_old_and_adds_new(
+        self, write_service, mock_journal_service, mock_transaction
+    ):
+        """Replacing types removes those no longer desired and adds the new ones."""
+        mock_journal_service.update_journal.return_value = _journal(journal_id=9)
+        write_service._get_current_types = AsyncMock(
+            return_value={JournalType.MOOD_RATING}
+        )
+        mock_journal_service.add_type_to_journal.return_value = [JournalType.FITNESS]
+        write_service.fitness_data_repo.find_by_journal_id.return_value = None
+
+        await write_service.update_journal_composite(
+            _journal(journal_id=9), mock_transaction, types=["fitness"]
+        )
+
+        # MOOD_RATING (current, not desired) is removed + its data deleted.
+        mock_journal_service.remove_type_from_journal.assert_awaited_once()
+        assert (
+            mock_journal_service.remove_type_from_journal.await_args.args[1]
+            == JournalType.MOOD_RATING
+        )
+        write_service.mood_data_repo.delete.assert_awaited_once_with(9)
+        # FITNESS (desired, not current) is added.
+        mock_journal_service.add_type_to_journal.assert_awaited_once()
+        assert (
+            mock_journal_service.add_type_to_journal.await_args.args[1]
+            == JournalType.FITNESS
+        )
+
+    @pytest.mark.asyncio
+    async def test_tags_replace_all(
+        self, write_service, mock_journal_service, mock_transaction
+    ):
+        """tags=[...] removes all existing tag assignments then re-applies."""
+        mock_journal_service.update_journal.return_value = _journal(journal_id=9)
+        existing = JournalTag(id=uuid4(), name="old", color="#111111")
+        write_service.tag_repo.get_tags_for_journal.return_value = [existing]
+        new_tag = JournalTag(id=uuid4(), name="new", color="#808080")
+        write_service.tag_repo.find_by_name.return_value = new_tag
+
+        await write_service.update_journal_composite(
+            _journal(journal_id=9), mock_transaction, tags=["new"]
+        )
+
+        write_service.tag_repo.remove_tag.assert_awaited_once_with(9, existing.id)
+        write_service.tag_repo.assign_tag.assert_awaited_once_with(9, new_tag.id)
+
+    @pytest.mark.asyncio
+    async def test_empty_tags_list_clears_all(
+        self, write_service, mock_journal_service, mock_transaction
+    ):
+        """tags=[] clears all assignments and adds nothing (distinct from None)."""
+        mock_journal_service.update_journal.return_value = _journal(journal_id=9)
+        existing = JournalTag(id=uuid4(), name="old", color="#111111")
+        write_service.tag_repo.get_tags_for_journal.return_value = [existing]
+
+        await write_service.update_journal_composite(
+            _journal(journal_id=9), mock_transaction, tags=[]
+        )
+
+        write_service.tag_repo.remove_tag.assert_awaited_once_with(9, existing.id)
+        write_service.tag_repo.assign_tag.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_relationships_replace_all(
+        self,
+        write_service,
+        mock_journal_service,
+        mock_journal_contact_service,
+        mock_transaction,
+    ):
+        """relationships=[...] removes existing then adds the provided set."""
+        mock_journal_service.update_journal.return_value = _journal(journal_id=9)
+        existing_rel = MagicMock()
+        existing_rel.contact_id = 7
+        existing_rel.relationship_type = JournalContactRelationshipType.PARTICIPANT
+        repo = AsyncMock()
+        repo.get_by_journal.return_value = [existing_rel]
+        mock_journal_contact_service.contact_relationship_repo = repo
+
+        await write_service.update_journal_composite(
+            _journal(journal_id=9),
+            mock_transaction,
+            relationships=[
+                {"attributes": {"contact_id": "5", "relationship_type": "PARTICIPANT"}}
+            ],
+        )
+
+        mock_journal_contact_service.remove_contact_from_journal.assert_awaited_once()
+        mock_journal_contact_service.add_contact_to_journal.assert_awaited_once()
