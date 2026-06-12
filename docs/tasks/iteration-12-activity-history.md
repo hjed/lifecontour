@@ -1,6 +1,6 @@
 # Iteration 12: Activity History (Journals + Unified Foundation)
 
-**Status:** 🟡 IN PROGRESS — ITER12-001 (shared foundation) complete (Phase 1 backend + Phase 2 frontend); ITER12-002 Phase 1 (journal event enrichment + projection consumer) and Phase 2 (changed-fields coverage + journal history API) complete; ITER12-002 Phase 3 (UI + MCP parity) pending
+**Status:** 🟡 IN PROGRESS — ITER12-001 (shared foundation) complete (Phase 1 backend + Phase 2 frontend); ITER12-002 Phase 1 (journal event enrichment + projection consumer) and Phase 2 (changed-fields coverage + journal history API) complete; ITER12-002 Phase 3 (UI + MCP read parity) and Phase 4 (remaining type-data coverage + MCP type-data writes) pending
 **Dependencies:** Iteration 4 (Journal core + events), Iteration 5 (Redis Streams event bus, transactional outbox relay, stream consumers), existing contact activity history
 **Goal:** Deliver field-level activity history for journals of all types, displayed at the bottom of the journal UI with full provenance, by generalising the existing contact-history infrastructure into a single shared, **event-driven** system — and migrating contacts onto that same foundation.
 
@@ -173,8 +173,11 @@ Ensure every journal mutation publishes accurate `changed_fields`, and expose th
 - Route `changed_fields` were **already** `(old, new)` pairs in `RouteRequestConverter.from_update_request`, and gear (`GearItemService.update`) already emits pairs — both flow through `RouteUpdated`/`GearItemUpdated` and the Phase 1 `route:<id>:<field>` / `gear:<id>:<field>` projection unchanged. No service change was needed.
 - `GET /api/journals/{journal_id}/history` mirrors the contact endpoint using **new shared** `History{Attributes,Resource,ListResponse}` schemas + `HistoryConverter` (`app/api/history/`, `type="journal_history"`), reading via a thin `JournalHistoryService` over `get_history_for_aggregate("journal", ...)`; 404 for a missing journal; DI wired in `JournalProvider`.
 
-**Known follow-ups (not blocking Phase 2):**
-- MCP **type-data** writes go through a separate `_update_type_specific_data` path in `app/mcp/domains/journals/tools.py` that does not publish `JournalUpdated`, so MCP-driven *type-data* edits don't yet produce history (MCP *base-field* edits do, via the shared service). Routing MCP type-data through `JournalWriteService` is a larger DI change deferred to ITER12-002 Phase 3 (MCP parity) or a follow-up.
+**Deferred to Phase 4 (not blocking Phase 2):**
+- **Remaining outdoor subtype type-data history** — see the Phase 2 design scope note above; the remaining editable types follow the identical registry pattern.
+- **MCP type-data write history** — MCP *type-data* writes go through a separate `_update_type_specific_data` path in `app/mcp/domains/journals/tools.py` that does not publish `JournalUpdated`, so MCP-driven type-data edits don't yet produce history (MCP *base-field* edits do, via the shared service).
+
+Both are captured as **ITER12-002 Phase 4** below.
 
 **Acceptance Criteria:**
 - [x] Journal service computes `changed_fields` as `{field: (old, new)}` for base fields **and** type-specific data tables (covering the editable journal types — see scope note above), routes, and gear — modelled on the contact `_calculate_changed_fields` pattern. *(`JournalService._calculate_changed_fields`; `JournalWriteService.update_type_data` snapshot/diff; routes/gear already paired.)*
@@ -202,6 +205,25 @@ Surface journal history to users and AI agents.
 - **Unit (RTL):** journal activity feed renders entries with provenance and pagination; empty/loading/error states.
 - **E2E (Playwright):** each test creates its own data (no conditional/skip logic). Editing a journal shows the change at the bottom of the screen with correct provenance (using `waitFor` for async projection); pagination works; coverage across multiple journal types (e.g. NOTE, EVENT, a fitness/outdoor type). Model on `contact-activity-feed.spec.ts`.
 - **Integration:** MCP `get_journal_history` returns expected entries.
+
+#### Phase 4: Complete Type-Data History Coverage (Remaining Types + MCP Writes)
+**PR Size:** ~6–8 files
+**Status:** ⬜ NOT STARTED
+
+Close the two coverage gaps deliberately deferred from Phase 2 so that **every editable journal type produces history through every write surface**, fully satisfying the spec's "all fitness and outdoor activity types" scope ([Scope](../product-specifications/activity-history-product-specification.md#scope)) and AI-first parity ([Product Principles](../product-specifications/activity-history-product-specification.md#product-principles)).
+
+> **Deferred from ITER12-002 Phase 2 (carried here):**
+> 1. **Remaining outdoor subtype type-data history.** Phase 2's `JournalWriteService.update_type_data` snapshot→diff registry (`_TYPE_DATA_TRACKED_FIELDS` + `_type_data_repo`) covers only the primary editable single-row types (EVENT, MOOD_RATING, FITNESS, OUTDOOR_ACTIVITY, BUSHWALKING, JOGGING). The remaining editable types — CANYONING, CAVING, CANOEING, CLIMBING, KAYAKING, CROSS_COUNTRY_SKIING, OUTDOOR_PLANNING, OUTDOOR_TRAINING, GEAR_MAINTENANCE, ABSEILING_TRIP — flow through the same `update_type_data` dispatch but are **not yet registered**, so editing their type-specific fields produces no history. (PLAN/TRAVEL/PHOTO_ALBUM stay excluded by design — integration-managed/non-editable; SNORKELLING/DIVING/DOWNHILL_SKIING are existence-validate-only with no editable fields.)
+> 2. **MCP type-data write history.** The MCP update tool's *base-field* writes go through the shared `JournalService.update_journal` and already produce history, but its **type-data** writes use a separate `_update_type_specific_data` path in `app/mcp/domains/journals/tools.py` (with its own per-type `_update_*_data` helpers) that does not publish `JournalUpdated`. So MCP-driven type-data edits produce neither history nor calendar sync — a parity gap with the REST path.
+
+**Acceptance Criteria:**
+- [ ] All remaining editable type-data tables are registered in `_TYPE_DATA_TRACKED_FIELDS` (+ `_type_data_repo`) with their tracked fields, so editing any of them via the REST type-data endpoint produces correctly-grouped `(old, new)` history. (ABSEILING_TRIP has nested pitch rows — record at least its scalar fields; pitch-collection diffs may be summarised, consistent with the contacts `count:` convention.)
+- [ ] MCP type-data writes produce the same history as the REST path — either by routing the MCP type-data path through `JournalWriteService.update_type_data` (preferred, removes the duplicate `_update_*_data` helpers) or by publishing the equivalent `JournalUpdated` event with computed `(old, new)` pairs and `Provenance.MCP`. Calendar sync for MCP-driven EVENT edits is preserved (the `calendar_info` marker is emitted).
+- [ ] No history is produced when a type-data update changes nothing, on either surface.
+
+**Required Test Coverage:**
+- **Unit:** `diff_tracked_fields` / type-data registry coverage for at least two of the newly-added types (e.g. CLIMBING, KAYAKING); "no change → no event" cases.
+- **Integration (end-to-end backend):** through the real service + outbox + relay + consumer path, a REST type-data edit of a newly-added type, and an **MCP** type-data edit, each produce correctly-grouped journal history retrievable via the endpoint, with correct old/new/`Provenance.MCP`/`Provenance.UI`.
 
 ---
 
@@ -263,9 +285,9 @@ Switch contacts fully onto the projection and delete the redundant write path.
 | Task | Phases | Total est. PRs |
 |---|---|---|
 | ITER12-001: Shared History Foundation | 2 | 2 |
-| ITER12-002: Journal History (end-to-end) | 3 | 3 |
+| ITER12-002: Journal History (end-to-end) | 4 | 4 |
 | ITER12-003: Migrate Contacts to Projection | 2 | 2 |
-| **Total** | **7** | **7** |
+| **Total** | **8** | **8** |
 
 ## Risks & Mitigations
 
