@@ -55,6 +55,7 @@ import { JournalChildrenList } from './JournalChildrenList';
 import { JournalParentSelector } from './JournalParentSelector';
 import { JournalTypeSection } from './JournalTypeSection';
 import { JournalTypeManager } from './JournalTypeManager';
+import { ActivityFeed as JournalActivityFeed } from './ActivityFeed';
 import { CreateAlbumButton } from './CreateAlbumButton';
 import { InlineEditHeading } from './InlineEditHeading';
 import { JournalContentInline } from './JournalContentInline';
@@ -555,6 +556,12 @@ export function JournalDetailView({
         parentId={journal.id}
         onAddExisting={handleAddExistingChild}
       />
+
+      {/* Activity History - field-level change history with provenance,
+          rendered at the bottom of the detail screen (mirrors contacts).
+          History is produced asynchronously, so entries may appear shortly
+          after a change. */}
+      <JournalActivityFeed journalId={journal.id} />
     </div>
   );
 }

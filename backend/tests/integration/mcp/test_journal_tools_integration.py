@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 import pytest_asyncio
+from core_shared.models.history import Provenance
 from core_shared.models.journals import (
     EventDateRange,
     Journal,
@@ -23,6 +24,10 @@ from fastmcp.client import Client
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.history.adapters.sql.field_history_repository import (
+    SqlFieldHistoryRepository,
+)
+from app.core.history.models import FieldHistoryEntry
 from app.core.journal.adapters.sql.bushwalking_data_repository import (
     SqlBushwalkingDataRepository,
 )
@@ -156,6 +161,7 @@ class TestJournalToolsIntegration:
                 "get_activity_stats",
                 "analyze_activity_trends",
                 "get_route_history",
+                "get_journal_history",
                 "link_journal_to_contact",
                 "get_contact_journals",
                 "merge_journals",
@@ -1728,6 +1734,188 @@ class TestActivityMcpToolsMountedIntegration:
         assert payload["activity_types"] == ["ROUTE"]
         assert payload["entries"][0]["journal_title"] == "Brick workout"
         assert payload["entries"][0]["activity_type"] == "ROUTE"
+
+    async def _seed_history(
+        self,
+        conn: AsyncConnection,
+        journal_id: int,
+        field_name: str,
+        *,
+        old_value: str | None,
+        new_value: str | None,
+        changed_by: str,
+        source: Provenance,
+        created_at: datetime,
+        event_id: str,
+    ) -> None:
+        """Seed a ``field_history`` row directly (the same rows the projection
+        consumer writes), so the read tool can be tested without the async
+        event pipeline."""
+        repo = SqlFieldHistoryRepository(conn)
+        await repo.record_change(
+            FieldHistoryEntry(
+                entity_type="journal",
+                entity_id=journal_id,
+                field_name=field_name,
+                old_value=old_value,
+                new_value=new_value,
+                changed_by=changed_by,
+                source=source,
+                event_id=event_id,
+                created_at=created_at,
+            )
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_journal_history_returns_entries_with_provenance(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+    ) -> None:
+        journal_id = await self._insert_journal(
+            clean_database,
+            title="History journal",
+            content="Tracked changes",
+            start=datetime(2024, 5, 1, tzinfo=UTC),
+        )
+        # Seed three changes from distinct sources at increasing times.
+        await self._seed_history(
+            clean_database,
+            journal_id,
+            "title",
+            old_value="Old title",
+            new_value="New title",
+            changed_by="ui-user",
+            source=Provenance.UI,
+            created_at=datetime(2024, 5, 1, 9, 0, tzinfo=UTC),
+            event_id="evt-ui",
+        )
+        await self._seed_history(
+            clean_database,
+            journal_id,
+            "content",
+            old_value="Old content",
+            new_value="New content",
+            changed_by="assistant",
+            source=Provenance.MCP,
+            created_at=datetime(2024, 5, 1, 10, 0, tzinfo=UTC),
+            event_id="evt-mcp",
+        )
+        await self._seed_history(
+            clean_database,
+            journal_id,
+            "route:abc:name",
+            old_value="River",
+            new_value="Harbour",
+            changed_by="strava-sync",
+            source=Provenance.STRAVA,
+            created_at=datetime(2024, 5, 1, 11, 0, tzinfo=UTC),
+            event_id="evt-strava",
+        )
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            payload = await self._call_tool(
+                authenticated_client,
+                session_id,
+                "get_journal_history",
+                {"journal_id": journal_id},
+            )
+
+        assert "error" not in payload
+        assert payload["journal_id"] == journal_id
+        assert payload["total_count"] == 3
+        assert payload["page"] == 1
+        assert len(payload["entries"]) == 3
+
+        # Most-recent-first ordering.
+        assert [e["field_name"] for e in payload["entries"]] == [
+            "route:abc:name",
+            "content",
+            "title",
+        ]
+        # Provenance + field-level detail preserved, matching the API.
+        assert [e["source"] for e in payload["entries"]] == ["strava", "mcp", "ui"]
+        title_entry = payload["entries"][2]
+        assert title_entry["old_value"] == "Old title"
+        assert title_entry["new_value"] == "New title"
+        assert title_entry["changed_by"] == "ui-user"
+
+    @pytest.mark.asyncio
+    async def test_get_journal_history_respects_limit_pagination(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+    ) -> None:
+        journal_id = await self._insert_journal(
+            clean_database,
+            title="Paged journal",
+            content="Many changes",
+            start=datetime(2024, 6, 1, tzinfo=UTC),
+        )
+        for i in range(3):
+            await self._seed_history(
+                clean_database,
+                journal_id,
+                f"field_{i}",
+                old_value=str(i),
+                new_value=str(i + 1),
+                changed_by="ui-user",
+                source=Provenance.UI,
+                created_at=datetime(2024, 6, 1, 9 + i, 0, tzinfo=UTC),
+                event_id=f"evt-{i}",
+            )
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            payload = await self._call_tool(
+                authenticated_client,
+                session_id,
+                "get_journal_history",
+                {"journal_id": journal_id, "page": 1, "limit": 2},
+            )
+
+        assert "error" not in payload
+        assert payload["total_count"] == 3
+        assert payload["limit"] == 2
+        assert len(payload["entries"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_get_journal_history_other_user_journal_not_found(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+    ) -> None:
+        # Journal owned by a different user — history must not leak across users.
+        other_journal_id = await self._insert_journal(
+            clean_database,
+            title="Someone else's journal",
+            content="Private",
+            start=datetime(2024, 7, 1, tzinfo=UTC),
+            user_id="other-user-999",
+        )
+        await self._seed_history(
+            clean_database,
+            other_journal_id,
+            "title",
+            old_value="A",
+            new_value="B",
+            changed_by="ui-user",
+            source=Provenance.UI,
+            created_at=datetime(2024, 7, 1, 9, 0, tzinfo=UTC),
+            event_id="evt-other",
+        )
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            payload = await self._call_tool(
+                authenticated_client,
+                session_id,
+                "get_journal_history",
+                {"journal_id": other_journal_id},
+            )
+
+        assert payload["error"] == "Journal not found"
 
 
 class TestMergeMcpToolsMountedIntegration:

@@ -11,14 +11,17 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from core_shared.models.history import Provenance
 from fastmcp import Client, FastMCP
 
+from app.core.history.models import FieldHistoryEntry
 from app.mcp.domains.journals.tools import (
     _fetch_activity_overall_stats_row,
     _fetch_activity_personal_record_row,
     _fetch_activity_rows,
     _fetch_activity_trend_rows,
     _fetch_activity_type_stats_rows,
+    _journal_history_entry_to_schema,
     _parse_optional_datetime_filter,
     _update_event_data,
     register_journal_tools,
@@ -62,6 +65,7 @@ class TestJournalTools:
                 "get_activity_stats",
                 "analyze_activity_trends",
                 "get_route_history",
+                "get_journal_history",
                 "delete_journal",
                 "get_contact_journals",
                 "link_journal_to_contact",
@@ -185,6 +189,79 @@ class TestJournalTools:
             # Verify the tool has the expected parameters
             properties = summary_tool.inputSchema.get("properties", {})
             assert "summary_date" in properties
+
+    @pytest.mark.asyncio
+    async def test_get_journal_history_tool_registration(self, mcp_server):
+        """Test that get_journal_history is registered with the expected schema."""
+        async with Client(mcp_server) as client:
+            tools_response = await client.list_tools()
+            tools = (
+                tools_response.tools
+                if hasattr(tools_response, "tools")
+                else tools_response
+            )
+
+            history_tool = next(
+                (t for t in tools if t.name == "get_journal_history"), None
+            )
+
+            assert history_tool is not None, "get_journal_history tool not found"
+            assert history_tool.description is not None
+            assert "history" in history_tool.description.lower()
+            assert history_tool.inputSchema is not None
+
+            # Verify the tool exposes journal_id plus pagination params.
+            properties = history_tool.inputSchema.get("properties", {})
+            assert "journal_id" in properties
+            assert "page" in properties
+            assert "limit" in properties
+
+
+class TestJournalHistoryEntryMapping:
+    """The MCP mapping must preserve field-level detail and provenance,
+    matching the REST ``HistoryConverter`` value coercion."""
+
+    def test_maps_all_fields_and_coerces_provenance_enum(self) -> None:
+        entry = FieldHistoryEntry(
+            entity_type="journal",
+            entity_id=42,
+            field_name="title",
+            old_value="Old",
+            new_value="New",
+            changed_by="user@example.com",
+            source=Provenance.UI,
+            created_at=datetime(2024, 1, 15, 10, 30, tzinfo=UTC),
+            id=7,
+        )
+
+        schema = _journal_history_entry_to_schema(entry)
+
+        assert schema.entity_type == "journal"
+        assert schema.entity_id == 42
+        assert schema.field_name == "title"
+        assert schema.old_value == "Old"
+        assert schema.new_value == "New"
+        assert schema.changed_by == "user@example.com"
+        # Provenance enum is coerced to its string value (parity with the API).
+        assert schema.source == "ui"
+        assert schema.created_at == datetime(2024, 1, 15, 10, 30, tzinfo=UTC)
+
+    def test_parses_iso_string_created_at(self) -> None:
+        entry = FieldHistoryEntry(
+            entity_type="journal",
+            entity_id=1,
+            field_name="content",
+            source=Provenance.MCP,
+            created_at="2024-03-11T08:00:00+00:00",
+            id=9,
+        )
+
+        schema = _journal_history_entry_to_schema(entry)
+
+        assert schema.source == "mcp"
+        assert schema.created_at == datetime.fromisoformat("2024-03-11T08:00:00+00:00")
+        assert schema.old_value is None
+        assert schema.new_value is None
 
 
 class TestDatetimeFilterParsing:

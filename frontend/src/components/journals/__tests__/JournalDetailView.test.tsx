@@ -118,6 +118,14 @@ jest.mock('../JournalChildrenList', () => ({
   JournalChildrenList: () => <div data-testid='children-list'>Children</div>,
 }));
 
+// The activity feed has its own dedicated tests; mock it here so this view's
+// tests don't depend on the journal history data hook.
+jest.mock('../ActivityFeed', () => ({
+  ActivityFeed: ({ journalId }: { journalId?: string }) => (
+    <div data-testid='activity-feed-mock'>Activity: {journalId}</div>
+  ),
+}));
+
 jest.mock('../JournalTypeSection', () => ({
   JournalTypeSection: ({ type }: { type?: string }) => (
     <div data-testid={`type-section-${type}`}>Type Section: {type}</div>

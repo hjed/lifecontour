@@ -30,6 +30,7 @@ import {
   AutoMergeResponse,
 } from '@/types/journals';
 import { JsonApiErrorResponse, JsonApiMeta } from '@/types/api';
+import type { HistoryFilters, HistoryListResponse } from '@/types/history';
 import {
   API_ENDPOINTS,
   ERROR_MESSAGES,
@@ -1581,5 +1582,62 @@ export function useExportOutdoorLogbook() {
     onError: (error: Error) => {
       toast.error(error.message);
     },
+  });
+}
+
+// Journal History API Functions
+//
+// Mirrors the contact history client (`lib/api/contacts.ts`) so the shared
+// `ActivityFeed` can be driven by either entity. History is produced
+// asynchronously by the projection consumer, so a just-made change may take a
+// moment to appear — the 2-minute stale time matches the contact feed.
+export const journalHistoryKeys = {
+  all: ['journal-history'] as const,
+  list: (journalId: string, page?: number, limit?: number) =>
+    [...journalHistoryKeys.all, journalId, { page, limit }] as const,
+};
+
+export async function fetchJournalHistory(
+  journalId: string,
+  filters: HistoryFilters = {}
+): Promise<HistoryListResponse> {
+  const params = new URLSearchParams();
+
+  if (filters.page) params.append('page', filters.page.toString());
+  if (filters.limit) params.append('limit', filters.limit.toString());
+
+  const url = `${API_ENDPOINTS.JOURNALS.BASE}/${journalId}/history?${params.toString()}`;
+
+  const response = await fetch(url, {
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.FETCH_FAILED
+    );
+  }
+
+  return response.json();
+}
+
+export function useJournalHistory(
+  journalId: string,
+  filters: HistoryFilters = {},
+  options: { enabled?: boolean } = {}
+) {
+  return useQuery({
+    queryKey: journalHistoryKeys.list(journalId, filters.page, filters.limit),
+    queryFn: () =>
+      fetchJournalHistory(journalId, {
+        page: filters.page,
+        limit: filters.limit,
+      }),
+    enabled: options.enabled !== false && !!journalId,
+    staleTime: 2 * 60 * 1000, // 2 minutes for history
   });
 }

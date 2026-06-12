@@ -1,6 +1,6 @@
 # Iteration 12: Activity History (Journals + Unified Foundation)
 
-**Status:** 🟡 IN PROGRESS — ITER12-001 (shared foundation) complete (Phase 1 backend + Phase 2 frontend); ITER12-002 Phase 1 (journal event enrichment + projection consumer) and Phase 2 (changed-fields coverage + journal history API) complete; ITER12-002 Phase 3 (UI + MCP read parity) and Phase 4 (type-data history on the MCP/integration/nested write surfaces) pending
+**Status:** 🟡 IN PROGRESS — ITER12-001 (shared foundation) complete (Phase 1 backend + Phase 2 frontend); ITER12-002 Phase 1 (journal event enrichment + projection consumer), Phase 2 (changed-fields coverage + journal history API), and Phase 3 (journal history UI + MCP read parity) complete; ITER12-002 Phase 4 (type-data history on the MCP/integration/nested write surfaces) pending
 **Dependencies:** Iteration 4 (Journal core + events), Iteration 5 (Redis Streams event bus, transactional outbox relay, stream consumers), existing contact activity history
 **Goal:** Deliver field-level activity history for journals of all types, displayed at the bottom of the journal UI with full provenance, by generalising the existing contact-history infrastructure into a single shared, **event-driven** system — and migrating contacts onto that same foundation.
 
@@ -137,9 +137,9 @@ Move the activity-feed components and types to a shared location, parameterised 
 - [Activity History — MCP and AI-Agent Parity](../product-specifications/activity-history-product-specification.md#mcp-and-ai-agent-parity)
 
 **Acceptance Criteria (task-level):**
-- [ ] Meaningful journal changes of every type are recorded with field-level diffs and provenance.
-- [ ] Journal history is available via API and MCP and rendered at the bottom of the journal detail screen.
-- [ ] Projection is idempotent (no duplicates on stream redelivery).
+- [ ] Meaningful journal changes of every type are recorded with field-level diffs and provenance. *(REST + all editable single-row types done in Phase 2; MCP type-data and nested/integration write surfaces remain in Phase 4.)*
+- [x] Journal history is available via API and MCP and rendered at the bottom of the journal detail screen. *(API in Phase 2; MCP `get_journal_history` tool + activity feed at the bottom of `JournalDetailView` in Phase 3.)*
+- [x] Projection is idempotent (no duplicates on stream redelivery). *(Unique index `(event_id, entity_type, entity_id, field_name)` + `ON CONFLICT DO NOTHING`, covered by Phase 1 tests.)*
 
 #### Phase 1: Event Enrichment + History Projection Consumer (Journal Events) ✅
 **PR Size:** ~8–10 files (exceeded: full UI/MCP/worker provenance plumbing landed in this PR by request)
@@ -186,21 +186,28 @@ Ensure every journal mutation publishes accurate `changed_fields`, and expose th
 - [x] **Integration (end-to-end backend):** through the real service + outbox + relay + consumer path, updating a journal field, two type-specific fields (MOOD_RATING and a newly-registered type, CLIMBING), and a route field each produce correctly-grouped history retrievable via the journal aggregation, with correct old/new/provenance; endpoint empty state, pagination, 404, other-user 404, and JSON:API shape. *(`tests/integration/infrastructure/events/test_journal_history_projection_e2e.py`, `tests/integration/api/test_journal_history_endpoints.py`.)*
 - [x] **Regression:** full unit suite (1993) green; journal/history/mcp/api/integrations/routes/events integration suites green; Google worker journal-event unit tests green; `ruff` + `ruff format` + `mypy` clean.
 
-#### Phase 3: Journal History UI + MCP Parity
+#### Phase 3: Journal History UI + MCP Parity ✅
 **PR Size:** ~6–8 files
+**Status:** ✅ COMPLETE
 
 Surface journal history to users and AI agents.
 
+**Design (as built):**
+- The frontend reuses the ITER12-001 shared, entity-agnostic feed unchanged: a thin `components/journals/ActivityFeed.tsx` wrapper supplies `entity="journal"` + the new `useJournalHistory` hook to the shared `components/history/ActivityFeed.tsx` (mirroring the contact wrapper). No new feed/pagination UI was written.
+- **Placement note:** the Phase 3 AC said "bottom of `JournalDetail.tsx`", but `JournalDetail.tsx` is dead code (imported nowhere). The journal detail route renders **`JournalDetailView.tsx`**, so the feed is mounted there as the last child (after `JournalChildrenList`, i.e. after the type-specific data sections) — satisfying the product spec's "bottom of the journal detail/edit screen".
+- The MCP `get_journal_history` tool mirrors `get_route_history` (user-scoped: other-user/missing journal → not-found) and reads via the existing `JournalHistoryService` + `SqlFieldHistoryRepository` (read-only, no transaction). Its `JournalHistoryEntry` schema is field-for-field parity with the REST `HistoryAttributes` (same provenance value coercion as `HistoryConverter`), with `page`/`limit` pagination matching the endpoint.
+
 **Acceptance Criteria:**
-- [ ] `useJournalHistory` hook + `fetchJournalHistory` client (mirror the contact history hook), with appropriate query keys and stale time.
-- [ ] Shared `<ActivityFeed entity="journal" id={journalId} />` rendered at the **bottom of `JournalDetail.tsx`** (after the type sections), with provenance icons/labels and Load-More pagination.
-- [ ] MCP `get_journal_history` tool returns field-level history with provenance, matching the API.
-- [ ] UI accounts for async projection (waits for entries to appear rather than asserting immediately).
+- [x] `useJournalHistory` hook + `fetchJournalHistory` client (mirror the contact history hook), with appropriate query keys and stale time. *(`frontend/src/lib/api/journals.ts`: `journalHistoryKeys`, `fetchJournalHistory`, `useJournalHistory` with `staleTime: 2 min`, structurally matching the shared feed's `UseHistoryHook`.)*
+- [x] Shared `<ActivityFeed entity="journal" entityId={journalId} />` rendered at the **bottom of the journal detail view** (after the type sections), with provenance icons/labels and Load-More pagination. *(`components/journals/ActivityFeed.tsx` wrapper + mounted as last child of `JournalDetailView.tsx`; provenance + Load-More come from the shared feed.)*
+- [x] MCP `get_journal_history` tool returns field-level history with provenance, matching the API. *(`app/mcp/domains/journals/tools.py` `get_journal_history` + `JournalHistoryEntry`/`JournalHistoryResponse` schemas; registered in `register_journal_tools`.)*
+- [x] UI accounts for async projection (waits for entries to appear rather than asserting immediately). *(E2E polls the history API with `toPass` until the projected entry lands; React Query 2-min stale time is acceptable for an audit log.)*
 
 **Required Test Coverage:**
-- **Unit (RTL):** journal activity feed renders entries with provenance and pagination; empty/loading/error states.
-- **E2E (Playwright):** each test creates its own data (no conditional/skip logic). Editing a journal shows the change at the bottom of the screen with correct provenance (using `waitFor` for async projection); pagination works; coverage across multiple journal types (e.g. NOTE, EVENT, a fitness/outdoor type). Model on `contact-activity-feed.spec.ts`.
-- **Integration:** MCP `get_journal_history` returns expected entries.
+- [x] **Unit (RTL):** journal activity feed renders entries with provenance and pagination; empty/loading/error states. *(`frontend/src/components/journals/__tests__/ActivityFeed.test.tsx` — 7 tests: id-threading, journal empty-state copy, entries+provenance (ui+mcp), loading, error, Load-More advances page, className.)*
+- [x] **E2E (Playwright):** each test creates its own data (no conditional/skip logic). Editing a journal shows the change at the bottom of the screen with correct provenance (using `toPass` for async projection); pagination works; coverage across multiple journal types (NOTE, EVENT, fitness). Modelled on `contact-activity-feed.spec.ts`. *(`frontend/tests/e2e/journal-history.spec.ts` — 6 tests; empty-state left to RTL since a created journal always projects a `__created__` entry.)*
+- [x] **Integration:** MCP `get_journal_history` returns expected entries. *(`tests/integration/mcp/test_journal_tools_integration.py` — entries+provenance+ordering, limit pagination, other-user not-found; plus unit mapping + registration tests in `tests/unit/mcp/domains/journals/test_tools.py`.)*
+- [x] **Regression:** full frontend unit suite (1383) green incl. `JournalDetailView` (feed child mocked); backend history/MCP unit + journal-history-endpoint/MCP integration suites green; `ruff` + `mypy` clean.
 
 #### Phase 4: Type-Data History on the Remaining Write Surfaces (MCP + Integrations + Nested)
 **PR Size:** ~6–8 files
