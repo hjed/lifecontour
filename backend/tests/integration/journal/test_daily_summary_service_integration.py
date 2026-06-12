@@ -1,10 +1,11 @@
 """Integration tests for DailySummaryService against a real database.
 
-Exercises the ``@transactional`` ``get_or_generate`` pipeline end-to-end through
-real SQL — the path that, before issue #945's fix, the REST controller left
-uncommitted (so a generated summary was discarded at request teardown and
-regenerated on every request). The AI call and input assembly are stubbed; the
-repository and connection are real.
+Exercises the ``get_or_generate`` pipeline end-to-end through real SQL. Each
+write (the ``GENERATING`` marker and the final ``GENERATED``/``FAILED`` result)
+commits as its own short unit of work so no transaction is held across the AI
+call (issue #970); before issue #945's fix the REST controller also left these
+writes uncommitted, discarding the summary at request teardown. The AI call and
+input assembly are stubbed; the repository and connection are real.
 """
 
 import json
@@ -64,9 +65,9 @@ class TestDailySummaryServiceTransactionalIntegration:
         assert result is not None
         assert result.status == SummaryStatus.GENERATED
 
-        # Read back via a separate repo on the same connection: the
-        # @transactional unit of work released its savepoint, so the row is
-        # present (it was not rolled back as an uncommitted write would be).
+        # Read back via a separate repo on the same connection: the final
+        # result's unit of work released its savepoint, so the row is present
+        # (it was not rolled back as an uncommitted write would be).
         repo = SqlJournalDailySummaryRepository(async_connection)
         persisted = await repo.find_by_user_and_date(_USER, _DATE)
         assert persisted is not None
@@ -74,10 +75,41 @@ class TestDailySummaryServiceTransactionalIntegration:
         assert persisted.summary_text == "A productive day."
 
     @pytest.mark.asyncio
+    async def test_marks_generating_before_calling_gemini(
+        self, service, async_connection
+    ):
+        """The GENERATING marker commits before the AI call, holding no txn.
+
+        Issue #970: the multi-second Gemini call must not run inside the unit of
+        work. We stub ``_call_gemini`` to observe state at AI-call time: the row
+        is already GENERATING (its marker committed as its own unit of work) and
+        no unit of work is open on the connection (depth 0).
+        """
+        observed: dict[str, object] = {}
+
+        async def fake_gemini(prompt: str) -> str:
+            repo = SqlJournalDailySummaryRepository(async_connection)
+            row = await repo.find_by_user_and_date(_USER, _DATE)
+            observed["status"] = row.status if row else None
+            observed["uow_depth"] = async_connection.info.get("uow_depth", 0)
+            return json.dumps({"summary_text": "A productive day."})
+
+        service._call_gemini = fake_gemini
+
+        result = await service.get_or_generate(_USER, _DATE, async_connection)
+
+        assert result is not None
+        assert result.status == SummaryStatus.GENERATED
+        # The marker was committed (visible on the same connection) before Gemini
+        assert observed["status"] == SummaryStatus.GENERATING
+        # ...and no transaction was held across the AI call.
+        assert observed["uow_depth"] == 0
+
+    @pytest.mark.asyncio
     async def test_regenerate_overwrites_existing_summary(
         self, service, async_connection
     ):
-        """regenerate invalidates then re-persists, all in one committed unit."""
+        """regenerate invalidates then re-persists as separate committed units."""
         await service.get_or_generate(_USER, _DATE, async_connection)
 
         result = await service.regenerate(_USER, _DATE, async_connection)

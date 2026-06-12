@@ -21,6 +21,7 @@ from app.core.journal.services.daily_summary_eligibility import (
 from app.core.journal.services.daily_summary_input_assembler import (
     DailySummaryInputAssembler,
 )
+from app.core.journal.services.daily_summary_models import DailySummaryInput
 from app.core.journal.services.daily_summary_prompt_builder import (
     DailySummaryPromptBuilder,
 )
@@ -63,20 +64,26 @@ class DailySummaryService:
             return DEFAULT_TIMEZONE
         return await self._user_settings_repo.get_timezone(user_id)
 
-    @transactional
     async def get_or_generate(
         self, user_id: str, summary_date: date, transaction: AsyncConnection
     ) -> JournalDailySummary | None:
         """Get a cached summary or generate a new one.
 
-        Returns the existing summary if already GENERATED,
-        otherwise assembles input and generates a new one.
+        Returns the existing summary if already GENERATED, otherwise assembles
+        input and generates a new one.
 
-        Any summary rows written here (status transitions and the final
-        GENERATED/FAILED result) are committed as one unit of work before the
-        response is sent: on the request paths (REST + MCP) the connection has no
-        commit backstop, so without this the generated summary would be rolled
-        back at teardown and regenerated on every request (issue #945).
+        This orchestrator deliberately holds **no** transaction across the
+        multi-second Gemini call (issue #970). Each write commits as its own
+        short unit of work via a ``@transactional`` helper: the ``GENERATING``
+        marker is committed *before* the AI call (so concurrent callers see it
+        and the row lock is released), then the AI call runs with no transaction
+        held, then the ``GENERATED``/``FAILED`` result is committed afterwards —
+        re-checking status first so a slower run can't overwrite a summary
+        another request already completed (last-writer-wins prevention).
+
+        Committing in the service layer (rather than relying on teardown) is
+        required because the request connection has no commit backstop, so an
+        uncommitted write would be discarded at teardown (issue #945).
         """
         if not self._gemini_api_key:
             logger.info(
@@ -84,7 +91,7 @@ class DailySummaryService:
             )
             return None
 
-        # 1. Check cache
+        # 1. Check cache (read — no transaction held)
         existing = await self._summary_repo.find_by_user_and_date(user_id, summary_date)
         if existing and existing.status == SummaryStatus.GENERATED:
             logger.info(
@@ -103,7 +110,7 @@ class DailySummaryService:
             )
             return existing
 
-        # 2. Assemble input (scoped to the user's local day)
+        # 2. Assemble input (scoped to the user's local day — reads only)
         timezone = await self._resolve_timezone(user_id)
         summary_input = await self._input_assembler.assemble(
             user_id, summary_date, timezone
@@ -116,19 +123,63 @@ class DailySummaryService:
                 summary_date,
                 summary_input.journal_count,
             )
-            disabled_summary = JournalDailySummary(
-                user_id=user_id,
-                summary_date=summary_date,
-                journal_count=summary_input.journal_count,
-                event_count=summary_input.event_count,
-                contact_count=len(set(summary_input.contact_names)),
-                mood_average=self._compute_mood_average(summary_input.mood_values),
-                status=SummaryStatus.DISABLED,
+            return await self._persist_disabled(
+                user_id, summary_date, summary_input, transaction
             )
-            return await self._summary_repo.upsert(disabled_summary)
 
-        # 4. Set status GENERATING (use update_status to preserve existing fields;
-        #    fall back to upsert if no row exists yet)
+        # 4. Commit the GENERATING marker as its own short unit of work, so
+        #    concurrent callers see it and the row lock is released before the
+        #    AI call.
+        await self._mark_generating(user_id, summary_date, transaction)
+
+        # 5. Build prompt and call Gemini — with NO transaction held.
+        try:
+            prompt = self._prompt_builder.build(summary_input, timezone=timezone)
+            raw_response = await self._call_gemini(prompt)
+            result = self._parse_response(raw_response)
+        except Exception as e:
+            logger.exception(
+                "AI generation failed for daily summary %s on %s: %s",
+                user_id,
+                summary_date,
+                e,
+            )
+            return await self._mark_failed(user_id, summary_date, transaction)
+
+        # 6. Persist the result as its own unit of work.
+        return await self._persist_generated(
+            user_id, summary_date, summary_input, result, transaction
+        )
+
+    @transactional
+    async def _persist_disabled(
+        self,
+        user_id: str,
+        summary_date: date,
+        summary_input: DailySummaryInput,
+        transaction: AsyncConnection,
+    ) -> JournalDailySummary:
+        """Persist a DISABLED summary for an ineligible day (own unit of work)."""
+        disabled_summary = JournalDailySummary(
+            user_id=user_id,
+            summary_date=summary_date,
+            journal_count=summary_input.journal_count,
+            event_count=summary_input.event_count,
+            contact_count=len(set(summary_input.contact_names)),
+            mood_average=self._compute_mood_average(summary_input.mood_values),
+            status=SummaryStatus.DISABLED,
+        )
+        return await self._summary_repo.upsert(disabled_summary)
+
+    @transactional
+    async def _mark_generating(
+        self, user_id: str, summary_date: date, transaction: AsyncConnection
+    ) -> None:
+        """Commit the GENERATING marker as its own unit of work.
+
+        Uses ``update_status`` to preserve existing fields; falls back to
+        ``upsert`` if no row exists yet.
+        """
         updated = await self._summary_repo.update_status(
             user_id, summary_date, SummaryStatus.GENERATING.value
         )
@@ -141,37 +192,30 @@ class DailySummaryService:
                 )
             )
 
-        # 5. Build prompt and call Gemini
-        try:
-            prompt = self._prompt_builder.build(summary_input, timezone=timezone)
-            raw_response = await self._call_gemini(prompt)
-            result = self._parse_response(raw_response)
-        except Exception as e:
-            logger.exception(
-                "AI generation failed for daily summary %s on %s: %s",
+    @transactional
+    async def _persist_generated(
+        self,
+        user_id: str,
+        summary_date: date,
+        summary_input: DailySummaryInput,
+        result: dict[str, Any],
+        transaction: AsyncConnection,
+    ) -> JournalDailySummary | None:
+        """Commit the GENERATED result, guarding against a concurrent overwrite.
+
+        Re-reads the row first: if a faster concurrent run already completed the
+        summary, return it instead of clobbering it (last-writer-wins).
+        """
+        existing = await self._summary_repo.find_by_user_and_date(user_id, summary_date)
+        if existing and existing.status == SummaryStatus.GENERATED:
+            logger.info(
+                "Daily summary for %s on %s was completed concurrently; "
+                "not overwriting",
                 user_id,
                 summary_date,
-                e,
             )
-            # Use update_status to preserve existing text/counts;
-            # fall back to upsert if no row exists yet
-            updated = await self._summary_repo.update_status(
-                user_id, summary_date, SummaryStatus.FAILED.value
-            )
-            if updated is None:
-                await self._summary_repo.upsert(
-                    JournalDailySummary(
-                        user_id=user_id,
-                        summary_date=summary_date,
-                        status=SummaryStatus.FAILED,
-                    )
-                )
-                updated = await self._summary_repo.find_by_user_and_date(
-                    user_id, summary_date
-                )
-            return updated
+            return existing
 
-        # 6. Persist result
         now = datetime.now(tz=UTC)
         generated_summary = JournalDailySummary(
             user_id=user_id,
@@ -187,16 +231,60 @@ class DailySummaryService:
         return await self._summary_repo.upsert(generated_summary)
 
     @transactional
+    async def _mark_failed(
+        self, user_id: str, summary_date: date, transaction: AsyncConnection
+    ) -> JournalDailySummary | None:
+        """Commit the FAILED status, guarding against a concurrent success.
+
+        Re-reads the row first: if a concurrent run already completed the
+        summary, return it rather than flipping a GENERATED row to FAILED.
+        """
+        existing = await self._summary_repo.find_by_user_and_date(user_id, summary_date)
+        if existing and existing.status == SummaryStatus.GENERATED:
+            logger.info(
+                "Daily summary for %s on %s was completed concurrently; "
+                "not marking failed",
+                user_id,
+                summary_date,
+            )
+            return existing
+
+        # Use update_status to preserve existing text/counts;
+        # fall back to upsert if no row exists yet.
+        updated = await self._summary_repo.update_status(
+            user_id, summary_date, SummaryStatus.FAILED.value
+        )
+        if updated is None:
+            await self._summary_repo.upsert(
+                JournalDailySummary(
+                    user_id=user_id,
+                    summary_date=summary_date,
+                    status=SummaryStatus.FAILED,
+                )
+            )
+            updated = await self._summary_repo.find_by_user_and_date(
+                user_id, summary_date
+            )
+        return updated
+
     async def regenerate(
         self, user_id: str, summary_date: date, transaction: AsyncConnection
     ) -> JournalDailySummary | None:
         """Force regenerate a daily summary by invalidating cache first.
 
-        The invalidation and the regeneration commit together as one unit of
-        work (``get_or_generate`` joins it re-entrantly).
+        The invalidation commits as its own unit of work, then ``get_or_generate``
+        runs its own short units of work — no transaction is held across the AI
+        call (issue #970).
         """
-        await self._summary_repo.invalidate_for_date(user_id, summary_date)
+        await self._invalidate_committed(user_id, summary_date, transaction)
         return await self.get_or_generate(user_id, summary_date, transaction)
+
+    @transactional
+    async def _invalidate_committed(
+        self, user_id: str, summary_date: date, transaction: AsyncConnection
+    ) -> None:
+        """Invalidate the cached summary, committed as its own unit of work."""
+        await self._summary_repo.invalidate_for_date(user_id, summary_date)
 
     async def invalidate(self, user_id: str, summary_date: date) -> None:
         """Invalidate (set to PENDING) an existing daily summary.

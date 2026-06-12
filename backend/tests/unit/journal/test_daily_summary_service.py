@@ -210,6 +210,41 @@ class TestDailySummaryServiceGeneration:
         assert result.status == SummaryStatus.GENERATED
         mock_input_assembler.assemble.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_does_not_overwrite_concurrently_generated_summary(
+        self,
+        service: DailySummaryService,
+        mock_summary_repo: AsyncMock,
+    ) -> None:
+        """A slower run must not overwrite a summary a faster run completed.
+
+        The cache check passes (no row yet), but by the time this run finishes
+        the AI call a concurrent request has persisted a GENERATED summary. The
+        final write re-checks status and returns the existing row instead of
+        clobbering it (last-writer-wins prevention).
+        """
+        completed = JournalDailySummary(
+            user_id="user123",
+            summary_date=date(2026, 4, 27),
+            summary_text="From the faster concurrent run.",
+            status=SummaryStatus.GENERATED,
+        )
+        # (1) cache check: None; (2) final-write guard: the completed row.
+        mock_summary_repo.find_by_user_and_date.side_effect = [None, completed]
+
+        result = await service.get_or_generate(
+            "user123", date(2026, 4, 27), transaction=_NO_TXN
+        )
+
+        assert result is completed
+        # No GENERATED summary was upserted (only the GENERATING marker).
+        generated_upserts = [
+            call
+            for call in mock_summary_repo.upsert.call_args_list
+            if call.args[0].status == SummaryStatus.GENERATED
+        ]
+        assert generated_upserts == []
+
 
 class TestDailySummaryServiceEligibility:
     """Test eligibility checking."""
@@ -251,8 +286,14 @@ class TestDailySummaryServiceFailure:
             summary_date=date(2026, 4, 27),
             status=SummaryStatus.FAILED,
         )
-        # First call: cache check returns None; second call: returns the upserted entity
-        mock_summary_repo.find_by_user_and_date.side_effect = [None, failed_entity]
+        # Reads in order: (1) cache check returns None; (2) _mark_failed guard
+        # read returns None (no concurrent success); (3) post-upsert fallback
+        # read returns the upserted FAILED entity.
+        mock_summary_repo.find_by_user_and_date.side_effect = [
+            None,
+            None,
+            failed_entity,
+        ]
 
         service = DailySummaryService(
             input_assembler=mock_input_assembler,
@@ -274,6 +315,49 @@ class TestDailySummaryServiceFailure:
         )
         assert result is not None
         assert result.status == SummaryStatus.FAILED
+
+    @pytest.mark.asyncio
+    async def test_failed_does_not_clobber_concurrent_generated(
+        self,
+        mock_input_assembler: AsyncMock,
+        mock_eligibility_checker: MagicMock,
+        mock_prompt_builder: MagicMock,
+        mock_summary_repo: AsyncMock,
+    ) -> None:
+        """A failed AI call must not overwrite a summary another run completed.
+
+        While this request's Gemini call was failing, a concurrent request
+        completed the summary. The FAILED write re-checks status and returns the
+        existing GENERATED row instead of flipping it to FAILED.
+        """
+        completed = JournalDailySummary(
+            user_id="user123",
+            summary_date=date(2026, 4, 27),
+            summary_text="From the concurrent run.",
+            status=SummaryStatus.GENERATED,
+        )
+        # (1) cache check returns None; (2) _mark_failed guard read sees the
+        # concurrently-completed GENERATED row.
+        mock_summary_repo.find_by_user_and_date.side_effect = [None, completed]
+
+        service = DailySummaryService(
+            input_assembler=mock_input_assembler,
+            eligibility_checker=mock_eligibility_checker,
+            prompt_builder=mock_prompt_builder,
+            summary_repo=mock_summary_repo,
+            gemini_api_key="test-key",
+            gemini_model="gemini-2.5-pro",
+            _gemini_response_override="not valid json",
+        )
+
+        result = await service.get_or_generate(
+            "user123", date(2026, 4, 27), transaction=_NO_TXN
+        )
+
+        assert result is completed
+        # The row was never flipped to FAILED.
+        for call in mock_summary_repo.update_status.call_args_list:
+            assert call.args[2] != SummaryStatus.FAILED.value
 
     @pytest.mark.asyncio
     async def test_no_api_key_returns_none(
