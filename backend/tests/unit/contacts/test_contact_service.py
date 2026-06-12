@@ -676,6 +676,28 @@ class TestContactService:
         mock_contact_repo.save.assert_called_once_with(updated_contact)
 
     @pytest.mark.asyncio
+    async def test_update_contact_empty_tag_names_clears_without_tag_service(
+        self, contact_service, mock_contact_repo, mock_transaction
+    ):
+        """An empty tag_names list clears tags and must not require a TagService.
+
+        contact_service is built WITHOUT a TagService, so this would raise if the
+        empty-list clear path still went through _resolve_tag_names.
+        """
+        current_contact = Contact(first_name="John", last_name="Smith", id=1)
+        saved_contact = Contact(first_name="John", last_name="Smith", id=1)
+        mock_contact_repo.find_by_id.return_value = current_contact
+        mock_contact_repo.save.return_value = saved_contact
+
+        updated_contact = Contact(first_name="John", last_name="Smith", id=1, tags=None)
+        result = await contact_service.update_contact(
+            updated_contact, mock_transaction, tag_names=[]
+        )
+
+        assert result == saved_contact
+        assert updated_contact.tags == []  # cleared
+
+    @pytest.mark.asyncio
     async def test_update_contact_no_id_raises_error(
         self, contact_service, mock_transaction
     ):

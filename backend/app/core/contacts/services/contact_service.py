@@ -389,9 +389,11 @@ class ContactService:
             # Resolve any tag names to existing-or-new tags inside this unit of
             # work (replacement strategy: the resolved set replaces all existing
             # tags). An empty list clears all tags; None leaves tags untouched.
+            # Clearing needs no TagService, so only resolve when names are given.
             if tag_names is not None:
                 contact.tags = []
-                await self._resolve_tag_names(contact, tag_names, transaction)
+                if tag_names:
+                    await self._resolve_tag_names(contact, tag_names, transaction)
 
             # Get current contact and calculate changes
             current_contact = await self._get_existing_contact(contact.id)
