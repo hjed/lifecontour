@@ -94,22 +94,20 @@ def _journal_created_event(
 
 
 async def _cleanup(engine, *, user_id: str, calendar_id: str) -> None:
-    """Remove rows created by a test (no rollback fixture on this path)."""
+    """Remove rows committed by a test (no rollback fixture on this path).
+
+    Deleting the journal cascades to every journal-child row (external-event
+    link, calendar info, type/fitness data, ...) — they all FK to ``journals.id``
+    ``ON DELETE CASCADE`` — so this stays correct as new write paths are added to
+    the processor. ``outbox_events`` has no FK to journals, so it is cleared
+    first (by the journal ids) while the journals still exist. The per-test
+    ``user_id``/``calendar_id`` are unique (uuid4), so any residual row cannot
+    collide with another test even if a delete is missed.
+    """
     async with engine.begin() as conn:
         await conn.execute(
             text(
                 "DELETE FROM outbox_events WHERE aggregate_id IN "
-                "(SELECT id FROM journals WHERE user_id = :user_id)"
-            ),
-            {"user_id": user_id},
-        )
-        await conn.execute(
-            text("DELETE FROM journal_external_event_links WHERE calendar_id = :cid"),
-            {"cid": calendar_id},
-        )
-        await conn.execute(
-            text(
-                "DELETE FROM journal_calendar_info WHERE journal_id IN "
                 "(SELECT id FROM journals WHERE user_id = :user_id)"
             ),
             {"user_id": user_id},
