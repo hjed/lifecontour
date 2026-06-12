@@ -18,6 +18,7 @@ from core_shared.models.journals import (
     JournalContactRelationshipType,
     JournalType,
 )
+from core_shared.models.journals.gear_usage_data import GearUsageData
 
 from app.core.journal.models.journal_tag import JournalTag
 from app.core.journal.services.journal_write_service import JournalWriteService
@@ -224,6 +225,29 @@ class TestUpdateTypeData:
         )
 
         write_service.mood_data_repo.save.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_update_type_data_gear_usage(self, write_service, mock_transaction):
+        """update_type_data for GEAR_USAGE writes via the gear-usage repo.
+
+        Regression guard: the single-field type-data endpoint must dispatch
+        GEAR_USAGE rather than rejecting it with "no type-specific data".
+        """
+        existing = GearUsageData(
+            journal_id=7,
+            gear_item_id=uuid4(),
+            checkout_date=datetime(2024, 1, 1, 8, 0, tzinfo=UTC),
+        )
+        write_service.gear_usage_data_repo.find_by_journal_id.return_value = existing
+
+        await write_service.update_type_data(
+            7,
+            JournalType.GEAR_USAGE,
+            {"checkin_date": "2024-01-02T18:00:00+00:00"},
+            mock_transaction,
+        )
+
+        write_service.gear_usage_data_repo.save.assert_awaited_once()
 
 
 class TestCreateJournalTags:

@@ -116,8 +116,8 @@ def diff_tracked_fields(
 # type or field is added without a coverage decision (tracked or excluded). Types
 # that are intentionally excluded (and why): PLAN/TRAVEL hold nested child
 # collections and PHOTO_ALBUM is Immich-synced (integration/Phase 4); SNORKELLING/
-# DIVING/DOWNHILL_SKIING validate existence only (no editable fields); GEAR_USAGE
-# has no type-data edit path; NOTE has no type data.
+# DIVING/DOWNHILL_SKIING validate existence only (no editable fields); NOTE has no
+# type data.
 _TYPE_DATA_TRACKED_FIELDS: dict[JournalType, tuple[str, ...]] = {
     JournalType.EVENT: (
         "calendar_id",
@@ -179,6 +179,11 @@ _TYPE_DATA_TRACKED_FIELDS: dict[JournalType, tuple[str, ...]] = {
         "maintenance_type",
         "activity_types",
         "retirement_reason",
+    ),
+    JournalType.GEAR_USAGE: (
+        "gear_item_id",
+        "checkout_date",
+        "checkin_date",
     ),
 }
 
@@ -506,6 +511,7 @@ class JournalWriteService:
             JournalType.OUTDOOR_PLANNING: self.outdoor_planning_data_repo,
             JournalType.OUTDOOR_TRAINING: self.outdoor_training_data_repo,
             JournalType.GEAR_MAINTENANCE: self.gear_maintenance_data_repo,
+            JournalType.GEAR_USAGE: self.gear_usage_data_repo,
         }.get(journal_type)
 
     async def _apply_type_data_update(
@@ -606,6 +612,10 @@ class JournalWriteService:
         elif journal_type == JournalType.GEAR_MAINTENANCE:
             await helpers.update_gear_maintenance_type_data(
                 journal_id, journal_type_str, attrs, self.gear_maintenance_data_repo
+            )
+        elif journal_type == JournalType.GEAR_USAGE:
+            await helpers.update_gear_usage_type_data(
+                journal_id, journal_type_str, attrs, self.gear_usage_data_repo
             )
         elif journal_type in (JournalType.PLAN, JournalType.TRAVEL):
             # PLAN and TRAVEL types have complex nested data structures
@@ -1155,8 +1165,11 @@ class JournalWriteService:
     ) -> None:
         """Find-or-create each tag by name and assign it to the journal.
 
-        Each tag is wrapped in a SAVEPOINT so a duplicate-name race or a bad item
-        rolls back only that tag, not the whole composite write. Tag lookup is
+        Each tag is wrapped in a SAVEPOINT so a failure (e.g. a duplicate-name
+        race on insert) rolls back just that statement and leaves the surrounding
+        transaction usable — the error then propagates cleanly rather than
+        poisoning the whole composite unit of work. The error is NOT swallowed:
+        a failing tag still aborts the composite write. Tag lookup is
         case-insensitive (``tag_repo.find_by_name``); a missing tag is created
         with the default grey colour, mirroring the previous MCP tool behaviour.
         """

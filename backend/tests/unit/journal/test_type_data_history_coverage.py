@@ -92,13 +92,6 @@ _EXCLUDED_FIELDS: dict[JournalType, dict[str, str]] = {
         "accommodations": "nested child collection (Phase 4)",
         "transportation": "nested child collection (Phase 4)",
     },
-    # GEAR_USAGE has no update_type_data path (driven by checkout/checkin flows);
-    # its history is out of scope for the type-data projection.
-    JournalType.GEAR_USAGE: {
-        "gear_item_id": "no type-data edit path (checkout/checkin flow)",
-        "checkout_date": "no type-data edit path (checkout/checkin flow)",
-        "checkin_date": "no type-data edit path (checkout/checkin flow)",
-    },
 }
 
 
