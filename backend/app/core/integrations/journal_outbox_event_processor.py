@@ -499,33 +499,18 @@ class JournalOutboxEventProcessor:
             order=existing_journal.order,
         )
 
-        # Calculate changed fields (including event_date_range)
-        changed_fields: dict[str, Any] = {}
-        if updated_journal.title != existing_journal.title:
-            changed_fields["title"] = (existing_journal.title, updated_journal.title)
-        if updated_journal.content != existing_journal.content:
-            changed_fields["content"] = (
-                existing_journal.content,
-                updated_journal.content,
-            )
-        if updated_journal.event_date_range != existing_journal.event_date_range:
-            changed_fields["event_date_range"] = (
-                {
-                    "start": existing_journal.event_date_range.start.isoformat(),
-                    "end": existing_journal.event_date_range.end.isoformat(),
-                },
-                {
-                    "start": updated_journal.event_date_range.start.isoformat(),
-                    "end": updated_journal.event_date_range.end.isoformat(),
-                },
-            )
-
-        # Update via journal service (only if fields actually changed)
-        if changed_fields:
+        # Skip a no-op inbound sync entirely so it produces no event/history;
+        # when something changed, JournalService computes the field-level
+        # changed_fields by diffing the persisted journal against updated_journal.
+        fields_changed = (
+            updated_journal.title != existing_journal.title
+            or updated_journal.content != existing_journal.content
+            or updated_journal.event_date_range != existing_journal.event_date_range
+        )
+        if fields_changed:
             provenance = _provenance_for_source(payload.integration_source)
             saved_journal = await self.journal_service.update_journal(
                 updated_journal,
-                changed_fields,
                 self.connection,
                 changed_by=payload.integration_source or "system",
                 source=provenance,
@@ -570,7 +555,7 @@ class JournalOutboxEventProcessor:
             "Updated journal from inbound sync event",
             journal_id=saved_journal.id,
             external_event_id=external_event_id,
-            changed_fields=list(changed_fields.keys()),
+            fields_changed=fields_changed,
         )
 
         return {

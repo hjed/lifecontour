@@ -2685,26 +2685,21 @@ async def update_journal_entry(
     if not existing_journal:
         raise JournalNotFoundError(journal_id)
 
-    # Track changed fields
-    changed_fields: dict[str, Any] = {}
-
-    # Update journal fields
+    # Apply the requested field changes to the loaded journal; JournalService
+    # diffs the persisted row against this merged object to compute changed_fields,
+    # so no manual changed_fields tracking is needed here.
     if request.title is not None:
         existing_journal.title = request.title
-        changed_fields["title"] = request.title
     if request.content is not None:
         existing_journal.content = request.content
-        changed_fields["content"] = request.content
     if request.event_date_range is not None:
         existing_journal.event_date_range = EventDateRange(
             start=request.event_date_range.start,
             end=request.event_date_range.end,
         )
-        changed_fields["event_date_range"] = request.event_date_range
 
     if "parent_id" in request.model_fields_set:
         existing_journal.parent_id = request.parent_id
-        changed_fields["parent_id"] = request.parent_id
 
     # Apply all updates atomically, committing before the response is returned
     # (issue #945). unit_of_work is re-entrant, so the already-@transactional
@@ -2713,7 +2708,6 @@ async def update_journal_entry(
         # Update journal
         updated_journal = await journal_service.update_journal(
             existing_journal,
-            changed_fields,
             db_connection,
             changed_by="mcp",
             source=Provenance.MCP,

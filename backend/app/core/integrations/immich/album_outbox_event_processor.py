@@ -53,16 +53,6 @@ EVENT_TYPE_IMMICH_ALBUM_UPDATED = "immich_album.updated"
 
 INTEGRATION_SOURCE = "immich_album"
 
-# changed_fields keys for the emitted JournalUpdated event. These are the fields
-# protected from inbound overwrite once a journal is edited locally, named to
-# match the repo-wide convention (a single ``event_date_range`` key rather than
-# separate ``_start`` / ``_end`` keys) so consumers don't special-case albums.
-_CHANGED_FIELDS = (
-    "title",
-    "content",
-    "event_date_range",
-)
-
 
 class ImmichAlbumOutboxEventProcessingError(Exception):
     """Raised when Immich album outbox event processing fails."""
@@ -270,7 +260,6 @@ class ImmichAlbumOutboxEventProcessor:
             merged.order = existing.order
             await self.journal_service.update_journal(
                 merged,
-                changed_fields=dict.fromkeys(_CHANGED_FIELDS, True),
                 transaction=self.connection,
                 changed_by=INTEGRATION_SOURCE,
                 source=Provenance.IMMICH,

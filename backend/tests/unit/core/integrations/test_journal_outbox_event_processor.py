@@ -520,52 +520,24 @@ class TestJournalOutboxEventProcessor:
         assert result["status"] == "success"
         mock_journal_service.update_journal.assert_called_once()
 
-    # ── Changed fields includes event_date_range ──────────────────────
+    # ── Date-range change drives the journal update ───────────────────
 
     @pytest.mark.asyncio
-    async def test_changed_fields_includes_date_range(
+    async def test_date_range_change_passes_updated_journal_to_service(
         self,
         processor: JournalOutboxEventProcessor,
         mock_journal_service: AsyncMock,
         mock_connection: AsyncMock,
     ) -> None:
-        """event_date_range changes should be included in changed_fields."""
-        event = _make_outbox_event(
-            event_type="journal_event.updated",
-            sync_action="updated",
-            existing_journal_id=42,
-        )
+        """An inbound date-range change calls update_journal with the merged journal.
 
-        mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
-            _mock_fetchone(_make_journal_row()),
-            _mock_fetchone(_make_link_row()),
-            _mock_empty_result(),  # _find_calendar_info
-            _mock_empty_result(),  # _save_calendar_info
-            _mock_empty_result(),  # _update_external_event_link_etag
-        ]
-
-        mock_journal_service.update_journal.return_value = _make_journal()
-
-        await processor.process_event(event)
-
-        changed_fields = mock_journal_service.update_journal.call_args[0][1]
-        assert "event_date_range" in changed_fields
-
-    @pytest.mark.asyncio
-    async def test_changed_fields_date_range_is_json_serializable(
-        self,
-        processor: JournalOutboxEventProcessor,
-        mock_journal_service: AsyncMock,
-        mock_connection: AsyncMock,
-    ) -> None:
-        """event_date_range changed_fields must be JSON-serializable.
-
-        The outbox publisher calls json.dumps(event_data), so EventDateRange
-        objects in changed_fields would cause 'Object of type EventDateRange
-        is not JSON serializable' errors.
+        Since ITER12-002 Phase 2, JournalService computes changed_fields itself by
+        diffing the persisted journal against the passed (merged) journal, so the
+        processor only has to hand over the updated journal — it no longer builds
+        a changed_fields dict. The JSON-serialisable event_date_range pair is now
+        covered by ``test_journal_changed_fields``.
         """
-        import json
+        from core_shared.models.journals import Journal
 
         event = _make_outbox_event(
             event_type="journal_event.updated",
@@ -586,22 +558,13 @@ class TestJournalOutboxEventProcessor:
 
         await processor.process_event(event)
 
-        changed_fields = mock_journal_service.update_journal.call_args[0][1]
-        assert "event_date_range" in changed_fields
-
-        # The old and new values must be JSON-serializable (dicts with ISO strings)
-        old_value, new_value = changed_fields["event_date_range"]
-        assert isinstance(old_value, dict), (
-            f"Expected dict, got {type(old_value).__name__}"
-        )
-        assert isinstance(new_value, dict), (
-            f"Expected dict, got {type(new_value).__name__}"
-        )
-        assert "start" in old_value
-        assert "end" in old_value
-
-        # Verify the entire changed_fields dict is JSON-serializable
-        json.dumps({"changed_fields": changed_fields})
+        mock_journal_service.update_journal.assert_called_once()
+        passed_journal = mock_journal_service.update_journal.call_args[0][0]
+        assert isinstance(passed_journal, Journal)
+        # No changed_fields positional arg is passed any more; the connection
+        # follows the journal directly.
+        assert passed_journal.event_date_range is not None
+        assert mock_journal_service.update_journal.call_args[0][1] is mock_connection
 
     # ── Calendar info upsert updated_at ───────────────────────────────
 

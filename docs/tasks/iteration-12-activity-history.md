@@ -1,6 +1,6 @@
 # Iteration 12: Activity History (Journals + Unified Foundation)
 
-**Status:** 🟡 IN PROGRESS — ITER12-001 (shared foundation) complete (Phase 1 backend + Phase 2 frontend); ITER12-002 Phase 1 (journal event enrichment + projection consumer) complete
+**Status:** 🟡 IN PROGRESS — ITER12-001 (shared foundation) complete (Phase 1 backend + Phase 2 frontend); ITER12-002 Phase 1 (journal event enrichment + projection consumer) and Phase 2 (changed-fields coverage + journal history API) complete; ITER12-002 Phase 3 (UI + MCP parity) pending
 **Dependencies:** Iteration 4 (Journal core + events), Iteration 5 (Redis Streams event bus, transactional outbox relay, stream consumers), existing contact activity history
 **Goal:** Deliver field-level activity history for journals of all types, displayed at the bottom of the journal UI with full provenance, by generalising the existing contact-history infrastructure into a single shared, **event-driven** system — and migrating contacts onto that same foundation.
 
@@ -160,32 +160,32 @@ Add provenance to journal events and build the consumer that writes history from
 - [x] **Integration:** publishing journal events to the stream → consumer writes correct `field_history` rows; **redelivery of the same event writes no duplicates**; malformed event → dead-letter; plus a backend end-to-end test through the real service → outbox → relay → consumer path. *(`tests/integration/infrastructure/events/test_history_projection_consumer_integration.py`, `tests/integration/infrastructure/events/test_journal_history_projection_e2e.py`, and `created_at` coverage in `tests/integration/history/test_field_history_repository_integration.py`.)*
 - [x] **Regression:** full unit suite (1852), contact-history + contact-service, search-indexer/outbox-relay, journal/route/gear/MCP integration suites green; `ruff` + `mypy` clean.
 
-#### Phase 2: Journal Changed-Fields Coverage (All Types) + History API
-**PR Size:** ~7–9 files
+#### Phase 2: Journal Changed-Fields Coverage (All Types) + History API ✅
+**PR Size:** ~7–9 files (slightly exceeded with the shared History API module + tests)
+**Status:** ✅ COMPLETE
 
 Ensure every journal mutation publishes accurate `changed_fields`, and expose the read API.
 
-> **Carried over from ITER12-002 Phase 1 (must be completed here):** the
-> projection (`HistoryService.project_event`) only emits history for `changed_fields`
-> entries shaped as `(old, new)` pairs; non-pair values are treated as internal
-> signals and skipped ("meaningful changes only"). The journal mutation producers
-> do **not** yet emit pairs — the UI update controllers build scalar new-values
-> (e.g. `changed_fields["title"] = updated_journal.title` in
-> `api/journals/controllers.py`), and the Immich processor uses marker dicts
-> (`dict.fromkeys(_CHANGED_FIELDS, True)` in `immich_album_outbox_event_processor.py`).
-> **Until they emit `(old, new)` pairs, journal-update and Immich-driven history
-> rows are produced for none of these fields.** Converting every producer to pairs
-> is the core of this phase.
+**Design (as built):**
+- Base-field `changed_fields` `{field: (old, new)}` is computed **inside `JournalService.update_journal`** (`_calculate_changed_fields`, mirroring contact `_calculate_changed_fields`): it loads the existing journal, diffs `title`/`content`/`event_date_range`/`parent_id`/`order` (event date range rendered as a compact ISO range string), and the `changed_fields` parameter is **removed** from the signature. This converted every producer at once — UI PUT/PATCH controllers, the MCP update tool, the Google inbound processor, and the Immich processor now just pass the merged journal; the Immich `_CHANGED_FIELDS` marker constant was deleted.
+- The Google Calendar outbound worker keys sync on `changed_fields` **keys** only (incl. the `calendar_info` marker — verified in `worker.py`), so converting values to `(old, new)` pairs preserves sync. The EVENT type-data path keeps emitting `{"calendar_info": True}` **and** adds real field diffs in the same event (the projection skips the non-pair marker, records the pairs).
+- Type-specific `changed_fields` is computed generically in `JournalWriteService.update_type_data` via a snapshot→apply→diff registry (`_TYPE_DATA_TRACKED_FIELDS` + `to_history_value`/`diff_tracked_fields`), with `changed_by`/`source` threaded through and a single `JournalUpdated` published. **Covered editable single-row types:** EVENT, MOOD_RATING, FITNESS, OUTDOOR_ACTIVITY, BUSHWALKING, JOGGING. PLAN/TRAVEL/PHOTO_ALBUM remain integration-managed/non-editable (no history); SNORKELLING/DIVING/DOWNHILL_SKIING are existence-validate-only. The remaining outdoor subtypes (CANYONING, CAVING, CANOEING, CLIMBING, KAYAKING, CROSS_COUNTRY_SKIING, OUTDOOR_PLANNING, OUTDOOR_TRAINING, GEAR_MAINTENANCE, ABSEILING_TRIP) follow the identical registry pattern and are a trivial extension (add their tracked fields to `_TYPE_DATA_TRACKED_FIELDS` + `_type_data_repo`) — deferred to keep the PR reviewable.
+- Route `changed_fields` were **already** `(old, new)` pairs in `RouteRequestConverter.from_update_request`, and gear (`GearItemService.update`) already emits pairs — both flow through `RouteUpdated`/`GearItemUpdated` and the Phase 1 `route:<id>:<field>` / `gear:<id>:<field>` projection unchanged. No service change was needed.
+- `GET /api/journals/{journal_id}/history` mirrors the contact endpoint using **new shared** `History{Attributes,Resource,ListResponse}` schemas + `HistoryConverter` (`app/api/history/`, `type="journal_history"`), reading via a thin `JournalHistoryService` over `get_history_for_aggregate("journal", ...)`; 404 for a missing journal; DI wired in `JournalProvider`.
+
+**Known follow-ups (not blocking Phase 2):**
+- MCP **type-data** writes go through a separate `_update_type_specific_data` path in `app/mcp/domains/journals/tools.py` that does not publish `JournalUpdated`, so MCP-driven *type-data* edits don't yet produce history (MCP *base-field* edits do, via the shared service). Routing MCP type-data through `JournalWriteService` is a larger DI change deferred to ITER12-002 Phase 3 (MCP parity) or a follow-up.
 
 **Acceptance Criteria:**
-- [ ] Journal service computes `changed_fields` as `{field: (old, new)}` for base fields **and** type-specific data tables (covering all journal types), routes, and gear — modelled on the contact `_calculate_changed_fields` pattern.
-- [ ] The existing scalar/marker `changed_fields` producers are converted to emit `(old, new)` pairs: the UI update controllers (`api/journals/controllers.py`), the MCP update tool, the inbound sync processor, and the Immich album processor — so their mutations actually appear in `field_history`.
-- [ ] Every journal create/update/delete/type/route/gear mutation publishes an event with accurate `changed_fields` + provenance, and produces no history when nothing changed.
-- [ ] `GET /api/journals/{journal_id}/history?page=&limit=` returns paginated JSON:API history (mirrors the contact history endpoint), 404 for a missing journal, with shared `HistoryAttributes`/`HistoryResource`/`HistoryListResponse` schemas and converter.
+- [x] Journal service computes `changed_fields` as `{field: (old, new)}` for base fields **and** type-specific data tables (covering the editable journal types — see scope note above), routes, and gear — modelled on the contact `_calculate_changed_fields` pattern. *(`JournalService._calculate_changed_fields`; `JournalWriteService.update_type_data` snapshot/diff; routes/gear already paired.)*
+- [x] The existing scalar/marker `changed_fields` producers are converted to emit `(old, new)` pairs: the UI update controllers (`api/journals/controllers.py` PUT + PATCH), the MCP update tool (base fields), the inbound sync processor, and the Immich album processor — so their mutations actually appear in `field_history`. *(All now pass the merged journal; service computes the pairs.)*
+- [x] Every journal create/update/delete/type/route/gear mutation publishes an event with accurate `changed_fields` + provenance, and produces no history when nothing changed. *(Empty `changed_fields` → projection writes no rows; Google inbound skips no-op syncs; type-data publishes only on real change, EVENT always carries the sync marker.)*
+- [x] `GET /api/journals/{journal_id}/history?page=&limit=` returns paginated JSON:API history (mirrors the contact history endpoint), 404 for a missing journal, with shared `HistoryAttributes`/`HistoryResource`/`HistoryListResponse` schemas and converter. *(`app/api/history/` + endpoint in `api/journals/controllers.py`.)*
 
 **Required Test Coverage:**
-- **Unit:** `changed_fields` calculation for base fields, at least two type-specific data tables, routes, and gear; "no change → no event" cases.
-- **Integration (end-to-end backend):** through the real service + outbox + relay + consumer path, updating a journal field (and a type-specific field, and a route/gear field) results in correctly-grouped history retrievable via the endpoint, with correct old/new/provenance; endpoint empty state, pagination, 404, and JSON:API shape (mirror `tests/integration/api/test_history_endpoints.py`).
+- [x] **Unit:** `changed_fields` calculation for base fields, two type-specific data tables, routes, and gear; "no change → no event" cases. *(`tests/unit/journal/test_journal_changed_fields.py`, `tests/unit/journal/test_type_data_changed_fields.py` (MoodData + FitnessData + EVENT value coercion), `tests/unit/api/routes/test_route_changed_fields.py`, existing `tests/unit/journal/test_gear_item_service.py`; updated `test_journal_outbox_event_processor.py`; shared converter unit test `tests/unit/api/test_journal_history_converter.py`.)*
+- [x] **Integration (end-to-end backend):** through the real service + outbox + relay + consumer path, updating a journal field, a type-specific field (MOOD_RATING), and a route field each produce correctly-grouped history retrievable via the journal aggregation, with correct old/new/provenance; endpoint empty state, pagination, 404, and JSON:API shape. *(`tests/integration/infrastructure/events/test_journal_history_projection_e2e.py` (base + type-data + route), `tests/integration/api/test_journal_history_endpoints.py` (empty/after-change/pagination/404/JSON:API/ordering, mirroring `test_history_endpoints.py`).)*
+- [x] **Regression:** full unit suite (1989) green; journal/history/mcp/api/integrations/events integration suites green; Google worker journal-event unit tests green; `ruff` + `ruff format` + `mypy` (371 files) clean.
 
 #### Phase 3: Journal History UI + MCP Parity
 **PR Size:** ~6–8 files

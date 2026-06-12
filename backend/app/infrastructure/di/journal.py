@@ -7,6 +7,11 @@ from core_shared.models.journals import (
 from dishka import Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.history.adapters.sql.field_history_repository import (
+    SqlFieldHistoryRepository,
+)
+from app.core.history.models import FieldHistoryRepository
+from app.core.history.services import JournalHistoryService
 from app.core.journal.adapters.sql.abseil_pitch_repository import (
     SqlAbseilPitchRepository,
 )
@@ -164,6 +169,20 @@ class JournalProvider(Provider):
     def journal_repository(self, connection: AsyncConnection) -> JournalRepository:
         """Provide a JournalRepository instance."""
         return SqlJournalRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def field_history_repository(
+        self, connection: AsyncConnection
+    ) -> FieldHistoryRepository:
+        """Provide the entity-agnostic field-history repository (read side)."""
+        return SqlFieldHistoryRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def journal_history_service(
+        self, history_repo: FieldHistoryRepository
+    ) -> JournalHistoryService:
+        """Provide the journal history read service."""
+        return JournalHistoryService(history_repo)
 
     @provide(scope=Scope.REQUEST)
     def calendar_repository(self, connection: AsyncConnection) -> CalendarRepository:

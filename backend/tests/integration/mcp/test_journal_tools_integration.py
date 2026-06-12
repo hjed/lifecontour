@@ -232,15 +232,9 @@ class TestJournalToolsIntegration:
         existing_journal.title = "Updated Test Journal"
         existing_journal.content = "Updated content via integration test"
 
-        # Track changed fields
-        changed_fields = {
-            "title": "Updated Test Journal",
-            "content": "Updated content via integration test",
-        }
-
-        # Save the updated journal
+        # Save the updated journal (the service computes changed_fields internally)
         updated_journal = await journal_service.update_journal(
-            existing_journal, changed_fields, clean_database
+            existing_journal, clean_database
         )
 
         # Verify the journal was updated

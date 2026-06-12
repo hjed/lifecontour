@@ -141,14 +141,12 @@ class TestJournalServiceIntegration:
         journal = create_test_journal(title="Original Title")
         journal = await journal_service.create_journal(journal, clean_database)
 
-        # Update the journal
+        # Update the journal (the service computes changed_fields by diffing the
+        # persisted journal against this merged object).
         journal.title = "Updated Title"
-        changed_fields = {"title": "Updated Title"}
 
         # Act
-        result = await journal_service.update_journal(
-            journal, changed_fields, clean_database
-        )
+        result = await journal_service.update_journal(journal, clean_database)
 
         # Assert
         assert result.title == "Updated Title"
@@ -172,11 +170,10 @@ class TestJournalServiceIntegration:
 
         # Try to make parent a child of child (would create cycle)
         parent.parent_id = child.id
-        changed_fields = {"parent_id": child.id}
 
         # Act & Assert
         with pytest.raises(JournalCycleError):
-            await journal_service.update_journal(parent, changed_fields, clean_database)
+            await journal_service.update_journal(parent, clean_database)
 
     @pytest.mark.asyncio
     async def test_delete_journal_success(
@@ -282,9 +279,7 @@ class TestJournalServiceIntegration:
 
         # Update journal
         journal.title = "Updated Workflow Test"
-        journal = await journal_service.update_journal(
-            journal, {"title": "Updated Workflow Test"}, clean_database
-        )
+        journal = await journal_service.update_journal(journal, clean_database)
         assert journal.title == "Updated Workflow Test"
 
         # Add type

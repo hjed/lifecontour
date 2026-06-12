@@ -145,35 +145,50 @@ class TestJournalServiceCRUD:
     async def test_update_journal_success(
         self, journal_service, mock_journal_repo, mock_event_publisher, mock_transaction
     ):
-        """Test successful journal update."""
-        # Arrange
+        """Test successful journal update computes changed_fields and publishes."""
+        # Arrange: persisted journal has the old title; the update changes it.
+        existing = create_test_journal(journal_id=1, title="Original Title")
         journal = create_test_journal(journal_id=1, title="Updated Title")
-        changed_fields = {"title": "Updated Title"}
 
+        mock_journal_repo.find_by_id.return_value = existing
         mock_journal_repo.save.return_value = journal
 
         # Act
-        result = await journal_service.update_journal(
-            journal, changed_fields, mock_transaction
-        )
+        result = await journal_service.update_journal(journal, mock_transaction)
 
         # Assert
         assert result == journal
+        mock_journal_repo.find_by_id.assert_called_once_with(1)
         mock_journal_repo.save.assert_called_once_with(journal)
         mock_event_publisher.publish.assert_called_once()
+        published_event = mock_event_publisher.publish.call_args[0][0]
+        assert published_event.event_data["changed_fields"]["title"] == (
+            "Original Title",
+            "Updated Title",
+        )
 
     @pytest.mark.asyncio
     async def test_update_journal_no_id_fails(self, journal_service, mock_transaction):
         """Test update fails when journal has no ID."""
         # Arrange
         journal = create_test_journal()
-        changed_fields = {"title": "Updated Title"}
 
         # Act & Assert
         with pytest.raises(JournalValidationError):
-            await journal_service.update_journal(
-                journal, changed_fields, mock_transaction
-            )
+            await journal_service.update_journal(journal, mock_transaction)
+
+    @pytest.mark.asyncio
+    async def test_update_journal_missing_journal_raises_not_found(
+        self, journal_service, mock_journal_repo, mock_transaction
+    ):
+        """Test update fails when the persisted journal does not exist."""
+        # Arrange
+        journal = create_test_journal(journal_id=42, title="Ghost")
+        mock_journal_repo.find_by_id.return_value = None
+
+        # Act & Assert
+        with pytest.raises(JournalNotFoundError):
+            await journal_service.update_journal(journal, mock_transaction)
 
     @pytest.mark.asyncio
     async def test_update_journal_parent_validates_hierarchy(
@@ -181,23 +196,24 @@ class TestJournalServiceCRUD:
     ):
         """Test updating parent validates hierarchy."""
         # Arrange
+        existing = create_test_journal(journal_id=1, title="Child Journal")
         parent_journal = create_test_journal(journal_id=2, title="Parent Journal")
         journal = create_test_journal(journal_id=1, title="Child Journal", parent_id=2)
-        changed_fields = {"parent_id": 2}
 
-        mock_journal_repo.find_by_id.return_value = parent_journal
+        # find_by_id(1) -> persisted journal (for diff); find_by_id(2) -> parent.
+        mock_journal_repo.find_by_id.side_effect = lambda jid: {
+            1: existing,
+            2: parent_journal,
+        }.get(jid)
         mock_journal_repo.get_depth.return_value = 1
         mock_journal_repo.get_ancestors.return_value = []
         mock_journal_repo.save.return_value = journal
 
         # Act
-        result = await journal_service.update_journal(
-            journal, changed_fields, mock_transaction
-        )
+        result = await journal_service.update_journal(journal, mock_transaction)
 
         # Assert
         assert result == journal
-        mock_journal_repo.find_by_id.assert_called_once_with(2)
         mock_journal_repo.get_depth.assert_called_once_with(2)
         mock_journal_repo.get_ancestors.assert_called_once_with(2)
 
@@ -207,23 +223,24 @@ class TestJournalServiceCRUD:
     ):
         """Test update fails when it would create a cycle."""
         # Arrange
+        existing = create_test_journal(journal_id=1, title="Child Journal")
         parent_journal = create_test_journal(journal_id=2, title="Parent Journal")
         # Journal 1 trying to set parent to 2, but 1 is an ancestor of 2
         journal = create_test_journal(journal_id=1, title="Child Journal", parent_id=2)
-        changed_fields = {"parent_id": 2}
 
         # Mock: journal 1 is an ancestor of journal 2
         ancestor_journal = create_test_journal(journal_id=1, title="Child Journal")
 
-        mock_journal_repo.find_by_id.return_value = parent_journal
+        mock_journal_repo.find_by_id.side_effect = lambda jid: {
+            1: existing,
+            2: parent_journal,
+        }.get(jid)
         mock_journal_repo.get_depth.return_value = 1
         mock_journal_repo.get_ancestors.return_value = [ancestor_journal]
 
         # Act & Assert
         with pytest.raises(JournalCycleError):
-            await journal_service.update_journal(
-                journal, changed_fields, mock_transaction
-            )
+            await journal_service.update_journal(journal, mock_transaction)
 
     @pytest.mark.asyncio
     async def test_delete_journal_success(
