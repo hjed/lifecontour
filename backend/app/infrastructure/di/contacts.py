@@ -161,6 +161,7 @@ class ContactProvider(Provider):
         contact_validation_service: ContactValidationService,
         history_service: ContactHistoryService,
         tag_hierarchy_service: TagHierarchyService,
+        tag_service: TagService,
     ) -> ContactService:
         return ContactService(
             contact_repo=contact_repo,
@@ -171,6 +172,7 @@ class ContactProvider(Provider):
             contact_validation_service=contact_validation_service,
             history_service=history_service,
             tag_hierarchy_service=tag_hierarchy_service,
+            tag_service=tag_service,
         )
 
     @provide

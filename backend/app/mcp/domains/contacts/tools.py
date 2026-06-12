@@ -37,7 +37,6 @@ from app.core.contacts.services import (
     TagService,
 )
 from app.infrastructure.search.search_service import SearchService
-from app.infrastructure.unit_of_work import unit_of_work
 from app.mcp.domains.contacts.schemas import (
     AddContactRelationshipRequest,
     ContactActionResponse,
@@ -308,8 +307,6 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
     async def create_contact(
         request: ContactCreateRequest,
         contact_service: ContactService = mcp_depends(get_contact_service),
-        tag_service: TagService = mcp_depends(get_tag_service),
-        tag_repo: TagRepository = mcp_depends(get_tag_repository),
         connection: AsyncConnection = mcp_depends(get_async_connection),
     ) -> str:
         """
@@ -394,35 +391,16 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 assert contact.important_dates is not None
                 contact.important_dates.append(important_date)
 
-        # New-tag creation and the contact write are two @transactional service
-        # calls that must commit together. unit_of_work is re-entrant, so both
-        # join this single outer unit of work and commit exactly once, before
-        # the response is sent (issue #945). This is the minimum boundary needed
-        # to keep the two writes atomic given the existing service shapes; the
-        # tool itself performs no direct write-repo calls.
-        async with unit_of_work(connection):
-            # Handle tags if provided - find or create tags by name
-            if request.tags:
-                for tag_name in request.tags:
-                    # Look up an existing tag by name (a read; it runs inside the
-                    # unit of work opened above)
-                    existing_tag = await tag_repo.find_by_name(tag_name)
-
-                    if existing_tag:
-                        # Use existing tag (add_tag handles dedup and limit)
-                        contact.add_tag(existing_tag)
-                    else:
-                        # Create new tag through the tag service so the write is
-                        # owned by a @transactional service, not a raw repo call.
-                        saved_tag = await tag_service.create_tag(
-                            tag_name, transaction=connection
-                        )
-                        contact.add_tag(saved_tag)
-
-            # Create the contact with all methods, notes, and tags in a single transaction
-            final_contact = await contact_service.create_contact(
-                contact, connection, changed_by="mcp", source=Provenance.MCP
-            )
+        # Create the contact, resolving any tag names (find-or-create) and writing
+        # methods/notes/tags as one committed unit of work in the service layer
+        # (issue #945). MCP tools call services; they don't open transactions.
+        final_contact = await contact_service.create_contact(
+            contact,
+            connection,
+            changed_by="mcp",
+            source=Provenance.MCP,
+            tag_names=request.tags,
+        )
 
         # Ensure contact was created with an ID
         if final_contact.id is None:
@@ -462,8 +440,6 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             ),
         ] = None,
         contact_service: ContactService = mcp_depends(get_contact_service),
-        tag_service: TagService = mcp_depends(get_tag_service),
-        tag_repo: TagRepository = mcp_depends(get_tag_repository),
         connection: AsyncConnection = mcp_depends(get_async_connection),
     ) -> str:
         """
@@ -601,39 +577,18 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                     )
                     updated_contact.important_dates.append(important_date)
 
-            # New-tag creation and the contact write are two @transactional
-            # service calls that must commit together. unit_of_work is
-            # re-entrant, so both join this single outer unit of work and commit
-            # exactly once, before the response is sent (issue #945). This is the
-            # minimum boundary needed to keep the two writes atomic given the
-            # existing service shapes; the tool itself performs no direct
-            # write-repo calls.
-            async with unit_of_work(connection):
-                # Handle tags if provided - find or create tags by name (replacement strategy)
-                if request.tags is not None:
-                    if updated_contact.tags is None:
-                        updated_contact.tags = []
-                    for tag_name in request.tags:
-                        # Look up an existing tag by name (a read; it runs inside
-                        # the unit of work opened above)
-                        existing_tag = await tag_repo.find_by_name(tag_name)
-
-                        if existing_tag:
-                            # Use existing tag (add_tag handles dedup and limit)
-                            updated_contact.add_tag(existing_tag)
-                        else:
-                            # Create new tag through the tag service so the write
-                            # is owned by a @transactional service, not a raw
-                            # repo call.
-                            saved_tag = await tag_service.create_tag(
-                                tag_name, transaction=connection
-                            )
-                            updated_contact.add_tag(saved_tag)
-
-                # Update the contact with all methods, notes, and tags in a single transaction
-                final_contact = await contact_service.update_contact(
-                    updated_contact, connection, changed_by="mcp", source=Provenance.MCP
-                )
+            # Update the contact, resolving any tag names (replacement strategy:
+            # request.tags replaces all existing tags; None leaves them untouched)
+            # and writing everything as one committed unit of work in the service
+            # layer (issue #945). MCP tools call services; they don't open
+            # transactions themselves.
+            final_contact = await contact_service.update_contact(
+                updated_contact,
+                connection,
+                changed_by="mcp",
+                source=Provenance.MCP,
+                tag_names=request.tags,
+            )
 
         # Create AI-friendly response using shared converter
         response = ContactConverter.to_contact_response(
