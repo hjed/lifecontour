@@ -1,6 +1,8 @@
 """Main contact service with transaction management."""
 
-from typing import Any, cast
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, cast
 
 import structlog
 from core_shared.models.contacts.entities import (
@@ -52,6 +54,9 @@ from app.core.contacts.services.contact_validation_service import (
 )
 from app.core.contacts.services.tag_hierarchy_service import TagHierarchyService
 from app.infrastructure.unit_of_work import unit_of_work
+
+if TYPE_CHECKING:
+    from app.core.contacts.services.tag_service import TagService
 
 logger = structlog.get_logger()
 
@@ -170,11 +175,16 @@ class ContactService:
         contact_validation_service: ContactValidationService,
         history_service: ContactHistoryService,
         tag_hierarchy_service: TagHierarchyService,
+        tag_service: TagService | None = None,
     ):
         self.contact_repo = contact_repo
         self.tag_repo = tag_repo
         self.history_repo = history_repo
         self.event_publisher = event_publisher
+        # Optional collaborator used only to resolve tag *names* on create/update
+        # (find-or-create). Left None for callers that pass tags by id or never
+        # pass tag names (e.g. the event consumer); required when tag_names is used.
+        self._tag_service = tag_service
 
         # Initialize services with dependencies
         self.address_validation = (
@@ -224,12 +234,43 @@ class ContactService:
 
         raise error
 
+    async def _resolve_tag_names(
+        self,
+        contact: Contact,
+        tag_names: list[str],
+        transaction: AsyncConnection,
+    ) -> None:
+        """Resolve tag names to existing-or-new tags and attach them to contact.
+
+        Each name is looked up; a missing name is created via the TagService
+        (a race-safe create-or-get), so the tag write is owned by a
+        ``@transactional`` service rather than a raw repo call. Runs inside the
+        caller's unit of work so tag creation commits atomically with the
+        contact. ``add_tag`` handles de-duplication and the per-contact limit.
+        """
+        if self._tag_service is None:
+            raise ContactValidationError(
+                "tags",
+                "Creating tags by name requires a TagService; none was configured.",
+            )
+        if contact.tags is None:
+            contact.tags = []
+        for name in tag_names:
+            existing = await self.tag_repo.find_by_name(name)
+            tag = (
+                existing
+                if existing is not None
+                else await self._tag_service.create_tag(name, transaction=transaction)
+            )
+            contact.add_tag(tag)
+
     async def create_contact(
         self,
         contact: Contact,
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        tag_names: list[str] | None = None,
     ) -> Contact:
         """
         Create a new contact with transaction management.
@@ -268,6 +309,11 @@ class ContactService:
         """
 
         async def _create_operation() -> Contact:
+            # Resolve any tag names to existing-or-new tags inside this unit of
+            # work, so tag creation and the contact write commit together.
+            if tag_names:
+                await self._resolve_tag_names(contact, tag_names, transaction)
+
             # Validate and save basic contact fields
             saved_contact = await self._validate_and_save_contact_basic_fields(
                 contact, transaction
@@ -306,6 +352,7 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        tag_names: list[str] | None = None,
     ) -> Contact:
         """
         Update an existing contact with transaction management.
@@ -338,6 +385,15 @@ class ContactService:
                 raise ContactValidationError(
                     "id", "Contact ID is required for update operation"
                 )
+
+            # Resolve any tag names to existing-or-new tags inside this unit of
+            # work (replacement strategy: the resolved set replaces all existing
+            # tags). An empty list clears all tags; None leaves tags untouched.
+            # Clearing needs no TagService, so only resolve when names are given.
+            if tag_names is not None:
+                contact.tags = []
+                if tag_names:
+                    await self._resolve_tag_names(contact, tag_names, transaction)
 
             # Get current contact and calculate changes
             current_contact = await self._get_existing_contact(contact.id)

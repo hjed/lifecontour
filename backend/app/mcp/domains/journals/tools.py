@@ -4544,11 +4544,13 @@ async def get_daily_summary(
 
     user_id = await get_current_user_id()
 
-    # get_or_generate may persist a new/updated summary; commit it before the
-    # response is returned (issue #945). The service shares this request's
-    # connection, so wrapping the call here is the single commit boundary.
-    async with unit_of_work(db_connection):
-        result = await daily_summary_service.get_or_generate(user_id, parsed_date)
+    # get_or_generate is @transactional: it commits any summary it persists
+    # before the response is returned (issue #945). Pass the request connection
+    # and let the service own the commit boundary — this tool opens no
+    # transaction itself (the required pattern; see AGENTS.md "Transactions").
+    result = await daily_summary_service.get_or_generate(
+        user_id, parsed_date, db_connection
+    )
 
     if result is None:
         return json.dumps({"data": None})

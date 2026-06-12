@@ -132,22 +132,54 @@ async def test_external_transaction_savepoint_rolls_back_on_error() -> None:
     assert conn.savepoints[0].rolled_back == 1
 
 
+def _real_savepoint_conn() -> tuple[Any, _FakeSavepoint]:
+    """A connection that passes ``isinstance(AsyncConnection)`` for savepoint tests.
+
+    ``savepoint`` no-ops for non-AsyncConnections (mirroring ``@transactional``),
+    so the real begin_nested/commit/rollback path needs a spec'd mock that
+    isinstance recognises as an AsyncConnection.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    from sqlalchemy.ext.asyncio import AsyncConnection
+
+    sp = _FakeSavepoint()
+    conn = MagicMock(spec=AsyncConnection)
+    conn.begin_nested = AsyncMock(return_value=sp)
+    return conn, sp
+
+
 @pytest.mark.asyncio
 async def test_savepoint_helper_releases_on_success() -> None:
-    conn = _conn()
+    conn, sp = _real_savepoint_conn()
     async with savepoint(conn):
         pass
-    assert conn.savepoints[0].committed == 1
-    assert conn.commits == 0  # savepoint does not touch the outer transaction
+    assert sp.committed == 1
+    conn.commit.assert_not_called()  # savepoint does not touch the outer transaction
 
 
 @pytest.mark.asyncio
 async def test_savepoint_helper_rolls_back_and_reraises_on_error() -> None:
-    conn = _conn()
+    conn, sp = _real_savepoint_conn()
     with pytest.raises(_Boom):
         async with savepoint(conn):
             raise _Boom
-    assert conn.savepoints[0].rolled_back == 1
+    assert sp.rolled_back == 1
+
+
+@pytest.mark.asyncio
+async def test_savepoint_noop_for_non_connection() -> None:
+    # Mirrors @transactional: savepoint no-ops for any non-AsyncConnection, so a
+    # service method using savepoint() is unit-testable with None OR a mock.
+    async with savepoint(None) as yielded:
+        assert yielded is None
+
+    from unittest.mock import MagicMock
+
+    mock_txn = MagicMock()  # a plain mock is not an AsyncConnection
+    async with savepoint(mock_txn) as yielded:
+        assert yielded is mock_txn
+    mock_txn.begin_nested.assert_not_called()  # no SAVEPOINT attempted
 
 
 def test_transactional_fails_fast_without_transaction_param() -> None:

@@ -64,6 +64,7 @@ class TestContactServiceIntegration:
             ContactHistoryService,
             ContactValidationService,
             TagHierarchyService,
+            TagService,
         )
 
         # Create service dependencies
@@ -71,6 +72,11 @@ class TestContactServiceIntegration:
         contact_validation_service = ContactValidationService(contact_repo)
         history_service = ContactHistoryService(history_repo)
         tag_hierarchy_service = TagHierarchyService(tag_repo)
+        tag_service = TagService(
+            tag_repo=tag_repo,
+            tag_hierarchy_service=tag_hierarchy_service,
+            event_publisher=event_publisher,
+        )
 
         return ContactService(
             contact_repo=contact_repo,
@@ -81,7 +87,76 @@ class TestContactServiceIntegration:
             contact_validation_service=contact_validation_service,
             history_service=history_service,
             tag_hierarchy_service=tag_hierarchy_service,
+            tag_service=tag_service,
         )
+
+    @pytest.mark.asyncio
+    async def test_create_contact_resolves_tag_names(
+        self, contact_service, tag_repo, clean_database: AsyncConnection
+    ):
+        """create_contact with tag_names finds-or-creates tags and assigns them."""
+        # One tag already exists; the other must be created.
+        await tag_repo.save(Tag(name=TagName("Friend")))
+
+        contact = Contact(first_name="Tag", last_name="Resolver", tags=[])
+        created = await contact_service.create_contact(
+            contact,
+            clean_database,
+            changed_by="mcp",
+            source=Provenance.MCP,
+            tag_names=["Friend", "Colleague"],
+        )
+
+        names = {str(t.name) for t in (created.tags or [])}
+        assert names == {"Friend", "Colleague"}
+        # The new tag was persisted (committed via the unit of work).
+        assert await tag_repo.find_by_name("Colleague") is not None
+
+    @pytest.mark.asyncio
+    async def test_create_contact_tag_names_are_create_or_get(
+        self, contact_service, tag_repo, clean_database: AsyncConnection
+    ):
+        """A tag name reused across two contacts resolves to the same tag row."""
+        c1 = await contact_service.create_contact(
+            Contact(first_name="First", last_name="Owner", tags=[]),
+            clean_database,
+            tag_names=["Shared"],
+        )
+        c2 = await contact_service.create_contact(
+            Contact(first_name="Second", last_name="Owner", tags=[]),
+            clean_database,
+            tag_names=["shared"],  # case-insensitive match
+        )
+
+        id1 = (c1.tags or [])[0].id
+        id2 = (c2.tags or [])[0].id
+        assert id1 is not None
+        assert id1 == id2  # same tag, not a duplicate
+
+    @pytest.mark.asyncio
+    async def test_update_contact_tag_names_replace(
+        self, contact_service, clean_database: AsyncConnection
+    ):
+        """update_contact with tag_names replaces the contact's tags."""
+        created = await contact_service.create_contact(
+            Contact(first_name="Replace", last_name="Tags", tags=[]),
+            clean_database,
+            tag_names=["Old"],
+        )
+
+        updated = await contact_service.update_contact(
+            Contact(
+                id=created.id,
+                first_name="Replace",
+                last_name="Tags",
+                tags=None,
+            ),
+            clean_database,
+            tag_names=["New"],
+        )
+
+        names = {str(t.name) for t in (updated.tags or [])}
+        assert names == {"New"}
 
     @pytest.mark.asyncio
     async def test_create_contact_success(

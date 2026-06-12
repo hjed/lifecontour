@@ -34,17 +34,29 @@ class DummyTagHierarchyService:
 
 class MockTagRepository:
     def __init__(self):
-        self.tags = {}
+        self.tags: dict[int, Tag] = {}
         self.deleted_ids = set()
+        # When set, the next save() raises DuplicateTagNameError (simulating the
+        # DB unique-name constraint firing on a concurrent create).
+        self.raise_duplicate_on_save = False
 
     async def find_by_id(self, tag_id: int) -> Tag | None:
         if tag_id in self.deleted_ids:
             return None
         return self.tags.get(tag_id)
 
+    async def find_by_name(self, name: str) -> Tag | None:
+        for tag in self.tags.values():
+            if str(tag.name).lower() == name.lower():
+                return tag
+        return None
+
     async def save(self, tag: Tag) -> Tag:
+        if self.raise_duplicate_on_save:
+            raise DuplicateTagNameError(str(tag.name))
         if tag.id is None:
             tag.id = len(self.tags) + 1
+        assert tag.id is not None
         self.tags[tag.id] = tag
         return tag
 
@@ -120,6 +132,30 @@ async def test_create_tag_with_existing_parent(service, repo):
 async def test_create_tag_missing_parent_raises(service):
     with pytest.raises(TagNotFoundError):
         await service.create_tag(name="Orphan", transaction=None, parent_id=99)
+
+
+@pytest.mark.asyncio
+async def test_create_tag_returns_existing_on_duplicate_name_race(service, repo):
+    """A lost create-or-get race returns the winner's tag instead of erroring."""
+    # The winner already created the tag.
+    winner = Tag(id=7, name=TagName("Work"))
+    await repo.save(winner)
+    # Our insert loses the race: the unique-name constraint fires.
+    repo.raise_duplicate_on_save = True
+
+    result = await service.create_tag(name="Work", transaction=None)
+
+    assert result is winner
+
+
+@pytest.mark.asyncio
+async def test_create_tag_reraises_duplicate_when_no_existing(service, repo):
+    """A unique violation with no findable row surfaces the conflict, not None."""
+    repo.raise_duplicate_on_save = True  # constraint fires...
+    # ...but find_by_name turns up nothing (e.g. the other writer rolled back).
+
+    with pytest.raises(DuplicateTagNameError):
+        await service.create_tag(name="Ghost", transaction=None)
 
 
 @pytest.mark.asyncio

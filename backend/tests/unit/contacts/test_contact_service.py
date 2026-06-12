@@ -74,6 +74,79 @@ class TestContactService:
             tag_hierarchy_service=tag_hierarchy_service,
         )
 
+    @pytest.fixture
+    def mock_tag_service(self):
+        """Create a mock TagService (create_tag = race-safe create-or-get)."""
+        return AsyncMock()
+
+    @pytest.fixture
+    def contact_service_with_tags(
+        self,
+        mock_contact_repo,
+        mock_tag_repo,
+        mock_history_repo,
+        mock_event_publisher,
+        mock_tag_service,
+    ):
+        """ContactService wired with a TagService so tag names can be resolved."""
+        from app.core.contacts.services import (
+            AddressValidationService,
+            ContactHistoryService,
+            ContactValidationService,
+            TagHierarchyService,
+        )
+
+        return ContactService(
+            contact_repo=mock_contact_repo,
+            tag_repo=mock_tag_repo,
+            history_repo=mock_history_repo,
+            event_publisher=mock_event_publisher,
+            address_validation_service=AddressValidationService(),
+            contact_validation_service=ContactValidationService(mock_contact_repo),
+            history_service=ContactHistoryService(mock_history_repo),
+            tag_hierarchy_service=TagHierarchyService(mock_tag_repo),
+            tag_service=mock_tag_service,
+        )
+
+    @pytest.mark.asyncio
+    async def test_resolve_tag_names_uses_existing_and_creates_missing(
+        self,
+        contact_service_with_tags,
+        mock_tag_repo,
+        mock_tag_service,
+        mock_transaction,
+    ):
+        """Existing names are reused; missing names go through TagService.create_tag."""
+        existing = Tag(id=5, name=TagName("Friend"))
+        created = Tag(id=9, name=TagName("Work"))
+
+        async def _find(name):
+            return existing if name == "Friend" else None
+
+        mock_tag_repo.find_by_name.side_effect = _find
+        mock_tag_service.create_tag.return_value = created
+
+        contact = Contact(first_name="A", last_name="B", tags=[])
+        await contact_service_with_tags._resolve_tag_names(
+            contact, ["Friend", "Work"], mock_transaction
+        )
+
+        assert existing in (contact.tags or [])
+        assert created in (contact.tags or [])
+        # Only the missing name is created; the existing one is not.
+        mock_tag_service.create_tag.assert_awaited_once_with(
+            "Work", transaction=mock_transaction
+        )
+
+    @pytest.mark.asyncio
+    async def test_resolve_tag_names_without_tag_service_raises(
+        self, contact_service, mock_transaction
+    ):
+        """A service built without a TagService can't create tags by name."""
+        contact = Contact(first_name="A", last_name="B", tags=[])
+        with pytest.raises(ContactValidationError):
+            await contact_service._resolve_tag_names(contact, ["X"], mock_transaction)
+
     # Phase 2 Tests: Favourite functionality
     @pytest.mark.asyncio
     async def test_toggle_contact_favourite_success(
@@ -601,6 +674,28 @@ class TestContactService:
         assert result == saved_contact
         mock_contact_repo.find_by_id.assert_called_once_with(1)
         mock_contact_repo.save.assert_called_once_with(updated_contact)
+
+    @pytest.mark.asyncio
+    async def test_update_contact_empty_tag_names_clears_without_tag_service(
+        self, contact_service, mock_contact_repo, mock_transaction
+    ):
+        """An empty tag_names list clears tags and must not require a TagService.
+
+        contact_service is built WITHOUT a TagService, so this would raise if the
+        empty-list clear path still went through _resolve_tag_names.
+        """
+        current_contact = Contact(first_name="John", last_name="Smith", id=1)
+        saved_contact = Contact(first_name="John", last_name="Smith", id=1)
+        mock_contact_repo.find_by_id.return_value = current_contact
+        mock_contact_repo.save.return_value = saved_contact
+
+        updated_contact = Contact(first_name="John", last_name="Smith", id=1, tags=None)
+        result = await contact_service.update_contact(
+            updated_contact, mock_transaction, tag_names=[]
+        )
+
+        assert result == saved_contact
+        assert updated_contact.tags == []  # cleared
 
     @pytest.mark.asyncio
     async def test_update_contact_no_id_raises_error(
