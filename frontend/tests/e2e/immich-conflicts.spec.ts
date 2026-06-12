@@ -455,7 +455,7 @@ test.describe('Immich Conflict Resolution', () => {
           data: [
             {
               id: '99',
-              type: 'contact',
+              type: 'contacts',
               attributes: {
                 first_name: 'Sarah',
                 last_name: 'Connor',
