@@ -425,6 +425,28 @@ Returns the history of activity journals associated with a route.
 - Distinct activity types that used the route
 - Activity entries ordered newest-first with date range, distance, and duration
 
+### get_journal_history
+
+Returns a journal's field-level change history with provenance, matching the
+`GET /api/journals/{id}/history` REST endpoint (AI-first parity). Covers the
+journal's own fields plus its type-specific data, routes, and gear. Scoped to the
+authenticated user — a journal owned by another user is reported as not-found.
+History is produced asynchronously by the projection consumer, so a just-made
+change may take a moment to appear.
+
+**Parameters:**
+- `journal_id` (integer): The unique identifier of the journal
+- `page` (integer, optional): Page number, 1-based (default: 1)
+- `limit` (integer, optional): Entries per page, 1–100 (default: 20)
+
+**Returns:**
+- `journal_id`, `total_count`, `page`, `limit`
+- `entries` ordered newest-first, each with `entity_type`, `entity_id`,
+  `field_name`, `old_value`, `new_value`, `changed_by`, `source` (provenance:
+  `ui`, `mcp`, `strava`, `google_calendar`, `immich`, `system`, …), and
+  `created_at`
+- `summary` — an AI-friendly description of the journal's history
+
 ### delete_journal
 
 Deletes a journal entry.

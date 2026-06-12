@@ -323,6 +323,54 @@ class RouteHistoryResponse(BaseModel):
     summary: str = Field(description="AI-friendly summary of route usage")
 
 
+class JournalHistoryEntry(BaseModel):
+    """A single field-level change in a journal's history.
+
+    Field-for-field parity with the REST ``HistoryAttributes`` schema so AI
+    agents see the same detail and provenance available in the UI.
+    """
+
+    entity_type: str = Field(
+        description="Entity the change applies to (journal, route, gear)"
+    )
+    entity_id: int = Field(description="Identifier of the changed entity")
+    field_name: str = Field(
+        description=(
+            "Field that changed. Route/gear changes are tagged to the journal "
+            "with context (e.g. 'route:<id>:name')."
+        )
+    )
+    old_value: str | None = Field(default=None, description="Previous value")
+    new_value: str | None = Field(default=None, description="New value")
+    changed_by: str | None = Field(
+        default=None, description="Who or what made the change"
+    )
+    source: str = Field(
+        description="Provenance (ui, mcp, strava, google_calendar, immich, system, ...)"
+    )
+    created_at: datetime | None = Field(
+        default=None, description="When the change actually occurred"
+    )
+
+
+class JournalHistoryResponse(BaseModel):
+    """AI-friendly journal field-level history response.
+
+    Matches the REST ``GET /api/journals/{id}/history`` endpoint: paginated,
+    most-recent-first, field-level entries with provenance.
+    """
+
+    journal_id: int = Field(description="Journal identifier")
+    total_count: int = Field(description="Total number of history entries")
+    page: int = Field(description="Current page number (1-based)")
+    limit: int = Field(description="Entries per page")
+    entries: list[JournalHistoryEntry] = Field(
+        default_factory=list,
+        description="History entries ordered newest first for this page",
+    )
+    summary: str = Field(description="AI-friendly summary of the journal's history")
+
+
 class JournalCreateRequest(BaseModel):
     """AI-friendly journal creation request format."""
 
