@@ -150,6 +150,14 @@ async def test_savepoint_helper_rolls_back_and_reraises_on_error() -> None:
     assert conn.savepoints[0].rolled_back == 1
 
 
+@pytest.mark.asyncio
+async def test_savepoint_noop_when_connection_none() -> None:
+    # The unit-test sentinel: no connection means no SAVEPOINT, so services can
+    # wrap a write in savepoint() and still be unit-tested with transaction=None.
+    async with savepoint(None) as yielded:
+        assert yielded is None
+
+
 def test_transactional_fails_fast_without_transaction_param() -> None:
     with pytest.raises(TypeError, match="requires a 'transaction' parameter"):
 

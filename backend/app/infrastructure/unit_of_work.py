@@ -145,7 +145,9 @@ def transactional[**P, R](
 
 
 @asynccontextmanager
-async def savepoint(connection: AsyncConnection) -> AsyncIterator[AsyncConnection]:
+async def savepoint(
+    connection: AsyncConnection | None,
+) -> AsyncIterator[AsyncConnection | None]:
     """Nested SAVEPOINT for per-item partial rollback inside a batch loop.
 
     Use within an enclosing :func:`unit_of_work` when individual items may fail
@@ -155,7 +157,15 @@ async def savepoint(connection: AsyncConnection) -> AsyncIterator[AsyncConnectio
 
     Does not affect the unit-of-work depth, so it never changes the outer commit
     decision.
+
+    When ``connection`` is ``None`` (the unit-test sentinel, mirroring how
+    :func:`transactional` skips a non-real connection) this is a no-op
+    passthrough, so service code can wrap a write in ``savepoint`` and still be
+    unit-tested with ``transaction=None``.
     """
+    if connection is None:
+        yield connection
+        return
     nested = await connection.begin_nested()
     try:
         yield connection

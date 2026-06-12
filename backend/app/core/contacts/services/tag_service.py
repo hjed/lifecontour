@@ -7,10 +7,10 @@ from core_shared.models.contacts.value_objects import TagName
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.events import TagDeleted, TagUpdated
-from app.core.contacts.models.exceptions import TagNotFoundError
+from app.core.contacts.models.exceptions import DuplicateTagNameError, TagNotFoundError
 from app.core.contacts.models.repositories import ContactEventPublisher, TagRepository
 from app.core.contacts.services.tag_hierarchy_service import TagHierarchyService
-from app.infrastructure.unit_of_work import transactional
+from app.infrastructure.unit_of_work import savepoint, transactional
 
 
 def _compute_path_string(path_tags: list[Tag], fallback_tag: Tag) -> str:
@@ -49,7 +49,16 @@ class TagService:
         parent_id: int | None = None,
     ) -> Tag:
         """
-        Create a new tag as a committed unit of work.
+        Create a tag (or return the existing one of the same name) as a
+        committed unit of work.
+
+        Tag names are unique. To stay safe under a concurrent duplicate-name
+        race (e.g. two requests that both look up a tag by name, find nothing,
+        and try to create it), the insert is guarded by a SAVEPOINT: if it
+        violates the unique-name constraint, the SAVEPOINT rolls back just that
+        failed insert (without poisoning the surrounding unit of work) and the
+        already-existing tag is fetched and returned — a race-safe
+        create-or-get.
 
         Args:
             name: Tag name.
@@ -73,7 +82,19 @@ class TagService:
             description=description,
             parent_id=parent_id,
         )
-        return await self.tag_repo.save(tag)
+        try:
+            async with savepoint(transaction):
+                return await self.tag_repo.save(tag)
+        except DuplicateTagNameError:
+            # Lost a create-or-get race: another writer already created this
+            # name. The SAVEPOINT rolled the failed insert back, so the
+            # connection is still usable — return the winner's tag.
+            existing = await self.tag_repo.find_by_name(name)
+            if existing is not None:
+                return existing
+            # No row found despite the unique violation (e.g. the other writer
+            # rolled back). Surface the conflict rather than silently swallow it.
+            raise
 
     @transactional
     async def update_tag(
