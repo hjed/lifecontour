@@ -51,6 +51,65 @@ async def test_list_immich_conflicts(
 
 
 @pytest.mark.asyncio
+async def test_list_immich_conflicts_includes_candidate_names(
+    authenticated_client: AsyncClient,
+    async_connection: AsyncConnection,
+    test_user,
+) -> None:
+    """Candidate contacts are returned with resolved display names and photos."""
+    # Create two real contacts to act as candidates
+    insert_contacts = text("""
+        INSERT INTO contacts (first_name, last_name, photo_url, created_at, updated_at)
+        VALUES
+            ('Nikhil', 'Sharma', 'https://photos/nikhil.jpg',
+             CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+            ('Nicole', NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        RETURNING id
+    """)
+    result = await async_connection.execute(insert_contacts)
+    contact_ids = [row.id for row in result.fetchall()]
+    assert len(contact_ids) == 2
+    missing_id = 999999  # No contact row -> falls back to "Contact {id}"
+
+    # Conflict referencing both real contacts plus a missing id, order preserved
+    candidate_json = f"[{contact_ids[0]}, {missing_id}, {contact_ids[1]}]"
+    insert_conflict = text("""
+        INSERT INTO pending_entity_mappings
+            (user_id, integration_source, external_entity_id,
+             external_entity_name, candidate_contact_ids, status,
+             created_at, updated_at)
+        VALUES
+            (:user_id, 'immich', 'person-names',
+             'Nikhil Sharma', CAST(:candidates AS jsonb),
+             'unresolved', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        RETURNING id
+    """)
+    res = await async_connection.execute(
+        insert_conflict,
+        {"user_id": str(test_user.id), "candidates": candidate_json},
+    )
+    conflict_id = res.scalar_one()
+
+    response = await authenticated_client.get("/api/integrations/immich/conflicts")
+    assert response.status_code == 200
+
+    conflicts = response.json()["data"]
+    conflict = next(c for c in conflicts if c["id"] == str(conflict_id))
+    candidates = conflict["attributes"]["candidateContacts"]
+
+    # Order is preserved and matches candidateContactIds
+    assert [c["id"] for c in candidates] == [contact_ids[0], missing_id, contact_ids[1]]
+    assert candidates[0]["name"] == "Nikhil Sharma"
+    assert candidates[0]["photoUrl"] == "https://photos/nikhil.jpg"
+    # Missing contact falls back to "Contact {id}" with no photo
+    assert candidates[1]["name"] == f"Contact {missing_id}"
+    assert candidates[1]["photoUrl"] is None
+    # Contact with only a first name uses just that name
+    assert candidates[2]["name"] == "Nicole"
+    assert candidates[2]["photoUrl"] is None
+
+
+@pytest.mark.asyncio
 async def test_resolve_immich_conflict_link(
     authenticated_client: AsyncClient,
     async_connection: AsyncConnection,

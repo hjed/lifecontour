@@ -441,6 +441,20 @@ class ConflictResolutionRequest(BaseModel):
     )
 
 
+class ImmichConflictCandidate(BaseModel):
+    """A candidate local contact for a sync conflict (JSON API format)."""
+
+    id: int = Field(description="Local contact ID")
+    name: str = Field(description="Display name of the candidate contact")
+    photo_url: str | None = Field(
+        default=None,
+        description="URL of the contact's photo, if any",
+        serialization_alias="photoUrl",
+    )
+
+    model_config = {"populate_by_name": True}
+
+
 class ImmichConflictAttributes(BaseModel):
     """Attributes for a sync conflict (JSON API format)."""
 
@@ -456,6 +470,11 @@ class ImmichConflictAttributes(BaseModel):
         default_factory=list,
         description="List of candidate local contact IDs",
         serialization_alias="candidateContactIds",
+    )
+    candidate_contacts: list[ImmichConflictCandidate] = Field(
+        default_factory=list,
+        description="Candidate local contacts with resolved display names",
+        serialization_alias="candidateContacts",
     )
     status: str = Field(description="Conflict status (unresolved, resolved)")
     created_at: str = Field(
