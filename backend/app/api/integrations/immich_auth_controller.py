@@ -20,6 +20,7 @@ from app.api.integrations.schemas import (
     ConflictResolutionAction,
     ConflictResolutionRequest,
     ImmichConflictAttributes,
+    ImmichConflictCandidate,
     ImmichConflictData,
     ImmichConflictListResponse,
     ImmichConflictResponse,
@@ -36,6 +37,7 @@ from app.api.integrations.schemas import (
     SyncJobRequest,
     SyncType,
 )
+from app.core.contacts.models.repositories import ContactRepository
 from app.core.contacts.services.contact_service import ContactService
 from app.core.integrations.adapters.sql.immich_auth_repository import (
     SqlImmichAuthRepository,
@@ -261,6 +263,7 @@ async def _enqueue_immich_sync(
 async def list_immich_conflicts(
     user: FromDishka[SessionUser],
     connection: FromDishka[AsyncConnection],
+    contact_repo: FromDishka[ContactRepository],
 ) -> ImmichConflictListResponse:
     """Get a list of unresolved Immich synchronization conflicts."""
     repo = PendingEntityMappingRepository(connection)
@@ -268,15 +271,33 @@ async def list_immich_conflicts(
         user_id=str(user.id), integration_source="immich"
     )
 
+    # Batch-fetch display names for every candidate across all conflicts so the
+    # UI can show real contact names instead of raw IDs (single query).
+    all_candidate_ids = {
+        cid for c in conflicts for cid in (c["candidate_contact_ids"] or [])
+    }
+    name_rows = await contact_repo.find_names_by_ids(list(all_candidate_ids))
+
+    def _candidate(contact_id: int) -> ImmichConflictCandidate:
+        first_name, last_name, photo_url = name_rows.get(contact_id, (None, None, None))
+        name = " ".join(part for part in (first_name, last_name) if part)
+        return ImmichConflictCandidate(
+            id=contact_id,
+            name=name if name else f"Contact {contact_id}",
+            photo_url=photo_url,
+        )
+
     data = []
     for c in conflicts:
+        candidate_ids = c["candidate_contact_ids"] or []
         data.append(
             ImmichConflictData(
                 id=str(c["id"]),
                 attributes=ImmichConflictAttributes(
                     external_entity_id=c["external_entity_id"],
                     external_entity_name=c["external_entity_name"],
-                    candidate_contact_ids=c["candidate_contact_ids"],
+                    candidate_contact_ids=candidate_ids,
+                    candidate_contacts=[_candidate(cid) for cid in candidate_ids],
                     status=c["status"],
                     created_at=c["created_at"].isoformat() if c["created_at"] else "",
                 ),

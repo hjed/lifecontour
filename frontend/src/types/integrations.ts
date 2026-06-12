@@ -362,10 +362,17 @@ export interface WebhookUrlResponse {
 }
 
 // Immich Conflict Types
+export interface ImmichConflictCandidate {
+  id: number;
+  name: string;
+  photoUrl: string | null;
+}
+
 export interface ImmichConflictAttributes {
   externalEntityId: string;
   externalEntityName: string | null;
   candidateContactIds: number[];
+  candidateContacts: ImmichConflictCandidate[];
   status: 'unresolved' | 'resolved';
   createdAt: string;
 }

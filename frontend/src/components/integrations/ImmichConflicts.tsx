@@ -9,6 +9,8 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { ContactSearchCombobox } from '@/components/contacts/ContactSearchCombobox';
+import { generateDisplayName } from '@/lib/utils';
 import {
   useImmichConflicts,
   useResolveImmichConflict,
@@ -29,6 +31,11 @@ function ConflictItem({ conflict, onResolve, isResolving }: ConflictItemProps) {
   const [selectedContactId, setSelectedContactId] = useState<number | null>(
     null
   );
+  // Display name for a contact chosen via search that isn't one of the
+  // candidate chips, so the user can see what Link will act on.
+  const [searchedContactLabel, setSearchedContactLabel] = useState<
+    string | null
+  >(null);
   const { attributes } = conflict;
 
   const handleLink = () => {
@@ -61,33 +68,70 @@ function ConflictItem({ conflict, onResolve, isResolving }: ConflictItemProps) {
             Immich ID: {attributes.externalEntityId}
           </p>
 
-          {attributes.candidateContactIds.length > 0 && (
+          {attributes.candidateContacts.length > 0 && (
             <div className='mt-3'>
               <p className='text-xs font-medium text-amber-700 dark:text-amber-400'>
-                Possible matches ({attributes.candidateContactIds.length}{' '}
+                Possible matches ({attributes.candidateContacts.length}{' '}
                 contacts):
               </p>
               <div className='mt-1 flex flex-wrap gap-1'>
-                {attributes.candidateContactIds.map(contactId => (
+                {attributes.candidateContacts.map(candidate => (
                   <button
-                    key={contactId}
+                    key={candidate.id}
                     type='button'
                     className={`inline-flex items-center rounded-md border px-2 py-1 text-xs transition-colors ${
-                      selectedContactId === contactId
+                      selectedContactId === candidate.id
                         ? 'border-primary bg-primary text-primary-foreground'
                         : 'border-border bg-background hover:bg-accent'
                     }`}
-                    onClick={() => setSelectedContactId(contactId)}
-                    aria-label={`Select contact ${contactId} for linking`}
-                    aria-pressed={selectedContactId === contactId}
-                    data-testid={`conflict-${conflict.id}-candidate-${contactId}`}
+                    onClick={() => {
+                      setSelectedContactId(candidate.id);
+                      setSearchedContactLabel(null);
+                    }}
+                    aria-label={`Select ${candidate.name} for linking`}
+                    aria-pressed={selectedContactId === candidate.id}
+                    data-testid={`conflict-${conflict.id}-candidate-${candidate.id}`}
                   >
-                    Contact #{contactId}
+                    {candidate.name}
                   </button>
                 ))}
               </div>
             </div>
           )}
+
+          <div className='mt-3'>
+            <p className='text-xs font-medium text-amber-700 dark:text-amber-400'>
+              Or search for a different contact:
+            </p>
+            <div className='mt-1'>
+              <ContactSearchCombobox
+                placeholder='Search contacts to link...'
+                inputId={`conflict-${conflict.id}-search`}
+                onSelect={contact => {
+                  setSelectedContactId(Number(contact.id));
+                  setSearchedContactLabel(
+                    contact.attributes.nick_name?.trim()
+                      ? `${generateDisplayName(
+                          contact.attributes.first_name,
+                          contact.attributes.last_name ?? ''
+                        )} (${contact.attributes.nick_name})`
+                      : generateDisplayName(
+                          contact.attributes.first_name,
+                          contact.attributes.last_name ?? ''
+                        )
+                  );
+                }}
+              />
+            </div>
+            {searchedContactLabel && (
+              <p
+                className='text-muted-foreground mt-1 text-xs'
+                data-testid={`conflict-${conflict.id}-selected-search`}
+              >
+                Selected: {searchedContactLabel}
+              </p>
+            )}
+          </div>
         </div>
 
         <div className='flex flex-shrink-0 flex-col gap-2'>

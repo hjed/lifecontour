@@ -41,6 +41,10 @@ const SAMPLE_CONFLICTS = [
       externalEntityId: 'person-abc-123',
       externalEntityName: 'John Smith',
       candidateContactIds: [10, 20],
+      candidateContacts: [
+        { id: 10, name: 'Johnny Smith', photoUrl: null },
+        { id: 20, name: 'John Smithson', photoUrl: null },
+      ],
       status: 'unresolved',
       createdAt: '2026-01-15T10:00:00Z',
     },
@@ -52,6 +56,7 @@ const SAMPLE_CONFLICTS = [
       externalEntityId: 'person-def-456',
       externalEntityName: 'Jane Doe',
       candidateContactIds: [30],
+      candidateContacts: [{ id: 30, name: 'Jane Doe', photoUrl: null }],
       status: 'unresolved',
       createdAt: '2026-01-15T11:00:00Z',
     },
@@ -413,6 +418,10 @@ test.describe('Immich Conflict Resolution', () => {
     await expect(candidate10).toBeVisible();
     await expect(candidate20).toBeVisible();
 
+    // Candidate chips show real contact names, not raw IDs
+    await expect(candidate10).toHaveText('Johnny Smith');
+    await expect(candidate20).toHaveText('John Smithson');
+
     // Select first candidate
     await candidate10.click();
     await expect(candidate10).toHaveAttribute('aria-pressed', 'true');
@@ -422,5 +431,107 @@ test.describe('Immich Conflict Resolution', () => {
     await candidate20.click();
     await expect(candidate20).toHaveAttribute('aria-pressed', 'true');
     await expect(candidate10).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  test('can link conflict to a contact found via search', async ({
+    authenticatedPage,
+  }) => {
+    await setupConnectedRoutes(authenticatedPage);
+
+    let conflictsData = [SAMPLE_CONFLICTS[0]];
+    await authenticatedPage.route(
+      '**/api/integrations/immich/conflicts',
+      route => {
+        if (route.request().method() !== 'GET') return route.fallback();
+        return route.fulfill(json({ data: conflictsData }));
+      }
+    );
+
+    // Stub the contact search endpoint used by ContactSearchCombobox
+    await authenticatedPage.route('**/api/search/contacts**', route => {
+      if (route.request().method() !== 'GET') return route.fallback();
+      return route.fulfill(
+        json({
+          data: [
+            {
+              id: '99',
+              type: 'contact',
+              attributes: {
+                first_name: 'Sarah',
+                last_name: 'Connor',
+                nick_name: null,
+              },
+            },
+          ],
+        })
+      );
+    });
+
+    // Stub resolve endpoint and capture the linked contact id
+    let resolvedContactId: number | null = null;
+    await authenticatedPage.route(
+      '**/api/integrations/immich/conflicts/1/resolve',
+      async route => {
+        if (route.request().method() !== 'POST') return route.fallback();
+        const body = route.request().postDataJSON() as {
+          action: string;
+          contact_id?: number;
+        };
+        resolvedContactId = body.contact_id ?? null;
+        conflictsData = conflictsData.filter(c => c.id !== '1');
+        return route.fulfill(
+          json({
+            data: {
+              id: '1',
+              type: 'immich-conflict',
+              attributes: {
+                ...SAMPLE_CONFLICTS[0].attributes,
+                status: 'resolved',
+              },
+            },
+          })
+        );
+      }
+    );
+
+    await authenticatedPage.goto('/integrations');
+
+    const conflictItem = authenticatedPage.locator(
+      '[data-testid="conflict-item-1"]'
+    );
+    await expect(conflictItem).toBeVisible();
+
+    // Search for a contact that is not one of the auto-detected candidates
+    const searchInput = authenticatedPage.locator('#conflict-1-search');
+    await searchInput.fill('Sarah');
+
+    const searchResult = authenticatedPage.getByText('Sarah Connor', {
+      exact: true,
+    });
+    await expect(searchResult).toBeVisible();
+    await searchResult.click();
+
+    // The selected contact is reflected in the UI
+    await expect(
+      authenticatedPage.locator('[data-testid="conflict-1-selected-search"]')
+    ).toContainText('Sarah Connor');
+
+    // Link resolves the conflict with the searched contact id
+    const linkButton = authenticatedPage.locator(
+      '[data-testid="conflict-link-button-1"]'
+    );
+    await expect(linkButton).toBeEnabled();
+
+    await Promise.all([
+      authenticatedPage.waitForResponse(
+        resp =>
+          resp.url().includes('/conflicts/1/resolve') &&
+          resp.request().method() === 'POST'
+      ),
+      linkButton.click(),
+    ]);
+
+    expect(resolvedContactId).toBe(99);
+    await expect(conflictItem).toBeHidden();
   });
 });
