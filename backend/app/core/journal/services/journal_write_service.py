@@ -1269,8 +1269,19 @@ class JournalWriteService:
             for added_type in added_types:
                 await self._create_type_specific_data(added_type, journal_id)
 
-        if type_data:
-            await self._process_journal_type_data(journal_id, type_data, transaction)
+        # Only apply type-data for types that remain after the replace. A stray
+        # key for a type not in `types` would otherwise recreate that type's row
+        # and defeat the replace-all semantics.
+        desired_values = {jt.value for jt in desired}
+        scoped_type_data = {
+            key: value
+            for key, value in normalized_type_data.items()
+            if key in desired_values
+        }
+        if scoped_type_data:
+            await self._process_journal_type_data(
+                journal_id, scoped_type_data, transaction
+            )
 
     async def _replace_contact_relationships(
         self,
@@ -1340,6 +1351,12 @@ class JournalWriteService:
         self, journal_type: JournalType, journal_id: int
     ) -> None:
         """Delete the type-specific data row for a journal type."""
+        if journal_type == JournalType.EVENT:
+            # EVENT has no row in the generic helper; its presence marker is the
+            # journal_calendar_info row, so it must be removed here for the type
+            # to actually be gone (e.g. on a replace-all update that drops EVENT).
+            await self.calendar_info_repo.delete(journal_id)
+            return
         await helpers.delete_type_specific_data(
             journal_type,
             journal_id,

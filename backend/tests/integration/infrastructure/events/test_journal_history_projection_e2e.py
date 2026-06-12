@@ -139,6 +139,8 @@ def _mock_write_service(
         "outdoor_planning_data_repo",
         "outdoor_training_data_repo",
         "gear_maintenance_data_repo",
+        "gear_usage_data_repo",
+        "tag_repo",
     )
     kwargs: dict[str, object] = {name: MagicMock() for name in repo_names}
     kwargs.update(real_repos)

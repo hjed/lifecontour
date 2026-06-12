@@ -420,3 +420,59 @@ class TestUpdateJournalComposite:
 
         mock_journal_contact_service.remove_contact_from_journal.assert_awaited_once()
         mock_journal_contact_service.add_contact_to_journal.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_replace_types_ignores_type_data_for_non_desired_types(
+        self, write_service, mock_journal_service, mock_transaction
+    ):
+        """type_data for a type not in the new `types` set is not applied.
+
+        Otherwise a stray key (e.g. EVENT) would recreate that type's row and
+        defeat the replace-all semantics.
+        """
+        mock_journal_service.update_journal.return_value = _journal(journal_id=9)
+        write_service._get_current_types = AsyncMock(return_value=set())
+        mock_journal_service.add_type_to_journal.return_value = [JournalType.FITNESS]
+        write_service.fitness_data_repo.find_by_journal_id.return_value = None
+
+        await write_service.update_journal_composite(
+            _journal(journal_id=9),
+            mock_transaction,
+            types=["fitness"],
+            type_data={"EVENT": {"calendar_id": "irrelevant"}},
+        )
+
+        # EVENT is not among the desired types, so its type_data is dropped.
+        write_service.calendar_info_repo.save.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_replace_types_removing_event_deletes_calendar_info(
+        self, write_service, mock_journal_service, mock_transaction
+    ):
+        """Dropping EVENT deletes its journal_calendar_info marker row."""
+        mock_journal_service.update_journal.return_value = _journal(journal_id=9)
+        write_service._get_current_types = AsyncMock(return_value={JournalType.EVENT})
+        mock_journal_service.add_type_to_journal.return_value = [
+            JournalType.MOOD_RATING
+        ]
+        write_service.mood_data_repo.find_by_journal_id.return_value = None
+
+        await write_service.update_journal_composite(
+            _journal(journal_id=9), mock_transaction, types=["mood_rating"]
+        )
+
+        write_service.calendar_info_repo.delete.assert_awaited_once_with(9)
+
+
+class TestRemoveTypeEvent:
+    @pytest.mark.asyncio
+    async def test_remove_event_type_deletes_calendar_info(
+        self, write_service, mock_journal_service, mock_transaction
+    ):
+        """remove_type(EVENT) deletes the calendar_info marker so EVENT is gone."""
+        await write_service.remove_type(
+            9, JournalType.EVENT, mock_transaction, changed_by="ui"
+        )
+
+        mock_journal_service.remove_type_from_journal.assert_awaited_once()
+        write_service.calendar_info_repo.delete.assert_awaited_once_with(9)
