@@ -23,6 +23,7 @@ from app.infrastructure.database import get_async_database_engine
 from app.infrastructure.events.dead_letter_consumer_mixin import DeadLetterConsumerMixin
 from app.infrastructure.events.stream_consumer import StreamConsumer
 from app.infrastructure.events.stream_event_adapter import stream_event_to_outbox_event
+from app.infrastructure.unit_of_work import unit_of_work
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncConnection
@@ -99,8 +100,17 @@ class InboundEventConsumer(DeadLetterConsumerMixin, StreamConsumer):
         """
         outbox_event = stream_event_to_outbox_event(event)
 
+        # Open a commit-as-you-go connection and own the outermost unit of work
+        # here, so the domain processors' @transactional service calls (e.g.
+        # JournalService.create_journal) nest instead of committing early. With
+        # engine.begin() the first @transactional service was the outermost unit
+        # of work and committed mid-handler, orphaning every write made after it
+        # in the processor (the external-event link and the detect-matches outbox
+        # event) — they were discarded when the connection closed, causing
+        # duplicate synced journals and disabling auto-dedupe. Wrapping the whole
+        # dispatch in one unit_of_work commits all of an event's writes atomically.
         engine = get_async_database_engine()
-        async with engine.begin() as conn:
+        async with engine.connect() as conn, unit_of_work(conn):
             if event.event_type.startswith("contact."):
                 await self._process_contact_event(outbox_event, conn)
             elif event.event_type.startswith("journal_event."):

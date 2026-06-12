@@ -74,14 +74,17 @@ class TestInboundEventConsumerIntegration:
         )
         await stream_client.ensure_consumer_group(test_stream_name, GROUP_NAME)
 
-        # Mock the engine so the consumer uses our test connection
+        # Mock the engine so the consumer uses our test connection. The
+        # consumer opens engine.connect() and owns the outermost unit_of_work;
+        # async_connection carries EXTERNAL_TRANSACTION_MARKER, so the unit of
+        # work uses a SAVEPOINT and the test transaction survives for rollback.
         mock_engine = MagicMock()
 
         @asynccontextmanager
-        async def mock_begin():
+        async def mock_connect():
             yield async_connection
 
-        mock_engine.begin = mock_begin
+        mock_engine.connect = mock_connect
 
         # Mock the OutboxEventProcessor to verify delegation
         mock_processor = AsyncMock()
@@ -153,10 +156,10 @@ class TestInboundEventConsumerIntegration:
         mock_engine = MagicMock()
 
         @asynccontextmanager
-        async def mock_begin():
+        async def mock_connect():
             yield async_connection
 
-        mock_engine.begin = mock_begin
+        mock_engine.connect = mock_connect
 
         mock_journal_processor = AsyncMock()
         mock_journal_processor.process_event = AsyncMock(
