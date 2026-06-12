@@ -20,6 +20,7 @@ import pytest
 from core_shared.models import Route
 from core_shared.models.history import Provenance
 from core_shared.models.journals import (
+    ClimbingData,
     EventDateRange,
     Journal,
     JournalType,
@@ -31,6 +32,9 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.history.adapters.sql.field_history_repository import (
     SqlFieldHistoryRepository,
+)
+from app.core.journal.adapters.sql.climbing_data_repository import (
+    SqlClimbingDataRepository,
 )
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.adapters.sql.mood_data_repository import SqlMoodDataRepository
@@ -99,43 +103,46 @@ async def _relay_and_project(
         await consumer._process_batch()
 
 
-def _mock_write_service_with_mood(
-    mood_data_repo: SqlMoodDataRepository, event_publisher: OutboxEventPublisher
+def _mock_write_service(
+    event_publisher: OutboxEventPublisher, **real_repos: object
 ) -> JournalWriteService:
-    """Build a JournalWriteService where only the MOOD_RATING path is real.
+    """Build a JournalWriteService with only the named repos real, rest mocked.
 
-    ``update_type_data`` for MOOD_RATING touches only ``mood_data_repo`` and
-    ``event_publisher``; every other dependency is mocked so the test can exercise
-    the real type-data → event → outbox path without wiring 20+ repositories.
+    A single-type `update_type_data` call touches only that type's data repo and
+    the event publisher, so the test can exercise the real type-data → event →
+    outbox path for any one type without wiring 20+ repositories. Pass the repos
+    that type needs as keyword arguments (e.g. ``mood_data_repo=...``).
     """
-    return JournalWriteService(
-        journal_service=MagicMock(),
-        journal_contact_service=MagicMock(),
-        calendar_info_repo=MagicMock(),
-        photo_album_data_repo=MagicMock(),
-        mood_data_repo=mood_data_repo,
-        plan_data_repo=MagicMock(),
-        travel_data_repo=MagicMock(),
-        fitness_data_repo=MagicMock(),
-        outdoor_activity_data_repo=MagicMock(),
-        bushwalking_data_repo=MagicMock(),
-        jogging_data_repo=MagicMock(),
-        abseiling_data_repo=MagicMock(),
-        abseil_pitch_repo=MagicMock(),
-        canyoning_data_repo=MagicMock(),
-        caving_data_repo=MagicMock(),
-        canoeing_data_repo=MagicMock(),
-        climbing_data_repo=MagicMock(),
-        kayaking_data_repo=MagicMock(),
-        skiing_data_repo=MagicMock(),
-        snorkelling_data_repo=MagicMock(),
-        diving_data_repo=MagicMock(),
-        downhill_skiing_data_repo=MagicMock(),
-        outdoor_planning_data_repo=MagicMock(),
-        outdoor_training_data_repo=MagicMock(),
-        gear_maintenance_data_repo=MagicMock(),
-        event_publisher=event_publisher,
+    repo_names = (
+        "journal_service",
+        "journal_contact_service",
+        "calendar_info_repo",
+        "photo_album_data_repo",
+        "mood_data_repo",
+        "plan_data_repo",
+        "travel_data_repo",
+        "fitness_data_repo",
+        "outdoor_activity_data_repo",
+        "bushwalking_data_repo",
+        "jogging_data_repo",
+        "abseiling_data_repo",
+        "abseil_pitch_repo",
+        "canyoning_data_repo",
+        "caving_data_repo",
+        "canoeing_data_repo",
+        "climbing_data_repo",
+        "kayaking_data_repo",
+        "skiing_data_repo",
+        "snorkelling_data_repo",
+        "diving_data_repo",
+        "downhill_skiing_data_repo",
+        "outdoor_planning_data_repo",
+        "outdoor_training_data_repo",
+        "gear_maintenance_data_repo",
     )
+    kwargs: dict[str, object] = {name: MagicMock() for name in repo_names}
+    kwargs.update(real_repos)
+    return JournalWriteService(event_publisher=event_publisher, **kwargs)  # type: ignore[arg-type]
 
 
 @pytest.mark.integration
@@ -257,7 +264,7 @@ class TestJournalHistoryProjectionE2E:
         mood_repo = SqlMoodDataRepository(async_connection)
         await mood_repo.save(MoodData(journal_id=journal_id, mood_value=3))
 
-        write_service = _mock_write_service_with_mood(mood_repo, publisher)
+        write_service = _mock_write_service(publisher, mood_data_repo=mood_repo)
         await write_service.update_type_data(
             journal_id,
             JournalType.MOOD_RATING,
@@ -284,6 +291,63 @@ class TestJournalHistoryProjectionE2E:
         assert mood_entry.new_value == "8"
         assert mood_entry.source == Provenance.UI
         assert mood_entry.changed_by == "ui"
+
+    @pytest.mark.asyncio
+    async def test_newly_covered_type_is_projected_to_journal_history(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+        redis_client: Redis,
+    ) -> None:
+        """A CLIMBING edit (a type added to the registry) is projected to history.
+
+        Proves the registry expansion (all editable outdoor subtypes) works
+        through the real service → outbox → relay → consumer path, not just in the
+        unit-level coverage guard.
+        """
+        publisher = OutboxEventPublisher(async_connection)
+        journal_service = JournalService(
+            journal_repo=SqlJournalRepository(async_connection),
+            event_publisher=publisher,
+        )
+        created = await journal_service.create_journal(
+            _make_journal("Climbing journal"),
+            async_connection,
+            changed_by="ui",
+            source=Provenance.UI,
+        )
+        assert created.id is not None
+        journal_id = created.id
+
+        climbing_repo = SqlClimbingDataRepository(async_connection)
+        await climbing_repo.save(ClimbingData(journal_id=journal_id, grade=15))
+
+        write_service = _mock_write_service(publisher, climbing_data_repo=climbing_repo)
+        await write_service.update_type_data(
+            journal_id,
+            JournalType.CLIMBING,
+            {"grade": 21},
+            async_connection,
+            changed_by="ui",
+            source=Provenance.UI,
+        )
+
+        await _relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-climbing-e2e"
+        )
+
+        entries = await SqlFieldHistoryRepository(
+            async_connection
+        ).get_history_for_aggregate("journal", journal_id, limit=50, offset=0)
+        by_field = {e.field_name: e for e in entries}
+
+        assert "grade" in by_field
+        grade_entry = by_field["grade"]
+        assert grade_entry.entity_id == journal_id
+        assert grade_entry.old_value == "15"
+        assert grade_entry.new_value == "21"
+        assert grade_entry.source == Provenance.UI
 
     @pytest.mark.asyncio
     async def test_route_update_is_projected_and_grouped_to_journal(

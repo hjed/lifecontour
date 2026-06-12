@@ -529,14 +529,7 @@ class TestJournalOutboxEventProcessor:
         mock_journal_service: AsyncMock,
         mock_connection: AsyncMock,
     ) -> None:
-        """An inbound date-range change calls update_journal with the merged journal.
-
-        Since ITER12-002 Phase 2, JournalService computes changed_fields itself by
-        diffing the persisted journal against the passed (merged) journal, so the
-        processor only has to hand over the updated journal — it no longer builds
-        a changed_fields dict. The JSON-serialisable event_date_range pair is now
-        covered by ``test_journal_changed_fields``.
-        """
+        """An inbound date-range change calls update_journal with the merged journal."""
         from core_shared.models.journals import Journal
 
         event = _make_outbox_event(
@@ -561,8 +554,6 @@ class TestJournalOutboxEventProcessor:
         mock_journal_service.update_journal.assert_called_once()
         passed_journal = mock_journal_service.update_journal.call_args[0][0]
         assert isinstance(passed_journal, Journal)
-        # No changed_fields positional arg is passed any more; the connection
-        # follows the journal directly.
         assert passed_journal.event_date_range is not None
         assert mock_journal_service.update_journal.call_args[0][1] is mock_connection
 

@@ -142,7 +142,7 @@ async def get_journal_history(
     request: Request,
     journal_service: FromDishka[JournalService],
     history_service: FromDishka[JournalHistoryService],
-    _user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],  # Require authentication
     page: Annotated[int, Query(description=PAGE_NUMBER_DESCRIPTION, ge=1)] = 1,
     limit: Annotated[
         int, Query(description=ITEMS_PER_PAGE_DESCRIPTION, ge=1, le=100)
@@ -157,9 +157,11 @@ async def get_journal_history(
     """
     base_url = get_request_base_url(request)
 
-    # Verify the journal exists (404 otherwise, mirroring the contact endpoint).
+    # Verify the journal exists and belongs to the authenticated user; a journal
+    # owned by someone else is reported as not-found so history cannot leak across
+    # users (mirrors the route sub-resource endpoints).
     journal = await journal_service.get_journal(journal_id)
-    if not journal:
+    if not journal or journal.user_id != user.id:
         raise JournalNotFoundError(journal_id)
 
     offset = (page - 1) * limit
@@ -1865,9 +1867,6 @@ async def update_journal(
         journal_request.data, existing_journal
     )
 
-    # The service computes field-level changed_fields by diffing the persisted
-    # journal against the merged `updated_journal`, so only genuine changes are
-    # recorded as history (and the calendar sync trigger keys on those fields).
     saved_journal = await journal_write_service.update_journal(
         updated_journal,
         connection,
@@ -2062,9 +2061,6 @@ async def partial_update_journal(
         updated_at=existing_journal.updated_at,
     )
 
-    # The service computes field-level changed_fields by diffing the persisted
-    # journal against the merged `updated_journal`, so partial updates only record
-    # the fields that genuinely changed.
     saved_journal = await journal_write_service.update_journal(
         updated_journal,
         connection,

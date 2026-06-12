@@ -147,6 +147,48 @@ class TestJournalHistoryEndpoint:
         assert "errors" in response.json()
 
     @pytest.mark.asyncio
+    async def test_get_journal_history_other_users_journal_is_404(
+        self,
+        authenticated_client,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """A journal owned by another user is reported as 404 (no cross-user leak)."""
+        from datetime import UTC as _UTC
+        from datetime import datetime as _dt
+
+        from sqlalchemy import text
+
+        now = _dt.now(_UTC)
+        result = await async_connection.execute(
+            text(
+                """
+                INSERT INTO journals
+                    (user_id, title, content,
+                     event_date_range_start, event_date_range_end)
+                VALUES (:user_id, :title, :content, :start, :end)
+                RETURNING id
+                """
+            ),
+            {
+                "user_id": "someone-else",
+                "title": "Other user's journal",
+                "content": "secret",
+                "start": now,
+                "end": now,
+            },
+        )
+        row = result.fetchone()
+        assert row is not None
+        other_journal_id = int(row[0])
+
+        # Even though the journal exists, the authenticated user does not own it.
+        response = await authenticated_client.get(
+            f"/api/journals/{other_journal_id}/history"
+        )
+        assert response.status_code == 404
+        assert "errors" in response.json()
+
+    @pytest.mark.asyncio
     async def test_get_journal_history_json_api_structure(
         self,
         authenticated_client,

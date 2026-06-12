@@ -2685,9 +2685,7 @@ async def update_journal_entry(
     if not existing_journal:
         raise JournalNotFoundError(journal_id)
 
-    # Apply the requested field changes to the loaded journal; JournalService
-    # diffs the persisted row against this merged object to compute changed_fields,
-    # so no manual changed_fields tracking is needed here.
+    # Apply the requested field changes to the loaded journal.
     if request.title is not None:
         existing_journal.title = request.title
     if request.content is not None:

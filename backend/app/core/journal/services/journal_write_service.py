@@ -106,9 +106,15 @@ def diff_tracked_fields(
 
 
 # Tracked fields per editable single-row type, used to compute type-data history.
-# Types absent here are intentionally excluded: PLAN/TRAVEL/PHOTO_ALBUM are
-# integration-managed or not editable through this API, and SNORKELLING/DIVING/
-# DOWNHILL_SKIING only validate existence (no editable fields).
+# Every editable journal type with an `update_*_type_data` helper is registered
+# here so its type-data edits appear in history. The field names are kept exactly
+# in sync with the type-data dataclasses by
+# `tests/unit/journal/test_type_data_history_coverage.py`, which fails if a new
+# type or field is added without a coverage decision (tracked or excluded). Types
+# that are intentionally excluded (and why): PLAN/TRAVEL hold nested child
+# collections and PHOTO_ALBUM is Immich-synced (integration/Phase 4); SNORKELLING/
+# DIVING/DOWNHILL_SKIING validate existence only (no editable fields); GEAR_USAGE
+# has no type-data edit path; NOTE has no type data.
 _TYPE_DATA_TRACKED_FIELDS: dict[JournalType, tuple[str, ...]] = {
     JournalType.EVENT: (
         "calendar_id",
@@ -139,8 +145,38 @@ _TYPE_DATA_TRACKED_FIELDS: dict[JournalType, tuple[str, ...]] = {
         "in_leadership_role",
         "participant_notes",
     ),
-    JournalType.BUSHWALKING: ("route_id", "track_grading"),
-    JournalType.JOGGING: ("route_id", "pace"),
+    JournalType.BUSHWALKING: ("track_grading",),
+    JournalType.JOGGING: ("pace",),
+    # Abseiling tracks its trip-level scalars; per-pitch (AbseilPitch) history is
+    # a nested collection deferred to Phase 4.
+    JournalType.ABSEILING_TRIP: (
+        "number_of_abseils",
+        "total_length",
+        "number_of_setups",
+        "number_of_rescues",
+    ),
+    JournalType.CANYONING: (
+        "template_id",
+        "french_grade",
+        "water_guage_name",
+        "water_guage_level",
+        "is_vertical",
+        "is_night_canyon",
+        "is_white_water",
+    ),
+    JournalType.CAVING: ("template_id", "is_vertical", "is_horizontal"),
+    JournalType.CANOEING: ("water_type",),
+    JournalType.CLIMBING: ("template_id", "climbing_type", "grade", "length"),
+    JournalType.KAYAKING: ("water_type", "is_white_water", "rapids_grade"),
+    JournalType.CROSS_COUNTRY_SKIING: ("snow_conditions",),
+    JournalType.OUTDOOR_PLANNING: ("topics", "activity_types"),
+    JournalType.OUTDOOR_TRAINING: ("focus_areas",),
+    JournalType.GEAR_MAINTENANCE: (
+        "gear_item_id",
+        "maintenance_type",
+        "activity_types",
+        "retirement_reason",
+    ),
 }
 
 
@@ -398,6 +434,16 @@ class JournalWriteService:
             JournalType.OUTDOOR_ACTIVITY: self.outdoor_activity_data_repo,
             JournalType.BUSHWALKING: self.bushwalking_data_repo,
             JournalType.JOGGING: self.jogging_data_repo,
+            JournalType.ABSEILING_TRIP: self.abseiling_data_repo,
+            JournalType.CANYONING: self.canyoning_data_repo,
+            JournalType.CAVING: self.caving_data_repo,
+            JournalType.CANOEING: self.canoeing_data_repo,
+            JournalType.CLIMBING: self.climbing_data_repo,
+            JournalType.KAYAKING: self.kayaking_data_repo,
+            JournalType.CROSS_COUNTRY_SKIING: self.skiing_data_repo,
+            JournalType.OUTDOOR_PLANNING: self.outdoor_planning_data_repo,
+            JournalType.OUTDOOR_TRAINING: self.outdoor_training_data_repo,
+            JournalType.GEAR_MAINTENANCE: self.gear_maintenance_data_repo,
         }.get(journal_type)
 
     async def _apply_type_data_update(
