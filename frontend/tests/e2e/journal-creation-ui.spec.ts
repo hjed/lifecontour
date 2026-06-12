@@ -1162,4 +1162,33 @@ test.describe('Journal Creation UI Flow', () => {
       page.getByTestId('outdoor-planning-type-editor')
     ).toBeVisible();
   });
+
+  test('should create an OUTDOOR_TRAINING journal and verify rendering', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+    await navigateToNewJournal(page);
+
+    await page.getByLabel(/title/i).fill(`Training Day ${Date.now()}`);
+    await page.getByLabel(/content/i).fill('Practising key skills.');
+    await page.getByLabel(/^outdoor training$/i).check();
+
+    await expect(
+      page.getByTestId('outdoor-training-type-editor')
+    ).toBeVisible();
+
+    await page.getByTestId('custom-focus-area-input').fill('Navigation');
+    await page.getByTestId('add-focus-area-btn').click();
+    await page.getByTestId('focus-area-checkbox-climbing').check();
+
+    await page.getByRole('button', { name: /create journal/i }).click();
+
+    await awaitCreationAndAssertBadge(page, 'manage-type-outdoor_training');
+    await page.getByTestId('type-section-trigger-outdoor_training').click();
+
+    // Verify type section is rendered
+    await expect(
+      page.getByTestId('outdoor-training-type-editor')
+    ).toBeVisible();
+  });
 });

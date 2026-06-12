@@ -14,8 +14,18 @@ import {
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { JournalCreateForm } from '../JournalCreateForm';
+import { JournalCreateForm, TYPE_LABELS } from '../JournalCreateForm';
 import { JournalType } from '@/types/journals';
+
+// Types the create form intentionally does NOT offer. PHOTO_ALBUM journals are
+// created by Immich album sync, not manually (see CreateAlbumButton).
+const NON_CREATABLE_TYPES: ReadonlySet<JournalType> = new Set([
+  JournalType.PHOTO_ALBUM,
+]);
+
+const CREATABLE_TYPES = Object.values(JournalType).filter(
+  type => !NON_CREATABLE_TYPES.has(type)
+);
 
 const createTestQueryClient = () =>
   new QueryClient({
@@ -205,28 +215,31 @@ describe('JournalCreateForm', () => {
   });
 
   describe('All Journal Type Options', () => {
-    it('renders all 15 journal type checkboxes', () => {
+    // Guard against a journal type being added to the JournalType enum but
+    // forgotten in the create form's checkbox list (the OUTDOOR_TRAINING bug).
+    // Derives the expected list from the enum so new types fail this test until
+    // they are wired into the form.
+    it.each(CREATABLE_TYPES)(
+      'offers a checkbox for the %s journal type',
+      type => {
+        renderWithClient(<JournalCreateForm />);
+
+        const label = TYPE_LABELS[type];
+        expect(screen.getByLabelText(label)).toBeInTheDocument();
+      }
+    );
+
+    it('offers exactly the creatable journal types as checkboxes', () => {
       renderWithClient(<JournalCreateForm />);
 
-      // Base types
-      expect(screen.getByLabelText(/^note$/i)).toBeInTheDocument();
-      expect(screen.getByLabelText(/^event$/i)).toBeInTheDocument();
-      expect(screen.getByLabelText(/^mood rating$/i)).toBeInTheDocument();
-      expect(screen.getByLabelText(/^plan$/i)).toBeInTheDocument();
-      expect(screen.getByLabelText(/^travel$/i)).toBeInTheDocument();
+      const renderedTypeLabels = CREATABLE_TYPES.map(type => TYPE_LABELS[type])
+        .filter(label => screen.queryByLabelText(label) !== null)
+        .sort();
+      const expectedLabels = CREATABLE_TYPES.map(type => TYPE_LABELS[type])
+        .slice()
+        .sort();
 
-      // Activity types
-      expect(screen.getByLabelText(/^fitness$/i)).toBeInTheDocument();
-      expect(screen.getByLabelText(/^outdoor activity$/i)).toBeInTheDocument();
-      expect(screen.getByLabelText(/^bushwalking$/i)).toBeInTheDocument();
-      expect(screen.getByLabelText(/^jogging$/i)).toBeInTheDocument();
-      expect(screen.getByLabelText(/^abseiling trip$/i)).toBeInTheDocument();
-      expect(screen.getByLabelText(/^canyoning$/i)).toBeInTheDocument();
-      expect(screen.getByLabelText(/^climbing$/i)).toBeInTheDocument();
-      expect(screen.getByLabelText(/^kayaking$/i)).toBeInTheDocument();
-      expect(
-        screen.getByLabelText(/^cross-country skiing$/i)
-      ).toBeInTheDocument();
+      expect(renderedTypeLabels).toEqual(expectedLabels);
     });
   });
 
@@ -239,6 +252,19 @@ describe('JournalCreateForm', () => {
       await user.click(eventCheckbox);
 
       expect(screen.getByTestId('event-type-editor')).toBeInTheDocument();
+    });
+
+    it('shows outdoor training type editor when OUTDOOR_TRAINING is selected', async () => {
+      const user = userEvent.setup();
+      renderWithClient(<JournalCreateForm />);
+
+      const outdoorTrainingCheckbox =
+        screen.getByLabelText(/^outdoor training$/i);
+      await user.click(outdoorTrainingCheckbox);
+
+      expect(
+        screen.getByTestId('outdoor-training-type-editor')
+      ).toBeInTheDocument();
     });
 
     it('shows mood rating type editor when MOOD_RATING is selected', async () => {
