@@ -193,7 +193,11 @@ function hasTypeDataJournalType(
   return TYPE_DATA_JOURNAL_TYPES.has(type as TypeDataJournalType);
 }
 
-// All 15 journal type options for checkboxes
+// User-creatable journal type checkboxes. Should list every `JournalType`
+// except PHOTO_ALBUM, which is created only by Immich album sync (see
+// CreateAlbumButton). Keep in sync with the JournalType enum — the
+// "offers every creatable journal type" test in JournalCreateForm.test.tsx
+// guards against a type being forgotten here.
 const typeOptions = [
   { value: JournalType.NOTE, label: 'Note' },
   { value: JournalType.EVENT, label: 'Event' },
@@ -215,6 +219,7 @@ const typeOptions = [
   { value: JournalType.DIVING, label: 'Diving' },
   { value: JournalType.DOWNHILL_SKIING, label: 'Downhill Skiing' },
   { value: JournalType.OUTDOOR_PLANNING, label: 'Outdoor Planning' },
+  { value: JournalType.OUTDOOR_TRAINING, label: 'Outdoor Training' },
   { value: JournalType.GEAR_MAINTENANCE, label: 'Gear Maintenance' },
   { value: JournalType.GEAR_USAGE, label: 'Gear Usage' },
 ];
@@ -331,7 +336,7 @@ function TypeCheckboxField({ control, option }: TypeCheckboxFieldProps) {
 }
 
 /** Human-readable labels for displaying dependency names to users. */
-const TYPE_LABELS: Record<JournalType, string> = {
+export const TYPE_LABELS: Record<JournalType, string> = {
   [JournalType.NOTE]: 'Note',
   [JournalType.EVENT]: 'Event',
   [JournalType.MOOD_RATING]: 'Mood Rating',
