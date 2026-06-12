@@ -2,15 +2,21 @@
 
 import json
 from datetime import date
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from core_shared.models.contacts.entities import SummaryStatus
 from core_shared.models.journals.daily_summary import JournalDailySummary
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.services.daily_summary_models import DailySummaryInput
 from app.core.journal.services.daily_summary_service import DailySummaryService
+
+# These unit tests mock the repository, so no real connection is needed: the
+# @transactional decorator no-ops for a non-AsyncConnection (the value is never
+# used to commit). cast keeps the typed signature happy without a real engine.
+_NO_TXN = cast(AsyncConnection, None)
 
 
 @pytest.fixture
@@ -84,7 +90,9 @@ class TestDailySummaryServiceGeneration:
         mock_prompt_builder: MagicMock,
     ) -> None:
         """When no cached summary exists, generates a new one."""
-        result = await service.get_or_generate("user123", date(2026, 4, 27))
+        result = await service.get_or_generate(
+            "user123", date(2026, 4, 27), transaction=_NO_TXN
+        )
 
         assert result is not None
         assert result.status == SummaryStatus.GENERATED
@@ -115,7 +123,9 @@ class TestDailySummaryServiceGeneration:
         )
         mock_summary_repo.find_by_user_and_date.return_value = cached
 
-        result = await service.get_or_generate("user123", date(2026, 4, 27))
+        result = await service.get_or_generate(
+            "user123", date(2026, 4, 27), transaction=_NO_TXN
+        )
 
         assert result is cached
         mock_input_assembler.assemble.assert_not_called()
@@ -135,7 +145,9 @@ class TestDailySummaryServiceGeneration:
         )
         mock_summary_repo.find_by_user_and_date.return_value = generating
 
-        result = await service.get_or_generate("user123", date(2026, 4, 27))
+        result = await service.get_or_generate(
+            "user123", date(2026, 4, 27), transaction=_NO_TXN
+        )
 
         assert result is generating
         mock_input_assembler.assemble.assert_not_called()
@@ -161,7 +173,9 @@ class TestDailySummaryServiceGeneration:
             status=SummaryStatus.GENERATING,
         )
 
-        result = await service.get_or_generate("user123", date(2026, 4, 27))
+        result = await service.get_or_generate(
+            "user123", date(2026, 4, 27), transaction=_NO_TXN
+        )
 
         assert result is not None
         assert result.status == SummaryStatus.GENERATED
@@ -188,7 +202,9 @@ class TestDailySummaryServiceGeneration:
             status=SummaryStatus.GENERATING,
         )
 
-        result = await service.get_or_generate("user123", date(2026, 4, 27))
+        result = await service.get_or_generate(
+            "user123", date(2026, 4, 27), transaction=_NO_TXN
+        )
 
         assert result is not None
         assert result.status == SummaryStatus.GENERATED
@@ -208,7 +224,9 @@ class TestDailySummaryServiceEligibility:
         """When the day is ineligible, returns a DISABLED summary."""
         mock_eligibility_checker.is_eligible.return_value = False
 
-        result = await service.get_or_generate("user123", date(2026, 4, 27))
+        result = await service.get_or_generate(
+            "user123", date(2026, 4, 27), transaction=_NO_TXN
+        )
 
         assert result is not None
         assert result.status == SummaryStatus.DISABLED
@@ -246,7 +264,9 @@ class TestDailySummaryServiceFailure:
             _gemini_response_override="not valid json",
         )
 
-        result = await service.get_or_generate("user123", date(2026, 4, 27))
+        result = await service.get_or_generate(
+            "user123", date(2026, 4, 27), transaction=_NO_TXN
+        )
 
         # update_status returns None (no existing row), so upsert is used as fallback
         mock_summary_repo.update_status.assert_any_call(
@@ -273,7 +293,9 @@ class TestDailySummaryServiceFailure:
             gemini_model="gemini-2.5-pro",
         )
 
-        result = await service.get_or_generate("user123", date(2026, 4, 27))
+        result = await service.get_or_generate(
+            "user123", date(2026, 4, 27), transaction=_NO_TXN
+        )
 
         assert result is None
         mock_input_assembler.assemble.assert_not_called()
@@ -290,7 +312,9 @@ class TestDailySummaryServiceRegenerate:
         mock_input_assembler: AsyncMock,
     ) -> None:
         """Regenerate invalidates cache then delegates to get_or_generate."""
-        result = await service.regenerate("user123", date(2026, 4, 27))
+        result = await service.regenerate(
+            "user123", date(2026, 4, 27), transaction=_NO_TXN
+        )
 
         mock_summary_repo.invalidate_for_date.assert_called_once_with(
             "user123", date(2026, 4, 27)

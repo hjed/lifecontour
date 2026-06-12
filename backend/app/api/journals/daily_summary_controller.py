@@ -11,6 +11,7 @@ import structlog
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.services.daily_summary_service import DailySummaryService
 from app.infrastructure.auth.models import SessionUser
@@ -54,6 +55,7 @@ DailySummaryResponse.model_rebuild()
 async def get_daily_summary(
     summary_date: date,
     daily_summary_service: FromDishka[DailySummaryService],
+    connection: FromDishka[AsyncConnection],
     _user: FromDishka[SessionUser],
 ) -> DailySummaryResponse:
     """Get or generate a daily summary for a specific date.
@@ -63,7 +65,9 @@ async def get_daily_summary(
     Returns null data when Gemini is not configured.
     """
     try:
-        result = await daily_summary_service.get_or_generate(_user.id, summary_date)
+        result = await daily_summary_service.get_or_generate(
+            _user.id, summary_date, connection
+        )
     except Exception as err:
         logger.exception(
             "Failed to get or generate daily summary",
@@ -100,6 +104,7 @@ async def get_daily_summary(
 async def regenerate_daily_summary(
     summary_date: date,
     daily_summary_service: FromDishka[DailySummaryService],
+    connection: FromDishka[AsyncConnection],
     _user: FromDishka[SessionUser],
 ) -> DailySummaryResponse:
     """Force regenerate a daily summary for a specific date.
@@ -107,7 +112,9 @@ async def regenerate_daily_summary(
     Invalidates the existing cache and triggers a fresh AI generation.
     """
     try:
-        result = await daily_summary_service.regenerate(_user.id, summary_date)
+        result = await daily_summary_service.regenerate(
+            _user.id, summary_date, connection
+        )
     except Exception as err:
         logger.exception(
             "Failed to regenerate daily summary",

@@ -13,6 +13,7 @@ from typing import Any
 
 from core_shared.models.contacts.entities import SummaryStatus
 from core_shared.models.journals.daily_summary import JournalDailySummary
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.services.daily_summary_eligibility import (
     DailySummaryEligibilityChecker,
@@ -28,6 +29,7 @@ from app.core.journal.services.daily_summary_repository import (
 )
 from app.core.settings.models import UserSettingsRepository
 from app.core.settings.timezone_utils import DEFAULT_TIMEZONE
+from app.infrastructure.unit_of_work import transactional
 
 logger = logging.getLogger(__name__)
 
@@ -61,13 +63,20 @@ class DailySummaryService:
             return DEFAULT_TIMEZONE
         return await self._user_settings_repo.get_timezone(user_id)
 
+    @transactional
     async def get_or_generate(
-        self, user_id: str, summary_date: date
+        self, user_id: str, summary_date: date, transaction: AsyncConnection
     ) -> JournalDailySummary | None:
         """Get a cached summary or generate a new one.
 
         Returns the existing summary if already GENERATED,
         otherwise assembles input and generates a new one.
+
+        Any summary rows written here (status transitions and the final
+        GENERATED/FAILED result) are committed as one unit of work before the
+        response is sent: on the request paths (REST + MCP) the connection has no
+        commit backstop, so without this the generated summary would be rolled
+        back at teardown and regenerated on every request (issue #945).
         """
         if not self._gemini_api_key:
             logger.info(
@@ -177,12 +186,17 @@ class DailySummaryService:
         )
         return await self._summary_repo.upsert(generated_summary)
 
+    @transactional
     async def regenerate(
-        self, user_id: str, summary_date: date
+        self, user_id: str, summary_date: date, transaction: AsyncConnection
     ) -> JournalDailySummary | None:
-        """Force regenerate a daily summary by invalidating cache first."""
+        """Force regenerate a daily summary by invalidating cache first.
+
+        The invalidation and the regeneration commit together as one unit of
+        work (``get_or_generate`` joins it re-entrantly).
+        """
         await self._summary_repo.invalidate_for_date(user_id, summary_date)
-        return await self.get_or_generate(user_id, summary_date)
+        return await self.get_or_generate(user_id, summary_date, transaction)
 
     async def invalidate(self, user_id: str, summary_date: date) -> None:
         """Invalidate (set to PENDING) an existing daily summary.
