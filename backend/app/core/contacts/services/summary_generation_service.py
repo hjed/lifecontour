@@ -35,6 +35,9 @@ from app.core.journal.models.repositories import (
 from app.core.settings.timezone_utils import DEFAULT_TIMEZONE, isoformat_in_tz
 
 if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncConnection
+
+    from app.core.contacts.models.repositories import ContactEventPublisher
     from app.core.contacts.services.contact_history_service import (
         ContactHistoryService,
     )
@@ -371,6 +374,8 @@ class SummaryGenerator:
         gemini_model: str,
         _gemini_response_override: str | None = None,
         history_service: ContactHistoryService | None = None,
+        event_publisher: ContactEventPublisher | None = None,
+        connection: AsyncConnection | None = None,
         timezone: str = DEFAULT_TIMEZONE,
     ) -> None:
         self._input_assembler = input_assembler
@@ -381,7 +386,75 @@ class SummaryGenerator:
         self._gemini_model = gemini_model
         self._gemini_response_override = _gemini_response_override
         self._history_service = history_service
+        # Optional event publisher + connection: when present, a ContactSummaryUpdated
+        # event is published to the outbox transactionally alongside the history write,
+        # so Phase 2 can project summary history from events (ITER12-003).
+        self._event_publisher = event_publisher
+        self._connection = connection
         self._timezone = timezone
+
+    def _assert_single_connection(self) -> None:
+        """Verify the history repo and event publisher share ``self._connection``.
+
+        Only enforced when an event publisher is wired (i.e. the consumer path that
+        actually publishes events); the SAVEPOINT in ``_record_summary_history``
+        only covers writes on ``self._connection``, so a divergent connection would
+        silently break the history/event atomicity guarantee.
+        """
+        if self._event_publisher is None:
+            return
+        publisher_conn = getattr(self._event_publisher, "conn", None)
+        repo = getattr(self._history_service, "history_repo", None)
+        repo_conn = getattr(repo, "conn", None)
+        if publisher_conn is not self._connection or repo_conn is not self._connection:
+            raise RuntimeError(
+                "SummaryGenerator history_service, event_publisher, and connection "
+                "must share one connection so summary history and ContactSummaryUpdated "
+                "commit atomically"
+            )
+
+    async def _record_summary_history(
+        self, contact_id: int, changed_fields: dict[str, Any]
+    ) -> None:
+        """Record summary history and publish ContactSummaryUpdated atomically.
+
+        Both writes go to the same connection inside a SAVEPOINT, so a failure of
+        either rolls back both — history is never left without its event (which
+        Phase 2 relies on), and vice versa. The already-upserted summary row is
+        outside the savepoint and is unaffected. ``savepoint`` no-ops for a
+        ``None``/mock connection, so unit tests (no event publisher) still record
+        history directly.
+
+        The atomicity holds only because the history repo and the event publisher
+        both execute on ``self._connection`` (the summary consumer constructs all
+        three from one connection). ``_assert_single_connection`` enforces that
+        invariant so an inconsistent injection fails loudly rather than silently
+        committing history without its event.
+        """
+        if self._history_service is None:
+            return
+        from app.core.contacts.models.events import ContactSummaryUpdated
+        from app.infrastructure.unit_of_work import savepoint
+
+        self._assert_single_connection()
+
+        async with savepoint(self._connection):
+            await self._history_service.record_summary_change(
+                contact_id=contact_id,
+                changed_fields=changed_fields,
+                changed_by="system",
+                source=Provenance.SUMMARY_REGENERATION,
+            )
+            if self._event_publisher is not None:
+                await self._event_publisher.publish(
+                    ContactSummaryUpdated(
+                        contact_id=contact_id,
+                        changed_fields=changed_fields,
+                        source=Provenance.SUMMARY_REGENERATION,
+                        changed_by="system",
+                        transaction=self._connection,
+                    )
+                )
 
     async def generate(self, contact_id: int) -> ContactSummary | None:
         """Generate or regenerate an AI summary for a contact.
@@ -449,21 +522,20 @@ class SummaryGenerator:
             )
             result_summary = await self._summary_repo.upsert(disabled_summary)
             if self._history_service and (not existing or not existing.is_disabled):
+                disabled_changed_fields = {
+                    "is_disabled": (
+                        existing.is_disabled if existing else False,
+                        True,
+                    )
+                }
                 try:
-                    await self._history_service.record_summary_change(
-                        contact_id=contact_id,
-                        changed_fields={
-                            "is_disabled": (
-                                existing.is_disabled if existing else False,
-                                True,
-                            )
-                        },
-                        changed_by="system",
-                        source=Provenance.SUMMARY_REGENERATION,
+                    await self._record_summary_history(
+                        contact_id, disabled_changed_fields
                     )
                 except Exception as e:  # noqa: BLE001
                     logger.warning(
-                        "Failed to record history for contact %s auto-disable: %s",
+                        "Failed to record history/event for contact %s "
+                        "auto-disable: %s",
                         contact_id,
                         e,
                     )
@@ -500,21 +572,18 @@ class SummaryGenerator:
         if self._history_service and (
             not existing or existing.summary_text != result["summary_text"]
         ):
-            try:
-                await self._history_service.record_summary_change(
-                    contact_id=contact_id,
-                    changed_fields={
-                        "summary_text": (
-                            existing.summary_text if existing else None,
-                            result["summary_text"],
-                        )
-                    },
-                    changed_by="system",
-                    source=Provenance.SUMMARY_REGENERATION,
+            summary_changed_fields = {
+                "summary_text": (
+                    existing.summary_text if existing else None,
+                    result["summary_text"],
                 )
+            }
+            try:
+                await self._record_summary_history(contact_id, summary_changed_fields)
             except Exception as e:  # noqa: BLE001
                 logger.warning(
-                    "Failed to record history for contact %s summary generation: %s",
+                    "Failed to record history/event for contact %s "
+                    "summary generation: %s",
                     contact_id,
                     e,
                 )

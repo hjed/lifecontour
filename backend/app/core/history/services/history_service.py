@@ -1,10 +1,18 @@
-"""Projection of journal domain events into field history rows.
+"""Projection of journal and contact domain events into field history rows.
 
 ``HistoryService.project_event`` is a *pure* mapping from a single journal/route/
-gear domain event (delivered as an :class:`OutboxEvent`) to the list of
+gear or contact domain event (delivered as an :class:`OutboxEvent`) to the list of
 :class:`FieldHistoryEntry` rows that should be written for it. It performs no I/O,
 so it is trivially unit-testable; the :class:`HistoryProjectionConsumer` owns the
 repository and the idempotent writes.
+
+Contacts (ITER12-003 Phase 1): each contact handler reproduces the EXACT rows the
+synchronous dual-write (``ContactHistoryService.record_*``) writes today, keyed to
+the same ``(entity_type, entity_id)`` pairs the contact aggregation strategy reads
+(``contact``/``contact_method``/``contact_address``/``contact_note``/
+``contact_important_date``/``contact_relationship``/``contact_summary``). Unlike
+journals, contacts spread history across these sub-entity rows, so ``_row`` takes an
+explicit ``entity_type``.
 
 Design (ITER12-002 Phase 1):
 
@@ -26,6 +34,7 @@ Design (ITER12-002 Phase 1):
   trip through Redis, so we index positionally rather than unpacking a tuple.
 """
 
+import re
 from collections.abc import Sequence
 from typing import Any
 
@@ -36,9 +45,32 @@ from app.infrastructure.events.outbox_repository import OutboxEvent
 
 _JOURNAL_ENTITY_TYPE = "journal"
 
+# Contact entity types — must match the contact aggregation strategy in
+# ``app/core/history/models.py`` and the dual-write's ``record_*`` entity types.
+_CONTACT_ENTITY_TYPE = "contact"
+_CONTACT_METHOD_ENTITY_TYPE = "contact_method"
+_CONTACT_ADDRESS_ENTITY_TYPE = "contact_address"
+_CONTACT_NOTE_ENTITY_TYPE = "contact_note"
+_CONTACT_IMPORTANT_DATE_ENTITY_TYPE = "contact_important_date"
+_CONTACT_RELATIONSHIP_ENTITY_TYPE = "contact_relationship"
+_CONTACT_SUMMARY_ENTITY_TYPE = "contact_summary"
+
+# A contact sub-entity field edit publishes ``ContactUpdated`` (the core contact
+# event downstream consumers rely on) with a per-sub-entity ``changed_fields`` key
+# shaped ``"{prefix}_{sub_id}_{field}"`` (e.g. ``"method_5_value"``). The projection
+# decodes that key back to the right sub-entity row, matching the dual-write's
+# ``record_method_change`` / ``record_address_change`` / ``record_note_change``.
+# Plain keys (``first_name``, ``status``, …) belong to the contact itself.
+_SUBENTITY_FIELD_RE = re.compile(r"^(method|address|note)_(\d+)_(.+)$")
+_SUBENTITY_PREFIX_ENTITY_TYPE = {
+    "method": _CONTACT_METHOD_ENTITY_TYPE,
+    "address": _CONTACT_ADDRESS_ENTITY_TYPE,
+    "note": _CONTACT_NOTE_ENTITY_TYPE,
+}
+
 
 class HistoryService:
-    """Maps journal domain events to field-history rows."""
+    """Maps journal and contact domain events to field-history rows."""
 
     def project_event(self, event: OutboxEvent) -> list[FieldHistoryEntry]:
         """Return the history rows for ``event`` (empty for irrelevant events)."""
@@ -182,6 +214,246 @@ class HistoryService:
             field_prefix=f"gear:{gear_item_id}:",
         )
 
+    # -- contact handlers (ITER12-003 Phase 1) -------------------------------
+
+    def _project_contact_created(
+        self, event: OutboxEvent, data: dict[str, Any]
+    ) -> list[FieldHistoryEntry]:
+        # Only the contact-level "created" marker comes from ContactCreated. The
+        # per-sub-entity "created" markers come from the ContactMethodAdded /
+        # ContactAddressAdded / ContactNoteAdded / ImportantDateAdded events that
+        # the bulk save publishes alongside, so they are not duplicated here.
+        return [
+            self._row(
+                event,
+                data,
+                entity_type=_CONTACT_ENTITY_TYPE,
+                entity_id=data["contact_id"],
+                field_name="status",
+                old_value=None,
+                new_value="created",
+            )
+        ]
+
+    def _project_contact_updated(
+        self, event: OutboxEvent, data: dict[str, Any]
+    ) -> list[FieldHistoryEntry]:
+        contact_id = data["contact_id"]
+        changed_fields = data.get("changed_fields")
+        if not changed_fields:
+            return []
+        rows: list[FieldHistoryEntry] = []
+        for field_name, change in changed_fields.items():
+            if not isinstance(change, (list, tuple)) or len(change) != 2:
+                continue
+            entity_type, entity_id, resolved_field = _resolve_contact_field(
+                field_name, contact_id
+            )
+            rows.append(
+                self._row(
+                    event,
+                    data,
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    field_name=resolved_field,
+                    old_value=change[0],
+                    new_value=change[1],
+                )
+            )
+        return rows
+
+    def _project_contact_deleted(
+        self, event: OutboxEvent, data: dict[str, Any]
+    ) -> list[FieldHistoryEntry]:
+        return [
+            self._row(
+                event,
+                data,
+                entity_type=_CONTACT_ENTITY_TYPE,
+                entity_id=data["contact_id"],
+                field_name="status",
+                old_value="active",
+                new_value="deleted",
+            )
+        ]
+
+    def _sub_entity_created(
+        self, event: OutboxEvent, data: dict[str, Any], *, entity_type: str, id_key: str
+    ) -> list[FieldHistoryEntry]:
+        return [
+            self._row(
+                event,
+                data,
+                entity_type=entity_type,
+                entity_id=data[id_key],
+                field_name="status",
+                old_value=None,
+                new_value="created",
+            )
+        ]
+
+    def _sub_entity_deleted(
+        self, event: OutboxEvent, data: dict[str, Any], *, entity_type: str, id_key: str
+    ) -> list[FieldHistoryEntry]:
+        return [
+            self._row(
+                event,
+                data,
+                entity_type=entity_type,
+                entity_id=data[id_key],
+                field_name="status",
+                old_value="active",
+                new_value="deleted",
+            )
+        ]
+
+    def _project_contact_method_added(
+        self, event: OutboxEvent, data: dict[str, Any]
+    ) -> list[FieldHistoryEntry]:
+        return self._sub_entity_created(
+            event, data, entity_type=_CONTACT_METHOD_ENTITY_TYPE, id_key="method_id"
+        )
+
+    def _project_contact_method_deleted(
+        self, event: OutboxEvent, data: dict[str, Any]
+    ) -> list[FieldHistoryEntry]:
+        return self._sub_entity_deleted(
+            event, data, entity_type=_CONTACT_METHOD_ENTITY_TYPE, id_key="method_id"
+        )
+
+    def _project_contact_address_added(
+        self, event: OutboxEvent, data: dict[str, Any]
+    ) -> list[FieldHistoryEntry]:
+        return self._sub_entity_created(
+            event, data, entity_type=_CONTACT_ADDRESS_ENTITY_TYPE, id_key="address_id"
+        )
+
+    def _project_contact_address_deleted(
+        self, event: OutboxEvent, data: dict[str, Any]
+    ) -> list[FieldHistoryEntry]:
+        return self._sub_entity_deleted(
+            event, data, entity_type=_CONTACT_ADDRESS_ENTITY_TYPE, id_key="address_id"
+        )
+
+    def _project_contact_note_added(
+        self, event: OutboxEvent, data: dict[str, Any]
+    ) -> list[FieldHistoryEntry]:
+        return self._sub_entity_created(
+            event, data, entity_type=_CONTACT_NOTE_ENTITY_TYPE, id_key="note_id"
+        )
+
+    def _project_important_date_added(
+        self, event: OutboxEvent, data: dict[str, Any]
+    ) -> list[FieldHistoryEntry]:
+        return self._sub_entity_created(
+            event,
+            data,
+            entity_type=_CONTACT_IMPORTANT_DATE_ENTITY_TYPE,
+            id_key="date_id",
+        )
+
+    def _project_important_date_deleted(
+        self, event: OutboxEvent, data: dict[str, Any]
+    ) -> list[FieldHistoryEntry]:
+        return self._sub_entity_deleted(
+            event,
+            data,
+            entity_type=_CONTACT_IMPORTANT_DATE_ENTITY_TYPE,
+            id_key="date_id",
+        )
+
+    def _project_tag_assigned(
+        self, event: OutboxEvent, data: dict[str, Any]
+    ) -> list[FieldHistoryEntry]:
+        return [
+            self._row(
+                event,
+                data,
+                entity_type=_CONTACT_ENTITY_TYPE,
+                entity_id=data["contact_id"],
+                field_name="tags",
+                old_value=None,
+                new_value=data.get("tag_name"),
+            )
+        ]
+
+    def _project_tag_removed(
+        self, event: OutboxEvent, data: dict[str, Any]
+    ) -> list[FieldHistoryEntry]:
+        return [
+            self._row(
+                event,
+                data,
+                entity_type=_CONTACT_ENTITY_TYPE,
+                entity_id=data["contact_id"],
+                field_name="tags",
+                old_value=data.get("tag_name"),
+                new_value=None,
+            )
+        ]
+
+    def _project_contact_relationship_created(
+        self, event: OutboxEvent, data: dict[str, Any]
+    ) -> list[FieldHistoryEntry]:
+        relationship_id = data["relationship_id"]
+        return [
+            self._row(
+                event,
+                data,
+                entity_type=_CONTACT_RELATIONSHIP_ENTITY_TYPE,
+                entity_id=relationship_id,
+                field_name="status",
+                old_value=None,
+                new_value="created",
+            ),
+            self._row(
+                event,
+                data,
+                entity_type=_CONTACT_RELATIONSHIP_ENTITY_TYPE,
+                entity_id=relationship_id,
+                field_name="relationship_type",
+                old_value=None,
+                new_value=data.get("relationship_type"),
+            ),
+        ]
+
+    def _project_contact_relationship_updated(
+        self, event: OutboxEvent, data: dict[str, Any]
+    ) -> list[FieldHistoryEntry]:
+        return self._rows_from_changed_fields(
+            event,
+            data,
+            entity_type=_CONTACT_RELATIONSHIP_ENTITY_TYPE,
+            entity_id=data["relationship_id"],
+            changed_fields=data.get("changed_fields"),
+        )
+
+    def _project_contact_relationship_deleted(
+        self, event: OutboxEvent, data: dict[str, Any]
+    ) -> list[FieldHistoryEntry]:
+        return [
+            self._row(
+                event,
+                data,
+                entity_type=_CONTACT_RELATIONSHIP_ENTITY_TYPE,
+                entity_id=data["relationship_id"],
+                field_name="status",
+                old_value="active",
+                new_value="deleted",
+            )
+        ]
+
+    def _project_contact_summary_updated(
+        self, event: OutboxEvent, data: dict[str, Any]
+    ) -> list[FieldHistoryEntry]:
+        return self._rows_from_changed_fields(
+            event,
+            data,
+            entity_type=_CONTACT_SUMMARY_ENTITY_TYPE,
+            entity_id=data["contact_id"],
+            changed_fields=data.get("changed_fields"),
+        )
+
     # -- helpers -------------------------------------------------------------
 
     def _rows_from_changed_fields(
@@ -191,6 +463,7 @@ class HistoryService:
         *,
         entity_id: int,
         changed_fields: dict[str, Sequence[Any]] | None,
+        entity_type: str = _JOURNAL_ENTITY_TYPE,
         field_prefix: str = "",
     ) -> list[FieldHistoryEntry]:
         if not changed_fields:
@@ -208,6 +481,7 @@ class HistoryService:
                 self._row(
                     event,
                     data,
+                    entity_type=entity_type,
                     entity_id=entity_id,
                     field_name=f"{field_prefix}{field_name}",
                     old_value=old_value,
@@ -225,9 +499,10 @@ class HistoryService:
         field_name: str,
         old_value: Any,
         new_value: Any,
+        entity_type: str = _JOURNAL_ENTITY_TYPE,
     ) -> FieldHistoryEntry:
         return FieldHistoryEntry(
-            entity_type=_JOURNAL_ENTITY_TYPE,
+            entity_type=entity_type,
             entity_id=entity_id,
             field_name=field_name,
             old_value=_stringify(old_value),
@@ -252,6 +527,17 @@ def _parse_provenance(source: str | None) -> Provenance:
         return Provenance.SYSTEM
 
 
+def _resolve_contact_field(field_name: str, contact_id: int) -> tuple[str, int, str]:
+    """Resolve a ``ContactUpdated`` changed-field key to its (entity_type, entity_id,
+    field) row target. Sub-entity keys (``"method_5_value"``) decode to the
+    contact_method/address/note row; plain keys belong to the contact itself."""
+    match = _SUBENTITY_FIELD_RE.match(field_name)
+    if match is None:
+        return _CONTACT_ENTITY_TYPE, contact_id, field_name
+    prefix, sub_id, field = match.group(1), int(match.group(2)), match.group(3)
+    return _SUBENTITY_PREFIX_ENTITY_TYPE[prefix], sub_id, field
+
+
 # Dispatch table: event_type -> bound handler method name. Built once at import.
 _HANDLERS = {
     "JournalCreated": HistoryService._project_journal_created,
@@ -263,4 +549,27 @@ _HANDLERS = {
     "RouteUpdated": HistoryService._project_route_updated,
     "RouteDeleted": HistoryService._project_route_deleted,
     "GearItemUpdated": HistoryService._project_gear_item_updated,
+    # Contact events (ITER12-003 Phase 1). The HistoryProjectionConsumer keeps
+    # these OUT of its live subscription this phase, so they only run in tests
+    # until Phase 2 switches contacts onto the projection and removes the
+    # dual-write.
+    "ContactCreated": HistoryService._project_contact_created,
+    # Sub-entity field edits also arrive as ContactUpdated (with a per-sub-entity
+    # key); _project_contact_updated decodes them to the contact_method/address/note
+    # row, so there are no separate Contact*Updated handlers.
+    "ContactUpdated": HistoryService._project_contact_updated,
+    "ContactDeleted": HistoryService._project_contact_deleted,
+    "ContactMethodAdded": HistoryService._project_contact_method_added,
+    "ContactMethodDeleted": HistoryService._project_contact_method_deleted,
+    "ContactAddressAdded": HistoryService._project_contact_address_added,
+    "ContactAddressDeleted": HistoryService._project_contact_address_deleted,
+    "ContactNoteAdded": HistoryService._project_contact_note_added,
+    "ImportantDateAdded": HistoryService._project_important_date_added,
+    "ImportantDateDeleted": HistoryService._project_important_date_deleted,
+    "TagAssigned": HistoryService._project_tag_assigned,
+    "TagRemoved": HistoryService._project_tag_removed,
+    "ContactRelationshipCreated": HistoryService._project_contact_relationship_created,
+    "ContactRelationshipUpdated": HistoryService._project_contact_relationship_updated,
+    "ContactRelationshipDeleted": HistoryService._project_contact_relationship_deleted,
+    "ContactSummaryUpdated": HistoryService._project_contact_summary_updated,
 }

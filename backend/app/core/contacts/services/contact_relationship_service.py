@@ -106,6 +106,8 @@ class ContactRelationshipService:
                     to_contact_id=created.to_contact_id,
                     relationship_type=created.relationship_type.value,
                     to_user=created.to_user,
+                    source=source,
+                    changed_by=changed_by,
                 )
             )
 
@@ -160,6 +162,8 @@ class ContactRelationshipService:
                     to_contact_id=created_relationship.to_contact_id,
                     relationship_type=created_relationship.relationship_type.value,
                     to_user=created_relationship.to_user,
+                    source=source,
+                    changed_by=changed_by,
                 )
             )
 
@@ -199,6 +203,8 @@ class ContactRelationshipService:
                         to_contact_id=created_inverse.to_contact_id,
                         relationship_type=created_inverse.relationship_type.value,
                         to_user=created_inverse.to_user,
+                        source=source,
+                        changed_by=changed_by,
                     )
                 )
 
@@ -311,6 +317,16 @@ class ContactRelationshipService:
                 "relationship",
                 "updated relationship is missing an id",
             )
+        # Compute the (old, new) field change so both the published event and the
+        # dual-write history record the same diff; an unchanged type yields an
+        # empty changed_fields (the projection then writes no row).
+        relationship_changed_fields: dict[str, tuple[str, str]] = {}
+        if updated.relationship_type != existing_relationship.relationship_type:
+            relationship_changed_fields["relationship_type"] = (
+                existing_relationship.relationship_type.value,
+                updated.relationship_type.value,
+            )
+
         await self.event_publisher.publish(
             ContactRelationshipUpdated(
                 relationship_id=updated.id,
@@ -318,18 +334,16 @@ class ContactRelationshipService:
                 to_contact_id=updated.to_contact_id,
                 relationship_type=updated.relationship_type.value,
                 to_user=updated.to_user,
+                changed_fields=relationship_changed_fields,
+                source=source,
+                changed_by=changed_by,
             )
         )
 
-        if updated.relationship_type != existing_relationship.relationship_type:
+        if relationship_changed_fields:
             await self.history_service.record_relationship_change(
                 updated.id,
-                {
-                    "relationship_type": (
-                        existing_relationship.relationship_type.value,
-                        updated.relationship_type.value,
-                    )
-                },
+                relationship_changed_fields,
                 changed_by=changed_by,
                 source=source,
             )
@@ -377,6 +391,8 @@ class ContactRelationshipService:
                 to_contact_id=existing_relationship.to_contact_id,
                 relationship_type=existing_relationship.relationship_type.value,
                 to_user=existing_relationship.to_user,
+                source=source,
+                changed_by=changed_by,
             )
         )
 
@@ -415,6 +431,8 @@ class ContactRelationshipService:
                         to_contact_id=relationship.to_contact_id,
                         relationship_type=relationship.relationship_type.value,
                         to_user=relationship.to_user,
+                        source=source,
+                        changed_by=changed_by,
                     )
                 )
 

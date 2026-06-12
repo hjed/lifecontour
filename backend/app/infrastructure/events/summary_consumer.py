@@ -184,6 +184,15 @@ class SummaryConsumer(DeadLetterConsumerMixin, StreamConsumer):
 
         history_service = ContactHistoryService(history_repo)
 
+        # Publish ContactSummaryUpdated to the outbox on the same connection so the
+        # event commits atomically with the history write (ITER12-003 Phase 1). The
+        # history projection consumer ignores it this phase (inert); Phase 2 uses it.
+        from app.infrastructure.events.outbox_event_publisher import (
+            OutboxEventPublisher,
+        )
+
+        event_publisher = OutboxEventPublisher(connection)
+
         input_assembler = SummaryInputAssembler(
             contact_repo=contact_repo,
             history_repo=history_repo,
@@ -208,6 +217,8 @@ class SummaryConsumer(DeadLetterConsumerMixin, StreamConsumer):
             gemini_api_key=settings.gemini_api_key,
             gemini_model=settings.gemini_summary_model,
             history_service=history_service,
+            event_publisher=event_publisher,
+            connection=connection,
             timezone=timezone,
         )
 

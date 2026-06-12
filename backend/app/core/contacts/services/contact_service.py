@@ -327,7 +327,7 @@ class ContactService:
 
             # Save all related entities
             saved_entities = await self._save_all_related_entities(
-                contact_id, contact, transaction
+                contact_id, contact, transaction, changed_by, source
             )
 
             # Build complete contact with related entities
@@ -412,7 +412,7 @@ class ContactService:
 
             # Handle related entities update
             saved_entities = await self._handle_update_relations(
-                contact_id, contact, current_contact, transaction
+                contact_id, contact, current_contact, transaction, changed_by, source
             )
 
             # Build complete contact with related entities
@@ -519,7 +519,13 @@ class ContactService:
             )
 
             # Publish update event
-            event = ContactUpdated(contact_id, changed_fields, transaction=transaction)
+            event = ContactUpdated(
+                contact_id,
+                changed_fields,
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
+            )
             await self.event_publisher.publish(event)
 
             return (
@@ -611,10 +617,14 @@ class ContactService:
                 _transaction=transaction,
             )
 
-            # Publish update event (method-specific event could be added)
+            # Publish ContactUpdated (the core contact event downstream consumers
+            # rely on) with a per-sub-entity key. The history projection decodes
+            # the "method_{id}_{field}" key back to the contact_method row.
             event = ContactUpdated(
                 contact_id,
                 {f"method_{method_id}_{field_name}": (old_value, new_value)},
+                source=source,
+                changed_by=changed_by,
                 transaction=transaction,
             )
             await self.event_publisher.publish(event)
@@ -704,10 +714,13 @@ class ContactService:
                 _transaction=transaction,
             )
 
-            # Publish update event
+            # Publish ContactUpdated with a per-sub-entity key; the projection
+            # decodes "address_{id}_{field}" to the contact_address row.
             event = ContactUpdated(
                 contact_id,
                 {f"address_{address_id}_{field_name}": (old_value, new_value)},
+                source=source,
+                changed_by=changed_by,
                 transaction=transaction,
             )
             await self.event_publisher.publish(event)
@@ -797,10 +810,13 @@ class ContactService:
                 _transaction=transaction,
             )
 
-            # Publish update event
+            # Publish ContactUpdated with a per-sub-entity key; the projection
+            # decodes "note_{id}_{field}" to the contact_note row.
             event = ContactUpdated(
                 contact_id,
                 {f"note_{note_id}_{field_name}": (old_value, new_value)},
+                source=source,
+                changed_by=changed_by,
                 transaction=transaction,
             )
             await self.event_publisher.publish(event)
@@ -966,22 +982,24 @@ class ContactService:
         contact_id: int,
         contact: Contact,
         transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> dict[str, list[Any]]:
         """Save all related entities and return them in a dictionary."""
         saved_methods = await self._save_contact_methods(
-            contact_id, contact.methods, transaction
+            contact_id, contact.methods, transaction, changed_by, source
         )
         saved_addresses = await self._save_contact_addresses(
-            contact_id, contact.addresses, transaction
+            contact_id, contact.addresses, transaction, changed_by, source
         )
         saved_notes = await self._save_contact_notes(
-            contact_id, contact.notes, transaction
+            contact_id, contact.notes, transaction, changed_by, source
         )
         saved_tags = await self._save_contact_tags(
-            contact_id, contact.tags, transaction
+            contact_id, contact.tags, transaction, changed_by, source
         )
         saved_dates = await self._save_contact_important_dates(
-            contact_id, contact.important_dates, transaction
+            contact_id, contact.important_dates, transaction, changed_by, source
         )
 
         return {
@@ -1070,6 +1088,8 @@ class ContactService:
             contact.id,
             contact.first_name,
             contact.last_name,
+            source=source,
+            changed_by=changed_by,
             transaction=transaction,
         )
         await self.event_publisher.publish(event)
@@ -1080,6 +1100,8 @@ class ContactService:
         contact: Contact,
         current_contact: Contact,
         transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> dict[str, list[Any]]:
         """Handle updating related entities for contact update."""
         # Remove existing relations if new data is provided
@@ -1095,29 +1117,29 @@ class ContactService:
 
         if contact.methods is not None:
             saved_entities["methods"] = await self._save_contact_methods(
-                contact_id, contact.methods, transaction
+                contact_id, contact.methods, transaction, changed_by, source
             )
 
         if contact.addresses is not None:
             saved_entities["addresses"] = await self._save_contact_addresses(
-                contact_id, contact.addresses, transaction
+                contact_id, contact.addresses, transaction, changed_by, source
             )
 
         if contact.notes is not None:
             saved_entities["notes"] = await self._save_contact_notes(
-                contact_id, contact.notes, transaction
+                contact_id, contact.notes, transaction, changed_by, source
             )
 
         if contact.tags is not None:
             saved_entities["tags"] = await self._save_contact_tags(
-                contact_id, contact.tags, transaction
+                contact_id, contact.tags, transaction, changed_by, source
             )
 
         if contact.important_dates is not None:
             saved_entities[
                 "important_dates"
             ] = await self._save_contact_important_dates(
-                contact_id, contact.important_dates, transaction
+                contact_id, contact.important_dates, transaction, changed_by, source
             )
 
         return saved_entities
@@ -1178,7 +1200,13 @@ class ContactService:
             _transaction=transaction,
         )
 
-        event = ContactUpdated(contact.id, changed_fields, transaction=transaction)
+        event = ContactUpdated(
+            contact.id,
+            changed_fields,
+            source=source,
+            changed_by=changed_by,
+            transaction=transaction,
+        )
         await self.event_publisher.publish(event)
 
         # Trigger async summary regeneration via outbox
@@ -1214,6 +1242,8 @@ class ContactService:
         contact_id: int,
         methods: list[ContactMethod] | None,
         transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> list[ContactMethod]:
         """Save contact methods and publish events."""
         saved_methods = []
@@ -1242,6 +1272,8 @@ class ContactService:
                 saved_method.id,
                 method.method_type.value,
                 method.value,
+                source=source,
+                changed_by=changed_by,
                 transaction=transaction,
             )
             await self.event_publisher.publish(method_event)
@@ -1253,6 +1285,8 @@ class ContactService:
         contact_id: int,
         addresses: list[ContactAddress] | None,
         transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> list[ContactAddress]:
         """Save contact addresses and publish events."""
         saved_addresses = []
@@ -1281,6 +1315,8 @@ class ContactService:
                 saved_address.id,
                 address.street_line_1,
                 address.country_code,
+                source=source,
+                changed_by=changed_by,
                 transaction=transaction,
             )
             await self.event_publisher.publish(address_event)
@@ -1292,6 +1328,8 @@ class ContactService:
         contact_id: int,
         notes: list[ContactNote] | None,
         transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> list[ContactNote]:
         """Save contact notes and publish events."""
         saved_notes = []
@@ -1310,14 +1348,24 @@ class ContactService:
 
             # Publish note added event
             note_event = ContactNoteAdded(
-                contact_id, saved_note.id, note.content, transaction=transaction
+                contact_id,
+                saved_note.id,
+                note.content,
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
             )
             await self.event_publisher.publish(note_event)
 
         return saved_notes
 
     async def _save_contact_tags(
-        self, contact_id: int, tags: list[Tag] | None, transaction: AsyncConnection
+        self,
+        contact_id: int,
+        tags: list[Tag] | None,
+        transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> list[Tag]:
         """Save contact tags and publish events."""
         saved_tags = []
@@ -1334,7 +1382,12 @@ class ContactService:
 
             # Publish tag assigned event
             tag_event = TagAssigned(
-                contact_id, tag.id, str(tag.name), transaction=transaction
+                contact_id,
+                tag.id,
+                str(tag.name),
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
             )
             await self.event_publisher.publish(tag_event)
 
@@ -1345,6 +1398,8 @@ class ContactService:
         contact_id: int,
         dates: list[ImportantDate] | None,
         transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> list[ImportantDate]:
         """Save contact important dates and publish events."""
         saved_dates = []
@@ -1363,7 +1418,12 @@ class ContactService:
 
             # Publish date added event
             date_event = ImportantDateAdded(
-                contact_id, saved_date.id, date.date_type.value, transaction=transaction
+                contact_id,
+                saved_date.id,
+                date.date_type.value,
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
             )
             await self.event_publisher.publish(date_event)
 
@@ -1425,7 +1485,12 @@ class ContactService:
             # Domain event will capture the deletion action
 
             # Publish event
-            event = ContactDeleted(contact_id, transaction=transaction)
+            event = ContactDeleted(
+                contact_id,
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
+            )
             await self.event_publisher.publish(event)
 
         return cast(
@@ -1494,7 +1559,12 @@ class ContactService:
 
             # Publish event
             event = TagAssigned(
-                contact_id, tag_id, str(tag.name), transaction=transaction
+                contact_id,
+                tag_id,
+                str(tag.name),
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
             )
             await self.event_publisher.publish(event)
             await self.contact_repo.touch(contact_id, transaction)
@@ -1542,7 +1612,12 @@ class ContactService:
 
             # Publish event
             event = TagRemoved(
-                contact_id, tag_id, str(tag.name), transaction=transaction
+                contact_id,
+                tag_id,
+                str(tag.name),
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
             )
             await self.event_publisher.publish(event)
             await self.contact_repo.touch(contact_id, transaction)
@@ -1620,6 +1695,8 @@ class ContactService:
                 saved_method.id,
                 method.method_type.value,
                 method.value,
+                source=source,
+                changed_by=changed_by,
                 transaction=transaction,
             )
             await self.event_publisher.publish(event)
@@ -1699,6 +1776,8 @@ class ContactService:
                 saved_address.id,
                 address.street_line_1,
                 address.country_code,
+                source=source,
+                changed_by=changed_by,
                 transaction=transaction,
             )
             await self.event_publisher.publish(event)
@@ -1762,7 +1841,12 @@ class ContactService:
 
             # Publish event
             event = ContactNoteAdded(
-                contact_id, saved_note.id, note.content, transaction=transaction
+                contact_id,
+                saved_note.id,
+                note.content,
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
             )
             await self.event_publisher.publish(event)
             await self.contact_repo.touch(contact_id, transaction)
@@ -1813,7 +1897,12 @@ class ContactService:
 
             # Publish event
             event = ImportantDateAdded(
-                contact_id, saved_date.id, date.date_type.value, transaction=transaction
+                contact_id,
+                saved_date.id,
+                date.date_type.value,
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
             )
             await self.event_publisher.publish(event)
             await self.contact_repo.touch(contact_id, transaction)
@@ -1874,6 +1963,8 @@ class ContactService:
                 method_id,
                 method.method_type.value,
                 method.value,
+                source=source,
+                changed_by=changed_by,
                 transaction=transaction,
             )
             await self.event_publisher.publish(event)
@@ -1928,7 +2019,12 @@ class ContactService:
 
             # Publish event
             event = ContactAddressDeleted(
-                contact_id, address_id, address.street_line_1, transaction=transaction
+                contact_id,
+                address_id,
+                address.street_line_1,
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
             )
             await self.event_publisher.publish(event)
             await self.contact_repo.touch(contact_id, transaction)
@@ -1975,7 +2071,12 @@ class ContactService:
 
             # Publish event
             event = ImportantDateDeleted(
-                contact_id, date_id, date.date_type.value, transaction=transaction
+                contact_id,
+                date_id,
+                date.date_type.value,
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
             )
             await self.event_publisher.publish(event)
             await self.contact_repo.touch(contact_id, transaction)
