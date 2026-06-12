@@ -11,6 +11,13 @@ class ContactNotFoundError(ContactDomainError):
         self.contact_id = contact_id
 
 
+class ContactMergeConflictError(ContactDomainError):
+    """Raised when two contacts cannot be merged (e.g. merging a contact into itself)."""
+
+    def __init__(self, message: str):
+        super().__init__(message, 409)
+
+
 class TagNotFoundError(ContactDomainError):
     """Tag not found in repository."""
 

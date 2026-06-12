@@ -141,15 +141,19 @@ These were established by reviewing the current code and drive the phase boundar
 
 Build the hardest re-points first, behind a not-yet-exposed `ContactMergeService`. No runtime path reaches this code yet, so it merges green as additive code under test.
 
+**Status:** ✅ DONE — repository re-points, service skeleton, and DI wiring implemented with unit + integration coverage; all backend quality gates (pytest, `ruff`, `mypy`) green locally.
+
+> **Ownership note (deviation):** the `contacts` table has **no `user_id`/owner column** (contacts are single-user in this system — verified in `contact_tables.py` and the `core_shared` `Contact` entity), so the AC's "same owner" precondition is **not applicable** at the data layer. Phase 1 validates only *both exist* + *distinct*. A cross-owner check can be added if/when contacts gain ownership.
+
 **Acceptance Criteria:**
-- [ ] `ContactRelationshipRepository` gains a `repoint_contact(source_id, survivor_id, transaction)` that re-points both `from_contact_id` and `to_contact_id`, **drops self-loops** between the two contacts before they violate `ck_contact_relationships_no_self_reference`, and dedupes the result against `uq_contact_relationships_contact_target` and `uq_contact_relationships_user_target` (delete-colliding-then-update, or `UPDATE … ON CONFLICT`-equivalent).
-- [ ] `JournalContactRelationshipRepository` gains a `repoint_contact(source_id, survivor_id, transaction)` that re-points and dedupes on the `(journal_id, contact_id, relationship_type)` composite PK.
-- [ ] A new `ContactMergeService.merge_contacts(survivor_id, source_id, transaction)` (decorated `@transactional`) validates preconditions (both exist, distinct, same owner) and invokes the two re-points. No scalar/sub-entity handling yet.
-- [ ] `ContactMergeService` is wired in `backend/app/infrastructure/di/contacts.py` (REQUEST scope).
+- [x] `ContactRelationshipRepository` gains a `repoint_contact(source_id, survivor_id, transaction)` that re-points both `from_contact_id` and `to_contact_id`, **drops self-loops** between the two contacts before they violate `ck_contact_relationships_no_self_reference`, and dedupes the result against `uq_contact_relationships_contact_target` and `uq_contact_relationships_user_target` (delete-colliding-then-update — the unique constraints are partial indexes, so a plain `UPDATE … ON CONFLICT` cannot name them).
+- [x] `JournalContactRelationshipRepository` gains a `repoint_contact(source_id, survivor_id, transaction)` that re-points and dedupes on the `(journal_id, contact_id, relationship_type)` composite PK.
+- [x] A new `ContactMergeService.merge_contacts(survivor_id, source_id, transaction)` (decorated `@transactional`) validates preconditions (both exist, distinct; *same owner* N/A — see note) and invokes the two re-points. No scalar/sub-entity handling yet.
+- [x] `ContactMergeService` is wired in `backend/app/infrastructure/di/contacts.py` (REQUEST scope).
 
 **Required Test Coverage:**
-- [ ] **Integration:** relationship re-point dedupes duplicates, drops the inter-contact self-loop, preserves to-user relationships, and handles both directions; journal-link re-point dedupes on the composite PK. Use `async_connection` / `clean_database` from `tests/integration/conftest.py`.
-- [ ] **Unit:** precondition validation (self-merge, missing contact, cross-owner) raises.
+- [x] **Integration:** relationship re-point dedupes duplicates, drops the inter-contact self-loop, preserves to-user relationships, and handles both directions; journal-link re-point dedupes on the composite PK. Use `async_connection` / `clean_database` from `tests/integration/conftest.py`. (`backend/tests/integration/contacts/test_contact_merge_repoint_integration.py`, 7 tests.)
+- [x] **Unit:** precondition validation (self-merge, missing survivor, missing source) raises; happy path delegates to both re-points. (`backend/tests/unit/contacts/test_contact_merge_service.py`, 4 tests. Cross-owner case omitted — not applicable, see note.)
 
 #### Phase 2: Sub-entity re-point + source deletion + summary refresh
 **PR Size:** ~520 lines (repo methods ~190, service ~80, tests ~250)

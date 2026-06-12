@@ -239,6 +239,120 @@ class SqlContactRelationshipRepository(ContactRelationshipRepository):
                 "relationship", f"Relationship with ID {relationship_id} not found"
             )
 
+    async def repoint_contact(
+        self, source_id: int, survivor_id: int, transaction: AsyncConnection
+    ) -> None:
+        """Re-point the source contact's relationships onto the survivor.
+
+        Both directions (where the source is the ``from`` contact and where it
+        is the ``to`` contact) move to the survivor. Relationships directly
+        between the two merged contacts are dropped first so the re-point cannot
+        create a row that violates ``ck_contact_relationships_no_self_reference``.
+        Remaining relationships dedupe against the two partial unique indexes
+        (``uq_contact_relationships_contact_target`` and
+        ``uq_contact_relationships_user_target``); colliding source rows are
+        deleted before the update so the survivor's existing relationship wins.
+        """
+        params = {"source_id": source_id, "survivor_id": survivor_id}
+
+        # 1. Drop inter-contact relationships between the merged pair (either
+        #    direction). After re-pointing they would become self-loops.
+        await transaction.execute(
+            text(
+                """
+                DELETE FROM contact_relationships
+                WHERE to_user = false
+                AND (
+                    (from_contact_id = :source_id AND to_contact_id = :survivor_id)
+                    OR (from_contact_id = :survivor_id AND to_contact_id = :source_id)
+                )
+                """
+            ),
+            params,
+        )
+
+        # 2a. From-side, to_user = false: drop source rows that collide with an
+        #     existing survivor relationship to the same target/type.
+        await transaction.execute(
+            text(
+                """
+                DELETE FROM contact_relationships src
+                WHERE src.from_contact_id = :source_id
+                AND src.to_user = false
+                AND EXISTS (
+                    SELECT 1 FROM contact_relationships tgt
+                    WHERE tgt.from_contact_id = :survivor_id
+                    AND tgt.to_user = false
+                    AND tgt.to_contact_id = src.to_contact_id
+                    AND tgt.relationship_type = src.relationship_type
+                )
+                """
+            ),
+            params,
+        )
+
+        # 2b. From-side, to_user = true: drop source rows that collide with an
+        #     existing survivor user-targeted relationship of the same type.
+        await transaction.execute(
+            text(
+                """
+                DELETE FROM contact_relationships src
+                WHERE src.from_contact_id = :source_id
+                AND src.to_user = true
+                AND EXISTS (
+                    SELECT 1 FROM contact_relationships tgt
+                    WHERE tgt.from_contact_id = :survivor_id
+                    AND tgt.to_user = true
+                    AND tgt.relationship_type = src.relationship_type
+                )
+                """
+            ),
+            params,
+        )
+
+        await transaction.execute(
+            text(
+                """
+                UPDATE contact_relationships
+                SET from_contact_id = :survivor_id,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE from_contact_id = :source_id
+                """
+            ),
+            params,
+        )
+
+        # 3. To-side (only to_user = false rows have a to_contact_id): drop source
+        #    rows that collide with an existing survivor relationship from the
+        #    same contact/type, then re-point the rest.
+        await transaction.execute(
+            text(
+                """
+                DELETE FROM contact_relationships src
+                WHERE src.to_contact_id = :source_id
+                AND EXISTS (
+                    SELECT 1 FROM contact_relationships tgt
+                    WHERE tgt.to_contact_id = :survivor_id
+                    AND tgt.from_contact_id = src.from_contact_id
+                    AND tgt.relationship_type = src.relationship_type
+                )
+                """
+            ),
+            params,
+        )
+
+        await transaction.execute(
+            text(
+                """
+                UPDATE contact_relationships
+                SET to_contact_id = :survivor_id,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE to_contact_id = :source_id
+                """
+            ),
+            params,
+        )
+
     async def relationship_exists(
         self,
         from_contact_id: int,

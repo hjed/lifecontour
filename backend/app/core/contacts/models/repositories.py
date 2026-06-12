@@ -479,6 +479,17 @@ class ContactRelationshipRepository(ABC):
         """Check if a specific relationship already exists."""
         pass
 
+    @abstractmethod
+    async def repoint_contact(
+        self, source_id: int, survivor_id: int, transaction: AsyncConnection
+    ) -> None:
+        """Re-point the source contact's relationships onto the survivor.
+
+        Moves both directions, drops self-loops between the merged pair, and
+        dedupes against the relationship unique indexes.
+        """
+        pass
+
 
 class ContactSummaryRepository(ABC):
     """Repository interface for contact summary operations."""

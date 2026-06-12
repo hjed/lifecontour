@@ -3,6 +3,7 @@
 from .address_validation_service import AddressValidationService
 from .contact_event_service import ContactEventService
 from .contact_history_service import ContactHistoryService
+from .contact_merge_service import ContactMergeService
 from .contact_relationship_service import ContactRelationshipService
 from .contact_service import ContactService
 from .contact_summary_service import ContactSummaryService, ContactSummaryUpdate
@@ -15,6 +16,7 @@ __all__ = [
     "AddressValidationService",
     "ContactEventService",
     "ContactHistoryService",
+    "ContactMergeService",
     "ContactRelationshipService",
     "ContactService",
     "ContactSummaryService",
