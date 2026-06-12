@@ -6,6 +6,7 @@ import structlog
 from core_shared.models.history import Provenance
 from core_shared.models.journals import (
     MAX_HIERARCHY_DEPTH,
+    EventDateRange,
     Journal,
     JournalCycleError,
     JournalMaxDepthExceededError,
@@ -33,6 +34,11 @@ from app.infrastructure.events.outbox_event_publisher import OutboxEventPublishe
 from app.infrastructure.unit_of_work import transactional
 
 logger = structlog.get_logger()
+
+
+def _format_event_date_range(event_date_range: EventDateRange) -> str:
+    """Render an event date range as a compact, JSON-safe ISO string for history."""
+    return f"{event_date_range.start.isoformat()}/{event_date_range.end.isoformat()}"
 
 
 class JournalService:
@@ -134,7 +140,6 @@ class JournalService:
     async def update_journal(
         self,
         journal: Journal,
-        changed_fields: dict[str, Any],
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
@@ -142,12 +147,16 @@ class JournalService:
         """
         Update an existing journal.
 
-        Validates hierarchy if parent_id is being changed.
-        Publishes JournalUpdated event via outbox pattern.
+        Computes field-level ``changed_fields`` as ``{field: (old, new)}`` pairs by
+        diffing the persisted journal against ``journal`` (mirroring the contact
+        ``_calculate_changed_fields`` pattern), validates hierarchy if ``parent_id``
+        changed, and publishes a ``JournalUpdated`` event carrying those pairs via
+        the outbox pattern. The history projection records one row per changed
+        field; an update that changes nothing produces no history.
 
         Args:
-            journal: The journal to update (must have id set)
-            changed_fields: Dictionary of changed fields for event tracking
+            journal: The journal to update (must have id set), already merged with
+                the caller's requested changes
             transaction: Database transaction
             changed_by: Who/what made the change (for history provenance)
             source: Provenance of the change (for history provenance)
@@ -163,6 +172,13 @@ class JournalService:
         """
         if journal.id is None:
             raise JournalValidationError("id", "Journal ID is required for update")
+
+        # Load the persisted journal so the service owns the change calculation.
+        existing_journal = await self.journal_repo.find_by_id(journal.id)
+        if existing_journal is None:
+            raise JournalNotFoundError(journal.id)
+
+        changed_fields = self._calculate_changed_fields(existing_journal, journal)
 
         # Validate hierarchy if parent_id is being changed
         if "parent_id" in changed_fields and journal.parent_id is not None:
@@ -434,6 +450,37 @@ class JournalService:
                 search=search,
             )
         return await self.journal_repo.count_by_user(user_id)
+
+    def _calculate_changed_fields(
+        self, existing_journal: Journal, updated_journal: Journal
+    ) -> dict[str, Any]:
+        """Calculate base-field changes between two journals as ``(old, new)`` pairs.
+
+        Mirrors the contact ``_calculate_changed_fields`` pattern. Only fields that
+        actually changed are returned, so an update that changes nothing yields an
+        empty dict (and therefore no history). Values are JSON-round-trippable
+        scalars because they travel through the outbox/Redis to the projection.
+        """
+        changed_fields: dict[str, Any] = {}
+
+        def _add_if_changed(field: str, old: Any, new: Any) -> None:
+            if old != new:
+                changed_fields[field] = (old, new)
+
+        _add_if_changed("title", existing_journal.title, updated_journal.title)
+        _add_if_changed("content", existing_journal.content, updated_journal.content)
+        _add_if_changed(
+            "parent_id", existing_journal.parent_id, updated_journal.parent_id
+        )
+        _add_if_changed("order", existing_journal.order, updated_journal.order)
+
+        if existing_journal.event_date_range != updated_journal.event_date_range:
+            changed_fields["event_date_range"] = (
+                _format_event_date_range(existing_journal.event_date_range),
+                _format_event_date_range(updated_journal.event_date_range),
+            )
+
+        return changed_fields
 
     async def _validate_hierarchy(
         self,

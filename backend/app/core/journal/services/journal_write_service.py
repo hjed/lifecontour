@@ -68,6 +68,118 @@ from app.infrastructure.unit_of_work import savepoint, transactional
 logger = structlog.get_logger()
 
 
+def to_history_value(value: Any) -> Any:
+    """Coerce a type-data field value to a JSON-safe scalar for history/events.
+
+    ``changed_fields`` travels through the outbox and Redis as JSON, so non-JSON
+    types on the type-data rows (enums, UUIDs, dates/times) must be reduced to a
+    primitive. Scalars and ``None`` pass through unchanged; enums use their value;
+    anything date/time-like is ISO-formatted; everything else is stringified.
+    """
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    enum_value = getattr(value, "value", None)
+    if enum_value is not None and not callable(enum_value):
+        return to_history_value(enum_value)
+    isoformat = getattr(value, "isoformat", None)
+    if callable(isoformat):
+        return isoformat()
+    return str(value)
+
+
+def diff_tracked_fields(
+    before: Any, after: Any, fields: tuple[str, ...]
+) -> dict[str, tuple[Any, Any]]:
+    """Diff ``fields`` between two type-data rows into ``{field: (old, new)}`` pairs.
+
+    Either row may be ``None`` (e.g. a row created during the update), in which
+    case its side of every field is ``None``. Only fields that actually changed
+    are returned, so an update that changes nothing yields ``{}`` (no history).
+    """
+    changed: dict[str, tuple[Any, Any]] = {}
+    for field in fields:
+        old = getattr(before, field, None) if before is not None else None
+        new = getattr(after, field, None) if after is not None else None
+        if old != new:
+            changed[field] = (to_history_value(old), to_history_value(new))
+    return changed
+
+
+# Tracked fields per editable single-row type, used to compute type-data history.
+# Every editable journal type with an `update_*_type_data` helper is registered
+# here so its type-data edits appear in history. The field names are kept exactly
+# in sync with the type-data dataclasses by
+# `tests/unit/journal/test_type_data_history_coverage.py`, which fails if a new
+# type or field is added without a coverage decision (tracked or excluded). Types
+# that are intentionally excluded (and why): PLAN/TRAVEL hold nested child
+# collections and PHOTO_ALBUM is Immich-synced (integration/Phase 4); SNORKELLING/
+# DIVING/DOWNHILL_SKIING validate existence only (no editable fields); GEAR_USAGE
+# has no type-data edit path; NOTE has no type data.
+_TYPE_DATA_TRACKED_FIELDS: dict[JournalType, tuple[str, ...]] = {
+    JournalType.EVENT: (
+        "calendar_id",
+        "is_all_day",
+        "start_time",
+        "end_time",
+        "location",
+        "timezone",
+        "description",
+        "sync_invitees",
+        "private_description",
+        "event_state",
+    ),
+    JournalType.MOOD_RATING: ("mood_value", "mood_label", "energy_level"),
+    JournalType.FITNESS: (
+        "heart_rate_avg",
+        "heart_rate_max",
+        "distance",
+        "elevation_gain",
+        "elevation_loss",
+        "duration",
+        "calories",
+        "strava_activity_id",
+    ),
+    JournalType.OUTDOOR_ACTIVITY: (
+        "weather_conditions",
+        "role",
+        "in_leadership_role",
+        "participant_notes",
+    ),
+    JournalType.BUSHWALKING: ("track_grading",),
+    JournalType.JOGGING: ("pace",),
+    # Abseiling tracks its trip-level scalars; per-pitch (AbseilPitch) history is
+    # a nested collection deferred to Phase 4.
+    JournalType.ABSEILING_TRIP: (
+        "number_of_abseils",
+        "total_length",
+        "number_of_setups",
+        "number_of_rescues",
+    ),
+    JournalType.CANYONING: (
+        "template_id",
+        "french_grade",
+        "water_guage_name",
+        "water_guage_level",
+        "is_vertical",
+        "is_night_canyon",
+        "is_white_water",
+    ),
+    JournalType.CAVING: ("template_id", "is_vertical", "is_horizontal"),
+    JournalType.CANOEING: ("water_type",),
+    JournalType.CLIMBING: ("template_id", "climbing_type", "grade", "length"),
+    JournalType.KAYAKING: ("water_type", "is_white_water", "rapids_grade"),
+    JournalType.CROSS_COUNTRY_SKIING: ("snow_conditions",),
+    JournalType.OUTDOOR_PLANNING: ("topics", "activity_types"),
+    JournalType.OUTDOOR_TRAINING: ("focus_areas",),
+    JournalType.GEAR_MAINTENANCE: (
+        "gear_item_id",
+        "maintenance_type",
+        "activity_types",
+        "retirement_reason",
+    ),
+}
+
+
 class JournalWriteService:
     """Service orchestrating composite journal writes as a single unit of work."""
 
@@ -177,16 +289,18 @@ class JournalWriteService:
     async def update_journal(
         self,
         journal: Journal,
-        changed_fields: dict[str, Any],
         transaction: AsyncConnection,
         *,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
     ) -> Journal:
-        """Update a journal's core fields as a committed unit of work."""
+        """Update a journal's core fields as a committed unit of work.
+
+        ``changed_fields`` are computed inside :class:`JournalService` by diffing
+        the persisted journal against ``journal``; callers pass the merged journal.
+        """
         return await self.journal_service.update_journal(
             journal,
-            changed_fields,
             transaction,
             changed_by=changed_by,
             source=source,
@@ -264,23 +378,87 @@ class JournalWriteService:
         journal_type: JournalType,
         attrs: dict[str, Any],
         transaction: AsyncConnection,
+        *,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> None:
-        """Update the type-specific data for a single existing journal type."""
+        """Update the type-specific data for a single existing journal type.
+
+        Snapshots the tracked fields of the type-data row before and after the
+        update, diffs them into ``{field: (old, new)}`` pairs, and publishes a
+        single ``JournalUpdated`` event so the change is projected into journal
+        history. EVENT additionally always carries the ``calendar_info`` marker so
+        the Google Calendar outbound worker re-syncs (the history projection skips
+        the non-pair marker and records only the real field diffs).
+        """
+        from app.core.journal.models.events import JournalUpdated
+
+        repo = self._type_data_repo(journal_type)
+        tracked = _TYPE_DATA_TRACKED_FIELDS.get(journal_type, ())
+        before = (
+            await repo.find_by_journal_id(journal_id)
+            if repo is not None and tracked
+            else None
+        )
+
+        await self._apply_type_data_update(journal_id, journal_type, attrs)
+
+        after = (
+            await repo.find_by_journal_id(journal_id)
+            if repo is not None and tracked
+            else None
+        )
+        changed_fields: dict[str, Any] = diff_tracked_fields(before, after, tracked)
+
+        if journal_type == JournalType.EVENT:
+            # The marker (a non-pair signal) triggers calendar sync regardless of
+            # whether any tracked field changed; the projection ignores it.
+            changed_fields = {**changed_fields, "calendar_info": True}
+
+        if changed_fields:
+            event = JournalUpdated(
+                journal_id=journal_id,
+                changed_fields=changed_fields,
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
+            )
+            await self.event_publisher.publish(event)
+
+    def _type_data_repo(self, journal_type: JournalType) -> Any:
+        """Return the single-row repo whose tracked fields back ``journal_type``."""
+        return {
+            JournalType.EVENT: self.calendar_info_repo,
+            JournalType.MOOD_RATING: self.mood_data_repo,
+            JournalType.FITNESS: self.fitness_data_repo,
+            JournalType.OUTDOOR_ACTIVITY: self.outdoor_activity_data_repo,
+            JournalType.BUSHWALKING: self.bushwalking_data_repo,
+            JournalType.JOGGING: self.jogging_data_repo,
+            JournalType.ABSEILING_TRIP: self.abseiling_data_repo,
+            JournalType.CANYONING: self.canyoning_data_repo,
+            JournalType.CAVING: self.caving_data_repo,
+            JournalType.CANOEING: self.canoeing_data_repo,
+            JournalType.CLIMBING: self.climbing_data_repo,
+            JournalType.KAYAKING: self.kayaking_data_repo,
+            JournalType.CROSS_COUNTRY_SKIING: self.skiing_data_repo,
+            JournalType.OUTDOOR_PLANNING: self.outdoor_planning_data_repo,
+            JournalType.OUTDOOR_TRAINING: self.outdoor_training_data_repo,
+            JournalType.GEAR_MAINTENANCE: self.gear_maintenance_data_repo,
+        }.get(journal_type)
+
+    async def _apply_type_data_update(
+        self,
+        journal_id: int,
+        journal_type: JournalType,
+        attrs: dict[str, Any],
+    ) -> None:
+        """Dispatch the type-specific data write (no event publishing)."""
         journal_type_str = journal_type.value
 
         if journal_type == JournalType.EVENT:
             await helpers.update_event_type_data(
                 journal_id, journal_type_str, attrs, self.calendar_info_repo
             )
-            # Publish JournalUpdated event so Google Calendar worker can sync
-            from app.core.journal.models.events import JournalUpdated
-
-            calendar_sync_event = JournalUpdated(
-                journal_id=journal_id,
-                changed_fields={"calendar_info": True},
-                transaction=transaction,
-            )
-            await self.event_publisher.publish(calendar_sync_event)
         elif journal_type == JournalType.MOOD_RATING:
             await helpers.update_mood_type_data(
                 journal_id, journal_type_str, attrs, self.mood_data_repo

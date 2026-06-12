@@ -34,6 +34,7 @@ from app.api.common.schemas import (
     create_pagination_meta,
     get_request_base_url,
 )
+from app.api.history import HistoryConverter, HistoryListResponse
 from app.api.journals.converters import (
     JournalConverter,
     JournalRequestConverter,
@@ -66,6 +67,7 @@ from app.api.journals.schemas import (
     ReviewSuggestionSchema,
 )
 from app.core.contacts.models.repositories import ContactRepository
+from app.core.history.services import JournalHistoryService
 from app.core.integrations.external_link_helpers import build_journal_external_links
 from app.core.integrations.immich.album_cover_proxy_service import (
     AlbumCoverProxyService,
@@ -128,6 +130,65 @@ router = APIRouter(
     prefix="/journals",
     tags=["journals"],
 )
+
+PAGE_NUMBER_DESCRIPTION = "Page number"
+ITEMS_PER_PAGE_DESCRIPTION = "Items per page"
+
+
+@router.get("/{journal_id}/history")
+@inject
+async def get_journal_history(
+    journal_id: int,
+    request: Request,
+    journal_service: FromDishka[JournalService],
+    history_service: FromDishka[JournalHistoryService],
+    user: FromDishka[SessionUser],  # Require authentication
+    page: Annotated[int, Query(description=PAGE_NUMBER_DESCRIPTION, ge=1)] = 1,
+    limit: Annotated[
+        int, Query(description=ITEMS_PER_PAGE_DESCRIPTION, ge=1, le=100)
+    ] = 20,
+) -> HistoryListResponse:
+    """Get field-level change history for a journal.
+
+    Returns a paginated JSON:API list of history entries (most recent first)
+    covering the journal's own fields plus its type-specific data, routes, and
+    gear, each with provenance. History is produced asynchronously by the
+    projection consumer, so a just-made change may take a moment to appear.
+    """
+    base_url = get_request_base_url(request)
+
+    # Verify the journal exists and belongs to the authenticated user; a journal
+    # owned by someone else is reported as not-found so history cannot leak across
+    # users (mirrors the route sub-resource endpoints).
+    journal = await journal_service.get_journal(journal_id)
+    if not journal or journal.user_id != user.id:
+        raise JournalNotFoundError(journal_id)
+
+    offset = (page - 1) * limit
+
+    history_entries = await history_service.get_journal_history(
+        journal_id=journal_id,
+        limit=limit,
+        offset=offset,
+    )
+    total_count = await history_service.get_journal_history_count(
+        journal_id=journal_id,
+    )
+
+    history_resources = [
+        HistoryConverter.to_resource(entry) for entry in history_entries
+    ]
+
+    meta = create_pagination_meta(total_count, page, limit)
+    links = create_pagination_links(
+        f"{base_url}/api/journals/{journal_id}/history", page, limit, total_count
+    )
+
+    return HistoryListResponse(
+        data=history_resources,
+        meta=meta,
+        links=links,
+    )
 
 
 @router.get("/{journal_id}/album-cover")
@@ -1806,26 +1867,8 @@ async def update_journal(
         journal_request.data, existing_journal
     )
 
-    # Track only the fields that were provided in the request (partial update support)
-    changed_fields: dict[str, Any] = {}
-    if journal_request.data.attributes.title is not None:
-        changed_fields["title"] = updated_journal.title
-    if journal_request.data.attributes.content is not None:
-        changed_fields["content"] = updated_journal.content
-    if journal_request.data.attributes.event_date_range is not None:
-        # Convert EventDateRange to JSON-serializable dict
-        changed_fields["event_date_range"] = {
-            "start": updated_journal.event_date_range.start.isoformat(),
-            "end": updated_journal.event_date_range.end.isoformat(),
-        }
-    if journal_request.data.attributes.parent_id is not None:
-        changed_fields["parent_id"] = updated_journal.parent_id
-    if journal_request.data.attributes.order is not None:
-        changed_fields["order"] = updated_journal.order
-
     saved_journal = await journal_write_service.update_journal(
         updated_journal,
-        changed_fields,
         connection,
         changed_by="ui",
         source=Provenance.UI,
@@ -2018,27 +2061,8 @@ async def partial_update_journal(
         updated_at=existing_journal.updated_at,
     )
 
-    # Track only changed fields for partial update (use is not None to allow empty
-    # strings)
-    changed_fields: dict[str, Any] = {}
-    if journal_request.data.attributes.title is not None:
-        changed_fields["title"] = title
-    if journal_request.data.attributes.content is not None:
-        changed_fields["content"] = content
-    if journal_request.data.attributes.event_date_range is not None:
-        # Convert EventDateRange to JSON-serializable dict
-        changed_fields["event_date_range"] = {
-            "start": event_date_range.start.isoformat(),
-            "end": event_date_range.end.isoformat(),
-        }
-    if journal_request.data.attributes.parent_id is not None:
-        changed_fields["parent_id"] = journal_request.data.attributes.parent_id
-    if journal_request.data.attributes.order is not None:
-        changed_fields["order"] = journal_request.data.attributes.order
-
     saved_journal = await journal_write_service.update_journal(
         updated_journal,
-        changed_fields,
         connection,
         changed_by="ui",
         source=Provenance.UI,
@@ -2617,8 +2641,17 @@ async def update_type_data(
     # Get the attributes from the request
     attrs = type_data_request.data.attributes
 
-    # Update type-specific data as a committed unit of work.
-    await journal_write_service.update_type_data(journal_id, jtype, attrs, connection)
+    # Update type-specific data as a committed unit of work. Provenance flows to
+    # the JournalUpdated event the service publishes, so type-data history is
+    # attributed to the UI.
+    await journal_write_service.update_type_data(
+        journal_id,
+        jtype,
+        attrs,
+        connection,
+        changed_by="ui",
+        source=Provenance.UI,
+    )
 
     # Get updated journal
     updated_journal = await journal_service.get_journal(journal_id)
