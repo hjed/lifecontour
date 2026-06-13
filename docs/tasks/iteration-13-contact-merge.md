@@ -160,15 +160,19 @@ Build the hardest re-points first, behind a not-yet-exposed `ContactMergeService
 
 Complete the aggregate merge so the service produces a correct unified contact under the default (survivor-wins / prefer-non-empty) policy. Still not exposed.
 
+**Status:** ✅ DONE — `ContactRepository.repoint_methods/addresses/notes/important_dates/tags` + the completed `ContactMergeService.merge_contacts` (scalar prefer-non-empty, source delete, `merged_from` history row, summary-refresh event) implemented with unit + integration coverage. All backend quality gates (pytest, `ruff`, `mypy`) green locally (516 contacts tests pass).
+
+> **Email-uniqueness note (clarification):** `ix_contact_methods_email_unique` (migration `0025`) makes email values unique **system-wide**, so two contacts can never pre-hold the same email — the literal "colliding email" pre-state is impossible to construct. The AC is therefore satisfied as (a) distinct emails from both contacts coexisting on the survivor after re-point, and (b) the **primary-email** collision being demoted (`ix_contact_methods_primary_unique`, survivor's primary wins). Exact-value duplicate collapse is verified via **phone** (no global-uniqueness constraint). The one-primary **address** invariant is likewise enforced by `idx_contact_addresses_unique_primary` (DB-level), handled by demote-then-re-point.
+
 **Acceptance Criteria:**
-- [ ] `ContactRepository` gains re-point methods for contact methods, addresses, notes, important dates, and tags that carry rows from source to survivor and collapse exact duplicates.
-- [ ] Constraint collisions are resolved during re-point: global email uniqueness and one-primary-per-`(contact, method_type)` for methods; one-primary address; `uq_contact_birthday`; `contact_tags` PK dedupe. Survivor's existing primary/value wins on collision.
-- [ ] `ContactMergeService` applies scalar fields with prefer-non-empty (survivor wins on conflict — overrides arrive in ITER13-002), re-points all sub-entities, deletes the source contact, and requests survivor summary regeneration by emitting `ContactSummaryRefreshRequested`.
-- [ ] The merge is recorded as an inline `field_history` row on the survivor (e.g. `field_name = "merged_from"`, `old_value = <source_id>`) via `ContactHistoryService`, carrying provenance.
+- [x] `ContactRepository` gains re-point methods for contact methods, addresses, notes, important dates, and tags that carry rows from source to survivor and collapse exact duplicates.
+- [x] Constraint collisions are resolved during re-point: global email uniqueness and one-primary-per-`(contact, method_type)` for methods; one-primary address; `uq_contact_birthday`; `contact_tags` PK dedupe. Survivor's existing primary/value wins on collision.
+- [x] `ContactMergeService` applies scalar fields with prefer-non-empty (survivor wins on conflict — overrides arrive in ITER13-002), re-points all sub-entities, deletes the source contact, and requests survivor summary regeneration by emitting `ContactSummaryRefreshRequested`.
+- [x] The merge is recorded as an inline `field_history` row on the survivor (e.g. `field_name = "merged_from"`, `old_value = <source_id>`) via `ContactHistoryService`, carrying provenance.
 
 **Required Test Coverage:**
-- [ ] **Integration:** full-aggregate merge produces a deduplicated survivor; source is deleted; colliding email / duplicate primary / duplicate tag / duplicate birthday resolve without constraint violation; the merge `field_history` row is written.
-- [ ] **Unit:** prefer-non-empty scalar policy; `ContactSummaryRefreshRequested` emitted for the survivor.
+- [x] **Integration:** full-aggregate merge produces a deduplicated survivor; source is deleted; colliding email / duplicate primary / duplicate tag / duplicate birthday resolve without constraint violation; the merge `field_history` row is written. (`backend/tests/integration/contacts/test_contact_merge_aggregate_integration.py`, 10 tests.)
+- [x] **Unit:** prefer-non-empty scalar policy; `ContactSummaryRefreshRequested` emitted for the survivor. (`backend/tests/unit/contacts/test_contact_merge_service.py`, extended to 10 tests.)
 
 #### Phase 3: `ContactMerged` event + REST endpoint + MCP tool (survivor-wins)
 **PR Size:** ~540 lines (event ~30, endpoint ~120, MCP tool ~90, schemas ~60, tests ~240)

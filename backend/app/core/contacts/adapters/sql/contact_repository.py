@@ -564,6 +564,264 @@ class SqlContactRepository(ContactRepository):
         query = text("DELETE FROM contacts")
         await transaction.execute(query)
 
+    async def repoint_methods(
+        self, source_id: int, survivor_id: int, transaction: AsyncConnection
+    ) -> None:
+        """Re-point the source contact's methods onto the survivor.
+
+        Exact duplicates (same ``method_type`` + ``value``) are deleted before
+        the re-point so they collapse — this also clears the global
+        email-uniqueness collision (``ix_contact_methods_email_unique``), as the
+        survivor is the only other contact that could already hold the value.
+        Source primaries for a ``method_type`` the survivor already has a primary
+        of are demoted so the re-point cannot violate
+        ``ix_contact_methods_primary_unique`` (survivor's primary wins).
+        """
+        params = {"source_id": source_id, "survivor_id": survivor_id}
+
+        # 1. Collapse exact duplicates (and resolve the email-unique collision).
+        await transaction.execute(
+            text(
+                """
+                DELETE FROM contact_methods src
+                WHERE src.contact_id = :source_id
+                AND EXISTS (
+                    SELECT 1 FROM contact_methods tgt
+                    WHERE tgt.contact_id = :survivor_id
+                    AND tgt.method_type = src.method_type
+                    AND tgt.value = src.value
+                )
+                """
+            ),
+            params,
+        )
+
+        # 2. Demote source primaries where the survivor already has a primary of
+        #    that type (survivor's primary wins).
+        await transaction.execute(
+            text(
+                """
+                UPDATE contact_methods src
+                SET is_primary = false, updated_at = CURRENT_TIMESTAMP
+                WHERE src.contact_id = :source_id
+                AND src.is_primary = true
+                AND EXISTS (
+                    SELECT 1 FROM contact_methods tgt
+                    WHERE tgt.contact_id = :survivor_id
+                    AND tgt.method_type = src.method_type
+                    AND tgt.is_primary = true
+                )
+                """
+            ),
+            params,
+        )
+
+        # 3. Re-point the survivors.
+        await transaction.execute(
+            text(
+                """
+                UPDATE contact_methods
+                SET contact_id = :survivor_id, updated_at = CURRENT_TIMESTAMP
+                WHERE contact_id = :source_id
+                """
+            ),
+            params,
+        )
+
+    async def repoint_addresses(
+        self, source_id: int, survivor_id: int, transaction: AsyncConnection
+    ) -> None:
+        """Re-point the source contact's addresses onto the survivor.
+
+        Addresses that exactly match a survivor address (every field) collapse.
+        Source primaries are demoted when the survivor already has a primary
+        address so the re-point cannot violate
+        ``idx_contact_addresses_unique_primary`` (survivor's primary wins).
+        """
+        params = {"source_id": source_id, "survivor_id": survivor_id}
+
+        # 1. Collapse exact-duplicate addresses (NULL-safe field comparison).
+        await transaction.execute(
+            text(
+                """
+                DELETE FROM contact_addresses src
+                WHERE src.contact_id = :source_id
+                AND EXISTS (
+                    SELECT 1 FROM contact_addresses tgt
+                    WHERE tgt.contact_id = :survivor_id
+                    AND tgt.street_line_1 = src.street_line_1
+                    AND tgt.country_code = src.country_code
+                    AND tgt.street_line_2 IS NOT DISTINCT FROM src.street_line_2
+                    AND tgt.locality IS NOT DISTINCT FROM src.locality
+                    AND tgt.region IS NOT DISTINCT FROM src.region
+                    AND tgt.postal_code IS NOT DISTINCT FROM src.postal_code
+                    AND tgt.label IS NOT DISTINCT FROM src.label
+                )
+                """
+            ),
+            params,
+        )
+
+        # 2. Demote source primaries where the survivor already has a primary.
+        await transaction.execute(
+            text(
+                """
+                UPDATE contact_addresses src
+                SET is_primary = false, updated_at = CURRENT_TIMESTAMP
+                WHERE src.contact_id = :source_id
+                AND src.is_primary = true
+                AND EXISTS (
+                    SELECT 1 FROM contact_addresses tgt
+                    WHERE tgt.contact_id = :survivor_id
+                    AND tgt.is_primary = true
+                )
+                """
+            ),
+            params,
+        )
+
+        # 3. Re-point the survivors.
+        await transaction.execute(
+            text(
+                """
+                UPDATE contact_addresses
+                SET contact_id = :survivor_id, updated_at = CURRENT_TIMESTAMP
+                WHERE contact_id = :source_id
+                """
+            ),
+            params,
+        )
+
+    async def repoint_notes(
+        self, source_id: int, survivor_id: int, transaction: AsyncConnection
+    ) -> None:
+        """Re-point the source contact's notes onto the survivor, collapsing
+        notes whose content already exists on the survivor."""
+        params = {"source_id": source_id, "survivor_id": survivor_id}
+
+        await transaction.execute(
+            text(
+                """
+                DELETE FROM contact_notes src
+                WHERE src.contact_id = :source_id
+                AND EXISTS (
+                    SELECT 1 FROM contact_notes tgt
+                    WHERE tgt.contact_id = :survivor_id
+                    AND tgt.content = src.content
+                )
+                """
+            ),
+            params,
+        )
+
+        await transaction.execute(
+            text(
+                """
+                UPDATE contact_notes
+                SET contact_id = :survivor_id, updated_at = CURRENT_TIMESTAMP
+                WHERE contact_id = :source_id
+                """
+            ),
+            params,
+        )
+
+    async def repoint_important_dates(
+        self, source_id: int, survivor_id: int, transaction: AsyncConnection
+    ) -> None:
+        """Re-point the source contact's important dates onto the survivor.
+
+        Exact-duplicate dates collapse. If the survivor already has a birthday,
+        the source's birthday is dropped first (survivor wins) so the re-point
+        cannot violate the ``uq_contact_birthday`` partial unique index.
+        """
+        params = {"source_id": source_id, "survivor_id": survivor_id}
+
+        # 1. Collapse exact-duplicate dates (NULL-safe field comparison).
+        await transaction.execute(
+            text(
+                """
+                DELETE FROM contact_important_dates src
+                WHERE src.contact_id = :source_id
+                AND EXISTS (
+                    SELECT 1 FROM contact_important_dates tgt
+                    WHERE tgt.contact_id = :survivor_id
+                    AND tgt.date_type = src.date_type
+                    AND tgt.precision = src.precision
+                    AND tgt.year IS NOT DISTINCT FROM src.year
+                    AND tgt.month IS NOT DISTINCT FROM src.month
+                    AND tgt.day IS NOT DISTINCT FROM src.day
+                    AND tgt.custom_date_type_id
+                        IS NOT DISTINCT FROM src.custom_date_type_id
+                )
+                """
+            ),
+            params,
+        )
+
+        # 2. Drop the source's birthday when the survivor already has one.
+        await transaction.execute(
+            text(
+                """
+                DELETE FROM contact_important_dates src
+                WHERE src.contact_id = :source_id
+                AND src.date_type = 'birthday'
+                AND EXISTS (
+                    SELECT 1 FROM contact_important_dates tgt
+                    WHERE tgt.contact_id = :survivor_id
+                    AND tgt.date_type = 'birthday'
+                )
+                """
+            ),
+            params,
+        )
+
+        # 3. Re-point the survivors.
+        await transaction.execute(
+            text(
+                """
+                UPDATE contact_important_dates
+                SET contact_id = :survivor_id, updated_at = CURRENT_TIMESTAMP
+                WHERE contact_id = :source_id
+                """
+            ),
+            params,
+        )
+
+    async def repoint_tags(
+        self, source_id: int, survivor_id: int, transaction: AsyncConnection
+    ) -> None:
+        """Re-point the source contact's tags onto the survivor, deduping on the
+        ``contact_tags`` composite primary key (union of both contacts' tags)."""
+        params = {"source_id": source_id, "survivor_id": survivor_id}
+
+        # 1. Drop source links the survivor already holds (composite-PK dedupe).
+        await transaction.execute(
+            text(
+                """
+                DELETE FROM contact_tags src
+                WHERE src.contact_id = :source_id
+                AND EXISTS (
+                    SELECT 1 FROM contact_tags tgt
+                    WHERE tgt.contact_id = :survivor_id
+                    AND tgt.tag_id = src.tag_id
+                )
+                """
+            ),
+            params,
+        )
+
+        # 2. Re-point the remaining links (contact_tags has no updated_at).
+        await transaction.execute(
+            text(
+                """
+                UPDATE contact_tags
+                SET contact_id = :survivor_id
+                WHERE contact_id = :source_id
+                """
+            ),
+            params,
+        )
+
     async def get_contacts_by_tag(self, tag_id: int) -> list[Contact]:
         """Get all contacts with a specific tag."""
         query = text(
