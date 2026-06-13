@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from core_shared.models.journals.attendee_status import AttendeeStatus
     from core_shared.models.journals.contact_event_role import ContactEventRole
     from core_shared.models.journals.review_item import ReviewItem
+    from sqlalchemy.ext.asyncio import AsyncConnection
 
 from core_shared.models.journals import (
     AbseilingData,
@@ -1170,6 +1171,24 @@ class JournalContactRelationshipRepository(ABC):
 
         Returns:
             List of eligible relationships for transition.
+        """
+        pass
+
+    @abstractmethod
+    async def repoint_contact(
+        self, source_id: int, survivor_id: int, transaction: AsyncConnection
+    ) -> None:
+        """
+        Re-point the source contact's journal links onto the survivor.
+
+        Moves every ``journal_contact_relationships`` row from the source contact
+        to the survivor, deduping on the ``(journal_id, contact_id,
+        relationship_type)`` composite primary key.
+
+        Args:
+            source_id: The contact being absorbed.
+            survivor_id: The contact that survives the merge.
+            transaction: The connection running the merge unit of work.
         """
         pass
 

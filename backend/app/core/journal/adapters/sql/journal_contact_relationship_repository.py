@@ -95,6 +95,45 @@ class SqlJournalContactRelationshipRepository(JournalContactRelationshipReposito
             },
         )
 
+    async def repoint_contact(
+        self, source_id: int, survivor_id: int, transaction: AsyncConnection
+    ) -> None:
+        """Re-point the source contact's journal links onto the survivor.
+
+        Source rows that collide with an existing survivor row on the
+        ``(journal_id, contact_id, relationship_type)`` composite primary key are
+        deleted first (survivor's link wins), then the remaining source rows are
+        re-pointed to the survivor.
+        """
+        params = {"source_id": source_id, "survivor_id": survivor_id}
+
+        await transaction.execute(
+            text(
+                """
+                DELETE FROM journal_contact_relationships src
+                WHERE src.contact_id = :source_id
+                AND EXISTS (
+                    SELECT 1 FROM journal_contact_relationships tgt
+                    WHERE tgt.contact_id = :survivor_id
+                    AND tgt.journal_id = src.journal_id
+                    AND tgt.relationship_type = src.relationship_type
+                )
+                """
+            ),
+            params,
+        )
+
+        await transaction.execute(
+            text(
+                """
+                UPDATE journal_contact_relationships
+                SET contact_id = :survivor_id
+                WHERE contact_id = :source_id
+                """
+            ),
+            params,
+        )
+
     async def get_by_journal(self, journal_id: int) -> list[JournalContactRelationship]:
         """Get all relationships for a journal."""
         query = text(
