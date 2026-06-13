@@ -1184,9 +1184,11 @@ class JournalWriteService:
                     await self.tag_repo.assign_tag(journal_id, tag.id)
 
     # Tables whose presence marks a journal type, used to detect current types
-    # for replace-all updates. Mirrors the read-side detection in the MCP
-    # enrichment helper. PHOTO_ALBUM is intentionally omitted: it is Immich-synced
-    # and must not be removed/created through this write path.
+    # for replace-all updates. Must cover every type that
+    # ``_create_type_specific_data`` / ``_delete_type_specific_data`` can
+    # add/remove, otherwise a replace-all update would fail to detect (and so
+    # leave behind) a dropped type. PHOTO_ALBUM is intentionally omitted: it is
+    # Immich-synced and must not be removed/created through this write path.
     def _type_presence_repos(self) -> list[tuple[JournalType, Any]]:
         return [
             (JournalType.EVENT, self.calendar_info_repo),
@@ -1200,9 +1202,15 @@ class JournalWriteService:
             (JournalType.ABSEILING_TRIP, self.abseiling_data_repo),
             (JournalType.CAVING, self.caving_data_repo),
             (JournalType.CANYONING, self.canyoning_data_repo),
+            (JournalType.CANOEING, self.canoeing_data_repo),
             (JournalType.CLIMBING, self.climbing_data_repo),
             (JournalType.KAYAKING, self.kayaking_data_repo),
             (JournalType.CROSS_COUNTRY_SKIING, self.skiing_data_repo),
+            (JournalType.SNORKELLING, self.snorkelling_data_repo),
+            (JournalType.DIVING, self.diving_data_repo),
+            (JournalType.DOWNHILL_SKIING, self.downhill_skiing_data_repo),
+            (JournalType.OUTDOOR_PLANNING, self.outdoor_planning_data_repo),
+            (JournalType.OUTDOOR_TRAINING, self.outdoor_training_data_repo),
             (JournalType.GEAR_MAINTENANCE, self.gear_maintenance_data_repo),
             (JournalType.GEAR_USAGE, self.gear_usage_data_repo),
         ]
@@ -1234,15 +1242,20 @@ class JournalWriteService:
         Types present but no longer desired are removed (their type-data row
         deleted); newly desired types are added (with auto-resolved dependencies)
         and given default rows; finally any supplied ``type_data`` is applied.
-        Invalid type strings are validated upfront by the caller, so parsing
-        failures here are skipped defensively.
+
+        An unparseable type string raises rather than being skipped: silently
+        dropping it from ``desired`` would make ``current - desired`` remove
+        (and delete the data of) more types than the client intended. Callers
+        validate upfront, so this is a defensive guard against an incomplete set.
         """
         desired: set[JournalType] = set()
         for type_str in types:
             try:
                 desired.add(helpers.parse_journal_type(type_str))
-            except ValueError, KeyError:
-                pass
+            except (ValueError, KeyError) as exc:
+                raise JournalValidationError(
+                    "types", f"Invalid journal type: {type_str}"
+                ) from exc
 
         current = await self._get_current_types(journal_id)
 

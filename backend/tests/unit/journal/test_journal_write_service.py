@@ -17,6 +17,7 @@ from core_shared.models.journals import (
     Journal,
     JournalContactRelationshipType,
     JournalType,
+    JournalValidationError,
 )
 from core_shared.models.journals.gear_usage_data import GearUsageData
 
@@ -486,6 +487,35 @@ class TestUpdateJournalComposite:
         )
 
         write_service.calendar_info_repo.delete.assert_awaited_once_with(9)
+
+    @pytest.mark.asyncio
+    async def test_type_presence_repos_covers_every_removable_type(self, write_service):
+        """Detection must cover every type the delete helper can remove.
+
+        Otherwise a replace-all update could fail to detect a current type and
+        leave it (and its data) behind. PHOTO_ALBUM is intentionally excluded
+        (Immich-synced).
+        """
+        covered = {jtype for jtype, _ in write_service._type_presence_repos()}
+        expected = set(JournalType) - {JournalType.NOTE, JournalType.PHOTO_ALBUM}
+        assert covered == expected
+
+    @pytest.mark.asyncio
+    async def test_replace_types_raises_on_invalid_type(
+        self, write_service, mock_journal_service, mock_transaction
+    ):
+        """An unparseable type aborts the replace rather than silently dropping it."""
+        mock_journal_service.update_journal.return_value = _journal(journal_id=9)
+        write_service._get_current_types = AsyncMock(return_value=set())
+
+        with pytest.raises(JournalValidationError):
+            await write_service.update_journal_composite(
+                _journal(journal_id=9), mock_transaction, types=["not_a_real_type"]
+            )
+
+        # No type was removed/added because we bailed before mutating.
+        mock_journal_service.remove_type_from_journal.assert_not_awaited()
+        mock_journal_service.add_type_to_journal.assert_not_awaited()
 
 
 class TestRemoveTypeEvent:
