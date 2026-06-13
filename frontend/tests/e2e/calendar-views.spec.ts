@@ -141,22 +141,20 @@ test.describe('Calendar Views', () => {
     await expect(page.getByTestId('calendar-month-view')).toBeVisible();
 
     // Click the event pill to navigate to the journal detail page.
-    // Retry the click + URL assertion as a unit: in the SPA the click can race
-    // with a calendar re-render and occasionally not trigger client-side
-    // navigation, leaving the page on /journals. Guarding on the URL ensures we
-    // only re-click while still on the list, never after navigation has started.
+    // The pill is a Next.js <Link>, so the click triggers a client-side soft
+    // navigation. This is the first test in the suite to navigate to the
+    // /journals/[id] route, so against the dev server the route is compiled on
+    // demand and the URL only commits once the navigation completes — which can
+    // take several seconds under CI load. Click ONCE and wait with a generous
+    // timeout: re-clicking the Link while a navigation is in flight restarts the
+    // transition and prevents it from ever committing the URL (the cause of the
+    // earlier flake, where the detail page rendered but page.url() stayed on
+    // /journals for the full retry budget).
     const eventLink = page.getByRole('link', { name: /navigable event/i });
     await expect(eventLink).toBeVisible();
+    await eventLink.click();
     const detailUrl = new RegExp(`/journals/${journals[0].id}`);
-    await expect(async () => {
-      if (!detailUrl.test(page.url())) {
-        await eventLink.click();
-      }
-      // Generous inner timeout so a slow-but-working navigation (Firefox under
-      // CI load) completes on the first click without forcing a retry; a
-      // genuinely lost click is still retried within the outer budget.
-      await expect(page).toHaveURL(detailUrl, { timeout: 10000 });
-    }).toPass({ timeout: 30000 });
+    await expect(page).toHaveURL(detailUrl, { timeout: 30000 });
 
     // Verify the journal detail page rendered
     await expect(
