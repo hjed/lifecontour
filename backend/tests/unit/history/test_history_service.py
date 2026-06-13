@@ -336,6 +336,421 @@ class TestGearItemUpdated:
         assert service.project_event(event) == []
 
 
+# --------------------------------------------------------------------------- #
+# Contact event projection (ITER12-003 Phase 1).
+#
+# Each contact handler must reproduce the EXACT rows the synchronous dual-write
+# (ContactHistoryService.record_*) writes today, so the projection can replace it
+# in Phase 2 without changing the user-visible feed. The contact aggregation
+# strategy keys on these (entity_type, entity_id) pairs:
+#   contact / contact_id          (base fields, "tags", "status")
+#   contact_method / method_id
+#   contact_address / address_id
+#   contact_note / note_id
+#   contact_important_date / date_id
+#   contact_relationship / relationship_id
+#   contact_summary / contact_id
+# --------------------------------------------------------------------------- #
+
+
+def _row_tuple(row: Any) -> tuple[str, int, str, str | None, str | None]:
+    return (
+        row.entity_type,
+        row.entity_id,
+        row.field_name,
+        row.old_value,
+        row.new_value,
+    )
+
+
+class TestContactCreated:
+    def test_projects_only_contact_status_marker(self, service: HistoryService) -> None:
+        # ContactCreated carries only the contact-level marker; per-sub-entity
+        # "created" markers come from the ContactMethodAdded / *AddressAdded /
+        # *NoteAdded / ImportantDateAdded events published alongside, so they are
+        # not duplicated by the ContactCreated projection.
+        event = _event(
+            "ContactCreated",
+            {
+                "contact_id": 5,
+                "first_name": "John",
+                "last_name": "Doe",
+                "source": Provenance.UI.value,
+                "changed_by": "ui",
+            },
+        )
+
+        rows = service.project_event(event)
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("contact", 5, "status", None, "created")
+        ]
+        assert rows[0].source == Provenance.UI
+        assert rows[0].changed_by == "ui"
+        assert rows[0].event_id == "evt-1"
+        assert rows[0].created_at == OCCURRED_AT
+
+
+class TestContactUpdated:
+    def test_one_row_per_changed_field(self, service: HistoryService) -> None:
+        event = _event(
+            "ContactUpdated",
+            {
+                "contact_id": 5,
+                "changed_fields": {
+                    "first_name": ["John", "Jonathan"],
+                    "last_name": ["Doe", "Smith"],
+                },
+                "source": Provenance.UI.value,
+                "changed_by": "ui",
+            },
+        )
+
+        rows = service.project_event(event)
+
+        assert {_row_tuple(r) for r in rows} == {
+            ("contact", 5, "first_name", "John", "Jonathan"),
+            ("contact", 5, "last_name", "Doe", "Smith"),
+        }
+
+    def test_empty_changed_fields_produces_no_rows(
+        self, service: HistoryService
+    ) -> None:
+        event = _event(
+            "ContactUpdated",
+            {"contact_id": 5, "changed_fields": {}, "source": "ui", "changed_by": "ui"},
+        )
+
+        assert service.project_event(event) == []
+
+    def test_sub_entity_keys_route_to_sub_entity_rows(
+        self, service: HistoryService
+    ) -> None:
+        """Sub-entity field edits arrive as ContactUpdated with a per-sub-entity
+        key; the projection decodes "{prefix}_{id}_{field}" to the right row
+        (method/address/note), matching the dual-write's record_*_change."""
+        event = _event(
+            "ContactUpdated",
+            {
+                "contact_id": 5,
+                "changed_fields": {
+                    "first_name": ["John", "Jane"],
+                    "method_11_value": ["a@b.com", "c@d.com"],
+                    "address_21_street_line_1": ["1 St", "2 Ave"],
+                    "note_31_content": ["Hi", "Hello"],
+                },
+                "source": Provenance.UI.value,
+                "changed_by": "ui",
+            },
+        )
+
+        rows = service.project_event(event)
+
+        assert {_row_tuple(r) for r in rows} == {
+            ("contact", 5, "first_name", "John", "Jane"),
+            ("contact_method", 11, "value", "a@b.com", "c@d.com"),
+            ("contact_address", 21, "street_line_1", "1 St", "2 Ave"),
+            ("contact_note", 31, "content", "Hi", "Hello"),
+        }
+
+    def test_field_name_with_underscores_is_preserved(
+        self, service: HistoryService
+    ) -> None:
+        """The decoded field keeps trailing underscores (e.g. is_primary)."""
+        event = _event(
+            "ContactUpdated",
+            {
+                "contact_id": 5,
+                "changed_fields": {"method_11_is_primary": ["False", "True"]},
+                "source": Provenance.UI.value,
+                "changed_by": "ui",
+            },
+        )
+
+        rows = service.project_event(event)
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("contact_method", 11, "is_primary", "False", "True")
+        ]
+
+
+class TestContactDeleted:
+    def test_status_deleted_marker(self, service: HistoryService) -> None:
+        event = _event(
+            "ContactDeleted",
+            {"contact_id": 5, "source": Provenance.UI.value, "changed_by": "ui"},
+        )
+
+        rows = service.project_event(event)
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("contact", 5, "status", "active", "deleted")
+        ]
+
+
+class TestContactMethod:
+    def test_added_status_marker(self, service: HistoryService) -> None:
+        event = _event(
+            "ContactMethodAdded",
+            {
+                "contact_id": 5,
+                "method_id": 11,
+                "method_type": "email",
+                "value": "a@b.com",
+                "source": Provenance.UI.value,
+                "changed_by": "ui",
+            },
+        )
+
+        rows = service.project_event(event)
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("contact_method", 11, "status", None, "created")
+        ]
+
+    def test_deleted_status_marker(self, service: HistoryService) -> None:
+        event = _event(
+            "ContactMethodDeleted",
+            {
+                "contact_id": 5,
+                "method_id": 11,
+                "method_type": "email",
+                "value": "a@b.com",
+                "source": Provenance.UI.value,
+                "changed_by": "ui",
+            },
+        )
+
+        rows = service.project_event(event)
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("contact_method", 11, "status", "active", "deleted")
+        ]
+
+
+class TestContactAddress:
+    def test_added_status_marker(self, service: HistoryService) -> None:
+        event = _event(
+            "ContactAddressAdded",
+            {
+                "contact_id": 5,
+                "address_id": 21,
+                "street_line_1": "1 St",
+                "country_code": "AU",
+                "source": Provenance.UI.value,
+                "changed_by": "ui",
+            },
+        )
+
+        rows = service.project_event(event)
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("contact_address", 21, "status", None, "created")
+        ]
+
+    def test_deleted_status_marker(self, service: HistoryService) -> None:
+        event = _event(
+            "ContactAddressDeleted",
+            {
+                "contact_id": 5,
+                "address_id": 21,
+                "street_line_1": "1 St",
+                "source": Provenance.UI.value,
+                "changed_by": "ui",
+            },
+        )
+
+        rows = service.project_event(event)
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("contact_address", 21, "status", "active", "deleted")
+        ]
+
+
+class TestContactNote:
+    def test_added_status_marker(self, service: HistoryService) -> None:
+        event = _event(
+            "ContactNoteAdded",
+            {
+                "contact_id": 5,
+                "note_id": 31,
+                "content": "Hi",
+                "source": Provenance.UI.value,
+                "changed_by": "ui",
+            },
+        )
+
+        rows = service.project_event(event)
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("contact_note", 31, "status", None, "created")
+        ]
+
+
+class TestContactImportantDate:
+    def test_added_status_marker(self, service: HistoryService) -> None:
+        event = _event(
+            "ImportantDateAdded",
+            {
+                "contact_id": 5,
+                "date_id": 41,
+                "date_type": "birthday",
+                "source": Provenance.UI.value,
+                "changed_by": "ui",
+            },
+        )
+
+        rows = service.project_event(event)
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("contact_important_date", 41, "status", None, "created")
+        ]
+
+    def test_deleted_status_marker(self, service: HistoryService) -> None:
+        event = _event(
+            "ImportantDateDeleted",
+            {
+                "contact_id": 5,
+                "date_id": 41,
+                "date_type": "birthday",
+                "source": Provenance.UI.value,
+                "changed_by": "ui",
+            },
+        )
+
+        rows = service.project_event(event)
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("contact_important_date", 41, "status", "active", "deleted")
+        ]
+
+
+class TestContactTags:
+    def test_assigned_writes_tags_field_on_contact(
+        self, service: HistoryService
+    ) -> None:
+        event = _event(
+            "TagAssigned",
+            {
+                "contact_id": 5,
+                "tag_id": 7,
+                "tag_name": "work",
+                "source": Provenance.UI.value,
+                "changed_by": "ui",
+            },
+        )
+
+        rows = service.project_event(event)
+
+        assert [_row_tuple(r) for r in rows] == [("contact", 5, "tags", None, "work")]
+
+    def test_removed_writes_tags_field_on_contact(
+        self, service: HistoryService
+    ) -> None:
+        event = _event(
+            "TagRemoved",
+            {
+                "contact_id": 5,
+                "tag_id": 7,
+                "tag_name": "work",
+                "source": Provenance.UI.value,
+                "changed_by": "ui",
+            },
+        )
+
+        rows = service.project_event(event)
+
+        assert [_row_tuple(r) for r in rows] == [("contact", 5, "tags", "work", None)]
+
+
+class TestContactRelationship:
+    def test_created_writes_status_and_relationship_type(
+        self, service: HistoryService
+    ) -> None:
+        event = _event(
+            "ContactRelationshipCreated",
+            {
+                "relationship_id": 9,
+                "from_contact_id": 5,
+                "to_contact_id": 6,
+                "relationship_type": "friend",
+                "to_user": False,
+                "source": Provenance.UI.value,
+                "changed_by": "ui",
+            },
+        )
+
+        rows = service.project_event(event)
+
+        assert {_row_tuple(r) for r in rows} == {
+            ("contact_relationship", 9, "status", None, "created"),
+            ("contact_relationship", 9, "relationship_type", None, "friend"),
+        }
+
+    def test_updated_one_row_per_field(self, service: HistoryService) -> None:
+        event = _event(
+            "ContactRelationshipUpdated",
+            {
+                "relationship_id": 9,
+                "from_contact_id": 5,
+                "to_contact_id": 6,
+                "relationship_type": "colleague",
+                "to_user": False,
+                "changed_fields": {"relationship_type": ["friend", "colleague"]},
+                "source": Provenance.UI.value,
+                "changed_by": "ui",
+            },
+        )
+
+        rows = service.project_event(event)
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("contact_relationship", 9, "relationship_type", "friend", "colleague")
+        ]
+
+    def test_deleted_status_marker(self, service: HistoryService) -> None:
+        event = _event(
+            "ContactRelationshipDeleted",
+            {
+                "relationship_id": 9,
+                "from_contact_id": 5,
+                "to_contact_id": 6,
+                "relationship_type": "friend",
+                "to_user": False,
+                "source": Provenance.UI.value,
+                "changed_by": "ui",
+            },
+        )
+
+        rows = service.project_event(event)
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("contact_relationship", 9, "status", "active", "deleted")
+        ]
+
+
+class TestContactSummaryUpdated:
+    def test_one_row_per_field_on_contact_summary(
+        self, service: HistoryService
+    ) -> None:
+        event = _event(
+            "ContactSummaryUpdated",
+            {
+                "contact_id": 5,
+                "changed_fields": {"summary_text": ["old", "new"]},
+                "source": Provenance.SUMMARY_REGENERATION.value,
+                "changed_by": "system",
+            },
+        )
+
+        rows = service.project_event(event)
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("contact_summary", 5, "summary_text", "old", "new")
+        ]
+        assert rows[0].source == Provenance.SUMMARY_REGENERATION
+
+
 class TestUnknownAndProvenanceDefaults:
     def test_unknown_event_type_returns_empty(self, service: HistoryService) -> None:
         event = _event("SomethingElse", {"journal_id": 10})

@@ -1,6 +1,15 @@
-"""Unit tests for contacts domain events."""
+"""Unit tests for contacts domain events.
+
+ITER12-003 Phase 1 enriches every contact event with ``source`` (Provenance) and
+``changed_by`` in ``event_data`` so the history projection consumer can record
+provenance. Sub-entity field edits stay on ``ContactUpdated`` with a per-sub-entity
+key (``"method_{id}_{field}"``); a new ``ContactSummaryUpdated`` covers summaries so
+the projection can reproduce the dual-write rows.
+"""
 
 from datetime import datetime
+
+from core_shared.models.history import Provenance
 
 from app.core.contacts.models.events import (
     ContactAddressAdded,
@@ -8,6 +17,10 @@ from app.core.contacts.models.events import (
     ContactDeleted,
     ContactMethodAdded,
     ContactNoteAdded,
+    ContactRelationshipCreated,
+    ContactRelationshipDeleted,
+    ContactRelationshipUpdated,
+    ContactSummaryUpdated,
     ContactUpdated,
     TagAssigned,
     TagRemoved,
@@ -176,3 +189,197 @@ class TestContactNoteAdded:
         assert len(event.event_data["content"]) == 103
         assert isinstance(event.occurred_at, datetime)
         assert event.event_id.startswith("contact_note_added_1_2_")
+
+
+class TestProvenanceEnrichment:
+    """Every contact event carries source + changed_by, defaulting to system."""
+
+    def test_contact_created_defaults_to_system(self) -> None:
+        event = ContactCreated(contact_id=1, first_name="John")
+
+        assert event.event_data["source"] == Provenance.SYSTEM.value
+        assert event.event_data["changed_by"] == "system"
+
+    def test_contact_created_explicit_provenance(self) -> None:
+        event = ContactCreated(
+            contact_id=1,
+            first_name="John",
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        assert event.event_data["source"] == Provenance.UI.value
+        assert event.event_data["changed_by"] == "ui"
+
+    def test_contact_updated_carries_provenance(self) -> None:
+        event = ContactUpdated(
+            contact_id=1,
+            changed_fields={"first_name": ("A", "B")},
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+
+        assert event.event_data["source"] == Provenance.MCP.value
+        assert event.event_data["changed_by"] == "mcp"
+
+    def test_contact_deleted_carries_provenance(self) -> None:
+        event = ContactDeleted(contact_id=1, source=Provenance.UI, changed_by="ui")
+
+        assert event.event_data["source"] == Provenance.UI.value
+        assert event.event_data["changed_by"] == "ui"
+
+    def test_tag_assigned_carries_provenance(self) -> None:
+        event = TagAssigned(
+            contact_id=1,
+            tag_id=2,
+            tag_name="work",
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        assert event.event_data["source"] == Provenance.UI.value
+        assert event.event_data["changed_by"] == "ui"
+
+    def test_tag_removed_carries_provenance(self) -> None:
+        event = TagRemoved(
+            contact_id=1,
+            tag_id=2,
+            tag_name="work",
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+
+        assert event.event_data["source"] == Provenance.MCP.value
+        assert event.event_data["changed_by"] == "mcp"
+
+    def test_method_added_carries_provenance(self) -> None:
+        event = ContactMethodAdded(
+            contact_id=1,
+            method_id=2,
+            method_type="email",
+            value="a@b.com",
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        assert event.event_data["source"] == Provenance.UI.value
+        assert event.event_data["changed_by"] == "ui"
+
+    def test_address_added_carries_provenance(self) -> None:
+        event = ContactAddressAdded(
+            contact_id=1,
+            address_id=2,
+            street_line_1="1 St",
+            country_code="AU",
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        assert event.event_data["source"] == Provenance.UI.value
+        assert event.event_data["changed_by"] == "ui"
+
+    def test_note_added_carries_provenance(self) -> None:
+        event = ContactNoteAdded(
+            contact_id=1,
+            note_id=2,
+            content="Hi",
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        assert event.event_data["source"] == Provenance.UI.value
+        assert event.event_data["changed_by"] == "ui"
+
+
+class TestContactUpdatedSubEntityKeys:
+    """Sub-entity field edits publish ContactUpdated with a per-sub-entity key
+    (the core contact event downstream relies on, kept rather than a new event)."""
+
+    def test_method_field_edit_uses_mangled_key(self) -> None:
+        event = ContactUpdated(
+            contact_id=1,
+            changed_fields={"method_2_value": ("a@b.com", "c@d.com")},
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        assert event.event_type == "ContactUpdated"
+        assert event.event_data["changed_fields"] == {
+            "method_2_value": ("a@b.com", "c@d.com")
+        }
+        assert event.event_data["source"] == Provenance.UI.value
+        assert event.event_data["changed_by"] == "ui"
+
+
+class TestContactSummaryUpdated:
+    def test_create_event(self) -> None:
+        event = ContactSummaryUpdated(
+            contact_id=1,
+            changed_fields={"summary_text": ("old", "new")},
+            source=Provenance.SUMMARY_REGENERATION,
+            changed_by="system",
+        )
+
+        assert event.aggregate_id == 1
+        assert event.event_type == "ContactSummaryUpdated"
+        assert event.event_data["contact_id"] == 1
+        assert event.event_data["changed_fields"] == {"summary_text": ("old", "new")}
+        assert event.event_data["source"] == Provenance.SUMMARY_REGENERATION.value
+        assert event.event_data["changed_by"] == "system"
+        assert event.event_id.startswith("contact_summary_updated_1_")
+
+    def test_defaults_to_summary_regeneration(self) -> None:
+        event = ContactSummaryUpdated(
+            contact_id=1, changed_fields={"summary_text": ("a", "b")}
+        )
+
+        assert event.event_data["source"] == Provenance.SUMMARY_REGENERATION.value
+        assert event.event_data["changed_by"] == "system"
+
+
+class TestContactRelationshipProvenance:
+    def test_created_carries_provenance(self) -> None:
+        event = ContactRelationshipCreated(
+            relationship_id=9,
+            from_contact_id=1,
+            to_contact_id=2,
+            relationship_type="friend",
+            to_user=False,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        assert event.event_data["source"] == Provenance.UI.value
+        assert event.event_data["changed_by"] == "ui"
+
+    def test_updated_carries_changed_fields_and_provenance(self) -> None:
+        event = ContactRelationshipUpdated(
+            relationship_id=9,
+            from_contact_id=1,
+            to_contact_id=2,
+            relationship_type="colleague",
+            to_user=False,
+            changed_fields={"relationship_type": ("friend", "colleague")},
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+
+        assert event.event_data["changed_fields"] == {
+            "relationship_type": ("friend", "colleague")
+        }
+        assert event.event_data["source"] == Provenance.MCP.value
+        assert event.event_data["changed_by"] == "mcp"
+
+    def test_deleted_carries_provenance(self) -> None:
+        event = ContactRelationshipDeleted(
+            relationship_id=9,
+            from_contact_id=1,
+            to_contact_id=2,
+            relationship_type="friend",
+            to_user=False,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        assert event.event_data["source"] == Provenance.UI.value
+        assert event.event_data["changed_by"] == "ui"

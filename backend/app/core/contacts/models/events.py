@@ -1,9 +1,27 @@
-"""Domain events for the contacts domain."""
+"""Domain events for the contacts domain.
+
+ITER12-003 Phase 1: every contact event that the history projection records carries
+``source`` (Provenance) and ``changed_by`` in its ``event_data`` so the consumer can
+record provenance, mirroring the journal events enriched in ITER12-002. The
+exceptions are ``TagUpdated``/``TagDeleted`` (tag-entity events — a tag rename/delete
+is not contact history, so the projection ignores them) and
+``ContactSummaryRefreshRequested`` (a trigger that only *requests* regeneration; the
+resulting change is recorded by ``ContactSummaryUpdated``) — these carry no
+provenance by design.
+
+Sub-entity field edits (method/address/note) stay on the existing ``ContactUpdated``
+event — a core contact event downstream consumers and search rely on — carrying a
+per-sub-entity ``changed_fields`` key shaped ``"{prefix}_{id}_{field}"`` (e.g.
+``"method_5_value"``). ``HistoryService._project_contact_updated`` decodes that key
+back to the correct ``(entity_type, entity_id)`` row, reproducing the synchronous
+dual-write without introducing new event types.
+"""
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from core_shared.models.history import Provenance
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 
@@ -28,6 +46,8 @@ class ContactCreated(DomainEvent):
         contact_id: int,
         first_name: str,
         last_name: str | None = None,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
@@ -39,6 +59,8 @@ class ContactCreated(DomainEvent):
                 "contact_id": contact_id,
                 "first_name": first_name,
                 "last_name": last_name,
+                "source": source.value,
+                "changed_by": changed_by,
             },
             transaction=transaction,
         )
@@ -52,6 +74,8 @@ class ContactUpdated(DomainEvent):
         self,
         contact_id: int,
         changed_fields: dict[str, Any],
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
@@ -59,7 +83,12 @@ class ContactUpdated(DomainEvent):
             occurred_at=datetime.now(tz=UTC),
             aggregate_id=contact_id,
             event_type="ContactUpdated",
-            event_data={"contact_id": contact_id, "changed_fields": changed_fields},
+            event_data={
+                "contact_id": contact_id,
+                "changed_fields": changed_fields,
+                "source": source.value,
+                "changed_by": changed_by,
+            },
             transaction=transaction,
         )
 
@@ -68,13 +97,23 @@ class ContactUpdated(DomainEvent):
 class ContactDeleted(DomainEvent):
     """Event raised when a contact is deleted."""
 
-    def __init__(self, contact_id: int, transaction: AsyncConnection | None = None):
+    def __init__(
+        self,
+        contact_id: int,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
+        transaction: AsyncConnection | None = None,
+    ):
         super().__init__(
             event_id=f"contact_deleted_{contact_id}_{datetime.now(tz=UTC).isoformat()}",
             occurred_at=datetime.now(tz=UTC),
             aggregate_id=contact_id,
             event_type="ContactDeleted",
-            event_data={"contact_id": contact_id},
+            event_data={
+                "contact_id": contact_id,
+                "source": source.value,
+                "changed_by": changed_by,
+            },
             transaction=transaction,
         )
 
@@ -88,6 +127,8 @@ class TagAssigned(DomainEvent):
         contact_id: int,
         tag_id: int,
         tag_name: str,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
@@ -99,6 +140,8 @@ class TagAssigned(DomainEvent):
                 "contact_id": contact_id,
                 "tag_id": tag_id,
                 "tag_name": tag_name,
+                "source": source.value,
+                "changed_by": changed_by,
             },
             transaction=transaction,
         )
@@ -113,6 +156,8 @@ class TagRemoved(DomainEvent):
         contact_id: int,
         tag_id: int,
         tag_name: str,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
         transaction: AsyncConnection | None = None,
     ):
         now = datetime.now(tz=UTC)
@@ -125,6 +170,8 @@ class TagRemoved(DomainEvent):
                 "contact_id": contact_id,
                 "tag_id": tag_id,
                 "tag_name": tag_name,
+                "source": source.value,
+                "changed_by": changed_by,
             },
             transaction=transaction,
         )
@@ -190,6 +237,8 @@ class ContactMethodAdded(DomainEvent):
         method_id: int,
         method_type: str,
         value: str,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
@@ -202,6 +251,8 @@ class ContactMethodAdded(DomainEvent):
                 "method_id": method_id,
                 "method_type": method_type,
                 "value": value,
+                "source": source.value,
+                "changed_by": changed_by,
             },
             transaction=transaction,
         )
@@ -217,6 +268,8 @@ class ContactAddressAdded(DomainEvent):
         address_id: int,
         street_line_1: str,
         country_code: str,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
@@ -229,6 +282,8 @@ class ContactAddressAdded(DomainEvent):
                 "address_id": address_id,
                 "street_line_1": street_line_1,
                 "country_code": country_code,
+                "source": source.value,
+                "changed_by": changed_by,
             },
             transaction=transaction,
         )
@@ -244,6 +299,8 @@ class ContactMethodDeleted(DomainEvent):
         method_id: int,
         method_type: str,
         value: str,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
@@ -256,6 +313,8 @@ class ContactMethodDeleted(DomainEvent):
                 "method_id": method_id,
                 "method_type": method_type,
                 "value": value,
+                "source": source.value,
+                "changed_by": changed_by,
             },
             transaction=transaction,
         )
@@ -270,6 +329,8 @@ class ContactAddressDeleted(DomainEvent):
         contact_id: int,
         address_id: int,
         street_line_1: str,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
@@ -281,6 +342,8 @@ class ContactAddressDeleted(DomainEvent):
                 "contact_id": contact_id,
                 "address_id": address_id,
                 "street_line_1": street_line_1,
+                "source": source.value,
+                "changed_by": changed_by,
             },
             transaction=transaction,
         )
@@ -295,6 +358,8 @@ class ContactNoteAdded(DomainEvent):
         contact_id: int,
         note_id: int,
         content: str,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
@@ -308,6 +373,8 @@ class ContactNoteAdded(DomainEvent):
                 "content": (
                     content[:100] + "..." if len(content) > 100 else content
                 ),  # Truncate for event
+                "source": source.value,
+                "changed_by": changed_by,
             },
             transaction=transaction,
         )
@@ -322,6 +389,8 @@ class ImportantDateAdded(DomainEvent):
         contact_id: int,
         date_id: int,
         date_type: str,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
@@ -333,6 +402,8 @@ class ImportantDateAdded(DomainEvent):
                 "contact_id": contact_id,
                 "date_id": date_id,
                 "date_type": date_type,
+                "source": source.value,
+                "changed_by": changed_by,
             },
             transaction=transaction,
         )
@@ -347,6 +418,8 @@ class ImportantDateDeleted(DomainEvent):
         contact_id: int,
         date_id: int,
         date_type: str,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
@@ -358,6 +431,8 @@ class ImportantDateDeleted(DomainEvent):
                 "contact_id": contact_id,
                 "date_id": date_id,
                 "date_type": date_type,
+                "source": source.value,
+                "changed_by": changed_by,
             },
             transaction=transaction,
         )
@@ -374,6 +449,8 @@ class ContactRelationshipCreated(DomainEvent):
         to_contact_id: int | None,
         relationship_type: str,
         to_user: bool,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
@@ -387,6 +464,8 @@ class ContactRelationshipCreated(DomainEvent):
                 "to_contact_id": to_contact_id,
                 "relationship_type": relationship_type,
                 "to_user": to_user,
+                "source": source.value,
+                "changed_by": changed_by,
             },
             transaction=transaction,
         )
@@ -403,6 +482,9 @@ class ContactRelationshipUpdated(DomainEvent):
         to_contact_id: int | None,
         relationship_type: str,
         to_user: bool,
+        changed_fields: dict[str, Any] | None = None,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
@@ -416,6 +498,9 @@ class ContactRelationshipUpdated(DomainEvent):
                 "to_contact_id": to_contact_id,
                 "relationship_type": relationship_type,
                 "to_user": to_user,
+                "changed_fields": changed_fields or {},
+                "source": source.value,
+                "changed_by": changed_by,
             },
             transaction=transaction,
         )
@@ -432,6 +517,8 @@ class ContactRelationshipDeleted(DomainEvent):
         to_contact_id: int | None,
         relationship_type: str,
         to_user: bool,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
@@ -445,6 +532,8 @@ class ContactRelationshipDeleted(DomainEvent):
                 "to_contact_id": to_contact_id,
                 "relationship_type": relationship_type,
                 "to_user": to_user,
+                "source": source.value,
+                "changed_by": changed_by,
             },
             transaction=transaction,
         )
@@ -468,5 +557,38 @@ class ContactSummaryRefreshRequested(DomainEvent):
             aggregate_id=contact_id,
             event_type="ContactSummaryRefreshRequested",
             event_data={"contact_id": contact_id},
+            transaction=transaction,
+        )
+
+
+@dataclass(frozen=True)
+class ContactSummaryUpdated(DomainEvent):
+    """Event raised when a contact summary actually changes.
+
+    The existing ``ContactSummaryRefreshRequested`` only *triggers* regeneration;
+    this event records the *result* (summary text / disabled flag changing) so the
+    history projection can write the ``contact_summary`` rows the dual-write writes.
+    Defaults to ``Provenance.SUMMARY_REGENERATION`` since summaries are AI-generated.
+    """
+
+    def __init__(
+        self,
+        contact_id: int,
+        changed_fields: dict[str, Any],
+        source: Provenance = Provenance.SUMMARY_REGENERATION,
+        changed_by: str = "system",
+        transaction: AsyncConnection | None = None,
+    ):
+        super().__init__(
+            event_id=f"contact_summary_updated_{contact_id}_{datetime.now(tz=UTC).isoformat()}",
+            occurred_at=datetime.now(tz=UTC),
+            aggregate_id=contact_id,
+            event_type="ContactSummaryUpdated",
+            event_data={
+                "contact_id": contact_id,
+                "changed_fields": changed_fields,
+                "source": source.value,
+                "changed_by": changed_by,
+            },
             transaction=transaction,
         )

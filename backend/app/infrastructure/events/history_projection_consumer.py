@@ -38,6 +38,31 @@ _JOURNAL_HISTORY_EVENT_TYPES: list[str] = [
     "GearItemUpdated",
 ]
 
+# Contact-domain event types the projection knows how to map (HistoryService has a
+# handler for each). ITER12-003 Phase 1 deliberately keeps these OUT of the live
+# subscription below: the synchronous dual-write is still the sole writer of
+# contact history this phase, so subscribing here would double-write. Phase 2 adds
+# these to ``event_type_patterns`` and removes the dual-write atomically. The list
+# lives here so Phase 2 (and the inertness-invariant test) can reference it.
+_CONTACT_HISTORY_EVENT_TYPES: list[str] = [
+    "ContactCreated",
+    "ContactUpdated",
+    "ContactDeleted",
+    "ContactMethodAdded",
+    "ContactMethodDeleted",
+    "ContactAddressAdded",
+    "ContactAddressDeleted",
+    "ContactNoteAdded",
+    "ImportantDateAdded",
+    "ImportantDateDeleted",
+    "TagAssigned",
+    "TagRemoved",
+    "ContactRelationshipCreated",
+    "ContactRelationshipUpdated",
+    "ContactRelationshipDeleted",
+    "ContactSummaryUpdated",
+]
+
 
 class HistoryProjectionConsumer(DeadLetterConsumerMixin, StreamConsumer):
     """Stream consumer that projects journal events into field history.
