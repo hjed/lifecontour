@@ -261,6 +261,60 @@ class ContactRepository(ABC):
         """Delete all important dates for a contact."""
         pass
 
+    @abstractmethod
+    async def repoint_methods(
+        self, source_id: int, survivor_id: int, transaction: AsyncConnection
+    ) -> None:
+        """Re-point the source contact's methods onto the survivor.
+
+        Exact duplicates (same ``method_type`` + ``value``) collapse — this also
+        resolves the global email-uniqueness collision, since the survivor is the
+        only other contact that could hold the same email. Where the survivor
+        already has a primary method of a given type, the source's competing
+        primaries are demoted so the one-primary-per-type invariant holds.
+        """
+        pass
+
+    @abstractmethod
+    async def repoint_addresses(
+        self, source_id: int, survivor_id: int, transaction: AsyncConnection
+    ) -> None:
+        """Re-point the source contact's addresses onto the survivor.
+
+        Exact-duplicate addresses collapse. Where the survivor already has a
+        primary address, the source's competing primaries are demoted so the
+        one-primary-address-per-contact invariant holds.
+        """
+        pass
+
+    @abstractmethod
+    async def repoint_notes(
+        self, source_id: int, survivor_id: int, transaction: AsyncConnection
+    ) -> None:
+        """Re-point the source contact's notes onto the survivor, collapsing
+        notes whose content already exists on the survivor."""
+        pass
+
+    @abstractmethod
+    async def repoint_important_dates(
+        self, source_id: int, survivor_id: int, transaction: AsyncConnection
+    ) -> None:
+        """Re-point the source contact's important dates onto the survivor.
+
+        Exact-duplicate dates collapse. If the survivor already has a birthday,
+        the source's birthday is dropped (survivor wins) so the re-point cannot
+        violate ``uq_contact_birthday``.
+        """
+        pass
+
+    @abstractmethod
+    async def repoint_tags(
+        self, source_id: int, survivor_id: int, transaction: AsyncConnection
+    ) -> None:
+        """Re-point the source contact's tags onto the survivor, deduping on the
+        ``contact_tags`` composite primary key (union of both contacts' tags)."""
+        pass
+
 
 class TagRepository(ABC):
     """Repository interface for tag operations."""

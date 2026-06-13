@@ -1,23 +1,30 @@
 """Service for merging two contacts into a single surviving record.
 
-ITER13-001 Phase 1 builds the engine's hardest re-points — contact-to-contact
-relationships and journal links — behind a not-yet-exposed service. Scalar/
-sub-entity handling, source deletion, summary regeneration, the ``ContactMerged``
-event, and the REST/MCP surface land in later phases.
+ITER13-001 Phase 1 built the engine's hardest re-points — contact-to-contact
+relationships and journal links — behind a not-yet-exposed service. Phase 2
+completes the aggregate merge: it re-points the remaining sub-entities (methods,
+addresses, notes, important dates, tags), applies the scalar identity fields with
+a prefer-non-empty (survivor-wins) policy, deletes the source, records the merge
+as an inline ``field_history`` row, and requests regeneration of the survivor's
+AI summary. The ``ContactMerged`` event and the REST/MCP surface land in Phase 3.
 """
 
 import structlog
 from core_shared.models.contacts.entities import Contact
+from core_shared.models.contacts.value_objects import Provenance
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.contacts.models.events import ContactSummaryRefreshRequested
 from app.core.contacts.models.exceptions import (
     ContactMergeConflictError,
     ContactNotFoundError,
 )
 from app.core.contacts.models.repositories import (
+    ContactEventPublisher,
     ContactRelationshipRepository,
     ContactRepository,
 )
+from app.core.contacts.services.contact_history_service import ContactHistoryService
 from app.core.journal.models.repositories import JournalContactRelationshipRepository
 from app.infrastructure.unit_of_work import transactional
 
@@ -32,10 +39,14 @@ class ContactMergeService:
         contact_repo: ContactRepository,
         relationship_repo: ContactRelationshipRepository,
         journal_relationship_repo: JournalContactRelationshipRepository,
+        history_service: ContactHistoryService,
+        event_publisher: ContactEventPublisher,
     ):
         self.contact_repo = contact_repo
         self.relationship_repo = relationship_repo
         self.journal_relationship_repo = journal_relationship_repo
+        self.history_service = history_service
+        self.event_publisher = event_publisher
 
     @transactional
     async def merge_contacts(
@@ -44,12 +55,18 @@ class ContactMergeService:
         source_id: int,
         *,
         transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> Contact:
-        """Absorb the source contact's relationships and journal links into the survivor.
+        """Absorb the source contact into the survivor, returning the unified contact.
 
-        Phase 1 scope: validate preconditions and re-point the contact-to-contact
-        relationships and journal links. The survivor is returned unchanged; the
-        source is not yet deleted (Phase 2).
+        Re-points and dedupes the full aggregate (relationships, journal links,
+        methods, addresses, notes, important dates, tags), applies the scalar
+        identity fields with a prefer-non-empty policy (survivor wins on
+        conflict — per-field overrides arrive in ITER13-002), deletes the source,
+        records an inline ``merged_from`` history row carrying provenance, and
+        requests regeneration of the survivor's AI summary. The whole operation
+        is a single atomic unit of work.
         """
         if survivor_id == source_id:
             raise ContactMergeConflictError("Cannot merge a contact into itself")
@@ -58,20 +75,73 @@ class ContactMergeService:
         if survivor is None:
             raise ContactNotFoundError(survivor_id)
 
-        source = await self.contact_repo.find_by_id(source_id)
-        if source is None:
+        source_contact = await self.contact_repo.find_by_id(source_id)
+        if source_contact is None:
             raise ContactNotFoundError(source_id)
 
+        # 1. Re-point the relationship graph (Phase 1) and the sub-entities.
         await self.relationship_repo.repoint_contact(
             source_id, survivor_id, transaction
         )
         await self.journal_relationship_repo.repoint_contact(
             source_id, survivor_id, transaction
         )
+        await self.contact_repo.repoint_methods(source_id, survivor_id, transaction)
+        await self.contact_repo.repoint_addresses(source_id, survivor_id, transaction)
+        await self.contact_repo.repoint_notes(source_id, survivor_id, transaction)
+        await self.contact_repo.repoint_important_dates(
+            source_id, survivor_id, transaction
+        )
+        await self.contact_repo.repoint_tags(source_id, survivor_id, transaction)
+
+        # 2. Apply scalar identity fields with prefer-non-empty (survivor wins).
+        merged = self._merge_scalars(survivor, source_contact)
+        await self.contact_repo.save(merged)
+
+        # 3. The source's aggregate has moved; delete the now-empty source row.
+        await self.contact_repo.delete(source_id)
+
+        # 4. Record the merge as an inline, provenance-carrying history row.
+        await self.history_service.record_contact_change(
+            survivor_id,
+            {"merged_from": (source_id, survivor_id)},
+            changed_by=changed_by,
+            source=source,
+            _transaction=transaction,
+        )
+
+        # 5. The survivor's interaction summary is now stale — regenerate it.
+        await self.event_publisher.publish(
+            ContactSummaryRefreshRequested(survivor_id, transaction=transaction)
+        )
 
         logger.info(
-            "Contact relationships and journal links re-pointed for merge",
+            "Contacts merged",
             survivor_id=survivor_id,
             source_id=source_id,
+            source=str(source),
         )
-        return survivor
+
+        merged_survivor = await self.contact_repo.find_by_id(survivor_id)
+        if merged_survivor is None:  # pragma: no cover - survivor was just updated
+            raise ContactNotFoundError(survivor_id)
+        return merged_survivor
+
+    @staticmethod
+    def _merge_scalars(survivor: Contact, source: Contact) -> Contact:
+        """Build the survivor's merged scalar identity using prefer-non-empty.
+
+        The survivor's value wins whenever it is set; otherwise the source's
+        value fills the gap. Per-field overrides arrive in ITER13-002.
+        """
+        return Contact(
+            id=survivor.id,
+            first_name=survivor.first_name or source.first_name,
+            last_name=survivor.last_name or source.last_name,
+            middle_name=survivor.middle_name or source.middle_name,
+            nick_name=survivor.nick_name or source.nick_name,
+            company=survivor.company or source.company,
+            job_title=survivor.job_title or source.job_title,
+            photo_url=survivor.photo_url or source.photo_url,
+            is_favourite=survivor.is_favourite or source.is_favourite,
+        )
