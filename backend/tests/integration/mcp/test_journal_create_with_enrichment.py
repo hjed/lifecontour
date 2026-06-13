@@ -691,3 +691,240 @@ class TestListJournalTypes:
 
             # Verify usage hint
             assert "usage_hint" in payload
+
+
+class TestCreateJournalServicifiedParity:
+    """Parity coverage for the servicified create tool (issue #967).
+
+    The composite write now goes through ``JournalWriteService`` instead of the
+    tool opening its own ``unit_of_work``. These tests guard the two capabilities
+    that were unique to the MCP tool: GEAR_USAGE type-data and find-or-create
+    tag reuse.
+    """
+
+    async def _create_gear_item(self, authenticated_client, session_id: str) -> str:
+        response = await authenticated_client.post(
+            "/mcp-server/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 10,
+                "method": "tools/call",
+                "params": {
+                    "name": "create_gear_item",
+                    "arguments": {"name": "Test Harness", "model": "Altitude"},
+                },
+            },
+            headers=mcp_headers(session_id),
+        )
+        assert response.status_code == 200
+        payload = extract_mcp_json_payload(response.text)
+        assert "error" not in payload, f"gear item create failed: {payload}"
+        return str(payload["id"])
+
+    @pytest.mark.asyncio
+    async def test_create_journal_with_gear_usage_persists_type_data(
+        self,
+        authenticated_lifespan_client,
+        _create_journal_via_mcp,
+    ) -> None:
+        """GEAR_USAGE type_data round-trips through the servicified create path."""
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            gear_item_id = await self._create_gear_item(
+                authenticated_client, session_id
+            )
+
+            payload = await _create_journal_via_mcp(
+                authenticated_client,
+                session_id,
+                {
+                    "title": "Harness check-out",
+                    "content": "Borrowed the harness for the weekend.",
+                    "event_date_range": {
+                        "start": "2025-04-09",
+                        "end": "2025-04-10",
+                    },
+                    "types": ["GEAR_USAGE"],
+                    "type_data": {
+                        "GEAR_USAGE": {
+                            "gear_item_id": gear_item_id,
+                            "checkout_date": "2025-04-09T08:00:00+00:00",
+                        }
+                    },
+                },
+            )
+
+            assert "error" not in payload, f"Unexpected error: {payload}"
+            assert "gear_usage" in payload["types"]
+
+    @pytest.mark.asyncio
+    async def test_create_journal_missing_gear_usage_type_data_rejected(
+        self,
+        authenticated_lifespan_client,
+        _create_journal_via_mcp,
+    ) -> None:
+        """Adding GEAR_USAGE without type_data is rejected (validation in the tool)."""
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            payload = await _create_journal_via_mcp(
+                authenticated_client,
+                session_id,
+                {
+                    "title": "Bad gear usage",
+                    "content": "No gear data.",
+                    "event_date_range": {
+                        "start": "2025-04-09",
+                        "end": "2025-04-10",
+                    },
+                    "types": ["GEAR_USAGE"],
+                },
+            )
+
+            assert "error" in payload
+            assert "GEAR_USAGE" in payload.get("message", "")
+
+    @pytest.mark.asyncio
+    async def test_shared_tag_name_is_reused_not_duplicated(
+        self,
+        authenticated_lifespan_client,
+        _create_journal_via_mcp,
+        clean_database: AsyncConnection,
+    ) -> None:
+        """Two journals sharing a tag name reuse one tag row (find-or-create)."""
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+
+            for title in ("First entry", "Second entry"):
+                payload = await _create_journal_via_mcp(
+                    authenticated_client,
+                    session_id,
+                    {
+                        "title": title,
+                        "content": "shared tag content",
+                        "event_date_range": {
+                            "start": "2025-04-09",
+                            "end": "2025-04-09",
+                        },
+                        "tags": ["shared-tag"],
+                    },
+                )
+                assert "error" not in payload, f"Unexpected error: {payload}"
+                assert payload["tags"] == ["shared-tag"]
+
+        # Exactly one tag row exists for the shared name (find-or-create reuse).
+        count = (
+            await clean_database.execute(
+                text("SELECT COUNT(*) FROM journal_tags WHERE name = :name"),
+                {"name": "shared-tag"},
+            )
+        ).scalar()
+        assert count == 1, f"expected exactly one 'shared-tag' row, got {count}"
+
+
+class TestUpdateJournalServicifiedParity:
+    """Tri-state replace-all parity for the servicified update tool (issue #967)."""
+
+    @pytest.mark.asyncio
+    async def test_update_title_only_leaves_types_and_tags_intact(
+        self,
+        authenticated_lifespan_client,
+        _create_journal_via_mcp,
+        _update_journal_via_mcp,
+    ) -> None:
+        """Omitted associations (None) are untouched by a core-field-only update."""
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            create_payload = await _create_journal_via_mcp(
+                authenticated_client,
+                session_id,
+                {
+                    "title": "Original",
+                    "content": "c",
+                    "event_date_range": {"start": "2025-04-09", "end": "2025-04-09"},
+                    "types": ["MOOD_RATING"],
+                    "tags": ["keep-me"],
+                },
+            )
+            assert "error" not in create_payload
+            journal_id = create_payload["id"]
+
+            update_payload = await _update_journal_via_mcp(
+                authenticated_client,
+                session_id,
+                journal_id,
+                {"title": "Renamed"},
+            )
+
+            assert "error" not in update_payload, f"error: {update_payload}"
+            assert update_payload["title"] == "Renamed"
+            assert "mood_rating" in update_payload["types"]
+            assert update_payload["tags"] == ["keep-me"]
+
+    @pytest.mark.asyncio
+    async def test_update_tags_empty_list_clears_all(
+        self,
+        authenticated_lifespan_client,
+        _create_journal_via_mcp,
+        _update_journal_via_mcp,
+    ) -> None:
+        """tags=[] clears all tags (distinct from omitting tags)."""
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            create_payload = await _create_journal_via_mcp(
+                authenticated_client,
+                session_id,
+                {
+                    "title": "Tagged",
+                    "content": "c",
+                    "event_date_range": {"start": "2025-04-09", "end": "2025-04-09"},
+                    "tags": ["alpha", "beta"],
+                },
+            )
+            assert "error" not in create_payload
+            journal_id = create_payload["id"]
+
+            update_payload = await _update_journal_via_mcp(
+                authenticated_client,
+                session_id,
+                journal_id,
+                {"tags": []},
+            )
+
+            assert "error" not in update_payload, f"error: {update_payload}"
+            assert update_payload["tags"] == []
+
+    @pytest.mark.asyncio
+    async def test_update_replace_types_removes_old_type_data(
+        self,
+        authenticated_lifespan_client,
+        _create_journal_via_mcp,
+        _update_journal_via_mcp,
+    ) -> None:
+        """Replacing types removes the old type (and its data) and adds the new one."""
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            create_payload = await _create_journal_via_mcp(
+                authenticated_client,
+                session_id,
+                {
+                    "title": "Mood entry",
+                    "content": "c",
+                    "event_date_range": {"start": "2025-04-09", "end": "2025-04-09"},
+                    "types": ["MOOD_RATING"],
+                    "type_data": {"MOOD_RATING": {"mood_value": 4}},
+                },
+            )
+            assert "error" not in create_payload
+            assert "mood_rating" in create_payload["types"]
+            journal_id = create_payload["id"]
+
+            update_payload = await _update_journal_via_mcp(
+                authenticated_client,
+                session_id,
+                journal_id,
+                {"types": ["FITNESS"]},
+            )
+
+            assert "error" not in update_payload, f"error: {update_payload}"
+            assert "fitness" in update_payload["types"]
+            assert "mood_rating" not in update_payload["types"]
