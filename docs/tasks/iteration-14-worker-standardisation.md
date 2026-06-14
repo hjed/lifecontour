@@ -196,19 +196,57 @@ Migrate the two workers that used bare `str`; convert secrets to `SecretStr` and
 
 #### Phase 1: Shared ARQ toolkit — defaults, cron helper, lifecycle factory (core_shared)
 **PR Size:** ~520 lines (defaults ~40, cron helper ~60, lifecycle factory ~130, tests ~290)
+**Status:** ✅ DONE
 
 Add the shared ARQ surface to `core_shared`, fully unit-tested. Not yet consumed, so it merges green.
 
 **Acceptance Criteria:**
-- [ ] Shared ARQ defaults (`job_timeout`, `keep_result`, `max_tries`, retry/backoff, `health_check_interval`) defined once, with a documented way to override per worker.
-- [ ] A shared cron-generation helper produces ARQ cron jobs from `enable_periodic_sync` + `sync_interval_hours` (and an empty schedule when disabled), reproducing the existing `immich`/`google`/`strava` schedules.
-- [ ] A shared `on_startup`/`on_shutdown` factory builds the DB session factory, stores it and the settings in the ARQ `ctx`, launches a supplied stream-consumer coroutine as a task, and on shutdown cancels it (handling `CancelledError`) and closes the session factory. It folds in the existing variants as options: optional `add_done_callback` error logging (strava) and a `done()` check before cancel.
+- [x] Shared ARQ defaults (`job_timeout`, `keep_result`, `max_tries`, retry/backoff, `health_check_interval`) defined once, with a documented way to override per worker.
+- [x] A shared cron-generation helper produces ARQ cron jobs from `enable_periodic_sync` + `sync_interval_hours` (and an empty schedule when disabled), reproducing the existing `immich`/`google`/`strava` schedules.
+- [x] A shared `on_startup`/`on_shutdown` factory builds the DB session factory, stores it and the settings in the ARQ `ctx`, launches a supplied stream-consumer coroutine as a task, and on shutdown cancels it (handling `CancelledError`) and closes the session factory. It folds in the existing variants as options: optional `add_done_callback` error logging (strava) and a `done()` check before cancel.
 
 **Required Test Coverage:**
-- **Unit:** defaults application + override; cron helper schedules for representative intervals and the disabled case; lifecycle factory wires `ctx` keys, launches and cancels the consumer task, invokes the done-callback option, and closes the session factory on shutdown.
+- [x] **Unit:** defaults application + override; cron helper schedules for representative intervals and the disabled case; lifecycle factory wires `ctx` keys, launches and cancels the consumer task, invokes the done-callback option, and closes the session factory on shutdown.
 
 **Required Documentation Updates:**
-- `docs/architecture/integration-architecture.md` — document the shared ARQ defaults, cron helper, and lifecycle factory as the standard worker bootstrap.
+- [x] `docs/architecture/integration-architecture.md` — document the shared ARQ defaults, cron helper, and lifecycle factory as the standard worker bootstrap.
+
+**Progress notes (Phase 1 complete — 2026-06-14, branch `emdash/iter14-001-1-shared-arq`):**
+
+- New module `core_shared/core_shared/worker_arq.py` provides the three shared surfaces, all
+  exported from `core_shared/__init__.py` (+ `__all__`): `SharedARQWorkerSettings` (defaults base) +
+  `default_retry_delay` and the `DEFAULT_*` constants; `generate_cron_jobs`; `build_worker_lifecycle`
+  (+ the `_log_consumer_task_done` callback ported from strava).
+- **Defaults & override:** `SharedARQWorkerSettings` carries `job_timeout=300`, `keep_result=3600`,
+  `max_tries=5`, `health_check_interval=30`, and `retry_delay=default_retry_delay` (google's
+  exponential-backoff-with-jitter, capped at 900s, ported verbatim) as class attributes. A worker
+  overrides a default by **redeclaring the attribute** (the documented mechanism); P2/P3 will use this
+  for behaviour-preserving overrides (google `job_timeout=600`, strava `max_tries=20`). The base
+  deliberately does **not** inherit arq's `WorkerSettingsBase` so importing it never imports `arq`.
+- **Cron helper:** `generate_cron_jobs(func, *, enable_periodic_sync, sync_interval_hours, minute=0, unique=True)`
+  reproduces the existing schedule (`hour = set(range(0, 24, max(1, interval)))`, top-of-hour,
+  `unique=True`; `[]` when disabled). A parametrised equivalence guard asserts it matches the legacy
+  `immich._generate_cron_jobs` output so P3 can delete that copy safely.
+- **Lifecycle factory:** `build_worker_lifecycle(*, settings, consumer_factory, close_session_factory=False, log_consumer_errors=False)`
+  returns `(on_startup, on_shutdown)`. `on_startup` builds the session factory from
+  `settings.database_url.get_secret_value()`, stores `session_factory`/`settings`/`stream_consumer_task`
+  in `ctx`, and launches `consumer_factory(session_factory, settings)`. `on_shutdown` does a
+  `done()`-checked cancel (handling `CancelledError`, logging other exceptions) and optionally closes
+  the session factory. The worker supplies `consumer_factory` as a closure wrapping its own
+  `run_<worker>_stream_consumer(...)`, absorbing the per-worker arg differences (some pass `stream_name`).
+- As with `redis_settings_from_url`, `arq` is imported lazily (only inside `generate_cron_jobs`); the
+  arq-free `import core_shared` invariant is asserted in the verification step.
+- Tests: `core_shared/tests/test_worker_arq.py` (30 cases) — TDD red→green: `TestSharedARQDefaults`,
+  `TestDefaultRetryDelay`, `TestGenerateCronJobs` (incl. legacy-equivalence guard), and async
+  `TestBuildWorkerLifecycle` (ctx wiring, launch, cancel, done-callback on/off, session-factory
+  close on/off, missing/already-done task), plus the export check.
+- **Test scope:** unit-only, per spec (Required Test Coverage above is **Unit**). Phase 1 is additive
+  `core_shared` library code with no wired-worker/DB/API/UI surface, mirroring ITER14-001 P1.
+  Integration coverage (each worker booting against real Redis/Postgres, running a trivial job, and
+  shutting down cleanly) lands in **ITER14-002 Phase 2/3**; the e2e surface (`IN_PROGRESS` sync in the
+  UI) lands in **ITER14-003 Phase 4**.
+- Quality gates green in `core_shared/`: `ruff check`, `ruff format --check`, `mypy` (80 files),
+  `pytest` (234 passed).
 
 #### Phase 2: Migrate `google` + `strava` onto the shared ARQ toolkit
 **PR Size:** ~360 lines (per-worker rewiring ~160, tests ~200)
