@@ -2097,7 +2097,7 @@ class TestJournalTypeDependencyDataCreation:
 
         # Verify FITNESS data was not cleared
         type_data = response.json()["data"]["attributes"]["type_data"]
-        assert type_data["fitness"]["distance"] == 5.0
+        assert type_data["fitness"]["distance"] == pytest.approx(5.0)
         assert type_data["fitness"]["duration"] == 1800
 
     async def test_adding_abseiling_trip_creates_fitness_and_outdoor_activity_data(

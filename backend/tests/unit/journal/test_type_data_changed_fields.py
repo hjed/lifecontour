@@ -9,10 +9,19 @@ non-scalar EVENT calendar fields.
 """
 
 from datetime import time
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
-from core_shared.models.journals import FitnessData, MoodData, PlanDocument
+import pytest
+from core_shared.models.journals import (
+    FitnessData,
+    JournalValidationError,
+    MoodData,
+    PlanData,
+    PlanDocument,
+)
 
+from app.core.journal.services.journal_type_data_helpers import update_plan_type_data
 from app.core.journal.services.journal_write_service import (
     diff_collection_rows,
     diff_tracked_fields,
@@ -213,3 +222,67 @@ class TestAbseilPitchCollectionSpec:
             before, after, key=spec.key, prefix=spec.prefix, fields=spec.fields
         )
         assert changed == {}
+
+
+class TestUpdatePlanTypeDataValidation:
+    """update_plan_type_data validates the free-form payload shape and surfaces
+    clean JournalValidationErrors (400) rather than 500s (ITER12-002 P4 review)."""
+
+    def _repo(self) -> AsyncMock:
+        repo = AsyncMock()
+        repo.find_by_journal_id = AsyncMock(return_value=PlanData(journal_id=1))
+        repo.get_documents = AsyncMock(return_value=[])
+        repo.save = AsyncMock(return_value=None)
+        repo.save_document = AsyncMock(return_value=None)
+        repo.delete_document = AsyncMock(return_value=None)
+        return repo
+
+    @pytest.mark.asyncio
+    async def test_documents_must_be_a_list(self) -> None:
+        with pytest.raises(JournalValidationError):
+            await update_plan_type_data(1, {"documents": {"url": "u"}}, self._repo())
+
+    @pytest.mark.asyncio
+    async def test_each_document_must_be_an_object(self) -> None:
+        with pytest.raises(JournalValidationError):
+            await update_plan_type_data(
+                1, {"documents": ["not-an-object"]}, self._repo()
+            )
+
+    @pytest.mark.asyncio
+    async def test_document_requires_string_url(self) -> None:
+        with pytest.raises(JournalValidationError):
+            await update_plan_type_data(
+                1, {"documents": [{"title": "t"}]}, self._repo()
+            )
+
+    @pytest.mark.asyncio
+    async def test_non_string_title_is_rejected(self) -> None:
+        with pytest.raises(JournalValidationError):
+            await update_plan_type_data(
+                1, {"documents": [{"url": "u", "title": 5}]}, self._repo()
+            )
+
+    @pytest.mark.asyncio
+    async def test_duplicate_urls_in_payload_are_rejected(self) -> None:
+        with pytest.raises(JournalValidationError):
+            await update_plan_type_data(
+                1,
+                {"documents": [{"url": "u", "title": "a"}, {"url": "u", "title": "b"}]},
+                self._repo(),
+            )
+
+    @pytest.mark.asyncio
+    async def test_valid_documents_are_saved(self) -> None:
+        repo = self._repo()
+        await update_plan_type_data(
+            1, {"documents": [{"url": "https://x", "title": "X"}]}, repo
+        )
+        repo.save_document.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_missing_documents_key_is_a_noop(self) -> None:
+        repo = self._repo()
+        await update_plan_type_data(1, {}, repo)
+        repo.save_document.assert_not_awaited()
+        repo.delete_document.assert_not_awaited()

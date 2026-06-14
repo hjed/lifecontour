@@ -342,3 +342,17 @@ class TestRecordMetadataHistory:
         await processor._record_metadata_history(7, dict(data), dict(data))
 
         publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_field_omitted_from_new_payload_is_not_a_clear(self) -> None:
+        """A field absent from the new (partial) payload must not record a spurious
+        'cleared' change — _reference_data drops None keys, so absence != cleared."""
+        publish = AsyncMock(return_value=None)
+        processor = self._processor(publish)
+        prev = {"album_name": "Trip", "asset_count": 3, "album_url": "u"}
+        # asset_count / album_url omitted by this sync; album_name unchanged.
+        new = {"album_name": "Trip"}
+
+        await processor._record_metadata_history(7, prev, new)
+
+        publish.assert_not_awaited()

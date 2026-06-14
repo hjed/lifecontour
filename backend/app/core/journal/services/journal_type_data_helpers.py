@@ -625,10 +625,17 @@ def _build_plan_document(
     from core_shared.models.journals import PlanDocument
 
     title_raw = doc.get("title")
-    if not title_raw or (isinstance(title_raw, str) and not title_raw.strip()):
+    if title_raw is not None and not isinstance(title_raw, str):
+        raise JournalValidationError("documents", "document title must be a string")
+    if not title_raw or not title_raw.strip():
         title = "Untitled"
     else:
         title = title_raw
+    description = doc.get("description")
+    if description is not None and not isinstance(description, str):
+        raise JournalValidationError(
+            "documents", "document description must be a string"
+        )
     order_raw = doc.get("order")
     order = order_raw if isinstance(order_raw, int) else order_fallback
     return PlanDocument(
@@ -636,7 +643,7 @@ def _build_plan_document(
         journal_id=journal_id,
         url=doc["url"],
         title=title,
-        description=doc.get("description"),
+        description=description,
         order=order,
     )
 
@@ -667,13 +674,30 @@ async def update_plan_type_data(
     if "documents" not in attrs:
         return
 
+    # The type-data update payload is a free-form dict, so validate the shape and
+    # surface clean JournalValidationErrors (400) rather than letting a malformed
+    # body raise TypeError/KeyError/AttributeError as a 500.
+    documents_payload = attrs["documents"] or []
+    if not isinstance(documents_payload, list):
+        raise JournalValidationError("documents", "documents must be a list")
+
     existing = await plan_data_repo.get_documents(journal_id)
     existing_by_url = {d.url: d for d in existing}
 
     new_documents: list[Any] = []
     seen_urls: set[str] = set()
-    for doc in attrs["documents"] or []:
-        url = doc["url"]
+    for doc in documents_payload:
+        if not isinstance(doc, dict):
+            raise JournalValidationError("documents", "each document must be an object")
+        url = doc.get("url")
+        if not isinstance(url, str) or not url.strip():
+            raise JournalValidationError(
+                "documents", "each document requires a non-empty string 'url'"
+            )
+        if url in seen_urls:
+            raise JournalValidationError(
+                "documents", f"duplicate document url in payload: {url}"
+            )
         match = existing_by_url.get(url)
         document_id = match.id if match is not None else uuid.uuid4()
         new_documents.append(

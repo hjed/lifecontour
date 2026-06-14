@@ -383,6 +383,11 @@ class ImmichAlbumOutboxEventProcessor:
 
         changed_fields: dict[str, Any] = {}
         for field in self._HISTORY_METADATA_FIELDS:
+            # `_reference_data()` drops keys whose value is None, so a field absent
+            # from the new payload was merely omitted by this sync — not cleared.
+            # Skip it to avoid fabricating a spurious "field cleared" history entry.
+            if field not in new_reference_data:
+                continue
             old = prev_reference_data.get(field)
             new = new_reference_data.get(field)
             if old != new:
