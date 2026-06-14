@@ -61,7 +61,7 @@ async def startup(ctx: dict) -> None:  # type: ignore[type-arg]
 
     from stream_consumer_tasks import run_immich_stream_consumer
 
-    session_factory = create_session_factory(settings.database_url)
+    session_factory = create_session_factory(settings.database_url.get_secret_value())
     ctx["session_factory"] = session_factory
 
     # Start stream consumer for domain events
@@ -156,7 +156,7 @@ async def sync_immich_people(
         async with session_factory() as session:
             conn = await session.connection()
 
-            auth_service = ImmichAuthService(settings.encryption_key)
+            auth_service = ImmichAuthService(settings.encryption_key.get_secret_value())
             api_key = await auth_service.get_api_key(user_id, conn)
             server_url = await auth_service.get_server_url(user_id, conn)
 
@@ -299,7 +299,7 @@ async def sync_immich_people_batch(
         async with session_factory() as session:
             conn = await session.connection()
 
-            auth_service = ImmichAuthService(settings.encryption_key)
+            auth_service = ImmichAuthService(settings.encryption_key.get_secret_value())
             api_key = await auth_service.get_api_key(user_id, conn)
             server_url = await auth_service.get_server_url(user_id, conn)
 
@@ -385,7 +385,7 @@ async def sync_immich_albums(
         async with session_factory() as session:
             conn = await session.connection()
 
-            auth_service = ImmichAuthService(settings.encryption_key)
+            auth_service = ImmichAuthService(settings.encryption_key.get_secret_value())
             api_key = await auth_service.get_api_key(user_id, conn)
             server_url = await auth_service.get_server_url(user_id, conn)
 
@@ -515,7 +515,7 @@ async def sync_immich_album_batch(
         async with session_factory() as session:
             conn = await session.connection()
 
-            auth_service = ImmichAuthService(settings.encryption_key)
+            auth_service = ImmichAuthService(settings.encryption_key.get_secret_value())
             api_key = await auth_service.get_api_key(user_id, conn)
             server_url = await auth_service.get_server_url(user_id, conn)
 
@@ -594,7 +594,7 @@ async def process_contact_event(
 
     async with session_factory() as session:
         # Find all Immich integrations for all users
-        auth_service = ImmichAuthService(settings.encryption_key)
+        auth_service = ImmichAuthService(settings.encryption_key.get_secret_value())
         conn = await session.connection()
 
         event_user_id = event_data.get("user_id")
@@ -619,7 +619,9 @@ async def process_contact_event(
         for user_id in user_ids:
             try:
                 conn = await session.connection()
-                auth_service = ImmichAuthService(settings.encryption_key)
+                auth_service = ImmichAuthService(
+                    settings.encryption_key.get_secret_value()
+                )
                 api_key = await auth_service.get_api_key(user_id, conn)
                 server_url = await auth_service.get_server_url(user_id, conn)
 

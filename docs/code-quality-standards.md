@@ -57,6 +57,21 @@ pnpm format:check     # Prettier formatting verification
 - Check for merge conflict markers
 - Prevent large files (>1MB) from being committed
 
+## Python Language Rules
+
+### Secrets must use `SecretStr`
+
+All secret-bearing settings fields in the backend and integration workers — for
+example `database_url`, `encryption_key`, and any API client secret — **must** be
+typed as `pydantic.SecretStr` rather than a bare `str`. This keeps secrets out of
+logs, `repr()`/`str()` output, and tracebacks.
+
+- Declare the field as `SecretStr` (the shared `core_shared.BaseWorkerSettings`
+  already declares `database_url: SecretStr`).
+- Read the raw value **only at the call site that needs it**, via
+  `.get_secret_value()` (e.g. `create_session_factory(settings.database_url.get_secret_value())`).
+- Do not log or interpolate the raw secret anywhere else.
+
 ## Tool-Specific Behavior
 
 ### Pre-commit Hooks (Auto-fix)

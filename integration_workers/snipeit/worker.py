@@ -47,7 +47,7 @@ async def startup(ctx: dict) -> None:  # type: ignore[type-arg]
 
     from stream_consumer_tasks import run_snipeit_stream_consumer
 
-    session_factory = create_session_factory(settings.database_url)
+    session_factory = create_session_factory(settings.database_url.get_secret_value())
     ctx["session_factory"] = session_factory
 
     # Start stream consumer for webhooks and domain events
@@ -117,7 +117,7 @@ def _create_sync_service(
     from snipeit_api_client import SnipeItAPIClient
     from snipeit_sync_service import SnipeItSyncService
 
-    fernet = Fernet(worker_settings.encryption_key.encode())
+    fernet = Fernet(worker_settings.encryption_key.get_secret_value().encode())
     api_key = fernet.decrypt(auth_data["encrypted_api_key"]).decode()
 
     api_client = SnipeItAPIClient.create(

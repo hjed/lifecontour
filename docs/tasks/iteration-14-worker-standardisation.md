@@ -156,17 +156,26 @@ Migrate the two workers that already use `SecretStr`. `google`'s inline settings
 Migrate the two workers that used bare `str`; convert secrets to `SecretStr` and add the periodic-sync fields `snipeit` lacked (inherited from the base, default disabled — no behaviour change).
 
 **Acceptance Criteria:**
-- [ ] `immich` and `snipeit` settings classes subclass `BaseWorkerSettings`, declaring only integration-specific fields; common/OTel fields removed.
-- [ ] All secrets (`encryption_key`, `database_url`) use `SecretStr`; call sites read `.get_secret_value()` where the raw value is needed.
-- [ ] `snipeit` inherits `enable_periodic_sync`/`sync_interval_hours` (default disabled) — no scheduling behaviour change.
+- [x] `immich` and `snipeit` settings classes subclass `BaseWorkerSettings`, declaring only integration-specific fields; common/OTel fields removed.
+- [x] All secrets (`encryption_key`, `database_url`) use `SecretStr`; call sites read `.get_secret_value()` where the raw value is needed.
+- [x] `snipeit` inherits `enable_periodic_sync`/`sync_interval_hours` (default disabled) — no scheduling behaviour change.
 
 **Required Test Coverage:**
-- **Unit:** settings subclasses load correctly; `SecretStr` masking verified; secret call sites resolve the raw value.
-- **Integration:** both workers boot with a representative `.env` and resolve Redis + DB URLs correctly.
+- [x] **Unit:** settings subclasses load correctly; `SecretStr` masking verified; secret call sites resolve the raw value.
+- [x] **Integration:** both workers boot with a representative `.env` and resolve Redis + DB URLs correctly.
 
 **Required Documentation Updates:**
-- `immich`/`snipeit` `README.md` settings sections updated.
-- `docs/code-quality-standards.md` — record the `SecretStr` requirement for all worker secrets.
+- [x] `immich`/`snipeit` `README.md` settings sections updated.
+- [x] `docs/code-quality-standards.md` — record the `SecretStr` requirement for all worker secrets.
+
+**Progress notes (Phase 3 complete — 2026-06-14, branch `emdash/iter14-001-3-immich-and-snipeit-sync`):**
+
+- `integration_workers/immich/immich_settings.py` and `integration_workers/snipeit/snipeit_settings.py` re-base `ImmichWorkerSettings`/`SnipeItWorkerSettings` onto `BaseWorkerSettings`, keeping only `encryption_key` (now `SecretStr`, default `SecretStr("")` to preserve the prior `str = ""` behaviour) plus the `worker_id`/`queue_name`/`otel_service_name` identity overrides. The duplicated common/OTel fields and the `model_config` block are removed; `from core_shared import BaseWorkerSettings` replaces `pydantic_settings.BaseSettings`.
+- `database_url` is now the base's required `SecretStr`. Call sites read the raw value via `.get_secret_value()`: immich `worker.py` (`create_session_factory(...)` + 6× `ImmichAuthService(...)`) and snipeit `worker.py` (`create_session_factory(...)` + `Fernet(...encode())`). The `ImmichAuthService`/`SnipeItAuthService` constructors keep their `encryption_key: str` signature — only the callers unwrap.
+- `snipeit` now inherits `enable_periodic_sync`/`sync_interval_hours` from the base (default-disabled), so it gains the fields without any scheduling-behaviour change. `redis_url`'s default consolidates from the workers' `redis://localhost:6379` to the base `redis://redis:6379` (deployments always set `REDIS_URL`). The per-worker `_parse_redis_url` helpers are left untouched — their replacement with `redis_settings_from_url` is ITER14-002.
+- Tests: `immich/tests/unit/test_immich_settings.py` (9) + `snipeit/tests/unit/test_snipeit_settings.py` (10) cover subclassing, integration-specific field loading, inherited base defaults (incl. snipeit's newly-inherited periodic-sync fields), identity overrides, `SecretStr` masking, secret call sites resolving the raw value via `.get_secret_value()`, env-var loading, and required-field validation. `immich`/`snipeit` `tests/integration/test_*_settings_integration.py` (2 each) boot each worker from a representative `.env` (asserting `database_url.get_secret_value()` + Redis/DB resolution) and assert each ARQ class's `redis_settings` is self-consistent with the worker's own `_parse_redis_url`. The pre-existing `immich/tests/unit/test_periodic_sync.py` was updated to pass `SecretStr(...)` for `database_url`.
+- Behaviour preservation verified: full `immich` (168 unit / 31 integration) and `snipeit` (162 unit / 14 integration) suites pass. Quality gates green: `ruff check`, `ruff format --check`, `mypy` for both workers.
+- Docs: created `integration_workers/immich/README.md` and `integration_workers/snipeit/README.md` with Configuration/Environment-Variables sections (base-inherited + integration-specific tables), and added the `SecretStr` worker-secret rule to `docs/code-quality-standards.md`.
 
 ---
 

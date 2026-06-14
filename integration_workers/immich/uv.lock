@@ -237,6 +237,7 @@ dependencies = [
     { name = "prometheus-client" },
     { name = "psycopg2-binary" },
     { name = "pydantic" },
+    { name = "pydantic-settings" },
     { name = "redis" },
     { name = "sqlalchemy" },
     { name = "structlog" },
@@ -244,6 +245,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "arq", marker = "extra == 'dev'", specifier = ">=0.26" },
     { name = "asyncpg", specifier = ">=0.31.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=2.1.0" },
     { name = "opentelemetry-api", specifier = ">=1.42.1" },
@@ -257,6 +259,7 @@ requires-dist = [
     { name = "prometheus-client", specifier = ">=0.25.0" },
     { name = "psycopg2-binary", specifier = ">=2.9.12" },
     { name = "pydantic", specifier = ">=2.13.4" },
+    { name = "pydantic-settings", specifier = ">=2.14.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.3" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=1.4.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1.0" },
@@ -270,6 +273,7 @@ provides-extras = ["dev"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "arq", specifier = ">=0.26" },
     { name = "mypy", specifier = ">=2.1.0" },
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
