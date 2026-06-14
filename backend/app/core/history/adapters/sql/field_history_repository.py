@@ -126,6 +126,72 @@ class SqlFieldHistoryRepository(FieldHistoryRepository):
         """Record multiple field changes."""
         return [await self.record_change(entry) for entry in entries]
 
+    async def repoint_entity_history(
+        self,
+        old_entity_id: int,
+        new_entity_id: int,
+        entity_type: str,
+        transaction: AsyncConnection,
+    ) -> int:
+        """Move an entity's top-level history rows onto another entity.
+
+        Used by the contact merge to carry the source contact's
+        ``entity_type = "contact"`` history onto the survivor so the survivor's
+        aggregate history is complete. Sub-entity rows (methods, addresses, …) are
+        deliberately NOT touched — they keep their own ids, which the merge already
+        re-pointed to the survivor, so the contact aggregation strategy already
+        picks them up.
+
+        Implemented as copy-then-delete in a single statement so the
+        ``(event_id, entity_type, entity_id, field_name)`` dedup index can drop any
+        row the survivor already carries (``ON CONFLICT DO NOTHING`` is only
+        available on ``INSERT``). The copy preserves ``event_id``, ``created_at``,
+        ``source`` and ``changed_by`` so ordering and provenance survive. Both CTEs
+        run from the same snapshot, so the delete removes the original source rows
+        regardless of which the insert skipped. Idempotent: once the source's rows
+        are gone a re-run copies and deletes nothing. Returns the rows moved.
+
+        A no-op when ``old_entity_id == new_entity_id``: copying onto the same id
+        conflicts on every row (so nothing is inserted) while the delete would wipe
+        that entity's history, so the self-move is rejected to prevent data loss.
+        """
+        if old_entity_id == new_entity_id:
+            return 0
+        query = text(
+            """
+            WITH moved AS (
+                INSERT INTO field_history
+                    (entity_type, entity_id, field_name, old_value, new_value,
+                     changed_by, source, event_id, created_at)
+                SELECT entity_type, :new_entity_id, field_name, old_value,
+                       new_value, changed_by, source, event_id, created_at
+                FROM field_history
+                WHERE entity_type = :entity_type AND entity_id = :old_entity_id
+                ON CONFLICT (event_id, entity_type, entity_id, field_name)
+                    DO NOTHING
+                RETURNING 1
+            ),
+            deleted AS (
+                DELETE FROM field_history
+                WHERE entity_type = :entity_type AND entity_id = :old_entity_id
+                RETURNING 1
+            )
+            SELECT
+                (SELECT count(*) FROM moved) AS moved_count,
+                (SELECT count(*) FROM deleted) AS deleted_count
+            """
+        )
+        result = await transaction.execute(
+            query,
+            {
+                "new_entity_id": new_entity_id,
+                "old_entity_id": old_entity_id,
+                "entity_type": entity_type,
+            },
+        )
+        row = result.fetchone()
+        return int(row.moved_count) if row else 0
+
     async def get_history_for_aggregate(
         self, root_type: str, root_id: int, limit: int = 50, offset: int = 0
     ) -> list[FieldHistoryEntry]:

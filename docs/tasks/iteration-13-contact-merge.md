@@ -298,17 +298,24 @@ Wire the reachable flow. **This phase makes contact merge usable in the web UI**
 - The source contact's `field_history` rows are re-pointed onto the survivor so the unified record's aggregate history is complete.
 - The merge event appears in the survivor's activity feed with correct `ui`/`mcp` provenance and references the absorbed source.
 
-#### Phase 1: Re-point contact history onto the survivor
+#### Phase 1: Re-point contact history onto the survivor ✅ Complete
 **PR Size:** ~230 lines (repo ~50, service wiring ~30, tests ~150)
 
 A single phase. Sub-entity history rows (`entity_type` in `contact_method` / `contact_address` / …) need no change — those rows keep their own ids, which ITER13-001 re-pointed to the survivor — so only the top-level `entity_type = "contact"` rows move.
 
 **Acceptance Criteria:**
-- [ ] `SqlFieldHistoryRepository` gains `repoint_entity_history(old_entity_id, new_entity_id, entity_type, transaction)` that re-points the source contact's top-level history rows to the survivor, respecting the `(event_id, entity_type, entity_id, field_name)` idempotency index (`ON CONFLICT DO NOTHING`).
-- [ ] `ContactMergeService` calls the re-point within the merge transaction (after the source's sub-entities have moved, before the source row is deleted), so the survivor's aggregate history (`get_history_for_aggregate("contact", survivor_id)`) returns both contacts' prior changes plus the ITER13-001 merge row.
+- [x] `SqlFieldHistoryRepository` gains `repoint_entity_history(old_entity_id, new_entity_id, entity_type, transaction)` that re-points the source contact's top-level history rows to the survivor, respecting the `(event_id, entity_type, entity_id, field_name)` idempotency index (`ON CONFLICT DO NOTHING`). Implemented as a single copy-then-delete statement (the only form that supports `ON CONFLICT DO NOTHING`), preserving `event_id` / `created_at` / `source` / `changed_by`.
+- [x] `ContactMergeService` calls the re-point within the merge transaction (after the source's sub-entities have moved, before the source row is deleted), so the survivor's aggregate history (`get_history_for_aggregate("contact", survivor_id)`) returns both contacts' prior changes plus the ITER13-001 merge row. `FieldHistoryRepository` is injected via Dishka (provided by `JournalProvider`).
 
 **Required Test Coverage:**
-- [ ] **Integration:** after a merge, the survivor's aggregate history includes the source's pre-merge changes and the merge event; re-running the re-point is idempotent; the activity-feed endpoint surfaces the merge row with correct provenance.
+- [x] **Integration:** after a merge, the survivor's aggregate history includes the source's pre-merge changes and the merge event; re-running the re-point is idempotent; the activity-feed endpoint surfaces the merge row with correct provenance.
+
+**Delivered tests:**
+- Unit: `tests/unit/contacts/test_contact_merge_service.py::test_repoints_history_then_deletes_source` (re-point called with `(source, survivor, "contact", tx)` before the source delete).
+- Integration (repo): `tests/integration/history/test_field_history_repository_integration.py` — moves top-level rows / leaves sub-entity rows; preserves provenance + event_id; idempotent re-run; conflicting-row dedup.
+- Integration (merge): `tests/integration/contacts/test_contact_merge_aggregate_integration.py::test_merge_repoints_source_history_onto_survivor`.
+- Integration (feed): `tests/integration/infrastructure/events/test_contact_history_projection_integration.py::TestMergeHistoryFeed::test_merge_event_surfaces_in_activity_feed_with_provenance` (real merge endpoint + outbox→projection→`GET /history`, asserts `merged_from` with `ui` provenance + re-pointed change).
+- E2E: `frontend/tests/e2e/contacts-merge-api.spec.ts` → "Contact merge history re-pointing (ITER13-004)" (Chromium, polls the async feed).
 
 ### ITER13-005: External Sync Reconciliation
 

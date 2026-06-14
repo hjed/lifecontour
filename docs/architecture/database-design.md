@@ -132,6 +132,14 @@ Reads are aggregated per root entity via a pluggable aggregation strategy
 (`HistoryAggregationStrategy`): the `contact` strategy resolves the contact plus all
 its related sub-entities; a `journal` strategy is added in ITER12-002.
 
+On contact merge (ITER13-004), `FieldHistoryRepository.repoint_entity_history` moves the
+source contact's top-level (`entity_type='contact'`) rows onto the survivor so the unified
+record carries both contacts' audit trail. It is a single copy-then-delete statement that
+respects `ux_field_history_event_dedup` via `ON CONFLICT DO NOTHING`, preserving each row's
+`event_id` / `created_at` / `source` / `changed_by`. Sub-entity rows are untouched — they
+keep their own ids (already re-pointed by ITER13-001), so the `contact` aggregation strategy
+already resolves them to the survivor.
+
 `field_name` also encodes changes to a journal's **sub-rows**, so they group under the
 parent journal (`entity_type='journal'`, `entity_id=<journal id>`) without a join and
 survive sub-row deletion. The convention is `<prefix>:<key>:<field>`, where the key is a

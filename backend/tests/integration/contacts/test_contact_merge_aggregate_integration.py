@@ -42,6 +42,10 @@ from app.core.contacts.models.repositories import (
     DomainEventProtocol,
 )
 from app.core.contacts.services.contact_merge_service import ContactMergeService
+from app.core.history.adapters.sql.field_history_repository import (
+    SqlFieldHistoryRepository,
+)
+from app.core.history.models import FieldHistoryEntry
 from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
     SqlJournalContactRelationshipRepository,
 )
@@ -71,10 +75,18 @@ async def event_publisher() -> RecordingEventPublisher:
 
 
 @pytest_asyncio.fixture
+async def history_repo(
+    async_connection: AsyncConnection,
+) -> SqlFieldHistoryRepository:
+    return SqlFieldHistoryRepository(async_connection)
+
+
+@pytest_asyncio.fixture
 async def merge_service(
     async_connection: AsyncConnection,
     contact_repo: SqlContactRepository,
     event_publisher: RecordingEventPublisher,
+    history_repo: SqlFieldHistoryRepository,
 ) -> ContactMergeService:
     return ContactMergeService(
         contact_repo=contact_repo,
@@ -83,6 +95,7 @@ async def merge_service(
             async_connection
         ),
         event_publisher=event_publisher,
+        history_repo=history_repo,
     )
 
 
@@ -408,6 +421,48 @@ class TestContactMergeAggregateIntegration:
         assert event.aggregate_id == survivor_id
         changed_fields = event.event_data["changed_fields"]
         assert changed_fields["merged_from"] == (source_id, survivor_id)
+
+    @pytest.mark.asyncio
+    async def test_merge_repoints_source_history_onto_survivor(
+        self,
+        async_connection: AsyncConnection,
+        contact_repo: SqlContactRepository,
+        merge_service: ContactMergeService,
+        history_repo: SqlFieldHistoryRepository,
+    ) -> None:
+        """The source's pre-merge top-level history is carried onto the survivor so
+        the unified record's aggregate history is complete."""
+        survivor_id = await _make_contact(contact_repo, "Survivor")
+        source_id = await _make_contact(contact_repo, "Source")
+        # A pre-merge change recorded against the source contact.
+        await history_repo.record_change(
+            FieldHistoryEntry(
+                entity_type="contact",
+                entity_id=source_id,
+                field_name="first_name",
+                old_value="Source",
+                new_value="Sourced",
+                event_id="evt-premerge",
+            )
+        )
+
+        await merge_service.merge_contacts(
+            survivor_id, source_id, transaction=async_connection
+        )
+
+        aggregate = await history_repo.get_history_for_aggregate(
+            "contact", survivor_id, limit=50, offset=0
+        )
+        moved = [
+            e
+            for e in aggregate
+            if e.field_name == "first_name" and e.event_id == "evt-premerge"
+        ]
+        assert len(moved) == 1
+        assert moved[0].entity_id == survivor_id
+        # No orphaned top-level rows remain for the deleted source.
+        source_rows = await history_repo.get_entity_history("contact", source_id)
+        assert source_rows == []
 
     @pytest.mark.asyncio
     async def test_merge_requests_summary_refresh_for_survivor(
