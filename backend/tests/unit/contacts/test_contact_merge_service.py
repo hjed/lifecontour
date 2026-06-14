@@ -330,3 +330,184 @@ class TestContactMergeSideEffects:
         published = self._published(mock_event_publisher)
         assert "ContactDeleted" not in published
         assert "ContactMerged" in published
+
+
+class TestContactMergeOverrides:
+    """ITER13-002 Phase 1: per-field overrides (survivor / source / custom).
+
+    An override is a mapping ``field_name -> explicit value to apply``. A present
+    key wins over the ITER13-001 prefer-non-empty default; an absent key falls
+    back to that default. The UI/agent resolves the "survivor vs source vs custom"
+    choice into a concrete value before calling the service (mirroring the journal
+    ``MergeResolutionDialog`` ↔ ``merge_journals`` contract).
+    """
+
+    @staticmethod
+    def _saved_contact(mock_contact_repo: AsyncMock) -> Contact:
+        mock_contact_repo.save.assert_awaited_once()
+        return cast(Contact, mock_contact_repo.save.await_args.args[0])
+
+    @staticmethod
+    def _conflicting(mock_contact_repo: AsyncMock) -> None:
+        """Both contacts hold differing non-empty values for every scalar field."""
+        mock_contact_repo.find_by_id.side_effect = lambda cid: (
+            Contact(
+                id=SURVIVOR_ID,
+                first_name="SurvFirst",
+                last_name="SurvLast",
+                middle_name="SurvMiddle",
+                nick_name="SurvNick",
+                company="SurvCo",
+                job_title="SurvTitle",
+                photo_url="https://survivor/photo.png",
+                is_favourite=True,
+            )
+            if cid == SURVIVOR_ID
+            else Contact(
+                id=SOURCE_ID,
+                first_name="SrcFirst",
+                last_name="SrcLast",
+                middle_name="SrcMiddle",
+                nick_name="SrcNick",
+                company="SrcCo",
+                job_title="SrcTitle",
+                photo_url="https://source/photo.png",
+                is_favourite=False,
+            )
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "field, custom_value",
+        [
+            ("first_name", "CustomFirst"),
+            ("last_name", "CustomLast"),
+            ("middle_name", "CustomMiddle"),
+            ("nick_name", "CustomNick"),
+            ("company", "CustomCo"),
+            ("job_title", "CustomTitle"),
+            ("photo_url", "https://custom/photo.png"),
+        ],
+    )
+    async def test_custom_override_applied_per_field(
+        self, merge_service, mock_contact_repo, mock_transaction, field, custom_value
+    ) -> None:
+        self._conflicting(mock_contact_repo)
+
+        await merge_service.merge_contacts(
+            SURVIVOR_ID,
+            SOURCE_ID,
+            transaction=mock_transaction,
+            overrides={field: custom_value},
+        )
+
+        saved = self._saved_contact(mock_contact_repo)
+        assert getattr(saved, field) == custom_value
+
+    @pytest.mark.asyncio
+    async def test_override_can_select_source_value_over_survivor(
+        self, merge_service, mock_contact_repo, mock_transaction
+    ) -> None:
+        # Survivor is non-empty, so prefer-non-empty would keep it; the override
+        # of the source's value must win, proving overrides beat survivor-wins.
+        self._conflicting(mock_contact_repo)
+
+        await merge_service.merge_contacts(
+            SURVIVOR_ID,
+            SOURCE_ID,
+            transaction=mock_transaction,
+            overrides={"company": "SrcCo"},
+        )
+
+        saved = self._saved_contact(mock_contact_repo)
+        assert saved.company == "SrcCo"
+
+    @pytest.mark.asyncio
+    async def test_is_favourite_false_override_is_honoured(
+        self, merge_service, mock_contact_repo, mock_transaction
+    ) -> None:
+        # Survivor is_favourite=True; an explicit False override must win even
+        # though it is falsy (boolean edge case — distinguished from "absent").
+        self._conflicting(mock_contact_repo)
+
+        await merge_service.merge_contacts(
+            SURVIVOR_ID,
+            SOURCE_ID,
+            transaction=mock_transaction,
+            overrides={"is_favourite": False},
+        )
+
+        saved = self._saved_contact(mock_contact_repo)
+        assert saved.is_favourite is False
+
+    @pytest.mark.asyncio
+    async def test_absent_override_falls_back_to_default_policy(
+        self, merge_service, mock_contact_repo, mock_transaction
+    ) -> None:
+        self._conflicting(mock_contact_repo)
+
+        # Only override company; every other field keeps survivor-wins default.
+        await merge_service.merge_contacts(
+            SURVIVOR_ID,
+            SOURCE_ID,
+            transaction=mock_transaction,
+            overrides={"company": "CustomCo"},
+        )
+
+        saved = self._saved_contact(mock_contact_repo)
+        assert saved.company == "CustomCo"
+        assert saved.first_name == "SurvFirst"  # survivor wins by default
+        assert saved.job_title == "SurvTitle"
+
+    @pytest.mark.asyncio
+    async def test_overridden_fields_recorded_in_audit_event(
+        self, merge_service, mock_contact_repo, mock_event_publisher, mock_transaction
+    ) -> None:
+        self._conflicting(mock_contact_repo)
+
+        await merge_service.merge_contacts(
+            SURVIVOR_ID,
+            SOURCE_ID,
+            transaction=mock_transaction,
+            overrides={"company": "CustomCo"},
+        )
+
+        published = [c.args[0] for c in mock_event_publisher.publish.await_args_list]
+        updated = next(e for e in published if e.event_type == "ContactUpdated")
+        changed_fields = updated.event_data["changed_fields"]
+        assert "merged_from" in changed_fields
+        # The explicitly overridden field is auditable as (old, new).
+        assert "company" in changed_fields
+        old_value, new_value = changed_fields["company"]
+        assert old_value == "SurvCo"
+        assert new_value == "CustomCo"
+
+
+class TestHasScalarConflicts:
+    """``has_scalar_conflicts`` mirrors ``has_base_conflicts`` for journals."""
+
+    @pytest.mark.asyncio
+    async def test_both_non_empty_and_differing_is_a_conflict(
+        self, merge_service
+    ) -> None:
+        survivor = Contact(id=SURVIVOR_ID, first_name="Alice", company="Acme")
+        source = Contact(id=SOURCE_ID, first_name="Alice", company="Globex")
+        assert merge_service.has_scalar_conflicts(survivor, source) is True
+
+    @pytest.mark.asyncio
+    async def test_one_side_empty_is_not_a_conflict(self, merge_service) -> None:
+        survivor = Contact(id=SURVIVOR_ID, first_name="Alice", company="Acme")
+        source = Contact(id=SOURCE_ID, first_name="Alice", company=None)
+        assert merge_service.has_scalar_conflicts(survivor, source) is False
+
+    @pytest.mark.asyncio
+    async def test_equal_values_are_not_a_conflict(self, merge_service) -> None:
+        survivor = Contact(id=SURVIVOR_ID, first_name="Alice", company="Acme")
+        source = Contact(id=SOURCE_ID, first_name="Alice", company="Acme")
+        assert merge_service.has_scalar_conflicts(survivor, source) is False
+
+    @pytest.mark.asyncio
+    async def test_both_empty_is_not_a_conflict(self, merge_service) -> None:
+        survivor = Contact(id=SURVIVOR_ID, first_name="Alice", company=None)
+        source = Contact(id=SOURCE_ID, first_name="Alice", company=None)
+        assert merge_service.has_scalar_conflicts(survivor, source) is False

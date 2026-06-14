@@ -321,10 +321,18 @@ async def merge_contact(
     The path ``contact_id`` is the surviving contact; ``source_contact_id`` in the
     body is absorbed and deleted. The survivor keeps its identity and gains the
     source's deduplicated aggregate. Conflicts resolve survivor-wins / prefer
-    non-empty (per-field overrides arrive in ITER13-002). The merge is a single
-    unit of work owned by the service, so this controller opens no transaction.
+    non-empty by default; optional per-field ``overrides`` (ITER13-002) let the
+    caller keep the survivor value, take the source value, or supply a custom one.
+    The merge is a single unit of work owned by the service, so this controller
+    opens no transaction.
     """
     source_id = merge_request.data.attributes.source_contact_id
+
+    overrides_dict = None
+    if merge_request.data.attributes.overrides:
+        overrides_dict = merge_request.data.attributes.overrides.model_dump(
+            exclude_none=True
+        )
 
     await contact_merge_service.merge_contacts(
         contact_id,
@@ -332,6 +340,7 @@ async def merge_contact(
         transaction=connection,
         changed_by="ui",
         source=Provenance.UI,
+        overrides=overrides_dict,
     )
 
     # Re-fetch the enriched survivor so the response carries the full, merged
