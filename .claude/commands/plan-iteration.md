@@ -4,9 +4,8 @@ argument-hint: <ITER-ID> [phase N] — e.g. ITER11-003 phase 2
 model: opus
 ---
 
-Plan and then implement **$ARGUMENTS** using strict Test-First Development (TDD).
 
-Plan and then implement **$ARGUMENTS** using TDD. Make sure the plan includes Unit, Integration and e2e coverage.
+Plan and then implement **$ARGUMENTS** using TDD. Make sure the plan includes Unit, Integration and e2e coverage. (E2E coverage can be skipped if the change does not yet impact frontend)
 
 Start by reviewing the documents linked in the iteration doc (especially the product-specification), as well as our standards  and architecture. Then review existing components we can modify or review. Ensure we update the iteration doc with our progress as we go and include this in the plan. Also include a check step in the plan to review our changes against the product specification and itteration doc Ensure all tests specified in the spec are included as a minimum. . Ensure you test all quality gates locally. Ensure UI is accessible and follow best practises for playwright. Make sure all tests are run locally and are passing. Ensure any relevant documentation is updated.
 
@@ -33,7 +32,7 @@ MCP tool for code/concept search before grep/find (per CLAUDE.md):
    `core_shared` models/schemas, frontend components, fixtures, and helpers. Prefer reuse over
    new code (per CLAUDE.md). Identify the specific files that will change.
 
-You can use auggie-explore, and plan subagents. DO NOT use the generic `explore` agent.
+You can use explore-auggie, and plan subagents. DO NOT use the generic `explore` agent.
 
 ## Phase 2 — Build the plan
 
