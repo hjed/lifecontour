@@ -7,7 +7,7 @@ description: review this before making any commit
 
 When you are preparing for a commit please consider the following:
 
-1. Refer back the implementation plan and ensure we've implemented what we expected to. Also check any iteration or task documents that we were referencing. If these are incorrect consider if we need to make changes before commiting.
+1. Refer back the implementation plan and ensure we've implemented what we expected to. Also check any iteration or task documents that we were referencing. If these are incorrect consider if we need to make changes before commiting. IF any work has been deffered - it must be reflected on a future task in an itteration doc, or if we're not working on an itteration then in a github issue
 
 2. Check that you have recently run *ALL* unit tests for the type of code you've touched (backend, frontend, core_shared, etc). If not, run them now. If there are failures, fix them before commiting. Ensure your fixes align with your implementation plan and any specification you were provided.
 
