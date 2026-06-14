@@ -38,12 +38,10 @@ _JOURNAL_HISTORY_EVENT_TYPES: list[str] = [
     "GearItemUpdated",
 ]
 
-# Contact-domain event types the projection knows how to map (HistoryService has a
-# handler for each). ITER12-003 Phase 1 deliberately keeps these OUT of the live
-# subscription below: the synchronous dual-write is still the sole writer of
-# contact history this phase, so subscribing here would double-write. Phase 2 adds
-# these to ``event_type_patterns`` and removes the dual-write atomically. The list
-# lives here so Phase 2 (and the inertness-invariant test) can reference it.
+# Contact-domain event types the projection maps (HistoryService has a handler for
+# each). ITER12-003 Phase 2 added these to the live ``event_type_patterns`` below
+# and removed the synchronous dual-write, so the projection is now the sole writer
+# of contact history.
 _CONTACT_HISTORY_EVENT_TYPES: list[str] = [
     "ContactCreated",
     "ContactUpdated",
@@ -65,11 +63,13 @@ _CONTACT_HISTORY_EVENT_TYPES: list[str] = [
 
 
 class HistoryProjectionConsumer(DeadLetterConsumerMixin, StreamConsumer):
-    """Stream consumer that projects journal events into field history.
+    """Stream consumer that projects journal and contact events into field history.
 
-    Listens to journal/route/gear domain events on the ``pms:domain-events``
-    stream using the ``history-projection`` consumer group and delegates the
-    event-to-rows mapping to :class:`HistoryService`.
+    Listens to journal/route/gear and contact domain events on the
+    ``pms:domain-events`` stream using the ``history-projection`` consumer group
+    and delegates the event-to-rows mapping to :class:`HistoryService`. Since
+    ITER12-003 Phase 2 it is the sole writer of contact history (the synchronous
+    dual-write was removed).
     """
 
     def __init__(
@@ -94,7 +94,9 @@ class HistoryProjectionConsumer(DeadLetterConsumerMixin, StreamConsumer):
             stream_name=stream_name,
             group_name="history-projection",
             consumer_name=consumer_name,
-            event_type_patterns=_JOURNAL_HISTORY_EVENT_TYPES,
+            event_type_patterns=(
+                _JOURNAL_HISTORY_EVENT_TYPES + _CONTACT_HISTORY_EVENT_TYPES
+            ),
             batch_size=batch_size,
             block_ms=block_ms,
         )

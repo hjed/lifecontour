@@ -95,22 +95,15 @@ class ContactTestProvider(Provider):
     ) -> ContactRelationshipService:
         from app.core.contacts.adapters.sql import (
             SqlContactEventPublisher,
-            SqlContactFieldHistoryRepository,
             SqlContactRelationshipRepository,
             SqlContactRepository,
         )
-        from app.core.contacts.services import (
-            ContactHistoryService,
-            ContactRelationshipService,
-        )
+        from app.core.contacts.services import ContactRelationshipService
 
         return ContactRelationshipService(
             contact_repo=SqlContactRepository(connection),
             relationship_repo=SqlContactRelationshipRepository(connection),
             event_publisher=SqlContactEventPublisher(connection),
-            history_service=ContactHistoryService(
-                SqlContactFieldHistoryRepository(connection)
-            ),
         )
 
     @provide(scope=Scope.APP)

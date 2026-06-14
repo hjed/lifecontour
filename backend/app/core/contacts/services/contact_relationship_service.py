@@ -18,24 +18,26 @@ from app.core.contacts.models.repositories import (
     ContactRelationshipRepository,
     ContactRepository,
 )
-from app.core.contacts.services.contact_history_service import ContactHistoryService
 from app.infrastructure.unit_of_work import transactional
 
 
 class ContactRelationshipService:
-    """Service for managing contact relationships with business logic."""
+    """Service for managing contact relationships with business logic.
+
+    ITER12-003 Phase 2: relationship history is produced by the event-driven
+    HistoryProjectionConsumer from the ContactRelationship* events published here,
+    so the service no longer writes history synchronously.
+    """
 
     def __init__(
         self,
         contact_repo: ContactRepository,
         relationship_repo: ContactRelationshipRepository,
         event_publisher: ContactEventPublisher,
-        history_service: ContactHistoryService,
     ):
         self.contact_repo = contact_repo
         self.relationship_repo = relationship_repo
         self.event_publisher = event_publisher
-        self.history_service = history_service
 
     @transactional
     async def create_relationship(
@@ -111,16 +113,6 @@ class ContactRelationshipService:
                 )
             )
 
-            await self.history_service.record_relationship_change(
-                created.id,
-                {
-                    "status": (None, "created"),
-                    "relationship_type": (None, created.relationship_type.value),
-                },
-                changed_by=changed_by,
-                source=source,
-            )
-
             return created
         else:
             # Contact-to-contact relationship
@@ -167,19 +159,6 @@ class ContactRelationshipService:
                 )
             )
 
-            await self.history_service.record_relationship_change(
-                created_relationship.id,
-                {
-                    "status": (None, "created"),
-                    "relationship_type": (
-                        None,
-                        created_relationship.relationship_type.value,
-                    ),
-                },
-                changed_by=changed_by,
-                source=source,
-            )
-
             # Create bidirectional relationship if requested
             if create_bidirectional:
                 inverse_relationship = ContactRelationship(
@@ -206,19 +185,6 @@ class ContactRelationshipService:
                         source=source,
                         changed_by=changed_by,
                     )
-                )
-
-                await self.history_service.record_relationship_change(
-                    created_inverse.id,
-                    {
-                        "status": (None, "created"),
-                        "relationship_type": (
-                            None,
-                            created_inverse.relationship_type.value,
-                        ),
-                    },
-                    changed_by=changed_by,
-                    source=source,
                 )
 
                 return [created_relationship, created_inverse]
@@ -340,14 +306,6 @@ class ContactRelationshipService:
             )
         )
 
-        if relationship_changed_fields:
-            await self.history_service.record_relationship_change(
-                updated.id,
-                relationship_changed_fields,
-                changed_by=changed_by,
-                source=source,
-            )
-
         return updated
 
     @transactional
@@ -396,13 +354,6 @@ class ContactRelationshipService:
             )
         )
 
-        await self.history_service.record_relationship_change(
-            existing_relationship.id,
-            {"status": ("active", "deleted")},
-            changed_by=changed_by,
-            source=source,
-        )
-
     @transactional
     async def delete_all_relationships_for_contact(
         self,
@@ -434,13 +385,6 @@ class ContactRelationshipService:
                         source=source,
                         changed_by=changed_by,
                     )
-                )
-
-                await self.history_service.record_relationship_change(
-                    relationship.id,
-                    {"status": ("active", "deleted")},
-                    changed_by=changed_by,
-                    source=source,
                 )
 
     async def get_relationship_by_id(

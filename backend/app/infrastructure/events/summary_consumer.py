@@ -177,16 +177,9 @@ class SummaryConsumer(DeadLetterConsumerMixin, StreamConsumer):
         journal_repo = SqlJournalRepository(connection)
         summary_repo = SqlContactSummaryRepository(connection)
 
-        # Create services
-        from app.core.contacts.services.contact_history_service import (
-            ContactHistoryService,
-        )
-
-        history_service = ContactHistoryService(history_repo)
-
         # Publish ContactSummaryUpdated to the outbox on the same connection so the
-        # event commits atomically with the history write (ITER12-003 Phase 1). The
-        # history projection consumer ignores it this phase (inert); Phase 2 uses it.
+        # event commits atomically with the summary row; the history projection
+        # consumer records summary history from it (ITER12-003 Phase 2).
         from app.infrastructure.events.outbox_event_publisher import (
             OutboxEventPublisher,
         )
@@ -216,7 +209,6 @@ class SummaryConsumer(DeadLetterConsumerMixin, StreamConsumer):
             summary_repo=summary_repo,
             gemini_api_key=settings.gemini_api_key,
             gemini_model=settings.gemini_summary_model,
-            history_service=history_service,
             event_publisher=event_publisher,
             connection=connection,
             timezone=timezone,

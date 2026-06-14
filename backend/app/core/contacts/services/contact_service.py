@@ -508,17 +508,8 @@ class ContactService:
             # Save the updated contact
             await self.contact_repo.save(updated_contact)
 
-            # Record field history
+            # Publish update event; the history projection records the change.
             changed_fields = {field_name: (old_value, new_value)}
-            await self.history_service.record_contact_change(
-                contact_id,
-                changed_fields,
-                changed_by=changed_by,
-                source=source,
-                _transaction=transaction,
-            )
-
-            # Publish update event
             event = ContactUpdated(
                 contact_id,
                 changed_fields,
@@ -607,16 +598,6 @@ class ContactService:
             # Save the updated method
             await self.contact_repo.update_method(method_to_update)
 
-            # Record history
-            changed_fields = {field_name: (old_value, new_value)}
-            await self.history_service.record_method_change(
-                method_id,
-                changed_fields,
-                changed_by=changed_by,
-                source=source,
-                _transaction=transaction,
-            )
-
             # Publish ContactUpdated (the core contact event downstream consumers
             # rely on) with a per-sub-entity key. The history projection decodes
             # the "method_{id}_{field}" key back to the contact_method row.
@@ -704,16 +685,6 @@ class ContactService:
             # Save the updated address
             await self.contact_repo.update_address(address_to_update)
 
-            # Record history
-            changed_fields = {field_name: (old_value, new_value)}
-            await self.history_service.record_address_change(
-                address_id,
-                changed_fields,
-                changed_by=changed_by,
-                source=source,
-                _transaction=transaction,
-            )
-
             # Publish ContactUpdated with a per-sub-entity key; the projection
             # decodes "address_{id}_{field}" to the contact_address row.
             event = ContactUpdated(
@@ -799,16 +770,6 @@ class ContactService:
 
             # Save the updated note
             await self.contact_repo.update_note(note_to_update)
-
-            # Record history
-            changed_fields = {field_name: (old_value, new_value)}
-            await self.history_service.record_note_change(
-                note_id,
-                changed_fields,
-                changed_by=changed_by,
-                source=source,
-                _transaction=transaction,
-            )
 
             # Publish ContactUpdated with a per-sub-entity key; the projection
             # decodes "note_{id}_{field}" to the contact_note row.
@@ -1040,50 +1001,12 @@ class ContactService:
             raise ContactValidationError(
                 "id", "Contact ID is required for event publishing"
             )
-        await self.history_service.record_contact_change(
-            contact.id,
-            {"status": (None, "created")},
-            changed_by=changed_by,
-            source=source,
-            _transaction=transaction,
-        )
-        for method in contact.methods or []:
-            if method.id is not None:
-                await self.history_service.record_method_change(
-                    method.id,
-                    {"status": (None, "created")},
-                    changed_by=changed_by,
-                    source=source,
-                    _transaction=transaction,
-                )
-        for address in contact.addresses or []:
-            if address.id is not None:
-                await self.history_service.record_address_change(
-                    address.id,
-                    {"status": (None, "created")},
-                    changed_by=changed_by,
-                    source=source,
-                    _transaction=transaction,
-                )
-        for note in contact.notes or []:
-            if note.id is not None:
-                await self.history_service.record_note_change(
-                    note.id,
-                    {"status": (None, "created")},
-                    changed_by=changed_by,
-                    source=source,
-                    _transaction=transaction,
-                )
-        for date in contact.important_dates or []:
-            if date.id is not None:
-                await self.history_service.record_important_date_change(
-                    date.id,
-                    {"status": (None, "created")},
-                    changed_by=changed_by,
-                    source=source,
-                    _transaction=transaction,
-                )
-
+        # ITER12-003 Phase 2: history is now produced by the projection consumer.
+        # ContactCreated projects the contact-level "created" marker; the per-item
+        # ContactMethodAdded/AddressAdded/NoteAdded/ImportantDateAdded events that
+        # _save_all_related_entities publishes (affects_history defaults True on the
+        # create path) project the per-sub-entity "created" markers — together
+        # reproducing the rows the dual-write used to record here.
         event = ContactCreated(
             contact.id,
             contact.first_name,
@@ -1115,31 +1038,61 @@ class ContactService:
             "tags": [],
         }
 
+        # ITER12-003 Phase 2: this is a bulk delete-all-then-re-save. The aggregate
+        # ContactUpdated row (computed by _calculate_changed_fields) is the feed, so
+        # the per-item add/assign events are flagged affects_history=False and the
+        # history projection skips them — preventing spurious per-item "created"/tag
+        # markers the dual-write never wrote. Search still consumes the events.
         if contact.methods is not None:
             saved_entities["methods"] = await self._save_contact_methods(
-                contact_id, contact.methods, transaction, changed_by, source
+                contact_id,
+                contact.methods,
+                transaction,
+                changed_by,
+                source,
+                affects_history=False,
             )
 
         if contact.addresses is not None:
             saved_entities["addresses"] = await self._save_contact_addresses(
-                contact_id, contact.addresses, transaction, changed_by, source
+                contact_id,
+                contact.addresses,
+                transaction,
+                changed_by,
+                source,
+                affects_history=False,
             )
 
         if contact.notes is not None:
             saved_entities["notes"] = await self._save_contact_notes(
-                contact_id, contact.notes, transaction, changed_by, source
+                contact_id,
+                contact.notes,
+                transaction,
+                changed_by,
+                source,
+                affects_history=False,
             )
 
         if contact.tags is not None:
             saved_entities["tags"] = await self._save_contact_tags(
-                contact_id, contact.tags, transaction, changed_by, source
+                contact_id,
+                contact.tags,
+                transaction,
+                changed_by,
+                source,
+                affects_history=False,
             )
 
         if contact.important_dates is not None:
             saved_entities[
                 "important_dates"
             ] = await self._save_contact_important_dates(
-                contact_id, contact.important_dates, transaction, changed_by, source
+                contact_id,
+                contact.important_dates,
+                transaction,
+                changed_by,
+                source,
+                affects_history=False,
             )
 
         return saved_entities
@@ -1187,19 +1140,11 @@ class ContactService:
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
     ) -> None:
-        """Publish contact updated events and record history."""
+        """Publish contact updated events; the history projection records the change."""
         if contact.id is None:
             raise ContactValidationError(
                 "id", "Contact ID is required for event publishing"
             )
-        await self.history_service.record_contact_change(
-            contact.id,
-            changed_fields,
-            changed_by=changed_by,
-            source=source,
-            _transaction=transaction,
-        )
-
         event = ContactUpdated(
             contact.id,
             changed_fields,
@@ -1244,6 +1189,7 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        affects_history: bool = True,
     ) -> list[ContactMethod]:
         """Save contact methods and publish events."""
         saved_methods = []
@@ -1274,6 +1220,7 @@ class ContactService:
                 method.value,
                 source=source,
                 changed_by=changed_by,
+                affects_history=affects_history,
                 transaction=transaction,
             )
             await self.event_publisher.publish(method_event)
@@ -1287,6 +1234,7 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        affects_history: bool = True,
     ) -> list[ContactAddress]:
         """Save contact addresses and publish events."""
         saved_addresses = []
@@ -1317,6 +1265,7 @@ class ContactService:
                 address.country_code,
                 source=source,
                 changed_by=changed_by,
+                affects_history=affects_history,
                 transaction=transaction,
             )
             await self.event_publisher.publish(address_event)
@@ -1330,6 +1279,7 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        affects_history: bool = True,
     ) -> list[ContactNote]:
         """Save contact notes and publish events."""
         saved_notes = []
@@ -1353,6 +1303,7 @@ class ContactService:
                 note.content,
                 source=source,
                 changed_by=changed_by,
+                affects_history=affects_history,
                 transaction=transaction,
             )
             await self.event_publisher.publish(note_event)
@@ -1366,6 +1317,7 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        affects_history: bool = True,
     ) -> list[Tag]:
         """Save contact tags and publish events."""
         saved_tags = []
@@ -1387,6 +1339,7 @@ class ContactService:
                 str(tag.name),
                 source=source,
                 changed_by=changed_by,
+                affects_history=affects_history,
                 transaction=transaction,
             )
             await self.event_publisher.publish(tag_event)
@@ -1400,6 +1353,7 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        affects_history: bool = True,
     ) -> list[ImportantDate]:
         """Save contact important dates and publish events."""
         saved_dates = []
@@ -1423,6 +1377,7 @@ class ContactService:
                 date.date_type.value,
                 source=source,
                 changed_by=changed_by,
+                affects_history=affects_history,
                 transaction=transaction,
             )
             await self.event_publisher.publish(date_event)
@@ -1474,17 +1429,7 @@ class ContactService:
             # Delete contact
             await self.contact_repo.delete(contact_id)
 
-            # Record field history (deletion doesn't have field changes)
-            await self.history_service.record_contact_change(
-                contact_id,
-                {"status": ("active", "deleted")},
-                changed_by=changed_by,
-                source=source,
-                _transaction=transaction,
-            )
-            # Domain event will capture the deletion action
-
-            # Publish event
+            # Publish event; the history projection records the deletion marker.
             event = ContactDeleted(
                 contact_id,
                 source=source,
@@ -1546,18 +1491,7 @@ class ContactService:
             # Assign tag
             await self.contact_repo.assign_tag(contact_id, tag_id)
 
-            # Record field history
-            await self.history_service.record_tag_change(
-                contact_id,
-                tag_id,
-                str(tag.name),
-                "assigned",
-                changed_by=changed_by,
-                source=source,
-                _transaction=transaction,
-            )
-
-            # Publish event
+            # Publish event; the history projection records the tag assignment.
             event = TagAssigned(
                 contact_id,
                 tag_id,
@@ -1599,18 +1533,7 @@ class ContactService:
             # Remove tag
             await self.contact_repo.remove_tag(contact_id, tag_id)
 
-            # Record field history
-            await self.history_service.record_tag_change(
-                contact_id,
-                tag_id,
-                str(tag.name),
-                "removed",
-                changed_by=changed_by,
-                source=source,
-                _transaction=transaction,
-            )
-
-            # Publish event
+            # Publish event; the history projection records the tag removal.
             event = TagRemoved(
                 contact_id,
                 tag_id,
@@ -1680,16 +1603,7 @@ class ContactService:
             if saved_method.id is None:
                 raise ContactValidationError("id", "Method ID is required after save")
 
-            # Record field history
-            await self.history_service.record_method_change(
-                saved_method.id,
-                {"status": (None, "created")},
-                changed_by=changed_by,
-                source=source,
-                _transaction=transaction,
-            )
-
-            # Publish event
+            # Publish event; the history projection records the "created" marker.
             event = ContactMethodAdded(
                 contact_id,
                 saved_method.id,
@@ -1761,16 +1675,7 @@ class ContactService:
             if saved_address.id is None:
                 raise ContactValidationError("id", "Address ID is required after save")
 
-            # Record field history
-            await self.history_service.record_address_change(
-                saved_address.id,
-                {"status": (None, "created")},
-                changed_by=changed_by,
-                source=source,
-                _transaction=transaction,
-            )
-
-            # Publish event
+            # Publish event; the history projection records the "created" marker.
             event = ContactAddressAdded(
                 contact_id,
                 saved_address.id,
@@ -1830,16 +1735,7 @@ class ContactService:
             if saved_note.id is None:
                 raise ContactValidationError("id", "Note ID is required after save")
 
-            # Record field history
-            await self.history_service.record_note_change(
-                saved_note.id,
-                {"status": (None, "created")},
-                changed_by=changed_by,
-                source=source,
-                _transaction=transaction,
-            )
-
-            # Publish event
+            # Publish event; the history projection records the "created" marker.
             event = ContactNoteAdded(
                 contact_id,
                 saved_note.id,
@@ -1886,16 +1782,7 @@ class ContactService:
             if saved_date.id is None:
                 raise ContactValidationError("id", "Date ID required after save")
 
-            # Record field history
-            await self.history_service.record_important_date_change(
-                saved_date.id,
-                {"status": (None, "created")},
-                changed_by=changed_by,
-                source=source,
-                _transaction=transaction,
-            )
-
-            # Publish event
+            # Publish event; the history projection records the "created" marker.
             event = ImportantDateAdded(
                 contact_id,
                 saved_date.id,
@@ -1948,16 +1835,7 @@ class ContactService:
             # Delete method
             await self.contact_repo.delete_method(method_id)
 
-            # Record history
-            await self.history_service.record_method_change(
-                method_id,
-                {"status": ("active", "deleted")},
-                changed_by=changed_by,
-                source=source,
-                _transaction=transaction,
-            )
-
-            # Publish event
+            # Publish event; the history projection records the "deleted" marker.
             event = ContactMethodDeleted(
                 contact_id,
                 method_id,
@@ -2008,16 +1886,7 @@ class ContactService:
             # Delete address
             await self.contact_repo.delete_address(address_id)
 
-            # Record history
-            await self.history_service.record_address_change(
-                address_id,
-                {"status": ("active", "deleted")},
-                changed_by=changed_by,
-                source=source,
-                _transaction=transaction,
-            )
-
-            # Publish event
+            # Publish event; the history projection records the "deleted" marker.
             event = ContactAddressDeleted(
                 contact_id,
                 address_id,
@@ -2060,16 +1929,7 @@ class ContactService:
             # Delete date
             await self.contact_repo.delete_important_date(date_id)
 
-            # Record history
-            await self.history_service.record_important_date_change(
-                date_id,
-                {"status": ("active", "deleted")},
-                changed_by=changed_by,
-                source=source,
-                _transaction=transaction,
-            )
-
-            # Publish event
+            # Publish event; the history projection records the "deleted" marker.
             event = ImportantDateDeleted(
                 contact_id,
                 date_id,

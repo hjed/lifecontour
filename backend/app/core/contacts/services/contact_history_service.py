@@ -1,8 +1,12 @@
-"""Contact field-level history tracking service."""
+"""Contact field-level history *read* service.
 
-from typing import Any
+ITER12-003 Phase 2 removed the synchronous ``record_*`` write methods: contact
+history is now produced solely by the event-driven ``HistoryProjectionConsumer``
+from contact domain events. This service is read-only — it backs the REST
+``GET /api/contacts/{id}/history`` endpoint, the MCP ``get_contact_history`` tool,
+and the summary generator's history reads.
+"""
 
-from core_shared.models.contacts.value_objects import Provenance
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.repositories import (
@@ -12,178 +16,10 @@ from app.core.contacts.models.repositories import (
 
 
 class ContactHistoryService:
-    """Service for tracking field-level changes in contact data."""
+    """Read-only service for contact field-level history."""
 
     def __init__(self, history_repo: ContactFieldHistoryRepository):
         self.history_repo = history_repo
-
-    async def record_contact_change(
-        self,
-        contact_id: int,
-        changed_fields: dict[str, Any],
-        changed_by: str = "system",
-        source: Provenance = Provenance.SYSTEM,
-        _transaction: AsyncConnection | None = None,
-    ) -> None:
-        """Record field changes to a contact."""
-        for field_name, (old_value, new_value) in changed_fields.items():
-            entry = ContactFieldHistoryEntry(
-                entity_type="contact",
-                entity_id=contact_id,
-                field_name=field_name,
-                old_value=str(old_value) if old_value is not None else None,
-                new_value=str(new_value) if new_value is not None else None,
-                changed_by=changed_by,
-                source=source,
-            )
-            await self.history_repo.record_change(entry)
-
-    async def record_method_change(
-        self,
-        method_id: int,
-        changed_fields: dict[str, Any],
-        changed_by: str = "system",
-        source: Provenance = Provenance.SYSTEM,
-        _transaction: AsyncConnection | None = None,
-    ) -> None:
-        """Record field changes to a contact method."""
-        for field_name, (old_value, new_value) in changed_fields.items():
-            entry = ContactFieldHistoryEntry(
-                entity_type="contact_method",
-                entity_id=method_id,
-                field_name=field_name,
-                old_value=str(old_value) if old_value is not None else None,
-                new_value=str(new_value) if new_value is not None else None,
-                changed_by=changed_by,
-                source=source,
-            )
-            await self.history_repo.record_change(entry)
-
-    async def record_address_change(
-        self,
-        address_id: int,
-        changed_fields: dict[str, Any],
-        changed_by: str = "system",
-        source: Provenance = Provenance.SYSTEM,
-        _transaction: AsyncConnection | None = None,
-    ) -> None:
-        """Record field changes to a contact address."""
-        for field_name, (old_value, new_value) in changed_fields.items():
-            entry = ContactFieldHistoryEntry(
-                entity_type="contact_address",
-                entity_id=address_id,
-                field_name=field_name,
-                old_value=str(old_value) if old_value is not None else None,
-                new_value=str(new_value) if new_value is not None else None,
-                changed_by=changed_by,
-                source=source,
-            )
-            await self.history_repo.record_change(entry)
-
-    async def record_note_change(
-        self,
-        note_id: int,
-        changed_fields: dict[str, Any],
-        changed_by: str = "system",
-        source: Provenance = Provenance.SYSTEM,
-        _transaction: AsyncConnection | None = None,
-    ) -> None:
-        """Record field changes to a contact note."""
-        for field_name, (old_value, new_value) in changed_fields.items():
-            entry = ContactFieldHistoryEntry(
-                entity_type="contact_note",
-                entity_id=note_id,
-                field_name=field_name,
-                old_value=str(old_value) if old_value is not None else None,
-                new_value=str(new_value) if new_value is not None else None,
-                changed_by=changed_by,
-                source=source,
-            )
-            await self.history_repo.record_change(entry)
-
-    async def record_tag_change(
-        self,
-        contact_id: int,
-        tag_id: int,
-        tag_name: str,
-        action: str,
-        changed_by: str = "system",
-        source: Provenance = Provenance.SYSTEM,
-        _transaction: AsyncConnection | None = None,
-    ) -> None:
-        """Record a tag assignment/removal as field change."""
-        entry = ContactFieldHistoryEntry(
-            entity_type="contact",
-            entity_id=contact_id,
-            field_name="tags",
-            old_value=None if action == "assigned" else tag_name,
-            new_value=tag_name if action == "assigned" else None,
-            changed_by=changed_by,
-            source=source,
-        )
-        await self.history_repo.record_change(entry)
-
-    async def record_relationship_change(
-        self,
-        relationship_id: int,
-        changed_fields: dict[str, Any],
-        changed_by: str = "system",
-        source: Provenance = Provenance.SYSTEM,
-        _transaction: AsyncConnection | None = None,
-    ) -> None:
-        """Record field changes to a contact relationship."""
-        for field_name, (old_value, new_value) in changed_fields.items():
-            entry = ContactFieldHistoryEntry(
-                entity_type="contact_relationship",
-                entity_id=relationship_id,
-                field_name=field_name,
-                old_value=str(old_value) if old_value is not None else None,
-                new_value=str(new_value) if new_value is not None else None,
-                changed_by=changed_by,
-                source=source,
-            )
-            await self.history_repo.record_change(entry)
-
-    async def record_important_date_change(
-        self,
-        important_date_id: int,
-        changed_fields: dict[str, Any],
-        changed_by: str = "system",
-        source: Provenance = Provenance.SYSTEM,
-        _transaction: AsyncConnection | None = None,
-    ) -> None:
-        """Record field changes to a contact important date."""
-        for field_name, (old_value, new_value) in changed_fields.items():
-            entry = ContactFieldHistoryEntry(
-                entity_type="contact_important_date",
-                entity_id=important_date_id,
-                field_name=field_name,
-                old_value=str(old_value) if old_value is not None else None,
-                new_value=str(new_value) if new_value is not None else None,
-                changed_by=changed_by,
-                source=source,
-            )
-            await self.history_repo.record_change(entry)
-
-    async def record_summary_change(
-        self,
-        contact_id: int,
-        changed_fields: dict[str, tuple[Any, Any]],
-        changed_by: str = "system",
-        source: Provenance = Provenance.SUMMARY_REGENERATION,
-    ) -> None:
-        """Record field changes to a contact summary."""
-        for field_name, (old_value, new_value) in changed_fields.items():
-            entry = ContactFieldHistoryEntry(
-                entity_type="contact_summary",
-                entity_id=contact_id,
-                field_name=field_name,
-                old_value=str(old_value) if old_value is not None else None,
-                new_value=str(new_value) if new_value is not None else None,
-                changed_by=changed_by,
-                source=source,
-            )
-            await self.history_repo.record_change(entry)
 
     async def get_contact_history(
         self,

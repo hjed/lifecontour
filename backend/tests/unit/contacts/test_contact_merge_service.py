@@ -67,11 +67,6 @@ def mock_journal_rel_repo() -> AsyncMock:
 
 
 @pytest.fixture
-def mock_history_service() -> AsyncMock:
-    return AsyncMock()
-
-
-@pytest.fixture
 def mock_event_publisher() -> AsyncMock:
     return AsyncMock()
 
@@ -81,14 +76,12 @@ def merge_service(
     mock_contact_repo,
     mock_relationship_repo,
     mock_journal_rel_repo,
-    mock_history_service,
     mock_event_publisher,
 ) -> ContactMergeService:
     return ContactMergeService(
         contact_repo=mock_contact_repo,
         relationship_repo=mock_relationship_repo,
         journal_relationship_repo=mock_journal_rel_repo,
-        history_service=mock_history_service,
         event_publisher=mock_event_publisher,
     )
 
@@ -241,26 +234,34 @@ class TestContactMergeScalarPolicy:
 
 
 class TestContactMergeSideEffects:
-    """The merge records an audit row and requests a summary refresh."""
+    """The merge publishes a ContactUpdated audit event and a summary refresh.
+
+    ITER12-003 Phase 2: the inline ``merged_from`` audit row is now produced by
+    the history projection from a published ``ContactUpdated`` event rather than a
+    synchronous history write.
+    """
 
     @pytest.mark.asyncio
-    async def test_records_merged_from_history_row(
+    async def test_publishes_merged_from_history_event(
         self,
         merge_service,
-        mock_history_service,
+        mock_event_publisher,
         mock_transaction,
     ) -> None:
         await merge_service.merge_contacts(
             SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
         )
 
-        mock_history_service.record_contact_change.assert_awaited_once()
-        call = mock_history_service.record_contact_change.await_args
-        assert call.args[0] == SURVIVOR_ID
-        changed_fields = call.args[1]
+        published = [c.args[0] for c in mock_event_publisher.publish.await_args_list]
+        merged_events = [e for e in published if e.event_type == "ContactUpdated"]
+        assert len(merged_events) == 1
+        event = merged_events[0]
+        assert event.aggregate_id == SURVIVOR_ID
+        changed_fields = event.event_data["changed_fields"]
         assert "merged_from" in changed_fields
-        old_value, _ = changed_fields["merged_from"]
+        old_value, new_value = changed_fields["merged_from"]
         assert old_value == SOURCE_ID
+        assert new_value == SURVIVOR_ID
 
     @staticmethod
     def _published(mock_event_publisher: AsyncMock) -> dict[str, Any]:

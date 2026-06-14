@@ -280,6 +280,12 @@ class HistoryService:
     def _sub_entity_created(
         self, event: OutboxEvent, data: dict[str, Any], *, entity_type: str, id_key: str
     ) -> list[FieldHistoryEntry]:
+        # ITER12-003 Phase 2: per-item add events emitted during a *bulk* contact
+        # re-save carry affects_history=False (the aggregate ContactUpdated row is
+        # the feed); the projection skips them so the feed stays identical to the
+        # dual-write. A missing key means True (create/standalone paths).
+        if data.get("affects_history", True) is False:
+            return []
         return [
             self._row(
                 event,
@@ -365,6 +371,11 @@ class HistoryService:
     def _project_tag_assigned(
         self, event: OutboxEvent, data: dict[str, Any]
     ) -> list[FieldHistoryEntry]:
+        # ITER12-003 Phase 2: a bulk re-save assigns tags with affects_history=False
+        # so the projection skips the per-tag row (the aggregate ContactUpdated
+        # "tags" row is the feed); search still consumes the TagAssigned event.
+        if data.get("affects_history", True) is False:
+            return []
         return [
             self._row(
                 event,

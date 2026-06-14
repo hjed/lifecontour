@@ -129,6 +129,7 @@ class TagAssigned(DomainEvent):
         tag_name: str,
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
+        affects_history: bool = True,
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
@@ -142,6 +143,10 @@ class TagAssigned(DomainEvent):
                 "tag_name": tag_name,
                 "source": source.value,
                 "changed_by": changed_by,
+                # False when emitted during a bulk contact re-save: the aggregate
+                # ContactUpdated row is the feed, so the projection skips this
+                # per-item marker (search still consumes the event). ITER12-003 P2.
+                "affects_history": affects_history,
             },
             transaction=transaction,
         )
@@ -239,6 +244,7 @@ class ContactMethodAdded(DomainEvent):
         value: str,
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
+        affects_history: bool = True,
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
@@ -253,6 +259,8 @@ class ContactMethodAdded(DomainEvent):
                 "value": value,
                 "source": source.value,
                 "changed_by": changed_by,
+                # False during a bulk contact re-save (see TagAssigned). ITER12-003 P2.
+                "affects_history": affects_history,
             },
             transaction=transaction,
         )
@@ -270,6 +278,7 @@ class ContactAddressAdded(DomainEvent):
         country_code: str,
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
+        affects_history: bool = True,
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
@@ -284,6 +293,8 @@ class ContactAddressAdded(DomainEvent):
                 "country_code": country_code,
                 "source": source.value,
                 "changed_by": changed_by,
+                # False during a bulk contact re-save (see TagAssigned). ITER12-003 P2.
+                "affects_history": affects_history,
             },
             transaction=transaction,
         )
@@ -360,6 +371,7 @@ class ContactNoteAdded(DomainEvent):
         content: str,
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
+        affects_history: bool = True,
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
@@ -375,6 +387,8 @@ class ContactNoteAdded(DomainEvent):
                 ),  # Truncate for event
                 "source": source.value,
                 "changed_by": changed_by,
+                # False during a bulk contact re-save (see TagAssigned). ITER12-003 P2.
+                "affects_history": affects_history,
             },
             transaction=transaction,
         )
@@ -391,6 +405,7 @@ class ImportantDateAdded(DomainEvent):
         date_type: str,
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
+        affects_history: bool = True,
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
@@ -404,6 +419,8 @@ class ImportantDateAdded(DomainEvent):
                 "date_type": date_type,
                 "source": source.value,
                 "changed_by": changed_by,
+                # False during a bulk contact re-save (see TagAssigned). ITER12-003 P2.
+                "affects_history": affects_history,
             },
             transaction=transaction,
         )

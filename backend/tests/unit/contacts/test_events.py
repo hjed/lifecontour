@@ -22,6 +22,7 @@ from app.core.contacts.models.events import (
     ContactRelationshipUpdated,
     ContactSummaryUpdated,
     ContactUpdated,
+    ImportantDateAdded,
     TagAssigned,
     TagRemoved,
 )
@@ -289,6 +290,91 @@ class TestProvenanceEnrichment:
 
         assert event.event_data["source"] == Provenance.UI.value
         assert event.event_data["changed_by"] == "ui"
+
+
+class TestAffectsHistoryFlag:
+    """ITER12-003 Phase 2: per-item add/assign events default ``affects_history``
+    True (create/standalone paths record per-item history), but the bulk re-save
+    path passes ``affects_history=False`` so the history projection skips the
+    spurious per-item markers while search still consumes the event."""
+
+    def test_method_added_defaults_affects_history_true(self) -> None:
+        event = ContactMethodAdded(
+            contact_id=1, method_id=2, method_type="email", value="a@b.com"
+        )
+
+        assert event.event_data["affects_history"] is True
+
+    def test_method_added_accepts_affects_history_false(self) -> None:
+        event = ContactMethodAdded(
+            contact_id=1,
+            method_id=2,
+            method_type="email",
+            value="a@b.com",
+            affects_history=False,
+        )
+
+        assert event.event_data["affects_history"] is False
+
+    def test_address_added_carries_affects_history(self) -> None:
+        assert (
+            ContactAddressAdded(
+                contact_id=1, address_id=2, street_line_1="1 St", country_code="AU"
+            ).event_data["affects_history"]
+            is True
+        )
+        assert (
+            ContactAddressAdded(
+                contact_id=1,
+                address_id=2,
+                street_line_1="1 St",
+                country_code="AU",
+                affects_history=False,
+            ).event_data["affects_history"]
+            is False
+        )
+
+    def test_note_added_carries_affects_history(self) -> None:
+        assert (
+            ContactNoteAdded(contact_id=1, note_id=2, content="Hi").event_data[
+                "affects_history"
+            ]
+            is True
+        )
+        assert (
+            ContactNoteAdded(
+                contact_id=1, note_id=2, content="Hi", affects_history=False
+            ).event_data["affects_history"]
+            is False
+        )
+
+    def test_important_date_added_carries_affects_history(self) -> None:
+        assert (
+            ImportantDateAdded(
+                contact_id=1, date_id=2, date_type="birthday"
+            ).event_data["affects_history"]
+            is True
+        )
+        assert (
+            ImportantDateAdded(
+                contact_id=1, date_id=2, date_type="birthday", affects_history=False
+            ).event_data["affects_history"]
+            is False
+        )
+
+    def test_tag_assigned_carries_affects_history(self) -> None:
+        assert (
+            TagAssigned(contact_id=1, tag_id=2, tag_name="work").event_data[
+                "affects_history"
+            ]
+            is True
+        )
+        assert (
+            TagAssigned(
+                contact_id=1, tag_id=2, tag_name="work", affects_history=False
+            ).event_data["affects_history"]
+            is False
+        )
 
 
 class TestContactUpdatedSubEntityKeys:

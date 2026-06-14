@@ -7,6 +7,37 @@
 
 import { test, expect } from './fixtures';
 
+/**
+ * Poll the contact history API until an entry matching `matches` appears.
+ *
+ * ITER12-003 Phase 2 made contact history event-driven: a change is projected
+ * into history asynchronously (service -> outbox -> stream -> projection
+ * consumer), so assertions on a just-made change must poll rather than read
+ * immediately. Mirrors the journal-history.spec.ts helper.
+ */
+async function waitForContactHistoryEntry(
+  request: import('@playwright/test').APIRequestContext,
+  contactId: string,
+  matches: (attrs: {
+    field_name: string;
+    source: string;
+    old_value: string | null;
+    new_value: string | null;
+  }) => boolean
+): Promise<void> {
+  await expect(async () => {
+    const response = await request.get(`/api/contacts/${contactId}/history`);
+    expect(response.ok()).toBeTruthy();
+    const json = await response.json();
+    expect(Array.isArray(json.data)).toBe(true);
+    const found = json.data.some(
+      (entry: { attributes: Parameters<typeof matches>[0] }) =>
+        matches(entry.attributes)
+    );
+    expect(found).toBe(true);
+  }).toPass({ timeout: 30000 });
+}
+
 test.describe('Contact Activity Feed', () => {
   test('should display Activity Feed section on contact detail page', async ({
     contactsWithData,
@@ -98,6 +129,17 @@ test.describe('Contact Activity Feed', () => {
 
     expect(updateResponse.ok()).toBeTruthy();
 
+    // History is projected asynchronously (ITER12-003 Phase 2), so poll until the
+    // nick_name change lands with the correct old/new values and UI provenance.
+    await waitForContactHistoryEntry(
+      page.request,
+      String(contact.id),
+      attrs =>
+        attrs.field_name === 'nick_name' &&
+        attrs.new_value === 'Updated Nickname' &&
+        attrs.source === 'ui'
+    );
+
     // Navigate to contact detail page
     await page.goto(`/contacts/${contact.id}`);
     await expect(page).toHaveURL(new RegExp(`/contacts/${contact.id}`));
@@ -107,14 +149,14 @@ test.describe('Contact Activity Feed', () => {
       timeout: 10000,
     });
 
-    // Verify the history API returns data for this contact
-    const historyResponse = await page.request.get(
-      `/api/contacts/${contact.id}/history`
+    // The projected entry is now visible in the feed with UI provenance.
+    const feed = page.getByTestId('activity-feed');
+    await expect(feed).toBeVisible();
+    await expect(feed.getByTestId('provenance-trigger-ui').first()).toBeVisible(
+      {
+        timeout: 10000,
+      }
     );
-    expect(historyResponse.ok()).toBeTruthy();
-    const historyData = await historyResponse.json();
-    expect(historyData.data).toBeDefined();
-    expect(Array.isArray(historyData.data)).toBe(true);
   });
 
   test('should load contact history via API endpoint', async ({

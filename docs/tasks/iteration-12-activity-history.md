@@ -1,6 +1,6 @@
 # Iteration 12: Activity History (Journals + Unified Foundation)
 
-**Status:** 🟡 IN PROGRESS — ITER12-001 (shared foundation) complete (Phase 1 backend + Phase 2 frontend); ITER12-002 **complete** — Phase 1 (journal event enrichment + projection consumer), Phase 2 (changed-fields coverage + journal history API), Phase 3 (journal history UI + MCP read parity), and Phase 4 (type-data history on the MCP/integration/nested write surfaces) all done; ITER12-003 Phase 1 (contact event enrichment + projection handlers, inert) complete; ITER12-003 Phase 2 (remove the contact dual-write) pending
+**Status:** ✅ COMPLETE — ITER12-001 (shared foundation) complete (Phase 1 backend + Phase 2 frontend); ITER12-002 **complete** — Phase 1 (journal event enrichment + projection consumer), Phase 2 (changed-fields coverage + journal history API), Phase 3 (journal history UI + MCP read parity), and Phase 4 (type-data history on the MCP/integration/nested write surfaces) all done; ITER12-003 Phase 1 (contact event enrichment + projection handlers, inert) **and Phase 2 (remove the contact dual-write — contacts now fully event-driven)** complete
 **Dependencies:** Iteration 4 (Journal core + events), Iteration 5 (Redis Streams event bus, transactional outbox relay, stream consumers), existing contact activity history
 **Goal:** Deliver field-level activity history for journals of all types, displayed at the bottom of the journal UI with full provenance, by generalising the existing contact-history infrastructure into a single shared, **event-driven** system — and migrating contacts onto that same foundation.
 
@@ -251,9 +251,9 @@ This phase is primarily a **feature** (TRAVEL nested editing), with history fall
 - [Activity History — Delivery Notes](../product-specifications/activity-history-product-specification.md#delivery-notes)
 
 **Acceptance Criteria (task-level):**
-- [ ] Contact history is produced solely by the `HistoryProjectionConsumer` from contact events.
-- [ ] The synchronous `history_service.record_*` dual-write is removed.
-- [ ] The contact activity feed is unchanged for users; the full existing contact-history suite passes via the event path.
+- [x] Contact history is produced solely by the `HistoryProjectionConsumer` from contact events. *(Phase 2: contact event types added to the live subscription; `ContactHistoryService` is read-only.)*
+- [x] The synchronous `history_service.record_*` dual-write is removed. *(Phase 2: removed from contact/relationship/merge/summary services; no `record_*` call sites remain in `app/`.)*
+- [x] The contact activity feed is unchanged for users; the full existing contact-history suite passes via the event path. *(Phase 2: bulk re-save suppresses per-item markers via `affects_history=False`; full contact E2E + integration regression green.)*
 
 #### Phase 1: Enrich Contact Events + Extend Projection Consumer ✅
 **PR Size:** ~7–9 files (slightly exceeded with full provenance plumbing across 3 services + the summary consumer, plus tests)
@@ -280,27 +280,52 @@ Carry provenance on contact events and teach the consumer to project them — **
 - [x] **Integration:** consumer projects contact events into equivalent history rows (compared against the dual-write output), idempotently. *(`tests/integration/infrastructure/events/test_contact_history_projection_integration.py`: per-event projection, redelivery idempotency, end-to-end inertness, and real-service→outbox→projection equivalence for base-field and method-field updates.)*
 - [x] **Regression:** affected unit dirs (contacts/history/events/search) + journal/summary unit suites green; contacts/events/history/summary integration tests green; full contact E2E specs (activity feed, inline editing, CRUD/search, tags, relationships, summary) green; `ruff` + `ruff format` + `mypy` clean.
 
-#### Phase 2: Remove the Synchronous Dual-Write
-**PR Size:** ~6–8 files
+#### Phase 2: Remove the Synchronous Dual-Write ✅
+**PR Size:** ~8 production files (test/doc updates push the total higher)
+**Status:** ✅ COMPLETE
 
 Switch contacts fully onto the projection and delete the redundant write path.
 
-**Deferred from ITER12-003 Phase 1 (must be resolved here, before the projection goes live):**
-These are inert in Phase 1 (the projection doesn't run for contacts), but **switching the projection on without addressing them would change the contact feed**:
-1. **Bulk re-save publishes spurious sub-entity "created" markers.** `ContactService.update_contact` replaces sub-entities via delete-all-then-`_save_*`, which re-publishes `ContactMethodAdded`/`ContactAddressAdded`/`ContactNoteAdded`/`ImportantDateAdded` for **every** item on **every** full-contact edit (the dual-write records no history for these). Once the projection is live, each would write a bogus `contact_*/status:(None,"created")` row. Phase 2 must make these accurate before enabling — e.g. compute real sub-entity diffs (mirroring the ITER12-002 journal type-data snapshot→diff), or only publish for genuinely new sub-entities, or have the projection ignore re-save markers. This is the **main correctness gate** for turning contacts on.
-2. **Tags assigned during bulk create/update.** `_save_contact_tags` publishes `TagAssigned`/`TagRemoved` on create and on bulk update; the dual-write records **no** tag history for those (only standalone assign/remove are recorded today). Projecting them adds tag rows the current feed doesn't show — arguably an improvement (consistent with standalone tag history), but Phase 2 must make a deliberate decision (record them, or suppress for bulk) and lock it with a test.
-3. **Sub-entity field-edit key decoding stays in sync.** Method/address/note field edits publish `ContactUpdated` with a `"{prefix}_{id}_{field}"` key that `HistoryService._project_contact_updated` decodes (`_SUBENTITY_FIELD_RE`). If the service-side key format ever changes, both must change together — Phase 2's end-to-end tests cover this, but keep them coupled.
-4. **Summary history/event atomicity is in place** (`SummaryGenerationService._record_summary_history` wraps the `record_summary_change` + `ContactSummaryUpdated` publish in a SAVEPOINT). When the dual-write is removed, drop the `record_summary_change` call and keep the event publish.
+**Design (as built):**
+- The ~24 `history_service.record_*` dual-write calls were removed from `contact_service.py`,
+  `contact_relationship_service.py`, `summary_generation_service.py`, **and**
+  `contact_merge_service.py` (a later ITER13 addition that recorded an inline `merged_from`
+  row with **no** paired event — it now publishes a `ContactUpdated` carrying
+  `{"merged_from": (source, survivor)}`, which the projection decodes to the same
+  contact-level audit row). Every removed write left its paired domain event in place, so
+  history is now derived solely from events.
+- `ContactHistoryService` is now **read-only** (its `record_*` methods deleted); it still backs
+  the REST `GET /api/contacts/{id}/history` endpoint, the MCP `get_contact_history` tool, and the
+  summary generator's history reads. The now-unused write dependency was dropped from the
+  relationship, merge, and summary services (and their Dishka providers).
+- **Bulk re-save spurious markers (the main correctness gate) — resolved by suppression.** A new
+  `affects_history: bool = True` flag on `ContactMethodAdded`/`ContactAddressAdded`/
+  `ContactNoteAdded`/`ImportantDateAdded`/`TagAssigned` (in `event_data`) lets the
+  **bulk** `update_contact` re-save path (`_handle_update_relations`) emit those per-item events
+  with `affects_history=False`; `HistoryService` skips them. The aggregate `ContactUpdated` rows
+  (`contact_methods`/`addresses`/`notes`/`important_dates`/`tags`) remain the feed, byte-for-byte
+  as before. **Search still consumes the events** (it ignores the flag), so tag/important-date
+  indexing is unaffected. Create and standalone add/assign paths keep the default `True`, so their
+  per-item "created"/tag markers (which the dual-write *did* record) are preserved.
+- **Tags-on-bulk decision (deliberate):** suppressed — the aggregate `tags` row is the feed, so a
+  bulk update shows one aggregate `tags` row, not per-tag rows. Locked by the headline
+  `test_bulk_update_produces_no_spurious_subentity_markers` integration test.
+- Summary: `_record_summary_history` now only publishes `ContactSummaryUpdated` (the
+  `record_summary_change` write was dropped); it is written to the outbox on the summary
+  connection so it commits atomically with the summary row.
+- Contact event types added to the `HistoryProjectionConsumer` live `event_type_patterns`
+  (`_JOURNAL_HISTORY_EVENT_TYPES + _CONTACT_HISTORY_EVENT_TYPES`); the Phase 1 inertness invariant
+  test was flipped to assert the contact projection is now live.
 
 **Acceptance Criteria:**
-- [ ] Direct `history_service.record_*` calls removed from `contact_service.py`, contact controllers, and relationship controllers; the `changed_by`/`source` arguments now feed the published events instead.
-- [ ] Contact history is produced only by the projection consumer.
-- [ ] No duplicate entries; ordering and content match prior behaviour.
-- [ ] The bulk re-save spurious-marker and tags-on-bulk issues (carried over from Phase 1, above) are resolved so the live projection matches the prior feed; contact event types are added to the `HistoryProjectionConsumer` live subscription (`_CONTACT_HISTORY_EVENT_TYPES`).
+- [x] Direct `history_service.record_*` calls removed from `contact_service.py`, contact controllers, and relationship controllers; the `changed_by`/`source` arguments now feed the published events instead. *(Also removed from the merge + summary services; no `record_*` call sites remain in `app/`.)*
+- [x] Contact history is produced only by the projection consumer. *(Contact event types added to the live subscription; `ContactHistoryService` is read-only.)*
+- [x] No duplicate entries; ordering and content match prior behaviour. *(Unique-index idempotency proven end-to-end; full contact E2E + integration regression green.)*
+- [x] The bulk re-save spurious-marker and tags-on-bulk issues (carried over from Phase 1, above) are resolved so the live projection matches the prior feed; contact event types are added to the `HistoryProjectionConsumer` live subscription (`_CONTACT_HISTORY_EVENT_TYPES`). *(`affects_history=False` on bulk re-save events; aggregate rows are the feed.)*
 
 **Required Test Coverage:**
-- **Integration (end-to-end):** through the real service + outbox + relay + consumer path, contact create/update/tag/relationship/important-date/summary changes produce the expected history; no duplicates; **a full-contact update that touches sub-entities produces no spurious `created` markers**.
-- **Regression:** the full existing contact-history unit + integration suite passes against the event-driven path; `contact-activity-feed.spec.ts` E2E passes (with `waitFor` for async, if needed).
+- [x] **Integration (end-to-end):** through the real service + outbox + relay + consumer path, contact create/update/tag/relationship/important-date/summary changes produce the expected history; no duplicates; **a full-contact update that touches sub-entities produces no spurious `created` markers**. *(`tests/integration/infrastructure/events/test_contact_history_projection_integration.py` — `TestContactProjectionEndToEnd`: create+sub-entity markers, base/method-field update, tag assign, important-date add, relationship create, summary update, end-to-end redelivery idempotency, and the headline `test_bulk_update_produces_no_spurious_subentity_markers`.)*
+- [x] **Regression:** the full existing contact-history unit + integration suite passes against the event-driven path; `contact-activity-feed.spec.ts` E2E passes (with `toPass` polling for async projection). *(Unit 1407 frontend / full backend unit green; contacts/history/events/api/mcp integration green; `affects_history` flag verified search-safe via the search-indexer suite; 7 activity-feed + 33 contact-regression E2E tests green on Chromium.)*
 
 ---
 

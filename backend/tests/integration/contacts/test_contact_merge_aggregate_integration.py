@@ -34,7 +34,6 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql import (
-    SqlContactFieldHistoryRepository,
     SqlContactRelationshipRepository,
     SqlContactRepository,
 )
@@ -42,7 +41,6 @@ from app.core.contacts.models.repositories import (
     ContactEventPublisher,
     DomainEventProtocol,
 )
-from app.core.contacts.services.contact_history_service import ContactHistoryService
 from app.core.contacts.services.contact_merge_service import ContactMergeService
 from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
     SqlJournalContactRelationshipRepository,
@@ -78,16 +76,12 @@ async def merge_service(
     contact_repo: SqlContactRepository,
     event_publisher: RecordingEventPublisher,
 ) -> ContactMergeService:
-    history_service = ContactHistoryService(
-        SqlContactFieldHistoryRepository(async_connection)
-    )
     return ContactMergeService(
         contact_repo=contact_repo,
         relationship_repo=SqlContactRelationshipRepository(async_connection),
         journal_relationship_repo=SqlJournalContactRelationshipRepository(
             async_connection
         ),
-        history_service=history_service,
         event_publisher=event_publisher,
     )
 
@@ -389,12 +383,16 @@ class TestContactMergeAggregateIntegration:
         assert survivor.company == "Acme"  # source fills the survivor's gap
 
     @pytest.mark.asyncio
-    async def test_merge_records_merged_from_history_row(
+    async def test_merge_publishes_merged_from_history_event(
         self,
         async_connection: AsyncConnection,
         contact_repo: SqlContactRepository,
         merge_service: ContactMergeService,
+        event_publisher: RecordingEventPublisher,
     ) -> None:
+        """ITER12-003 Phase 2: the merged_from audit row is now derived from a
+        published ContactUpdated event (the history projection writes it), not a
+        synchronous history write."""
         survivor_id = await _make_contact(contact_repo, "Survivor")
         source_id = await _make_contact(contact_repo, "Source")
 
@@ -402,20 +400,14 @@ class TestContactMergeAggregateIntegration:
             survivor_id, source_id, transaction=async_connection
         )
 
-        result = await async_connection.execute(
-            text(
-                """
-                SELECT old_value FROM field_history
-                WHERE entity_type = 'contact'
-                AND entity_id = :survivor_id
-                AND field_name = 'merged_from'
-                """
-            ),
-            {"survivor_id": survivor_id},
-        )
-        rows = result.fetchall()
-        assert len(rows) == 1
-        assert rows[0].old_value == str(source_id)
+        merged_events = [
+            e for e in event_publisher.events if e.event_type == "ContactUpdated"
+        ]
+        assert len(merged_events) == 1
+        event = merged_events[0]
+        assert event.aggregate_id == survivor_id
+        changed_fields = event.event_data["changed_fields"]
+        assert changed_fields["merged_from"] == (source_id, survivor_id)
 
     @pytest.mark.asyncio
     async def test_merge_requests_summary_refresh_for_survivor(

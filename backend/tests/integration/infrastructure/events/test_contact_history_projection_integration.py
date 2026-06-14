@@ -1,42 +1,84 @@
 """Integration tests for projecting CONTACT events into field_history.
 
-ITER12-003 Phase 1 teaches the HistoryProjectionConsumer to derive contact
-history from contact domain events, but keeps those event types OUT of the live
-subscription so the synchronous dual-write stays the sole writer this phase
-(inert). These tests therefore:
+ITER12-003 Phase 2 switched contacts onto the event-driven HistoryProjectionConsumer
+and removed the synchronous dual-write. These tests therefore:
 
-* drive ``consumer._handle_event`` directly with contact StreamEvents to prove
-  the projection writes the rows the dual-write writes today (idempotently);
-* prove the live ``_process_batch`` does NOT project contact events (inert);
-* run a real ContactService mutation through the outbox and assert the published
-  event projects to rows equivalent to the dual-write's record_* output.
+* drive ``consumer._handle_event`` directly with contact StreamEvents to prove the
+  projection writes the right rows (idempotently);
+* prove the live ``_process_batch`` now DOES project contact events;
+* run real ContactService / ContactRelationshipService mutations through the full
+  service -> outbox -> relay -> consumer chain and assert the resulting
+  field_history rows (the closest backend equivalent to the user-facing feed);
+* prove a *bulk* full-contact update produces NO spurious per-sub-entity "created"
+  markers (the aggregate ContactUpdated rows are the feed) — the main correctness
+  gate for turning the projection on.
 
 Mirrors test_history_projection_consumer_integration.py and
 test_journal_history_projection_e2e.py.
 """
 
-import json
 import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from core_shared.models.contacts.entities import Contact, ContactMethod, MethodType
+from core_shared.models.contacts.entities import (
+    Contact,
+    ContactMethod,
+    ImportantDate,
+    MethodType,
+    RelationshipType,
+)
+from core_shared.models.contacts.important_date_types import (
+    DatePrecision,
+    ImportantDateType,
+)
 from core_shared.models.contacts.value_objects import Provenance
 from core_shared.stream_client import StreamClient, StreamEvent
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.history.services.history_service import HistoryService
 from app.infrastructure.events.history_projection_consumer import (
     HistoryProjectionConsumer,
 )
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
-from app.infrastructure.events.outbox_repository import OutboxEvent
+from app.infrastructure.events.outbox_relay import OutboxRelay
 
 GROUP_NAME = "history-projection"
 OCCURRED_AT = "2024-03-01T08:00:00+00:00"
+
+
+async def _relay_and_project(
+    stream_client: StreamClient,
+    stream_name: str,
+    async_connection: AsyncConnection,
+    consumer_name: str,
+) -> None:
+    """Relay outbox events to the stream and run the projection consumer once.
+
+    Both the relay and the consumer operate on the test ``async_connection`` (the
+    consumer's engine is patched to yield it) so all writes share the test
+    savepoint and roll back at teardown. Mirrors the journal e2e helper.
+    """
+    relay = OutboxRelay(
+        stream_client=stream_client, stream_name=stream_name, batch_size=50
+    )
+    await relay.relay_batch(async_connection)
+
+    consumer = HistoryProjectionConsumer(
+        stream_client=stream_client,
+        stream_name=stream_name,
+        consumer_name=consumer_name,
+        block_ms=100,
+    )
+    await stream_client.ensure_consumer_group(stream_name, GROUP_NAME)
+
+    with patch(
+        "app.infrastructure.events.history_projection_consumer.get_async_database_engine",
+        return_value=_patched_engine(async_connection),
+    ):
+        await consumer._process_batch()
 
 
 def _patched_engine(async_connection: AsyncConnection) -> MagicMock:
@@ -252,16 +294,15 @@ class TestContactHistoryProjection:
         )
 
     @pytest.mark.asyncio
-    async def test_contact_events_are_inert_in_live_subscription(
+    async def test_contact_events_are_projected_by_live_subscription(
         self,
         test_stream_name: str,
         async_connection: AsyncConnection,
         stream_client: StreamClient,
     ) -> None:
-        """End-to-end inertness: a ContactUpdated on the stream is acked by the
-        live consumer but projects NO rows, because contact event types are not in
-        the journal-only subscription this phase (the dual-write stays sole writer).
-        """
+        """ITER12-003 Phase 2: a ContactUpdated on the stream is now consumed by the
+        LIVE subscription and projected into field_history (the projection is the
+        sole writer of contact history)."""
         await stream_client.publish(
             stream_name=test_stream_name,
             event_id=f"evt-{uuid.uuid4().hex[:8]}",
@@ -284,16 +325,24 @@ class TestContactHistoryProjection:
         ):
             await consumer._process_batch()
 
-        assert (
-            await _rows_for(async_connection, entity_type="contact", entity_id=880007)
-            == []
-        )
+        assert await _rows_for(
+            async_connection, entity_type="contact", entity_id=880007
+        ) == [("first_name", "A", "B", "ui", "ui")]
+
+
+async def _count_rows(conn: AsyncConnection, *, entity_type: str) -> int:
+    result = await conn.execute(
+        text("SELECT COUNT(*) FROM field_history WHERE entity_type = :et"),
+        {"et": entity_type},
+    )
+    return int(result.scalar_one())
 
 
 @pytest.mark.integration
-class TestContactProjectionMatchesDualWrite:
-    """A real ContactService mutation publishes an event that, when projected,
-    reproduces the rows the synchronous dual-write wrote (snapshot equivalence)."""
+class TestContactProjectionEndToEnd:
+    """Real service mutations travel the full service -> outbox -> relay ->
+    HistoryProjectionConsumer chain and write the expected field_history rows
+    (the closest backend equivalent to the user-facing contact activity feed)."""
 
     def _service(self, conn: AsyncConnection):
         from app.core.contacts.adapters.sql import (
@@ -313,7 +362,7 @@ class TestContactProjectionMatchesDualWrite:
         contact_repo = SqlContactRepository(conn)
         tag_repo = SqlTagRepository(conn)
         history_repo = SqlContactFieldHistoryRepository(conn)
-        # Publish to the outbox so we can read & project the real event.
+        # Publish to the outbox so the relay can deliver the real event.
         event_publisher = OutboxEventPublisher(conn)
         tag_hierarchy_service = TagHierarchyService(tag_repo)
         return ContactService(
@@ -332,121 +381,119 @@ class TestContactProjectionMatchesDualWrite:
             ),
         )
 
-    async def _project_outbox_after(
-        self, conn: AsyncConnection, *, after_id: int
-    ) -> set[tuple[object, ...]]:
-        """Project every outbox event published after ``after_id`` and return the
-        (entity_type, entity_id, field_name, old, new, source, changed_by) tuples the
-        projection writes. Provenance is included so an enrichment regression (the
-        whole point of Phase 1) can't slip through the equivalence check."""
-        result = await conn.execute(
-            text(
-                "SELECT id, event_id, event_type, aggregate_id, event_data, "
-                "occurred_at FROM outbox_events WHERE id > :after ORDER BY id"
-            ),
-            {"after": after_id},
+    def _relationship_service(self, conn: AsyncConnection):
+        from app.core.contacts.adapters.sql import (
+            SqlContactRelationshipRepository,
+            SqlContactRepository,
         )
-        service = HistoryService()
-        rows: set[tuple[object, ...]] = set()
-        for rec in result.fetchall():
-            data = rec.event_data
-            if isinstance(data, str):
-                data = json.loads(data)
-            event = OutboxEvent(
-                id=rec.id,
-                event_id=rec.event_id,
-                event_type=rec.event_type,
-                aggregate_id=rec.aggregate_id,
-                event_data=data,
-                occurred_at=rec.occurred_at,
-                retry_count=0,
-                created_at=rec.occurred_at,
-            )
-            for r in service.project_event(event):
-                rows.add(
-                    (
-                        r.entity_type,
-                        r.entity_id,
-                        r.field_name,
-                        r.old_value,
-                        r.new_value,
-                        # field_history stores the provenance string; project_event
-                        # yields a Provenance enum, so compare on its value.
-                        r.source.value,
-                        r.changed_by,
-                    )
-                )
-        return rows
+        from app.core.contacts.services import ContactRelationshipService
 
-    async def _dualwrite_rows(
-        self, conn: AsyncConnection, *, after_id: int
-    ) -> set[tuple[object, ...]]:
-        """The history rows the dual-write wrote (event_id IS NULL) after ``after_id``,
-        including source/changed_by for provenance parity."""
-        result = await conn.execute(
-            text(
-                "SELECT entity_type, entity_id, field_name, old_value, new_value, "
-                "source, changed_by FROM field_history "
-                "WHERE event_id IS NULL AND id > :after"
-            ),
-            {"after": after_id},
+        return ContactRelationshipService(
+            SqlContactRepository(conn),
+            SqlContactRelationshipRepository(conn),
+            OutboxEventPublisher(conn),
         )
-        return {tuple(r) for r in result.fetchall()}
 
-    async def _max_ids(self, conn: AsyncConnection) -> tuple[int, int]:
-        outbox = await conn.execute(
-            text("SELECT COALESCE(MAX(id), 0) FROM outbox_events")
+    def _tag_service(self, conn: AsyncConnection):
+        from app.core.contacts.adapters.sql import SqlTagRepository
+        from app.core.contacts.services import TagHierarchyService, TagService
+
+        tag_repo = SqlTagRepository(conn)
+        return TagService(
+            tag_repo=tag_repo,
+            tag_hierarchy_service=TagHierarchyService(tag_repo),
+            event_publisher=OutboxEventPublisher(conn),
         )
-        history = await conn.execute(
-            text("SELECT COALESCE(MAX(id), 0) FROM field_history")
+
+    async def _drain(
+        self,
+        stream_client: StreamClient,
+        stream_name: str,
+        conn: AsyncConnection,
+    ) -> None:
+        await _relay_and_project(
+            stream_client, stream_name, conn, f"e2e-{uuid.uuid4().hex[:6]}"
         )
-        return int(outbox.scalar_one()), int(history.scalar_one())
 
     @pytest.mark.asyncio
-    async def test_base_field_update_projection_equals_dual_write(
-        self, clean_database: AsyncConnection
+    async def test_create_projects_contact_and_subentity_markers(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
     ) -> None:
-        service = self._service(clean_database)
+        """Create with a method projects the contact-level AND the per-sub-entity
+        "created" markers (affects_history defaults True on the create path)."""
+        service = self._service(async_connection)
+        created = await service.create_contact(
+            Contact(
+                first_name="John",
+                methods=[
+                    ContactMethod(
+                        method_type=MethodType.EMAIL,
+                        value="j@example.com",
+                        contact_id=0,
+                    )
+                ],
+            ),
+            async_connection,
+            changed_by="ui",
+            source=Provenance.UI,
+        )
+        assert created.id is not None and created.methods is not None
+        method_id = created.methods[0].id
+        assert method_id is not None
+        await self._drain(stream_client, test_stream_name, async_connection)
+
+        assert await _rows_for(
+            async_connection, entity_type="contact", entity_id=created.id
+        ) == [("status", None, "created", "ui", "ui")]
+        assert await _rows_for(
+            async_connection,
+            entity_type="contact_method",
+            entity_id=method_id,
+        ) == [("status", None, "created", "ui", "ui")]
+
+    @pytest.mark.asyncio
+    async def test_base_field_update_projected(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        service = self._service(async_connection)
         created = await service.create_contact(
             Contact(first_name="John", last_name="Doe"),
-            clean_database,
+            async_connection,
             changed_by="ui",
             source=Provenance.UI,
         )
         assert created.id is not None
-
-        outbox_before, history_before = await self._max_ids(clean_database)
         await service.update_contact_field(
             created.id,
             "first_name",
             "Jonathan",
-            clean_database,
+            async_connection,
             changed_by="ui",
             source=Provenance.UI,
         )
+        await self._drain(stream_client, test_stream_name, async_connection)
 
-        projected = await self._project_outbox_after(
-            clean_database, after_id=outbox_before
+        rows = await _rows_for(
+            async_connection, entity_type="contact", entity_id=created.id
         )
-        dual_write = await self._dualwrite_rows(clean_database, after_id=history_before)
-        assert projected == dual_write
-        assert (
-            "contact",
-            created.id,
-            "first_name",
-            "John",
-            "Jonathan",
-            "ui",
-            "ui",
-        ) in projected
+        assert ("first_name", "John", "Jonathan", "ui", "ui") in rows
 
     @pytest.mark.asyncio
-    async def test_method_field_update_projection_equals_dual_write(
-        self, clean_database: AsyncConnection
+    async def test_method_field_update_projected(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
     ) -> None:
         """A method field edit publishes ContactUpdated with a "method_{id}_{field}"
-        key, which projects to the same contact_method row the dual-write wrote."""
-        service = self._service(clean_database)
+        key, which projects to the contact_method row."""
+        service = self._service(async_connection)
         created = await service.create_contact(
             Contact(
                 first_name="Mia",
@@ -458,35 +505,273 @@ class TestContactProjectionMatchesDualWrite:
                     )
                 ],
             ),
-            clean_database,
+            async_connection,
             changed_by="ui",
             source=Provenance.UI,
         )
-        assert created.id is not None and created.methods[0].id is not None
+        assert created.id is not None and created.methods is not None
         method_id = created.methods[0].id
-
-        outbox_before, history_before = await self._max_ids(clean_database)
+        assert method_id is not None
         await service.update_contact_method_field(
             created.id,
             method_id,
             "value",
             "new@example.com",
-            clean_database,
+            async_connection,
             changed_by="ui",
             source=Provenance.UI,
         )
+        await self._drain(stream_client, test_stream_name, async_connection)
 
-        projected = await self._project_outbox_after(
-            clean_database, after_id=outbox_before
+        rows = await _rows_for(
+            async_connection, entity_type="contact_method", entity_id=method_id
         )
-        dual_write = await self._dualwrite_rows(clean_database, after_id=history_before)
-        assert projected == dual_write
-        assert (
-            "contact_method",
-            method_id,
-            "value",
-            "old@example.com",
-            "new@example.com",
-            "ui",
-            "ui",
-        ) in projected
+        assert ("value", "old@example.com", "new@example.com", "ui", "ui") in rows
+
+    @pytest.mark.asyncio
+    async def test_tag_assign_projected(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        service = self._service(async_connection)
+        created = await service.create_contact(
+            Contact(first_name="Tara"),
+            async_connection,
+            changed_by="ui",
+            source=Provenance.UI,
+        )
+        assert created.id is not None
+        tag = await self._tag_service(async_connection).create_tag(
+            "vip", async_connection
+        )
+        assert tag.id is not None
+        await service.assign_tag_to_contact(
+            created.id,
+            tag.id,
+            async_connection,
+            changed_by="ui",
+            source=Provenance.UI,
+        )
+        await self._drain(stream_client, test_stream_name, async_connection)
+
+        rows = await _rows_for(
+            async_connection, entity_type="contact", entity_id=created.id
+        )
+        assert ("tags", None, "vip", "ui", "ui") in rows
+
+    @pytest.mark.asyncio
+    async def test_important_date_add_projected(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        service = self._service(async_connection)
+        created = await service.create_contact(
+            Contact(first_name="Dana"),
+            async_connection,
+            changed_by="ui",
+            source=Provenance.UI,
+        )
+        assert created.id is not None
+        saved_date = await service.add_contact_important_date(
+            created.id,
+            ImportantDate(
+                contact_id=created.id,
+                date_type=ImportantDateType.BIRTHDAY,
+                precision=DatePrecision.DAY_MONTH,
+                month=5,
+                day=15,
+            ),
+            async_connection,
+            changed_by="ui",
+            source=Provenance.UI,
+        )
+        assert saved_date.id is not None
+        await self._drain(stream_client, test_stream_name, async_connection)
+
+        assert await _rows_for(
+            async_connection,
+            entity_type="contact_important_date",
+            entity_id=saved_date.id,
+        ) == [("status", None, "created", "ui", "ui")]
+
+    @pytest.mark.asyncio
+    async def test_bulk_update_produces_no_spurious_subentity_markers(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        """The headline correctness gate. A bulk full-contact update that adds a
+        method and a tag via delete-all-then-re-save must produce ONLY the
+        aggregate ContactUpdated rows (``contact_methods`` / ``tags`` on the
+        contact) — NOT spurious per-sub-entity "created"/per-tag markers (the
+        re-save events carry affects_history=False)."""
+        service = self._service(async_connection)
+        created = await service.create_contact(
+            Contact(first_name="Bea"),
+            async_connection,
+            changed_by="ui",
+            source=Provenance.UI,
+        )
+        assert created.id is not None
+        # Drain the create so we start from a known state (contact status:created).
+        await self._drain(stream_client, test_stream_name, async_connection)
+        assert await _count_rows(async_connection, entity_type="contact_method") == 0
+
+        # Bulk update: add a method and a tag through the re-save path.
+        await service.update_contact(
+            Contact(
+                id=created.id,
+                first_name="Bea",
+                methods=[
+                    ContactMethod(
+                        method_type=MethodType.EMAIL,
+                        value="bea@example.com",
+                        contact_id=created.id,
+                    )
+                ],
+            ),
+            async_connection,
+            changed_by="ui",
+            source=Provenance.UI,
+            tag_names=["work"],
+        )
+        await self._drain(stream_client, test_stream_name, async_connection)
+
+        rows = await _rows_for(
+            async_connection, entity_type="contact", entity_id=created.id
+        )
+        # The aggregate rows ARE the feed for a bulk update.
+        field_names = {r[0] for r in rows}
+        assert "contact_methods" in field_names
+        tags_rows = [r for r in rows if r[0] == "tags"]
+        # Exactly one tags row — the aggregate ("None" -> "work"), NOT a per-tag
+        # (None -> "work") marker. The aggregate uses the literal string "None".
+        assert tags_rows == [("tags", "None", "work", "ui", "ui")]
+        # No per-sub-entity "created" markers from the re-saved method.
+        assert await _count_rows(async_connection, entity_type="contact_method") == 0
+
+    @pytest.mark.asyncio
+    async def test_relationship_create_projected(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        service = self._service(async_connection)
+        a = await service.create_contact(
+            Contact(first_name="Ann"), async_connection, source=Provenance.UI
+        )
+        b = await service.create_contact(
+            Contact(first_name="Ben"), async_connection, source=Provenance.UI
+        )
+        assert a.id is not None and b.id is not None
+        rel_service = self._relationship_service(async_connection)
+        created_rel = await rel_service.create_relationship(
+            from_contact_id=a.id,
+            to_contact_id=b.id,
+            relationship_type=RelationshipType.FRIEND,
+            create_bidirectional=False,
+            transaction=async_connection,
+            changed_by="ui",
+            source=Provenance.UI,
+        )
+        rel_id = (
+            created_rel.id if not isinstance(created_rel, list) else created_rel[0].id
+        )
+        assert rel_id is not None
+        await self._drain(stream_client, test_stream_name, async_connection)
+
+        assert await _rows_for(
+            async_connection, entity_type="contact_relationship", entity_id=rel_id
+        ) == [
+            ("relationship_type", None, "friend", "ui", "ui"),
+            ("status", None, "created", "ui", "ui"),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_summary_updated_projected(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        """A ContactSummaryUpdated event (published by the summary generator)
+        projects to the contact_summary entity."""
+        from app.core.contacts.models.events import ContactSummaryUpdated
+
+        publisher = OutboxEventPublisher(async_connection)
+        await publisher.publish(
+            ContactSummaryUpdated(
+                contact_id=990123,
+                changed_fields={"summary_text": ("old", "new")},
+                transaction=async_connection,
+            )
+        )
+        await self._drain(stream_client, test_stream_name, async_connection)
+
+        assert await _rows_for(
+            async_connection, entity_type="contact_summary", entity_id=990123
+        ) == [
+            (
+                "summary_text",
+                "old",
+                "new",
+                Provenance.SUMMARY_REGENERATION.value,
+                "system",
+            )
+        ]
+
+    @pytest.mark.asyncio
+    async def test_redelivery_no_duplicates_end_to_end(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        """Projecting the same outbox event twice (relay + re-project) must not
+        duplicate rows — the unique index makes the projection idempotent."""
+        service = self._service(async_connection)
+        created = await service.create_contact(
+            Contact(first_name="Uno"),
+            async_connection,
+            changed_by="ui",
+            source=Provenance.UI,
+        )
+        assert created.id is not None
+        await service.update_contact_field(
+            created.id,
+            "first_name",
+            "Una",
+            async_connection,
+            changed_by="ui",
+            source=Provenance.UI,
+        )
+        # First delivery.
+        await self._drain(stream_client, test_stream_name, async_connection)
+        # Re-project the same already-relayed stream events (re-read from id 0).
+        consumer = HistoryProjectionConsumer(
+            stream_client=stream_client,
+            stream_name=test_stream_name,
+            consumer_name=f"redeliver-{uuid.uuid4().hex[:6]}",
+            block_ms=100,
+        )
+        await stream_client.ensure_consumer_group(test_stream_name, GROUP_NAME)
+        with patch(
+            "app.infrastructure.events.history_projection_consumer.get_async_database_engine",
+            return_value=_patched_engine(async_connection),
+        ):
+            await consumer._process_batch()
+
+        update_rows = [
+            r
+            for r in await _rows_for(
+                async_connection, entity_type="contact", entity_id=created.id
+            )
+            if r[0] == "first_name"
+        ]
+        assert update_rows == [("first_name", "Uno", "Una", "ui", "ui")]
