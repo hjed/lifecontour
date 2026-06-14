@@ -16,7 +16,10 @@ content and date range are preserved and the inbound album values are ignored.
 
 import json
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 
 import structlog
 from core_shared.models.history import Provenance
@@ -67,14 +70,21 @@ class ImmichAlbumOutboxEventProcessor:
         connection: AsyncConnection,
         relationship_repo: SqlJournalContactRelationshipRepository | None = None,
         ext_ref_repo: ExternalReferenceRepository | None = None,
+        event_publisher: OutboxEventPublisher | None = None,
     ) -> None:
         """Initialize with a journal service and database connection.
 
         ``relationship_repo`` and ``ext_ref_repo`` are used for participant
         detection (resolving tagged Immich people to local contacts and keeping
-        the journal's PARTICIPANT relationships in sync). They default to
-        connection-backed implementations so existing callers need not change.
+        the journal's PARTICIPANT relationships in sync). ``event_publisher`` is
+        used to record album metadata changes (name/asset count/url) as journal
+        history (ITER12-002 Phase 4). They default to connection-backed
+        implementations so existing callers need not change.
         """
+        from app.infrastructure.events.outbox_event_publisher import (
+            OutboxEventPublisher,
+        )
+
         self.journal_service = journal_service
         self.connection = connection
         self.journal_repo = SqlJournalRepository(connection)
@@ -84,6 +94,10 @@ class ImmichAlbumOutboxEventProcessor:
             relationship_repo or SqlJournalContactRelationshipRepository(connection)
         )
         self.ext_ref_repo = ext_ref_repo or ExternalReferenceRepository(connection)
+        self.event_publisher = event_publisher or OutboxEventPublisher(connection)
+
+    # Album display-metadata fields whose changes are recorded as journal history.
+    _HISTORY_METADATA_FIELDS = ("album_name", "asset_count", "album_url")
 
     async def process_event(self, event: OutboxEvent) -> dict[str, Any]:
         """Process a single Immich album outbox event."""
@@ -265,10 +279,18 @@ class ImmichAlbumOutboxEventProcessor:
                 source=Provenance.IMMICH,
             )
 
+        # Record album display-metadata changes (name / asset count / url) as
+        # journal history before mutating reference_data further. Metadata is
+        # integration-managed (not user-editable), so it is recorded regardless of
+        # local-edit merge protection.
+        reference_data = self._reference_data(payload)
+        await self._record_metadata_history(
+            journal_id, prev_reference_data, reference_data
+        )
+
         # Participants are reconciled regardless of merge protection: newly
         # tagged people are always added, but removals are skipped when the
         # journal was edited locally (add-only), preserving a user-curated list.
-        reference_data = self._reference_data(payload)
         reference_data["participant_contact_ids"] = await self._sync_participants(
             journal_id, payload, prev_reference_data, has_local_edits=has_local_edits
         )
@@ -344,6 +366,45 @@ class ImmichAlbumOutboxEventProcessor:
             "shared_link_url": metadata.get("shared_link_url"),
         }
         return {k: v for k, v in data.items() if v is not None}
+
+    async def _record_metadata_history(
+        self,
+        journal_id: int,
+        prev_reference_data: dict[str, Any],
+        new_reference_data: dict[str, Any],
+    ) -> None:
+        """Publish a ``JournalUpdated`` for changed album display metadata.
+
+        Diffs ``album_name`` / ``asset_count`` / ``album_url`` between the prior
+        and new album reference data; only changed fields are recorded, so an
+        unchanged-metadata sync produces no history (and no event at all).
+        """
+        from app.core.journal.models.events import JournalUpdated
+
+        changed_fields: dict[str, Any] = {}
+        for field in self._HISTORY_METADATA_FIELDS:
+            # `_reference_data()` drops keys whose value is None, so a field absent
+            # from the new payload was merely omitted by this sync — not cleared.
+            # Skip it to avoid fabricating a spurious "field cleared" history entry.
+            if field not in new_reference_data:
+                continue
+            old = prev_reference_data.get(field)
+            new = new_reference_data.get(field)
+            if old != new:
+                changed_fields[field] = (old, new)
+
+        if not changed_fields:
+            return
+
+        await self.event_publisher.publish(
+            JournalUpdated(
+                journal_id=journal_id,
+                changed_fields=changed_fields,
+                source=Provenance.IMMICH,
+                changed_by=INTEGRATION_SOURCE,
+                transaction=self.connection,
+            )
+        )
 
     @staticmethod
     def _decode_reference_data(reference_data: str | None) -> dict[str, Any]:

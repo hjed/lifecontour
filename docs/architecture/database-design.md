@@ -132,6 +132,18 @@ Reads are aggregated per root entity via a pluggable aggregation strategy
 (`HistoryAggregationStrategy`): the `contact` strategy resolves the contact plus all
 its related sub-entities; a `journal` strategy is added in ITER12-002.
 
+`field_name` also encodes changes to a journal's **sub-rows**, so they group under the
+parent journal (`entity_type='journal'`, `entity_id=<journal id>`) without a join and
+survive sub-row deletion. The convention is `<prefix>:<key>:<field>`, where the key is a
+short, stable surrogate kept within the `VARCHAR(100)` column:
+
+- `route:<route_id>:<field>` / `gear:<gear_item_id>:<field>` — route/gear edits (ITER12-002 P1/2)
+- `plan:doc:<document_id>:<field>` — PLAN document edits (document ids are preserved across
+  updates by matching on `url`; ITER12-002 P4)
+- `abseil:pitch:<pitch_number>:<field>` — ABSEILING per-pitch edits (ITER12-002 P4)
+
+Marker fields (`__created__`, `__deleted__`, `types`) record create/delete/type changes.
+
 #### Event Outbox Table (Transactional Event Publishing)
 ```sql
 CREATE TABLE event_outbox (

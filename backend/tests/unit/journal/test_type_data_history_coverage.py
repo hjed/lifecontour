@@ -12,6 +12,7 @@ import dataclasses
 
 from core_shared.models.journals import (
     AbseilingData,
+    AbseilPitch,
     BushwalkingData,
     CalendarInfo,
     CanoeingData,
@@ -32,11 +33,15 @@ from core_shared.models.journals import (
     OutdoorPlanningData,
     OutdoorTrainingData,
     PlanData,
+    PlanDocument,
     SnorkellingData,
     TravelData,
 )
 
-from app.core.journal.services.journal_write_service import _TYPE_DATA_TRACKED_FIELDS
+from app.core.journal.services.journal_write_service import (
+    _TYPE_DATA_COLLECTIONS,
+    _TYPE_DATA_TRACKED_FIELDS,
+)
 
 # Keys present on every type-data model that are structural, not content.
 _STRUCTURAL_FIELDS = {"id", "journal_id", "created_at", "updated_at"}
@@ -84,13 +89,19 @@ _EXCLUDED_FIELDS: dict[JournalType, dict[str, str]] = {
             "tracked as a base field; not edited via the type-data API"
         ),
     },
-    # Nested child collections; their per-row history is integration/create
-    # managed and is captured separately under ITER12-002 Phase 4.
-    JournalType.PLAN: {"documents": "nested child collection (Phase 4)"},
+    # Nested child collection: per-row history is produced via the
+    # _TYPE_DATA_COLLECTIONS registry (plan:doc:<id>:<field>), not the single-row
+    # tracked registry (ITER12-002 Phase 4).
+    JournalType.PLAN: {
+        "documents": "per-row history via plan:doc:<id>:<field> (Phase 4)"
+    },
+    # TRAVEL nested children have no write path yet (the type-data update endpoint
+    # rejects TRAVEL and nothing calls save_flight/accommodation/transportation),
+    # so there is no write to record. Deferred until TRAVEL nested editing exists.
     JournalType.TRAVEL: {
-        "flights": "nested child collection (Phase 4)",
-        "accommodations": "nested child collection (Phase 4)",
-        "transportation": "nested child collection (Phase 4)",
+        "flights": "no write path — deferred until TRAVEL nested editing exists",
+        "accommodations": "no write path — deferred until TRAVEL nested editing exists",
+        "transportation": "no write path — deferred until TRAVEL nested editing exists",
     },
 }
 
@@ -144,3 +155,55 @@ def test_tracked_and_excluded_do_not_overlap() -> None:
         assert not overlap, (
             f"{jtype.value}: {sorted(overlap)} both tracked and excluded"
         )
+
+
+# The per-row child model backing each registered nested collection (ITER12-002
+# Phase 4). PLAN documents are a field on PlanData; ABSEIL pitches are a separate
+# table (AbseilPitch), not a field on AbseilingData.
+_COLLECTION_ROW_MODELS: dict[JournalType, type] = {
+    JournalType.PLAN: PlanDocument,
+    JournalType.ABSEILING_TRIP: AbseilPitch,
+}
+
+
+def test_collection_per_row_fields_are_real_model_fields() -> None:
+    """Every nested-collection per-row tracked field must exist on its row model.
+
+    Guards the Phase 4 ``_TYPE_DATA_COLLECTIONS`` registry the same way
+    ``test_tracked_fields_are_real_model_fields`` guards the single-row registry.
+    """
+    for jtype, specs in _TYPE_DATA_COLLECTIONS.items():
+        row_model = _COLLECTION_ROW_MODELS.get(jtype)
+        assert row_model is not None, (
+            f"{jtype.value} has a collection spec but no row model in this test"
+        )
+        content = _content_fields(row_model)
+        for spec in specs:
+            unknown = set(spec.fields) - content
+            assert not unknown, (
+                f"{jtype.value}: collection '{spec.field_name}' tracks per-row "
+                f"field(s) {sorted(unknown)} not on {row_model.__name__}."
+            )
+
+
+def test_collection_field_on_single_row_model_is_excluded() -> None:
+    """A collection that is also a field on the single-row model must be excluded.
+
+    Keeps the two registries consistent: PLAN.documents is a field on PlanData, so
+    it must be excluded-with-reason from the single-row tracked registry (it is
+    covered per-row instead). Separate-table collections (ABSEIL pitches) are not
+    single-row fields, so they need no exclusion.
+    """
+    for jtype, specs in _TYPE_DATA_COLLECTIONS.items():
+        model = _TYPE_DATA_MODELS[jtype]
+        if model is None:
+            continue
+        single_row_fields = _content_fields(model)
+        excluded = set(_EXCLUDED_FIELDS.get(jtype, {}))
+        for spec in specs:
+            if spec.field_name in single_row_fields:
+                assert spec.field_name in excluded, (
+                    f"{jtype.value}: collection '{spec.field_name}' is a field on "
+                    f"{model.__name__} but is not excluded-with-reason; the "
+                    f"single-row coverage guard would flag it."
+                )
