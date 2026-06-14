@@ -1,0 +1,481 @@
+# Iteration 14: Worker Standardisation
+
+**Status:** 🔵 PLANNED — sub-iterations and PR-sized phases defined; ready to implement
+**Dependencies:** Iteration 5 (Redis Streams event bus, isolated worker pattern — COMPLETE). No external dependencies beyond what is already in `main`.
+**Goal:** Consolidate the four integration workers (`google`, `immich`, `strava`, `snipeit`) onto a shared, standardised platform — shared settings, shared ARQ configuration and lifecycle, non-blocking fan-outs — and document the procedure for creating new workers.
+
+## Overview
+
+The four integration workers were built incrementally and have drifted: settings are partly duplicated and declared inconsistently (inline vs separate module, `SecretStr` only in some), ARQ configuration and lifecycle code is hand-written per worker with divergent values, and fan-out (batch) jobs block a worker slot for their whole duration. This iteration removes that duplication by moving shared concerns into `core_shared`, makes fan-outs non-blocking, and adds a skill documenting how to create a new worker.
+
+This iteration realises the [Worker Standardisation Product Specification](../product-specifications/worker-standardisation-product-specification.md). It does **not** change the event-bus architecture established in iteration 5 — workers continue to communicate with the backend only via events (outbox → Redis Streams).
+
+The work is split into six independently shippable **sub-iterations**, each broken into **PR-sized phases**. Phases are sized to merge to a green `main` independently within a **~600-line diff** (implementation + tests). A phase need not expose a user-facing change on its own — the sub-iteration is the shippable unit — but every phase must leave `main` green and introduce no broken or half-wired runtime path.
+
+## Reference Documents
+
+- **[Worker Standardisation Product Specification](../product-specifications/worker-standardisation-product-specification.md)** — approved product behaviour for this iteration
+- **[Integration Architecture & Strava Product Specification](../product-specifications/integration-architecture-and-strava-product-specification.md)** — event-bus architecture this builds on
+- **[Integration Architecture](../architecture/integration-architecture.md)** — event-driven integration patterns, worker structure
+- **[Database Design](../architecture/database-design.md)** — transaction management, commit-as-you-go, schema standards
+- **[Testing Strategy](../architecture/testing-strategy.md)** — worker unit tests, integration tests, conftest usage
+- **[Code Quality Standards](../code-quality-standards.md)** — ruff/mypy/pytest configuration
+- **[CI/CD Setup](../ci-cd-setup.md)** — worker test matrix and release image publishing
+- **[Iteration 13: Contact Merge](./iteration-13-contact-merge.md)** — the PR-sizing reference this phase breakdown mirrors
+
+### External Documentation
+
+- **arq** — https://arq-docs.helpmanual.io/ (worker settings, cron, `RedisSettings.from_dsn`)
+- **Pydantic Settings** — https://docs.pydantic.dev/latest/concepts/pydantic_settings/ (`BaseSettings`, `SecretStr`)
+- **SQLAlchemy Core** — https://docs.sqlalchemy.org/en/20/ (use the `writing-sql` skill before authoring queries)
+- **Alembic** — https://alembic.sqlalchemy.org/en/latest/ (use the `creating-migrations` skill for sequential naming)
+- **OpenTelemetry Python** — https://opentelemetry.io/docs/languages/python/ (existing `core_shared/telemetry.py`)
+
+## Delivery Rules
+
+These rules apply to every phase below:
+
+1. **Tests first:** write the failing tests for the slice before implementation (TDD red → green → refactor).
+2. **Green main:** do not merge a phase unless relevant tests, linting (`ruff`), and type checks (`mypy`) pass for every affected worker and `core_shared`.
+3. **PR size ≤ ~600 lines:** keep each phase within roughly a 600-line diff (implementation + tests); split further if it grows.
+4. **Structural changes preserve behaviour:** ITER14-001, -002, -004, and -005 are refactors — observable worker behaviour must be identical before and after. Verify by running each affected worker's existing suite unchanged.
+5. **Migrate-and-delete in the same phase:** when a phase moves a worker onto a shared surface, it must delete that worker's now-duplicate code in the same PR — no dead duplicate left behind.
+6. **No SQL in `worker.py`:** all database access goes through repositories.
+7. **Events only:** workers never write to journals or contacts directly.
+8. **Every phase is shippable:** no phase may rely on a later phase to restore broken behaviour. New shared code lands behind no runtime path until a migration phase wires it in.
+
+## Dependency and Parallelisation Notes
+
+- **ITER14-001 (Base Settings)** has no dependencies and lands first — the foundation other sub-iterations build on.
+- **ITER14-002 (ARQ Settings & Lifecycle)** depends on **ITER14-001** (uses the settings base and shared Redis-settings helper).
+- **ITER14-003 (Non-Blocking Fan-Outs)** is largely independent of 001/002 (it changes the `SyncJob` model and orchestrators); its reconciliation cron reuses the ITER14-002 cron helper if available, otherwise ships its own and is reconciled in 002.
+- **ITER14-004 (Stream-Consumer Registration)** depends on **ITER14-002** (the shared lifecycle factory launches the consumer task).
+- **ITER14-005 (Fixtures, Tooling & Dockerfile)** is independent and benefits from landing early so 001–004 reuse its fixtures.
+- **ITER14-006 (Skill)** depends on **ITER14-001 through -005** and lands last.
+
+| Sub-iteration | Depends on | Can parallelise with |
+|---|---|---|
+| ITER14-001 Base Settings | — | ITER14-003, ITER14-005 |
+| ITER14-002 ARQ Settings & Lifecycle | ITER14-001 | ITER14-003, ITER14-005 |
+| ITER14-003 Non-Blocking Fan-Outs | — (soft: ITER14-002 cron helper) | ITER14-001, ITER14-002, ITER14-005 |
+| ITER14-004 Stream-Consumer Registration | ITER14-002 | ITER14-003, ITER14-005 |
+| ITER14-005 Fixtures, Tooling & Dockerfile | — | all others |
+| ITER14-006 Creating-a-Worker Skill | ITER14-001…005 | — |
+
+## Sizing findings that shaped the phases
+
+These were established by reviewing the current code and drive the phase boundaries below:
+
+- **Settings are ~60% common but declared four different ways.** Common fields (`database_url`, `redis_url`, `worker_id`, `log_level`, `otel_*`) recur in all four; `google` declares them **inline** in `worker.py:54–99`, while `immich` (`immich_settings.py:13–34`), `strava` (`strava_settings.py:12–46`), and `snipeit` (`snipeit_settings.py:13–30`) use separate modules. `google`/`strava` use `SecretStr`; `immich`/`snipeit` use bare `str`. `snipeit` lacks `enable_periodic_sync`/`sync_interval_hours`. This split (SecretStr-already vs needs-conversion) shapes the 001 migration pairing.
+- **Redis-URL parsing is duplicated.** `_parse_redis_url()` is copy-pasted in `immich/worker.py:788–798` and `snipeit/worker.py:402–412`; `google`/`strava` already use `RedisSettings.from_dsn(...)`. The shared helper lands in ITER14-001 and both copies are deleted in ITER14-002's migration.
+- **Cron generation is duplicated three ways.** `immich` has a `_generate_cron_jobs()` helper (`worker.py:801–823`); `google` (`worker.py:3887–3909`) and `strava` (`worker.py:741–760`) inline equivalent logic; `snipeit` has none. One shared helper replaces all three.
+- **Startup/shutdown are ~50 lines of near-identical code per worker.** `google:114–165`, `immich:56–91`, `strava:80–125`, `snipeit:42–77`. Differences are minor: `strava` adds an `add_done_callback` for error logging and checks `task.done()` before cancel; `google` closes the session factory. The shared factory must fold these variants in as options.
+- **Fan-out handling is asymmetric and only partly persisted.** `immich.sync_immich_albums` (`worker.py:340–487`) **blocks** on `asyncio.gather(*[j.result(timeout=290)], return_exceptions=True)` (lines 454–459) and updates a `SyncJob`; `immich.sync_immich_people` (`worker.py:122–276`) enqueues children and returns but **does not persist** a `SyncJob`; `strava.sync_strava_activities` (`worker.py:426–532`) enqueues and returns, also without persisting. Children use deterministic synthetic IDs (e.g. `immich-album-batch-{job_id}-b{n}`) and are **never persisted** as `sync_jobs` rows. This drives 003's split: schema/repo first, then per-worker orchestrator migration.
+- **`SyncJobRepository` has no hierarchy support.** Current public methods (`sync_job_repository.py`): `create`, `update_status`, `get_by_job_id`, `list_by_user`, `get_recent_failures`, `get_job_statistics`. There is **no** `parent_job_id`, no child query, and no atomic counter update — all net-new in ITER14-003 Phase 1.
+- **Stream consumers all subclass `StreamConsumer`** (`core_shared/stream_consumer.py`, 312 lines) and override `__init__` (group/stream/patterns) + `_handle_event` routing. `google` has full routing (`stream_consumer_tasks.py:82–119`); `immich`/`strava`/`snipeit` are thin. A declarative route table replaces the per-worker `_handle_event` boilerplate.
+- **Test fixtures and tooling are copy-pasted.** Per-worker `tests/integration/conftest.py` are ~114–121 lines and largely identical; each `pyproject.toml` (~134–147 lines) repeats the same ruff/mypy/pytest/dev config. Dockerfiles are already identical 22-line files `FROM pms-python-base` — they only need documenting as canonical.
+
+---
+
+## Task Breakdown
+
+Each sub-iteration defines its objective, the specification it builds on, the outcomes its phases collectively satisfy, and a **phase breakdown**. Each phase lists a PR-size estimate, acceptance criteria, required test coverage, and required documentation updates. Sizes are estimates grounded in the line ranges above.
+
+### ITER14-001: Shared Base Worker Settings
+
+**Objective:** Introduce a single `BaseWorkerSettings` model in `core_shared` (including the OTel block) and migrate all four workers to subclass it, standardising `SecretStr` and Redis-settings derivation.
+
+**Specification Reference:**
+- [Part 1: Shared Base Settings Model](../product-specifications/worker-standardisation-product-specification.md#part-1-shared-base-settings-model)
+
+**Dependencies:** None.
+
+**Outcomes the phases must satisfy:**
+- One `BaseWorkerSettings` defines every common field and the OTel block; workers add only integration-specific fields.
+- All secret-bearing settings across all workers use `SecretStr`.
+- A single shared helper derives ARQ `RedisSettings` from `redis_url`; the duplicated `_parse_redis_url` copies are gone.
+- Worker boot behaviour is unchanged for the same env vars.
+
+#### Phase 1: `BaseWorkerSettings` + shared Redis-settings helper (core_shared)
+**PR Size:** ~250 lines (model ~90, helper ~30, tests ~130)
+
+Add the base model and helper to `core_shared`, fully unit-tested. Not yet consumed by any worker, so it merges green as additive code.
+
+**Acceptance Criteria:**
+- [ ] `core_shared` exposes `BaseWorkerSettings` (Pydantic `BaseSettings`) with `database_url` (`SecretStr`), `redis_url`, `stream_name`, `worker_id`, `queue_name`, `log_level`, `enable_periodic_sync`, `sync_interval_hours`, and the OTel block (`enable_telemetry`, `otel_exporter_otlp_endpoint`, `otel_service_name`, `otel_resource_attributes`), with documented defaults.
+- [ ] A `redis_settings_from_url(redis_url)` helper returns ARQ `RedisSettings` via `RedisSettings.from_dsn`, handling host/port/db/password forms.
+- [ ] Both are exported from `core_shared/__init__.py`.
+
+**Required Test Coverage:**
+- **Unit:** field defaults and env-var loading; `SecretStr` masking of `database_url`; `redis_settings_from_url` parses representative `redis://` forms (with/without db index and password).
+
+**Required Documentation Updates:**
+- `docs/architecture/integration-architecture.md` — document `BaseWorkerSettings` as the canonical worker settings base and the standard field set.
+
+#### Phase 2: Migrate `google` + `strava` settings onto the base
+**PR Size:** ~300 lines (per-worker settings ~120, tests ~180)
+
+Migrate the two workers that already use `SecretStr`. `google`'s inline settings move into a dedicated settings module subclassing the base.
+
+**Acceptance Criteria:**
+- [ ] `google` and `strava` settings classes subclass `BaseWorkerSettings`, declaring only integration-specific fields (`google_client_id`/`secret`, `max_concurrent_jobs`, `google_reserved_groups`, `webhook_base_url`; `strava_client_id`/`secret`). No common or OTel field is redeclared.
+- [ ] `google`'s settings move out of `worker.py` into a `google_settings.py` module (consistent with the others); `worker.py` imports it.
+- [ ] Both workers boot with their existing `.env` and produce identical effective configuration.
+
+**Required Test Coverage:**
+- **Unit:** each worker's settings subclass loads integration-specific fields and inherits the base fields/defaults.
+- **Integration:** each worker boots with a representative `.env` and resolves Redis + DB URLs correctly (behaviour-preservation check).
+
+**Required Documentation Updates:**
+- `google`/`strava` `README.md` settings sections updated to reference the base.
+
+#### Phase 3: Migrate `immich` + `snipeit` settings + `SecretStr` conversion
+**PR Size:** ~300 lines (per-worker settings ~120, tests ~180)
+
+Migrate the two workers that used bare `str`; convert secrets to `SecretStr` and add the periodic-sync fields `snipeit` lacked (inherited from the base, default disabled — no behaviour change).
+
+**Acceptance Criteria:**
+- [ ] `immich` and `snipeit` settings classes subclass `BaseWorkerSettings`, declaring only integration-specific fields; common/OTel fields removed.
+- [ ] All secrets (`encryption_key`, `database_url`) use `SecretStr`; call sites read `.get_secret_value()` where the raw value is needed.
+- [ ] `snipeit` inherits `enable_periodic_sync`/`sync_interval_hours` (default disabled) — no scheduling behaviour change.
+
+**Required Test Coverage:**
+- **Unit:** settings subclasses load correctly; `SecretStr` masking verified; secret call sites resolve the raw value.
+- **Integration:** both workers boot with a representative `.env` and resolve Redis + DB URLs correctly.
+
+**Required Documentation Updates:**
+- `immich`/`snipeit` `README.md` settings sections updated.
+- `docs/code-quality-standards.md` — record the `SecretStr` requirement for all worker secrets.
+
+---
+
+### ITER14-002: Shared ARQ Worker Settings & Lifecycle
+
+**Objective:** Provide shared ARQ defaults, a shared cron helper, and a shared `on_startup`/`on_shutdown` lifecycle factory in `core_shared`; migrate all four workers so their ARQ `WorkerSettings` reduces to a functions list plus consumer registration.
+
+**Specification Reference:**
+- [Part 2: Shared ARQ Worker Settings & Lifecycle](../product-specifications/worker-standardisation-product-specification.md#part-2-shared-arq-worker-settings--lifecycle)
+
+**Dependencies:** ITER14-001 (settings base + Redis-settings helper).
+
+**Outcomes the phases must satisfy:**
+- ARQ operational defaults, cron generation, and lifecycle are defined once and consumed by all four workers.
+- Each worker's ARQ `WorkerSettings` is reduced to its functions list, consumer registration, and any documented override.
+- The duplicated `_parse_redis_url`, `_generate_cron_jobs`/inline cron, and per-worker startup/shutdown are deleted.
+- Startup/shutdown, cron scheduling, and retry behaviour are unchanged.
+
+#### Phase 1: Shared ARQ toolkit — defaults, cron helper, lifecycle factory (core_shared)
+**PR Size:** ~520 lines (defaults ~40, cron helper ~60, lifecycle factory ~130, tests ~290)
+
+Add the shared ARQ surface to `core_shared`, fully unit-tested. Not yet consumed, so it merges green.
+
+**Acceptance Criteria:**
+- [ ] Shared ARQ defaults (`job_timeout`, `keep_result`, `max_tries`, retry/backoff, `health_check_interval`) defined once, with a documented way to override per worker.
+- [ ] A shared cron-generation helper produces ARQ cron jobs from `enable_periodic_sync` + `sync_interval_hours` (and an empty schedule when disabled), reproducing the existing `immich`/`google`/`strava` schedules.
+- [ ] A shared `on_startup`/`on_shutdown` factory builds the DB session factory, stores it and the settings in the ARQ `ctx`, launches a supplied stream-consumer coroutine as a task, and on shutdown cancels it (handling `CancelledError`) and closes the session factory. It folds in the existing variants as options: optional `add_done_callback` error logging (strava) and a `done()` check before cancel.
+
+**Required Test Coverage:**
+- **Unit:** defaults application + override; cron helper schedules for representative intervals and the disabled case; lifecycle factory wires `ctx` keys, launches and cancels the consumer task, invokes the done-callback option, and closes the session factory on shutdown.
+
+**Required Documentation Updates:**
+- `docs/architecture/integration-architecture.md` — document the shared ARQ defaults, cron helper, and lifecycle factory as the standard worker bootstrap.
+
+#### Phase 2: Migrate `google` + `strava` onto the shared ARQ toolkit
+**PR Size:** ~360 lines (per-worker rewiring ~160, tests ~200)
+
+**Acceptance Criteria:**
+- [ ] `google` and `strava` ARQ `WorkerSettings` use the shared defaults, cron helper, lifecycle factory, and `redis_settings_from_url`; each retains only its `functions` list, consumer registration, and documented overrides (`google` `max_concurrent_jobs`, `strava` `max_tries=20`).
+- [ ] Per-worker `startup`/`shutdown`, inline cron blocks, and any local Redis parsing are deleted.
+- [ ] Startup/shutdown, cron scheduling, and retry behaviour are unchanged.
+
+**Required Test Coverage:**
+- **Unit:** each worker's `WorkerSettings` exposes the expected functions/overrides; lifecycle delegates to the shared factory.
+- **Integration:** each worker starts against real Redis + Postgres, runs a trivial job, and shuts down cleanly (consumer task cancelled, no leaked connections).
+
+**Required Documentation Updates:**
+- `google`/`strava` `README.md` updated to show the reduced `WorkerSettings`.
+
+#### Phase 3: Migrate `immich` + `snipeit` onto the shared ARQ toolkit
+**PR Size:** ~340 lines (per-worker rewiring ~150, tests ~190)
+
+**Acceptance Criteria:**
+- [ ] `immich` and `snipeit` ARQ `WorkerSettings` use the shared defaults, cron helper (immich), lifecycle factory, and `redis_settings_from_url`; each retains only its `functions` list, consumer registration, and documented overrides (`snipeit` `health_check_interval=30`).
+- [ ] The duplicated `_parse_redis_url` (both workers), `immich._generate_cron_jobs`, and per-worker `startup`/`shutdown` are deleted.
+- [ ] Behaviour unchanged; `snipeit` (no cron) continues to schedule nothing.
+
+**Required Test Coverage:**
+- **Unit:** `WorkerSettings` functions/overrides; lifecycle delegates to the shared factory; no residual local Redis/cron helpers referenced.
+- **Integration:** both workers start, run a trivial job, and shut down cleanly against real Redis + Postgres.
+
+**Required Documentation Updates:**
+- `immich`/`snipeit` `README.md` updated to show the reduced `WorkerSettings`.
+- `docs/architecture/testing-strategy.md` — note the lifecycle factory's role in worker tests.
+
+---
+
+### ITER14-003: Non-Blocking Fan-Outs
+
+**Objective:** Make orchestrator (fan-out) jobs non-blocking: add an `IN_PROGRESS` sync-job status and parent↔child tracking to `sync_jobs`, change orchestrators to dispatch-and-return, and add a periodic reconciliation job that finalises in-progress parents.
+
+**Specification Reference:**
+- [Part 3: Non-Blocking Fan-Outs](../product-specifications/worker-standardisation-product-specification.md#part-3-non-blocking-fan-outs)
+
+**Dependencies:** None hard. Soft: reuse the ITER14-002 cron helper for the reconciliation schedule.
+
+**Outcomes the phases must satisfy:**
+- `SyncJobStatus` gains `IN_PROGRESS`; `sync_jobs` gains `parent_job_id` and child counters; children persist as linked rows.
+- Orchestrators dispatch children, mark the parent `IN_PROGRESS`, and return immediately — no blocking `asyncio.gather`.
+- A shared reconciliation job finalises parents against child rows (authoritative), including stuck/timeout handling.
+- The Immich and Strava fan-outs no longer hold a worker slot for their children's duration; final status remains correct.
+
+#### Phase 1: Schema, model, migration & repository hierarchy support
+**PR Size:** ~520 lines (model ~40, migration ~70, repository ~150, tests ~260)
+
+Net-new data layer, additive and not yet driven by orchestrators, so it merges green under test.
+
+**Acceptance Criteria:**
+- [ ] `SyncJobStatus` gains `IN_PROGRESS`; the `ck_sync_jobs_status` check constraint is extended (existing statuses unchanged).
+- [ ] `sync_jobs` gains `parent_job_id` (self-referencing FK, nullable) and `expected_children`, `completed_children`, `failed_children` (default 0).
+- [ ] An Alembic migration adds the status value, columns, and constraint change, created per the `creating-migrations` skill (sequential numbering); it applies and rolls back cleanly.
+- [ ] `SyncJobRepository` gains methods to: create a child linked to a parent, set a parent's `expected_children`, atomically increment `completed_children`/`failed_children`, and list/aggregate children by parent.
+
+**Required Test Coverage:**
+- **Unit:** status enum + constraint include `IN_PROGRESS`; repository counter increments are correct.
+- **Integration:** create parent + children, increment counters atomically under concurrency, query children by parent; migration up/down verified with `async_connection`/`clean_database`.
+
+**Required Documentation Updates:**
+- `docs/architecture/database-design.md` — document the new `sync_jobs` columns and the `IN_PROGRESS` status value.
+
+#### Phase 2: Shared reconciliation job (core_shared)
+**PR Size:** ~450 lines (reconciler ~170, cron wiring ~20, tests ~260)
+
+Add the shared reconciliation function operating on the Phase 1 schema. It is a safe no-op until orchestrators emit `IN_PROGRESS` parents (Phases 3–4), so it merges green.
+
+**Acceptance Criteria:**
+- [ ] A shared `reconcile_in_progress_parents` function scans `IN_PROGRESS` parents and transitions them to `COMPLETED` (all children completed) or `FAILED` (per failure policy) based on the child rows — counters are a fast path, child rows are authoritative.
+- [ ] Stuck/timeout handling: a parent whose children have not progressed within a configured window is marked `FAILED` (or flagged for retry) rather than remaining `IN_PROGRESS`.
+- [ ] A helper registers the reconciler on a cron (reusing the ITER14-002 cron helper) so any worker using fan-outs can schedule it.
+
+**Required Test Coverage:**
+- **Unit:** transition logic for all-success, partial-failure, all-failure, and stuck/timeout cases.
+- **Integration:** seed `IN_PROGRESS` parents with various child states and verify the reconciler finalises each correctly; verify the no-op case (no in-progress parents).
+
+**Required Documentation Updates:**
+- `docs/architecture/integration-architecture.md` — document the reconciliation job and the non-blocking fan-out lifecycle.
+
+#### Phase 3: Migrate Immich fan-outs to non-blocking
+**PR Size:** ~480 lines (orchestrator changes ~160, child counter updates ~70, tests ~250)
+
+Make the asymmetric Immich orchestrators consistent and non-blocking.
+
+**Acceptance Criteria:**
+- [ ] `sync_immich_albums` no longer blocks on `asyncio.gather`; it persists children linked to the parent, sets `expected_children`, marks the parent `IN_PROGRESS`, and returns. The reconciler finalises it.
+- [ ] `sync_immich_people` persists a parent + linked children (previously unpersisted), marks the parent `IN_PROGRESS`, and returns.
+- [ ] `sync_immich_album_batch` / `sync_immich_people_batch` update their own child rows and atomically increment the parent counters on completion/failure.
+- [ ] The Immich worker schedules the reconciliation cron.
+
+**Required Test Coverage:**
+- **Unit:** orchestrators return without awaiting children; batch jobs increment the correct parent counter.
+- **Integration:** an album/people fan-out dispatches children against real Redis/Postgres, returns immediately, children update counters, and the reconciler transitions the parent to the correct final status. Regression: a large fan-out completes and reports correct totals.
+
+**Required Documentation Updates:**
+- `immich` `README.md` — describe the non-blocking sync flow and status semantics.
+
+#### Phase 4: Migrate Strava fan-out to non-blocking
+**PR Size:** ~360 lines (orchestrator changes ~120, child counter updates ~60, tests ~180)
+
+**Acceptance Criteria:**
+- [ ] `sync_strava_activities` persists a parent + linked children, sets `expected_children`, marks the parent `IN_PROGRESS`, and returns (it already does not block, but now persists hierarchy and status).
+- [ ] `sync_strava_activity_batch` updates its child row and atomically increments the parent counters.
+- [ ] The Strava worker schedules the reconciliation cron.
+- [ ] Sync status surfaces sensibly wherever sync jobs are displayed (`IN_PROGRESS` renders as an active state; no UI regression).
+
+**Required Test Coverage:**
+- **Unit:** orchestrator persists hierarchy and returns; batch increments counters.
+- **Integration:** a Strava activity fan-out dispatches children, returns immediately, and the reconciler finalises the parent correctly.
+- **E2E (where surfaced):** trigger a Strava import from the integration dashboard and verify it shows `IN_PROGRESS` then resolves without blocking other syncs.
+
+**Required Documentation Updates:**
+- `strava` `README.md` — describe the non-blocking sync flow.
+- `docs/tasks/periodic-sync-implementation.md` — cross-reference the reconciliation cron.
+
+---
+
+### ITER14-004: Shared Stream-Consumer Registration
+
+**Objective:** Replace each worker's hand-written `StreamConsumer` subclass and `_handle_event` routing with a shared registration convention where a worker declares its event routes and shared infrastructure runs the loop, acknowledgement, and error handling.
+
+**Specification Reference:**
+- [Part 4: Stream-Consumer Registration](../product-specifications/worker-standardisation-product-specification.md#stream-consumer-registration)
+
+**Dependencies:** ITER14-002 (the shared lifecycle factory launches the consumer task).
+
+**Outcomes the phases must satisfy:**
+- A worker declares `event-type pattern → handler` routes; shared infrastructure runs `XREADGROUP`/ack/retry and dispatches, acking unmatched events immediately.
+- Per-worker consumer boilerplate is deleted; the consumed-event set is reviewable from the route table.
+- Failure isolation and at-least-once semantics are preserved.
+
+#### Phase 1: Route-registration convention in `core_shared`
+**PR Size:** ~350 lines (registry + dispatch ~150, tests ~200)
+
+Extend `core_shared`'s `StreamConsumer` with a declarative route table + dispatch, fully unit-tested. Not yet consumed, so it merges green.
+
+**Acceptance Criteria:**
+- [ ] `core_shared` provides a way to declare routes (`event-type pattern → handler`); shared dispatch matches an event, invokes the handler, and acks; unmatched events are acked immediately.
+- [ ] Retry-on-failure via pending entries is preserved; the existing subclass override path remains supported (backward compatible) until workers migrate.
+
+**Required Test Coverage:**
+- **Unit:** route matching (pattern → handler, unmatched → immediate ack), handler dispatch, retry-on-failure via pending entries.
+
+**Required Documentation Updates:**
+- `docs/architecture/integration-architecture.md` — document the route-registration convention as the standard way workers consume domain events.
+
+#### Phase 2: Migrate `google` + `immich` consumers to declarative routes
+**PR Size:** ~300 lines (per-worker route tables ~120, tests ~180)
+
+**Acceptance Criteria:**
+- [ ] `google` and `immich` declare route tables instead of subclassing/overriding `_handle_event`; the per-worker routing boilerplate is deleted.
+- [ ] Each worker's consumed-event set is unchanged (regression-checked against the prior patterns).
+
+**Required Test Coverage:**
+- **Unit:** each worker's route table maps the expected event types to the right handlers; unmatched events acked.
+- **Integration:** a consumer reads real events from a Redis stream, dispatches matched events, acks unmatched, and retries a failing handler.
+
+**Required Documentation Updates:**
+- `google`/`immich` `README.md` consumer sections updated to the declarative pattern.
+
+#### Phase 3: Migrate `strava` + `snipeit` consumers to declarative routes
+**PR Size:** ~300 lines (per-worker route tables ~120, tests ~180)
+
+**Acceptance Criteria:**
+- [ ] `strava` and `snipeit` declare route tables; per-worker routing boilerplate deleted.
+- [ ] Consumed-event sets unchanged (`strava.*` prefix routing and the snipeit event set preserved).
+
+**Required Test Coverage:**
+- **Unit:** route tables map the expected event types; prefix/pattern matching preserved.
+- **Integration:** each consumer reads, dispatches, acks unmatched, and retries a failing handler against real Redis.
+
+**Required Documentation Updates:**
+- `strava`/`snipeit` `README.md` consumer sections updated.
+
+---
+
+### ITER14-005: Shared Test Fixtures, Tooling Config & Canonical Dockerfile
+
+**Objective:** Remove per-worker scaffolding duplication: shared test fixtures under `core_shared/testing/`, a shared Python tooling configuration workers inherit, and a documented canonical worker Dockerfile.
+
+**Specification Reference:**
+- [Part 4: Shared Test Fixtures](../product-specifications/worker-standardisation-product-specification.md#shared-test-fixtures)
+- [Part 4: Shared Python Tooling Configuration](../product-specifications/worker-standardisation-product-specification.md#shared-python-tooling-configuration)
+- [Part 4: Canonical Dockerfile](../product-specifications/worker-standardisation-product-specification.md#canonical-dockerfile)
+
+**Dependencies:** None (benefits from landing early so 001–004 reuse the fixtures).
+
+**Outcomes the phases must satisfy:**
+- Shared worker fixtures exist once in `core_shared/testing/`; worker `conftest.py` keeps only integration-specific fixtures.
+- Tooling config (ruff/mypy/pytest, dev deps, Python `>=3.14`) is defined once and inherited; quality checks behave identically.
+- The canonical worker Dockerfile pattern is documented and all four workers conform.
+
+#### Phase 1: `core_shared/testing/` shared fixtures
+**PR Size:** ~300 lines (fixtures ~150, self-tests ~150)
+
+Add shared fixtures, self-tested. Not yet adopted by workers, so it merges green.
+
+**Acceptance Criteria:**
+- [ ] `core_shared/testing/` provides shared worker fixtures (Redis mock/client, session-factory mock, ARQ context/harness, fake `BaseWorkerSettings`), importable by worker test suites.
+- [ ] Fixtures are documented and behave as specified.
+
+**Required Test Coverage:**
+- **Unit:** each fixture produces the expected object; a sample worker-style test runs purely on the shared fixtures.
+
+**Required Documentation Updates:**
+- `docs/architecture/testing-strategy.md` — document `core_shared/testing/` fixtures and how worker tests should consume them.
+
+#### Phase 2: Adopt shared fixtures across all workers
+**PR Size:** ~350 lines (mostly deletions + imports across 4 conftests, ~90 net)
+
+Migrate each worker's `tests/conftest.py` / `tests/integration/conftest.py` to import the shared fixtures and delete the duplicated common fixtures. Tests verify behaviour is unchanged.
+
+**Acceptance Criteria:**
+- [ ] Each worker's `conftest.py` imports the shared fixtures and retains only integration-specific fixtures; duplicated common fixtures are deleted.
+- [ ] Every worker's existing test suite passes unchanged against the shared fixtures.
+
+**Required Test Coverage:**
+- **Integration:** each worker's full suite runs green against the shared fixtures (no new tests required beyond confirming green; add a thin smoke test per worker if a fixture seam needs it).
+
+**Required Documentation Updates:**
+- Worker `README.md` testing sections updated to reference the shared fixtures.
+
+#### Phase 3: Shared tooling config + canonical Dockerfile
+**PR Size:** ~300 lines (shared config ~120, per-worker pyproject trims ~120, docs ~60)
+
+**Acceptance Criteria:**
+- [ ] A shared base tooling configuration (ruff, mypy, pytest, dev dependency set, Python `>=3.14`) is defined once and inherited by all four workers; per-worker `pyproject.toml` no longer repeats it.
+- [ ] `pnpm`/`uv` quality checks (`ruff`, `mypy`, `pytest`) behave identically across workers.
+- [ ] The canonical worker Dockerfile pattern (`FROM pms-python-base`, uv install, Redis-ping `HEALTHCHECK`, `appuser`, `CMD ["python", "worker.py"]`) is documented and all four workers conform.
+
+**Required Test Coverage:**
+- **Integration:** each worker's suite and quality gates run green against the shared tooling config.
+
+**Required Documentation Updates:**
+- `docs/code-quality-standards.md` — document the shared tooling configuration and how workers inherit it.
+- `docs/ci-cd-setup.md` — reference the canonical Dockerfile and shared tooling in the worker build/test description.
+- `docs/architecture/integration-architecture.md` — link the canonical Dockerfile pattern.
+
+---
+
+### ITER14-006: `creating-a-new-worker` Skill
+
+**Objective:** Author a skill documenting the end-to-end procedure for creating a new integration worker on the standardised platform.
+
+**Specification Reference:**
+- [Part 5: `creating-a-new-worker` Skill](../product-specifications/worker-standardisation-product-specification.md#part-5-creating-a-new-worker-skill-dependent-phase)
+
+**Dependencies:** ITER14-001 through ITER14-005 (the skill documents the standardised surfaces).
+
+**Outcomes the phases must satisfy:**
+- A skill exists that lets a developer or AI agent scaffold a complete, tested, deployable worker by following its steps, covering checklist items (a)–(g).
+
+#### Phase 1: Author and validate the `creating-a-new-worker` skill
+**PR Size:** ~300 lines (skill doc; no production code)
+
+Single phase — the skill is documentation, validated by following it to scaffold a throwaway sample worker.
+
+**Acceptance Criteria:**
+- [ ] `.claude/skills/creating-a-new-worker/SKILL.md` exists, following the established skill format (YAML frontmatter `name` + `description`, then numbered actionable steps — see `.claude/skills/creating-migrations/SKILL.md`).
+- [ ] The skill covers, as an ordered checklist:
+  - [ ] **(a)** Tests created first (`tests/unit/` + `tests/integration/`, using `core_shared/testing/` fixtures).
+  - [ ] **(b)** uv project setup depending on `core_shared` as an editable source and inheriting the shared tooling config.
+  - [ ] **(c)** Canonical Dockerfile (`FROM pms-python-base`, uv install, Redis-ping `HEALTHCHECK`, `appuser`, `CMD ["python", "worker.py"]`).
+  - [ ] **(d)** CI updates — path-filter + matrix entry in `.github/workflows/ci.yml` (unit + integration jobs) and build component + Dockerfile mapping in `.github/workflows/release.yml`.
+  - [ ] **(e)** Worker setup using `BaseWorkerSettings` and the shared ARQ factory/lifecycle (functions list + consumer routes only).
+  - [ ] **(f)** No SQL in `worker.py` — all data access via repositories.
+  - [ ] **(g)** Backend communication via events only (outbox → Redis Streams); never write journals or contacts directly.
+- [ ] The skill references the canonical examples and the relevant `core_shared` surfaces by path.
+
+**Required Test Coverage:**
+- **Validation (manual):** follow the skill end-to-end to scaffold a throwaway sample worker and confirm each step is accurate (tests run, image builds, CI entries valid, worker boots). Fix any gaps found.
+
+**Required Documentation Updates:**
+- `docs/architecture/integration-architecture.md` — link the `creating-a-new-worker` skill as the canonical path for adding a worker.
+- `CLAUDE.md` / skills index — ensure the new skill is discoverable per the project's skill registration convention.
+
+---
+
+## Delivery Notes
+
+This iteration is sequenced so the foundational shared surfaces land first (ITER14-001, then -002), the independent fan-out work (ITER14-003) and scaffolding work (ITER14-005) proceed in parallel, the consumer convention (ITER14-004) follows the lifecycle factory, and the documentation skill (ITER14-006) lands last once everything it documents exists.
+
+Every phase is sized to merge to a green `main` within ~600 lines and carries its own tests and documentation updates. Within each sub-iteration, the first phase adds shared `core_shared` code behind no runtime path; subsequent phases migrate workers onto it and delete the per-worker duplicates.
+
+### Phase Summary
+
+| Sub-iteration | Phases | Est. PRs |
+|---|---|---|
+| ITER14-001: Shared Base Settings | 3 | 3 |
+| ITER14-002: Shared ARQ Settings & Lifecycle | 3 | 3 |
+| ITER14-003: Non-Blocking Fan-Outs | 4 | 4 |
+| ITER14-004: Stream-Consumer Registration | 3 | 3 |
+| ITER14-005: Fixtures, Tooling & Dockerfile | 3 | 3 |
+| ITER14-006: Creating-a-Worker Skill | 1 | 1 |
+| **Total** | **17** | **17** |
