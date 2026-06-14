@@ -92,6 +92,8 @@ class SearchIndexer:
                 await self._index_contact_updated(contact_index_name, event)
             elif event.event_type == "ContactDeleted":
                 self._index_contact_deleted(contact_index_name, event)
+            elif event.event_type == "ContactMerged":
+                self._index_contact_merged(contact_index_name, event)
             elif event.event_type in ["TagAssigned", "TagRemoved"]:
                 await self._index_contact_tag_change(contact_index_name, event)
             elif event.event_type in [
@@ -590,6 +592,35 @@ class SearchIndexer:
 
         logger.debug(
             "Contact removed from search", contact_id=contact_id, index_name=index_name
+        )
+
+    def _index_contact_merged(self, index_name: str, event: OutboxEvent) -> None:
+        """Remove the merged-away source contact from the search index.
+
+        A merge deletes the source contact at the database level (its aggregate
+        has been re-pointed onto the survivor), so its now-stale document must be
+        dropped from search. Only the source is removed — the survivor keeps its
+        identity and is re-indexed via its own ``ContactSummaryRefreshRequested``
+        / ``ContactUpdated`` events. Unlike ``ContactDeleted``, ``ContactMerged``
+        carries no remote-deletion semantics, so de-indexing here cannot trigger
+        integration workers to delete a remote contact.
+
+        Args:
+            index_name: Name of the search index
+            event: Contact merged event
+        """
+        contact_data = event.event_data
+        source_contact_id = contact_data["source_contact_id"]
+
+        index = self.client.index(index_name)
+        task = index.delete_document(source_contact_id)
+        self.client.wait_for_task(task.task_uid)
+
+        logger.debug(
+            "Merged source contact removed from search",
+            source_contact_id=source_contact_id,
+            survivor_contact_id=contact_data.get("survivor_contact_id"),
+            index_name=index_name,
         )
 
     async def _index_contact_tag_change(

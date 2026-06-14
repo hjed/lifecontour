@@ -307,24 +307,25 @@ class TestContactMergeSideEffects:
         assert event.event_data["changed_by"] == "ui"
 
     @pytest.mark.asyncio
-    async def test_emits_contact_deleted_for_source_to_deindex(
+    async def test_does_not_emit_contact_deleted_for_source(
         self,
         merge_service,
         mock_event_publisher,
         mock_transaction,
     ) -> None:
-        """The source is deleted at the repo layer, so the merge must emit
-        ``ContactDeleted`` itself for the search indexer to drop its stale row."""
+        """The merge must NOT emit ``ContactDeleted`` for the source.
+
+        Integration workers (e.g. the Google worker) consume ``ContactDeleted``
+        to delete the *remote* contact unconditionally — that contradicts merge
+        semantics, where the source's external links may need to carry over to
+        or consolidate onto the survivor (ITER13-005). Search de-indexing of the
+        source is handled by the search indexer's ``ContactMerged`` handler
+        instead, which has no integration side effects.
+        """
         await merge_service.merge_contacts(
-            SURVIVOR_ID,
-            SOURCE_ID,
-            transaction=mock_transaction,
-            changed_by="ui",
-            source=Provenance.UI,
+            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
         )
 
-        event = self._published(mock_event_publisher)["ContactDeleted"]
-        assert event.aggregate_id == SOURCE_ID
-        assert event.event_data["contact_id"] == SOURCE_ID
-        assert event.event_data["source"] == Provenance.UI.value
-        assert event.event_data["changed_by"] == "ui"
+        published = self._published(mock_event_publisher)
+        assert "ContactDeleted" not in published
+        assert "ContactMerged" in published

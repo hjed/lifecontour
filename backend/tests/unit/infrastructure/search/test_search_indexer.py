@@ -165,6 +165,44 @@ class TestSearchIndexer:
         assert doc["last_name"] == "Smith"
         assert doc["full_name"] == "Jane Smith"
 
+    @pytest.fixture
+    def contact_merged_event(self):
+        """Create a ContactMerged outbox event for testing."""
+        return OutboxEvent(
+            id=5,
+            event_id="contact-merged-99-42",
+            event_type="ContactMerged",
+            aggregate_id=99,
+            event_data={"survivor_contact_id": 99, "source_contact_id": 42},
+            occurred_at=datetime(2024, 1, 1, 16, 0, 0),
+            retry_count=0,
+            created_at=datetime(2024, 1, 1, 16, 0, 0),
+        )
+
+    @pytest.mark.asyncio
+    async def test_process_contact_merged_event_deindexes_source(
+        self, indexer, mock_meilisearch_client, contact_merged_event
+    ):
+        """ContactMerged removes the source's stale document, leaving the survivor."""
+        # Arrange
+        mock_index = MagicMock()
+        mock_meilisearch_client.index.return_value = mock_index
+        mock_index.get_stats.return_value = {"numberOfDocuments": 2}
+
+        mock_task = MagicMock()
+        mock_task.task_uid = "task-merge"
+        mock_index.delete_document.return_value = mock_task
+
+        with patch(
+            "app.infrastructure.search.search_indexer.get_index_name",
+            return_value="pms_contacts",
+        ):
+            # Act
+            await indexer.process_event(contact_merged_event)
+
+        # Assert — only the source document is removed; the survivor is untouched.
+        mock_index.delete_document.assert_called_once_with(42)
+
     @pytest.mark.asyncio
     async def test_process_contact_deleted_event(
         self, indexer, mock_meilisearch_client, contact_deleted_event

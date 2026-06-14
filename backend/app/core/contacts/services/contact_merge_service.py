@@ -15,7 +15,6 @@ from core_shared.models.contacts.value_objects import Provenance
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.events import (
-    ContactDeleted,
     ContactMerged,
     ContactSummaryRefreshRequested,
 )
@@ -103,19 +102,13 @@ class ContactMergeService:
         await self.contact_repo.save(merged)
 
         # 3. The source's aggregate has moved; delete the now-empty source row.
-        #    The delete is at the repository level (it bypasses
-        #    ``ContactService.delete_contact``), so emit ``ContactDeleted``
-        #    ourselves — otherwise the search indexer never drops the source's
-        #    now-stale MeiliSearch document. Mirror the normal delete path.
+        #    Note: we deliberately do NOT emit ``ContactDeleted`` here — that
+        #    event makes integration workers (e.g. Google) delete the *remote*
+        #    contact unconditionally, which contradicts merge semantics (the
+        #    source's links may need to carry over to, or consolidate onto, the
+        #    survivor — ITER13-005). The survivor's now-stale search row is
+        #    instead removed by the search indexer's ``ContactMerged`` handler.
         await self.contact_repo.delete(source_id)
-        await self.event_publisher.publish(
-            ContactDeleted(
-                source_id,
-                source=source,
-                changed_by=changed_by,
-                transaction=transaction,
-            )
-        )
 
         # 4. Record the merge as an inline, provenance-carrying history row.
         await self.history_service.record_contact_change(
