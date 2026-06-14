@@ -15,6 +15,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from pydantic import SecretStr
 
 
 @pytest.fixture(autouse=True)
@@ -74,14 +75,18 @@ class TestPeriodicSyncSettings:
         """Periodic sync is disabled by default."""
         from immich_settings import ImmichWorkerSettings
 
-        settings = ImmichWorkerSettings(database_url="postgresql://test/test")
+        settings = ImmichWorkerSettings(
+            database_url=SecretStr("postgresql://test/test")
+        )
         assert settings.enable_periodic_sync is False
 
     def test_sync_interval_hours_default(self) -> None:
         """Sync interval defaults to 6 hours."""
         from immich_settings import ImmichWorkerSettings
 
-        settings = ImmichWorkerSettings(database_url="postgresql://test/test")
+        settings = ImmichWorkerSettings(
+            database_url=SecretStr("postgresql://test/test")
+        )
         assert settings.sync_interval_hours == 6
 
 
