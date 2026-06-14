@@ -3,43 +3,21 @@
  */
 
 import { renderHook, waitFor } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import React, { ReactNode } from 'react';
-import { contactKeys, useMergeContact } from '../contacts';
+import { createQueryTestHarness } from '@/test-utils';
+import { contactKeys, historyKeys, useMergeContact } from '../contacts';
 
 // Mock fetch
 globalThis.fetch = jest.fn();
+
+// jest.setup.ts mocks @/lib/constants but omits CONTACTS.BY_ID (used to build the
+// merge URL); use the real constants here rather than re-declaring the whole mock.
+jest.mock('@/lib/constants', () => jest.requireActual('@/lib/constants'));
 
 // Mock toast
 jest.mock('sonner', () => ({
   toast: {
     success: jest.fn(),
     error: jest.fn(),
-  },
-}));
-
-// Mock constants
-jest.mock('@/lib/constants', () => ({
-  API_ENDPOINTS: {
-    CONTACTS: {
-      BASE: '/api/contacts',
-      BY_ID: (id: string) => `/api/contacts/${id}`,
-    },
-    SEARCH: {
-      CONTACTS: '/api/search/contacts',
-    },
-  },
-  ERROR_MESSAGES: {
-    FETCH_FAILED: 'Failed to fetch data',
-    CREATE_FAILED: 'Failed to create item',
-    UPDATE_FAILED: 'Failed to update item',
-    DELETE_FAILED: 'Failed to delete item',
-    SEARCH_FAILED: 'Search failed',
-  },
-  SUCCESS_MESSAGES: {
-    CONTACT_CREATED: 'Contact created successfully',
-    CONTACT_UPDATED: 'Contact updated successfully',
-    CONTACT_DELETED: 'Contact deleted successfully',
   },
 }));
 
@@ -62,18 +40,10 @@ const survivorResponse = {
 };
 
 describe('useMergeContact', () => {
-  let queryClient: QueryClient;
-
-  const createWrapper = ({ children }: { children: ReactNode }) =>
-    React.createElement(QueryClientProvider, { client: queryClient }, children);
+  let harness: ReturnType<typeof createQueryTestHarness>;
 
   beforeEach(() => {
-    queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-        mutations: { retry: false },
-      },
-    });
+    harness = createQueryTestHarness();
     jest.clearAllMocks();
   });
 
@@ -84,7 +54,7 @@ describe('useMergeContact', () => {
     } as Response);
 
     const { result } = renderHook(() => useMergeContact(), {
-      wrapper: createWrapper,
+      wrapper: harness.wrapper,
     });
 
     const response = await result.current.mutateAsync({
@@ -120,7 +90,7 @@ describe('useMergeContact', () => {
     } as Response);
 
     const { result } = renderHook(() => useMergeContact(), {
-      wrapper: createWrapper,
+      wrapper: harness.wrapper,
     });
 
     await result.current.mutateAsync({ survivorId: '10', sourceId: '20' });
@@ -140,16 +110,16 @@ describe('useMergeContact', () => {
     });
   });
 
-  it('invalidates all contacts and both detail caches on success', async () => {
+  it('invalidates contacts, both detail caches, and contact history on success', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => survivorResponse,
     } as Response);
 
-    const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
+    const invalidateSpy = jest.spyOn(harness.queryClient, 'invalidateQueries');
 
     const { result } = renderHook(() => useMergeContact(), {
-      wrapper: createWrapper,
+      wrapper: harness.wrapper,
     });
 
     await result.current.mutateAsync({ survivorId: '10', sourceId: '20' });
@@ -164,6 +134,9 @@ describe('useMergeContact', () => {
       expect(invalidateSpy).toHaveBeenCalledWith(
         expect.objectContaining({ queryKey: contactKeys.detail('20') })
       );
+      expect(invalidateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ queryKey: historyKeys.all })
+      );
     });
     expect(toast.success).toHaveBeenCalledWith('Contacts merged successfully');
   });
@@ -177,7 +150,7 @@ describe('useMergeContact', () => {
     } as Response);
 
     const { result } = renderHook(() => useMergeContact(), {
-      wrapper: createWrapper,
+      wrapper: harness.wrapper,
     });
 
     await expect(

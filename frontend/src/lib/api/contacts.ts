@@ -601,6 +601,10 @@ export function useMergeContact() {
       queryClient.invalidateQueries({
         queryKey: contactKeys.detail(sourceId),
       });
+      // The merge writes an audit row to field_history; refresh the activity
+      // feed (backed by historyKeys) so it surfaces without waiting for a
+      // natural refetch.
+      queryClient.invalidateQueries({ queryKey: historyKeys.all });
       toast.success('Contacts merged successfully');
     },
     onError: (error: Error) => {

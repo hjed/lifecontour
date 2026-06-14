@@ -93,11 +93,12 @@ async function waitUntilSearchable(page: Page, query: string, id: string) {
 async function openMergeDialog(page: Page): Promise<Locator> {
   const mergeButton = page.getByRole('button', { name: /merge contact/i });
   await expect(mergeButton).toBeVisible();
-  // Centre the button in the viewport so the sticky app header never overlaps it.
-  await mergeButton.evaluate(el =>
-    el.scrollIntoView({ block: 'center', inline: 'center' })
-  );
-  await mergeButton.click();
+  // Activate via keyboard: the detail-page sidebar/sticky-header can transiently
+  // overlap the button's hit area during async load, so a pointer click can be
+  // intercepted. Enter on the focused button avoids hit-testing entirely and also
+  // exercises keyboard operability.
+  await mergeButton.focus();
+  await mergeButton.press('Enter');
 
   const dialog = page
     .getByRole('dialog')
@@ -112,9 +113,10 @@ test.describe('Contact Merge Workflow (web UI)', () => {
     testCleanup,
   }) => {
     const page = authenticatedPage;
-    // Short unique token keeps generated names compact (long names overflow the
-    // identity row and can push the action buttons under the sticky header).
-    const suffix = Date.now().toString(36);
+    // Short unique token: timestamp + random so names can't collide across
+    // parallel/same-millisecond runs, while staying compact (long names overflow
+    // the identity row and can push the action buttons under the sticky header).
+    const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
     const survivor = await createContact(page, {
       firstName: `Survivor${suffix}`,
@@ -197,9 +199,10 @@ test.describe('Contact Merge Workflow (web UI)', () => {
     testCleanup,
   }) => {
     const page = authenticatedPage;
-    // Short unique token keeps generated names compact (long names overflow the
-    // identity row and can push the action buttons under the sticky header).
-    const suffix = Date.now().toString(36);
+    // Short unique token: timestamp + random so names can't collide across
+    // parallel/same-millisecond runs, while staying compact (long names overflow
+    // the identity row and can push the action buttons under the sticky header).
+    const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
     // Identical surfaced fields → no conflicts. The combobox excludes the
     // current (survivor) contact, so only the source matches the shared name.

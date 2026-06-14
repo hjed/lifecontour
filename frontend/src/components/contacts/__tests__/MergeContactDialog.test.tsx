@@ -1,55 +1,31 @@
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { contactTestUtils } from '@/test-utils';
 import { MergeContactDialog } from '../MergeContactDialog';
 import { ContactResource } from '@/types/contacts';
 
-function buildContact(
-  id: string,
-  attrs: Partial<ContactResource['attributes']>
-): ContactResource {
-  return {
-    id,
-    type: 'contacts',
-    attributes: {
-      first_name: '',
-      last_name: '',
-      middle_name: '',
-      nick_name: '',
-      photo_url: null,
-      is_favourite: false,
-      created_at: '',
-      updated_at: '',
-      contact_methods: [],
-      addresses: [],
-      notes: [],
-      relationships: [],
-      important_dates: [],
-      summary: null,
-      ...attrs,
-    },
-  } as ContactResource;
-}
-
-const currentContact = buildContact('1', {
-  first_name: 'Current',
-  last_name: 'Person',
+const currentContact = contactTestUtils.createMockContact({
+  id: '1',
+  attributes: { first_name: 'Current', last_name: 'Person' },
 });
-const otherContact = buildContact('2', {
-  first_name: 'Other',
-  last_name: 'Duplicate',
+// `mock`-prefixed so the jest.mock factory below may reference it lazily.
+const mockOtherContact = contactTestUtils.createMockContact({
+  id: '2',
+  attributes: { first_name: 'Other', last_name: 'Duplicate' },
 });
 
-// Capture mutation calls
+// Capture mutation calls and let individual tests toggle the pending state.
 const mutateAsyncMock = jest.fn().mockResolvedValue({ data: { id: '1' } });
+const mockMergeState = { isPending: false };
 jest.mock('@/lib/api/contacts', () => ({
   useMergeContact: () => ({
     mutateAsync: mutateAsyncMock,
-    isPending: false,
+    isPending: mockMergeState.isPending,
   }),
   // The dialog fetches the full source contact once one is chosen.
   useContact: (id: string) => ({
-    data: id === '2' ? { data: otherContact } : undefined,
+    data: id === '2' ? { data: mockOtherContact } : undefined,
   }),
 }));
 
@@ -64,24 +40,27 @@ jest.mock('../ContactSearchCombobox', () => ({
     excludeContactIds?: string[];
   }) => (
     <div data-exclude-ids={(excludeContactIds ?? []).join(',')}>
-      <button type='button' onClick={() => onSelect(otherContact)}>
+      <button type='button' onClick={() => onSelect(mockOtherContact)}>
         pick-other
       </button>
     </div>
   ),
 }));
 
-// Capture the props handed to the resolution dialog.
+// Capture the props handed to the resolution dialog and expose hooks to drive
+// both a resolve and an overlay/escape-style close.
 jest.mock('../MergeContactResolutionDialog', () => ({
   MergeContactResolutionDialog: ({
     survivorContact,
     sourceContact,
     open,
+    onOpenChange,
     onResolve,
   }: {
     survivorContact: ContactResource | null;
     sourceContact: ContactResource | null;
     open: boolean;
+    onOpenChange: (open: boolean) => void;
     onResolve: (o: Record<string, unknown>) => void;
   }) =>
     open ? (
@@ -94,6 +73,9 @@ jest.mock('../MergeContactResolutionDialog', () => ({
         >
           resolve-merge
         </button>
+        <button type='button' onClick={() => onOpenChange(false)}>
+          close-resolution
+        </button>
       </div>
     ) : null,
 }));
@@ -101,6 +83,7 @@ jest.mock('../MergeContactResolutionDialog', () => ({
 describe('MergeContactDialog', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockMergeState.isPending = false;
   });
 
   function renderDialog(onMerged = jest.fn()) {
@@ -174,5 +157,22 @@ describe('MergeContactDialog', () => {
       });
       expect(onMerged).toHaveBeenCalledWith('1');
     });
+  });
+
+  it('does not let an overlay/escape dismiss reopen selection while merging', async () => {
+    const user = userEvent.setup();
+    mockMergeState.isPending = true;
+    renderDialog();
+
+    await user.click(screen.getByText('pick-other'));
+    await user.click(screen.getByRole('button', { name: /next/i }));
+    expect(screen.getByTestId('resolution-dialog')).toBeInTheDocument();
+
+    // Simulate an overlay/escape close mid-mutation.
+    await user.click(screen.getByRole('button', { name: /close-resolution/i }));
+
+    // The resolution dialog stays open and the selection dialog does not reappear.
+    expect(screen.getByTestId('resolution-dialog')).toBeInTheDocument();
+    expect(screen.queryByText('Merge Another Contact')).not.toBeInTheDocument();
   });
 });

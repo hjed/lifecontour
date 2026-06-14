@@ -89,9 +89,12 @@ export function MergeContactDialog({
   };
 
   const handleResolutionOpenChange = (nextOpen: boolean) => {
+    // Lock the resolution dialog while the merge is in flight: an overlay/escape
+    // dismiss must not reopen the selection dialog or reset state mid-mutation.
+    if (!nextOpen && mergeContact.isPending) return;
     setResolutionOpen(nextOpen);
-    if (!nextOpen && !mergeContact.isPending) {
-      // Cancelling resolution returns to the (now-closed) selection flow.
+    if (!nextOpen) {
+      // Cancelling resolution closes the whole flow.
       onOpenChange(false);
       resetState();
     }
