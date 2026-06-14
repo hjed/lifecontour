@@ -27,6 +27,7 @@ _SEARCH_EVENT_TYPES: list[str] = [
     "ContactCreated",
     "ContactUpdated",
     "ContactDeleted",
+    "ContactMerged",
     "ContactSummaryRefreshRequested",
     # Contact relationship events
     "ContactRelationshipCreated",

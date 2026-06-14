@@ -16,6 +16,7 @@ from app.core.contacts.services import (
     ContactService,
     TagService,
 )
+from app.core.contacts.services.contact_merge_service import ContactMergeService
 from app.core.journal.services.activity_template_service import (
     ActivityTemplateService,
 )
@@ -154,6 +155,11 @@ async def get_immich_album_creation_service() -> Any:
 async def get_contact_service() -> ContactService:
     """Resolve the contact service for the current MCP request."""
     return cast(ContactService, await _resolve_dependency(ContactService))
+
+
+async def get_contact_merge_service() -> ContactMergeService:
+    """Resolve the contact merge service for the current MCP request."""
+    return cast(ContactMergeService, await _resolve_dependency(ContactMergeService))
 
 
 async def get_search_service() -> SearchService:

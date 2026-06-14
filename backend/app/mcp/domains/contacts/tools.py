@@ -36,6 +36,7 @@ from app.core.contacts.services import (
     ContactService,
     TagService,
 )
+from app.core.contacts.services.contact_merge_service import ContactMergeService
 from app.infrastructure.search.search_service import SearchService
 from app.mcp.domains.contacts.schemas import (
     AddContactRelationshipRequest,
@@ -56,6 +57,7 @@ from app.mcp.shared.converters import (
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
     get_async_connection,
+    get_contact_merge_service,
     get_contact_relationship_service,
     get_contact_service,
     get_current_user_id,
@@ -223,6 +225,48 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             )
             response.summary = f"{response.summary}\n\n{history_summary}"
 
+        return MCPResponseBuilder.success_response(response)
+
+    @mcp.tool
+    @mcp_unified_error_handler("merge_contacts", "contact")
+    async def merge_contacts(
+        survivor_contact_id: Annotated[
+            int,
+            Field(description="The ID of the contact to keep (the surviving contact)"),
+        ],
+        source_contact_id: Annotated[
+            int,
+            Field(description="The ID of the contact to absorb and delete"),
+        ],
+        merge_service: ContactMergeService = mcp_depends(get_contact_merge_service),
+        connection: AsyncConnection = mcp_depends(get_async_connection),
+    ) -> str:
+        """
+        Merge a source contact into a surviving contact.
+
+        The survivor keeps its identity and gains the source's deduplicated
+        aggregate: relationships, journal links, contact methods, addresses,
+        notes, important dates, and tags. Scalar identity fields resolve
+        survivor-wins / prefer-non-empty (per-field overrides arrive later).
+        The source contact is deleted once the merge completes, and the
+        survivor's AI summary is queued for regeneration.
+
+        Args:
+            survivor_contact_id: ID of the contact to keep
+            source_contact_id: ID of the contact to absorb (deleted on success)
+
+        Returns:
+            JSON string containing the unified surviving contact
+        """
+        merged = await merge_service.merge_contacts(
+            survivor_contact_id,
+            source_contact_id,
+            transaction=connection,
+            changed_by="mcp",
+            source=Provenance.MCP,
+        )
+
+        response = ContactConverter.to_contact_response(merged)
         return MCPResponseBuilder.success_response(response)
 
     @mcp.tool

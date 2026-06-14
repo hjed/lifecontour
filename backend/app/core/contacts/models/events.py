@@ -592,3 +592,36 @@ class ContactSummaryUpdated(DomainEvent):
             },
             transaction=transaction,
         )
+
+
+@dataclass(frozen=True)
+class ContactMerged(DomainEvent):
+    """Event raised when a source contact is merged into a surviving contact.
+
+    Carries both contact IDs and provenance so downstream consumers (ITER13-005
+    external-sync reconciliation) can reconcile the survivor's external links and
+    remote records. No consumer exists yet; an absent consumer must not error.
+    The aggregate is the survivor, whose identity is preserved by the merge.
+    """
+
+    def __init__(
+        self,
+        survivor_contact_id: int,
+        source_contact_id: int,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
+        transaction: AsyncConnection | None = None,
+    ):
+        super().__init__(
+            event_id=f"contact_merged_{survivor_contact_id}_{source_contact_id}_{datetime.now(tz=UTC).isoformat()}",
+            occurred_at=datetime.now(tz=UTC),
+            aggregate_id=survivor_contact_id,
+            event_type="ContactMerged",
+            event_data={
+                "survivor_contact_id": survivor_contact_id,
+                "source_contact_id": source_contact_id,
+                "source": source.value,
+                "changed_by": changed_by,
+            },
+            transaction=transaction,
+        )

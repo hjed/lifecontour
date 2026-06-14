@@ -389,6 +389,29 @@ class ContactListResponse(JsonApiCollectionResponse[ContactResource]):
     pass
 
 
+# Contact Merge Request Models (ITER13-001 Phase 3)
+class MergeContactAttributes(BaseModel):
+    """Attributes for merging a contact (survivor-wins; overrides arrive in ITER13-002)."""
+
+    source_contact_id: int = Field(
+        ...,
+        description="ID of the contact to absorb into this one (it will be deleted)",
+    )
+
+
+class MergeContactData(BaseModel):
+    """Data for merging a contact."""
+
+    type: str = Field(default="contact-merge", description="Resource type")
+    attributes: MergeContactAttributes = Field(..., description="Merge attributes")
+
+
+class MergeContactRequest(JsonApiCreateRequest[MergeContactData]):
+    """Request model for merging contacts."""
+
+    pass
+
+
 # Contact Relationship Request/Response Models
 class ContactRelationshipCreateData(BaseModel):
     """Data for creating a new contact relationship."""

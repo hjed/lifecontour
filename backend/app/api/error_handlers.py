@@ -47,6 +47,7 @@ from app.api.common.schemas import (
     JsonApiErrorSource,
 )
 from app.core.contacts.models.exceptions import (
+    ContactMergeConflictError,
     ContactNotFoundError,
     CustomDateTypeInUseError,
     CustomDateTypeNotFoundError,
@@ -117,6 +118,7 @@ def create_domain_error_response(domain_error: DomainError) -> JsonApiErrorRespo
     error_code_map = {
         # Contact errors
         ContactNotFoundError: "CONTACT_NOT_FOUND",
+        ContactMergeConflictError: "CONTACT_MERGE_CONFLICT",
         TagNotFoundError: "TAG_NOT_FOUND",
         DuplicateEmailError: "DUPLICATE_EMAIL",
         DuplicateTagNameError: "DUPLICATE_TAG_NAME",

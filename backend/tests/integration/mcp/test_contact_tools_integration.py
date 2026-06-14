@@ -825,6 +825,86 @@ class TestContactToolsIntegration:
             )
             assert get1_after_remove["total_count"] == 0
 
+    @pytest.mark.asyncio
+    async def test_merge_contacts_tool_registered_with_schema(self):
+        """merge_contacts is registered with explicit survivor + source IDs."""
+        mcp: FastMCP[None] = FastMCP("TestServer")
+        register_contact_tools(mcp)
+
+        async with Client(mcp) as client:
+            tools = await client.list_tools()
+            merge_tool = next((t for t in tools if t.name == "merge_contacts"), None)
+            assert merge_tool is not None, "merge_contacts tool not registered"
+            assert merge_tool.description is not None
+            assert "merge" in merge_tool.description.lower()
+            properties = merge_tool.inputSchema.get("properties", {})
+            assert "survivor_contact_id" in properties
+            assert "source_contact_id" in properties
+
+    @pytest.mark.asyncio
+    async def test_merge_contacts_via_mounted_http_session(
+        self,
+        authenticated_lifespan_client,
+        contact_service: ContactService,
+        clean_database,
+    ):
+        """The merge_contacts tool consolidates and deletes the source contact."""
+        from core_shared.models.contacts.entities import Contact
+
+        survivor = await contact_service.create_contact(
+            Contact(first_name="Jane", last_name="Survivor", middle_name=None),
+            clean_database,
+        )
+        source = await contact_service.create_contact(
+            Contact(first_name="Janet", last_name="Source", middle_name="Mariposa"),
+            clean_database,
+        )
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+
+            async def call_mcp(name, args):
+                resp = await authenticated_client.post(
+                    "/mcp-server/mcp",
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {"name": name, "arguments": args},
+                    },
+                    headers=mcp_headers(session_id),
+                )
+                assert resp.status_code == 200
+                return extract_mcp_json_payload(resp.text)
+
+            # Happy path: survivor absorbs the source and is returned.
+            merged = await call_mcp(
+                "merge_contacts",
+                {"survivor_contact_id": survivor.id, "source_contact_id": source.id},
+            )
+            assert merged["id"] == str(survivor.id)
+
+            # The source contact is deleted — fetching it now errors.
+            missing = await call_mcp("get_contact", {"contact_id": source.id})
+            assert "error" in missing
+
+            # Self-merge is rejected.
+            self_merge = await call_mcp(
+                "merge_contacts",
+                {
+                    "survivor_contact_id": survivor.id,
+                    "source_contact_id": survivor.id,
+                },
+            )
+            assert "error" in self_merge
+
+            # A missing source is rejected.
+            not_found = await call_mcp(
+                "merge_contacts",
+                {"survivor_contact_id": survivor.id, "source_contact_id": 999999},
+            )
+            assert "error" in not_found
+
 
 class TestMCPTagParity:
     """Integration tests verifying MCP update_contact tag parity with REST API.
