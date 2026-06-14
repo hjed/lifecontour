@@ -28,6 +28,7 @@ import {
   ContactFieldResponse,
   CustomDateTypeResponse,
   CustomDateTypeListResponse,
+  MergeContactOverrides,
 } from '@/types/contacts';
 import { JsonApiErrorResponse, JsonApiMeta } from '@/types/api';
 import type { HistoryFilters } from '@/types/history';
@@ -524,6 +525,83 @@ export function useToggleContactFavourite() {
           ? 'Contact added to favourites'
           : 'Contact removed from favourites'
       );
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+// Contact Merge API Functions
+
+/**
+ * Merge a source contact into a surviving contact.
+ *
+ * `survivorId` keeps its ID; the source is absorbed and deleted. Per-field
+ * `overrides` carry the already-resolved survivor / source / custom values for
+ * conflicting scalar fields; omitted fields fall back to the backend default
+ * policy (survivor wins, prefer non-empty). Mirrors {@link mergeTag} /
+ * `mergeJournal`.
+ */
+async function mergeContact(
+  survivorId: string,
+  sourceId: string,
+  overrides?: MergeContactOverrides
+): Promise<ContactResponse> {
+  const requestData = {
+    type: 'contact-merge' as const,
+    attributes: {
+      source_contact_id: Number(sourceId),
+      ...(overrides ? { overrides } : {}),
+    },
+  };
+
+  const response = await fetch(
+    `${API_ENDPOINTS.CONTACTS.BY_ID(survivorId)}/merge`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ data: requestData }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || 'Failed to merge contacts'
+    );
+  }
+
+  return response.json();
+}
+
+export function useMergeContact() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      survivorId,
+      sourceId,
+      overrides,
+    }: {
+      survivorId: string;
+      sourceId: string;
+      overrides?: MergeContactOverrides;
+    }) => mergeContact(survivorId, sourceId, overrides),
+    onSuccess: (_data, { survivorId, sourceId }) => {
+      // The merge deletes the source and consolidates the aggregate onto the
+      // survivor, so refresh the full contacts cache plus both detail entries.
+      queryClient.invalidateQueries({ queryKey: contactKeys.all });
+      queryClient.invalidateQueries({
+        queryKey: contactKeys.detail(survivorId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: contactKeys.detail(sourceId),
+      });
+      toast.success('Contacts merged successfully');
     },
     onError: (error: Error) => {
       toast.error(error.message);
