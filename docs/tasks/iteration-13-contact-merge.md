@@ -253,12 +253,16 @@ A single phase: the override contract spans all three surfaces and is small enou
 
 Build the conflict-resolution dialog as a self-contained, not-yet-reachable component (mirrors the 409-line `MergeResolutionDialog.tsx`). Merges green; nothing routes to it yet.
 
+**Status:** ✅ DONE — `MergeContactResolutionDialog.tsx` (+ exported `detectContactConflicts` helper) and the `MergeContactOverrides` frontend type implemented with RTL coverage. All frontend quality gates green locally (`pnpm quality:check` exit 0; 6 new tests pass; 283 contacts component tests pass, no regressions).
+
+> **Conflict-field scope (clarification):** the frontend `ContactResource.attributes` exposes only `first_name, last_name, middle_name, nick_name, photo_url, is_favourite`. The dialog detects conflicts on the **text** identity fields (`first_name, last_name, middle_name, nick_name, photo_url`). `is_favourite` is **excluded** from conflict detection (boolean OR-merge, no meaningful "both differ" state — consistent with the ITER13-002 `_CONFLICT_FIELDS` note). `company`/`job_title` are **not exposed** on the frontend resource (the documented ITER13-001 display limitation), so they cannot be surfaced in the UI; they remain overridable via MCP/API (the `MergeContactOverrides` type still carries them for parity). No contact identity field is multiline, so the custom-value control is `Input` (no `Textarea` branch needed).
+
 **Acceptance Criteria:**
-- [ ] `MergeContactResolutionDialog.tsx` detects scalar-field conflicts (both sides non-empty and differing) across the contact identity fields and renders a per-field `RadioGroup` (survivor / source / custom) with `Input`/`Textarea` for custom values, building the override object on submit. Reuse the `ResolutionChoice` / `FieldResolution` shapes from the journal dialog.
-- [ ] When no conflicts exist, the dialog reports "no conflicts" and resolves immediately (the parent can merge directly).
+- [x] `MergeContactResolutionDialog.tsx` detects scalar-field conflicts (both sides non-empty and differing) across the contact identity fields and renders a per-field `RadioGroup` (survivor / source / custom) with `Input`/`Textarea` for custom values, building the override object on submit. Reuse the `ResolutionChoice` / `FieldResolution` shapes from the journal dialog. (Custom uses `Input`; no contact identity field is multiline — see note.)
+- [x] When no conflicts exist, the dialog reports "no conflicts" and resolves immediately (the parent can merge directly).
 
 **Required Test Coverage:**
-- [ ] **Component (RTL):** conflict detection, radio selection, custom text/textarea input, override-object construction, and the no-conflict path.
+- [x] **Component (RTL):** conflict detection (incl. `is_favourite` exclusion + empties), radio selection, custom text input, override-object construction, the no-conflict path, and the null-props loading guard. (`frontend/src/components/contacts/__tests__/MergeContactResolutionDialog.test.tsx`, 6 tests.)
 
 #### Phase 2: `MergeContactDialog` + hook + detail-page entry (feature reachable)
 **PR Size:** ~470 lines (dialog ~180, hook+types ~100, page wiring ~40, tests ~150)
