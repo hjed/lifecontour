@@ -13,6 +13,7 @@ dependencies = [
     "psycopg2-binary>=2.9.12",
     "asyncpg>=0.31.0",
     "pydantic>=2.13.4",
+    "pydantic-settings>=2.14.1",
     "structlog>=26.1.0",
     "prometheus-client>=0.25.0",
     "redis>=8.0.0",
@@ -28,6 +29,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    # arq is a dev-only dependency: redis_settings_from_url imports it lazily so
+    # core_shared installs without it (arq pins redis<6 vs our redis>=8). Tests
+    # and the consuming workers always have arq available.
+    "arq>=0.26",
     "pytest>=9.0.3",
     "pytest-asyncio>=1.4.0",
     "pytest-cov>=4.1.0",
@@ -107,6 +112,7 @@ exclude_lines = [
 
 [dependency-groups]
 dev = [
+    "arq>=0.26",
     "mypy>=2.1.0",
     "pytest>=9.0.3",
     "pytest-asyncio>=1.4.0",

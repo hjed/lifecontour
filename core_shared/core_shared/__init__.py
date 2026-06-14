@@ -54,6 +54,10 @@ from core_shared.models import (
     SyncMetadata,
     SyncStatus,
 )
+from core_shared.worker_settings import (
+    BaseWorkerSettings,
+    redis_settings_from_url,
+)
 
 __all__ = [
     "Base",
@@ -93,4 +97,7 @@ __all__ = [
     "api_requests_total",
     "api_request_duration",
     "MetricsCollector",
+    # Worker settings
+    "BaseWorkerSettings",
+    "redis_settings_from_url",
 ]
