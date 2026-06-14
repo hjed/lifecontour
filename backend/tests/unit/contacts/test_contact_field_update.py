@@ -120,14 +120,16 @@ class TestContactFieldUpdate:
         saved_contact = mock_contact_repo.save.call_args[0][0]
         assert saved_contact.first_name == "Jonathan"
 
-        # Verify history was recorded
-        mock_history_service.record_contact_change.assert_called_once()
-        history_call = mock_history_service.record_contact_change.call_args
-        assert history_call[0][0] == 1  # contact_id
-        assert history_call[0][1] == {"first_name": ("John", "Jonathan")}
-
-        # Verify event was published
+        # History is now derived from the published ContactUpdated event
+        # (ITER12-003 Phase 2); the dual-write no longer runs.
+        mock_history_service.record_contact_change.assert_not_called()
         mock_event_publisher.publish.assert_called_once()
+        published = mock_event_publisher.publish.call_args[0][0]
+        assert published.event_type == "ContactUpdated"
+        assert published.event_data["contact_id"] == 1
+        assert published.event_data["changed_fields"] == {
+            "first_name": ("John", "Jonathan")
+        }
 
     @pytest.mark.asyncio
     async def test_update_is_favourite_with_string_true(
@@ -392,8 +394,14 @@ class TestContactMethodFieldUpdate:
         updated_method = mock_contact_repo.update_method.call_args[0][0]
         assert updated_method.value == "newemail@example.com"
 
-        # Verify history was recorded
-        mock_history_service.record_method_change.assert_called_once()
+        # History is now derived from the published ContactUpdated event with the
+        # per-sub-entity key (ITER12-003 Phase 2); the dual-write no longer runs.
+        mock_history_service.record_method_change.assert_not_called()
+        published = mock_event_publisher.publish.call_args[0][0]
+        assert published.event_type == "ContactUpdated"
+        assert published.event_data["changed_fields"] == {
+            "method_1_value": ("john.doe@example.com", "newemail@example.com")
+        }
 
     @pytest.mark.asyncio
     async def test_update_method_is_primary(

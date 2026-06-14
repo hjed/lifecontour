@@ -145,10 +145,9 @@ class ContactProvider(Provider):
         contact_repo: ContactRepository,
         relationship_repo: ContactRelationshipRepository,
         event_publisher: ContactEventPublisher,
-        history_service: ContactHistoryService,
     ) -> ContactRelationshipService:
         return ContactRelationshipService(
-            contact_repo, relationship_repo, event_publisher, history_service
+            contact_repo, relationship_repo, event_publisher
         )
 
     @provide
@@ -157,14 +156,12 @@ class ContactProvider(Provider):
         contact_repo: ContactRepository,
         relationship_repo: ContactRelationshipRepository,
         journal_relationship_repo: JournalContactRelationshipRepository,
-        history_service: ContactHistoryService,
         event_publisher: ContactEventPublisher,
     ) -> ContactMergeService:
         return ContactMergeService(
             contact_repo=contact_repo,
             relationship_repo=relationship_repo,
             journal_relationship_repo=journal_relationship_repo,
-            history_service=history_service,
             event_publisher=event_publisher,
         )
 

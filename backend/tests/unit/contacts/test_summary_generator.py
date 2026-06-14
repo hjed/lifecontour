@@ -72,7 +72,10 @@ def _make_generator(
             }
         )
 
-    history_service = AsyncMock()
+    # ITER12-003 Phase 2: summary history is derived from the ContactSummaryUpdated
+    # event published here, so wire a mock publisher (no real connection → the
+    # atomicity assertion short-circuits and the event records via the projection).
+    event_publisher = AsyncMock()
 
     return SummaryGenerator(
         input_assembler=input_assembler,
@@ -82,7 +85,7 @@ def _make_generator(
         gemini_api_key="test-key",
         gemini_model="gemini-2.5-flash",
         _gemini_response_override=gemini_response,
-        history_service=history_service,
+        event_publisher=event_publisher,
     )
 
 
@@ -106,13 +109,15 @@ class TestSummaryGenerator:
         ]
         assert result.generated_at is not None
 
-        # Verify history was recorded
-        assert generator._history_service is not None
-        record_mock = cast(AsyncMock, generator._history_service.record_summary_change)
-        record_mock.assert_awaited_once()
-        call_args = record_mock.call_args[1]
-        assert call_args["contact_id"] == 1
-        assert "summary_text" in call_args["changed_fields"]
+        # Verify a ContactSummaryUpdated event was published (history is projected
+        # from it). ITER12-003 Phase 2.
+        assert generator._event_publisher is not None
+        publish_mock = cast(AsyncMock, generator._event_publisher.publish)
+        publish_mock.assert_awaited_once()
+        event = publish_mock.await_args_list[0].args[0]
+        assert event.event_type == "ContactSummaryUpdated"
+        assert event.event_data["contact_id"] == 1
+        assert "summary_text" in event.event_data["changed_fields"]
 
     @pytest.mark.asyncio
     async def test_sets_generating_status_before_ai_call(self):
@@ -146,13 +151,14 @@ class TestSummaryGenerator:
         assert result.status == SummaryStatus.DISABLED
         assert result.is_disabled is True
 
-        # Verify history was recorded
-        assert generator._history_service is not None
-        record_mock = cast(AsyncMock, generator._history_service.record_summary_change)
-        record_mock.assert_awaited_once()
-        call_args = record_mock.call_args[1]
-        assert call_args["contact_id"] == 1
-        assert "is_disabled" in call_args["changed_fields"]
+        # Verify a ContactSummaryUpdated event was published with the disable diff.
+        assert generator._event_publisher is not None
+        publish_mock = cast(AsyncMock, generator._event_publisher.publish)
+        publish_mock.assert_awaited_once()
+        event = publish_mock.await_args_list[0].args[0]
+        assert event.event_type == "ContactSummaryUpdated"
+        assert event.event_data["contact_id"] == 1
+        assert "is_disabled" in event.event_data["changed_fields"]
 
     @pytest.mark.asyncio
     async def test_disabled_contact_skipped(self):

@@ -32,40 +32,46 @@ class TestContactHistoryEndpoints:
         # History should exist and be a list (may or may not be empty)
 
     @pytest.mark.asyncio
-    async def test_get_contact_history_after_update(
+    async def test_get_contact_history_returns_entry(
         self,
         authenticated_client,
         contact_factory: ContactFactory,
+        async_connection,
     ):
-        """Test getting history after contact update."""
-        # Create a contact
+        """The endpoint returns a contact's history with the JSON:API shape.
+
+        ITER12-003 Phase 2: history is produced by the event-driven projection
+        (covered end-to-end in ``test_contact_history_projection_integration.py``),
+        so this endpoint test seeds the read model directly via the repository —
+        mirroring a projected first_name change — rather than relying on the async
+        projection to have run after an HTTP update.
+        """
+        from core_shared.models.contacts.value_objects import Provenance
+
+        from app.core.contacts.adapters.sql.contact_field_history_repository import (
+            SqlContactFieldHistoryRepository,
+        )
+        from app.core.contacts.models.repositories import ContactFieldHistoryEntry
+
         contact = await contact_factory.create_contact(
             first_name="John", last_name="Doe"
         )
+        contact_id = int(contact["id"])
 
-        # Update the contact to generate history
-        update_data = {
-            "data": {
-                "type": "contacts",
-                "id": contact["id"],
-                "attributes": {
-                    "first_name": "Jane",
-                    "last_name": "Doe",
-                    "contact_methods": [],
-                    "addresses": [],
-                    "notes": [],
-                },
-            }
-        }
-        update_response = await authenticated_client.put(
-            f"/api/contacts/{contact['id']}", json=update_data
+        repo = SqlContactFieldHistoryRepository(async_connection)
+        await repo.record_change(
+            ContactFieldHistoryEntry(
+                entity_type="contact",
+                entity_id=contact_id,
+                field_name="first_name",
+                old_value="John",
+                new_value="Jane",
+                changed_by="ui",
+                source=Provenance.UI,
+            )
         )
-        assert update_response.status_code == 200
 
-        # Get history - should have entry for first_name change
-        response = await authenticated_client.get(
-            f"/api/contacts/{contact['id']}/history"
-        )
+        response = await authenticated_client.get(f"/api/contacts/{contact_id}/history")
 
         assert response.status_code == 200
         data = response.json()
@@ -78,8 +84,8 @@ class TestContactHistoryEndpoints:
         assert history_entry["type"] == "contact_history"
         assert "id" in history_entry
         assert "attributes" in history_entry
-        assert "entity_type" in history_entry["attributes"]
-        assert "field_name" in history_entry["attributes"]
+        assert history_entry["attributes"]["entity_type"] == "contact"
+        assert history_entry["attributes"]["field_name"] == "first_name"
         assert "created_at" in history_entry["attributes"]
 
     @pytest.mark.asyncio
@@ -187,9 +193,7 @@ class TestContactHistoryEndpoints:
         from app.core.contacts.adapters.sql.contact_field_history_repository import (
             SqlContactFieldHistoryRepository,
         )
-        from app.core.contacts.services.contact_history_service import (
-            ContactHistoryService,
-        )
+        from app.core.contacts.models.repositories import ContactFieldHistoryEntry
 
         contact = await contact_factory.create_contact(
             first_name="Mixed", last_name="Source"
@@ -197,39 +201,51 @@ class TestContactHistoryEndpoints:
 
         contact_id = int(contact["id"])
 
+        # ITER12-003 Phase 2: the synchronous record_* service methods were removed
+        # (history is projected from events). Seed the read model directly via the
+        # repository, mirroring the rows the projection would write.
         repo = SqlContactFieldHistoryRepository(async_connection)
-        history_service = ContactHistoryService(repo)
 
-        # 1. UI change
-        await history_service.record_contact_change(
-            contact_id,
-            changed_fields={"first_name": ("Mixed", "UI")},
-            changed_by="ui",
-            source=Provenance.UI,
+        async def _seed(
+            field_name: str,
+            old: str | None,
+            new: str | None,
+            *,
+            changed_by: str,
+            source: Provenance,
+            entity_type: str = "contact",
+        ) -> None:
+            await repo.record_change(
+                ContactFieldHistoryEntry(
+                    entity_type=entity_type,
+                    entity_id=contact_id,
+                    field_name=field_name,
+                    old_value=old,
+                    new_value=new,
+                    changed_by=changed_by,
+                    source=source,
+                )
+            )
+
+        # Ordering follows insertion (created_at + id tiebreaker), newest first.
+        await _seed("first_name", "Mixed", "UI", changed_by="ui", source=Provenance.UI)
+        await _seed(
+            "last_name", "Source", "MCP", changed_by="mcp", source=Provenance.MCP
         )
-
-        # 2. MCP change
-        await history_service.record_contact_change(
-            contact_id,
-            changed_fields={"last_name": ("Source", "MCP")},
-            changed_by="mcp",
-            source=Provenance.MCP,
-        )
-
-        # 3. Sync change
-        await history_service.record_contact_change(
-            contact_id,
-            changed_fields={"company": (None, "Google")},
+        await _seed(
+            "company",
+            None,
+            "Google",
             changed_by="system",
             source=Provenance.GOOGLE_CONTACTS,
         )
-
-        # 4. Summary Regeneration change
-        await history_service.record_summary_change(
-            contact_id,
-            changed_fields={"summary_text": (None, "AI generated summary")},
+        await _seed(
+            "summary_text",
+            None,
+            "AI generated summary",
             changed_by="system",
             source=Provenance.SUMMARY_REGENERATION,
+            entity_type="contact_summary",
         )
 
         response = await authenticated_client.get(f"/api/contacts/{contact_id}/history")

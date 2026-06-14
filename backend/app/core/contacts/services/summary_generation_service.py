@@ -38,9 +38,6 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncConnection
 
     from app.core.contacts.models.repositories import ContactEventPublisher
-    from app.core.contacts.services.contact_history_service import (
-        ContactHistoryService,
-    )
     from app.core.contacts.services.summary_prompt_builder import (
         SummaryPromptBuilder,
     )
@@ -373,7 +370,6 @@ class SummaryGenerator:
         gemini_api_key: str,
         gemini_model: str,
         _gemini_response_override: str | None = None,
-        history_service: ContactHistoryService | None = None,
         event_publisher: ContactEventPublisher | None = None,
         connection: AsyncConnection | None = None,
         timezone: str = DEFAULT_TIMEZONE,
@@ -385,76 +381,56 @@ class SummaryGenerator:
         self._gemini_api_key = gemini_api_key
         self._gemini_model = gemini_model
         self._gemini_response_override = _gemini_response_override
-        self._history_service = history_service
-        # Optional event publisher + connection: when present, a ContactSummaryUpdated
-        # event is published to the outbox transactionally alongside the history write,
-        # so Phase 2 can project summary history from events (ITER12-003).
+        # ITER12-003 Phase 2: summary history is produced by the projection from
+        # the ContactSummaryUpdated event published here (the synchronous
+        # history write was removed). The event is written to the outbox on
+        # ``connection`` so it commits atomically with the summary row.
         self._event_publisher = event_publisher
         self._connection = connection
         self._timezone = timezone
 
     def _assert_single_connection(self) -> None:
-        """Verify the history repo and event publisher share ``self._connection``.
+        """Verify the event publisher shares ``self._connection`` so the
+        ContactSummaryUpdated event is written to the outbox on the same
+        connection the summary row was upserted on (and commits atomically).
 
-        Only enforced when an event publisher is wired (i.e. the consumer path that
-        actually publishes events); the SAVEPOINT in ``_record_summary_history``
-        only covers writes on ``self._connection``, so a divergent connection would
-        silently break the history/event atomicity guarantee.
+        Only meaningful when a real connection + publisher are wired (the
+        consumer path); unit tests pass a ``None`` connection and skip the check.
         """
-        if self._event_publisher is None:
+        if self._event_publisher is None or self._connection is None:
             return
         publisher_conn = getattr(self._event_publisher, "conn", None)
-        repo = getattr(self._history_service, "history_repo", None)
-        repo_conn = getattr(repo, "conn", None)
-        if publisher_conn is not self._connection or repo_conn is not self._connection:
+        if publisher_conn is not self._connection:
             raise RuntimeError(
-                "SummaryGenerator history_service, event_publisher, and connection "
-                "must share one connection so summary history and ContactSummaryUpdated "
-                "commit atomically"
+                "SummaryGenerator event_publisher and connection must share one "
+                "connection so the summary row and ContactSummaryUpdated commit "
+                "atomically"
             )
 
     async def _record_summary_history(
         self, contact_id: int, changed_fields: dict[str, Any]
     ) -> None:
-        """Record summary history and publish ContactSummaryUpdated atomically.
+        """Publish ContactSummaryUpdated so the history projection records the change.
 
-        Both writes go to the same connection inside a SAVEPOINT, so a failure of
-        either rolls back both — history is never left without its event (which
-        Phase 2 relies on), and vice versa. The already-upserted summary row is
-        outside the savepoint and is unaffected. ``savepoint`` no-ops for a
-        ``None``/mock connection, so unit tests (no event publisher) still record
-        history directly.
-
-        The atomicity holds only because the history repo and the event publisher
-        both execute on ``self._connection`` (the summary consumer constructs all
-        three from one connection). ``_assert_single_connection`` enforces that
-        invariant so an inconsistent injection fails loudly rather than silently
-        committing history without its event.
+        ITER12-003 Phase 2 removed the synchronous ``record_summary_change`` write;
+        history is now derived from this event. The event is written to the outbox
+        on ``self._connection`` — the same connection the summary row was upserted
+        on — so the two commit atomically. No publisher (unit tests) → no-op.
         """
-        if self._history_service is None:
+        if self._event_publisher is None:
             return
         from app.core.contacts.models.events import ContactSummaryUpdated
-        from app.infrastructure.unit_of_work import savepoint
 
         self._assert_single_connection()
-
-        async with savepoint(self._connection):
-            await self._history_service.record_summary_change(
+        await self._event_publisher.publish(
+            ContactSummaryUpdated(
                 contact_id=contact_id,
                 changed_fields=changed_fields,
-                changed_by="system",
                 source=Provenance.SUMMARY_REGENERATION,
+                changed_by="system",
+                transaction=self._connection,
             )
-            if self._event_publisher is not None:
-                await self._event_publisher.publish(
-                    ContactSummaryUpdated(
-                        contact_id=contact_id,
-                        changed_fields=changed_fields,
-                        source=Provenance.SUMMARY_REGENERATION,
-                        changed_by="system",
-                        transaction=self._connection,
-                    )
-                )
+        )
 
     async def generate(self, contact_id: int) -> ContactSummary | None:
         """Generate or regenerate an AI summary for a contact.
@@ -521,7 +497,7 @@ class SummaryGenerator:
                 is_disabled=True,
             )
             result_summary = await self._summary_repo.upsert(disabled_summary)
-            if self._history_service and (not existing or not existing.is_disabled):
+            if self._event_publisher and (not existing or not existing.is_disabled):
                 disabled_changed_fields = {
                     "is_disabled": (
                         existing.is_disabled if existing else False,
@@ -569,7 +545,7 @@ class SummaryGenerator:
         )
         result_summary = await self._summary_repo.upsert(generated_summary)
 
-        if self._history_service and (
+        if self._event_publisher and (
             not existing or existing.summary_text != result["summary_text"]
         ):
             summary_changed_fields = {

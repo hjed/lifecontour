@@ -751,6 +751,97 @@ class TestContactSummaryUpdated:
         assert rows[0].source == Provenance.SUMMARY_REGENERATION
 
 
+class TestAffectsHistoryFlag:
+    """ITER12-003 Phase 2: per-item add/assign events emitted during a *bulk*
+    contact re-save carry ``affects_history=False`` so the projection skips them
+    (the aggregate ``ContactUpdated`` rows are the feed). Search still consumes
+    the events; only the history projection honours the flag. A missing key is
+    treated as ``True`` for backward compatibility with create/standalone paths.
+    """
+
+    @pytest.mark.parametrize(
+        ("event_type", "data"),
+        [
+            (
+                "ContactMethodAdded",
+                {
+                    "contact_id": 5,
+                    "method_id": 11,
+                    "method_type": "email",
+                    "value": "a@b.com",
+                },
+            ),
+            (
+                "ContactAddressAdded",
+                {
+                    "contact_id": 5,
+                    "address_id": 21,
+                    "street_line_1": "1 St",
+                    "country_code": "AU",
+                },
+            ),
+            (
+                "ContactNoteAdded",
+                {"contact_id": 5, "note_id": 31, "content": "Hi"},
+            ),
+            (
+                "ImportantDateAdded",
+                {"contact_id": 5, "date_id": 41, "date_type": "birthday"},
+            ),
+            (
+                "TagAssigned",
+                {"contact_id": 5, "tag_id": 7, "tag_name": "work"},
+            ),
+        ],
+    )
+    def test_affects_history_false_skips_projection(
+        self, service: HistoryService, event_type: str, data: dict[str, Any]
+    ) -> None:
+        event = _event(
+            event_type,
+            {**data, "affects_history": False, "source": Provenance.UI.value},
+        )
+
+        assert service.project_event(event) == []
+
+    @pytest.mark.parametrize(
+        ("event_type", "data", "expected"),
+        [
+            (
+                "ContactMethodAdded",
+                {
+                    "contact_id": 5,
+                    "method_id": 11,
+                    "method_type": "email",
+                    "value": "a@b.com",
+                },
+                ("contact_method", 11, "status", None, "created"),
+            ),
+            (
+                "TagAssigned",
+                {"contact_id": 5, "tag_id": 7, "tag_name": "work"},
+                ("contact", 5, "tags", None, "work"),
+            ),
+        ],
+    )
+    def test_affects_history_true_or_absent_projects_rows(
+        self,
+        service: HistoryService,
+        event_type: str,
+        data: dict[str, Any],
+        expected: tuple[str, int, str, str | None, str | None],
+    ) -> None:
+        # affects_history=True is explicit; the absent-key case below proves
+        # backward compatibility (Phase 1 events have no such key).
+        explicit = _event(
+            event_type, {**data, "affects_history": True, "source": Provenance.UI.value}
+        )
+        absent = _event(event_type, {**data, "source": Provenance.UI.value})
+
+        assert [_row_tuple(r) for r in service.project_event(explicit)] == [expected]
+        assert [_row_tuple(r) for r in service.project_event(absent)] == [expected]
+
+
 class TestUnknownAndProvenanceDefaults:
     def test_unknown_event_type_returns_empty(self, service: HistoryService) -> None:
         event = _event("SomethingElse", {"journal_id": 10})

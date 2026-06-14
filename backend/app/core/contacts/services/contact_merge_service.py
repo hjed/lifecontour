@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.contacts.models.events import (
     ContactMerged,
     ContactSummaryRefreshRequested,
+    ContactUpdated,
 )
 from app.core.contacts.models.exceptions import (
     ContactMergeConflictError,
@@ -27,7 +28,6 @@ from app.core.contacts.models.repositories import (
     ContactRelationshipRepository,
     ContactRepository,
 )
-from app.core.contacts.services.contact_history_service import ContactHistoryService
 from app.core.journal.models.repositories import JournalContactRelationshipRepository
 from app.infrastructure.unit_of_work import transactional
 
@@ -35,20 +35,23 @@ logger = structlog.get_logger(__name__)
 
 
 class ContactMergeService:
-    """Merge a source contact into a user-chosen surviving contact."""
+    """Merge a source contact into a user-chosen surviving contact.
+
+    ITER12-003 Phase 2: the inline ``merged_from`` audit row is produced by the
+    event-driven HistoryProjectionConsumer from the ``ContactUpdated`` event
+    published here, rather than a synchronous ``history_service.record_*`` call.
+    """
 
     def __init__(
         self,
         contact_repo: ContactRepository,
         relationship_repo: ContactRelationshipRepository,
         journal_relationship_repo: JournalContactRelationshipRepository,
-        history_service: ContactHistoryService,
         event_publisher: ContactEventPublisher,
     ):
         self.contact_repo = contact_repo
         self.relationship_repo = relationship_repo
         self.journal_relationship_repo = journal_relationship_repo
-        self.history_service = history_service
         self.event_publisher = event_publisher
 
     @transactional
@@ -110,13 +113,17 @@ class ContactMergeService:
         #    removed by the search indexer's ``ContactMerged`` handler.
         await self.contact_repo.delete(source_id)
 
-        # 4. Record the merge as an inline, provenance-carrying history row.
-        await self.history_service.record_contact_change(
-            survivor_id,
-            {"merged_from": (source_id, survivor_id)},
-            changed_by=changed_by,
-            source=source,
-            _transaction=transaction,
+        # 4. Publish the merge as a ContactUpdated event; the history projection
+        #    decodes the plain "merged_from" key to a contact-level audit row
+        #    carrying provenance (identical to the prior dual-write row).
+        await self.event_publisher.publish(
+            ContactUpdated(
+                survivor_id,
+                {"merged_from": (source_id, survivor_id)},
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
+            )
         )
 
         # 5. The survivor's interaction summary is now stale — regenerate it.

@@ -314,9 +314,15 @@ class TestContactServiceIntegration:
 
     @pytest.mark.asyncio
     async def test_update_contact_success(
-        self, contact_service, clean_database: AsyncConnection, history_repo
+        self, contact_service, clean_database: AsyncConnection
     ):
-        """Test successful contact update with field history tracking."""
+        """Test successful contact update.
+
+        ITER12-003 Phase 2: field history is now produced by the event-driven
+        HistoryProjectionConsumer (covered end-to-end in
+        ``test_contact_history_projection_integration.py``), so this test verifies
+        only the mutation, not synchronous history.
+        """
         # Arrange - Create contact
         contact = Contact(first_name="John", last_name="Smith")
         saved_contact = await contact_service.create_contact(contact, clean_database)
@@ -331,20 +337,6 @@ class TestContactServiceIntegration:
         assert result.id == saved_contact.id
         assert result.first_name == "John"
         assert result.last_name == "Doe"
-
-        # Verify field history was recorded
-        history = await history_repo.get_contact_history(saved_contact.id)
-        assert len(history) >= 1
-        update_history = next((h for h in history if h.field_name == "last_name"), None)
-        assert update_history is not None, (
-            "History entry for last_name update not found"
-        )
-        assert update_history.entity_type == "contact"
-        assert update_history.entity_id == saved_contact.id
-        assert update_history.old_value == "Smith"
-        assert update_history.new_value == "Doe"
-        assert update_history.source == Provenance.SYSTEM
-        assert update_history.changed_by == "system"
 
     @pytest.mark.asyncio
     async def test_update_contact_with_methods_and_notes_single_call(
@@ -458,9 +450,14 @@ class TestContactServiceIntegration:
 
     @pytest.mark.asyncio
     async def test_assign_tag_to_contact_success(
-        self, contact_service, tag_repo, clean_database: AsyncConnection, history_repo
+        self, contact_service, tag_repo, clean_database: AsyncConnection
     ):
-        """Test successful tag assignment with real database."""
+        """Test successful tag assignment with real database.
+
+        History for tag assignment is event-driven (ITER12-003 Phase 2) and
+        covered in ``test_contact_history_projection_integration.py``; this test
+        verifies only the assignment.
+        """
         # Arrange - Create contact and tag
         contact = Contact(first_name="John", last_name="Doe")
         saved_contact = await contact_service.create_contact(contact, clean_database)
@@ -479,22 +476,12 @@ class TestContactServiceIntegration:
         assert contact_with_tags.tags[0].id == saved_tag.id
         assert str(contact_with_tags.tags[0].name) == "work"
 
-        # Verify field history was recorded for tag assignment
-        history = await history_repo.get_contact_history(saved_contact.id)
-        tag_history = [
-            h for h in history if h.entity_type == "contact" and h.field_name == "tags"
-        ]
-        assert len(tag_history) == 1
-        assert tag_history[0].field_name == "tags"
-        assert tag_history[0].new_value == "work"
-
     @pytest.mark.asyncio
     async def test_comprehensive_contact_workflow(
         self,
         contact_service,
         tag_repo,
         clean_database: AsyncConnection,
-        history_repo,
         event_repo,
     ):
         """Test comprehensive contact workflow with all features."""
@@ -596,11 +583,8 @@ class TestContactServiceIntegration:
         )
         assert found_by_email.id == saved_contact.id
 
-        # Verify field history tracking
-        history = await history_repo.get_contact_history(saved_contact.id)
-        assert len(history) >= 3  # nick_name update + tag assignments
-
-        # Verify domain events were recorded
+        # Verify domain events were recorded. Field history is event-driven
+        # (ITER12-003 Phase 2) and asserted in the projection integration tests.
         events = await event_repo.get_events_for_contact(saved_contact.id)
         assert len(events) >= 6  # create, add method x2, add address, add note, update
 

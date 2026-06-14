@@ -1,18 +1,22 @@
 """Unit tests for HistoryProjectionConsumer configuration.
 
-Verifies the consumer subscribes to exactly the journal/route/gear event types
-and runs in the dedicated ``history-projection`` consumer group, mirroring the
-SearchIndexerConsumer setup.
+Verifies the consumer subscribes to the journal/route/gear AND contact event
+types and runs in the dedicated ``history-projection`` consumer group, mirroring
+the SearchIndexerConsumer setup.
+
+ITER12-003 Phase 2 switched contacts onto the projection: the contact event types
+are now part of the live subscription (the synchronous dual-write was removed).
 """
 
 from unittest.mock import MagicMock
 
 from app.infrastructure.events.history_projection_consumer import (
     _CONTACT_HISTORY_EVENT_TYPES,
+    _JOURNAL_HISTORY_EVENT_TYPES,
     HistoryProjectionConsumer,
 )
 
-_EXPECTED_EVENT_TYPES = {
+_JOURNAL_EVENT_TYPES = {
     "JournalCreated",
     "JournalUpdated",
     "JournalDeleted",
@@ -24,9 +28,7 @@ _EXPECTED_EVENT_TYPES = {
     "GearItemUpdated",
 }
 
-# Contact event types the projection knows how to map, but which must NOT be in
-# the live subscription this phase (ITER12-003 Phase 1 keeps contact projection
-# inert so the dual-write stays the sole writer until Phase 2).
+# Contact event types the projection maps — now part of the live subscription.
 _CONTACT_EVENT_TYPES = {
     "ContactCreated",
     "ContactUpdated",
@@ -60,19 +62,29 @@ def test_consumer_uses_history_projection_group() -> None:
     assert consumer._group_name == "history-projection"
 
 
-def test_consumer_subscribes_to_journal_event_types() -> None:
+def test_consumer_subscribes_to_journal_and_contact_event_types() -> None:
     consumer = _consumer()
-    assert set(consumer._event_type_patterns) == _EXPECTED_EVENT_TYPES
+    assert set(consumer._event_type_patterns) == (
+        _JOURNAL_EVENT_TYPES | _CONTACT_EVENT_TYPES
+    )
 
 
-def test_contact_projection_is_inert_in_live_subscription() -> None:
-    """Phase 1 invariant: no contact event type is on the live subscription, so the
-    consumer never double-writes contact history while the dual-write still runs."""
+def test_contact_projection_is_live() -> None:
+    """ITER12-003 Phase 2: every contact event type is now on the live
+    subscription, so the projection is the sole writer of contact history."""
     consumer = _consumer()
-    assert _CONTACT_EVENT_TYPES.isdisjoint(set(consumer._event_type_patterns))
+    assert _CONTACT_EVENT_TYPES.issubset(set(consumer._event_type_patterns))
 
 
-def test_contact_history_event_types_constant_ready_for_phase_2() -> None:
-    """The contact event-type list exists (for Phase 2 to switch on) and matches
-    the full set of contact events the projection handles."""
+def test_subscription_has_no_duplicate_event_types() -> None:
+    """Journal and contact event-type lists are disjoint, so the merged live
+    subscription contains each type exactly once."""
+    consumer = _consumer()
+    patterns = list(consumer._event_type_patterns)
+    assert len(patterns) == len(set(patterns))
+
+
+def test_event_type_constants_match_handled_sets() -> None:
+    """The module constants match the full sets the projection handles."""
+    assert set(_JOURNAL_HISTORY_EVENT_TYPES) == _JOURNAL_EVENT_TYPES
     assert set(_CONTACT_HISTORY_EVENT_TYPES) == _CONTACT_EVENT_TYPES
