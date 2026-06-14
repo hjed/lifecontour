@@ -296,3 +296,49 @@ class TestCoerceContactIds:
     def test_non_list_returns_empty_set(self) -> None:
         assert ImmichAlbumOutboxEventProcessor._coerce_contact_ids(None) == set()
         assert ImmichAlbumOutboxEventProcessor._coerce_contact_ids("nope") == set()
+
+
+class TestRecordMetadataHistory:
+    """Album display-metadata changes are published as JournalUpdated history
+    (ITER12-002 Phase 4); an unchanged sync publishes nothing."""
+
+    def _processor(self, publish: AsyncMock) -> ImmichAlbumOutboxEventProcessor:
+        publisher = MagicMock()
+        publisher.publish = publish
+        return ImmichAlbumOutboxEventProcessor(
+            journal_service=MagicMock(),
+            connection=MagicMock(),
+            relationship_repo=MagicMock(),
+            ext_ref_repo=MagicMock(),
+            event_publisher=publisher,
+        )
+
+    @pytest.mark.asyncio
+    async def test_changed_metadata_publishes_journal_updated(self) -> None:
+        publish = AsyncMock(return_value=None)
+        processor = self._processor(publish)
+        prev = {"album_name": "Old", "asset_count": 3, "album_url": "u"}
+        new = {"album_name": "New", "asset_count": 5, "album_url": "u"}
+
+        await processor._record_metadata_history(7, prev, new)
+
+        publish.assert_awaited_once()
+        event = publish.call_args.args[0]
+        assert event.event_data["journal_id"] == 7
+        assert event.event_data["source"] == "immich"
+        assert event.event_data["changed_by"] == "immich_album"
+        changed = event.event_data["changed_fields"]
+        assert changed["album_name"] == ("Old", "New")
+        assert changed["asset_count"] == (3, 5)
+        # Unchanged field is omitted.
+        assert "album_url" not in changed
+
+    @pytest.mark.asyncio
+    async def test_unchanged_metadata_publishes_nothing(self) -> None:
+        publish = AsyncMock(return_value=None)
+        processor = self._processor(publish)
+        data = {"album_name": "Same", "asset_count": 3, "album_url": "u"}
+
+        await processor._record_metadata_history(7, dict(data), dict(data))
+
+        publish.assert_not_awaited()

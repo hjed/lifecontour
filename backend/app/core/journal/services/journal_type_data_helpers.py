@@ -610,6 +610,91 @@ async def update_jogging_type_data(
     await jogging_data_repo.save(validated_data)
 
 
+def _build_plan_document(
+    journal_id: int,
+    doc: dict[str, Any],
+    *,
+    document_id: UUID,
+    order_fallback: int,
+) -> Any:
+    """Build a PlanDocument from a request payload, coercing blank title/order.
+
+    Shared by the create and update paths so both apply identical coercion (blank
+    title -> "Untitled", missing order -> sequential index).
+    """
+    from core_shared.models.journals import PlanDocument
+
+    title_raw = doc.get("title")
+    if not title_raw or (isinstance(title_raw, str) and not title_raw.strip()):
+        title = "Untitled"
+    else:
+        title = title_raw
+    order_raw = doc.get("order")
+    order = order_raw if isinstance(order_raw, int) else order_fallback
+    return PlanDocument(
+        id=document_id,
+        journal_id=journal_id,
+        url=doc["url"],
+        title=title,
+        description=doc.get("description"),
+        order=order,
+    )
+
+
+async def update_plan_type_data(
+    journal_id: int,
+    attrs: dict[str, Any],
+    plan_data_repo: PlanDataRepository,
+) -> None:
+    """Update PLAN type data, replacing its document collection.
+
+    Ensures the ``PlanData`` row exists, then (when ``documents`` is provided)
+    replaces the document set: incoming documents are matched to existing ones by
+    ``url`` and **reuse the existing id** so per-row history reads as edits rather
+    than churn (and new urls get a fresh id); documents whose url is absent from
+    the payload are deleted. With no existing documents this matches the original
+    create behaviour (fresh ids, no deletes).
+    """
+    import uuid
+
+    from core_shared.models.journals import PlanData
+
+    plan_data = await plan_data_repo.find_by_journal_id(journal_id)
+    if plan_data is None:
+        plan_data = PlanData(journal_id=journal_id)
+        await plan_data_repo.save(plan_data)
+
+    if "documents" not in attrs:
+        return
+
+    existing = await plan_data_repo.get_documents(journal_id)
+    existing_by_url = {d.url: d for d in existing}
+
+    new_documents: list[Any] = []
+    seen_urls: set[str] = set()
+    for doc in attrs["documents"] or []:
+        url = doc["url"]
+        match = existing_by_url.get(url)
+        document_id = match.id if match is not None else uuid.uuid4()
+        new_documents.append(
+            _build_plan_document(
+                journal_id,
+                doc,
+                document_id=document_id,
+                order_fallback=len(new_documents),
+            )
+        )
+        seen_urls.add(url)
+
+    for document in new_documents:
+        await plan_data_repo.save_document(document)
+
+    # Delete documents that are no longer present in the payload.
+    for document in existing:
+        if document.url not in seen_urls:
+            await plan_data_repo.delete_document(document.id)
+
+
 async def update_abseiling_type_data(
     journal_id: int,
     journal_type: str,

@@ -18,7 +18,8 @@ Per-item batch operations (contact-relationship bulk processing) use
 just its SAVEPOINT and the loop continues.
 """
 
-from typing import Any
+from collections.abc import Callable, Sequence
+from typing import Any, NamedTuple
 
 import structlog
 from core_shared.models.history import Provenance
@@ -108,6 +109,47 @@ def diff_tracked_fields(
     return changed
 
 
+def diff_collection_rows(
+    before_rows: Sequence[Any],
+    after_rows: Sequence[Any],
+    *,
+    key: Callable[[Any], str],
+    prefix: str,
+    fields: tuple[str, ...],
+) -> dict[str, tuple[Any, Any]]:
+    """Per-row diff of a nested child collection into prefixed history pairs.
+
+    Each row is identified by a stable natural ``key`` (e.g. a document id or a
+    pitch number) so edits to the same logical row read as field changes rather
+    than churn. For every changed field of every row the result carries a
+    ``{prefix}:{key}:{field} -> (old, new)`` pair, mirroring the route/gear
+    ``route:<id>:<field>`` projection convention:
+
+    - a row only in ``after``  -> ``(None, new)`` pairs (created)
+    - a row only in ``before`` -> ``(old, None)`` pairs (deleted)
+    - a row in both            -> ``(old, new)`` pairs for changed fields only
+
+    Rows whose tracked fields are all unchanged contribute nothing, so a no-op
+    update yields ``{}`` (no history). Short surrogate keys keep the qualified
+    ``field_name`` within the history column's length.
+    """
+    before_by = {key(r): r for r in before_rows}
+    after_by = {key(r): r for r in after_rows}
+    changed: dict[str, tuple[Any, Any]] = {}
+    for row_key in sorted(before_by.keys() | after_by.keys()):
+        before_row = before_by.get(row_key)
+        after_row = after_by.get(row_key)
+        for field in fields:
+            old = getattr(before_row, field, None) if before_row is not None else None
+            new = getattr(after_row, field, None) if after_row is not None else None
+            if old != new:
+                changed[f"{prefix}:{row_key}:{field}"] = (
+                    to_history_value(old),
+                    to_history_value(new),
+                )
+    return changed
+
+
 # Tracked fields per editable single-row type, used to compute type-data history.
 # Every editable journal type with an `update_*_type_data` helper is registered
 # here so its type-data edits appear in history. The field names are kept exactly
@@ -184,6 +226,53 @@ _TYPE_DATA_TRACKED_FIELDS: dict[JournalType, tuple[str, ...]] = {
         "gear_item_id",
         "checkout_date",
         "checkin_date",
+    ),
+}
+
+
+class _CollectionSpec(NamedTuple):
+    """How a nested child collection of a journal type is diffed into history.
+
+    ``field_name`` is the collection attribute on the type-data model (kept in
+    sync with the model by ``test_type_data_history_coverage.py``); ``prefix`` +
+    a short, stable per-row ``key`` form the ``{prefix}:{key}:{field}`` history
+    field names (mirroring the route/gear convention); ``fields`` are the per-row
+    fields tracked for history.
+    """
+
+    field_name: str
+    prefix: str
+    key: Callable[[Any], str]
+    fields: tuple[str, ...]
+
+
+# Nested child collections whose per-row changes are projected into journal
+# history (ITER12-002 Phase 4). Each collection is snapshotted before/after the
+# type-data update and diffed by ``diff_collection_rows``. TRAVEL's collections
+# are intentionally absent: they have no write path yet (deferred).
+_TYPE_DATA_COLLECTIONS: dict[JournalType, tuple[_CollectionSpec, ...]] = {
+    JournalType.PLAN: (
+        _CollectionSpec(
+            field_name="documents",
+            prefix="plan:doc",
+            key=lambda d: str(d.id),
+            fields=("url", "title", "description", "order"),
+        ),
+    ),
+    JournalType.ABSEILING_TRIP: (
+        _CollectionSpec(
+            field_name="pitches",
+            prefix="abseil:pitch",
+            key=lambda p: str(p.pitch_number),
+            fields=(
+                "height",
+                "anchor_location",
+                "anchor_type",
+                "did_rescue",
+                "did_setup",
+                "notes",
+            ),
+        ),
     ),
 }
 
@@ -361,7 +450,26 @@ class JournalWriteService:
                 source=source,
             )
         elif type_data is not None:
-            await self._process_journal_type_data(journal_id, type_data, transaction)
+            # Editing type-data on an existing journal (no type change): route each
+            # type through update_type_data so the edit produces field-level history
+            # with the caller's provenance — MCP parity with the REST PUT
+            # /types/{type}/data path — including EVENT calendar sync and PLAN/ABSEIL
+            # per-row history (ITER12-002 Phase 4).
+            for type_name, attrs in type_data.items():
+                try:
+                    jtype = JournalType[type_name.upper()]
+                except KeyError as exc:
+                    raise JournalValidationError(
+                        "type_data", f"Unknown journal type: {type_name}"
+                    ) from exc
+                await self.update_type_data(
+                    journal_id,
+                    jtype,
+                    attrs,
+                    transaction,
+                    changed_by=changed_by,
+                    source=source,
+                )
 
         if relationships is not None:
             await self._replace_contact_relationships(
@@ -467,6 +575,15 @@ class JournalWriteService:
             if repo is not None and tracked
             else None
         )
+        # Snapshot nested child collections (PLAN documents, ABSEIL pitches) before
+        # the update so per-row changes can be diffed into history (Phase 4).
+        collections = _TYPE_DATA_COLLECTIONS.get(journal_type, ())
+        before_collections = {
+            spec.field_name: await self._load_collection_rows(
+                journal_type, spec.field_name, journal_id
+            )
+            for spec in collections
+        }
 
         await self._apply_type_data_update(journal_id, journal_type, attrs)
 
@@ -476,6 +593,20 @@ class JournalWriteService:
             else None
         )
         changed_fields: dict[str, Any] = diff_tracked_fields(before, after, tracked)
+
+        for spec in collections:
+            after_rows = await self._load_collection_rows(
+                journal_type, spec.field_name, journal_id
+            )
+            changed_fields.update(
+                diff_collection_rows(
+                    before_collections[spec.field_name],
+                    after_rows,
+                    key=spec.key,
+                    prefix=spec.prefix,
+                    fields=spec.fields,
+                )
+            )
 
         if journal_type == JournalType.EVENT:
             # The marker (a non-pair signal) triggers calendar sync regardless of
@@ -513,6 +644,16 @@ class JournalWriteService:
             JournalType.GEAR_MAINTENANCE: self.gear_maintenance_data_repo,
             JournalType.GEAR_USAGE: self.gear_usage_data_repo,
         }.get(journal_type)
+
+    async def _load_collection_rows(
+        self, journal_type: JournalType, field_name: str, journal_id: int
+    ) -> list[Any]:
+        """Load the rows of a nested child collection for history diffing."""
+        if journal_type == JournalType.PLAN and field_name == "documents":
+            return list(await self.plan_data_repo.get_documents(journal_id))
+        if journal_type == JournalType.ABSEILING_TRIP and field_name == "pitches":
+            return list(await self.abseil_pitch_repo.find_by_journal_id(journal_id))
+        return []
 
     async def _apply_type_data_update(
         self,
@@ -617,12 +758,15 @@ class JournalWriteService:
             await helpers.update_gear_usage_type_data(
                 journal_id, journal_type_str, attrs, self.gear_usage_data_repo
             )
-        elif journal_type in (JournalType.PLAN, JournalType.TRAVEL):
-            # PLAN and TRAVEL types have complex nested data structures
-            # For now, return an error indicating this is not yet supported
+        elif journal_type == JournalType.PLAN:
+            await helpers.update_plan_type_data(journal_id, attrs, self.plan_data_repo)
+        elif journal_type == JournalType.TRAVEL:
+            # TRAVEL nested children (flights/accommodations/transportation) have
+            # no write path yet, so editing them is unsupported (and produces no
+            # history). Deferred until TRAVEL nested editing is implemented.
             raise JournalValidationError(
                 "journal_type",
-                f"Updating {journal_type_str} type data is not yet supported. "
+                "Updating TRAVEL type data is not yet supported. "
                 "Please use the full journal update endpoint instead.",
             )
         else:
@@ -779,50 +923,12 @@ class JournalWriteService:
                 "PHOTO_ALBUM data is managed by Immich sync and cannot be set",
             )
 
-        # Process PLAN type data
+        # Process PLAN type data (shared with the update path so create and edit
+        # apply identical document coercion + replace semantics).
         if "plan" in normalized_type_data:
-            import uuid
-
-            from core_shared.models.journals import PlanData, PlanDocument
-
-            plan_payload = normalized_type_data["plan"]
-            plan_data = await self.plan_data_repo.find_by_journal_id(journal_id)
-            if not plan_data:
-                plan_data = PlanData(journal_id=journal_id)
-
-            if "documents" in plan_payload:
-                documents: list[PlanDocument] = []
-                for doc in plan_payload["documents"]:
-                    doc_id = uuid.uuid4()
-                    # Coerce null/blank title to "Untitled"
-                    title_raw = doc.get("title")
-                    if not title_raw or (
-                        isinstance(title_raw, str) and not title_raw.strip()
-                    ):
-                        title = "Untitled"
-                    else:
-                        title = title_raw
-                    # Coerce null order to sequential index
-                    order_raw = doc.get("order")
-                    order = order_raw if isinstance(order_raw, int) else len(documents)
-                    documents.append(
-                        PlanDocument(
-                            id=doc_id,
-                            journal_id=journal_id,
-                            url=doc["url"],
-                            title=title,
-                            description=doc.get("description"),
-                            order=order,
-                        )
-                    )
-                plan_data.documents = documents
-
-            # Persist PlanData itself
-            await self.plan_data_repo.save(plan_data)
-
-            # Persist each PlanDocument explicitly (save() does not cascade documents)
-            for document in plan_data.documents:
-                await self.plan_data_repo.save_document(document)
+            await helpers.update_plan_type_data(
+                journal_id, normalized_type_data["plan"], self.plan_data_repo
+            )
 
         # Process TRAVEL type data
         if "travel" in normalized_type_data:

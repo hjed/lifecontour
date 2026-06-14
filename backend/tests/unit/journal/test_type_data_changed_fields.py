@@ -9,11 +9,12 @@ non-scalar EVENT calendar fields.
 """
 
 from datetime import time
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from core_shared.models.journals import FitnessData, MoodData
+from core_shared.models.journals import FitnessData, MoodData, PlanDocument
 
 from app.core.journal.services.journal_write_service import (
+    diff_collection_rows,
     diff_tracked_fields,
     to_history_value,
 )
@@ -97,3 +98,118 @@ class TestDiffTrackedFieldsMissingRow:
 
     def test_both_none_returns_empty(self) -> None:
         assert diff_tracked_fields(None, None, self.fields) == {}
+
+
+class TestDiffCollectionRows:
+    """Per-row diff of a nested child collection (PLAN documents) into prefixed
+    ``{prefix}:{key}:{field}`` history pairs (ITER12-002 Phase 4)."""
+
+    fields = ("url", "title", "description", "order")
+
+    def _doc(self, doc_id: UUID, *, url: str, title: str, order: int = 0):
+        return PlanDocument(id=doc_id, journal_id=1, url=url, title=title, order=order)
+
+    def test_no_change_returns_empty(self) -> None:
+        doc_id = uuid4()
+        before = [self._doc(doc_id, url="u", title="t")]
+        after = [self._doc(doc_id, url="u", title="t")]
+        assert (
+            diff_collection_rows(
+                before,
+                after,
+                key=lambda d: str(d.id),
+                prefix="plan:doc",
+                fields=self.fields,
+            )
+            == {}
+        )
+
+    def test_edited_row_yields_field_pair(self) -> None:
+        doc_id = uuid4()
+        before = [self._doc(doc_id, url="u", title="Old")]
+        after = [self._doc(doc_id, url="u", title="New")]
+        changed = diff_collection_rows(
+            before,
+            after,
+            key=lambda d: str(d.id),
+            prefix="plan:doc",
+            fields=self.fields,
+        )
+        assert changed == {f"plan:doc:{doc_id}:title": ("Old", "New")}
+
+    def test_added_row_is_created(self) -> None:
+        doc_id = uuid4()
+        after = [self._doc(doc_id, url="u", title="t")]
+        changed = diff_collection_rows(
+            [],
+            after,
+            key=lambda d: str(d.id),
+            prefix="plan:doc",
+            fields=self.fields,
+        )
+        assert changed[f"plan:doc:{doc_id}:url"] == (None, "u")
+        assert changed[f"plan:doc:{doc_id}:title"] == (None, "t")
+
+    def test_removed_row_is_deleted(self) -> None:
+        doc_id = uuid4()
+        before = [self._doc(doc_id, url="u", title="t")]
+        changed = diff_collection_rows(
+            before,
+            [],
+            key=lambda d: str(d.id),
+            prefix="plan:doc",
+            fields=self.fields,
+        )
+        assert changed[f"plan:doc:{doc_id}:url"] == ("u", None)
+        assert changed[f"plan:doc:{doc_id}:title"] == ("t", None)
+
+    def test_field_name_stays_within_history_column_length(self) -> None:
+        doc_id = uuid4()
+        after = [self._doc(doc_id, url="u", title="t")]
+        changed = diff_collection_rows(
+            [],
+            after,
+            key=lambda d: str(d.id),
+            prefix="plan:doc",
+            fields=self.fields,
+        )
+        # field_history.field_name is VARCHAR(100); short surrogate keys must fit.
+        assert all(len(name) <= 100 for name in changed)
+
+
+class TestAbseilPitchCollectionSpec:
+    """The registered ABSEILING_TRIP collection spec diffs pitches into
+    ``abseil:pitch:<pitch_number>:<field>`` history pairs (ITER12-002 Phase 4)."""
+
+    def _spec(self):
+        from core_shared.models.journals import JournalType
+
+        from app.core.journal.services.journal_write_service import (
+            _TYPE_DATA_COLLECTIONS,
+        )
+
+        (spec,) = _TYPE_DATA_COLLECTIONS[JournalType.ABSEILING_TRIP]
+        return spec
+
+    def _pitch(self, pitch_number: int, *, height: int):
+        from core_shared.models.journals import AbseilPitch
+
+        return AbseilPitch(journal_id=1, pitch_number=pitch_number, height=height)
+
+    def test_edited_pitch_keys_by_pitch_number(self) -> None:
+        spec = self._spec()
+        before = [self._pitch(1, height=20)]
+        after = [self._pitch(1, height=25)]
+        changed = diff_collection_rows(
+            before, after, key=spec.key, prefix=spec.prefix, fields=spec.fields
+        )
+        assert changed == {"abseil:pitch:1:height": (20, 25)}
+
+    def test_no_change_returns_empty(self) -> None:
+        spec = self._spec()
+        before = [self._pitch(1, height=20)]
+        after = [self._pitch(1, height=20)]
+        changed = diff_collection_rows(
+            before, after, key=spec.key, prefix=spec.prefix, fields=spec.fields
+        )
+        assert changed == {}

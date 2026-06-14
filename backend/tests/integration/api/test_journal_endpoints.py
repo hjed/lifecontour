@@ -1121,6 +1121,55 @@ class TestJournalTypeManagement:
         # Should succeed or return validation error
         assert response.status_code in [200, 400, 422]
 
+    async def test_update_plan_type_data(self, integration_api_client):
+        """PLAN type data can be edited via the endpoint (ITER12-002 Phase 4).
+
+        Previously this raised "not yet supported" (HTTP 400); the per-row history
+        hook made the edit path functional. The document set is replaced: an edited
+        document (matched by url) keeps its place, a new url is added, and a dropped
+        url is removed.
+        """
+        create_data = create_journal_request_data(
+            title="Plan Update Test",
+            content="Test content",
+            types=["PLAN"],
+            type_data={
+                "plan": {
+                    "documents": [
+                        {"url": "https://kept", "title": "Old", "order": 0},
+                        {"url": "https://removed", "title": "Gone", "order": 1},
+                    ]
+                }
+            },
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {
+                    "documents": [
+                        {"url": "https://kept", "title": "New", "order": 0},
+                        {"url": "https://added", "title": "Added", "order": 1},
+                    ]
+                },
+            }
+        }
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/PLAN/data", json=update_data
+        )
+
+        assert response.status_code == 200
+        documents = response.json()["data"]["attributes"]["type_data"]["plan"][
+            "documents"
+        ]
+        titles_by_url = {d["url"]: d["title"] for d in documents}
+        assert titles_by_url == {"https://kept": "New", "https://added": "Added"}
+
     async def test_update_fitness_type_data(self, integration_api_client):
         """Test updating FITNESS type data."""
         # Create a FITNESS journal

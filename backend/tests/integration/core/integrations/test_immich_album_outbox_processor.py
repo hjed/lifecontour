@@ -257,14 +257,15 @@ async def test_resync_updates_when_not_locally_edited(
     assert row.title == "Renamed Trip"
     assert row.event_date_range_end == new_end
 
-    # The emitted JournalUpdated event uses the repo-wide changed_fields
-    # convention (a single ``event_date_range`` key), not ``_start`` / ``_end``.
+    # The base-field JournalUpdated event (published first, before the Phase 4
+    # album-metadata history event) uses the repo-wide changed_fields convention
+    # (a single ``event_date_range`` key), not ``_start`` / ``_end``.
     evt = (
         await async_connection.execute(
             text("""
                 SELECT event_data FROM outbox_events
                 WHERE event_type = 'JournalUpdated' AND aggregate_id = :jid
-                ORDER BY id DESC LIMIT 1
+                ORDER BY id ASC LIMIT 1
             """),
             {"jid": journal_id},
         )

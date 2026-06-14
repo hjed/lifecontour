@@ -332,6 +332,7 @@ class InboundEventConsumer(DeadLetterConsumerMixin, StreamConsumer):
             connection=connection,
             relationship_repo=contact_relationship_repo,
             ext_ref_repo=ExternalReferenceRepository(connection),
+            event_publisher=event_publisher,
         )
         result = await processor.process_event(event)  # type: ignore[arg-type]
 

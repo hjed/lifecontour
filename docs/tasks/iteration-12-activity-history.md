@@ -1,6 +1,6 @@
 # Iteration 12: Activity History (Journals + Unified Foundation)
 
-**Status:** 🟡 IN PROGRESS — ITER12-001 (shared foundation) complete (Phase 1 backend + Phase 2 frontend); ITER12-002 Phase 1 (journal event enrichment + projection consumer), Phase 2 (changed-fields coverage + journal history API), and Phase 3 (journal history UI + MCP read parity) complete; ITER12-003 Phase 1 (contact event enrichment + projection handlers, inert) complete; ITER12-002 Phase 4 (type-data history on the MCP/integration/nested write surfaces) and ITER12-003 Phase 2 (remove the contact dual-write) pending
+**Status:** 🟡 IN PROGRESS — ITER12-001 (shared foundation) complete (Phase 1 backend + Phase 2 frontend); ITER12-002 **complete** — Phase 1 (journal event enrichment + projection consumer), Phase 2 (changed-fields coverage + journal history API), Phase 3 (journal history UI + MCP read parity), and Phase 4 (type-data history on the MCP/integration/nested write surfaces) all done; ITER12-003 Phase 1 (contact event enrichment + projection handlers, inert) complete; ITER12-003 Phase 2 (remove the contact dual-write) pending
 **Dependencies:** Iteration 4 (Journal core + events), Iteration 5 (Redis Streams event bus, transactional outbox relay, stream consumers), existing contact activity history
 **Goal:** Deliver field-level activity history for journals of all types, displayed at the bottom of the journal UI with full provenance, by generalising the existing contact-history infrastructure into a single shared, **event-driven** system — and migrating contacts onto that same foundation.
 
@@ -137,7 +137,7 @@ Move the activity-feed components and types to a shared location, parameterised 
 - [Activity History — MCP and AI-Agent Parity](../product-specifications/activity-history-product-specification.md#mcp-and-ai-agent-parity)
 
 **Acceptance Criteria (task-level):**
-- [ ] Meaningful journal changes of every type are recorded with field-level diffs and provenance. *(REST + all editable single-row types done in Phase 2; MCP type-data and nested/integration write surfaces remain in Phase 4.)*
+- [x] Meaningful journal changes of every type are recorded with field-level diffs and provenance. *(REST + all editable single-row types in Phase 2; MCP type-data parity, PLAN/ABSEIL nested per-row history, and Immich PHOTO_ALBUM metadata in Phase 4. TRAVEL nested children are deferred — they have no write path yet.)*
 - [x] Journal history is available via API and MCP and rendered at the bottom of the journal detail screen. *(API in Phase 2; MCP `get_journal_history` tool + activity feed at the bottom of `JournalDetailView` in Phase 3.)*
 - [x] Projection is idempotent (no duplicates on stream redelivery). *(Unique index `(event_id, entity_type, entity_id, field_name)` + `ON CONFLICT DO NOTHING`, covered by Phase 1 tests.)*
 
@@ -209,24 +209,36 @@ Surface journal history to users and AI agents.
 - [x] **Integration:** MCP `get_journal_history` returns expected entries. *(`tests/integration/mcp/test_journal_tools_integration.py` — entries+provenance+ordering, limit pagination, other-user not-found; plus unit mapping + registration tests in `tests/unit/mcp/domains/journals/test_tools.py`.)*
 - [x] **Regression:** full frontend unit suite (1383) green incl. `JournalDetailView` (feed child mocked); backend history/MCP unit + journal-history-endpoint/MCP integration suites green; `ruff` + `mypy` clean.
 
-#### Phase 4: Type-Data History on the Remaining Write Surfaces (MCP + Integrations + Nested)
-**PR Size:** ~6–8 files
-**Status:** ⬜ NOT STARTED
+#### Phase 4: Type-Data History on the Remaining Write Surfaces (MCP + Integrations + Nested) ✅
+**PR Size:** ~6 source / ~6 test files
+**Status:** ✅ COMPLETE
 
 Phase 2 made **every editable single-row type** produce type-data history on the **REST** surface (registry + completeness guard). This phase closes the remaining write surfaces so the same fields produce history no matter who writes them, completing AI-first parity ([Product Principles](../product-specifications/activity-history-product-specification.md#product-principles)) and the "all fitness and outdoor activity types" scope ([Scope](../product-specifications/activity-history-product-specification.md#scope)).
 
-> **Deferred from ITER12-002 Phase 2 (carried here):**
-> 1. **MCP type-data write history.** The MCP update tool's *base-field* writes go through the shared `JournalService.update_journal` and already produce history, but its **type-data** writes use a separate `_update_type_specific_data` path in `app/mcp/domains/journals/tools.py` (with its own per-type `_update_*_data` helpers) that does not publish `JournalUpdated`. So MCP-driven type-data edits produce neither history nor calendar sync — a parity gap with the REST path.
-> 2. **Integration / nested write paths.** PLAN/TRAVEL nested child collections (documents, flights, accommodations, transportation), Immich-managed PHOTO_ALBUM album metadata, and ABSEILING per-pitch (`AbseilPitch`) rows are not single-row type-data tables, so they sit outside the Phase 2 `update_type_data` snapshot→diff. They are explicitly excluded-with-reason in `_EXCLUDED_FIELDS` / the coverage guard today and need their own history production.
+**Design (as built):**
+- **MCP type-data parity.** The MCP `update_journal_entry` tool's type-data writes now route through `JournalWriteService.update_type_data` via a new `get_journal_write_service()` DI helper and an `_apply_mcp_type_data_update` dispatcher (`app/mcp/domains/journals/tools.py`), so they publish `JournalUpdated` and project to history with `Provenance.MCP` (and EVENT preserves the `calendar_info` calendar-sync marker). The duplicate `_update_*_data` helpers remain only for the **create** tool (create history is the `__created__` marker, matching REST). `GEAR_USAGE` is the one type the service does not own (checkout/checkin flow, no history coverage), so the dispatcher applies it directly via the extracted `_update_gear_usage_data` helper — preserving prior behaviour.
+- **Nested per-row history (user-chosen granularity).** A `_TYPE_DATA_COLLECTIONS` registry + `diff_collection_rows` helper (`journal_write_service.py`) snapshot nested child collections before/after the update and diff them per-row into `{prefix}:{key}:{field}` history pairs (mirroring the route/gear convention): **PLAN documents** → `plan:doc:<uuid>:<field>` (ids preserved across updates by matching on `url`, so edits read as field changes, not churn; removed urls are deleted), **ABSEIL pitches** → `abseil:pitch:<pitch_number>:<field>`. Short surrogate keys keep `field_name` within `VARCHAR(100)` — no migration. This also **fixed the previously-broken PLAN type-data edit** (the `PUT /types/PLAN/data` endpoint used to raise "not yet supported" → 400); the create + update paths now share one `update_plan_type_data` helper.
+- **Immich PHOTO_ALBUM metadata.** `ImmichAlbumOutboxEventProcessor` now takes an `OutboxEventPublisher` and, on update, diffs `album_name`/`asset_count`/`album_url` between the prior and new album reference data, publishing a `JournalUpdated` (`Provenance.IMMICH`, `changed_by="immich_album"`) only when they change. The inbound consumer wires the publisher; the publish commits within the consumer's `unit_of_work`.
+- **TRAVEL nested children are deferred (no write path).** `save_flight`/`save_accommodation`/`save_transportation` have no callers and the `TravelTypeEditor` is a placeholder, so there is no write to record. TRAVEL's nested fields stay excluded-with-reason ("no write path — deferred until TRAVEL nested editing exists") in the coverage guard; the `update_type_data` TRAVEL branch still raises.
 
 **Acceptance Criteria:**
-- [ ] MCP type-data writes produce the same history as the REST path — preferably by routing the MCP type-data path through `JournalWriteService.update_type_data` (removing the duplicate `_update_*_data` helpers), or by publishing the equivalent `JournalUpdated` with computed `(old, new)` pairs and `Provenance.MCP`. Calendar sync for MCP-driven EVENT edits is preserved (the `calendar_info` marker is emitted).
-- [ ] Nested-collection and integration-managed type data produce history: PLAN/TRAVEL document/itinerary changes, Immich PHOTO_ALBUM metadata changes (from the album processor), and ABSEILING per-pitch changes — summarised where a full per-row diff is impractical (e.g. `count:`-style, consistent with the contacts convention). Update the coverage guard's `_EXCLUDED_FIELDS` as each is covered.
-- [ ] No history is produced when a write changes nothing, on every surface.
+- [x] MCP type-data writes produce the same history as the REST path — routed through `JournalWriteService.update_type_data` with `Provenance.MCP`; EVENT calendar sync preserved (`calendar_info` marker emitted). *(`_apply_mcp_type_data_update`; `get_journal_write_service`.)*
+- [x] Nested-collection and integration-managed type data produce history: PLAN document changes (per-row `plan:doc:<id>:<field>`), Immich PHOTO_ALBUM metadata changes (album name/asset count/url), and ABSEILING per-pitch changes (per-row `abseil:pitch:<n>:<field>`); coverage guard `_EXCLUDED_FIELDS` reasons updated and a new `_TYPE_DATA_COLLECTIONS` consistency guard added. *(TRAVEL nested deferred — no write path.)*
+- [x] No history is produced when a write changes nothing, on every surface. *(Empty diff → no event; unit tests cover the no-op cases.)*
 
 **Required Test Coverage:**
-- **Unit:** history production for at least one nested/integration case; "no change → no event" cases; coverage-guard updated.
-- **Integration (end-to-end backend):** through the real service + outbox + relay + consumer path, an **MCP** type-data edit and one nested/integration write each produce correctly-grouped journal history retrievable via the endpoint, with correct old/new/`Provenance.MCP`/integration provenance.
+- [x] **Unit:** `diff_collection_rows` (PLAN documents: created/updated/deleted/no-op; field-name length guard) and the ABSEIL pitch collection spec; the MCP dispatcher delegation + GEAR_USAGE bypass; the Immich metadata-diff publish / no-op-suppress; coverage-guard reasons + `_TYPE_DATA_COLLECTIONS` consistency. *(`tests/unit/journal/test_type_data_changed_fields.py`, `test_type_data_history_coverage.py`, `tests/unit/mcp/domains/journals/test_tools.py`, `tests/unit/core/integrations/test_immich_album_outbox_processor.py`.)*
+- [x] **Integration (end-to-end backend):** through the real service + outbox + relay + consumer path — an **MCP** type-data edit (history via the endpoint, `Provenance.MCP`), a **PLAN** document add/edit/remove (per-row, grouped to the journal), an **ABSEIL** pitch edit (per-pitch), and an **Immich** album metadata change (`Provenance.IMMICH`) — plus a PLAN type-data endpoint regression (no longer 400). *(`tests/integration/infrastructure/events/test_journal_history_projection_e2e.py`, `tests/integration/api/test_journal_endpoints.py`.)*
+
+#### Phase 5 (deferred): TRAVEL Nested Editing + Per-Row History
+**Status:** ⬜ NOT STARTED (deferred from Phase 4 — blocked on a missing write path, not history)
+
+Phase 4 discovered that TRAVEL nested children (**flights / accommodations / transportation**) have **no write path at all**: `TravelDataRepository.save_flight` / `save_accommodation` / `save_transportation` have zero callers, the `update_type_data` TRAVEL branch raises "not yet supported", and `TravelTypeEditor.tsx` is a placeholder. History for a write that cannot happen is impossible, so these fields stay **excluded-with-reason** ("no write path — deferred until TRAVEL nested editing exists") in the coverage guard.
+
+This phase is primarily a **feature** (TRAVEL nested editing), with history falling out for free once the writes exist:
+- [ ] Implement TRAVEL nested write paths: extend `update_type_data` (+ a `update_travel_type_data` helper shared with the create path) to persist flights/accommodations/transportation with replace semantics (match-by-natural-key, delete removed), mirroring the PLAN documents implementation; wire the `TravelTypeEditor` UI to the `PUT /types/TRAVEL/data` endpoint.
+- [ ] Add `travel:flight:<key>:<field>` / `travel:accom:<key>:<field>` / `travel:transport:<key>:<field>` entries to `_TYPE_DATA_COLLECTIONS` so the edits produce per-row history (reuse `diff_collection_rows`); move the TRAVEL fields from `_EXCLUDED_FIELDS` to covered, updating the coverage guard.
+- [ ] Unit + integration (real service → outbox → relay → consumer) coverage mirroring the PLAN/ABSEIL tests; "no change → no event"; plus the relevant UI/RTL coverage for the new editor wiring.
 
 ---
 
