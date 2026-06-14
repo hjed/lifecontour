@@ -61,16 +61,22 @@ pnpm format:check     # Prettier formatting verification
 
 ### Secrets must use `SecretStr`
 
-All secret-bearing settings fields in the backend and integration workers — for
-example `database_url`, `encryption_key`, and any API client secret — **must** be
-typed as `pydantic.SecretStr` rather than a bare `str`. This keeps secrets out of
-logs, `repr()`/`str()` output, and tracebacks.
+All secret-bearing settings fields in the **integration workers** — for example
+`database_url`, `encryption_key`, and any API client secret — **must** be typed
+as `pydantic.SecretStr` rather than a bare `str`. This keeps secrets out of logs,
+`repr()`/`str()` output, and tracebacks.
 
 - Declare the field as `SecretStr` (the shared `core_shared.BaseWorkerSettings`
   already declares `database_url: SecretStr`).
 - Read the raw value **only at the call site that needs it**, via
   `.get_secret_value()` (e.g. `create_session_factory(settings.database_url.get_secret_value())`).
 - Do not log or interpolate the raw secret anywhere else.
+
+The backend's own settings (`backend/app/infrastructure/config.py`) still type
+several secrets as plain `str`; migrating them to `SecretStr` is not yet done.
+New backend secret fields **should** prefer `SecretStr`, and existing ones should
+be converted opportunistically, but the hard requirement above currently applies
+to the integration workers only.
 
 ## Tool-Specific Behavior
 
