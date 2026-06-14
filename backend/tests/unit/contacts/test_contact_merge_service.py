@@ -72,17 +72,26 @@ def mock_event_publisher() -> AsyncMock:
 
 
 @pytest.fixture
+def mock_history_repo() -> AsyncMock:
+    repo = AsyncMock()
+    repo.repoint_entity_history.return_value = 0
+    return repo
+
+
+@pytest.fixture
 def merge_service(
     mock_contact_repo,
     mock_relationship_repo,
     mock_journal_rel_repo,
     mock_event_publisher,
+    mock_history_repo,
 ) -> ContactMergeService:
     return ContactMergeService(
         contact_repo=mock_contact_repo,
         relationship_repo=mock_relationship_repo,
         journal_relationship_repo=mock_journal_rel_repo,
         event_publisher=mock_event_publisher,
+        history_repo=mock_history_repo,
     )
 
 
@@ -169,6 +178,32 @@ class TestContactMergeDelegation:
 
         # The source is deleted only after the aggregate has been re-pointed.
         mock_contact_repo.delete.assert_awaited_once_with(SOURCE_ID)
+
+    @pytest.mark.asyncio
+    async def test_repoints_history_then_deletes_source(
+        self,
+        merge_service,
+        mock_contact_repo,
+        mock_history_repo,
+        mock_transaction,
+    ) -> None:
+        """The source's top-level history is re-pointed onto the survivor within
+        the merge, after the sub-entities move and before the source row is
+        deleted."""
+        manager = MagicMock()
+        manager.attach_mock(mock_history_repo.repoint_entity_history, "repoint")
+        manager.attach_mock(mock_contact_repo.delete, "delete")
+
+        await merge_service.merge_contacts(
+            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
+        )
+
+        mock_history_repo.repoint_entity_history.assert_awaited_once_with(
+            SOURCE_ID, SURVIVOR_ID, "contact", mock_transaction
+        )
+        # The re-point must run before the source row is deleted.
+        ordered = [call[0] for call in manager.mock_calls]
+        assert ordered.index("repoint") < ordered.index("delete")
 
 
 class TestContactMergeScalarPolicy:

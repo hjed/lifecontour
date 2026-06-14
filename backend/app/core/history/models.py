@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from core_shared.models.history import Provenance
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 
 class FieldHistoryEntry:
@@ -145,3 +146,20 @@ class FieldHistoryRepository(ABC):
         self, entity_type: str, entity_id: int
     ) -> list[FieldHistoryEntry]:
         """Get field history for a single entity."""
+
+    @abstractmethod
+    async def repoint_entity_history(
+        self,
+        old_entity_id: int,
+        new_entity_id: int,
+        entity_type: str,
+        transaction: AsyncConnection,
+    ) -> int:
+        """Re-point an entity's top-level history rows onto another entity.
+
+        Moves every ``(entity_type, old_entity_id)`` row to ``new_entity_id``,
+        respecting the ``(event_id, entity_type, entity_id, field_name)`` dedup
+        index (``ON CONFLICT DO NOTHING``). Idempotent and returns the number of
+        rows moved. Used by the contact merge to carry the source's history onto
+        the survivor.
+        """

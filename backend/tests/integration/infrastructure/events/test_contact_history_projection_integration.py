@@ -39,11 +39,16 @@ from core_shared.stream_client import StreamClient, StreamEvent
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.history.adapters.sql.field_history_repository import (
+    SqlFieldHistoryRepository,
+)
+from app.core.history.models import FieldHistoryEntry
 from app.infrastructure.events.history_projection_consumer import (
     HistoryProjectionConsumer,
 )
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.events.outbox_relay import OutboxRelay
+from tests.integration.conftest import ContactFactory
 
 GROUP_NAME = "history-projection"
 OCCURRED_AT = "2024-03-01T08:00:00+00:00"
@@ -775,3 +780,87 @@ class TestContactProjectionEndToEnd:
             if r[0] == "first_name"
         ]
         assert update_rows == [("first_name", "Uno", "Una", "ui", "ui")]
+
+
+@pytest.mark.integration
+class TestMergeHistoryFeed:
+    """After a merge the survivor's activity feed carries both the source's
+    re-pointed history and the merge event with correct provenance.
+
+    Drives the real REST surface (POST merge -> GET history) plus the real
+    outbox -> relay -> projection chain, the closest backend equivalent to what
+    the user sees in the activity feed.
+    """
+
+    @pytest.mark.asyncio
+    async def test_merge_event_surfaces_in_activity_feed_with_provenance(
+        self,
+        authenticated_client,
+        contact_factory: ContactFactory,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+        test_stream_name: str,
+    ) -> None:
+        survivor = await contact_factory.create_contact(
+            first_name="Survivor", last_name="Keep"
+        )
+        source = await contact_factory.create_contact(
+            first_name="Source", last_name="Drop"
+        )
+        survivor_id = int(survivor["id"])
+        source_id = int(source["id"])
+
+        # A pre-merge change recorded against the source contact (a projected prior
+        # change, seeded deterministically — normal field projection is covered by
+        # the tests above).
+        repo = SqlFieldHistoryRepository(async_connection)
+        await repo.record_change(
+            FieldHistoryEntry(
+                entity_type="contact",
+                entity_id=source_id,
+                field_name="first_name",
+                old_value="Source",
+                new_value="Sourced",
+                changed_by="ui",
+                source=Provenance.UI,
+                event_id="evt-premerge-feed",
+            )
+        )
+
+        merge_res = await authenticated_client.post(
+            f"/api/contacts/{survivor_id}/merge",
+            json={
+                "data": {
+                    "type": "contact-merge",
+                    "attributes": {"source_contact_id": source_id},
+                }
+            },
+        )
+        assert merge_res.status_code == 200, merge_res.text
+
+        # Project the published merged_from event into field_history.
+        await _relay_and_project(
+            stream_client,
+            test_stream_name,
+            async_connection,
+            f"merge-feed-{uuid.uuid4().hex[:6]}",
+        )
+
+        history_res = await authenticated_client.get(
+            f"/api/contacts/{survivor_id}/history"
+        )
+        assert history_res.status_code == 200, history_res.text
+        attrs = [e["attributes"] for e in history_res.json()["data"]]
+
+        # The merge event is surfaced with UI provenance and references the source.
+        # Search the entries rather than keying by field_name, which would collapse
+        # any duplicate rows for the same field.
+        merge_rows = [a for a in attrs if a["field_name"] == "merged_from"]
+        assert len(merge_rows) == 1
+        assert merge_rows[0]["source"] == Provenance.UI.value
+        assert str(source_id) in (merge_rows[0]["old_value"] or "")
+        # The source's pre-merge change is carried onto the survivor.
+        assert any(
+            a["field_name"] == "first_name" and a["new_value"] == "Sourced"
+            for a in attrs
+        )
