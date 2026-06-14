@@ -142,7 +142,7 @@ async def test_merge_contact_endpoint_dedupes_journal_links(
                 }
             },
         )
-        assert link_res.status_code in (200, 201), link_res.text
+        assert link_res.status_code == 200, link_res.text
 
     merge_res = await authenticated_client.post(
         f"/api/contacts/{survivor_id}/merge",

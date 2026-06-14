@@ -305,3 +305,26 @@ class TestContactMergeSideEffects:
         assert event.event_data["source_contact_id"] == SOURCE_ID
         assert event.event_data["source"] == Provenance.UI.value
         assert event.event_data["changed_by"] == "ui"
+
+    @pytest.mark.asyncio
+    async def test_emits_contact_deleted_for_source_to_deindex(
+        self,
+        merge_service,
+        mock_event_publisher,
+        mock_transaction,
+    ) -> None:
+        """The source is deleted at the repo layer, so the merge must emit
+        ``ContactDeleted`` itself for the search indexer to drop its stale row."""
+        await merge_service.merge_contacts(
+            SURVIVOR_ID,
+            SOURCE_ID,
+            transaction=mock_transaction,
+            changed_by="ui",
+            source=Provenance.UI,
+        )
+
+        event = self._published(mock_event_publisher)["ContactDeleted"]
+        assert event.aggregate_id == SOURCE_ID
+        assert event.event_data["contact_id"] == SOURCE_ID
+        assert event.event_data["source"] == Provenance.UI.value
+        assert event.event_data["changed_by"] == "ui"
