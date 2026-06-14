@@ -106,8 +106,8 @@ class ContactMergeService:
         #    event makes integration workers (e.g. Google) delete the *remote*
         #    contact unconditionally, which contradicts merge semantics (the
         #    source's links may need to carry over to, or consolidate onto, the
-        #    survivor — ITER13-005). The survivor's now-stale search row is
-        #    instead removed by the search indexer's ``ContactMerged`` handler.
+        #    survivor — ITER13-005). The source's now-stale search row is instead
+        #    removed by the search indexer's ``ContactMerged`` handler.
         await self.contact_repo.delete(source_id)
 
         # 4. Record the merge as an inline, provenance-carrying history row.
