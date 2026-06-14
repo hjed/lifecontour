@@ -13,9 +13,9 @@ import random
 from typing import Any
 
 from arq import Retry, run_worker
-from arq.connections import RedisSettings
 from arq.cron import cron
 from arq.typing import StartupShutdown, WorkerSettingsBase
+from core_shared import redis_settings_from_url
 from core_shared.database.engine import create_session_factory
 from core_shared.integration_constants import STRAVA_ARQ_QUEUE_NAME
 from core_shared.logging import configure_logging, get_logger
@@ -723,7 +723,7 @@ class StravaWorkerSettings(WorkerSettingsBase):
     on_shutdown: StartupShutdown = shutdown
 
     # Redis settings
-    redis_settings = RedisSettings.from_dsn(settings.redis_url)
+    redis_settings = redis_settings_from_url(settings.redis_url)
 
     # Worker configuration
     max_jobs = 5

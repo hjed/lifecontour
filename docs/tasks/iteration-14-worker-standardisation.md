@@ -125,19 +125,30 @@ Add the base model and helper to `core_shared`, fully unit-tested. Not yet consu
 #### Phase 2: Migrate `google` + `strava` settings onto the base
 **PR Size:** ~300 lines (per-worker settings ~120, tests ~180)
 
+**Status:** ✅ DONE
+
 Migrate the two workers that already use `SecretStr`. `google`'s inline settings move into a dedicated settings module subclassing the base.
 
 **Acceptance Criteria:**
-- [ ] `google` and `strava` settings classes subclass `BaseWorkerSettings`, declaring only integration-specific fields (`google_client_id`/`secret`, `max_concurrent_jobs`, `google_reserved_groups`, `webhook_base_url`; `strava_client_id`/`secret`). No common or OTel field is redeclared.
-- [ ] `google`'s settings move out of `worker.py` into a `google_settings.py` module (consistent with the others); `worker.py` imports it.
-- [ ] Both workers boot with their existing `.env` and produce identical effective configuration.
+- [x] `google` and `strava` settings classes subclass `BaseWorkerSettings`, declaring only integration-specific fields (`google_client_id`/`secret`, `encryption_key`, `max_concurrent_jobs`, `google_reserved_groups`, `webhook_base_url`; `strava_client_id`/`secret`, `encryption_key`). No common or OTel field is redeclared.
+- [x] `google`'s settings move out of `worker.py` into a `google_settings.py` module (consistent with the others); `worker.py` imports it.
+- [x] Both workers boot with their existing `.env` and produce identical effective configuration.
 
 **Required Test Coverage:**
-- **Unit:** each worker's settings subclass loads integration-specific fields and inherits the base fields/defaults.
-- **Integration:** each worker boots with a representative `.env` and resolves Redis + DB URLs correctly (behaviour-preservation check).
+- [x] **Unit:** each worker's settings subclass loads integration-specific fields and inherits the base fields/defaults.
+- [x] **Integration:** each worker boots with a representative `.env` and resolves Redis + DB URLs correctly (behaviour-preservation check).
 
 **Required Documentation Updates:**
-- `google`/`strava` `README.md` settings sections updated to reference the base.
+- [x] `google`/`strava` `README.md` settings sections updated to reference the base.
+
+**Progress notes (Phase 2 complete — 2026-06-14, branch `emdash/iter14-001-2-migrate-google-strava`):**
+
+- New `integration_workers/google/google_settings.py` exposes `GoogleSettings(BaseWorkerSettings)`; `google/worker.py` now imports it (`settings = GoogleSettings()`) and the inline `WorkerSettings`/`BaseSettings`/`SettingsConfigDict` block is deleted. The settings class is named `GoogleSettings` for consistency with `StravaSettings`; the ARQ worker class `GoogleWorkerSettings` is unchanged.
+- `integration_workers/strava/strava_settings.py` re-bases `StravaSettings` onto `BaseWorkerSettings`, keeping only `strava_client_id`/`strava_client_secret`/`encryption_key` and the `worker_id`/`otel_service_name` identity overrides; the duplicated common/OTel fields and `model_config` block are removed.
+- `encryption_key` is integration-specific (not in the base) and remains in both subclasses. `worker_id` and `otel_service_name` are overridden to preserve the exact prior values (`google-worker`/`strava-worker`); `queue_name`/`stream_name` stay at base defaults (workers still read the `*_ARQ_QUEUE_NAME` constants directly — wiring `settings.queue_name` in is ITER14-002).
+- Both ARQ worker classes now derive Redis settings via the shared `redis_settings_from_url(settings.redis_url)` (replacing direct `RedisSettings.from_dsn(...)`), and the now-unused `from arq.connections import RedisSettings` import is dropped from each `worker.py`.
+- Tests: `google/tests/unit/test_google_settings.py` (8) + `strava/tests/unit/test_strava_settings.py` (7) cover subclassing, integration-specific field loading, inherited base defaults, identity overrides, `SecretStr` masking, env-var loading, and required-field validation. `google`/`strava` `tests/integration/test_*_settings_integration.py` boot each worker from a representative `.env` and assert the ARQ class's `redis_settings` is derived via the shared helper (self-consistent, import-order-independent — no module reload, so the rest of the integration suite is unperturbed).
+- Behaviour preservation verified: full `google` (309 unit / 50 integration) and `strava` (160 unit / 17 integration) suites pass unchanged; `core_shared` settings suite (20) green. Quality gates green: `ruff check`, `ruff format --check`, `mypy` for `core_shared`, `google`, `strava`.
 
 #### Phase 3: Migrate `immich` + `snipeit` settings + `SecretStr` conversion
 **PR Size:** ~300 lines (per-worker settings ~120, tests ~180)

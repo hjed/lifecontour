@@ -1,46 +1,29 @@
 """
 Strava worker configuration settings.
 
-Loads configuration from environment variables with Pydantic BaseSettings.
-Secrets are isolated to the worker's own .env file.
+``StravaSettings`` subclasses the shared ``core_shared.BaseWorkerSettings`` so
+the common worker surface (database/Redis connection, ARQ queue/stream identity,
+logging, periodic-sync cadence and the OpenTelemetry block) is declared once.
+Only Strava-specific fields and the per-worker identity defaults are declared
+here. Secrets use ``SecretStr`` to keep them out of logs and tracebacks.
 """
 
+from __future__ import annotations
+
+from core_shared import BaseWorkerSettings
 from pydantic import SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class StravaSettings(BaseSettings):
-    """Configuration for Strava integration worker."""
+class StravaSettings(BaseWorkerSettings):
+    """Configuration for the Strava integration worker."""
 
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-    )
-
-    # Database connection
-    database_url: SecretStr
-
-    # Redis connection
-    redis_url: str = "redis://redis:6379"
-
-    # Strava API credentials
+    # Strava API credentials.
     strava_client_id: str
     strava_client_secret: SecretStr
 
-    # Encryption key for tokens
+    # Encryption key for stored OAuth tokens (matches the main app).
     encryption_key: SecretStr
 
-    # Worker configuration
+    # Per-worker identity overrides (see BaseWorkerSettings for the rest).
     worker_id: str = "strava-worker"
-    log_level: str = "INFO"
-
-    # Periodic sync configuration
-    enable_periodic_sync: bool = False
-    sync_interval_hours: int = 6
-
-    # Observability
-    enable_telemetry: bool = False
-    otel_exporter_otlp_endpoint: str = ""
     otel_service_name: str = "strava-worker"
-    otel_resource_attributes: str = ""
