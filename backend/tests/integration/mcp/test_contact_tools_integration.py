@@ -833,6 +833,8 @@ class TestContactToolsIntegration:
             properties = merge_tool.inputSchema.get("properties", {})
             assert "survivor_contact_id" in properties
             assert "source_contact_id" in properties
+            # ITER13-002: the optional per-field overrides mapping is advertised.
+            assert "overrides" in properties
 
     @pytest.mark.asyncio
     async def test_merge_contacts_via_mounted_http_session(
@@ -897,6 +899,76 @@ class TestContactToolsIntegration:
                 {"survivor_contact_id": survivor.id, "source_contact_id": 999999},
             )
             assert "error" in not_found
+
+    @pytest.mark.asyncio
+    async def test_merge_contacts_applies_overrides_via_mounted_http_session(
+        self,
+        authenticated_lifespan_client,
+        contact_service: ContactService,
+        clean_database,
+    ):
+        """ITER13-002: merge_contacts applies per-field overrides via MCP."""
+        from core_shared.models.contacts.entities import Contact
+
+        survivor = await contact_service.create_contact(
+            Contact(
+                first_name="Jane",
+                last_name="Survivor",
+                company="SurvivorCo",
+                job_title="Survivor Title",
+            ),
+            clean_database,
+        )
+        source = await contact_service.create_contact(
+            Contact(
+                first_name="Janet",
+                last_name="Source",
+                company="SourceCo",
+                job_title="Source Title",
+            ),
+            clean_database,
+        )
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+
+            async def call_mcp(name, args):
+                resp = await authenticated_client.post(
+                    "/mcp-server/mcp",
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {"name": name, "arguments": args},
+                    },
+                    headers=mcp_headers(session_id),
+                )
+                assert resp.status_code == 200
+                return extract_mcp_json_payload(resp.text)
+
+            merged = await call_mcp(
+                "merge_contacts",
+                {
+                    "survivor_contact_id": survivor.id,
+                    "source_contact_id": source.id,
+                    "overrides": {
+                        "company": "SourceCo",  # take source value
+                        "job_title": "Custom Title",  # custom value
+                    },
+                },
+            )
+
+            assert merged["id"] == str(survivor.id)
+            # company override picks the source value; job_title takes a custom value.
+            assert merged["company"] == "SourceCo"
+            assert merged["job_title"] == "Custom Title"
+            # first/last names had no override -> survivor wins by default
+            # (the MCP response exposes the combined full name).
+            assert merged["name"] == "Jane Survivor"
+
+            # The source contact is deleted.
+            missing = await call_mcp("get_contact", {"contact_id": source.id})
+            assert "error" in missing
 
 
 class TestMCPTagParity:

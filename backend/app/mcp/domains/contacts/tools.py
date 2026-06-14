@@ -5,7 +5,7 @@ Provides AI access to contact management functionality through MCP tools.
 Each tool is designed to return AI-friendly, contextual information.
 """
 
-from typing import Annotated
+from typing import Annotated, Any
 
 import structlog
 from core_shared.models.contacts.entities import (
@@ -238,6 +238,21 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             int,
             Field(description="The ID of the contact to absorb and delete"),
         ],
+        overrides: Annotated[
+            dict[str, Any] | None,
+            Field(
+                default=None,
+                description=(
+                    "Optional explicit per-field conflict resolution. Each key is "
+                    "the concrete value to apply to the survivor (resolve the "
+                    "survivor / source / custom choice before calling). Supported "
+                    "keys: 'first_name', 'last_name', 'middle_name', 'nick_name', "
+                    "'company', 'job_title', 'photo_url' (str), 'is_favourite' "
+                    "(bool). Omitted fields default to survivor-wins / prefer "
+                    "non-empty."
+                ),
+            ),
+        ] = None,
         merge_service: ContactMergeService = mcp_depends(get_contact_merge_service),
         connection: AsyncConnection = mcp_depends(get_async_connection),
     ) -> str:
@@ -247,13 +262,15 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         The survivor keeps its identity and gains the source's deduplicated
         aggregate: relationships, journal links, contact methods, addresses,
         notes, important dates, and tags. Scalar identity fields resolve
-        survivor-wins / prefer-non-empty (per-field overrides arrive later).
-        The source contact is deleted once the merge completes, and the
+        survivor-wins / prefer-non-empty by default; pass ``overrides`` to keep
+        the survivor value, take the source value, or supply a custom value per
+        field. The source contact is deleted once the merge completes, and the
         survivor's AI summary is queued for regeneration.
 
         Args:
             survivor_contact_id: ID of the contact to keep
             source_contact_id: ID of the contact to absorb (deleted on success)
+            overrides: Optional per-field conflict resolution overrides
 
         Returns:
             JSON string containing the unified surviving contact
@@ -264,6 +281,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             transaction=connection,
             changed_by="mcp",
             source=Provenance.MCP,
+            overrides=overrides,
         )
 
         response = ContactConverter.to_contact_response(merged)

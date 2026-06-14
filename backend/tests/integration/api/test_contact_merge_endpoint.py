@@ -164,6 +164,85 @@ async def test_merge_contact_endpoint_dedupes_journal_links(
 
 
 @pytest.mark.asyncio
+async def test_merge_contact_endpoint_applies_field_overrides(
+    authenticated_client: AsyncClient,
+    async_connection: AsyncConnection,
+    clean_database: None,
+) -> None:
+    """ITER13-002: per-field overrides apply survivor / source / custom end-to-end.
+
+    Asserts the converter-exposed identity fields (``nick_name``, ``middle_name``,
+    ``is_favourite``) via the HTTP response and the non-exposed ``company`` field
+    directly in the database, so the full HTTP -> service -> DB path is verified.
+    """
+    survivor_id = await _create_contact(
+        authenticated_client,
+        {
+            "first_name": "Jane",
+            "last_name": "Survivor",
+            "nick_name": "Survivor Nick",
+            "middle_name": "SurvivorMiddle",
+            "company": "SurvivorCo",
+            "is_favourite": True,
+        },
+    )
+    source_id = await _create_contact(
+        authenticated_client,
+        {
+            "first_name": "Janet",
+            "last_name": "Source",
+            "nick_name": "Source Nick",
+            "middle_name": "SourceMiddle",
+            "company": "SourceCo",
+        },
+    )
+
+    merge_res = await authenticated_client.post(
+        f"/api/contacts/{survivor_id}/merge",
+        json={
+            "data": {
+                "type": "contact-merge",
+                "attributes": {
+                    "source_contact_id": source_id,
+                    "overrides": {
+                        # take the source value for nick_name
+                        "nick_name": "Source Nick",
+                        # supply a custom value for middle_name
+                        "middle_name": "Custom Middle",
+                        # take the source value for company
+                        "company": "SourceCo",
+                        # explicitly clear the survivor's favourite flag
+                        "is_favourite": False,
+                    },
+                },
+            }
+        },
+    )
+
+    assert merge_res.status_code == 200, merge_res.text
+    attrs = merge_res.json()["data"]["attributes"]
+    # last_name has no override -> survivor wins by default.
+    assert attrs["last_name"] == "Survivor"
+    # nick_name override picks the source's value over the survivor's.
+    assert attrs["nick_name"] == "Source Nick"
+    # middle_name override applies a custom value.
+    assert attrs["middle_name"] == "Custom Middle"
+    # is_favourite override is honoured even though it is falsy.
+    assert attrs["is_favourite"] is False
+
+    # company is not exposed by the REST converter — verify it in the database.
+    from sqlalchemy import text
+
+    company_row = await async_connection.execute(
+        text("SELECT company FROM contacts WHERE id = :id"), {"id": survivor_id}
+    )
+    assert company_row.scalar_one() == "SourceCo"
+
+    get_source = await authenticated_client.get(f"/api/contacts/{source_id}")
+    assert get_source.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_merge_contact_self_merge_returns_409(
     authenticated_client: AsyncClient,
     clean_database: None,

@@ -214,14 +214,21 @@ Expose the engine. **This phase makes contact merge live via API and MCP.**
 
 A single phase: the override contract spans all three surfaces and is small enough to land together.
 
+**Status:** ✅ DONE — per-field overrides land across the service (`overrides` mapping + override-aware `_merge_scalars` + `has_scalar_conflicts`), the REST `MergeContactOverrides` schema/controller, and the `merge_contacts` MCP tool's optional `overrides` mapping. Overridden fields are surfaced in the merge audit (`ContactUpdated`) payload. All backend quality gates green locally (`ruff`, `ruff format`, `mypy` over 372 files, **577 contacts unit+integration tests pass**). UI/browser E2E is **deferred to ITER13-003** (the merge UI phase); an **API-level Playwright E2E** (`frontend/tests/e2e/contacts-merge-api.spec.ts`, Chromium, 2 specs) covers the override contract end-to-end through the REST surface now.
+
+> **`is_favourite` note:** `is_favourite` is a boolean OR-merge (default `False`) with no meaningful "both set and differing" state, so it is **excluded from `has_scalar_conflicts`** (documented in `_CONFLICT_FIELDS`). It remains fully overridable — an explicit `is_favourite=False` override is honoured (the override path keys on "present and not `None`", not truthiness).
+
+> **Override semantics:** an override is a mapping `field_name → concrete value to apply`; the caller (UI/agent) resolves the survivor / source / custom choice into a value before calling, mirroring the journal `MergeResolutionDialog` ↔ `merge_journals` contract. Absent keys fall back to the ITER13-001 prefer-non-empty default. The REST converter does not expose `company`/`job_title` (an ITER13-001 display limitation, unchanged here); those overrides are verified directly against the database in the integration test.
+
 **Acceptance Criteria:**
-- [ ] `ContactMergeService.merge_contacts` accepts an `overrides` mapping for the scalar identity fields (`first_name`, `last_name`, `middle_name`, `nick_name`, `company`, `job_title`, `photo_url`, `is_favourite`); each field resolves to the survivor value, the source value, or a caller-supplied custom value, falling back to the ITER13-001 default when unspecified.
-- [ ] A `has_scalar_conflicts(survivor, source)` helper reports fields where both sides hold differing non-empty values (mirrors `has_base_conflicts` in `journal_merge_service.py`).
-- [ ] The REST `MergeContactOverrides` schema and the MCP `merge_contacts` request schema both carry the override mapping, mirroring `MergeOverrides` / `MergeJournalMCPRequest`.
+- [x] `ContactMergeService.merge_contacts` accepts an `overrides` mapping for the scalar identity fields (`first_name`, `last_name`, `middle_name`, `nick_name`, `company`, `job_title`, `photo_url`, `is_favourite`); each field resolves to the survivor value, the source value, or a caller-supplied custom value, falling back to the ITER13-001 default when unspecified.
+- [x] A `has_scalar_conflicts(survivor, source)` helper reports fields where both sides hold differing non-empty values (mirrors `has_base_conflicts` in `journal_merge_service.py`; `is_favourite` excluded — see note).
+- [x] The REST `MergeContactOverrides` schema and the MCP `merge_contacts` request schema both carry the override mapping, mirroring `MergeOverrides` / `MergeJournalMCPRequest`.
 
 **Required Test Coverage:**
-- [ ] **Unit:** each scalar field honours survivor / source / custom; `has_scalar_conflicts` boundary cases (one-empty is not a conflict; equal values are not a conflict).
-- [ ] **Integration:** REST and MCP merges apply overrides end-to-end.
+- [x] **Unit:** each scalar field honours survivor / source / custom; `has_scalar_conflicts` boundary cases (one-empty is not a conflict; equal values are not a conflict; both-empty is not a conflict); `is_favourite=False` override honoured; absent-override regression; overridden fields recorded in the audit event. (`backend/tests/unit/contacts/test_contact_merge_service.py`, extended to 27 tests.)
+- [x] **Integration:** REST and MCP merges apply overrides end-to-end. (`backend/tests/integration/api/test_contact_merge_endpoint.py` + `backend/tests/integration/mcp/test_contact_tools_integration.py`.)
+- [x] **E2E (API-level, Chromium):** override merge (survivor / source / custom + `is_favourite=False`) and no-override survivor-wins merge through the REST surface; source deleted. (`frontend/tests/e2e/contacts-merge-api.spec.ts`.) Browser/UI E2E deferred to ITER13-003.
 
 ### ITER13-003: Web Merge Experience (UI)
 

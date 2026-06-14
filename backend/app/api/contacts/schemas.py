@@ -389,13 +389,38 @@ class ContactListResponse(JsonApiCollectionResponse[ContactResource]):
     pass
 
 
-# Contact Merge Request Models (ITER13-001 Phase 3)
+# Contact Merge Request Models (ITER13-001 Phase 3; overrides ITER13-002 Phase 1)
+class MergeContactOverrides(BaseModel):
+    """Explicit per-field conflict resolution for a contact merge.
+
+    Each field is the concrete value to apply to the surviving contact (the
+    caller has already resolved the survivor / source / custom choice). Omitted
+    fields fall back to the default policy (survivor wins, prefer non-empty).
+    Mirrors the journal ``MergeOverrides`` schema.
+    """
+
+    first_name: str | None = Field(default=None, description="Explicit first name")
+    last_name: str | None = Field(default=None, description="Explicit last name")
+    middle_name: str | None = Field(default=None, description="Explicit middle name")
+    nick_name: str | None = Field(default=None, description="Explicit nickname")
+    company: str | None = Field(default=None, description="Explicit company")
+    job_title: str | None = Field(default=None, description="Explicit job title")
+    photo_url: str | None = Field(default=None, description="Explicit photo URL")
+    is_favourite: bool | None = Field(
+        default=None, description="Explicit favourite flag"
+    )
+
+
 class MergeContactAttributes(BaseModel):
-    """Attributes for merging a contact (survivor-wins; overrides arrive in ITER13-002)."""
+    """Attributes for merging a contact (survivor-wins by default; per-field overrides)."""
 
     source_contact_id: int = Field(
         ...,
         description="ID of the contact to absorb into this one (it will be deleted)",
+    )
+    overrides: MergeContactOverrides | None = Field(
+        default=None,
+        description="Explicit per-field conflict resolution overrides",
     )
 
 

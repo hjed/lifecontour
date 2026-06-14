@@ -9,6 +9,8 @@ as an inline ``field_history`` row, and requests regeneration of the survivor's
 AI summary. The ``ContactMerged`` event and the REST/MCP surface land in Phase 3.
 """
 
+from typing import Any
+
 import structlog
 from core_shared.models.contacts.entities import Contact
 from core_shared.models.contacts.value_objects import Provenance
@@ -33,6 +35,32 @@ from app.infrastructure.unit_of_work import transactional
 
 logger = structlog.get_logger(__name__)
 
+# Scalar identity fields that participate in the merge (ITER13-001 / ITER13-002).
+_SCALAR_FIELDS = (
+    "first_name",
+    "last_name",
+    "middle_name",
+    "nick_name",
+    "company",
+    "job_title",
+    "photo_url",
+    "is_favourite",
+)
+
+# Fields surfaced to the user as conflicts when both sides differ. ``is_favourite``
+# is a boolean OR-merge (default ``False``) with no meaningful "both set and
+# differing" state, so it is excluded from conflict detection — it can still be
+# set explicitly via an override.
+_CONFLICT_FIELDS = (
+    "first_name",
+    "last_name",
+    "middle_name",
+    "nick_name",
+    "company",
+    "job_title",
+    "photo_url",
+)
+
 
 class ContactMergeService:
     """Merge a source contact into a user-chosen surviving contact.
@@ -54,6 +82,21 @@ class ContactMergeService:
         self.journal_relationship_repo = journal_relationship_repo
         self.event_publisher = event_publisher
 
+    def has_scalar_conflicts(self, survivor: Contact, source: Contact) -> bool:
+        """Report whether two contacts have conflicting scalar identity fields.
+
+        Returns ``True`` when any string identity field is non-empty on **both**
+        contacts and the values differ — the case that needs field-by-field
+        resolution. Mirrors ``has_base_conflicts`` in ``journal_merge_service``.
+        ``is_favourite`` is excluded (boolean OR-merge — see ``_CONFLICT_FIELDS``).
+        """
+        for field in _CONFLICT_FIELDS:
+            survivor_value = getattr(survivor, field)
+            source_value = getattr(source, field)
+            if survivor_value and source_value and survivor_value != source_value:
+                return True
+        return False
+
     @transactional
     async def merge_contacts(
         self,
@@ -63,16 +106,22 @@ class ContactMergeService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        overrides: dict[str, Any] | None = None,
     ) -> Contact:
         """Absorb the source contact into the survivor, returning the unified contact.
 
         Re-points and dedupes the full aggregate (relationships, journal links,
         methods, addresses, notes, important dates, tags), applies the scalar
-        identity fields with a prefer-non-empty policy (survivor wins on
-        conflict — per-field overrides arrive in ITER13-002), deletes the source,
-        records an inline ``merged_from`` history row carrying provenance, and
-        requests regeneration of the survivor's AI summary. The whole operation
-        is a single atomic unit of work.
+        identity fields, deletes the source, records an inline ``merged_from``
+        history row carrying provenance, and requests regeneration of the
+        survivor's AI summary. The whole operation is a single atomic unit of work.
+
+        Scalar fields resolve per ``overrides`` (ITER13-002): a present, non-``None``
+        ``overrides[field]`` is applied verbatim (the caller has already resolved
+        the survivor / source / custom choice into a concrete value, mirroring the
+        journal ``MergeResolutionDialog`` ↔ ``merge_journals`` contract); fields
+        without an override fall back to the ITER13-001 prefer-non-empty default
+        (survivor wins on conflict).
         """
         if survivor_id == source_id:
             raise ContactMergeConflictError("Cannot merge a contact into itself")
@@ -100,8 +149,10 @@ class ContactMergeService:
         )
         await self.contact_repo.repoint_tags(source_id, survivor_id, transaction)
 
-        # 2. Apply scalar identity fields with prefer-non-empty (survivor wins).
-        merged = self._merge_scalars(survivor, source_contact)
+        # 2. Apply scalar identity fields: overrides win, else prefer-non-empty.
+        merged, override_changes = self._merge_scalars(
+            survivor, source_contact, overrides or {}
+        )
         await self.contact_repo.save(merged)
 
         # 3. The source's aggregate has moved; delete the now-empty source row.
@@ -115,11 +166,15 @@ class ContactMergeService:
 
         # 4. Publish the merge as a ContactUpdated event; the history projection
         #    decodes the plain "merged_from" key to a contact-level audit row
-        #    carrying provenance (identical to the prior dual-write row).
+        #    carrying provenance (identical to the prior dual-write row). Any
+        #    explicitly-overridden scalar fields are recorded alongside as
+        #    (old, new) so the override choices stay auditable.
+        changed_fields: dict[str, Any] = {"merged_from": (source_id, survivor_id)}
+        changed_fields.update(override_changes)
         await self.event_publisher.publish(
             ContactUpdated(
                 survivor_id,
-                {"merged_from": (source_id, survivor_id)},
+                changed_fields,
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
@@ -157,20 +212,25 @@ class ContactMergeService:
         return merged_survivor
 
     @staticmethod
-    def _merge_scalars(survivor: Contact, source: Contact) -> Contact:
-        """Build the survivor's merged scalar identity using prefer-non-empty.
+    def _merge_scalars(
+        survivor: Contact, source: Contact, overrides: dict[str, Any]
+    ) -> tuple[Contact, dict[str, Any]]:
+        """Build the survivor's merged scalar identity, honouring overrides.
 
-        The survivor's value wins whenever it is set; otherwise the source's
-        value fills the gap. Per-field overrides arrive in ITER13-002.
+        For each scalar field: a present, non-``None`` ``overrides[field]`` is
+        applied verbatim; otherwise prefer-non-empty (survivor wins, then source
+        fills the gap). Returns the merged contact plus a dict of the fields an
+        override actually changed, as ``{field: (old, new)}`` for the audit trail.
         """
-        return Contact(
-            id=survivor.id,
-            first_name=survivor.first_name or source.first_name,
-            last_name=survivor.last_name or source.last_name,
-            middle_name=survivor.middle_name or source.middle_name,
-            nick_name=survivor.nick_name or source.nick_name,
-            company=survivor.company or source.company,
-            job_title=survivor.job_title or source.job_title,
-            photo_url=survivor.photo_url or source.photo_url,
-            is_favourite=survivor.is_favourite or source.is_favourite,
-        )
+        resolved: dict[str, Any] = {}
+        override_changes: dict[str, Any] = {}
+        for field in _SCALAR_FIELDS:
+            survivor_value = getattr(survivor, field)
+            override_value = overrides.get(field)
+            if override_value is not None:
+                resolved[field] = override_value
+                if override_value != survivor_value:
+                    override_changes[field] = (survivor_value, override_value)
+            else:
+                resolved[field] = survivor_value or getattr(source, field)
+        return Contact(id=survivor.id, **resolved), override_changes
