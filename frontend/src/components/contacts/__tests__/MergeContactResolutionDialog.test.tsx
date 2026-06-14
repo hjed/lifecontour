@@ -147,6 +147,80 @@ describe('MergeContactResolutionDialog', () => {
     );
   });
 
+  it('sends an empty string when Custom is selected without typing', async () => {
+    const user = userEvent.setup();
+    render(
+      <MergeContactResolutionDialog
+        survivorContact={survivor}
+        sourceContact={source}
+        open={true}
+        isPending={false}
+        onOpenChange={mockOnOpenChange}
+        onResolve={mockOnResolve}
+      />
+    );
+
+    // Explicitly choose Custom but leave the input empty.
+    await user.click(screen.getByTestId('radio-custom-nick_name'));
+
+    await user.click(
+      screen.getByRole('button', { name: /resolve and merge/i })
+    );
+
+    expect(mockOnResolve).toHaveBeenCalledWith(
+      expect.objectContaining({ nick_name: '' })
+    );
+  });
+
+  it('re-detects conflicts and defaults new selections when contacts change', async () => {
+    const user = userEvent.setup();
+    const survivorA = buildContact('1', { first_name: 'Alice' });
+    const sourceA = buildContact('2', { first_name: 'Bob' });
+    const { rerender } = render(
+      <MergeContactResolutionDialog
+        survivorContact={survivorA}
+        sourceContact={sourceA}
+        open={true}
+        isPending={false}
+        onOpenChange={mockOnOpenChange}
+        onResolve={mockOnResolve}
+      />
+    );
+
+    // Swap in a different pair that introduces a brand-new conflicting field.
+    const survivorB = buildContact('3', {
+      first_name: 'Carol',
+      last_name: 'Smith',
+    });
+    const sourceB = buildContact('4', {
+      first_name: 'Dave',
+      last_name: 'Jones',
+    });
+    rerender(
+      <MergeContactResolutionDialog
+        survivorContact={survivorB}
+        sourceContact={sourceB}
+        open={true}
+        isPending={false}
+        onOpenChange={mockOnOpenChange}
+        onResolve={mockOnResolve}
+      />
+    );
+
+    // The newly detected last_name conflict must have a default selection so it
+    // is not silently skipped on submit.
+    expect(screen.getByTestId('radio-target-last_name')).toBeChecked();
+
+    await user.click(
+      screen.getByRole('button', { name: /resolve and merge/i })
+    );
+
+    expect(mockOnResolve).toHaveBeenCalledWith({
+      first_name: 'Carol',
+      last_name: 'Smith',
+    });
+  });
+
   it('shows the no-conflict confirm state and resolves with empty overrides', async () => {
     const user = userEvent.setup();
     const identical = buildContact('1', {

@@ -30,11 +30,19 @@ interface MergeContactResolutionDialogProps {
   readonly onResolve: (overrides: MergeContactOverrides) => void;
 }
 
-/** Override keys the dialog can surface — all string-valued identity fields. */
-type TextOverrideField = Exclude<keyof MergeContactOverrides, 'is_favourite'>;
+/**
+ * Identity fields the web `ContactResource` exposes and the dialog can resolve.
+ * A subset of the override contract — see {@link CONFLICT_FIELDS}.
+ */
+type SurfacedField =
+  | 'first_name'
+  | 'last_name'
+  | 'middle_name'
+  | 'nick_name'
+  | 'photo_url';
 
 interface Conflict {
-  fieldId: TextOverrideField;
+  fieldId: SurfacedField;
   label: string;
   targetValue: string;
   sourceValue: string;
@@ -51,7 +59,7 @@ interface Conflict {
  * text, so the custom-value control is an `Input` (no multiline field exists).
  */
 const CONFLICT_FIELDS: ReadonlyArray<{
-  fieldId: TextOverrideField;
+  fieldId: SurfacedField;
   label: string;
 }> = [
   { fieldId: 'first_name', label: 'First Name' },
@@ -60,6 +68,8 @@ const CONFLICT_FIELDS: ReadonlyArray<{
   { fieldId: 'nick_name', label: 'Nickname' },
   { fieldId: 'photo_url', label: 'Photo URL' },
 ];
+
+const normalise = (value: string | null | undefined): string => value ?? '';
 
 /**
  * Detect scalar-field conflicts between the survivor and source contacts.
@@ -71,24 +81,11 @@ export function detectContactConflicts(
   survivor: ContactResource,
   source: ContactResource
 ): Conflict[] {
-  const survivorAttrs = survivor.attributes as unknown as Record<
-    string,
-    unknown
-  >;
-  const sourceAttrs = source.attributes as unknown as Record<string, unknown>;
   const conflicts: Conflict[] = [];
 
   for (const { fieldId, label } of CONFLICT_FIELDS) {
-    const survivorValue = survivorAttrs[fieldId];
-    const sourceValue = sourceAttrs[fieldId];
-    const survivorStr =
-      survivorValue === null || survivorValue === undefined
-        ? ''
-        : String(survivorValue);
-    const sourceStr =
-      sourceValue === null || sourceValue === undefined
-        ? ''
-        : String(sourceValue);
+    const survivorStr = normalise(survivor.attributes[fieldId]);
+    const sourceStr = normalise(source.attributes[fieldId]);
 
     if (survivorStr && sourceStr && survivorStr !== sourceStr) {
       conflicts.push({
@@ -101,6 +98,37 @@ export function detectContactConflicts(
   }
 
   return conflicts;
+}
+
+/** A single survivor / source / custom choice within a conflict block. */
+function ConflictOption({
+  fieldId,
+  choice,
+  label,
+  children,
+}: {
+  readonly fieldId: string;
+  readonly choice: ResolutionChoice;
+  readonly label: string;
+  readonly children: React.ReactNode;
+}) {
+  const id = `${choice}-${fieldId}`;
+  return (
+    <div className='flex items-start space-x-2'>
+      <RadioGroupItem
+        value={choice}
+        id={id}
+        data-testid={`radio-${id}`}
+        className='mt-1'
+      />
+      <div className='grid w-full gap-1.5 leading-none'>
+        <Label htmlFor={id} className='font-semibold'>
+          {label}
+        </Label>
+        {children}
+      </div>
+    </div>
+  );
 }
 
 export function MergeContactResolutionDialog({
@@ -124,15 +152,19 @@ export function MergeContactResolutionDialog({
     }
 
     const detected = detectContactConflicts(survivorContact, sourceContact);
-    const initialResolutions: Record<string, FieldResolution> = {};
-    detected.forEach(conflict => {
-      initialResolutions[conflict.fieldId] = { choice: 'target' };
-    });
-
     setConflicts(detected);
-    setResolutions(prev =>
-      Object.keys(prev).length === 0 ? initialResolutions : prev
-    );
+    // Rebuild resolutions to cover exactly the current conflicts: keep the
+    // user's prior choice for fields still in conflict, default newly detected
+    // fields to the survivor, and drop entries for fields no longer in conflict.
+    // This guarantees every conflict always has a selection so handleSubmit
+    // never silently skips one when the compared contacts change.
+    setResolutions(prev => {
+      const next: Record<string, FieldResolution> = {};
+      detected.forEach(conflict => {
+        next[conflict.fieldId] = prev[conflict.fieldId] ?? { choice: 'target' };
+      });
+      return next;
+    });
   }, [survivorContact, sourceContact]);
 
   const handleResolutionChange = (
@@ -152,6 +184,12 @@ export function MergeContactResolutionDialog({
     }));
   };
 
+  const resolveValue = (conflict: Conflict, res: FieldResolution): string => {
+    if (res.choice === 'source') return conflict.sourceValue;
+    if (res.choice === 'custom') return res.customValue ?? '';
+    return conflict.targetValue;
+  };
+
   const handleSubmit = () => {
     if (!conflicts) return;
     const overrides: MergeContactOverrides = {};
@@ -159,19 +197,7 @@ export function MergeContactResolutionDialog({
     conflicts.forEach(conflict => {
       const res = resolutions[conflict.fieldId];
       if (!res) return;
-
-      let chosenValue: string | undefined;
-      if (res.choice === 'target') {
-        chosenValue = conflict.targetValue;
-      } else if (res.choice === 'source') {
-        chosenValue = conflict.sourceValue;
-      } else {
-        chosenValue = res.customValue;
-      }
-
-      if (chosenValue !== undefined) {
-        overrides[conflict.fieldId] = chosenValue;
-      }
+      overrides[conflict.fieldId] = resolveValue(conflict, res);
     });
 
     onResolve(overrides);
@@ -238,90 +264,52 @@ export function MergeContactResolutionDialog({
           <div className='space-y-6'>
             {conflicts.map(conflict => {
               const res = resolutions[conflict.fieldId];
+              const fieldId = conflict.fieldId;
               return (
-                <div
-                  key={conflict.fieldId}
-                  className='space-y-3 rounded-md border p-4'
-                >
+                <div key={fieldId} className='space-y-3 rounded-md border p-4'>
                   <h4 className='text-sm font-medium'>{conflict.label}</h4>
                   <RadioGroup
                     value={res?.choice}
                     onValueChange={(val: string) =>
-                      handleResolutionChange(
-                        conflict.fieldId,
-                        val as ResolutionChoice
-                      )
+                      handleResolutionChange(fieldId, val as ResolutionChoice)
                     }
                     className='space-y-2 text-sm'
                   >
-                    <div className='flex items-start space-x-2'>
-                      <RadioGroupItem
-                        value='target'
-                        id={`target-${conflict.fieldId}`}
-                        data-testid={`radio-target-${conflict.fieldId}`}
-                        className='mt-1'
-                      />
-                      <div className='grid gap-1.5 leading-none'>
-                        <Label
-                          htmlFor={`target-${conflict.fieldId}`}
-                          className='font-semibold'
-                        >
-                          Survivor (Keeps)
-                        </Label>
-                        <p className='text-muted-foreground whitespace-pre-wrap'>
-                          {conflict.targetValue}
-                        </p>
-                      </div>
-                    </div>
-                    <div className='flex items-start space-x-2'>
-                      <RadioGroupItem
-                        value='source'
-                        id={`source-${conflict.fieldId}`}
-                        data-testid={`radio-source-${conflict.fieldId}`}
-                        className='mt-1'
-                      />
-                      <div className='grid gap-1.5 leading-none'>
-                        <Label
-                          htmlFor={`source-${conflict.fieldId}`}
-                          className='font-semibold'
-                        >
-                          Source (Absorbed)
-                        </Label>
-                        <p className='text-muted-foreground whitespace-pre-wrap'>
-                          {conflict.sourceValue}
-                        </p>
-                      </div>
-                    </div>
-                    <div className='flex items-start space-x-2'>
-                      <RadioGroupItem
-                        value='custom'
-                        id={`custom-${conflict.fieldId}`}
-                        data-testid={`radio-custom-${conflict.fieldId}`}
-                        className='mt-1'
-                      />
-                      <div className='grid w-full gap-1.5 leading-none'>
-                        <Label
-                          htmlFor={`custom-${conflict.fieldId}`}
-                          className='font-semibold'
-                        >
-                          Custom Value
-                        </Label>
-                        {res?.choice === 'custom' && (
-                          <div className='mt-2'>
-                            <Input
-                              value={res.customValue ?? ''}
-                              onChange={e =>
-                                handleCustomValueChange(
-                                  conflict.fieldId,
-                                  e.target.value
-                                )
-                              }
-                              placeholder={`Enter custom ${conflict.label.toLowerCase()}...`}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                    <ConflictOption
+                      fieldId={fieldId}
+                      choice='target'
+                      label='Survivor (Keeps)'
+                    >
+                      <p className='text-muted-foreground whitespace-pre-wrap'>
+                        {conflict.targetValue}
+                      </p>
+                    </ConflictOption>
+                    <ConflictOption
+                      fieldId={fieldId}
+                      choice='source'
+                      label='Source (Absorbed)'
+                    >
+                      <p className='text-muted-foreground whitespace-pre-wrap'>
+                        {conflict.sourceValue}
+                      </p>
+                    </ConflictOption>
+                    <ConflictOption
+                      fieldId={fieldId}
+                      choice='custom'
+                      label='Custom Value'
+                    >
+                      {res?.choice === 'custom' && (
+                        <div className='mt-2'>
+                          <Input
+                            value={res.customValue ?? ''}
+                            onChange={e =>
+                              handleCustomValueChange(fieldId, e.target.value)
+                            }
+                            placeholder={`Enter custom ${conflict.label.toLowerCase()}...`}
+                          />
+                        </div>
+                      )}
+                    </ConflictOption>
                   </RadioGroup>
                 </div>
               );
