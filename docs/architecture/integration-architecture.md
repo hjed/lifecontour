@@ -581,9 +581,9 @@ STRAVA_CLIENT_ID=your-strava-client-id
 STRAVA_CLIENT_SECRET=your-strava-client-secret
 ```
 
-#### Worker Configuration Loading
+#### Worker Configuration Loading (legacy pattern)
 ```python
-# In worker.py
+# Legacy per-worker pattern — superseded by core_shared.BaseWorkerSettings below.
 import os
 from pydantic import BaseSettings
 
@@ -599,6 +599,63 @@ class GoogleWorkerSettings(BaseSettings):
 
 settings = GoogleWorkerSettings()
 ```
+
+#### Shared Base Settings (`core_shared.BaseWorkerSettings`)
+
+`core_shared` provides `BaseWorkerSettings` as the **canonical worker settings base**.
+Every worker subclasses it and declares only its integration-specific fields, so the
+common surface is defined once. It is a Pydantic v2 `BaseSettings` model loaded from the
+process environment or a `.env` file, with
+`model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=False, extra="ignore")`.
+
+Standard field set and documented defaults:
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `database_url` | `SecretStr` | *(required)* | Always a `SecretStr` — keeps the DSN out of logs/tracebacks. Read via `.get_secret_value()`. |
+| `redis_url` | `str` | `redis://redis:6379` | Backs both the ARQ queue and the event stream. |
+| `stream_name` | `str` | `pms:domain-events` | Shared domain-events Redis stream the worker consumes. |
+| `worker_id` | `str` | `worker` | Per-worker identifier (override, e.g. `immich-worker`). |
+| `queue_name` | `str` | `arq:queue` | Matches arq's own default queue; override per worker (e.g. `arq:immich`). |
+| `log_level` | `str` | `INFO` | |
+| `enable_periodic_sync` | `bool` | `False` | |
+| `sync_interval_hours` | `int` | `6` | |
+| `enable_telemetry` | `bool` | `False` | OpenTelemetry block. |
+| `otel_exporter_otlp_endpoint` | `str` | `""` | |
+| `otel_service_name` | `str` | `worker` | Override per worker. |
+| `otel_resource_attributes` | `str` | `""` | |
+
+All secret-bearing settings (e.g. `database_url`, `encryption_key`, API client secrets)
+must use `SecretStr`.
+
+A companion helper, `redis_settings_from_url(redis_url) -> arq.connections.RedisSettings`,
+derives ARQ `RedisSettings` from a `redis://` URL (wrapping `RedisSettings.from_dsn`,
+handling host/port/database/password forms). It is the single shared replacement for the
+duplicated `_parse_redis_url` helpers in the immich/snipeit workers.
+
+```python
+# In a worker's settings module
+from pydantic import SecretStr
+from core_shared import BaseWorkerSettings, redis_settings_from_url
+
+
+class ImmichWorkerSettings(BaseWorkerSettings):
+    """Adds only integration-specific fields; common fields come from the base."""
+
+    worker_id: str = "immich-worker"
+    queue_name: str = "arq:immich"
+    otel_service_name: str = "immich-worker"
+    encryption_key: SecretStr = SecretStr("")
+
+
+settings = ImmichWorkerSettings()
+redis_settings = redis_settings_from_url(settings.redis_url)
+```
+
+> **Rollout (iteration 14, ITER14-001).** This base is **additive** in Phase 1 — it lands
+> in `core_shared` behind no runtime path. Phase 2 migrates `google`/`strava` onto it and
+> Phase 3 migrates `immich`/`snipeit` (converting their bare-`str` secrets to `SecretStr`),
+> deleting the duplicated `_parse_redis_url` copies in the same phase.
 
 ## Security Considerations
 

@@ -98,19 +98,29 @@ Each sub-iteration defines its objective, the specification it builds on, the ou
 
 #### Phase 1: `BaseWorkerSettings` + shared Redis-settings helper (core_shared)
 **PR Size:** ~250 lines (model ~90, helper ~30, tests ~130)
+**Status:** ✅ DONE
 
 Add the base model and helper to `core_shared`, fully unit-tested. Not yet consumed by any worker, so it merges green as additive code.
 
 **Acceptance Criteria:**
-- [ ] `core_shared` exposes `BaseWorkerSettings` (Pydantic `BaseSettings`) with `database_url` (`SecretStr`), `redis_url`, `stream_name`, `worker_id`, `queue_name`, `log_level`, `enable_periodic_sync`, `sync_interval_hours`, and the OTel block (`enable_telemetry`, `otel_exporter_otlp_endpoint`, `otel_service_name`, `otel_resource_attributes`), with documented defaults.
-- [ ] A `redis_settings_from_url(redis_url)` helper returns ARQ `RedisSettings` via `RedisSettings.from_dsn`, handling host/port/db/password forms.
-- [ ] Both are exported from `core_shared/__init__.py`.
+- [x] `core_shared` exposes `BaseWorkerSettings` (Pydantic `BaseSettings`) with `database_url` (`SecretStr`), `redis_url`, `stream_name`, `worker_id`, `queue_name`, `log_level`, `enable_periodic_sync`, `sync_interval_hours`, and the OTel block (`enable_telemetry`, `otel_exporter_otlp_endpoint`, `otel_service_name`, `otel_resource_attributes`), with documented defaults.
+- [x] A `redis_settings_from_url(redis_url)` helper returns ARQ `RedisSettings` via `RedisSettings.from_dsn`, handling host/port/db/password forms.
+- [x] Both are exported from `core_shared/__init__.py`.
 
 **Required Test Coverage:**
 - **Unit:** field defaults and env-var loading; `SecretStr` masking of `database_url`; `redis_settings_from_url` parses representative `redis://` forms (with/without db index and password).
 
 **Required Documentation Updates:**
 - `docs/architecture/integration-architecture.md` — document `BaseWorkerSettings` as the canonical worker settings base and the standard field set.
+
+**Progress notes (Phase 1 complete):**
+- Implemented `BaseWorkerSettings` + `redis_settings_from_url` in new module `core_shared/core_shared/worker_settings.py`; both exported from `core_shared/__init__.py` and `__all__`.
+- Per-worker fields (`worker_id`, `queue_name`, `otel_service_name`) take generic defaults so Phase 2 wiring causes no churn; `queue_name` defaults to `arq:queue` (arq's own default) so it is behaviourally inert for google/strava, which don't set it today.
+- `model_config` standardised on `SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=False, extra="ignore")`.
+- Added `pydantic-settings>=2.14.1` as a runtime dependency and `arq>=0.26` as a **dev-only** dependency of `core_shared` (refreshed `uv.lock`). `arq` is dev-only because it pins `redis<6` while `core_shared` requires `redis>=8` — reconciled by the existing `[tool.uv] override-dependencies` only when `core_shared` is the resolution root, but the shared `python-base` image installs it via a bare `uv pip install -e /core_shared` where the override does not apply. `redis_settings_from_url` therefore imports `arq` lazily so `import core_shared` works without `arq` (the backend never calls the helper; the workers that do always depend on `arq`).
+- Tests: `core_shared/tests/test_worker_settings.py` (20 cases) — TDD red→green. Includes a legacy-equivalence guard parametrised over representative URLs that asserts the helper matches the old immich/snipeit `_parse_redis_url` output, so Phase 2 can delete those copies safely.
+- **Test scope:** unit-only, per spec. Phase 1 is additive `core_shared` library code with no DB/API/UI/wired-worker surface, so there is no meaningful integration or e2e layer. Integration coverage (workers booting against real Redis/Postgres and resolving Redis+DB URLs) lands in **ITER14-001 Phase 2/3**; the e2e surface (`IN_PROGRESS` sync shown in the UI) lands in **ITER14-003 Phase 4**.
+- Quality gates green in `core_shared/`: `ruff check`, `ruff format --check`, `mypy`, `pytest`.
 
 #### Phase 2: Migrate `google` + `strava` settings onto the base
 **PR Size:** ~300 lines (per-worker settings ~120, tests ~180)
