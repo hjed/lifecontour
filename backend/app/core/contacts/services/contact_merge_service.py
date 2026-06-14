@@ -14,7 +14,10 @@ from core_shared.models.contacts.entities import Contact
 from core_shared.models.contacts.value_objects import Provenance
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.contacts.models.events import ContactSummaryRefreshRequested
+from app.core.contacts.models.events import (
+    ContactMerged,
+    ContactSummaryRefreshRequested,
+)
 from app.core.contacts.models.exceptions import (
     ContactMergeConflictError,
     ContactNotFoundError,
@@ -113,6 +116,19 @@ class ContactMergeService:
         # 5. The survivor's interaction summary is now stale — regenerate it.
         await self.event_publisher.publish(
             ContactSummaryRefreshRequested(survivor_id, transaction=transaction)
+        )
+
+        # 6. Announce the merge so downstream consumers (ITER13-005 external-sync
+        #    reconciliation) can reconcile the survivor's external links. No
+        #    consumer exists yet; an absent consumer must not error.
+        await self.event_publisher.publish(
+            ContactMerged(
+                survivor_id,
+                source_id,
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
+            )
         )
 
         logger.info(

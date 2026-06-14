@@ -48,6 +48,7 @@ from app.api.contacts.schemas import (
     ContactSummaryUpdateRequest,
     ContactUpdateRequest,
     FieldUpdateRequest,
+    MergeContactRequest,
     MethodFieldUpdateRequest,
     NoteFieldUpdateRequest,
     TagAssignmentRequest,
@@ -67,6 +68,7 @@ from app.core.contacts.services import (
     ContactSummaryUpdate,
 )
 from app.core.contacts.services.contact_history_service import ContactHistoryService
+from app.core.contacts.services.contact_merge_service import ContactMergeService
 from app.core.integrations.external_link_helpers import build_contact_external_links
 from app.core.integrations.immich.avatar_proxy_service import AvatarProxyService
 from app.core.journal.adapters.sql.album_sync_read_repository import (
@@ -299,6 +301,47 @@ async def get_contact(
 
     contact_resource = ContactConverter.to_resource(contact, base_url)
 
+    return ContactResponse(data=contact_resource)
+
+
+@router.post("/{contact_id}/merge", status_code=status.HTTP_200_OK)
+@inject
+async def merge_contact(
+    contact_id: int,
+    request: Request,
+    merge_request: MergeContactRequest,
+    contact_merge_service: FromDishka[ContactMergeService],
+    contact_service: FromDishka[ContactService],
+    connection: FromDishka[AsyncConnection],
+    _user: FromDishka[SessionUser],  # Require authentication
+) -> ContactResponse:
+    """
+    Merge another contact into this one (ITER13-001 Phase 3).
+
+    The path ``contact_id`` is the surviving contact; ``source_contact_id`` in the
+    body is absorbed and deleted. The survivor keeps its identity and gains the
+    source's deduplicated aggregate. Conflicts resolve survivor-wins / prefer
+    non-empty (per-field overrides arrive in ITER13-002). The merge is a single
+    unit of work owned by the service, so this controller opens no transaction.
+    """
+    source_id = merge_request.data.attributes.source_contact_id
+
+    await contact_merge_service.merge_contacts(
+        contact_id,
+        source_id,
+        transaction=connection,
+        changed_by="ui",
+        source=Provenance.UI,
+    )
+
+    # Re-fetch the enriched survivor so the response carries the full, merged
+    # aggregate (mirrors how get_contact builds its response).
+    merged = await contact_service.get_contact_by_id(contact_id)
+    if not merged:
+        raise ContactNotFoundError(contact_id)
+
+    base_url = get_request_base_url(request)
+    contact_resource = ContactConverter.to_resource(merged, base_url)
     return ContactResponse(data=contact_resource)
 
 

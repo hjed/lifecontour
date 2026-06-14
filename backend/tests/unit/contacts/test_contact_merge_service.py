@@ -7,11 +7,12 @@ deletion, the inline ``merged_from`` history row, and the survivor summary
 refresh event. The REST/MCP surface arrives in later phases.
 """
 
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from core_shared.models.contacts.entities import Contact
+from core_shared.models.history import Provenance
 
 from app.core.contacts.models.exceptions import (
     ContactMergeConflictError,
@@ -261,6 +262,14 @@ class TestContactMergeSideEffects:
         old_value, _ = changed_fields["merged_from"]
         assert old_value == SOURCE_ID
 
+    @staticmethod
+    def _published(mock_event_publisher: AsyncMock) -> dict[str, Any]:
+        """Map each published event by its ``event_type``."""
+        return {
+            call.args[0].event_type: call.args[0]
+            for call in mock_event_publisher.publish.await_args_list
+        }
+
     @pytest.mark.asyncio
     async def test_requests_summary_refresh_for_survivor(
         self,
@@ -272,7 +281,27 @@ class TestContactMergeSideEffects:
             SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
         )
 
-        mock_event_publisher.publish.assert_awaited_once()
-        event = mock_event_publisher.publish.await_args.args[0]
-        assert event.event_type == "ContactSummaryRefreshRequested"
+        event = self._published(mock_event_publisher)["ContactSummaryRefreshRequested"]
         assert event.aggregate_id == SURVIVOR_ID
+
+    @pytest.mark.asyncio
+    async def test_emits_contact_merged_event_with_provenance(
+        self,
+        merge_service,
+        mock_event_publisher,
+        mock_transaction,
+    ) -> None:
+        await merge_service.merge_contacts(
+            SURVIVOR_ID,
+            SOURCE_ID,
+            transaction=mock_transaction,
+            changed_by="ui",
+            source=Provenance.UI,
+        )
+
+        event = self._published(mock_event_publisher)["ContactMerged"]
+        assert event.aggregate_id == SURVIVOR_ID
+        assert event.event_data["survivor_contact_id"] == SURVIVOR_ID
+        assert event.event_data["source_contact_id"] == SOURCE_ID
+        assert event.event_data["source"] == Provenance.UI.value
+        assert event.event_data["changed_by"] == "ui"

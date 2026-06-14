@@ -179,14 +179,19 @@ Complete the aggregate merge so the service produces a correct unified contact u
 
 Expose the engine. **This phase makes contact merge live via API and MCP.**
 
+**Status:** ✅ DONE — `ContactMerged` event emitted via the dual publisher, `POST /api/contacts/{id}/merge` REST endpoint, and the `merge_contacts` MCP tool implemented with unit + integration coverage. All backend quality gates (pytest, `ruff`, `ruff format`, `mypy`) green locally.
+
+> **Ownership note (deviation, carried from Phase 1):** the `contacts` table has **no `user_id`/owner column** (contacts are single-user), so "enforce ownership of both" reduces to **existence** at the data layer — matching the existing `get_contact` MCP tool, which checks only existence. The service validates *both exist* + *distinct*; the MCP tool surfaces those as error payloads. A cross-owner check can be added if/when contacts gain ownership.
+
 **Acceptance Criteria:**
-- [ ] A `ContactMerged(source_contact_id, survivor_contact_id, …)` domain event is added to `backend/app/core/contacts/models/events.py` and emitted by `ContactMergeService` via the dual publisher (no consumer yet — ITER13-005 adds them; an absent consumer must not error).
-- [ ] `POST /api/contacts/{id}/merge` (JSON:API; path id = survivor, body carries `source_contact_id`) calls `ContactMergeService` and returns the unified contact via the existing contact response converter. The controller opens no transaction.
-- [ ] A `merge_contacts` MCP tool takes explicit survivor + source IDs, enforces ownership of both, calls the service, and returns the unified contact. Mirrors `merge_journals`; registered alongside the other contact tools.
+- [x] A `ContactMerged(survivor_contact_id, source_contact_id, …)` domain event is added to `backend/app/core/contacts/models/events.py` and emitted by `ContactMergeService` via the dual publisher (no consumer yet — ITER13-005 adds them; an absent consumer must not error). Carries provenance (`source`/`changed_by`).
+- [x] `POST /api/contacts/{id}/merge` (JSON:API; path id = survivor, body carries `source_contact_id`) calls `ContactMergeService` and returns the unified contact via `ContactConverter.to_resource`. The controller opens no transaction. `ContactMergeConflictError` (self-merge) maps to **409**; missing contact to **404**.
+- [x] A `merge_contacts` MCP tool takes explicit survivor + source IDs, validates existence of both (see ownership note), calls the service, and returns the unified contact. Mirrors `merge_journals`; registered alongside the other contact tools via `register_contact_tools`.
 
 **Required Test Coverage:**
-- [ ] **Integration (REST):** end-to-end merge via the endpoint; source deleted; relationships/journal links/sub-entities consolidated; ownership/validation errors return correct status.
-- [ ] **Integration/Unit (MCP):** `merge_contacts` registered with the right schema; ownership enforced; returns the unified contact.
+- [x] **Integration (REST):** end-to-end merge via the endpoint; source deleted; journal links / sub-entities consolidated; survivor-wins / prefer-non-empty scalar resolution; self-merge → 409 and missing survivor/source → 404. (`backend/tests/integration/api/test_contact_merge_endpoint.py`, 5 tests.)
+- [x] **Integration/Unit (MCP):** `merge_contacts` registered with the right schema (`survivor_contact_id` + `source_contact_id`); mounted-HTTP merge returns the unified contact and deletes the source; self-merge / not-found return error payloads. (`backend/tests/integration/mcp/test_contact_tools_integration.py`, 2 tests.)
+- [x] **Unit (service):** `ContactMerged` is published with the survivor/source IDs and the passed provenance. (`backend/tests/unit/contacts/test_contact_merge_service.py`, extended to 12 tests.)
 
 ### ITER13-002: Field-by-Field Conflict Resolution (overrides)
 
