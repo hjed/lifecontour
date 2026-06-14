@@ -11,9 +11,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from arq import run_worker
-from arq.connections import RedisSettings
 from arq.cron import cron
 from arq.typing import StartupShutdown, WorkerSettingsBase
+from core_shared import redis_settings_from_url
 from core_shared.database.engine import create_session_factory
 
 # Import integration exceptions from core_shared
@@ -35,8 +35,6 @@ from core_shared.models.outbox import OutboxEvent
 from core_shared.models.sync_metadata import SyncStatus
 from core_shared.repositories import SyncJobRepository
 from core_shared.telemetry import setup_telemetry, trace_arq_job
-from pydantic import SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,57 +44,13 @@ from api_models import ListConnectionsResponse
 # Import worker-specific services
 from google_auth_service import GoogleAuthService
 from google_client import GoogleAPIClient
+from google_settings import GoogleSettings
 from group_mapping import _build_contact_group_mapping
 from group_translator import GoogleGroupNameTranslator
 from transformer import GoogleContactTransformer
 
-
-class WorkerSettings(BaseSettings):
-    """Configuration for Google Contacts worker."""
-
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-    )
-
-    # Database connection
-    database_url: SecretStr
-
-    # Redis connection
-    redis_url: str = "redis://redis:6379"
-
-    # Google API credentials
-    google_client_id: str
-    google_client_secret: SecretStr
-
-    # Encryption key for tokens
-    encryption_key: SecretStr
-
-    # Worker configuration
-    worker_id: str = "google-worker"
-    log_level: str = "INFO"
-    max_concurrent_jobs: int = 5
-
-    # Periodic sync configuration
-    enable_periodic_sync: bool = False
-    sync_interval_hours: int = 6
-
-    # Reserved google groups to ignore (by default just myContacts)
-    google_reserved_groups: list[str] = ["myContacts"]
-
-    # Webhook configuration
-    webhook_base_url: str = ""  # Public HTTPS URL for webhook callbacks
-
-    # Observability
-    enable_telemetry: bool = False
-    otel_exporter_otlp_endpoint: str = ""
-    otel_service_name: str = "google-worker"
-    otel_resource_attributes: str = ""
-
-
 # Global settings instance
-settings = WorkerSettings()
+settings = GoogleSettings()
 
 # Configure structured logging using shared module
 configure_logging(
@@ -3868,7 +3822,7 @@ class GoogleWorkerSettings(WorkerSettingsBase):
     on_shutdown: StartupShutdown = shutdown
 
     # Redis settings
-    redis_settings = RedisSettings.from_dsn(settings.redis_url)
+    redis_settings = redis_settings_from_url(settings.redis_url)
 
     # Worker configuration
     max_jobs = settings.max_concurrent_jobs

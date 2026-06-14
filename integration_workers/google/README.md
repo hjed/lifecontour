@@ -34,20 +34,40 @@ The worker uses ARQ (Async Redis Queue) for task processing and supports:
 
 ## Configuration
 
+Settings live in [`google_settings.py`](google_settings.py) as `GoogleSettings`,
+which subclasses the shared `core_shared.BaseWorkerSettings`. The common worker
+surface — database/Redis connection, ARQ queue/stream identity, logging,
+periodic-sync cadence and the OpenTelemetry block — is declared once in the base
+and inherited here; only the Google-specific fields below are declared locally.
+Secrets (`DATABASE_URL`, `GOOGLE_CLIENT_SECRET`, `ENCRYPTION_KEY`) are
+`SecretStr` so they stay out of logs and tracebacks.
+
 ### Environment Variables
+
+**Inherited from `BaseWorkerSettings`** (see `core_shared/core_shared/worker_settings.py`):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DATABASE_URL` | *required* | PostgreSQL connection string |
-| `REDIS_URL` | *required* | Redis connection string for ARQ |
-| `GOOGLE_CLIENT_ID` | *required* | Google OAuth client ID |
-| `GOOGLE_CLIENT_SECRET` | *required* | Google OAuth client secret |
-| `ENCRYPTION_KEY` | *required* | Key for encrypting OAuth tokens |
+| `DATABASE_URL` | *required* | PostgreSQL connection string (`SecretStr`) |
+| `REDIS_URL` | `redis://redis:6379` | Redis connection string for ARQ + event stream |
+| `STREAM_NAME` | `pms:domain-events` | Shared domain-events Redis stream |
 | `LOG_LEVEL` | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR) |
-| `WORKER_ID` | `google-worker` | Unique worker identifier |
-| `MAX_CONCURRENT_JOBS` | `5` | Maximum concurrent ARQ jobs |
 | `ENABLE_PERIODIC_SYNC` | `false` | Enable automatic periodic syncing |
 | `SYNC_INTERVAL_HOURS` | `6` | Hours between periodic syncs |
+| `ENABLE_TELEMETRY` | `false` | Enable OpenTelemetry export |
+| `OTEL_*` | `""` | OpenTelemetry exporter/resource configuration |
+
+**Google-specific (declared in `GoogleSettings`)**:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GOOGLE_CLIENT_ID` | *required* | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | *required* | Google OAuth client secret (`SecretStr`) |
+| `ENCRYPTION_KEY` | *required* | Key for encrypting OAuth tokens (`SecretStr`) |
+| `WORKER_ID` | `google-worker` | Unique worker identifier (overrides base default) |
+| `MAX_CONCURRENT_JOBS` | `5` | Maximum concurrent ARQ jobs |
+| `GOOGLE_RESERVED_GROUPS` | `["myContacts"]` | Google groups to ignore during sync |
+| `WEBHOOK_BASE_URL` | `""` | Public HTTPS URL for webhook callbacks |
 
 ### Periodic Sync Configuration
 
