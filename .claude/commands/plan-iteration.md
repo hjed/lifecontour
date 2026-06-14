@@ -33,7 +33,7 @@ MCP tool for code/concept search before grep/find (per CLAUDE.md):
    `core_shared` models/schemas, frontend components, fixtures, and helpers. Prefer reuse over
    new code (per CLAUDE.md). Identify the specific files that will change.
 
-You can use auggie-explore, and plan subagents
+You can use auggie-explore, and plan subagents. DO NOT use the generic `explore` agent.
 
 ## Phase 2 — Build the plan
 
