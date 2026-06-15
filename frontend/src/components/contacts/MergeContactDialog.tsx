@@ -124,7 +124,9 @@ export function MergeContactDialog({
   return (
     <>
       <Dialog open={open && !resolutionOpen} onOpenChange={handleOpenChange}>
-        <DialogContent className='sm:max-w-md'>
+        {/* Constrain height and scroll on short viewports so the footer actions
+            (Cancel / Next) stay reachable instead of overflowing off-screen. */}
+        <DialogContent className='max-h-[85vh] overflow-y-auto sm:max-w-md'>
           <DialogHeader>
             <DialogTitle>Merge Another Contact</DialogTitle>
             <DialogDescription>
