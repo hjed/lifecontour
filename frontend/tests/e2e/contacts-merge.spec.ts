@@ -152,6 +152,9 @@ test.describe('Contact Merge Workflow (web UI)', () => {
       });
     }).toPass({ timeout: 20000 });
 
+    // The search results dropdown is absolutely positioned over the footer;
+    // wait for it to close after selection so it can't intercept the Next click.
+    await expect(dialog.locator('li[role="option"]')).toHaveCount(0);
     await dialog.getByRole('button', { name: /next/i }).click();
 
     const resolution = page
@@ -237,6 +240,9 @@ test.describe('Contact Merge Workflow (web UI)', () => {
       });
     }).toPass({ timeout: 20000 });
 
+    // The search results dropdown is absolutely positioned over the footer;
+    // wait for it to close after selection so it can't intercept the Next click.
+    await expect(dialog.locator('li[role="option"]')).toHaveCount(0);
     await dialog.getByRole('button', { name: /next/i }).click();
 
     // No conflicts → the resolution dialog shows the confirm state directly.
