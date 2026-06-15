@@ -694,6 +694,9 @@ done-callback that logs unhandled consumer exceptions in real time (strava).
 
 ```python
 # In a worker's ARQ worker module
+from typing import cast
+
+from arq.typing import StartupShutdown, WorkerSettingsBase
 from core_shared import (
     SharedARQWorkerSettings,
     build_worker_lifecycle,
@@ -714,16 +717,18 @@ async def _consumer(session_factory, settings):
     )
 
 
-on_startup, on_shutdown = build_worker_lifecycle(
+_on_startup, _on_shutdown = build_worker_lifecycle(
     settings=settings, consumer_factory=_consumer
 )
 
 
-class WorkerSettings(SharedARQWorkerSettings):
+class WorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
     functions = [sync_immich_people, sync_immich_albums]  # tasks only
     redis_settings = redis_settings_from_url(settings.redis_url)
-    on_startup = on_startup
-    on_shutdown = on_shutdown
+    # cast to arq's StartupShutdown Protocol — the shared LifecycleHook alias is a
+    # positional Callable, which the Protocol's named-`ctx` form rejects.
+    on_startup: StartupShutdown = cast("StartupShutdown", _on_startup)
+    on_shutdown: StartupShutdown = cast("StartupShutdown", _on_shutdown)
     cron_jobs = generate_cron_jobs(
         periodic_sync_all_immich_accounts,
         enable_periodic_sync=settings.enable_periodic_sync,
@@ -731,8 +736,19 @@ class WorkerSettings(SharedARQWorkerSettings):
     )
 ```
 
+The leaf also inherits `arq.typing.WorkerSettingsBase` so `run_worker` accepts it nominally.
 As with `redis_settings_from_url`, `arq` is imported lazily (only `generate_cron_jobs` needs
 it), so `import core_shared` works without `arq` installed.
+
+> **Subtlety — defaults must coincide with arq's, or be redeclared on the leaf.** arq builds the
+> worker via `get_kwargs`, which reads only the **leaf** `WorkerSettings.__dict__` (inherited
+> `SharedARQWorkerSettings` attributes are invisible to it) and falls back to arq's own `Worker`
+> defaults for anything absent. The shared defaults for `job_timeout` (300), `keep_result` (3600)
+> and `max_tries` (5) equal arq's, so inheritance is behaviourally transparent. `health_check_interval`
+> is the exception (shared 30 vs arq 3600): a worker that wants 30 must **redeclare it on the leaf**
+> (e.g. snipeit). google/strava never set it and stay on arq's 3600. Any genuine override
+> (`google` `job_timeout=600`, `strava` `max_tries=20`/`max_jobs=5`, `google` `max_jobs`) is
+> declared on the leaf with a comment.
 
 > **Rollout (iteration 14, ITER14-002).** The toolkit is **additive** in Phase 1 — it lands
 > in `core_shared` behind no runtime path, fully unit-tested. Phase 2 migrates `google`/`strava`

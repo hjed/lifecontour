@@ -251,10 +251,12 @@ Add the shared ARQ surface to `core_shared`, fully unit-tested. Not yet consumed
 #### Phase 2: Migrate `google` + `strava` onto the shared ARQ toolkit
 **PR Size:** ~360 lines (per-worker rewiring ~160, tests ~200)
 
+**Status:** ✅ Complete (2026-06-15, branch `emdash/iter14-002-2-migrate-arq`).
+
 **Acceptance Criteria:**
-- [ ] `google` and `strava` ARQ `WorkerSettings` use the shared defaults, cron helper, lifecycle factory, and `redis_settings_from_url`; each retains only its `functions` list, consumer registration, and documented overrides (`google` `max_concurrent_jobs`, `strava` `max_tries=20`).
-- [ ] Per-worker `startup`/`shutdown`, inline cron blocks, and any local Redis parsing are deleted.
-- [ ] Startup/shutdown, cron scheduling, and retry behaviour are unchanged.
+- [x] `google` and `strava` ARQ `WorkerSettings` use the shared defaults, cron helper, lifecycle factory, and `redis_settings_from_url`; each retains only its `functions` list, consumer registration, and documented overrides (`google` `max_concurrent_jobs`, `strava` `max_tries=20`).
+- [x] Per-worker `startup`/`shutdown`, inline cron blocks, and any local Redis parsing are deleted.
+- [x] Startup/shutdown, cron scheduling, and retry behaviour are unchanged.
 
 **Required Test Coverage:**
 - **Unit:** each worker's `WorkerSettings` exposes the expected functions/overrides; lifecycle delegates to the shared factory.
@@ -262,6 +264,14 @@ Add the shared ARQ surface to `core_shared`, fully unit-tested. Not yet consumed
 
 **Required Documentation Updates:**
 - `google`/`strava` `README.md` updated to show the reduced `WorkerSettings`.
+
+**Progress notes (Phase 2 complete — 2026-06-15, branch `emdash/iter14-002-2-migrate-arq`):**
+- `google` and `strava` `WorkerSettings` now subclass `SharedARQWorkerSettings` (plus `arq.typing.WorkerSettingsBase` for `run_worker` typing) and use `build_worker_lifecycle`, `generate_cron_jobs`, and `redis_settings_from_url`. Deleted: each worker's `startup`/`shutdown`, the inline cron blocks, google's `retry_delay_func` (ported byte-for-byte to `core_shared.default_retry_delay`), and strava's `_on_consumer_task_done`.
+- **Lifecycle options:** `google` → `close_session_factory=True` (disposes the engine; its old `hasattr(sf, "close")` cleanup was a no-op since `async_sessionmaker` has no `close`), `log_consumer_errors=False`. `strava` → `close_session_factory=False`, `log_consumer_errors=True` (real-time done-callback).
+- **arq `get_kwargs` reads only the leaf `__dict__`** (inherited shared defaults are invisible to arq; it falls back to arq's own `Worker` defaults). The shared `job_timeout`/`keep_result`/`max_tries` equal arq's defaults, so inheritance is behaviourally transparent. The **one divergence is `health_check_interval`** (shared 30 vs arq 3600): google/strava never declared it and stay on arq's 3600 before and after — behaviour preserved. **Flag for Phase 3:** immich/snipeit currently declare `health_check_interval=30` on the leaf and must keep it declared (snipeit's documented override) — relying on inheritance would silently regress it to 3600. Unit tests assert via `arq.worker.get_kwargs(...)`, not class attributes, to make this visible.
+- **`retry_delay` is not an arq `Worker` parameter** in our arq version (retry timing comes from `Retry(defer=...)`), so it was already an inert attribute; dropping it changes nothing.
+- **strava `max_jobs=5`** is kept as an extra documented override (deviates from arq's default of 10); the AC text only names `max_tries=20`, but dropping `max_jobs` would change concurrency, violating "behaviour unchanged".
+- **Tests:** strava `tests/unit/test_worker.py` (settings via `get_kwargs`, cron + lifecycle delegation; removed `TestOnConsumerTaskDone`); google new `tests/unit/test_worker_settings.py` and redirected `test_retry_strategy.py`/`test_retry_integration.py` to `core_shared.default_retry_delay`; new `tests/integration/test_worker_lifecycle_integration.py` in both workers (start → trivial DB job → clean shutdown against real Redis+Postgres). Local results: strava 166 unit + 19 integration; google 315 unit + 52 integration (1 pre-existing skip); ruff + mypy clean.
 
 #### Phase 3: Migrate `immich` + `snipeit` onto the shared ARQ toolkit
 **PR Size:** ~340 lines (per-worker rewiring ~150, tests ~190)

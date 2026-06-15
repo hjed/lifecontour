@@ -69,6 +69,43 @@ Secrets (`DATABASE_URL`, `GOOGLE_CLIENT_SECRET`, `ENCRYPTION_KEY`) are
 | `GOOGLE_RESERVED_GROUPS` | `["myContacts"]` | Google groups to ignore during sync |
 | `WEBHOOK_BASE_URL` | `""` | Public HTTPS URL for webhook callbacks |
 
+### ARQ Worker Settings
+
+The ARQ `GoogleWorkerSettings` (in [`worker.py`](worker.py)) is built from the
+shared toolkit in `core_shared` (ITER14-002): operational defaults, the
+`build_worker_lifecycle` startup/shutdown factory, the `generate_cron_jobs`
+helper, and `redis_settings_from_url`. It declares only its functions list, its
+consumer wiring, and documented overrides:
+
+```python
+class GoogleWorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
+    functions = [
+        sync_google_contacts,
+        push_local_contacts_to_google,
+        sync_calendar_events,
+        setup_calendar_webhook,
+        periodic_sync_all_accounts,
+    ]
+    on_startup = _on_startup        # build_worker_lifecycle(close_session_factory=True)
+    on_shutdown = _on_shutdown
+    redis_settings = redis_settings_from_url(settings.redis_url)
+    queue_name = ARQ_QUEUE_NAME
+
+    # Documented overrides (everything else inherits the shared defaults):
+    job_timeout = 600               # 10 min — large accounts page slowly
+    max_jobs = settings.max_concurrent_jobs
+
+    cron_jobs = generate_cron_jobs(
+        periodic_sync_all_accounts,
+        enable_periodic_sync=settings.enable_periodic_sync,
+        sync_interval_hours=settings.sync_interval_hours,
+    )
+```
+
+`keep_result`, `max_tries`, the retry backoff, and `health_check_interval` come
+from `SharedARQWorkerSettings`; the per-worker `startup`/`shutdown`, the local
+`retry_delay_func`, and the inline cron block were removed.
+
 ### Periodic Sync Configuration
 
 Periodic sync is **disabled by default** for safety. To enable:
