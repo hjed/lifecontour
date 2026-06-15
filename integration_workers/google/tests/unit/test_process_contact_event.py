@@ -264,6 +264,202 @@ class TestProcessContactDeleted:
         assert result["results"][0]["reason"] == "no_sync_metadata"
 
 
+def _mock_merge_session_factory(
+    users: list[Any] | None = None,
+) -> tuple[MagicMock, AsyncMock]:
+    """Build a mock session factory for the ContactMerged handler.
+
+    The merge handler does not do a ``contact_id``-keyed sync_metadata lookup
+    (the event carries no ``contact_id``); its only direct query is the
+    ``user_google_auth`` lookup (``fetchall``), so a single ``execute`` result
+    suffices when the per-collision delete helper is patched.
+    """
+    mock_session = AsyncMock()
+    mock_session.commit = AsyncMock()
+
+    mock_users_result = MagicMock()
+    mock_users_result.fetchall.return_value = users or []
+    mock_session.execute.return_value = mock_users_result
+
+    mock_factory = MagicMock()
+    mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
+
+    return mock_factory, mock_session
+
+
+_GOOGLE_COLLISION = {
+    "external_system": "google",
+    "external_entity_type": "person",
+    "source_external_id": "people/source123",
+    "survivor_external_id": "people/survivor456",
+}
+
+
+class TestProcessContactMerged:
+    """Verify ContactMerged deletes the source's remote Google contact.
+
+    ITER13-005 Phase 2: the merge already deleted the source's *local*
+    sync_metadata/external_references inline (Phase 1) and surfaced the
+    same-service clash on ``external_collisions``. The worker uses
+    ``source_external_id`` from that payload to delete the orphaned *remote*
+    record; the survivor's Google contact is reconciled by the separate
+    ``ContactUpdated`` event, not here.
+    """
+
+    @pytest.mark.asyncio
+    async def test_deletes_source_remote_for_google_collision(self) -> None:
+        """A same-service (google) collision deletes exactly the source remote."""
+        from worker import process_contact_event
+
+        mock_factory, _ = _mock_merge_session_factory(
+            users=[MagicMock(user_id="1", google_account_email="test@gmail.com")],
+        )
+
+        with (
+            patch(
+                "worker._delete_contact_from_google_for_event",
+                new_callable=AsyncMock,
+                return_value={"status": "deleted", "external_id": "people/source123"},
+            ) as mock_delete,
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient"),
+        ):
+            result = await process_contact_event(
+                ctx=_make_ctx(mock_factory),
+                event_type="ContactMerged",
+                event_data={
+                    "survivor_contact_id": 1,
+                    "source_contact_id": 2,
+                    "external_collisions": [_GOOGLE_COLLISION],
+                },
+            )
+
+        assert result["status"] == "success"
+        mock_delete.assert_called_once()
+        call_kwargs = mock_delete.call_args[1]
+        assert call_kwargs["external_id"] == "people/source123"
+        assert call_kwargs["contact_id"] == 2
+
+    @pytest.mark.asyncio
+    async def test_skips_when_no_google_collision(self) -> None:
+        """A different-service (or empty) collision set triggers no Google deletion."""
+        from worker import process_contact_event
+
+        immich_collision = {
+            "external_system": "immich",
+            "external_entity_type": "person",
+            "source_external_id": "person-abc",
+            "survivor_external_id": "person-def",
+        }
+
+        with patch(
+            "worker._delete_contact_from_google_for_event",
+            new_callable=AsyncMock,
+        ) as mock_delete:
+            result = await process_contact_event(
+                ctx=_make_ctx(),
+                event_type="ContactMerged",
+                event_data={
+                    "survivor_contact_id": 1,
+                    "source_contact_id": 2,
+                    "external_collisions": [immich_collision],
+                },
+            )
+
+        assert result["status"] == "skipped"
+        assert result["reason"] == "no_google_collisions"
+        mock_delete.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_skips_when_no_google_integrations(self) -> None:
+        """A google collision with no connected Google accounts performs no remote call."""
+        from worker import process_contact_event
+
+        mock_factory, _ = _mock_merge_session_factory(users=[])
+
+        with (
+            patch(
+                "worker._delete_contact_from_google_for_event",
+                new_callable=AsyncMock,
+            ) as mock_delete,
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient"),
+        ):
+            result = await process_contact_event(
+                ctx=_make_ctx(mock_factory),
+                event_type="ContactMerged",
+                event_data={
+                    "survivor_contact_id": 1,
+                    "source_contact_id": 2,
+                    "external_collisions": [_GOOGLE_COLLISION],
+                },
+            )
+
+        assert result["status"] == "skipped"
+        assert result["reason"] == "no_google_integrations"
+        mock_delete.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_does_not_require_contact_id(self) -> None:
+        """ContactMerged (no contact_id) must not hit the missing-contact_id error path."""
+        from worker import process_contact_event
+
+        result = await process_contact_event(
+            ctx=_make_ctx(),
+            event_type="ContactMerged",
+            event_data={
+                "survivor_contact_id": 1,
+                "source_contact_id": 2,
+                "external_collisions": [],
+            },
+        )
+
+        # Empty collisions short-circuits to a skip — crucially NOT an error.
+        assert result["status"] == "skipped"
+        assert result["reason"] == "no_google_collisions"
+
+    @pytest.mark.asyncio
+    async def test_deletes_each_google_collision(self) -> None:
+        """Multiple google collisions delete one source remote each."""
+        from worker import process_contact_event
+
+        second_collision = {
+            "external_system": "google",
+            "external_entity_type": "person",
+            "source_external_id": "people/source789",
+            "survivor_external_id": "people/survivor456",
+        }
+
+        mock_factory, _ = _mock_merge_session_factory(
+            users=[MagicMock(user_id="1", google_account_email="test@gmail.com")],
+        )
+
+        with (
+            patch(
+                "worker._delete_contact_from_google_for_event",
+                new_callable=AsyncMock,
+                return_value={"status": "deleted"},
+            ) as mock_delete,
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient"),
+        ):
+            result = await process_contact_event(
+                ctx=_make_ctx(mock_factory),
+                event_type="ContactMerged",
+                event_data={
+                    "survivor_contact_id": 1,
+                    "source_contact_id": 2,
+                    "external_collisions": [_GOOGLE_COLLISION, second_collision],
+                },
+            )
+
+        assert result["status"] == "success"
+        assert mock_delete.call_count == 2
+        deleted_ids = {c.kwargs["external_id"] for c in mock_delete.call_args_list}
+        assert deleted_ids == {"people/source123", "people/source789"}
+
+
 class TestProcessContactEventErrorHandling:
     """Verify process_contact_event handles errors gracefully."""
 

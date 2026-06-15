@@ -2645,7 +2645,7 @@ async def _push_contact_to_google_for_event(
 async def _delete_contact_from_google_for_event(
     session: AsyncSession,
     client: GoogleAPIClient,
-    contact_id: int,
+    contact_id: int | None,
     external_id: str,
     google_account_email: str,
 ) -> dict[str, Any]:
@@ -2654,7 +2654,8 @@ async def _delete_contact_from_google_for_event(
     Args:
         session: Database session
         client: Google Contacts API client
-        contact_id: Internal contact ID
+        contact_id: Internal contact ID (log context only; the merge path
+            passes the absorbed source id)
         external_id: Google resource name
         google_account_email: Google account email
 
@@ -2683,13 +2684,116 @@ async def _delete_contact_from_google_for_event(
     return {"status": "deleted", "external_id": external_id}
 
 
+async def _process_contact_merged_event(
+    ctx: dict[str, Any], event_data: dict[str, Any]
+) -> dict[str, Any]:
+    """Reconcile a contact merge with Google Contacts (ITER13-005 Phase 2).
+
+    The merge already re-pointed the survivor's external links and deleted the
+    source contact's *local* ``external_references`` / ``sync_metadata`` inline
+    (Phase 1). A same-service clash — both contacts linked to Google — is
+    surfaced on ``event_data["external_collisions"]``; each entry carries the
+    source contact's orphaned remote id (``source_external_id``), which is the
+    only way to find it now that the local row is gone.
+
+    For every google collision this deletes the source's remote Google contact
+    via the existing delete flow (which also cleans any residual sync metadata
+    and treats a remote 404 as success). The survivor's Google contact is
+    reconciled separately by the ``ContactUpdated`` event the merge also emits,
+    so it is intentionally not re-pushed here.
+
+    Args:
+        ctx: ARQ-compatible context dictionary with session_factory
+        event_data: The ``ContactMerged`` payload (survivor/source ids +
+            ``external_collisions``)
+
+    Returns:
+        Task result dictionary with reconciliation status
+    """
+    source_contact_id = event_data.get("source_contact_id")
+    collisions = event_data.get("external_collisions") or []
+    google_collisions = [c for c in collisions if c.get("external_system") == "google"]
+
+    if not google_collisions:
+        logger.info(
+            "ContactMerged has no Google collisions, skipping",
+            source_contact_id=source_contact_id,
+        )
+        return {"status": "skipped", "reason": "no_google_collisions"}
+
+    session_factory = ctx["session_factory"]
+
+    async with session_factory() as session:
+        # Find all Google integrations for all users. The source remote belongs
+        # to one of them; deleting a non-existent resource on the others returns
+        # a 404, which the client treats as success (mirrors ContactDeleted).
+        auth_stmt = text("""
+            SELECT user_id, google_account_email
+            FROM user_google_auth
+        """)
+        auth_result = await session.execute(auth_stmt)
+        users = auth_result.fetchall()
+
+        if not users:
+            logger.info(
+                "No Google integrations found, skipping ContactMerged",
+                source_contact_id=source_contact_id,
+            )
+            return {"status": "skipped", "reason": "no_google_integrations"}
+
+        results = []
+        for row in users:
+            user_id = row.user_id
+            google_account_email = row.google_account_email
+
+            try:
+                auth_service = GoogleAuthService(
+                    session=session,
+                    encryption_key=settings.encryption_key.get_secret_value(),
+                    google_client_id=settings.google_client_id,
+                    google_client_secret=settings.google_client_secret.get_secret_value(),
+                )
+                client = GoogleAPIClient(
+                    auth_service=auth_service,
+                    google_account_email=google_account_email,
+                    google_client_id=settings.google_client_id,
+                    google_client_secret=settings.google_client_secret.get_secret_value(),
+                    user_id=user_id,
+                )
+
+                for collision in google_collisions:
+                    result = await _delete_contact_from_google_for_event(
+                        session=session,
+                        client=client,
+                        contact_id=source_contact_id,
+                        external_id=collision["source_external_id"],
+                        google_account_email=google_account_email,
+                    )
+                    results.append(result)
+
+                await session.commit()
+
+            except Exception as e:
+                logger.error(
+                    "Failed to reconcile ContactMerged for Google account",
+                    source_contact_id=source_contact_id,
+                    google_account_email=google_account_email,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                )
+                raise
+
+        return {"status": "success", "results": results}
+
+
 async def process_contact_event(
     ctx: dict[str, Any], event_type: str, event_data: dict[str, Any]
 ) -> dict[str, Any]:
     """Process a single contact event for Google Contacts outbound sync.
 
-    Receives domain events (ContactCreated, ContactUpdated, ContactDeleted)
-    and pushes the changes to Google Contacts for all synced Google accounts.
+    Receives domain events (ContactCreated, ContactUpdated, ContactDeleted,
+    ContactMerged) and pushes the changes to Google Contacts for all synced
+    Google accounts.
 
     Args:
         ctx: ARQ-compatible context dictionary with session_factory
@@ -2702,6 +2806,12 @@ async def process_contact_event(
     job_id = ctx.get("job_id", "unknown")
     set_job_id(job_id)
     set_worker_id(settings.worker_id)
+
+    # ContactMerged carries no contact_id (only survivor/source ids and the
+    # external collisions to reconcile), so it is handled before the
+    # contact_id guard below.
+    if event_type == "ContactMerged":
+        return await _process_contact_merged_event(ctx, event_data)
 
     contact_id = event_data.get("contact_id")
     if not contact_id:
