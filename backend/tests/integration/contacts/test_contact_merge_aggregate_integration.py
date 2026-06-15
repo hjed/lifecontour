@@ -46,6 +46,7 @@ from app.core.history.adapters.sql.field_history_repository import (
     SqlFieldHistoryRepository,
 )
 from app.core.history.models import FieldHistoryEntry
+from app.core.integrations.external_reference_service import ExternalReferenceService
 from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
     SqlJournalContactRelationshipRepository,
 )
@@ -96,6 +97,7 @@ async def merge_service(
         ),
         event_publisher=event_publisher,
         history_repo=history_repo,
+        external_reference_service=ExternalReferenceService(async_connection),
     )
 
 

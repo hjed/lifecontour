@@ -31,6 +31,7 @@ from app.core.contacts.models.repositories import (
     ContactRepository,
 )
 from app.core.history.models import FieldHistoryRepository
+from app.core.integrations.external_reference_service import ExternalReferenceService
 from app.core.journal.models.repositories import JournalContactRelationshipRepository
 from app.infrastructure.unit_of_work import transactional
 
@@ -78,12 +79,14 @@ class ContactMergeService:
         journal_relationship_repo: JournalContactRelationshipRepository,
         event_publisher: ContactEventPublisher,
         history_repo: FieldHistoryRepository,
+        external_reference_service: ExternalReferenceService,
     ):
         self.contact_repo = contact_repo
         self.relationship_repo = relationship_repo
         self.journal_relationship_repo = journal_relationship_repo
         self.event_publisher = event_publisher
         self.history_repo = history_repo
+        self.external_reference_service = external_reference_service
 
     def has_scalar_conflicts(self, survivor: Contact, source: Contact) -> bool:
         """Report whether two contacts have conflicting scalar identity fields.
@@ -164,6 +167,15 @@ class ContactMergeService:
             source_id, survivor_id, "contact", transaction
         )
 
+        # 1c. Re-point the source's external links onto the survivor so the merge
+        #     does not orphan ``external_references`` / ``sync_metadata`` rows (no
+        #     ON DELETE CASCADE). Same-service collisions are surfaced for remote
+        #     reconciliation by the integration workers. Local-only re-point — the
+        #     remote calls stay in the workers consuming ``ContactMerged``.
+        collisions = await self.external_reference_service.repoint_contact_references(
+            source_id, survivor_id, transaction
+        )
+
         # 2. Apply scalar identity fields: overrides win, else prefer-non-empty.
         merged, override_changes = self._merge_scalars(
             survivor, source_contact, overrides or {}
@@ -211,6 +223,7 @@ class ContactMergeService:
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
+                external_collisions=[c.as_dict() for c in collisions],
             )
         )
 
