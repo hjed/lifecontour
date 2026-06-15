@@ -8,13 +8,16 @@ It runs as a separate process from the main FastAPI application.
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 from arq import run_worker
-from arq.cron import cron
 from arq.typing import StartupShutdown, WorkerSettingsBase
-from core_shared import redis_settings_from_url
-from core_shared.database.engine import create_session_factory
+from core_shared import (
+    SharedARQWorkerSettings,
+    build_worker_lifecycle,
+    generate_cron_jobs,
+    redis_settings_from_url,
+)
 
 # Import integration exceptions from core_shared
 from core_shared.exceptions import JobCancelledException
@@ -65,58 +68,32 @@ logger = get_logger(__name__)
 metrics_collector = MetricsCollector(worker_type="google")
 
 
-async def startup(ctx: dict[str, Any]) -> None:  # NOSONAR
+async def _run_stream_consumer(session_factory: Any, worker_settings: Any) -> None:
+    """Adapt the Google stream consumer to the shared lifecycle factory's shape.
+
+    ``build_worker_lifecycle`` calls ``consumer_factory(session_factory, settings)``;
+    ``run_google_stream_consumer`` takes ``redis_url``/``stream_name`` keywords, so
+    this thin closure reads them off the worker settings.
     """
-    Worker startup function.
-
-    Initializes database session factory, stream consumer, and other resources.
-    """
-    logger.info("Google Contacts worker starting up", worker_id=settings.worker_id)
-
-    # Create database session factory
-    session_factory = create_session_factory(settings.database_url.get_secret_value())
-    ctx["session_factory"] = session_factory
-    ctx["settings"] = settings
-
-    # Launch stream consumer for journal/tag event fan-out
     from stream_consumer_tasks import run_google_stream_consumer
 
-    consumer_task = asyncio.create_task(
-        run_google_stream_consumer(
-            session_factory=session_factory,
-            redis_url=settings.redis_url,
-        )
+    await run_google_stream_consumer(
+        session_factory=session_factory,
+        redis_url=worker_settings.redis_url,
+        stream_name=worker_settings.stream_name,
     )
-    ctx["stream_consumer_task"] = consumer_task
-
-    logger.info("Google Contacts worker startup complete")
 
 
-async def shutdown(ctx: dict[str, Any]) -> None:
-    """
-    Worker shutdown function.
-
-    Cleans up resources when the worker shuts down.
-    """
-    logger.info("Google Contacts worker shutting down", worker_id=settings.worker_id)
-
-    # Cancel stream consumer task
-    consumer_task = ctx.get("stream_consumer_task")
-    if consumer_task:
-        consumer_task.cancel()
-        try:
-            await consumer_task
-        except asyncio.CancelledError:
-            logger.info("Stream consumer task stopped")
-        except Exception:
-            logger.exception("Stream consumer task failed during shutdown")
-
-    # Close database connections if needed
-    session_factory = ctx.get("session_factory")
-    if session_factory and hasattr(session_factory, "close"):
-        await session_factory.close()
-
-    logger.info("Google Contacts worker shutdown complete")
+# Shared lifecycle: build the database session factory, launch the stream
+# consumer, and on shutdown cancel/reap it and dispose the session factory's
+# engine (google closes the session factory; it does not log consumer errors
+# via a done-callback).
+_on_startup, _on_shutdown = build_worker_lifecycle(
+    settings=settings,
+    consumer_factory=_run_stream_consumer,
+    close_session_factory=True,
+    log_consumer_errors=False,
+)
 
 
 # Helper functions for sync logic
@@ -3019,43 +2996,6 @@ async def push_local_contacts_to_google(
         }
 
 
-def retry_delay_func(retry_count: int) -> float:
-    """
-    Calculate retry delay with exponential backoff and jitter.
-
-    Implements exponential backoff strategy:
-    - Retry 0 (1st retry): ~60s (48-72s with jitter)
-    - Retry 1 (2nd retry): ~120s (96-144s with jitter)
-    - Retry 2 (3rd retry): ~240s (192-288s with jitter)
-    - Retry 3 (4th retry): ~480s (384-576s with jitter)
-    - Retry 4+ (5th+ retry): capped at 900s (720-900s with jitter)
-
-    Note: Jitter is intentionally random (±20%) to prevent thundering herd problems
-    in production. Unit tests verify correct behavior by testing many samples and
-    checking that average delays match expected values.
-
-    Args:
-        retry_count: Number of retries already attempted (0-based)
-
-    Returns:
-        Delay in seconds before next retry
-    """
-    # Base delay: 60 seconds
-    base_delay = 60
-
-    # Exponential backoff: 60 * (2 ^ retry_count)
-    delay = base_delay * (2**retry_count)
-
-    # Apply jitter: ±20% to prevent thundering herd
-    import secrets
-
-    jitter = secrets.SystemRandom().uniform(0.8, 1.2)
-    delay_with_jitter = delay * jitter
-
-    # Cap at 15 minutes (900 seconds)
-    return float(min(delay_with_jitter, 900.0))
-
-
 def _create_google_client(
     session: Any,
     user_id: str | int,
@@ -3108,8 +3048,6 @@ async def _fetch_all_calendar_events(
         page_token = events_response.get("nextPageToken")
         if not page_token:
             break
-
-        import asyncio
 
         await asyncio.sleep(0.2)
 
@@ -3802,10 +3740,18 @@ async def setup_calendar_webhook(
 
 
 # ARQ Worker Settings
-class GoogleWorkerSettings(WorkerSettingsBase):
-    """ARQ worker configuration."""
+class GoogleWorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
+    """ARQ worker configuration.
 
-    # Task functions
+    Operational defaults (``keep_result``, ``max_tries`` baseline, retry backoff)
+    come from :class:`core_shared.SharedARQWorkerSettings` and equal arq's own
+    constructor defaults, so they apply unchanged. ``health_check_interval`` is the
+    exception: arq's ``get_kwargs`` reads only this leaf class's attributes, so the
+    inherited shared ``30`` is invisible to arq and it falls back to arq's default
+    of ``3600`` (this worker does not redeclare it). Only the functions list,
+    consumer wiring, and documented overrides live here.
+    """
+
     # Task functions — process_journal_event and process_tag_event are now
     # consumed directly from the Redis Stream via GoogleWorkerStreamConsumer
     # and are no longer registered as ARQ tasks.
@@ -3817,50 +3763,31 @@ class GoogleWorkerSettings(WorkerSettingsBase):
         periodic_sync_all_accounts,  # Wrapper for periodic cron syncs
     ]
 
-    # Worker lifecycle
-    on_startup: StartupShutdown = startup
-    on_shutdown: StartupShutdown = shutdown
+    # Worker lifecycle (shared factory). Cast to arq's StartupShutdown Protocol:
+    # the hooks accept ``ctx`` but the shared LifecycleHook alias is a plain
+    # positional Callable, which the Protocol's named-parameter form rejects.
+    on_startup: StartupShutdown = cast("StartupShutdown", _on_startup)
+    on_shutdown: StartupShutdown = cast("StartupShutdown", _on_shutdown)
 
-    # Redis settings
+    # Redis settings (shared helper).
     redis_settings = redis_settings_from_url(settings.redis_url)
 
-    # Worker configuration
-    max_jobs = settings.max_concurrent_jobs
-    job_timeout = 600  # 10 minutes
-    keep_result = 3600  # Keep results for 1 hour
-
-    # Retry configuration with exponential backoff
-    max_tries = 5
-    retry_delay = retry_delay_func  # Use function for exponential backoff with jitter
-
-    # Queue name
+    # Queue name.
     queue_name = ARQ_QUEUE_NAME
 
-    # Periodic sync configuration (cron jobs)
-    # Only configure cron_jobs if periodic sync is enabled
-    cron_jobs = []
-    if settings.enable_periodic_sync:
-        # Generate cron schedule based on sync_interval_hours
-        # For example: sync_interval_hours=6 -> hours={0, 6, 12, 18}
-        sync_hours = set(range(0, 24, settings.sync_interval_hours))
+    # Documented overrides:
+    # - job_timeout=600 (10 min): Google contact/calendar syncs page through large
+    #   accounts and need longer than the shared 5-minute default.
+    # - max_jobs: follow the worker's configured concurrency budget.
+    job_timeout = 600
+    max_jobs = settings.max_concurrent_jobs
 
-        # Schedule periodic_sync_all_accounts to run at configured intervals
-        # This function queries all active Google integrations and enqueues
-        # individual sync jobs for each account
-        cron_jobs = [
-            cron(
-                periodic_sync_all_accounts,
-                hour=sync_hours,
-                minute=0,  # Run at the top of the hour
-                unique=True,  # Only run once even with multiple workers
-            )
-        ]
-
-        logger.info(
-            "Periodic sync enabled",
-            sync_interval_hours=settings.sync_interval_hours,
-            sync_hours=list(sync_hours),
-        )
+    # Periodic sync cron (shared helper; empty when periodic sync is disabled).
+    cron_jobs = generate_cron_jobs(
+        periodic_sync_all_accounts,
+        enable_periodic_sync=settings.enable_periodic_sync,
+        sync_interval_hours=settings.sync_interval_hours,
+    )
 
 
 if __name__ == "__main__":

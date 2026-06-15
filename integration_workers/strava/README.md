@@ -40,6 +40,48 @@ Secrets (`DATABASE_URL`, `STRAVA_CLIENT_SECRET`, `ENCRYPTION_KEY`) are
 
 See [`.env.example`](.env.example) for a copy-paste starting point.
 
+### ARQ Worker Settings
+
+The ARQ `StravaWorkerSettings` (in [`worker.py`](worker.py)) is built from the
+shared toolkit in `core_shared` (ITER14-002): operational defaults, the
+`build_worker_lifecycle` startup/shutdown factory, the `generate_cron_jobs`
+helper, and `redis_settings_from_url`. It declares only its functions list, its
+consumer wiring, and documented overrides:
+
+```python
+class StravaWorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
+    functions = [
+        process_strava_webhook_event,
+        sync_strava_activities,
+        sync_strava_activity_batch,
+        periodic_sync_all_strava_accounts,
+    ]
+    on_startup = _on_startup        # build_worker_lifecycle(log_consumer_errors=True)
+    on_shutdown = _on_shutdown
+    redis_settings = redis_settings_from_url(settings.redis_url)
+    queue_name = STRAVA_ARQ_QUEUE_NAME
+
+    # Documented overrides (everything else inherits the shared defaults):
+    max_tries = 20                  # many retries to span Strava's daily-limit reset
+    max_jobs = 5                    # cap concurrency below arq's default of 10
+
+    cron_jobs = generate_cron_jobs(
+        periodic_sync_all_strava_accounts,
+        enable_periodic_sync=settings.enable_periodic_sync,
+        sync_interval_hours=settings.sync_interval_hours,
+    )
+```
+
+`job_timeout`, `keep_result`, and the retry backoff match the
+`SharedARQWorkerSettings` baseline — which equals arq's own constructor defaults,
+so they apply unchanged. Note: arq's `get_kwargs` reads only the leaf class's
+attributes, so an *inherited* default is invisible to arq and falls back to arq's
+own. This matters for `health_check_interval`: the shared baseline is `30`, but
+arq's default is `3600`, so this worker (which does not redeclare it) runs at
+`3600` — the shared `30` applies only to workers that declare it on the leaf. The
+per-worker `startup`/`shutdown`, the `_on_consumer_task_done` callback, and the
+inline cron block were removed.
+
 ## Running the Worker
 
 ```bash
