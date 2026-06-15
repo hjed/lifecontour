@@ -102,9 +102,15 @@ class GoogleWorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
     )
 ```
 
-`keep_result`, `max_tries`, the retry backoff, and `health_check_interval` come
-from `SharedARQWorkerSettings`; the per-worker `startup`/`shutdown`, the local
-`retry_delay_func`, and the inline cron block were removed.
+`keep_result`, `max_tries`, and the retry backoff match the `SharedARQWorkerSettings`
+baseline — which equals arq's own constructor defaults, so they apply unchanged.
+Note: arq's `get_kwargs` reads only the leaf class's attributes, so an *inherited*
+default is invisible to arq and falls back to arq's own. This matters for
+`health_check_interval`: the shared baseline is `30`, but arq's default is `3600`,
+so this worker (which does not redeclare it) runs at `3600` — the shared `30`
+applies only to workers that declare it on the leaf. The per-worker
+`startup`/`shutdown`, the local `retry_delay_func`, and the inline cron block were
+removed.
 
 ### Periodic Sync Configuration
 

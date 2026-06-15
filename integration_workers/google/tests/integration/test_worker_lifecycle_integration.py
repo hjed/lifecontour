@@ -42,12 +42,31 @@ async def redis_pool() -> Any:
     await pool.aclose()
 
 
+@pytest.fixture
+def worker_module() -> Any:
+    """Reload the worker so its settings reflect this session's env.
+
+    The google unit tests reload ``worker`` under a patched env (fake DB/Redis),
+    which can leave ``worker.settings`` and the lifecycle hooks pointing at
+    unreachable hosts if a unit test ran first in the same process. Reloading
+    here — after ``conftest`` has set ``DATABASE_URL``/``REDIS_URL`` to the real
+    test services — makes this test independent of import/run order.
+    """
+    import importlib
+
+    import worker
+
+    return importlib.reload(worker)
+
+
 class TestGoogleWorkerLifecycle:
     """The migrated lifecycle hooks start, run a job, and shut down cleanly."""
 
     @pytest.mark.asyncio
-    async def test_start_run_job_and_clean_shutdown(self, redis_pool: Any) -> None:
-        import worker
+    async def test_start_run_job_and_clean_shutdown(
+        self, redis_pool: Any, worker_module: Any
+    ) -> None:
+        worker = worker_module
 
         job = await redis_pool.enqueue_job("_trivial_db_job", _queue_name=_TEST_QUEUE)
         assert job is not None
@@ -85,10 +104,10 @@ class TestGoogleWorkerLifecycle:
         assert consumer_task.done()
 
     @pytest.mark.asyncio
-    async def test_shutdown_disposes_session_factory(self) -> None:
+    async def test_shutdown_disposes_session_factory(self, worker_module: Any) -> None:
         """Google sets close_session_factory=True, so on_shutdown disposes the
         engine bound to the session factory (no leaked connection pool)."""
-        import worker
+        worker = worker_module
 
         ctx: dict[str, Any] = {}
         await worker.GoogleWorkerSettings.on_startup(ctx)

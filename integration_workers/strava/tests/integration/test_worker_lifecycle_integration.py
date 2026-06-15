@@ -9,6 +9,7 @@ stream-consumer task is cancelled/reaped — no leaked background task).
 
 from __future__ import annotations
 
+import base64
 import os
 from typing import Any
 
@@ -22,9 +23,11 @@ from .conftest import get_async_database_url, get_workspace_env
 
 # The worker module instantiates StravaSettings at import time, so the required
 # settings (and the test Redis URL) must be present in the environment first.
+# The encryption key is generated at runtime (a valid 32-byte url-safe value) so
+# no secret-shaped literal is committed; the lifecycle test never decrypts.
 os.environ["STRAVA_CLIENT_ID"] = "test"
-os.environ["STRAVA_CLIENT_SECRET"] = "test"
-os.environ["ENCRYPTION_KEY"] = "dGVzdGtleXRlc3RrZXl0ZXN0a2V5dGVzdGtleXQ9"
+os.environ["STRAVA_CLIENT_SECRET"] = "test"  # noqa: S105 — non-secret test placeholder
+os.environ["ENCRYPTION_KEY"] = base64.urlsafe_b64encode(os.urandom(32)).decode()
 os.environ["DATABASE_URL"] = get_async_database_url()
 os.environ.setdefault(
     "REDIS_URL",

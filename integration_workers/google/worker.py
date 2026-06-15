@@ -3743,10 +3743,13 @@ async def setup_calendar_webhook(
 class GoogleWorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
     """ARQ worker configuration.
 
-    Operational defaults (``keep_result``, ``max_tries`` baseline,
-    ``health_check_interval``, retry backoff) come from
-    :class:`core_shared.SharedARQWorkerSettings`. Only the functions list, consumer
-    wiring, and documented overrides live here.
+    Operational defaults (``keep_result``, ``max_tries`` baseline, retry backoff)
+    come from :class:`core_shared.SharedARQWorkerSettings` and equal arq's own
+    constructor defaults, so they apply unchanged. ``health_check_interval`` is the
+    exception: arq's ``get_kwargs`` reads only this leaf class's attributes, so the
+    inherited shared ``30`` is invisible to arq and it falls back to arq's default
+    of ``3600`` (this worker does not redeclare it). Only the functions list,
+    consumer wiring, and documented overrides live here.
     """
 
     # Task functions — process_journal_event and process_tag_event are now

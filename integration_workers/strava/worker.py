@@ -672,10 +672,13 @@ _on_startup, _on_shutdown = build_worker_lifecycle(
 class StravaWorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
     """ARQ worker configuration.
 
-    Operational defaults (``job_timeout``, ``keep_result``, ``max_tries`` baseline,
-    ``health_check_interval``, retry backoff) come from
-    :class:`core_shared.SharedARQWorkerSettings`. Only the functions list, consumer
-    wiring, and documented overrides live here.
+    Operational defaults (``job_timeout``, ``keep_result``, retry backoff) come from
+    :class:`core_shared.SharedARQWorkerSettings` and equal arq's own constructor
+    defaults, so they apply unchanged. ``health_check_interval`` is the exception:
+    arq's ``get_kwargs`` reads only this leaf class's attributes, so the inherited
+    shared ``30`` is invisible to arq and it falls back to arq's default of ``3600``
+    (this worker does not redeclare it). Only the functions list, consumer wiring,
+    and documented overrides live here.
     """
 
     # Task functions
