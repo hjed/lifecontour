@@ -896,9 +896,16 @@ class OutboxEventProcessor:
             ) from e
 
         if not existing_contact:
-            raise OutboxEventProcessingError(
-                f"Contact not found for update: {external_id} from {integration_source}"
+            # Google's incremental sync emits contact.updated for contacts added
+            # remotely after the initial full sync, so the backend may never have
+            # seen them. Upsert via the create path instead of erroring; it owns
+            # idempotency, email reconciliation, and external-reference creation.
+            logger.info(
+                "contact.updated for unknown contact - upserting via create path",
+                integration_source=integration_source,
+                external_id=external_id,
             )
+            return await self._process_contact_created(event)
 
         # Deserialize contact data from outbox event
         try:
