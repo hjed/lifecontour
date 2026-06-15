@@ -89,16 +89,23 @@ async function waitUntilSearchable(page: Page, query: string, id: string) {
     .toBe(true);
 }
 
+/**
+ * Activate a footer/action button via the keyboard. On the narrow mobile
+ * viewport a dialog body/overlay can transiently sit over a footer button and
+ * intercept pointer events; focusing and pressing Enter avoids hit-testing
+ * entirely while still exercising keyboard operability.
+ */
+async function activate(button: Locator) {
+  await expect(button).toBeEnabled();
+  await button.focus();
+  await button.press('Enter');
+}
+
 /** Open the merge dialog from the detail page action area. */
 async function openMergeDialog(page: Page): Promise<Locator> {
   const mergeButton = page.getByRole('button', { name: /merge contact/i });
   await expect(mergeButton).toBeVisible();
-  // Activate via keyboard: the detail-page sidebar/sticky-header can transiently
-  // overlap the button's hit area during async load, so a pointer click can be
-  // intercepted. Enter on the focused button avoids hit-testing entirely and also
-  // exercises keyboard operability.
-  await mergeButton.focus();
-  await mergeButton.press('Enter');
+  await activate(mergeButton);
 
   const dialog = page
     .getByRole('dialog')
@@ -149,9 +156,7 @@ test.describe('Contact Merge Workflow (web UI)', () => {
       });
     }).toPass({ timeout: 20000 });
 
-    const nextBtn = dialog.getByRole('button', { name: /next/i });
-    await expect(nextBtn).toBeEnabled();
-    await nextBtn.click();
+    await activate(dialog.getByRole('button', { name: /next/i }));
 
     const resolution = page
       .getByRole('dialog')
@@ -173,9 +178,9 @@ test.describe('Contact Merge Workflow (web UI)', () => {
         response.request().method() === 'POST'
     );
 
-    await resolution
-      .getByRole('button', { name: /resolve and merge/i })
-      .click();
+    await activate(
+      resolution.getByRole('button', { name: /resolve and merge/i })
+    );
     const mergeResponse = await mergeResponsePromise;
     expect(mergeResponse.status()).toBe(200);
 
@@ -236,7 +241,7 @@ test.describe('Contact Merge Workflow (web UI)', () => {
       });
     }).toPass({ timeout: 20000 });
 
-    await dialog.getByRole('button', { name: /next/i }).click();
+    await activate(dialog.getByRole('button', { name: /next/i }));
 
     // No conflicts → the resolution dialog shows the confirm state directly.
     const confirm = page
@@ -250,7 +255,7 @@ test.describe('Contact Merge Workflow (web UI)', () => {
         response.request().method() === 'POST'
     );
 
-    await confirm.getByRole('button', { name: /^merge$/i }).click();
+    await activate(confirm.getByRole('button', { name: /^merge$/i }));
     const mergeResponse = await mergeResponsePromise;
     expect(mergeResponse.status()).toBe(200);
 
