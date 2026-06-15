@@ -362,12 +362,19 @@ Stop the merge from orphaning links: re-point the source's `external_references`
 #### Phase 2: Google worker — consolidate then delete source remote
 **PR Size:** ~290 lines (worker handler ~90, wiring ~20, tests ~180)
 
+**Status:** ✅ DONE — `ContactMerged` added to the Google worker's subscribed event types and a `_process_contact_merged_event` handler deletes the source contact's orphaned remote Google record for a same-service collision, reusing the existing delete flow (sync-metadata cleanup + 404-as-success). All worker quality gates green locally (`ruff format`, `ruff check`, `mypy` over 59 files; 321 unit tests + 55 integration tests pass).
+
+> **Source-remote lookup (clarification):** Phase 1 already deletes the source's *local* `external_references` / `sync_metadata` inline during the merge, so the worker **cannot** look the source's remote id up from the DB. It uses `ContactMerged.external_collisions[].source_external_id` (the only surviving record of the orphaned remote) to target the delete. `external_collisions` is filtered to `external_system == "google"`, so a different-service merge yields no Google collision → no remote deletion.
+
+> **Survivor consolidation (decision):** "ensure the survivor's Google contact reflects the merged data" is delivered by the **separate `ContactUpdated(survivor_id, …)` event** the merge already emits (handled by the existing `ContactUpdated` push), **not** re-pushed inside the `ContactMerged` handler — this avoids a double-push / etag race. The `ContactMerged` handler is responsible only for deleting the source's orphaned remote. `ContactMerged` carries no `contact_id`, so it is dispatched by an early branch in `process_contact_event` before the `contact_id` guard.
+
 **Acceptance Criteria:**
-- [ ] `ContactMerged` is added to the Google worker's subscribed event types (`stream_consumer_tasks.py` / `_OUTBOUND_EVENT_TYPES`).
-- [ ] On `ContactMerged` where both contacts had a Google link, the worker ensures the survivor's Google contact reflects the merged data, then deletes the source's Google contact via the existing `google_client.delete_contact()` and cleans the source's `sync_metadata` (reusing the existing delete flow). A 404 on the source remote is treated as success.
+- [x] `ContactMerged` is added to the Google worker's subscribed event types (`stream_consumer_tasks.py` / `_OUTBOUND_EVENT_TYPES`).
+- [x] On `ContactMerged` where both contacts had a Google link, the worker ensures the survivor's Google contact reflects the merged data (via the separately-emitted `ContactUpdated` event — see decision), then deletes the source's Google contact via the existing `google_client.delete_contact()` (targeting `external_collisions[].source_external_id`) and cleans the source's `sync_metadata` (reusing `_delete_contact_from_google_for_event`). A 404 on the source remote is treated as success (already handled in `google_client.delete_contact`).
 
 **Required Test Coverage:**
-- [ ] **Integration (worker):** same-service merge deletes exactly the source remote and cleans its sync metadata; survivor link preserved; different-service merge triggers no Google deletion.
+- [x] **Integration (worker):** same-service merge deletes exactly the source remote and cleans its sync metadata; survivor link preserved; different-service merge triggers no Google deletion. (`integration_workers/google/tests/integration/test_process_contact_event_integration.py`, 3 tests incl. a 404-as-success case.)
+- [x] **Unit (worker):** google collision deletes the source remote; no-google-collision and no-Google-account paths skip; `ContactMerged` does not hit the missing-`contact_id` error path; multiple collisions delete one remote each. (`integration_workers/google/tests/unit/test_process_contact_event.py::TestProcessContactMerged`, 5 tests.)
 
 #### Phase 3: Immich worker — unlink orphaned source (no remote delete)
 **PR Size:** ~190 lines (handler ~60, wiring ~10, tests ~120)

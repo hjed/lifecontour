@@ -31,7 +31,11 @@ _JOURNAL_EVENT_TYPES = frozenset({"JournalCreated", "JournalUpdated", "JournalDe
 _TAG_EVENT_TYPES = frozenset({"TagUpdated", "TagDeleted"})
 
 # Contact event types that trigger outbound push to Google.
-_CONTACT_EVENT_TYPES = frozenset({"ContactCreated", "ContactUpdated", "ContactDeleted"})
+# ``ContactMerged`` (ITER13-005 Phase 2) reconciles a same-service merge by
+# deleting the source contact's orphaned remote Google record.
+_CONTACT_EVENT_TYPES = frozenset(
+    {"ContactCreated", "ContactUpdated", "ContactDeleted", "ContactMerged"}
+)
 
 # Combined event type list for pattern matching (exact match).
 _OUTBOUND_EVENT_TYPES: list[str] = sorted(
