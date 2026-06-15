@@ -1332,6 +1332,8 @@ async def _perform_incremental_sync(
     contacts_response = ListConnectionsResponse(**response)
 
     total_processed = 0
+    created_count = 0
+    updated_count = 0
 
     # Transform and serialize contacts, handling per-item failures
     transformer = await _create_transformer(client)
@@ -1342,15 +1344,32 @@ async def _perform_incremental_sync(
         metrics,
     )
 
+    # An incremental delta returns contacts added remotely since the last sync
+    # as well as modified ones. Emit 'created' for contacts the backend has not
+    # seen and 'updated' for known ones, mirroring the full-sync decision, so the
+    # backend doesn't reject brand-new contacts as "Contact not found for update".
+    batch_external_ids = [
+        google_person.resource_name for google_person, _ in serialized_contacts
+    ]
+    existing_external_ids = await _find_existing_external_ids(
+        session, batch_external_ids, "google"
+    )
+
     # Process changed contacts using outbox pattern
     for google_person, contact_data in serialized_contacts:
         try:
+            sync_type = (
+                "updated"
+                if google_person.resource_name in existing_external_ids
+                else "created"
+            )
+
             # Create outbox event for contact sync
             outbox_event = OutboxEvent.create_contact_sync_event(
                 contact_data=contact_data,
                 integration_source="google",
                 external_id=google_person.resource_name,
-                sync_type="updated",
+                sync_type=sync_type,
                 etag=google_person.etag,
             )
 
@@ -1358,6 +1377,10 @@ async def _perform_incremental_sync(
             session.add(outbox_event)
 
             total_processed += 1
+            if sync_type == "created":
+                created_count += 1
+            else:
+                updated_count += 1
             metrics["contacts_processed"] += 1
 
         except Exception as e:  # noqa: BLE001
@@ -1379,9 +1402,11 @@ async def _perform_incremental_sync(
         "Incremental sync completed",
         google_account_email=google_account_email,
         total_processed=total_processed,
+        contacts_created=created_count,
+        contacts_updated=updated_count,
     )
 
-    return {"contacts_updated": total_processed}
+    return {"contacts_created": created_count, "contacts_updated": updated_count}
 
 
 async def _save_sync_token(
