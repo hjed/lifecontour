@@ -29,7 +29,7 @@ dependencies = [
     "pydantic-settings==2.14.1",
 
     # Encryption
-    "cryptography>=48.0.0",
+    "cryptography>=49.0.0",
 
     # Redis client
     "redis[hiredis]>=8.0.0",
