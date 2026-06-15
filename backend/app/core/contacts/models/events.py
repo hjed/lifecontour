@@ -615,10 +615,14 @@ class ContactSummaryUpdated(DomainEvent):
 class ContactMerged(DomainEvent):
     """Event raised when a source contact is merged into a surviving contact.
 
-    Carries both contact IDs and provenance so downstream consumers (ITER13-005
-    external-sync reconciliation) can reconcile the survivor's external links and
-    remote records. No consumer exists yet; an absent consumer must not error.
-    The aggregate is the survivor, whose identity is preserved by the merge.
+    Carries both contact IDs and provenance so downstream consumers (external-sync
+    reconciliation) can reconcile the survivor's external links and remote records.
+    ``external_collisions`` lists the same-service links that could not simply
+    carry over — the survivor already had a link for that service, so the source's
+    local row was removed during the merge and its remote ``external_entity_id`` is
+    surfaced here for the integration workers to reconcile remotely. No worker
+    consumer exists yet; an absent consumer must not error. The aggregate is the
+    survivor, whose identity is preserved by the merge.
     """
 
     def __init__(
@@ -628,6 +632,7 @@ class ContactMerged(DomainEvent):
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
         transaction: AsyncConnection | None = None,
+        external_collisions: list[dict[str, Any]] | None = None,
     ):
         super().__init__(
             event_id=f"contact_merged_{survivor_contact_id}_{source_contact_id}_{datetime.now(tz=UTC).isoformat()}",
@@ -639,6 +644,7 @@ class ContactMerged(DomainEvent):
                 "source_contact_id": source_contact_id,
                 "source": source.value,
                 "changed_by": changed_by,
+                "external_collisions": external_collisions or [],
             },
             transaction=transaction,
         )
