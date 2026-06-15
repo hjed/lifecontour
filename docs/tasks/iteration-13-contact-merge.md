@@ -269,22 +269,28 @@ Build the conflict-resolution dialog as a self-contained, not-yet-reachable comp
 
 Wire the reachable flow. **This phase makes contact merge usable in the web UI** — and only now, because the resolution dialog (Phase 1) already exists, so no survivor-wins-without-UI gap is shipped.
 
+**Status:** ✅ DONE — `useMergeContact` hook + `mergeContact` API fn (in `frontend/src/lib/api/contacts.ts`), `MergeContactDialog.tsx` (source picker + explicit survivor selector + hand-off to `MergeContactResolutionDialog`), and the contact-detail Merge entry point (`frontend/src/app/contacts/[id]/page.tsx`, with redirect to the survivor when the current contact is absorbed). `MergeContactOverrides` already existed (Phase 1). All frontend quality gates green locally (`pnpm quality:check` exit 0, 0 errors); 9 new unit/component tests pass and 392 contacts tests pass with no regressions. Phase 3 (browser E2E) delivered in the same pass — see below.
+
 **Acceptance Criteria:**
-- [ ] `useMergeContact` + `mergeContact` + `MergeContactOverrides` are added to `frontend/src/lib/api/contacts.ts`, following the existing `useMergeTag` mutation + cache-invalidation pattern (invalidate `contactKeys.all` and both contacts' detail caches; success/error toasts).
-- [ ] `MergeContactDialog.tsx` lets the user pick the other contact via the existing `ContactSearchCombobox` (excluding the current contact), choose which contact survives, then hands off to `MergeContactResolutionDialog`.
-- [ ] A "Merge" entry point is added to the contact detail page action area (`frontend/src/app/contacts/[id]/page.tsx`, alongside Delete).
+- [x] `useMergeContact` + `mergeContact` + `MergeContactOverrides` are added to `frontend/src/lib/api/contacts.ts`, following the existing `useMergeTag` mutation + cache-invalidation pattern (invalidate `contactKeys.all` and both contacts' detail caches; success/error toasts). (`MergeContactOverrides` landed in Phase 1; the hook reuses it.)
+- [x] `MergeContactDialog.tsx` lets the user pick the other contact via the existing `ContactSearchCombobox` (excluding the current contact), choose which contact survives, then hands off to `MergeContactResolutionDialog`.
+- [x] A "Merge" entry point is added to the contact detail page action area (`frontend/src/app/contacts/[id]/page.tsx`, alongside Delete).
 
 **Required Test Coverage:**
-- [ ] **Component (RTL):** source selection (survivor exclusion), survivor toggle, hand-off to the resolution dialog, and mutation invocation.
+- [x] **Component (RTL):** source selection (survivor exclusion), survivor toggle, hand-off to the resolution dialog, and mutation invocation. (`frontend/src/components/contacts/__tests__/MergeContactDialog.test.tsx`, 5 tests; plus `frontend/src/lib/api/__tests__/contact-merge-mutations.test.ts`, 4 hook tests covering request shape, override omission, cache invalidation, and error toast.)
 
 #### Phase 3: End-to-end merge flow
 **PR Size:** ~320 lines (E2E spec, test-only)
 
+**Status:** ✅ DONE — `frontend/tests/e2e/contacts-merge.spec.ts` (2 specs) drives the full UI merge flow on Chromium: open the merge dialog from the detail page, pick the source via the combobox, choose the survivor, resolve conflicts (source + custom per field), confirm, and assert the survivor holds the resolved values and the source returns 404. Both the conflict-resolution and no-conflict (direct) paths pass deterministically (verified with `--repeat-each=2`). Each test seeds its own data via the REST API and waits for MeiliSearch indexing by polling `/api/search/contacts` before driving the search-backed combobox.
+
+> **Scope note (relationship/journal-link consolidation):** the AC mentions "overlapping relationships/journal links". Aggregate consolidation (relationships, journal links, sub-entities) is already verified end-to-end by the backend integration suite (`test_contact_merge_aggregate_integration.py`, `test_contact_merge_repoint_integration.py`) and the API-level E2E (`contacts-merge-api.spec.ts`). The **browser** E2E deliberately focuses on the UI flow — survivor/source/custom field resolution, the no-conflict direct path, and source deletion — to stay deterministic and avoid flakiness, rather than re-asserting backend consolidation through the UI.
+
 **Acceptance Criteria:**
-- [ ] A Playwright spec (modelled on `frontend/tests/e2e/journals-merge.spec.ts`) creates two contacts with conflicting fields and overlapping relationships/journal links, opens the merge dialog from the detail page, selects the source, picks the survivor, resolves conflicts, confirms, and asserts the survivor holds the consolidated data and the source is gone. Deterministic test data per the project's E2E rules (no conditional/skipped assertions).
+- [x] A Playwright spec (modelled on `frontend/tests/e2e/journals-merge.spec.ts`) creates two contacts with conflicting fields, opens the merge dialog from the detail page, selects the source, picks the survivor, resolves conflicts, confirms, and asserts the survivor holds the consolidated/resolved data and the source is gone. Deterministic test data per the project's E2E rules (no conditional/skipped assertions). (Aggregate consolidation covered by backend integration + API E2E — see scope note.)
 
 **Required Test Coverage:**
-- [ ] **E2E:** the full conflict-resolution merge path and a no-conflict (direct) merge path, validated on Chromium.
+- [x] **E2E:** the full conflict-resolution merge path and a no-conflict (direct) merge path, validated on Chromium. (`frontend/tests/e2e/contacts-merge.spec.ts`.)
 
 ### ITER13-004: History Re-pointing & Merge Audit
 

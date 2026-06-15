@@ -117,6 +117,24 @@ export function renderWithProviders(
   });
 }
 
+/**
+ * Build a retry-disabled QueryClient and a matching wrapper for testing React
+ * Query hooks with `renderHook`. Returns the client so tests can spy on
+ * `invalidateQueries` / seed cache state.
+ */
+export function createQueryTestHarness() {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+  const wrapper = ({ children }: { children: React.ReactNode }) => (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  );
+  return { queryClient, wrapper };
+}
+
 // Note: Mock constants are now centralized in jest.setup.ts to avoid duplication
 
 // Mock setup utilities
@@ -267,7 +285,9 @@ export const contactTestUtils = {
 
   // Mock data factories for contacts
   createMockContact: (
-    overrides: Partial<ContactResource> = {}
+    overrides: Partial<Omit<ContactResource, 'attributes'>> & {
+      attributes?: Partial<ContactResource['attributes']>;
+    } = {}
   ): ContactResource => {
     const baseContact: ContactResource = {
       id: '1',
