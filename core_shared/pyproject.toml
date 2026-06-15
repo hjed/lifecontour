@@ -33,10 +33,10 @@ dev = [
     # core_shared installs without it (arq pins redis<6 vs our redis>=8). Tests
     # and the consuming workers always have arq available.
     "arq>=0.26",
-    "pytest>=9.0.3",
+    "pytest>=9.1.0",
     "pytest-asyncio>=1.4.0",
     "pytest-cov>=4.1.0",
-    "ruff>=0.15.16",
+    "ruff>=0.15.17",
     "mypy>=2.1.0",
     "types-psycopg2>=2.9.21.20260518",
 ]
@@ -114,10 +114,10 @@ exclude_lines = [
 dev = [
     "arq>=0.26",
     "mypy>=2.1.0",
-    "pytest>=9.0.3",
+    "pytest>=9.1.0",
     "pytest-asyncio>=1.4.0",
     "pytest-cov>=6.2.1",
-    "ruff>=0.15.16",
+    "ruff>=0.15.17",
 ]
 
 [tool.uv]
