@@ -105,8 +105,12 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Reverse the fan-out hierarchy columns and status constraint extension."""
-    # Demote any in_progress rows before tightening the constraint.
-    op.execute("UPDATE sync_jobs SET status = 'failed' WHERE status = 'in_progress'")
+    # Demote any in_progress rows before tightening the constraint, keeping the
+    # audit timestamp consistent with the status change.
+    op.execute(
+        "UPDATE sync_jobs SET status = 'failed', updated_at = now() "
+        "WHERE status = 'in_progress'"
+    )
 
     op.drop_constraint("ck_sync_jobs_status", "sync_jobs", type_="check")
     op.create_check_constraint(

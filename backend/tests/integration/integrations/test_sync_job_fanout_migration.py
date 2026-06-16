@@ -122,8 +122,10 @@ class TestSyncJobFanoutMigration:
         finally:
             await engine.dispose()
 
-        # 2. Apply the fan-out hierarchy migration.
-        _run_alembic(url_str, "upgrade", "head")
+        # 2. Apply the fan-out hierarchy migration. Target 0088 explicitly (not
+        #    "head") so the round-trip stays scoped to this migration and cannot
+        #    be perturbed by unrelated future migrations.
+        _run_alembic(url_str, "upgrade", "0088")
 
         engine = create_async_engine(url_str)
         try:

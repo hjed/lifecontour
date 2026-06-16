@@ -106,6 +106,20 @@ class TestSyncJobHierarchyRepository:
         assert fetched.expected_children == 7
 
     @pytest.mark.asyncio
+    async def test_set_expected_children_rejects_negative(
+        self, repo: SyncJobRepository
+    ) -> None:
+        """A negative expected_children is rejected and leaves the row unchanged."""
+        parent_id = await self._create_parent(repo)
+
+        with pytest.raises(ValueError, match="non-negative"):
+            await repo.set_expected_children(parent_id, -1)
+
+        fetched = await repo.get_by_job_id(parent_id)
+        assert fetched is not None
+        assert fetched.expected_children == 0
+
+    @pytest.mark.asyncio
     async def test_increment_counters_accumulate_independently(
         self, repo: SyncJobRepository
     ) -> None:

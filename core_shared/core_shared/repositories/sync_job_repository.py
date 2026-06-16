@@ -412,11 +412,20 @@ class SyncJobRepository:
 
         Args:
             job_id: Parent orchestrator job ID
-            expected_children: Number of child jobs dispatched
+            expected_children: Number of child jobs dispatched (must be >= 0)
 
         Returns:
             Updated SyncJob or None if the parent was not found
+
+        Raises:
+            ValueError: if ``expected_children`` is negative — an invalid count
+                that would break completion logic assuming non-negative counters.
         """
+        if expected_children < 0:
+            raise ValueError(
+                f"expected_children must be non-negative, got {expected_children}"
+            )
+
         now = datetime.now(UTC)
         query = text(
             "UPDATE sync_jobs "

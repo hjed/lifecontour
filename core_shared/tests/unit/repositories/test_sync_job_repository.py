@@ -283,6 +283,18 @@ class TestSyncJobRepositorySetExpectedChildren:
 
         assert result is None
 
+    @pytest.mark.asyncio
+    async def test_set_expected_children_rejects_negative(
+        self, repository: SyncJobRepository, mock_connection: AsyncMock
+    ) -> None:
+        """A negative expected_children is rejected before touching the DB."""
+        mock_connection.execute = AsyncMock()
+
+        with pytest.raises(ValueError, match="non-negative"):
+            await repository.set_expected_children("parent-1", -1)
+
+        mock_connection.execute.assert_not_called()
+
 
 class TestSyncJobRepositoryIncrementCounters:
     """Test atomic child-counter increments."""
