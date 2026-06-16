@@ -34,16 +34,41 @@ _BASE_ENV = {
     "ENCRYPTION_KEY": "testkey",
 }
 
+# Worker-managed env vars (BaseWorkerSettings surface + Immich-specific). Cleared
+# before each reload so ambient values cannot leak into the reloaded settings.
+_MANAGED_ENV = (
+    "DATABASE_URL",
+    "REDIS_URL",
+    "STREAM_NAME",
+    "WORKER_ID",
+    "QUEUE_NAME",
+    "LOG_LEVEL",
+    "ENABLE_PERIODIC_SYNC",
+    "SYNC_INTERVAL_HOURS",
+    "ENABLE_TELEMETRY",
+    "OTEL_EXPORTER_OTLP_ENDPOINT",
+    "OTEL_SERVICE_NAME",
+    "OTEL_RESOURCE_ATTRIBUTES",
+    "ENCRYPTION_KEY",
+)
+
 
 def _reload_worker(**env: str) -> Any:
-    """Reload the worker module under a given environment.
+    """Reload the worker module under a clean, explicit environment.
 
-    Reloading re-evaluates the ``WorkerSettings`` class body (and the module-level
-    lifecycle wiring) so settings reflect the patched environment.
+    Clears all worker-managed env vars first so ambient values (e.g.
+    ``ENABLE_PERIODIC_SYNC``, ``REDIS_URL``) cannot leak into the reload and make
+    these tests non-deterministic; only ``_BASE_ENV`` plus the explicit overrides
+    apply. Reloading re-evaluates the ``WorkerSettings`` class body and the
+    module-level lifecycle wiring so settings reflect that environment.
     """
     import worker
 
-    with patch.dict(os.environ, {**_BASE_ENV, **env}):
+    effective = {**_BASE_ENV, **env}
+    with patch.dict(os.environ, effective, clear=False):
+        for name in _MANAGED_ENV:
+            if name not in effective:
+                os.environ.pop(name, None)
         importlib.reload(worker)
     return worker
 

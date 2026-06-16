@@ -96,6 +96,9 @@ class TestImmichWorkerLifecycle:
         # Burst run: on_startup → process the queued job. async_run() does not
         # invoke on_shutdown (it leaves connections open for testing), so close()
         # is called explicitly below to exercise shutdown.
+        # Bound before the try so an early assertion failure surfaces directly
+        # rather than as a later UnboundLocalError.
+        consumer_task: Any = None
         try:
             await arq_worker.async_run()
 
@@ -112,6 +115,7 @@ class TestImmichWorkerLifecycle:
 
         # Clean shutdown: the stream-consumer task was launched and then
         # cancelled/reaped by on_shutdown — no leaked background task.
+        assert consumer_task is not None
         assert consumer_task.done()
 
     @pytest.mark.asyncio
