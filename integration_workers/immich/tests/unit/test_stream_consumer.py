@@ -64,6 +64,7 @@ class TestImmichWorkerStreamConsumer:
             "ContactCreated",
             "ContactUpdated",
             "ContactBirthdayChanged",
+            "ContactMerged",
         ]
         assert consumer._event_type_patterns == expected
 
@@ -187,4 +188,54 @@ class TestHandleEvent:
             {"session_factory": consumer._session_factory, "job_id": "evt-3"},
             "ContactBirthdayChanged",
             {"user_id": 1, "contact_id": 44},
+        )
+
+    async def test_handle_contact_merged_event(
+        self,
+        consumer: ImmichWorkerStreamConsumer,
+        mock_process_contact_event: AsyncMock,
+    ) -> None:
+        """ContactMerged is routed with its raw payload (no contact_id injected).
+
+        Unlike the other contact events, ``ContactMerged`` carries no single
+        ``contact_id`` — it reconciles a survivor/source pair via
+        ``external_collisions`` — so the consumer must forward the event data
+        unchanged for the handler's early dispatch to read.
+        """
+        event = StreamEvent(
+            message_id="4-0",
+            event_id="evt-4",
+            event_type="ContactMerged",
+            aggregate_id=10,
+            event_data={
+                "survivor_contact_id": 10,
+                "source_contact_id": 20,
+                "external_collisions": [
+                    {
+                        "external_system": "immich",
+                        "external_entity_type": "person",
+                        "source_external_id": "person-source",
+                        "survivor_external_id": "person-survivor",
+                    }
+                ],
+            },
+            occurred_at="2024-01-01T00:00:00Z",
+        )
+
+        await consumer._handle_event(event)
+        mock_process_contact_event.assert_awaited_once_with(
+            {"session_factory": consumer._session_factory, "job_id": "evt-4"},
+            "ContactMerged",
+            {
+                "survivor_contact_id": 10,
+                "source_contact_id": 20,
+                "external_collisions": [
+                    {
+                        "external_system": "immich",
+                        "external_entity_type": "person",
+                        "source_external_id": "person-source",
+                        "survivor_external_id": "person-survivor",
+                    }
+                ],
+            },
         )
