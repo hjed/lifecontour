@@ -55,6 +55,49 @@ Periodic sync is **disabled by default**. Enable it by setting
 `ENABLE_PERIODIC_SYNC=true` and an `SYNC_INTERVAL_HOURS` cadence (both inherited
 from `BaseWorkerSettings`).
 
+### ARQ Worker Settings
+
+The ARQ `WorkerSettings` (in [`worker.py`](worker.py)) is built from the shared
+toolkit in `core_shared` (ITER14-002): operational defaults, the
+`build_worker_lifecycle` startup/shutdown factory, the `generate_cron_jobs`
+helper, and `redis_settings_from_url`. It declares only its functions list, its
+consumer wiring, and documented overrides:
+
+```python
+class WorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
+    functions = [
+        sync_immich_people,
+        sync_immich_people_batch,
+        sync_immich_albums,
+        sync_immich_album_batch,
+        periodic_sync_all_immich_accounts,
+        process_contact_event,
+    ]
+    on_startup = _on_startup        # build_worker_lifecycle(close_session_factory=False,
+    on_shutdown = _on_shutdown      #                        log_consumer_errors=True)
+    redis_settings = redis_settings_from_url(settings.redis_url)
+    queue_name = IMMICH_ARQ_QUEUE_NAME
+
+    # Documented override (everything else inherits the shared defaults):
+    health_check_interval = 30      # see note below
+
+    cron_jobs = generate_cron_jobs(
+        periodic_sync_all_immich_accounts,
+        enable_periodic_sync=settings.enable_periodic_sync,
+        sync_interval_hours=settings.sync_interval_hours,
+    )
+```
+
+`job_timeout`, `keep_result`, and the retry backoff match the
+`SharedARQWorkerSettings` baseline — which equals arq's own constructor defaults,
+so they apply unchanged. Note: arq's `get_kwargs` reads only the leaf class's
+attributes, so an *inherited* default is invisible to arq and falls back to arq's
+own. This matters for `health_check_interval`: the shared baseline is `30` but
+arq's default is `3600`, so this worker redeclares `30` on the leaf to preserve
+its pre-migration 30s health-check ping. The duplicated `_parse_redis_url`, the
+`_generate_cron_jobs` helper, and the per-worker `startup`/`shutdown` were
+removed.
+
 ## Testing
 
 ```bash

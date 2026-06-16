@@ -276,10 +276,12 @@ Add the shared ARQ surface to `core_shared`, fully unit-tested. Not yet consumed
 #### Phase 3: Migrate `immich` + `snipeit` onto the shared ARQ toolkit
 **PR Size:** ~340 lines (per-worker rewiring ~150, tests ~190)
 
+**Status:** ✅ Complete (2026-06-16, branch `emdash/iter14-002-3-migrate-arq`).
+
 **Acceptance Criteria:**
-- [ ] `immich` and `snipeit` ARQ `WorkerSettings` use the shared defaults, cron helper (immich), lifecycle factory, and `redis_settings_from_url`; each retains only its `functions` list, consumer registration, and documented overrides (`snipeit` `health_check_interval=30`).
-- [ ] The duplicated `_parse_redis_url` (both workers), `immich._generate_cron_jobs`, and per-worker `startup`/`shutdown` are deleted.
-- [ ] Behaviour unchanged; `snipeit` (no cron) continues to schedule nothing.
+- [x] `immich` and `snipeit` ARQ `WorkerSettings` use the shared defaults, cron helper (immich), lifecycle factory, and `redis_settings_from_url`; each retains only its `functions` list, consumer registration, and documented overrides (`health_check_interval=30` on both leaves — see note).
+- [x] The duplicated `_parse_redis_url` (both workers), `immich._generate_cron_jobs`, and per-worker `startup`/`shutdown` are deleted.
+- [x] Behaviour unchanged; `snipeit` (no cron) continues to schedule nothing.
 
 **Required Test Coverage:**
 - **Unit:** `WorkerSettings` functions/overrides; lifecycle delegates to the shared factory; no residual local Redis/cron helpers referenced.
@@ -288,6 +290,15 @@ Add the shared ARQ surface to `core_shared`, fully unit-tested. Not yet consumed
 **Required Documentation Updates:**
 - `immich`/`snipeit` `README.md` updated to show the reduced `WorkerSettings`.
 - `docs/architecture/testing-strategy.md` — note the lifecycle factory's role in worker tests.
+
+**Progress notes (Phase 3 complete — 2026-06-16, branch `emdash/iter14-002-3-migrate-arq`):**
+- `immich` and `snipeit` ARQ `WorkerSettings` now subclass `SharedARQWorkerSettings` (plus `arq.typing.WorkerSettingsBase`) and use `build_worker_lifecycle`, `redis_settings_from_url`, and — for `immich` only — `generate_cron_jobs`. Each worker added a `_run_stream_consumer` adapter that feeds `redis_url`/`stream_name` from settings into its existing `run_*_stream_consumer`. Deleted from both: `_parse_redis_url`, the per-worker `startup`/`shutdown`; deleted from `immich`: `_generate_cron_jobs`.
+- **Lifecycle options (both):** `close_session_factory=False`, `log_consumer_errors=True` — these reproduce the pre-migration startup/shutdown exactly (neither worker disposed the session factory; both logged consumer errors in the shutdown except-branch). Matches `strava`.
+- **`health_check_interval=30` is redeclared on *both* leaves.** As flagged in the Phase 2 notes, arq's `get_kwargs` reads only the leaf `__dict__`, so the inherited shared `30` is invisible and arq would fall back to `3600`. Both workers declared `30` pre-migration, so "behaviour unchanged" requires keeping it declared (unlike google/strava, which never declared it and stay on arq's `3600`). The AC parenthetical named only `snipeit`; `immich` keeps it for the same behaviour-preservation reason.
+- **`snipeit` has no periodic-sync task**, so it declares no `cron_jobs` and schedules nothing (unit test asserts `cron_jobs` is absent from the leaf and arq resolves none). `immich`'s cron schedule is produced by the shared helper; the existing `test_periodic_sync.py` cron-parity cases were redirected from the deleted `_generate_cron_jobs` to `core_shared.generate_cron_jobs` driven by the worker's periodic task, so the {0,6,12,18}/etc. hours are pinned unchanged.
+- **Settings tests** that referenced `worker._parse_redis_url` were repointed to `core_shared.redis_settings_from_url`.
+- **E2E:** not applicable — this is backend worker-infrastructure with no API/UI surface; the spec's Part 2 required coverage is unit + integration only.
+- **Tests / gates (local):** immich 166 unit + 33 integration; snipeit 169 unit + 16 integration; core_shared `test_worker_arq.py` 32 unit; ruff check + ruff format --check + mypy clean for both workers.
 
 ---
 

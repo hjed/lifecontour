@@ -56,6 +56,41 @@ Periodic sync is **disabled by default**. The worker inherits
 periodic full syncs by setting `ENABLE_PERIODIC_SYNC=true` and a
 `SYNC_INTERVAL_HOURS` cadence.
 
+### ARQ Worker Settings
+
+The ARQ `WorkerSettings` (in [`worker.py`](worker.py)) is built from the shared
+toolkit in `core_shared` (ITER14-002): operational defaults, the
+`build_worker_lifecycle` startup/shutdown factory, and `redis_settings_from_url`.
+Snipe-IT has **no periodic sync task**, so it declares **no cron jobs** and
+schedules nothing. It declares only its functions list, its consumer wiring, and
+documented overrides:
+
+```python
+class WorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
+    functions = [
+        sync_snipeit_assets,
+        sync_snipeit_asset_batch,
+        sync_snipeit_maintenances,
+        sync_snipeit_maintenance_batch,
+    ]
+    on_startup = _on_startup        # build_worker_lifecycle(close_session_factory=False,
+    on_shutdown = _on_shutdown      #                        log_consumer_errors=True)
+    redis_settings = redis_settings_from_url(settings.redis_url)
+    queue_name = SNIPEIT_ARQ_QUEUE_NAME
+
+    # Documented override (everything else inherits the shared defaults):
+    health_check_interval = 30      # see note below
+```
+
+`job_timeout`, `keep_result`, and the retry backoff match the
+`SharedARQWorkerSettings` baseline — which equals arq's own constructor defaults,
+so they apply unchanged. Note: arq's `get_kwargs` reads only the leaf class's
+attributes, so an *inherited* default is invisible to arq and falls back to arq's
+own. This matters for `health_check_interval`: the shared baseline is `30` but
+arq's default is `3600`, so this worker redeclares `30` on the leaf to preserve
+its pre-migration 30s health-check ping. The duplicated `_parse_redis_url` and
+the per-worker `startup`/`shutdown` were removed.
+
 ## Testing
 
 ```bash

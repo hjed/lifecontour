@@ -80,7 +80,7 @@ def test_arq_redis_settings_match_configured_redis_url() -> None:
     """The ARQ worker class derives Redis settings from its own settings."""
     import worker
 
-    expected = worker._parse_redis_url(worker.settings.redis_url)
+    expected = redis_settings_from_url(worker.settings.redis_url)
     actual = worker.WorkerSettings.redis_settings
     assert actual.host == expected.host
     assert actual.port == expected.port
