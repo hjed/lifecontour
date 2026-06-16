@@ -10,11 +10,16 @@ implementations will be added in subsequent phases.
 
 from __future__ import annotations
 
-import asyncio
 import sys
-from typing import Any
+from typing import Any, cast
 
-from arq.connections import RedisSettings
+from arq.typing import StartupShutdown, WorkerSettingsBase
+from core_shared import (
+    SharedARQWorkerSettings,
+    build_worker_lifecycle,
+    redis_settings_from_url,
+)
+from core_shared.integration_constants import SNIPEIT_ARQ_QUEUE_NAME
 from core_shared.logging import configure_logging, get_logger
 from core_shared.telemetry import setup_telemetry, trace_arq_job
 
@@ -33,53 +38,6 @@ configure_logging(
 )
 
 logger = get_logger(__name__)
-
-# ---------------------------------------------------------------------------
-# ARQ lifecycle hooks
-# ---------------------------------------------------------------------------
-
-
-async def startup(ctx: dict) -> None:  # type: ignore[type-arg]
-    """Initialise shared resources on worker startup."""
-    logger.info("snipeit-worker starting", worker_id=settings.worker_id)
-
-    from core_shared.database import create_session_factory
-
-    from stream_consumer_tasks import run_snipeit_stream_consumer
-
-    session_factory = create_session_factory(settings.database_url)
-    ctx["session_factory"] = session_factory
-
-    # Start stream consumer for webhooks and domain events
-    consumer_task = asyncio.create_task(
-        run_snipeit_stream_consumer(
-            session_factory=session_factory,
-            redis_url=settings.redis_url,
-            stream_name=settings.stream_name,
-        )
-    )
-    ctx["stream_consumer_task"] = consumer_task
-
-
-async def shutdown(ctx: dict) -> None:  # type: ignore[type-arg]
-    """Clean up shared resources on worker shutdown."""
-    logger.info("snipeit-worker shutting down", worker_id=settings.worker_id)
-
-    # Stop the stream consumer
-    consumer_task = ctx.get("stream_consumer_task")
-    if consumer_task:
-        consumer_task.cancel()
-        try:
-            await consumer_task
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:  # noqa: BLE001
-            logger.error("Stream consumer task failed with an exception", error=str(e))
-
-
-# ---------------------------------------------------------------------------
-# ARQ worker configuration
-# ---------------------------------------------------------------------------
 
 
 async def _get_auth_data(session_factory: Any, user_id: str) -> dict[str, Any] | None:
@@ -117,7 +75,7 @@ def _create_sync_service(
     from snipeit_api_client import SnipeItAPIClient
     from snipeit_sync_service import SnipeItSyncService
 
-    fernet = Fernet(worker_settings.encryption_key.encode())
+    fernet = Fernet(worker_settings.encryption_key.get_secret_value().encode())
     api_key = fernet.decrypt(auth_data["encrypted_api_key"]).decode()
 
     api_client = SnipeItAPIClient.create(
@@ -399,25 +357,47 @@ async def sync_snipeit_maintenance_batch(
         await sync_service._api_client.close()
 
 
-def _parse_redis_url(url: str) -> RedisSettings:
-    """Convert a ``redis://`` URL into ARQ ``RedisSettings``."""
-    from urllib.parse import urlparse
+async def _run_stream_consumer(session_factory: Any, worker_settings: Any) -> None:
+    """Adapt the Snipe-IT stream consumer to the shared lifecycle factory's shape.
 
-    parsed = urlparse(url)
-    return RedisSettings(
-        host=parsed.hostname or "localhost",
-        port=parsed.port or 6379,
-        database=int(parsed.path.lstrip("/") or 0),
-        password=parsed.password,
+    ``build_worker_lifecycle`` calls ``consumer_factory(session_factory, settings)``;
+    ``run_snipeit_stream_consumer`` takes ``redis_url``/``stream_name`` keywords, so
+    this thin closure reads them off the worker settings.
+    """
+    from stream_consumer_tasks import run_snipeit_stream_consumer
+
+    await run_snipeit_stream_consumer(
+        session_factory=session_factory,
+        redis_url=worker_settings.redis_url,
+        stream_name=worker_settings.stream_name,
     )
 
 
-class WorkerSettings:
-    """ARQ worker settings for the Snipe-IT integration worker."""
+# Shared lifecycle: build the database session factory, launch the stream
+# consumer, and on shutdown cancel/reap it. Snipe-IT logs consumer errors in real
+# time (done-callback) and does not close the session factory on shutdown — this
+# matches the pre-migration startup/shutdown behaviour exactly.
+_on_startup, _on_shutdown = build_worker_lifecycle(
+    settings=settings,
+    consumer_factory=_run_stream_consumer,
+    close_session_factory=False,
+    log_consumer_errors=True,
+)
 
-    queue_name = SnipeItWorkerSettings.model_fields["queue_name"].default
 
-    # Task functions — populated as phases are implemented
+class WorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
+    """ARQ worker settings for the Snipe-IT integration worker.
+
+    Operational defaults (``job_timeout``, ``keep_result``, retry backoff) come from
+    :class:`core_shared.SharedARQWorkerSettings` and equal arq's own constructor
+    defaults, so they apply unchanged. Snipe-IT has no periodic sync, so it declares
+    no cron jobs. Only the functions list, consumer wiring, and documented overrides
+    live here.
+    """
+
+    queue_name = SNIPEIT_ARQ_QUEUE_NAME
+
+    # Task functions.
     functions: list[Any] = [
         sync_snipeit_assets,
         sync_snipeit_asset_batch,
@@ -425,16 +405,20 @@ class WorkerSettings:
         sync_snipeit_maintenance_batch,
     ]
 
-    on_startup = startup
-    on_shutdown = shutdown
+    # Worker lifecycle (shared factory). Cast to arq's StartupShutdown Protocol:
+    # the hooks accept ``ctx`` but the shared LifecycleHook alias is a plain
+    # positional Callable, which the Protocol's named-parameter form rejects.
+    on_startup: StartupShutdown = cast("StartupShutdown", _on_startup)
+    on_shutdown: StartupShutdown = cast("StartupShutdown", _on_shutdown)
 
-    # Retry / DLQ configuration
-    max_tries = 5
-    job_timeout = 300
-    keep_result = 3600
+    # Redis settings (shared helper).
+    redis_settings = redis_settings_from_url(settings.redis_url)
+
+    # Documented override:
+    # - health_check_interval=30: arq's ``get_kwargs`` reads only this leaf class's
+    #   attributes, so the inherited shared 30 is invisible and arq would fall back
+    #   to its default of 3600. Redeclaring 30 preserves the pre-migration 30s ping.
     health_check_interval = 30
-
-    redis_settings = _parse_redis_url(settings.redis_url)
 
 
 # ---------------------------------------------------------------------------

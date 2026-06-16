@@ -8,13 +8,16 @@ It runs as a separate process from the main FastAPI application.
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 from arq import run_worker
-from arq.cron import cron
 from arq.typing import StartupShutdown, WorkerSettingsBase
-from core_shared import redis_settings_from_url
-from core_shared.database.engine import create_session_factory
+from core_shared import (
+    SharedARQWorkerSettings,
+    build_worker_lifecycle,
+    generate_cron_jobs,
+    redis_settings_from_url,
+)
 
 # Import integration exceptions from core_shared
 from core_shared.exceptions import JobCancelledException
@@ -65,58 +68,32 @@ logger = get_logger(__name__)
 metrics_collector = MetricsCollector(worker_type="google")
 
 
-async def startup(ctx: dict[str, Any]) -> None:  # NOSONAR
+async def _run_stream_consumer(session_factory: Any, worker_settings: Any) -> None:
+    """Adapt the Google stream consumer to the shared lifecycle factory's shape.
+
+    ``build_worker_lifecycle`` calls ``consumer_factory(session_factory, settings)``;
+    ``run_google_stream_consumer`` takes ``redis_url``/``stream_name`` keywords, so
+    this thin closure reads them off the worker settings.
     """
-    Worker startup function.
-
-    Initializes database session factory, stream consumer, and other resources.
-    """
-    logger.info("Google Contacts worker starting up", worker_id=settings.worker_id)
-
-    # Create database session factory
-    session_factory = create_session_factory(settings.database_url.get_secret_value())
-    ctx["session_factory"] = session_factory
-    ctx["settings"] = settings
-
-    # Launch stream consumer for journal/tag event fan-out
     from stream_consumer_tasks import run_google_stream_consumer
 
-    consumer_task = asyncio.create_task(
-        run_google_stream_consumer(
-            session_factory=session_factory,
-            redis_url=settings.redis_url,
-        )
+    await run_google_stream_consumer(
+        session_factory=session_factory,
+        redis_url=worker_settings.redis_url,
+        stream_name=worker_settings.stream_name,
     )
-    ctx["stream_consumer_task"] = consumer_task
-
-    logger.info("Google Contacts worker startup complete")
 
 
-async def shutdown(ctx: dict[str, Any]) -> None:
-    """
-    Worker shutdown function.
-
-    Cleans up resources when the worker shuts down.
-    """
-    logger.info("Google Contacts worker shutting down", worker_id=settings.worker_id)
-
-    # Cancel stream consumer task
-    consumer_task = ctx.get("stream_consumer_task")
-    if consumer_task:
-        consumer_task.cancel()
-        try:
-            await consumer_task
-        except asyncio.CancelledError:
-            logger.info("Stream consumer task stopped")
-        except Exception:
-            logger.exception("Stream consumer task failed during shutdown")
-
-    # Close database connections if needed
-    session_factory = ctx.get("session_factory")
-    if session_factory and hasattr(session_factory, "close"):
-        await session_factory.close()
-
-    logger.info("Google Contacts worker shutdown complete")
+# Shared lifecycle: build the database session factory, launch the stream
+# consumer, and on shutdown cancel/reap it and dispose the session factory's
+# engine (google closes the session factory; it does not log consumer errors
+# via a done-callback).
+_on_startup, _on_shutdown = build_worker_lifecycle(
+    settings=settings,
+    consumer_factory=_run_stream_consumer,
+    close_session_factory=True,
+    log_consumer_errors=False,
+)
 
 
 # Helper functions for sync logic
@@ -1355,6 +1332,8 @@ async def _perform_incremental_sync(
     contacts_response = ListConnectionsResponse(**response)
 
     total_processed = 0
+    created_count = 0
+    updated_count = 0
 
     # Transform and serialize contacts, handling per-item failures
     transformer = await _create_transformer(client)
@@ -1365,15 +1344,32 @@ async def _perform_incremental_sync(
         metrics,
     )
 
+    # An incremental delta returns contacts added remotely since the last sync
+    # as well as modified ones. Emit 'created' for contacts the backend has not
+    # seen and 'updated' for known ones, mirroring the full-sync decision, so the
+    # backend doesn't reject brand-new contacts as "Contact not found for update".
+    batch_external_ids = [
+        google_person.resource_name for google_person, _ in serialized_contacts
+    ]
+    existing_external_ids = await _find_existing_external_ids(
+        session, batch_external_ids, "google"
+    )
+
     # Process changed contacts using outbox pattern
     for google_person, contact_data in serialized_contacts:
         try:
+            sync_type = (
+                "updated"
+                if google_person.resource_name in existing_external_ids
+                else "created"
+            )
+
             # Create outbox event for contact sync
             outbox_event = OutboxEvent.create_contact_sync_event(
                 contact_data=contact_data,
                 integration_source="google",
                 external_id=google_person.resource_name,
-                sync_type="updated",
+                sync_type=sync_type,
                 etag=google_person.etag,
             )
 
@@ -1381,6 +1377,10 @@ async def _perform_incremental_sync(
             session.add(outbox_event)
 
             total_processed += 1
+            if sync_type == "created":
+                created_count += 1
+            else:
+                updated_count += 1
             metrics["contacts_processed"] += 1
 
         except Exception as e:  # noqa: BLE001
@@ -1402,9 +1402,11 @@ async def _perform_incremental_sync(
         "Incremental sync completed",
         google_account_email=google_account_email,
         total_processed=total_processed,
+        contacts_created=created_count,
+        contacts_updated=updated_count,
     )
 
-    return {"contacts_updated": total_processed}
+    return {"contacts_created": created_count, "contacts_updated": updated_count}
 
 
 async def _save_sync_token(
@@ -2643,7 +2645,7 @@ async def _push_contact_to_google_for_event(
 async def _delete_contact_from_google_for_event(
     session: AsyncSession,
     client: GoogleAPIClient,
-    contact_id: int,
+    contact_id: int | None,
     external_id: str,
     google_account_email: str,
 ) -> dict[str, Any]:
@@ -2652,7 +2654,8 @@ async def _delete_contact_from_google_for_event(
     Args:
         session: Database session
         client: Google Contacts API client
-        contact_id: Internal contact ID
+        contact_id: Internal contact ID (log context only; the merge path
+            passes the absorbed source id)
         external_id: Google resource name
         google_account_email: Google account email
 
@@ -2681,13 +2684,116 @@ async def _delete_contact_from_google_for_event(
     return {"status": "deleted", "external_id": external_id}
 
 
+async def _process_contact_merged_event(
+    ctx: dict[str, Any], event_data: dict[str, Any]
+) -> dict[str, Any]:
+    """Reconcile a contact merge with Google Contacts (ITER13-005 Phase 2).
+
+    The merge already re-pointed the survivor's external links and deleted the
+    source contact's *local* ``external_references`` / ``sync_metadata`` inline
+    (Phase 1). A same-service clash — both contacts linked to Google — is
+    surfaced on ``event_data["external_collisions"]``; each entry carries the
+    source contact's orphaned remote id (``source_external_id``), which is the
+    only way to find it now that the local row is gone.
+
+    For every google collision this deletes the source's remote Google contact
+    via the existing delete flow (which also cleans any residual sync metadata
+    and treats a remote 404 as success). The survivor's Google contact is
+    reconciled separately by the ``ContactUpdated`` event the merge also emits,
+    so it is intentionally not re-pushed here.
+
+    Args:
+        ctx: ARQ-compatible context dictionary with session_factory
+        event_data: The ``ContactMerged`` payload (survivor/source ids +
+            ``external_collisions``)
+
+    Returns:
+        Task result dictionary with reconciliation status
+    """
+    source_contact_id = event_data.get("source_contact_id")
+    collisions = event_data.get("external_collisions") or []
+    google_collisions = [c for c in collisions if c.get("external_system") == "google"]
+
+    if not google_collisions:
+        logger.info(
+            "ContactMerged has no Google collisions, skipping",
+            source_contact_id=source_contact_id,
+        )
+        return {"status": "skipped", "reason": "no_google_collisions"}
+
+    session_factory = ctx["session_factory"]
+
+    async with session_factory() as session:
+        # Find all Google integrations for all users. The source remote belongs
+        # to one of them; deleting a non-existent resource on the others returns
+        # a 404, which the client treats as success (mirrors ContactDeleted).
+        auth_stmt = text("""
+            SELECT user_id, google_account_email
+            FROM user_google_auth
+        """)
+        auth_result = await session.execute(auth_stmt)
+        users = auth_result.fetchall()
+
+        if not users:
+            logger.info(
+                "No Google integrations found, skipping ContactMerged",
+                source_contact_id=source_contact_id,
+            )
+            return {"status": "skipped", "reason": "no_google_integrations"}
+
+        results = []
+        for row in users:
+            user_id = row.user_id
+            google_account_email = row.google_account_email
+
+            try:
+                auth_service = GoogleAuthService(
+                    session=session,
+                    encryption_key=settings.encryption_key.get_secret_value(),
+                    google_client_id=settings.google_client_id,
+                    google_client_secret=settings.google_client_secret.get_secret_value(),
+                )
+                client = GoogleAPIClient(
+                    auth_service=auth_service,
+                    google_account_email=google_account_email,
+                    google_client_id=settings.google_client_id,
+                    google_client_secret=settings.google_client_secret.get_secret_value(),
+                    user_id=user_id,
+                )
+
+                for collision in google_collisions:
+                    result = await _delete_contact_from_google_for_event(
+                        session=session,
+                        client=client,
+                        contact_id=source_contact_id,
+                        external_id=collision["source_external_id"],
+                        google_account_email=google_account_email,
+                    )
+                    results.append(result)
+
+                await session.commit()
+
+            except Exception as e:
+                logger.error(
+                    "Failed to reconcile ContactMerged for Google account",
+                    source_contact_id=source_contact_id,
+                    google_account_email=google_account_email,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                )
+                raise
+
+        return {"status": "success", "results": results}
+
+
 async def process_contact_event(
     ctx: dict[str, Any], event_type: str, event_data: dict[str, Any]
 ) -> dict[str, Any]:
     """Process a single contact event for Google Contacts outbound sync.
 
-    Receives domain events (ContactCreated, ContactUpdated, ContactDeleted)
-    and pushes the changes to Google Contacts for all synced Google accounts.
+    Receives domain events (ContactCreated, ContactUpdated, ContactDeleted,
+    ContactMerged) and pushes the changes to Google Contacts for all synced
+    Google accounts.
 
     Args:
         ctx: ARQ-compatible context dictionary with session_factory
@@ -2700,6 +2806,12 @@ async def process_contact_event(
     job_id = ctx.get("job_id", "unknown")
     set_job_id(job_id)
     set_worker_id(settings.worker_id)
+
+    # ContactMerged carries no contact_id (only survivor/source ids and the
+    # external collisions to reconcile), so it is handled before the
+    # contact_id guard below.
+    if event_type == "ContactMerged":
+        return await _process_contact_merged_event(ctx, event_data)
 
     contact_id = event_data.get("contact_id")
     if not contact_id:
@@ -3019,43 +3131,6 @@ async def push_local_contacts_to_google(
         }
 
 
-def retry_delay_func(retry_count: int) -> float:
-    """
-    Calculate retry delay with exponential backoff and jitter.
-
-    Implements exponential backoff strategy:
-    - Retry 0 (1st retry): ~60s (48-72s with jitter)
-    - Retry 1 (2nd retry): ~120s (96-144s with jitter)
-    - Retry 2 (3rd retry): ~240s (192-288s with jitter)
-    - Retry 3 (4th retry): ~480s (384-576s with jitter)
-    - Retry 4+ (5th+ retry): capped at 900s (720-900s with jitter)
-
-    Note: Jitter is intentionally random (±20%) to prevent thundering herd problems
-    in production. Unit tests verify correct behavior by testing many samples and
-    checking that average delays match expected values.
-
-    Args:
-        retry_count: Number of retries already attempted (0-based)
-
-    Returns:
-        Delay in seconds before next retry
-    """
-    # Base delay: 60 seconds
-    base_delay = 60
-
-    # Exponential backoff: 60 * (2 ^ retry_count)
-    delay = base_delay * (2**retry_count)
-
-    # Apply jitter: ±20% to prevent thundering herd
-    import secrets
-
-    jitter = secrets.SystemRandom().uniform(0.8, 1.2)
-    delay_with_jitter = delay * jitter
-
-    # Cap at 15 minutes (900 seconds)
-    return float(min(delay_with_jitter, 900.0))
-
-
 def _create_google_client(
     session: Any,
     user_id: str | int,
@@ -3108,8 +3183,6 @@ async def _fetch_all_calendar_events(
         page_token = events_response.get("nextPageToken")
         if not page_token:
             break
-
-        import asyncio
 
         await asyncio.sleep(0.2)
 
@@ -3802,10 +3875,18 @@ async def setup_calendar_webhook(
 
 
 # ARQ Worker Settings
-class GoogleWorkerSettings(WorkerSettingsBase):
-    """ARQ worker configuration."""
+class GoogleWorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
+    """ARQ worker configuration.
 
-    # Task functions
+    Operational defaults (``keep_result``, ``max_tries`` baseline, retry backoff)
+    come from :class:`core_shared.SharedARQWorkerSettings` and equal arq's own
+    constructor defaults, so they apply unchanged. ``health_check_interval`` is the
+    exception: arq's ``get_kwargs`` reads only this leaf class's attributes, so the
+    inherited shared ``30`` is invisible to arq and it falls back to arq's default
+    of ``3600`` (this worker does not redeclare it). Only the functions list,
+    consumer wiring, and documented overrides live here.
+    """
+
     # Task functions — process_journal_event and process_tag_event are now
     # consumed directly from the Redis Stream via GoogleWorkerStreamConsumer
     # and are no longer registered as ARQ tasks.
@@ -3817,50 +3898,31 @@ class GoogleWorkerSettings(WorkerSettingsBase):
         periodic_sync_all_accounts,  # Wrapper for periodic cron syncs
     ]
 
-    # Worker lifecycle
-    on_startup: StartupShutdown = startup
-    on_shutdown: StartupShutdown = shutdown
+    # Worker lifecycle (shared factory). Cast to arq's StartupShutdown Protocol:
+    # the hooks accept ``ctx`` but the shared LifecycleHook alias is a plain
+    # positional Callable, which the Protocol's named-parameter form rejects.
+    on_startup: StartupShutdown = cast("StartupShutdown", _on_startup)
+    on_shutdown: StartupShutdown = cast("StartupShutdown", _on_shutdown)
 
-    # Redis settings
+    # Redis settings (shared helper).
     redis_settings = redis_settings_from_url(settings.redis_url)
 
-    # Worker configuration
-    max_jobs = settings.max_concurrent_jobs
-    job_timeout = 600  # 10 minutes
-    keep_result = 3600  # Keep results for 1 hour
-
-    # Retry configuration with exponential backoff
-    max_tries = 5
-    retry_delay = retry_delay_func  # Use function for exponential backoff with jitter
-
-    # Queue name
+    # Queue name.
     queue_name = ARQ_QUEUE_NAME
 
-    # Periodic sync configuration (cron jobs)
-    # Only configure cron_jobs if periodic sync is enabled
-    cron_jobs = []
-    if settings.enable_periodic_sync:
-        # Generate cron schedule based on sync_interval_hours
-        # For example: sync_interval_hours=6 -> hours={0, 6, 12, 18}
-        sync_hours = set(range(0, 24, settings.sync_interval_hours))
+    # Documented overrides:
+    # - job_timeout=600 (10 min): Google contact/calendar syncs page through large
+    #   accounts and need longer than the shared 5-minute default.
+    # - max_jobs: follow the worker's configured concurrency budget.
+    job_timeout = 600
+    max_jobs = settings.max_concurrent_jobs
 
-        # Schedule periodic_sync_all_accounts to run at configured intervals
-        # This function queries all active Google integrations and enqueues
-        # individual sync jobs for each account
-        cron_jobs = [
-            cron(
-                periodic_sync_all_accounts,
-                hour=sync_hours,
-                minute=0,  # Run at the top of the hour
-                unique=True,  # Only run once even with multiple workers
-            )
-        ]
-
-        logger.info(
-            "Periodic sync enabled",
-            sync_interval_hours=settings.sync_interval_hours,
-            sync_hours=list(sync_hours),
-        )
+    # Periodic sync cron (shared helper; empty when periodic sync is disabled).
+    cron_jobs = generate_cron_jobs(
+        periodic_sync_all_accounts,
+        enable_periodic_sync=settings.enable_periodic_sync,
+        sync_interval_hours=settings.sync_interval_hours,
+    )
 
 
 if __name__ == "__main__":

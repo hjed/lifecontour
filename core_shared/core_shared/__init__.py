@@ -54,6 +54,16 @@ from core_shared.models import (
     SyncMetadata,
     SyncStatus,
 )
+from core_shared.worker_arq import (
+    DEFAULT_HEALTH_CHECK_INTERVAL,
+    DEFAULT_JOB_TIMEOUT,
+    DEFAULT_KEEP_RESULT,
+    DEFAULT_MAX_TRIES,
+    SharedARQWorkerSettings,
+    build_worker_lifecycle,
+    default_retry_delay,
+    generate_cron_jobs,
+)
 from core_shared.worker_settings import (
     BaseWorkerSettings,
     redis_settings_from_url,
@@ -100,4 +110,13 @@ __all__ = [
     # Worker settings
     "BaseWorkerSettings",
     "redis_settings_from_url",
+    # Shared ARQ toolkit
+    "SharedARQWorkerSettings",
+    "default_retry_delay",
+    "generate_cron_jobs",
+    "build_worker_lifecycle",
+    "DEFAULT_JOB_TIMEOUT",
+    "DEFAULT_KEEP_RESULT",
+    "DEFAULT_MAX_TRIES",
+    "DEFAULT_HEALTH_CHECK_INTERVAL",
 ]

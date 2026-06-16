@@ -9,7 +9,7 @@
 
 import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Trash2, Calendar } from 'lucide-react';
+import { ArrowLeft, Trash2, Calendar, GitMerge } from 'lucide-react';
 
 import { format } from 'date-fns';
 import { enAU } from 'date-fns/locale';
@@ -20,6 +20,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
+import { MergeContactDialog } from '@/components/contacts/MergeContactDialog';
 import { ContactAvatar } from '@/components/contacts/ContactAvatar';
 import { ContactIdentityInline } from '@/components/contacts/ContactIdentityInline';
 import { ContactMethodsList } from '@/components/contacts/ContactMethodsList';
@@ -59,6 +60,7 @@ function ContactDetailPageContent() {
   const contactId = params.id as string;
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showMergeDialog, setShowMergeDialog] = useState(false);
 
   const { data: contactData, isLoading, error } = useContact(contactId);
   const { data: externalLinksData } = useContactExternalLinks(contactId);
@@ -66,6 +68,14 @@ function ContactDetailPageContent() {
   const deleteContactMutation = useDeleteContact();
 
   const contact = contactData?.data;
+
+  const handleMerged = (survivorId: string) => {
+    // If the current contact was absorbed (became the source), it no longer
+    // exists — navigate to the survivor. Otherwise stay and let the query refetch.
+    if (survivorId !== contactId) {
+      router.replace(`/contacts/${survivorId}`);
+    }
+  };
 
   const handleDelete = async () => {
     try {
@@ -153,6 +163,14 @@ function ContactDetailPageContent() {
 
                 {/* Action Buttons */}
                 <div className='flex shrink-0 gap-2'>
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    onClick={() => setShowMergeDialog(true)}
+                    aria-label='Merge contact'
+                  >
+                    <GitMerge className='h-4 w-4' />
+                  </Button>
                   <Button
                     variant='outline'
                     size='sm'
@@ -275,6 +293,14 @@ function ContactDetailPageContent() {
           <ActivityFeed contactId={contact.id} pageSize={5} />
         </aside>
       </div>
+
+      {/* Merge Dialog */}
+      <MergeContactDialog
+        currentContact={contact}
+        open={showMergeDialog}
+        onOpenChange={setShowMergeDialog}
+        onMerged={handleMerged}
+      />
 
       {/* Delete Confirmation Dialog */}
       {showDeleteConfirm && (

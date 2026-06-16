@@ -72,17 +72,36 @@ def mock_event_publisher() -> AsyncMock:
 
 
 @pytest.fixture
+def mock_history_repo() -> AsyncMock:
+    repo = AsyncMock()
+    repo.repoint_entity_history.return_value = 0
+    return repo
+
+
+@pytest.fixture
+def mock_external_reference_service() -> AsyncMock:
+    service = AsyncMock()
+    # Default: no external links to reconcile.
+    service.repoint_contact_references.return_value = []
+    return service
+
+
+@pytest.fixture
 def merge_service(
     mock_contact_repo,
     mock_relationship_repo,
     mock_journal_rel_repo,
     mock_event_publisher,
+    mock_history_repo,
+    mock_external_reference_service,
 ) -> ContactMergeService:
     return ContactMergeService(
         contact_repo=mock_contact_repo,
         relationship_repo=mock_relationship_repo,
         journal_relationship_repo=mock_journal_rel_repo,
         event_publisher=mock_event_publisher,
+        history_repo=mock_history_repo,
+        external_reference_service=mock_external_reference_service,
     )
 
 
@@ -169,6 +188,32 @@ class TestContactMergeDelegation:
 
         # The source is deleted only after the aggregate has been re-pointed.
         mock_contact_repo.delete.assert_awaited_once_with(SOURCE_ID)
+
+    @pytest.mark.asyncio
+    async def test_repoints_history_then_deletes_source(
+        self,
+        merge_service,
+        mock_contact_repo,
+        mock_history_repo,
+        mock_transaction,
+    ) -> None:
+        """The source's top-level history is re-pointed onto the survivor within
+        the merge, after the sub-entities move and before the source row is
+        deleted."""
+        manager = MagicMock()
+        manager.attach_mock(mock_history_repo.repoint_entity_history, "repoint")
+        manager.attach_mock(mock_contact_repo.delete, "delete")
+
+        await merge_service.merge_contacts(
+            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
+        )
+
+        mock_history_repo.repoint_entity_history.assert_awaited_once_with(
+            SOURCE_ID, SURVIVOR_ID, "contact", mock_transaction
+        )
+        # The re-point must run before the source row is deleted.
+        ordered = [call[0] for call in manager.mock_calls]
+        assert ordered.index("repoint") < ordered.index("delete")
 
 
 class TestContactMergeScalarPolicy:
@@ -330,6 +375,99 @@ class TestContactMergeSideEffects:
         published = self._published(mock_event_publisher)
         assert "ContactDeleted" not in published
         assert "ContactMerged" in published
+
+
+class TestContactMergeExternalReferences:
+    """ITER13-005 Phase 1: the merge re-points the source's external links.
+
+    The local re-point of ``external_references`` / ``sync_metadata`` runs inline
+    in the merge transaction (a local ``UPDATE``/``DELETE``, never a remote call).
+    Same-service collisions surfaced by the re-point are carried on the
+    ``ContactMerged`` event so the integration workers (Phases 2/3) can reconcile
+    the remote records after the source's local row has gone.
+    """
+
+    @staticmethod
+    def _published(mock_event_publisher: AsyncMock) -> dict[str, Any]:
+        return {
+            call.args[0].event_type: call.args[0]
+            for call in mock_event_publisher.publish.await_args_list
+        }
+
+    @pytest.mark.asyncio
+    async def test_repoints_external_references_before_deleting_source(
+        self,
+        merge_service,
+        mock_contact_repo,
+        mock_external_reference_service,
+        mock_transaction,
+    ) -> None:
+        manager = MagicMock()
+        manager.attach_mock(
+            mock_external_reference_service.repoint_contact_references, "repoint_refs"
+        )
+        manager.attach_mock(mock_contact_repo.delete, "delete")
+
+        await merge_service.merge_contacts(
+            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
+        )
+
+        mock_external_reference_service.repoint_contact_references.assert_awaited_once_with(
+            SOURCE_ID, SURVIVOR_ID, mock_transaction
+        )
+        ordered = [call[0] for call in manager.mock_calls]
+        assert ordered.index("repoint_refs") < ordered.index("delete")
+
+    @pytest.mark.asyncio
+    async def test_collisions_carried_on_contact_merged_event(
+        self,
+        merge_service,
+        mock_event_publisher,
+        mock_external_reference_service,
+        mock_transaction,
+    ) -> None:
+        from app.core.integrations.external_reference_service import (
+            ExternalReferenceCollision,
+        )
+
+        collision = ExternalReferenceCollision(
+            external_system="google",
+            external_entity_type="person",
+            source_external_id="people/source",
+            survivor_external_id="people/survivor",
+        )
+        mock_external_reference_service.repoint_contact_references.return_value = [
+            collision
+        ]
+
+        await merge_service.merge_contacts(
+            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
+        )
+
+        event = self._published(mock_event_publisher)["ContactMerged"]
+        collisions = event.event_data["external_collisions"]
+        assert collisions == [
+            {
+                "external_system": "google",
+                "external_entity_type": "person",
+                "source_external_id": "people/source",
+                "survivor_external_id": "people/survivor",
+            }
+        ]
+
+    @pytest.mark.asyncio
+    async def test_no_collisions_yields_empty_payload(
+        self,
+        merge_service,
+        mock_event_publisher,
+        mock_transaction,
+    ) -> None:
+        await merge_service.merge_contacts(
+            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
+        )
+
+        event = self._published(mock_event_publisher)["ContactMerged"]
+        assert event.event_data["external_collisions"] == []
 
 
 class TestContactMergeOverrides:

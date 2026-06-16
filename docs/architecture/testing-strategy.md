@@ -36,6 +36,28 @@ def test_sync_contact_creates_new_contact(mock_google_client, mock_db_session):
     pass
 ```
 
+**Shared ARQ lifecycle factory in worker tests (ITER14-002)**
+
+Each worker's ARQ `WorkerSettings` is built from the shared `core_shared` toolkit
+(`SharedARQWorkerSettings` defaults, `build_worker_lifecycle`, `generate_cron_jobs`,
+`redis_settings_from_url`). Because arq's `get_kwargs` reads only the *leaf* class's
+attributes (inherited shared defaults are invisible to arq and fall back to arq's own
+constructor defaults), worker settings tests assert against `arq.worker.get_kwargs(...)`
+rather than raw class attributes — this surfaces what arq actually consumes (e.g. a
+`health_check_interval` that must be redeclared on the leaf to take effect).
+
+- **Settings unit tests** verify the migrated `WorkerSettings` exposes the expected
+  `functions`, `queue_name`, redis settings, and documented overrides, and that lifecycle
+  hooks delegate to `build_worker_lifecycle` (asserted by patching
+  `core_shared.build_worker_lifecycle` and checking the `close_session_factory` /
+  `log_consumer_errors` options and the consumer factory wiring). They also assert the
+  duplicated `_parse_redis_url`/`_generate_cron_jobs`/`startup`/`shutdown` helpers are gone.
+- **Lifecycle integration tests** (`tests/integration/test_worker_lifecycle_integration.py`)
+  exercise the factory's `on_startup`/`on_shutdown` against real Redis + Postgres: startup
+  builds the session factory and launches the stream-consumer task, a trivial ARQ job runs
+  against the database, and shutdown cancels/reaps the consumer task with no leaked
+  background task.
+
 #### 2. Core Application Tests
 **Scope**: Core FastAPI application without integration workers
 **Location**: `backend/tests/`

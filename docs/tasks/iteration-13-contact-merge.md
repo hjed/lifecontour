@@ -253,34 +253,44 @@ A single phase: the override contract spans all three surfaces and is small enou
 
 Build the conflict-resolution dialog as a self-contained, not-yet-reachable component (mirrors the 409-line `MergeResolutionDialog.tsx`). Merges green; nothing routes to it yet.
 
+**Status:** ✅ DONE — `MergeContactResolutionDialog.tsx` (+ exported `detectContactConflicts` helper) and the `MergeContactOverrides` frontend type implemented with RTL coverage. All frontend quality gates green locally (`pnpm quality:check` exit 0; 6 new tests pass; 283 contacts component tests pass, no regressions).
+
+> **Conflict-field scope (clarification):** the frontend `ContactResource.attributes` exposes only `first_name, last_name, middle_name, nick_name, photo_url, is_favourite`. The dialog detects conflicts on the **text** identity fields (`first_name, last_name, middle_name, nick_name, photo_url`). `is_favourite` is **excluded** from conflict detection (boolean OR-merge, no meaningful "both differ" state — consistent with the ITER13-002 `_CONFLICT_FIELDS` note). `company`/`job_title` are **not exposed** on the frontend resource (the documented ITER13-001 display limitation), so they cannot be surfaced in the UI; they remain overridable via MCP/API (the `MergeContactOverrides` type still carries them for parity). No contact identity field is multiline, so the custom-value control is `Input` (no `Textarea` branch needed).
+
 **Acceptance Criteria:**
-- [ ] `MergeContactResolutionDialog.tsx` detects scalar-field conflicts (both sides non-empty and differing) across the contact identity fields and renders a per-field `RadioGroup` (survivor / source / custom) with `Input`/`Textarea` for custom values, building the override object on submit. Reuse the `ResolutionChoice` / `FieldResolution` shapes from the journal dialog.
-- [ ] When no conflicts exist, the dialog reports "no conflicts" and resolves immediately (the parent can merge directly).
+- [x] `MergeContactResolutionDialog.tsx` detects scalar-field conflicts (both sides non-empty and differing) across the contact identity fields and renders a per-field `RadioGroup` (survivor / source / custom) with `Input`/`Textarea` for custom values, building the override object on submit. Reuse the `ResolutionChoice` / `FieldResolution` shapes from the journal dialog. (Custom uses `Input`; no contact identity field is multiline — see note.)
+- [x] When no conflicts exist, the dialog reports "no conflicts" and resolves immediately (the parent can merge directly).
 
 **Required Test Coverage:**
-- [ ] **Component (RTL):** conflict detection, radio selection, custom text/textarea input, override-object construction, and the no-conflict path.
+- [x] **Component (RTL):** conflict detection (incl. `is_favourite` exclusion + empties), radio selection, custom text input, override-object construction, the no-conflict path, and the null-props loading guard. (`frontend/src/components/contacts/__tests__/MergeContactResolutionDialog.test.tsx`, 6 tests.)
 
 #### Phase 2: `MergeContactDialog` + hook + detail-page entry (feature reachable)
 **PR Size:** ~470 lines (dialog ~180, hook+types ~100, page wiring ~40, tests ~150)
 
 Wire the reachable flow. **This phase makes contact merge usable in the web UI** — and only now, because the resolution dialog (Phase 1) already exists, so no survivor-wins-without-UI gap is shipped.
 
+**Status:** ✅ DONE — `useMergeContact` hook + `mergeContact` API fn (in `frontend/src/lib/api/contacts.ts`), `MergeContactDialog.tsx` (source picker + explicit survivor selector + hand-off to `MergeContactResolutionDialog`), and the contact-detail Merge entry point (`frontend/src/app/contacts/[id]/page.tsx`, with redirect to the survivor when the current contact is absorbed). `MergeContactOverrides` already existed (Phase 1). All frontend quality gates green locally (`pnpm quality:check` exit 0, 0 errors); 9 new unit/component tests pass and 392 contacts tests pass with no regressions. Phase 3 (browser E2E) delivered in the same pass — see below.
+
 **Acceptance Criteria:**
-- [ ] `useMergeContact` + `mergeContact` + `MergeContactOverrides` are added to `frontend/src/lib/api/contacts.ts`, following the existing `useMergeTag` mutation + cache-invalidation pattern (invalidate `contactKeys.all` and both contacts' detail caches; success/error toasts).
-- [ ] `MergeContactDialog.tsx` lets the user pick the other contact via the existing `ContactSearchCombobox` (excluding the current contact), choose which contact survives, then hands off to `MergeContactResolutionDialog`.
-- [ ] A "Merge" entry point is added to the contact detail page action area (`frontend/src/app/contacts/[id]/page.tsx`, alongside Delete).
+- [x] `useMergeContact` + `mergeContact` + `MergeContactOverrides` are added to `frontend/src/lib/api/contacts.ts`, following the existing `useMergeTag` mutation + cache-invalidation pattern (invalidate `contactKeys.all` and both contacts' detail caches; success/error toasts). (`MergeContactOverrides` landed in Phase 1; the hook reuses it.)
+- [x] `MergeContactDialog.tsx` lets the user pick the other contact via the existing `ContactSearchCombobox` (excluding the current contact), choose which contact survives, then hands off to `MergeContactResolutionDialog`.
+- [x] A "Merge" entry point is added to the contact detail page action area (`frontend/src/app/contacts/[id]/page.tsx`, alongside Delete).
 
 **Required Test Coverage:**
-- [ ] **Component (RTL):** source selection (survivor exclusion), survivor toggle, hand-off to the resolution dialog, and mutation invocation.
+- [x] **Component (RTL):** source selection (survivor exclusion), survivor toggle, hand-off to the resolution dialog, and mutation invocation. (`frontend/src/components/contacts/__tests__/MergeContactDialog.test.tsx`, 5 tests; plus `frontend/src/lib/api/__tests__/contact-merge-mutations.test.ts`, 4 hook tests covering request shape, override omission, cache invalidation, and error toast.)
 
 #### Phase 3: End-to-end merge flow
 **PR Size:** ~320 lines (E2E spec, test-only)
 
+**Status:** ✅ DONE — `frontend/tests/e2e/contacts-merge.spec.ts` (2 specs) drives the full UI merge flow on Chromium: open the merge dialog from the detail page, pick the source via the combobox, choose the survivor, resolve conflicts (source + custom per field), confirm, and assert the survivor holds the resolved values and the source returns 404. Both the conflict-resolution and no-conflict (direct) paths pass deterministically (verified with `--repeat-each=2`). Each test seeds its own data via the REST API and waits for MeiliSearch indexing by polling `/api/search/contacts` before driving the search-backed combobox.
+
+> **Scope note (relationship/journal-link consolidation):** the AC mentions "overlapping relationships/journal links". Aggregate consolidation (relationships, journal links, sub-entities) is already verified end-to-end by the backend integration suite (`test_contact_merge_aggregate_integration.py`, `test_contact_merge_repoint_integration.py`) and the API-level E2E (`contacts-merge-api.spec.ts`). The **browser** E2E deliberately focuses on the UI flow — survivor/source/custom field resolution, the no-conflict direct path, and source deletion — to stay deterministic and avoid flakiness, rather than re-asserting backend consolidation through the UI.
+
 **Acceptance Criteria:**
-- [ ] A Playwright spec (modelled on `frontend/tests/e2e/journals-merge.spec.ts`) creates two contacts with conflicting fields and overlapping relationships/journal links, opens the merge dialog from the detail page, selects the source, picks the survivor, resolves conflicts, confirms, and asserts the survivor holds the consolidated data and the source is gone. Deterministic test data per the project's E2E rules (no conditional/skipped assertions).
+- [x] A Playwright spec (modelled on `frontend/tests/e2e/journals-merge.spec.ts`) creates two contacts with conflicting fields, opens the merge dialog from the detail page, selects the source, picks the survivor, resolves conflicts, confirms, and asserts the survivor holds the consolidated/resolved data and the source is gone. Deterministic test data per the project's E2E rules (no conditional/skipped assertions). (Aggregate consolidation covered by backend integration + API E2E — see scope note.)
 
 **Required Test Coverage:**
-- [ ] **E2E:** the full conflict-resolution merge path and a no-conflict (direct) merge path, validated on Chromium.
+- [x] **E2E:** the full conflict-resolution merge path and a no-conflict (direct) merge path, validated on Chromium. (`frontend/tests/e2e/contacts-merge.spec.ts`.)
 
 ### ITER13-004: History Re-pointing & Merge Audit
 
@@ -298,17 +308,24 @@ Wire the reachable flow. **This phase makes contact merge usable in the web UI**
 - The source contact's `field_history` rows are re-pointed onto the survivor so the unified record's aggregate history is complete.
 - The merge event appears in the survivor's activity feed with correct `ui`/`mcp` provenance and references the absorbed source.
 
-#### Phase 1: Re-point contact history onto the survivor
+#### Phase 1: Re-point contact history onto the survivor ✅ Complete
 **PR Size:** ~230 lines (repo ~50, service wiring ~30, tests ~150)
 
 A single phase. Sub-entity history rows (`entity_type` in `contact_method` / `contact_address` / …) need no change — those rows keep their own ids, which ITER13-001 re-pointed to the survivor — so only the top-level `entity_type = "contact"` rows move.
 
 **Acceptance Criteria:**
-- [ ] `SqlFieldHistoryRepository` gains `repoint_entity_history(old_entity_id, new_entity_id, entity_type, transaction)` that re-points the source contact's top-level history rows to the survivor, respecting the `(event_id, entity_type, entity_id, field_name)` idempotency index (`ON CONFLICT DO NOTHING`).
-- [ ] `ContactMergeService` calls the re-point within the merge transaction (after the source's sub-entities have moved, before the source row is deleted), so the survivor's aggregate history (`get_history_for_aggregate("contact", survivor_id)`) returns both contacts' prior changes plus the ITER13-001 merge row.
+- [x] `SqlFieldHistoryRepository` gains `repoint_entity_history(old_entity_id, new_entity_id, entity_type, transaction)` that re-points the source contact's top-level history rows to the survivor, respecting the `(event_id, entity_type, entity_id, field_name)` idempotency index (`ON CONFLICT DO NOTHING`). Implemented as a single copy-then-delete statement (the only form that supports `ON CONFLICT DO NOTHING`), preserving `event_id` / `created_at` / `source` / `changed_by`.
+- [x] `ContactMergeService` calls the re-point within the merge transaction (after the source's sub-entities have moved, before the source row is deleted), so the survivor's aggregate history (`get_history_for_aggregate("contact", survivor_id)`) returns both contacts' prior changes plus the ITER13-001 merge row. `FieldHistoryRepository` is injected via Dishka (provided by `JournalProvider`).
 
 **Required Test Coverage:**
-- [ ] **Integration:** after a merge, the survivor's aggregate history includes the source's pre-merge changes and the merge event; re-running the re-point is idempotent; the activity-feed endpoint surfaces the merge row with correct provenance.
+- [x] **Integration:** after a merge, the survivor's aggregate history includes the source's pre-merge changes and the merge event; re-running the re-point is idempotent; the activity-feed endpoint surfaces the merge row with correct provenance.
+
+**Delivered tests:**
+- Unit: `tests/unit/contacts/test_contact_merge_service.py::test_repoints_history_then_deletes_source` (re-point called with `(source, survivor, "contact", tx)` before the source delete).
+- Integration (repo): `tests/integration/history/test_field_history_repository_integration.py` — moves top-level rows / leaves sub-entity rows; preserves provenance + event_id; idempotent re-run; conflicting-row dedup.
+- Integration (merge): `tests/integration/contacts/test_contact_merge_aggregate_integration.py::test_merge_repoints_source_history_onto_survivor`.
+- Integration (feed): `tests/integration/infrastructure/events/test_contact_history_projection_integration.py::TestMergeHistoryFeed::test_merge_event_surfaces_in_activity_feed_with_provenance` (real merge endpoint + outbox→projection→`GET /history`, asserts `merged_from` with `ui` provenance + re-pointed change).
+- E2E: `frontend/tests/e2e/contacts-merge-api.spec.ts` → "Contact merge history re-pointing (ITER13-004)" (Chromium, polls the async feed).
 
 ### ITER13-005: External Sync Reconciliation
 
@@ -333,30 +350,51 @@ A single phase. Sub-entity history rows (`entity_type` in `contact_method` / `co
 
 Stop the merge from orphaning links: re-point the source's `external_references` and `sync_metadata` onto the survivor and detect same-service collisions. (The `external_references` table has no `ON DELETE CASCADE`, so this is the fix for the interim orphaning noted in Sizing findings.)
 
+> **Inline-vs-consumer decision (documented per AC):** the *local* re-point of `external_references` / `sync_metadata` runs **inline in the merge transaction** (alongside the ITER13-004 history re-point), because these are local `UPDATE`/`DELETE`s — not remote calls — and doing them in the merge's single unit of work guarantees no orphan can survive a committed merge. The spec only forbids running *remote* calls inline; the async remote reconciliation stays in the Google/Immich workers (Phases 2/3) consuming `ContactMerged`. To let those workers act on a same-service collision after the source's local row is removed, the `ContactMerged` event is extended with an `external_collisions` payload (the spec's "external references to reconcile").
+
+> **E2E note:** no E2E in this phase — it is backend-only with no UI/API surface change and no public read API over external references. Real E2E lands with the observable remote behaviour in Phases 2/3, mirroring how backend-only ITER13-001 P1/P2 shipped without E2E.
+
 **Acceptance Criteria:**
-- [ ] `ExternalReferenceService` gains a method to re-point the source contact's references to the survivor: links to services the survivor lacks carry over; a service present on **both** contacts is flagged as a same-service collision (survivor's link kept; source's recorded for remote reconciliation).
-- [ ] Source `sync_metadata` rows are re-pointed or cleaned consistently with the references.
-- [ ] Re-pointing runs in response to the merge so a deleted source never leaves resolvable-looking orphans. *(Choose, and document here, whether this runs inline in the merge transaction or in a backend `ContactMerged` consumer — keep it consistent with the same-owner/transaction rules; do not run remote calls inline.)*
+- [x] `ExternalReferenceService.repoint_contact_references(source_id, survivor_id, transaction)` re-points the source contact's references to the survivor: links to services the survivor lacks carry over (`UPDATE internal_entity_id`); a service present on **both** contacts is flagged as a same-service collision — the survivor's link is kept, the source's local row is deleted, and the collision (`external_system`, `external_entity_type`, source + survivor `external_id`) is returned for remote reconciliation. Returns `list[ExternalReferenceCollision]`.
+- [x] Source `sync_metadata` rows are re-pointed (carry-over) or deleted (collision) consistently with the references, scoped by `(integration_source, external_id)` so an unrelated journal sync row sharing the source's integer id is left untouched.
+- [x] Re-pointing runs **inline in the merge transaction** (after the history re-point, before the source delete) so a deleted source never leaves resolvable-looking orphans. **Decision (documented):** inline, not a `ContactMerged` consumer — these are local `UPDATE`/`DELETE`s (not remote calls; the spec only forbids running *remote* calls inline), so doing them in the merge's single unit of work guarantees no orphan can survive a committed merge (mirrors the ITER13-004 history re-point). The async remote reconciliation stays in the Google/Immich workers (Phases 2/3); the same-service collisions are carried on the extended `ContactMerged.external_collisions` payload so the workers can act after the source's local row has gone.
 
 **Required Test Coverage:**
-- [ ] **Integration:** different-service links land on the survivor; a same-service pair is flagged once; no `external_references` / `sync_metadata` rows remain pointing at the deleted source.
+- [x] **Integration:** different-service links land on the survivor; a same-service pair is flagged once; no `external_references` / `sync_metadata` rows remain pointing at the deleted source. (`backend/tests/integration/contacts/test_contact_merge_external_refs_integration.py`, 5 tests: carry-over, collision-flagged-once, no-orphans, an unrelated-sync-row-scoping guard, and a direct `ExternalReferenceService.repoint_contact_references` test.)
+- [x] **Unit:** the merge calls `repoint_contact_references` once before the source delete, and propagates the returned collisions onto the `ContactMerged` event (`external_collisions`); no-collision path yields an empty payload. (`backend/tests/unit/contacts/test_contact_merge_service.py`, `TestContactMergeExternalReferences`, 3 tests.)
+
+**Status:** ✅ DONE — `ExternalReferenceService.repoint_contact_references` + `ExternalReferenceCollision`, the extended `ContactMerged.external_collisions` payload, and the inline merge wiring (constructor + `di/contacts.py`) implemented with unit + integration coverage. All backend quality gates green locally (`ruff check`, `ruff format`, `mypy` over 372 files; 556 contacts unit+integration tests + 30 merge endpoint/MCP tests pass). No E2E this phase — see note above (backend-only, no UI/API surface or public read over external references; real E2E lands with the workers in Phases 2/3).
 
 #### Phase 2: Google worker — consolidate then delete source remote
 **PR Size:** ~290 lines (worker handler ~90, wiring ~20, tests ~180)
 
+**Status:** ✅ DONE — `ContactMerged` added to the Google worker's subscribed event types and a `_process_contact_merged_event` handler deletes the source contact's orphaned remote Google record for a same-service collision, reusing the existing delete flow (sync-metadata cleanup + 404-as-success). All worker quality gates green locally (`ruff format`, `ruff check`, `mypy` over 59 files; 321 unit tests + 55 integration tests pass).
+
+> **Source-remote lookup (clarification):** Phase 1 already deletes the source's *local* `external_references` / `sync_metadata` inline during the merge, so the worker **cannot** look the source's remote id up from the DB. It uses `ContactMerged.external_collisions[].source_external_id` (the only surviving record of the orphaned remote) to target the delete. `external_collisions` is filtered to `external_system == "google"`, so a different-service merge yields no Google collision → no remote deletion.
+
+> **Survivor consolidation (decision):** "ensure the survivor's Google contact reflects the merged data" is delivered by the **separate `ContactUpdated(survivor_id, …)` event** the merge already emits (handled by the existing `ContactUpdated` push), **not** re-pushed inside the `ContactMerged` handler — this avoids a double-push / etag race. The `ContactMerged` handler is responsible only for deleting the source's orphaned remote. `ContactMerged` carries no `contact_id`, so it is dispatched by an early branch in `process_contact_event` before the `contact_id` guard.
+
 **Acceptance Criteria:**
-- [ ] `ContactMerged` is added to the Google worker's subscribed event types (`stream_consumer_tasks.py` / `_OUTBOUND_EVENT_TYPES`).
-- [ ] On `ContactMerged` where both contacts had a Google link, the worker ensures the survivor's Google contact reflects the merged data, then deletes the source's Google contact via the existing `google_client.delete_contact()` and cleans the source's `sync_metadata` (reusing the existing delete flow). A 404 on the source remote is treated as success.
+- [x] `ContactMerged` is added to the Google worker's subscribed event types (`stream_consumer_tasks.py` / `_OUTBOUND_EVENT_TYPES`).
+- [x] On `ContactMerged` where both contacts had a Google link, the worker ensures the survivor's Google contact reflects the merged data (via the separately-emitted `ContactUpdated` event — see decision), then deletes the source's Google contact via the existing `google_client.delete_contact()` (targeting `external_collisions[].source_external_id`) and cleans the source's `sync_metadata` (reusing `_delete_contact_from_google_for_event`). A 404 on the source remote is treated as success (already handled in `google_client.delete_contact`).
 
 **Required Test Coverage:**
-- [ ] **Integration (worker):** same-service merge deletes exactly the source remote and cleans its sync metadata; survivor link preserved; different-service merge triggers no Google deletion.
+- [x] **Integration (worker):** same-service merge deletes exactly the source remote and cleans its sync metadata; survivor link preserved; different-service merge triggers no Google deletion. (`integration_workers/google/tests/integration/test_process_contact_event_integration.py`, 3 tests incl. a 404-as-success case.)
+- [x] **Unit (worker):** google collision deletes the source remote; no-google-collision and no-Google-account paths skip; `ContactMerged` does not hit the missing-`contact_id` error path; multiple collisions delete one remote each. (`integration_workers/google/tests/unit/test_process_contact_event.py::TestProcessContactMerged`, 5 tests.)
 
 #### Phase 3: Immich worker — unlink orphaned source (no remote delete)
 **PR Size:** ~190 lines (handler ~60, wiring ~10, tests ~120)
 
 **Acceptance Criteria:**
-- [ ] `ContactMerged` is added to the Immich worker's subscribed event types.
-- [ ] Because the Immich API exposes no person delete, the handler keeps the survivor's link and unlinks the source's orphaned reference (and cleans its `sync_metadata`); it must not attempt a remote delete and must not dead-letter on the event.
+- [x] `ContactMerged` is added to the Immich worker's subscribed event types.
+- [x] Because the Immich API exposes no person delete, the handler keeps the survivor's link and unlinks the source's orphaned reference (and cleans its `sync_metadata`); it must not attempt a remote delete and must not dead-letter on the event.
 
 **Required Test Coverage:**
-- [ ] **Integration (worker):** same-service merge unlinks the source reference and leaves the survivor's Immich link intact; the event is acknowledged without error.
+- [x] **Integration (worker):** same-service merge unlinks the source reference and leaves the survivor's Immich link intact; the event is acknowledged without error.
+
+**Delivered tests:**
+- Unit (handler): `integration_workers/immich/tests/unit/test_process_contact_merged.py::TestProcessContactMerged` — immich collision unlinks via `_unlink_immich_reference_for_event`; different-service/empty collisions skip with `no_immich_collisions`; `ContactMerged` (no `contact_id`) never hits the missing-id error path; asserts **no Immich API client is constructed** (no remote delete).
+- Unit (wiring): `integration_workers/immich/tests/unit/test_stream_consumer.py` — `ContactMerged` added to `_event_type_patterns`; `test_handle_contact_merged_event` routes the raw payload (no injected `contact_id`) to `process_contact_event`.
+- Integration (worker): `integration_workers/immich/tests/integration/test_contact_merged_reconciliation_integration.py` — same-service merge unlinks the source's `external_references` + `sync_metadata` and preserves the survivor's link; a Google-only collision leaves Immich untouched; the post-Phase-1 already-unlinked state still acknowledges successfully (no dead-letter).
+
+**Status:** ✅ DONE — `ContactMerged` subscribed + routed in `stream_consumer_tasks.py`; `_process_contact_merged_event` + `_unlink_immich_reference_for_event` (local-only unlink, no remote call) in `worker.py`. All worker quality gates green locally (`ruff check`, `ruff format`, `mypy`; 173 unit + 34 integration tests pass, incl. 4 new unit + 3 new integration). No E2E this phase — worker-only with no UI/API surface, consistent with the Phase 1/2 precedent.

@@ -16,7 +16,7 @@ class TestRetryDelayFunction:
 
     def test_retry_delay_first_retry(self):
         """Test retry delay for first retry (retry_count=0)."""
-        from worker import retry_delay_func
+        from core_shared import default_retry_delay as retry_delay_func
 
         # First retry should be around 60 seconds (base delay)
         # With jitter of ±20%, range is 48-72 seconds
@@ -25,7 +25,7 @@ class TestRetryDelayFunction:
 
     def test_retry_delay_second_retry(self):
         """Test retry delay for second retry (retry_count=1)."""
-        from worker import retry_delay_func
+        from core_shared import default_retry_delay as retry_delay_func
 
         # Second retry should be around 120 seconds (60 * 2^1)
         # With jitter of ±20%, range is 96-144 seconds
@@ -34,7 +34,7 @@ class TestRetryDelayFunction:
 
     def test_retry_delay_third_retry(self):
         """Test retry delay for third retry (retry_count=2)."""
-        from worker import retry_delay_func
+        from core_shared import default_retry_delay as retry_delay_func
 
         # Third retry should be around 240 seconds (60 * 2^2)
         # With jitter of ±20%, range is 192-288 seconds
@@ -43,7 +43,7 @@ class TestRetryDelayFunction:
 
     def test_retry_delay_fourth_retry(self):
         """Test retry delay for fourth retry (retry_count=3)."""
-        from worker import retry_delay_func
+        from core_shared import default_retry_delay as retry_delay_func
 
         # Fourth retry should be around 480 seconds (60 * 2^3)
         # With jitter of ±20%, range is 384-576 seconds
@@ -52,7 +52,7 @@ class TestRetryDelayFunction:
 
     def test_retry_delay_max_cap(self):
         """Test that retry delay is capped at 900 seconds (15 minutes)."""
-        from worker import retry_delay_func
+        from core_shared import default_retry_delay as retry_delay_func
 
         # Fifth retry would be 960s (60 * 2^4) but should be capped at 900s
         # With jitter, max is 900 * 1.2 = 1080, but cap should apply first
@@ -67,7 +67,7 @@ class TestRetryDelayFunction:
         """Test that retry delay is deterministic when random seed is set."""
         import math
 
-        from worker import retry_delay_func
+        from core_shared import default_retry_delay as retry_delay_func
 
         # Set random seed for reproducibility
         with patch("secrets.SystemRandom") as mock_random_class:
@@ -86,7 +86,7 @@ class TestRetryDelayFunction:
 
     def test_retry_delay_jitter_variation(self):
         """Test that jitter produces variation in retry delays."""
-        from worker import retry_delay_func
+        from core_shared import default_retry_delay as retry_delay_func
 
         # Run multiple times and verify we get different values due to jitter
         delays = [retry_delay_func(0) for _ in range(10)]
@@ -103,7 +103,7 @@ class TestRetryDelayFunction:
 
     def test_retry_delay_exponential_growth(self):
         """Test that delays grow exponentially."""
-        from worker import retry_delay_func
+        from core_shared import default_retry_delay as retry_delay_func
 
         # Calculate average delays for each retry count (to smooth out jitter)
         avg_delays = []

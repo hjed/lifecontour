@@ -30,6 +30,8 @@ from app.core.contacts.models.repositories import (
     ContactRelationshipRepository,
     ContactRepository,
 )
+from app.core.history.models import FieldHistoryRepository
+from app.core.integrations.external_reference_service import ExternalReferenceService
 from app.core.journal.models.repositories import JournalContactRelationshipRepository
 from app.infrastructure.unit_of_work import transactional
 
@@ -76,11 +78,15 @@ class ContactMergeService:
         relationship_repo: ContactRelationshipRepository,
         journal_relationship_repo: JournalContactRelationshipRepository,
         event_publisher: ContactEventPublisher,
+        history_repo: FieldHistoryRepository,
+        external_reference_service: ExternalReferenceService,
     ):
         self.contact_repo = contact_repo
         self.relationship_repo = relationship_repo
         self.journal_relationship_repo = journal_relationship_repo
         self.event_publisher = event_publisher
+        self.history_repo = history_repo
+        self.external_reference_service = external_reference_service
 
     def has_scalar_conflicts(self, survivor: Contact, source: Contact) -> bool:
         """Report whether two contacts have conflicting scalar identity fields.
@@ -111,7 +117,9 @@ class ContactMergeService:
         """Absorb the source contact into the survivor, returning the unified contact.
 
         Re-points and dedupes the full aggregate (relationships, journal links,
-        methods, addresses, notes, important dates, tags), applies the scalar
+        methods, addresses, notes, important dates, tags), re-points the source's
+        top-level ``field_history`` rows onto the survivor so the unified record
+        carries both contacts' audit trail, applies the scalar
         identity fields, deletes the source, records an inline ``merged_from``
         history row carrying provenance, and requests regeneration of the
         survivor's AI summary. The whole operation is a single atomic unit of work.
@@ -148,6 +156,25 @@ class ContactMergeService:
             source_id, survivor_id, transaction
         )
         await self.contact_repo.repoint_tags(source_id, survivor_id, transaction)
+
+        # 1b. Carry the source's top-level ``contact`` history rows onto the
+        #     survivor so the unified record's aggregate history is complete.
+        #     Sub-entity history rows keep their own ids — already re-pointed
+        #     above — so only the ``entity_type = "contact"`` rows move. Runs after
+        #     the sub-entities have moved and before the source row is deleted,
+        #     within the same merge transaction.
+        await self.history_repo.repoint_entity_history(
+            source_id, survivor_id, "contact", transaction
+        )
+
+        # 1c. Re-point the source's external links onto the survivor so the merge
+        #     does not orphan ``external_references`` / ``sync_metadata`` rows (no
+        #     ON DELETE CASCADE). Same-service collisions are surfaced for remote
+        #     reconciliation by the integration workers. Local-only re-point — the
+        #     remote calls stay in the workers consuming ``ContactMerged``.
+        collisions = await self.external_reference_service.repoint_contact_references(
+            source_id, survivor_id, transaction
+        )
 
         # 2. Apply scalar identity fields: overrides win, else prefer-non-empty.
         merged, override_changes = self._merge_scalars(
@@ -196,6 +223,7 @@ class ContactMergeService:
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
+                external_collisions=[c.as_dict() for c in collisions],
             )
         )
 

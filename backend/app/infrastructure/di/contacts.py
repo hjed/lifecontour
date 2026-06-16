@@ -37,6 +37,8 @@ from app.core.contacts.services import (
     TagHierarchyService,
     TagService,
 )
+from app.core.history.models import FieldHistoryRepository
+from app.core.integrations.external_reference_service import ExternalReferenceService
 from app.core.journal.models.repositories import JournalContactRelationshipRepository
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.search.search_service import SearchService
@@ -157,12 +159,16 @@ class ContactProvider(Provider):
         relationship_repo: ContactRelationshipRepository,
         journal_relationship_repo: JournalContactRelationshipRepository,
         event_publisher: ContactEventPublisher,
+        history_repo: FieldHistoryRepository,
+        external_reference_service: ExternalReferenceService,
     ) -> ContactMergeService:
         return ContactMergeService(
             contact_repo=contact_repo,
             relationship_repo=relationship_repo,
             journal_relationship_repo=journal_relationship_repo,
             event_publisher=event_publisher,
+            history_repo=history_repo,
+            external_reference_service=external_reference_service,
         )
 
     # Main contact service

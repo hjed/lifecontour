@@ -589,7 +589,8 @@ class TestGoogleWorker:
                 user_id=1,
             )
 
-        assert result == {"contacts_updated": 1}
+        # No sync_metadata exists for the contact, so it is emitted as 'created'.
+        assert result == {"contacts_created": 1, "contacts_updated": 0}
         assert metrics["contacts_processed"] == 1
         mock_process.assert_called_once()
         assert mock_session.add.call_count == 1

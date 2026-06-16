@@ -256,6 +256,27 @@ export interface ContactListResponse {
   links?: JsonApiLinks;
   meta?: JsonApiMeta;
 }
+
+/**
+ * Per-field conflict-resolution overrides for a contact merge (ITER13-003).
+ *
+ * Each key is the concrete value to apply to the surviving contact — the caller
+ * has already resolved the survivor / source / custom choice. Omitted keys fall
+ * back to the backend default policy (survivor wins, prefer non-empty). Mirrors
+ * the backend `MergeContactOverrides` schema and the journal `MergeOverrides`
+ * shape. `company`/`job_title` are part of the contract for MCP/API parity even
+ * though the web resource does not currently expose them.
+ */
+export interface MergeContactOverrides {
+  first_name?: string;
+  last_name?: string;
+  middle_name?: string;
+  nick_name?: string;
+  company?: string;
+  job_title?: string;
+  photo_url?: string;
+  is_favourite?: boolean;
+}
 export type TagResponse = JsonApiResponse<TagResource>;
 export type TagListResponse = JsonApiCollectionResponse<TagResource>;
 

@@ -11,13 +11,17 @@ sync tasks. Actual sync logic will be implemented in ITER11-002+.
 
 from __future__ import annotations
 
-import asyncio
 import sys
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
-from arq import cron
-from arq.connections import RedisSettings
+from arq.typing import StartupShutdown, WorkerSettingsBase
+from core_shared import (
+    SharedARQWorkerSettings,
+    build_worker_lifecycle,
+    generate_cron_jobs,
+    redis_settings_from_url,
+)
 from core_shared.integration_constants import IMMICH_ARQ_QUEUE_NAME
 from core_shared.logging import (
     configure_logging,
@@ -47,49 +51,6 @@ configure_logging(
 )
 
 logger = get_logger(__name__)
-
-# ---------------------------------------------------------------------------
-# ARQ lifecycle hooks
-# ---------------------------------------------------------------------------
-
-
-async def startup(ctx: dict) -> None:  # type: ignore[type-arg]
-    """Initialise shared resources on worker startup."""
-    logger.info("immich-worker starting", worker_id=settings.worker_id)
-
-    from core_shared.database import create_session_factory
-
-    from stream_consumer_tasks import run_immich_stream_consumer
-
-    session_factory = create_session_factory(settings.database_url)
-    ctx["session_factory"] = session_factory
-
-    # Start stream consumer for domain events
-    consumer_task = asyncio.create_task(
-        run_immich_stream_consumer(
-            session_factory=session_factory,
-            redis_url=settings.redis_url,
-            stream_name=settings.stream_name,
-        )
-    )
-    ctx["stream_consumer_task"] = consumer_task
-
-
-async def shutdown(ctx: dict) -> None:  # type: ignore[type-arg]
-    """Clean up shared resources on worker shutdown."""
-    logger.info("immich-worker shutting down", worker_id=settings.worker_id)
-
-    # Stop the stream consumer
-    consumer_task = ctx.get("stream_consumer_task")
-    if consumer_task:
-        consumer_task.cancel()
-        try:
-            await consumer_task
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:  # noqa: BLE001
-            logger.error("Stream consumer task failed with an exception", error=str(e))
-
 
 # ---------------------------------------------------------------------------
 # ARQ sync tasks
@@ -156,7 +117,7 @@ async def sync_immich_people(
         async with session_factory() as session:
             conn = await session.connection()
 
-            auth_service = ImmichAuthService(settings.encryption_key)
+            auth_service = ImmichAuthService(settings.encryption_key.get_secret_value())
             api_key = await auth_service.get_api_key(user_id, conn)
             server_url = await auth_service.get_server_url(user_id, conn)
 
@@ -299,7 +260,7 @@ async def sync_immich_people_batch(
         async with session_factory() as session:
             conn = await session.connection()
 
-            auth_service = ImmichAuthService(settings.encryption_key)
+            auth_service = ImmichAuthService(settings.encryption_key.get_secret_value())
             api_key = await auth_service.get_api_key(user_id, conn)
             server_url = await auth_service.get_server_url(user_id, conn)
 
@@ -385,7 +346,7 @@ async def sync_immich_albums(
         async with session_factory() as session:
             conn = await session.connection()
 
-            auth_service = ImmichAuthService(settings.encryption_key)
+            auth_service = ImmichAuthService(settings.encryption_key.get_secret_value())
             api_key = await auth_service.get_api_key(user_id, conn)
             server_url = await auth_service.get_server_url(user_id, conn)
 
@@ -515,7 +476,7 @@ async def sync_immich_album_batch(
         async with session_factory() as session:
             conn = await session.connection()
 
-            auth_service = ImmichAuthService(settings.encryption_key)
+            auth_service = ImmichAuthService(settings.encryption_key.get_secret_value())
             api_key = await auth_service.get_api_key(user_id, conn)
             server_url = await auth_service.get_server_url(user_id, conn)
 
@@ -553,14 +514,148 @@ async def sync_immich_album_batch(
         raise
 
 
+async def _unlink_immich_reference_for_event(
+    session: Any,
+    external_id: str,
+    contact_id: int | None,
+) -> dict[str, Any]:
+    """Unlink an orphaned Immich link locally, triggered by a domain event.
+
+    Immich exposes no person-delete, so reconciling a same-service merge clash
+    means removing the source contact's local ``external_references`` row and
+    its ``sync_metadata`` (keyed by the source's remote person id) — never a
+    remote call. Idempotent: deleting zero rows (the link was already cleaned
+    inline by the merge) is success.
+
+    The reference delete is scoped to the source contact's internal entity as
+    well as the remote person id, so a row owned by a different contact that
+    (pathologically) shares the same external person id is never collaterally
+    unlinked.
+
+    Args:
+        session: Database session
+        external_id: Immich person id of the orphaned source link
+        contact_id: Internal id of the source contact whose link is unlinked
+
+    Returns:
+        Result dict with status
+    """
+    from sqlalchemy import text
+
+    await session.execute(
+        text("""
+            DELETE FROM sync_metadata
+            WHERE integration_source = :integration_source
+              AND external_id = :external_id
+        """),
+        {"integration_source": "immich", "external_id": external_id},
+    )
+    await session.execute(
+        text("""
+            DELETE FROM external_references
+            WHERE external_system = :external_system
+              AND external_entity_type = 'person'
+              AND external_entity_id = :external_id
+              AND internal_entity_type = 'contact'
+              AND internal_entity_id = :contact_id
+        """),
+        {
+            "external_system": "immich",
+            "external_id": external_id,
+            "contact_id": contact_id,
+        },
+    )
+
+    logger.info(
+        "Unlinked orphaned Immich reference via event",
+        contact_id=contact_id,
+        external_id=external_id,
+    )
+    return {"status": "unlinked", "external_id": external_id}
+
+
+async def _process_contact_merged_event(
+    ctx: dict[str, Any], event_data: dict[str, Any]
+) -> dict[str, Any]:
+    """Reconcile a contact merge with Immich.
+
+    The merge already re-pointed the survivor's external links and deleted the
+    source contact's *local* ``external_references`` / ``sync_metadata`` inline.
+    A same-service clash — both contacts linked to Immich — is surfaced on
+    ``event_data["external_collisions"]``; each entry carries the source
+    contact's orphaned remote id (``source_external_id``).
+
+    Because the Immich API exposes no person-delete, this keeps the survivor's
+    link and unlinks the source's orphaned local reference (and any residual
+    sync metadata) without any remote call. The survivor's Immich person is
+    reconciled separately by the ``ContactUpdated`` event the merge also emits,
+    so it is intentionally not re-pushed here.
+
+    Args:
+        ctx: ARQ-compatible context dictionary with session_factory
+        event_data: The ``ContactMerged`` payload (survivor/source ids +
+            ``external_collisions``)
+
+    Returns:
+        Task result dictionary with reconciliation status
+    """
+    source_contact_id = event_data.get("source_contact_id")
+    collisions = event_data.get("external_collisions") or []
+
+    # Validate each collision rather than indexing it: a malformed entry must
+    # be skipped (and logged), never raise, so the event is still acknowledged
+    # and never dead-letters. Only person references can be unlinked here.
+    source_external_ids: list[str] = []
+    for collision in collisions:
+        if collision.get("external_system") != "immich":
+            continue
+        if collision.get("external_entity_type") != "person":
+            logger.warning(
+                "Skipping Immich collision with unexpected entity type",
+                source_contact_id=source_contact_id,
+                external_entity_type=collision.get("external_entity_type"),
+            )
+            continue
+        source_external_id = collision.get("source_external_id")
+        if not source_external_id:
+            logger.warning(
+                "Skipping malformed Immich collision missing source_external_id",
+                source_contact_id=source_contact_id,
+            )
+            continue
+        source_external_ids.append(source_external_id)
+
+    if not source_external_ids:
+        logger.info(
+            "ContactMerged has no Immich collisions, skipping",
+            source_contact_id=source_contact_id,
+        )
+        return {"status": "skipped", "reason": "no_immich_collisions"}
+
+    session_factory = ctx["session_factory"]
+
+    async with session_factory() as session:
+        results = []
+        for source_external_id in source_external_ids:
+            result = await _unlink_immich_reference_for_event(
+                session=session,
+                external_id=source_external_id,
+                contact_id=source_contact_id,
+            )
+            results.append(result)
+        await session.commit()
+
+    return {"status": "success", "results": results}
+
+
 @trace_arq_job
 async def process_contact_event(
     ctx: dict[str, Any], event_type: str, event_data: dict[str, Any]
 ) -> dict[str, Any]:
     """Process a single contact event for Immich outbound sync.
 
-    Receives domain events (ContactCreated, ContactUpdated, ContactBirthdayChanged)
-    and pushes the changes to Immich for all synced accounts.
+    Receives domain events (ContactCreated, ContactUpdated, ContactBirthdayChanged,
+    ContactMerged) and pushes the changes to Immich for all synced accounts.
 
     Args:
         ctx: ARQ-compatible context dictionary with session_factory
@@ -573,6 +668,12 @@ async def process_contact_event(
     job_id = ctx.get("job_id", "unknown")
     set_job_id(job_id)
     set_worker_id(settings.worker_id)
+
+    # ContactMerged carries no contact_id (only survivor/source ids and the
+    # external collisions to reconcile), so it is handled before the
+    # contact_id guard below.
+    if event_type == "ContactMerged":
+        return await _process_contact_merged_event(ctx, event_data)
 
     contact_id = event_data.get("contact_id")
     if not contact_id:
@@ -594,7 +695,7 @@ async def process_contact_event(
 
     async with session_factory() as session:
         # Find all Immich integrations for all users
-        auth_service = ImmichAuthService(settings.encryption_key)
+        auth_service = ImmichAuthService(settings.encryption_key.get_secret_value())
         conn = await session.connection()
 
         event_user_id = event_data.get("user_id")
@@ -619,7 +720,9 @@ async def process_contact_event(
         for user_id in user_ids:
             try:
                 conn = await session.connection()
-                auth_service = ImmichAuthService(settings.encryption_key)
+                auth_service = ImmichAuthService(
+                    settings.encryption_key.get_secret_value()
+                )
                 api_key = await auth_service.get_api_key(user_id, conn)
                 server_url = await auth_service.get_server_url(user_id, conn)
 
@@ -785,50 +888,46 @@ async def periodic_sync_all_immich_accounts(
 # ---------------------------------------------------------------------------
 
 
-def _parse_redis_url(url: str) -> RedisSettings:
-    """Convert a ``redis://`` URL into ARQ ``RedisSettings``."""
-    from urllib.parse import urlparse
+async def _run_stream_consumer(session_factory: Any, worker_settings: Any) -> None:
+    """Adapt the Immich stream consumer to the shared lifecycle factory's shape.
 
-    parsed = urlparse(url)
-    return RedisSettings(
-        host=parsed.hostname or "localhost",
-        port=parsed.port or 6379,
-        database=int(parsed.path.lstrip("/") or 0),
-        password=parsed.password,
+    ``build_worker_lifecycle`` calls ``consumer_factory(session_factory, settings)``;
+    ``run_immich_stream_consumer`` takes ``redis_url``/``stream_name`` keywords, so
+    this thin closure reads them off the worker settings.
+    """
+    from stream_consumer_tasks import run_immich_stream_consumer
+
+    await run_immich_stream_consumer(
+        session_factory=session_factory,
+        redis_url=worker_settings.redis_url,
+        stream_name=worker_settings.stream_name,
     )
 
 
-def _generate_cron_jobs(
-    enable_periodic_sync: bool, sync_interval_hours: int
-) -> list[Any]:
-    if not enable_periodic_sync:
-        return []
-
-    interval = max(1, sync_interval_hours)
-    sync_hours = set(range(0, 24, interval))
-
-    logger.info(
-        "Periodic Immich sync enabled",
-        sync_interval_hours=interval,
-        sync_hours=list(sync_hours),
-    )
-
-    return [
-        cron(
-            periodic_sync_all_immich_accounts,
-            hour=sync_hours,
-            minute=0,  # Run at the top of the hour
-            unique=True,  # Only run once even with multiple workers
-        )
-    ]
+# Shared lifecycle: build the database session factory, launch the stream
+# consumer, and on shutdown cancel/reap it. Immich logs consumer errors in real
+# time (done-callback) and does not close the session factory on shutdown — this
+# matches the pre-migration startup/shutdown behaviour exactly.
+_on_startup, _on_shutdown = build_worker_lifecycle(
+    settings=settings,
+    consumer_factory=_run_stream_consumer,
+    close_session_factory=False,
+    log_consumer_errors=True,
+)
 
 
-class WorkerSettings:
-    """ARQ worker settings for the Immich integration worker."""
+class WorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
+    """ARQ worker settings for the Immich integration worker.
 
-    queue_name = ImmichWorkerSettings.model_fields["queue_name"].default
+    Operational defaults (``job_timeout``, ``keep_result``, retry backoff) come from
+    :class:`core_shared.SharedARQWorkerSettings` and equal arq's own constructor
+    defaults, so they apply unchanged. Only the functions list, consumer wiring,
+    cron schedule, and documented overrides live here.
+    """
 
-    # Task functions — Phase 3 provides placeholder sync tasks
+    queue_name = IMMICH_ARQ_QUEUE_NAME
+
+    # Task functions.
     functions: list[Any] = [
         sync_immich_people,
         sync_immich_people_batch,
@@ -838,20 +937,26 @@ class WorkerSettings:
         process_contact_event,
     ]
 
-    on_startup = startup
-    on_shutdown = shutdown
+    # Worker lifecycle (shared factory). Cast to arq's StartupShutdown Protocol:
+    # the hooks accept ``ctx`` but the shared LifecycleHook alias is a plain
+    # positional Callable, which the Protocol's named-parameter form rejects.
+    on_startup: StartupShutdown = cast("StartupShutdown", _on_startup)
+    on_shutdown: StartupShutdown = cast("StartupShutdown", _on_shutdown)
 
-    # Retry / DLQ configuration
-    max_tries = 5
-    job_timeout = 300
-    keep_result = 3600
+    # Redis settings (shared helper).
+    redis_settings = redis_settings_from_url(settings.redis_url)
+
+    # Documented override:
+    # - health_check_interval=30: arq's ``get_kwargs`` reads only this leaf class's
+    #   attributes, so the inherited shared 30 is invisible and arq would fall back
+    #   to its default of 3600. Redeclaring 30 preserves the pre-migration 30s ping.
     health_check_interval = 30
 
-    redis_settings = _parse_redis_url(settings.redis_url)
-
-    # Periodic sync configuration (cron jobs)
-    cron_jobs: list[Any] = _generate_cron_jobs(
-        settings.enable_periodic_sync, settings.sync_interval_hours
+    # Periodic sync cron (shared helper; empty when periodic sync is disabled).
+    cron_jobs = generate_cron_jobs(
+        periodic_sync_all_immich_accounts,
+        enable_periodic_sync=settings.enable_periodic_sync,
+        sync_interval_hours=settings.sync_interval_hours,
     )
 
 

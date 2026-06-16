@@ -581,23 +581,39 @@ class TestOutboxEventProcessor:
         assert "john.doe@example.com" in upsert_kwargs["error_message"]
 
     @pytest.mark.asyncio
-    async def test_process_contact_updated_contact_not_found(
+    async def test_process_contact_updated_unknown_contact_upserts(
         self,
         processor: OutboxEventProcessor,
         contact_updated_event: OutboxEvent,
         mock_contact_service: AsyncMock,
         mock_connection: AsyncConnection,
+        mock_external_ref_service: AsyncMock,
     ):
-        """Test handling contact.updated when contact doesn't exist."""
-        # Mock contact service to return None (contact not found)
+        """contact.updated for an unknown contact upserts via the create path.
+
+        Google's incremental sync emits ``contact.updated`` for contacts that were
+        added remotely after the initial full sync, so the backend has never seen
+        them. Rather than erroring, the processor falls back to the create path
+        which creates the contact and its external reference.
+        """
+        # No local contact for this external reference triggers the upsert.
         mock_contact_service.find_contact_by_external_reference.return_value = None
+        # No existing external reference and no email match -> create a new contact.
+        mock_external_ref_service.find_by_external_id.return_value = None
+        mock_contact_service.get_contact_by_email.return_value = None
+        created_contact = Contact(id=456, first_name="Johnny", last_name="Doe")
+        mock_contact_service.create_contact.return_value = created_contact
 
-        # Should raise OutboxEventProcessingError
-        with pytest.raises(OutboxEventProcessingError) as exc_info:
-            await processor.process_event(contact_updated_event)
+        result = await processor.process_event(contact_updated_event)
 
-        assert "Contact not found for update" in str(exc_info.value)
-        assert "people/c123456789" in str(exc_info.value)
+        # Delegated to the create path: contact and external reference created.
+        mock_contact_service.create_contact.assert_called_once()
+        mock_external_ref_service.create_external_reference.assert_called_once()
+        mock_contact_service.update_contact.assert_not_called()
+
+        assert result["status"] == "success"
+        assert result["event_type"] == "contact.created"
+        assert result["contact_id"] == 456
 
     @pytest.mark.asyncio
     async def test_process_event_with_invalid_contact_data(

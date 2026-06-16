@@ -657,6 +657,104 @@ redis_settings = redis_settings_from_url(settings.redis_url)
 > Phase 3 migrates `immich`/`snipeit` (converting their bare-`str` secrets to `SecretStr`),
 > deleting the duplicated `_parse_redis_url` copies in the same phase.
 
+#### Shared ARQ Toolkit (`core_shared.worker_arq`)
+
+`core_shared` provides the **standard ARQ worker bootstrap** so operational defaults, cron
+generation, and the `on_startup`/`on_shutdown` lifecycle are defined once instead of
+hand-written (and drifting) per worker. A worker's ARQ `WorkerSettings` then reduces to its
+`functions` list, its consumer registration, and any documented override.
+
+**Operational defaults.** `SharedARQWorkerSettings` carries the canonical ARQ settings as
+class attributes; a worker subclasses it and **overrides a default only by redeclaring that
+attribute, with a documented reason**. The shared backoff `default_retry_delay(retry_count)`
+(exponential with ±20% jitter, capped at 900s) is the default `retry_delay`.
+
+| Attribute | Default constant | Value | Notes |
+|---|---|---|---|
+| `job_timeout` | `DEFAULT_JOB_TIMEOUT` | `300` | Hard cap on a single job's runtime (seconds). |
+| `keep_result` | `DEFAULT_KEEP_RESULT` | `3600` | How long job results are retained. |
+| `max_tries` | `DEFAULT_MAX_TRIES` | `5` | Attempts before a job is dead-lettered. |
+| `health_check_interval` | `DEFAULT_HEALTH_CHECK_INTERVAL` | `30` | Seconds between ARQ health-check writes. |
+| `retry_delay` | `default_retry_delay` | — | Exponential backoff with jitter, capped at 900s. |
+
+**Cron generation.** `generate_cron_jobs(func, *, enable_periodic_sync, sync_interval_hours, minute=0, unique=True)`
+returns the ARQ cron list (empty when disabled), scheduling `func` at the top of every
+`sync_interval_hours`-th hour (e.g. `6` → hours `{0, 6, 12, 18}`; `0` is floored to `1`). It
+replaces `immich._generate_cron_jobs` and the inline google/strava cron blocks.
+
+**Lifecycle factory.** `build_worker_lifecycle(*, settings, consumer_factory, close_session_factory=False, log_consumer_errors=False)`
+returns the `(on_startup, on_shutdown)` pair. `on_startup` creates the DB session factory from
+`settings.database_url`, stores it and `settings` in the ARQ `ctx`, and launches
+`consumer_factory(session_factory, settings)` as the stream-consumer task. `on_shutdown`
+cancels and reaps that task (handling `CancelledError`, and surfacing a crash even for an
+already-completed task) and, when `close_session_factory` is set, disposes the session
+factory's bound engine (releasing the connection pool — an `async_sessionmaker` has no `close`
+of its own). The per-worker variants are folded in as options: `log_consumer_errors` attaches a
+done-callback that logs unhandled consumer exceptions in real time (strava).
+
+```python
+# In a worker's ARQ worker module
+from typing import cast
+
+from arq.typing import StartupShutdown, WorkerSettingsBase
+from core_shared import (
+    SharedARQWorkerSettings,
+    build_worker_lifecycle,
+    generate_cron_jobs,
+    redis_settings_from_url,
+)
+from .immich_settings import ImmichWorkerSettings
+from .stream_consumer_tasks import run_immich_stream_consumer
+
+settings = ImmichWorkerSettings()
+
+
+async def _consumer(session_factory, settings):
+    await run_immich_stream_consumer(
+        session_factory=session_factory,
+        redis_url=settings.redis_url,
+        stream_name=settings.stream_name,
+    )
+
+
+_on_startup, _on_shutdown = build_worker_lifecycle(
+    settings=settings, consumer_factory=_consumer
+)
+
+
+class WorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
+    functions = [sync_immich_people, sync_immich_albums]  # tasks only
+    redis_settings = redis_settings_from_url(settings.redis_url)
+    # cast to arq's StartupShutdown Protocol — the shared LifecycleHook alias is a
+    # positional Callable, which the Protocol's named-`ctx` form rejects.
+    on_startup: StartupShutdown = cast("StartupShutdown", _on_startup)
+    on_shutdown: StartupShutdown = cast("StartupShutdown", _on_shutdown)
+    cron_jobs = generate_cron_jobs(
+        periodic_sync_all_immich_accounts,
+        enable_periodic_sync=settings.enable_periodic_sync,
+        sync_interval_hours=settings.sync_interval_hours,
+    )
+```
+
+The leaf also inherits `arq.typing.WorkerSettingsBase` so `run_worker` accepts it nominally.
+As with `redis_settings_from_url`, `arq` is imported lazily (only `generate_cron_jobs` needs
+it), so `import core_shared` works without `arq` installed.
+
+> **Subtlety — defaults must coincide with arq's, or be redeclared on the leaf.** arq builds the
+> worker via `get_kwargs`, which reads only the **leaf** `WorkerSettings.__dict__` (inherited
+> `SharedARQWorkerSettings` attributes are invisible to it) and falls back to arq's own `Worker`
+> defaults for anything absent. The shared defaults for `job_timeout` (300), `keep_result` (3600)
+> and `max_tries` (5) equal arq's, so inheritance is behaviourally transparent. `health_check_interval`
+> is the exception (shared 30 vs arq 3600): a worker that wants 30 must **redeclare it on the leaf**
+> (e.g. snipeit). google/strava never set it and stay on arq's 3600. Any genuine override
+> (`google` `job_timeout=600`, `strava` `max_tries=20`/`max_jobs=5`, `google` `max_jobs`) is
+> declared on the leaf with a comment.
+
+> **Rollout (iteration 14, ITER14-002).** The toolkit is **additive** in Phase 1 — it lands
+> in `core_shared` behind no runtime path, fully unit-tested. Phase 2 migrates `google`/`strava`
+> onto it and Phase 3 migrates `immich`/`snipeit`, deleting each worker's hand-written
+> startup/shutdown, inline cron, and `_parse_redis_url` in the same phase.
+
 ## Security Considerations
 
 ### Credential Management

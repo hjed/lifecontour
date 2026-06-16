@@ -156,17 +156,26 @@ Migrate the two workers that already use `SecretStr`. `google`'s inline settings
 Migrate the two workers that used bare `str`; convert secrets to `SecretStr` and add the periodic-sync fields `snipeit` lacked (inherited from the base, default disabled — no behaviour change).
 
 **Acceptance Criteria:**
-- [ ] `immich` and `snipeit` settings classes subclass `BaseWorkerSettings`, declaring only integration-specific fields; common/OTel fields removed.
-- [ ] All secrets (`encryption_key`, `database_url`) use `SecretStr`; call sites read `.get_secret_value()` where the raw value is needed.
-- [ ] `snipeit` inherits `enable_periodic_sync`/`sync_interval_hours` (default disabled) — no scheduling behaviour change.
+- [x] `immich` and `snipeit` settings classes subclass `BaseWorkerSettings`, declaring only integration-specific fields; common/OTel fields removed.
+- [x] All secrets (`encryption_key`, `database_url`) use `SecretStr`; call sites read `.get_secret_value()` where the raw value is needed.
+- [x] `snipeit` inherits `enable_periodic_sync`/`sync_interval_hours` (default disabled) — no scheduling behaviour change.
 
 **Required Test Coverage:**
-- **Unit:** settings subclasses load correctly; `SecretStr` masking verified; secret call sites resolve the raw value.
-- **Integration:** both workers boot with a representative `.env` and resolve Redis + DB URLs correctly.
+- [x] **Unit:** settings subclasses load correctly; `SecretStr` masking verified; secret call sites resolve the raw value.
+- [x] **Integration:** both workers boot with a representative `.env` and resolve Redis + DB URLs correctly.
 
 **Required Documentation Updates:**
-- `immich`/`snipeit` `README.md` settings sections updated.
-- `docs/code-quality-standards.md` — record the `SecretStr` requirement for all worker secrets.
+- [x] `immich`/`snipeit` `README.md` settings sections updated.
+- [x] `docs/code-quality-standards.md` — record the `SecretStr` requirement for all worker secrets.
+
+**Progress notes (Phase 3 complete — 2026-06-14, branch `emdash/iter14-001-3-immich-and-snipeit-sync`):**
+
+- `integration_workers/immich/immich_settings.py` and `integration_workers/snipeit/snipeit_settings.py` re-base `ImmichWorkerSettings`/`SnipeItWorkerSettings` onto `BaseWorkerSettings`, keeping only `encryption_key` (now `SecretStr`, default `SecretStr("")` to preserve the prior `str = ""` behaviour) plus the `worker_id`/`queue_name`/`otel_service_name` identity overrides. The duplicated common/OTel fields and the `model_config` block are removed; `from core_shared import BaseWorkerSettings` replaces `pydantic_settings.BaseSettings`.
+- `database_url` is now the base's required `SecretStr`. Call sites read the raw value via `.get_secret_value()`: immich `worker.py` (`create_session_factory(...)` + 6× `ImmichAuthService(...)`) and snipeit `worker.py` (`create_session_factory(...)` + `Fernet(...encode())`). The `ImmichAuthService`/`SnipeItAuthService` constructors keep their `encryption_key: str` signature — only the callers unwrap.
+- `snipeit` now inherits `enable_periodic_sync`/`sync_interval_hours` from the base (default-disabled), so it gains the fields without any scheduling-behaviour change. `redis_url`'s default consolidates from the workers' `redis://localhost:6379` to the base `redis://redis:6379` (deployments always set `REDIS_URL`). The per-worker `_parse_redis_url` helpers are left untouched — their replacement with `redis_settings_from_url` is ITER14-002.
+- Tests: `immich/tests/unit/test_immich_settings.py` (9) + `snipeit/tests/unit/test_snipeit_settings.py` (10) cover subclassing, integration-specific field loading, inherited base defaults (incl. snipeit's newly-inherited periodic-sync fields), identity overrides, `SecretStr` masking, secret call sites resolving the raw value via `.get_secret_value()`, env-var loading, and required-field validation. `immich`/`snipeit` `tests/integration/test_*_settings_integration.py` (2 each) boot each worker from a representative `.env` (asserting `database_url.get_secret_value()` + Redis/DB resolution) and assert each ARQ class's `redis_settings` is self-consistent with the worker's own `_parse_redis_url`. The pre-existing `immich/tests/unit/test_periodic_sync.py` was updated to pass `SecretStr(...)` for `database_url`.
+- Behaviour preservation verified: full `immich` (168 unit / 31 integration) and `snipeit` (162 unit / 14 integration) suites pass. Quality gates green: `ruff check`, `ruff format --check`, `mypy` for both workers.
+- Docs: created `integration_workers/immich/README.md` and `integration_workers/snipeit/README.md` with Configuration/Environment-Variables sections (base-inherited + integration-specific tables), and added the `SecretStr` worker-secret rule to `docs/code-quality-standards.md`.
 
 ---
 
@@ -187,27 +196,67 @@ Migrate the two workers that used bare `str`; convert secrets to `SecretStr` and
 
 #### Phase 1: Shared ARQ toolkit — defaults, cron helper, lifecycle factory (core_shared)
 **PR Size:** ~520 lines (defaults ~40, cron helper ~60, lifecycle factory ~130, tests ~290)
+**Status:** ✅ DONE
 
 Add the shared ARQ surface to `core_shared`, fully unit-tested. Not yet consumed, so it merges green.
 
 **Acceptance Criteria:**
-- [ ] Shared ARQ defaults (`job_timeout`, `keep_result`, `max_tries`, retry/backoff, `health_check_interval`) defined once, with a documented way to override per worker.
-- [ ] A shared cron-generation helper produces ARQ cron jobs from `enable_periodic_sync` + `sync_interval_hours` (and an empty schedule when disabled), reproducing the existing `immich`/`google`/`strava` schedules.
-- [ ] A shared `on_startup`/`on_shutdown` factory builds the DB session factory, stores it and the settings in the ARQ `ctx`, launches a supplied stream-consumer coroutine as a task, and on shutdown cancels it (handling `CancelledError`) and closes the session factory. It folds in the existing variants as options: optional `add_done_callback` error logging (strava) and a `done()` check before cancel.
+- [x] Shared ARQ defaults (`job_timeout`, `keep_result`, `max_tries`, retry/backoff, `health_check_interval`) defined once, with a documented way to override per worker.
+- [x] A shared cron-generation helper produces ARQ cron jobs from `enable_periodic_sync` + `sync_interval_hours` (and an empty schedule when disabled), reproducing the existing `immich`/`google`/`strava` schedules.
+- [x] A shared `on_startup`/`on_shutdown` factory builds the DB session factory, stores it and the settings in the ARQ `ctx`, launches a supplied stream-consumer coroutine as a task, and on shutdown cancels it (handling `CancelledError`) and closes the session factory. It folds in the existing variants as options: optional `add_done_callback` error logging (strava) and a `done()` check before cancel.
 
 **Required Test Coverage:**
-- **Unit:** defaults application + override; cron helper schedules for representative intervals and the disabled case; lifecycle factory wires `ctx` keys, launches and cancels the consumer task, invokes the done-callback option, and closes the session factory on shutdown.
+- [x] **Unit:** defaults application + override; cron helper schedules for representative intervals and the disabled case; lifecycle factory wires `ctx` keys, launches and cancels the consumer task, invokes the done-callback option, and closes the session factory on shutdown.
 
 **Required Documentation Updates:**
-- `docs/architecture/integration-architecture.md` — document the shared ARQ defaults, cron helper, and lifecycle factory as the standard worker bootstrap.
+- [x] `docs/architecture/integration-architecture.md` — document the shared ARQ defaults, cron helper, and lifecycle factory as the standard worker bootstrap.
+
+**Progress notes (Phase 1 complete — 2026-06-14, branch `emdash/iter14-001-1-shared-arq`):**
+
+- New module `core_shared/core_shared/worker_arq.py` provides the three shared surfaces, all
+  exported from `core_shared/__init__.py` (+ `__all__`): `SharedARQWorkerSettings` (defaults base) +
+  `default_retry_delay` and the `DEFAULT_*` constants; `generate_cron_jobs`; `build_worker_lifecycle`
+  (+ the `_log_consumer_task_done` callback ported from strava).
+- **Defaults & override:** `SharedARQWorkerSettings` carries `job_timeout=300`, `keep_result=3600`,
+  `max_tries=5`, `health_check_interval=30`, and `retry_delay=default_retry_delay` (google's
+  exponential-backoff-with-jitter, capped at 900s, ported verbatim) as class attributes. A worker
+  overrides a default by **redeclaring the attribute** (the documented mechanism); P2/P3 will use this
+  for behaviour-preserving overrides (google `job_timeout=600`, strava `max_tries=20`). The base
+  deliberately does **not** inherit arq's `WorkerSettingsBase` so importing it never imports `arq`.
+- **Cron helper:** `generate_cron_jobs(func, *, enable_periodic_sync, sync_interval_hours, minute=0, unique=True)`
+  reproduces the existing schedule (`hour = set(range(0, 24, max(1, interval)))`, top-of-hour,
+  `unique=True`; `[]` when disabled). A parametrised equivalence guard asserts it matches the legacy
+  `immich._generate_cron_jobs` output so P3 can delete that copy safely.
+- **Lifecycle factory:** `build_worker_lifecycle(*, settings, consumer_factory, close_session_factory=False, log_consumer_errors=False)`
+  returns `(on_startup, on_shutdown)`. `on_startup` builds the session factory from
+  `settings.database_url.get_secret_value()`, stores `session_factory`/`settings`/`stream_consumer_task`
+  in `ctx`, and launches `consumer_factory(session_factory, settings)`. `on_shutdown` does a
+  `done()`-checked cancel (handling `CancelledError`, logging other exceptions) and optionally closes
+  the session factory. The worker supplies `consumer_factory` as a closure wrapping its own
+  `run_<worker>_stream_consumer(...)`, absorbing the per-worker arg differences (some pass `stream_name`).
+- As with `redis_settings_from_url`, `arq` is imported lazily (only inside `generate_cron_jobs`); the
+  arq-free `import core_shared` invariant is asserted in the verification step.
+- Tests: `core_shared/tests/test_worker_arq.py` (30 cases) — TDD red→green: `TestSharedARQDefaults`,
+  `TestDefaultRetryDelay`, `TestGenerateCronJobs` (incl. legacy-equivalence guard), and async
+  `TestBuildWorkerLifecycle` (ctx wiring, launch, cancel, done-callback on/off, session-factory
+  close on/off, missing/already-done task), plus the export check.
+- **Test scope:** unit-only, per spec (Required Test Coverage above is **Unit**). Phase 1 is additive
+  `core_shared` library code with no wired-worker/DB/API/UI surface, mirroring ITER14-001 P1.
+  Integration coverage (each worker booting against real Redis/Postgres, running a trivial job, and
+  shutting down cleanly) lands in **ITER14-002 Phase 2/3**; the e2e surface (`IN_PROGRESS` sync in the
+  UI) lands in **ITER14-003 Phase 4**.
+- Quality gates green in `core_shared/`: `ruff check`, `ruff format --check`, `mypy` (80 files),
+  `pytest` (234 passed).
 
 #### Phase 2: Migrate `google` + `strava` onto the shared ARQ toolkit
 **PR Size:** ~360 lines (per-worker rewiring ~160, tests ~200)
 
+**Status:** ✅ Complete (2026-06-15, branch `emdash/iter14-002-2-migrate-arq`).
+
 **Acceptance Criteria:**
-- [ ] `google` and `strava` ARQ `WorkerSettings` use the shared defaults, cron helper, lifecycle factory, and `redis_settings_from_url`; each retains only its `functions` list, consumer registration, and documented overrides (`google` `max_concurrent_jobs`, `strava` `max_tries=20`).
-- [ ] Per-worker `startup`/`shutdown`, inline cron blocks, and any local Redis parsing are deleted.
-- [ ] Startup/shutdown, cron scheduling, and retry behaviour are unchanged.
+- [x] `google` and `strava` ARQ `WorkerSettings` use the shared defaults, cron helper, lifecycle factory, and `redis_settings_from_url`; each retains only its `functions` list, consumer registration, and documented overrides (`google` `max_concurrent_jobs`, `strava` `max_tries=20`).
+- [x] Per-worker `startup`/`shutdown`, inline cron blocks, and any local Redis parsing are deleted.
+- [x] Startup/shutdown, cron scheduling, and retry behaviour are unchanged.
 
 **Required Test Coverage:**
 - **Unit:** each worker's `WorkerSettings` exposes the expected functions/overrides; lifecycle delegates to the shared factory.
@@ -216,13 +265,23 @@ Add the shared ARQ surface to `core_shared`, fully unit-tested. Not yet consumed
 **Required Documentation Updates:**
 - `google`/`strava` `README.md` updated to show the reduced `WorkerSettings`.
 
+**Progress notes (Phase 2 complete — 2026-06-15, branch `emdash/iter14-002-2-migrate-arq`):**
+- `google` and `strava` `WorkerSettings` now subclass `SharedARQWorkerSettings` (plus `arq.typing.WorkerSettingsBase` for `run_worker` typing) and use `build_worker_lifecycle`, `generate_cron_jobs`, and `redis_settings_from_url`. Deleted: each worker's `startup`/`shutdown`, the inline cron blocks, google's `retry_delay_func` (ported byte-for-byte to `core_shared.default_retry_delay`), and strava's `_on_consumer_task_done`.
+- **Lifecycle options:** `google` → `close_session_factory=True` (disposes the engine; its old `hasattr(sf, "close")` cleanup was a no-op since `async_sessionmaker` has no `close`), `log_consumer_errors=False`. `strava` → `close_session_factory=False`, `log_consumer_errors=True` (real-time done-callback).
+- **arq `get_kwargs` reads only the leaf `__dict__`** (inherited shared defaults are invisible to arq; it falls back to arq's own `Worker` defaults). The shared `job_timeout`/`keep_result`/`max_tries` equal arq's defaults, so inheritance is behaviourally transparent. The **one divergence is `health_check_interval`** (shared 30 vs arq 3600): google/strava never declared it and stay on arq's 3600 before and after — behaviour preserved. **Flag for Phase 3:** immich/snipeit currently declare `health_check_interval=30` on the leaf and must keep it declared (snipeit's documented override) — relying on inheritance would silently regress it to 3600. Unit tests assert via `arq.worker.get_kwargs(...)`, not class attributes, to make this visible.
+- **`retry_delay` is not an arq `Worker` parameter** in our arq version (retry timing comes from `Retry(defer=...)`), so it was already an inert attribute; dropping it changes nothing.
+- **strava `max_jobs=5`** is kept as an extra documented override (deviates from arq's default of 10); the AC text only names `max_tries=20`, but dropping `max_jobs` would change concurrency, violating "behaviour unchanged".
+- **Tests:** strava `tests/unit/test_worker.py` (settings via `get_kwargs`, cron + lifecycle delegation; removed `TestOnConsumerTaskDone`); google new `tests/unit/test_worker_settings.py` and redirected `test_retry_strategy.py`/`test_retry_integration.py` to `core_shared.default_retry_delay`; new `tests/integration/test_worker_lifecycle_integration.py` in both workers (start → trivial DB job → clean shutdown against real Redis+Postgres). Local results: strava 166 unit + 19 integration; google 315 unit + 52 integration (1 pre-existing skip); ruff + mypy clean.
+
 #### Phase 3: Migrate `immich` + `snipeit` onto the shared ARQ toolkit
 **PR Size:** ~340 lines (per-worker rewiring ~150, tests ~190)
 
+**Status:** ✅ Complete (2026-06-16, branch `emdash/iter14-002-3-migrate-arq`).
+
 **Acceptance Criteria:**
-- [ ] `immich` and `snipeit` ARQ `WorkerSettings` use the shared defaults, cron helper (immich), lifecycle factory, and `redis_settings_from_url`; each retains only its `functions` list, consumer registration, and documented overrides (`snipeit` `health_check_interval=30`).
-- [ ] The duplicated `_parse_redis_url` (both workers), `immich._generate_cron_jobs`, and per-worker `startup`/`shutdown` are deleted.
-- [ ] Behaviour unchanged; `snipeit` (no cron) continues to schedule nothing.
+- [x] `immich` and `snipeit` ARQ `WorkerSettings` use the shared defaults, cron helper (immich), lifecycle factory, and `redis_settings_from_url`; each retains only its `functions` list, consumer registration, and documented overrides (`health_check_interval=30` on both leaves — see note).
+- [x] The duplicated `_parse_redis_url` (both workers), `immich._generate_cron_jobs`, and per-worker `startup`/`shutdown` are deleted.
+- [x] Behaviour unchanged; `snipeit` (no cron) continues to schedule nothing.
 
 **Required Test Coverage:**
 - **Unit:** `WorkerSettings` functions/overrides; lifecycle delegates to the shared factory; no residual local Redis/cron helpers referenced.
@@ -231,6 +290,15 @@ Add the shared ARQ surface to `core_shared`, fully unit-tested. Not yet consumed
 **Required Documentation Updates:**
 - `immich`/`snipeit` `README.md` updated to show the reduced `WorkerSettings`.
 - `docs/architecture/testing-strategy.md` — note the lifecycle factory's role in worker tests.
+
+**Progress notes (Phase 3 complete — 2026-06-16, branch `emdash/iter14-002-3-migrate-arq`):**
+- `immich` and `snipeit` ARQ `WorkerSettings` now subclass `SharedARQWorkerSettings` (plus `arq.typing.WorkerSettingsBase`) and use `build_worker_lifecycle`, `redis_settings_from_url`, and — for `immich` only — `generate_cron_jobs`. Each worker added a `_run_stream_consumer` adapter that feeds `redis_url`/`stream_name` from settings into its existing `run_*_stream_consumer`. Deleted from both: `_parse_redis_url`, the per-worker `startup`/`shutdown`; deleted from `immich`: `_generate_cron_jobs`.
+- **Lifecycle options (both):** `close_session_factory=False`, `log_consumer_errors=True` — these reproduce the pre-migration startup/shutdown exactly (neither worker disposed the session factory; both logged consumer errors in the shutdown except-branch). Matches `strava`.
+- **`health_check_interval=30` is redeclared on *both* leaves.** As flagged in the Phase 2 notes, arq's `get_kwargs` reads only the leaf `__dict__`, so the inherited shared `30` is invisible and arq would fall back to `3600`. Both workers declared `30` pre-migration, so "behaviour unchanged" requires keeping it declared (unlike google/strava, which never declared it and stay on arq's `3600`). The AC parenthetical named only `snipeit`; `immich` keeps it for the same behaviour-preservation reason.
+- **`snipeit` has no periodic-sync task**, so it declares no `cron_jobs` and schedules nothing (unit test asserts `cron_jobs` is absent from the leaf and arq resolves none). `immich`'s cron schedule is produced by the shared helper; the existing `test_periodic_sync.py` cron-parity cases were redirected from the deleted `_generate_cron_jobs` to `core_shared.generate_cron_jobs` driven by the worker's periodic task, so the {0,6,12,18}/etc. hours are pinned unchanged.
+- **Settings tests** that referenced `worker._parse_redis_url` were repointed to `core_shared.redis_settings_from_url`.
+- **E2E:** not applicable — this is backend worker-infrastructure with no API/UI surface; the spec's Part 2 required coverage is unit + integration only.
+- **Tests / gates (local):** immich 166 unit + 33 integration; snipeit 169 unit + 16 integration; core_shared `test_worker_arq.py` 32 unit; ruff check + ruff format --check + mypy clean for both workers.
 
 ---
 

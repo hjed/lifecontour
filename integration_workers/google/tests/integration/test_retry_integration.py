@@ -108,18 +108,22 @@ class TestARQRetryIntegration:
     @pytest.mark.asyncio
     async def test_worker_settings_configuration(self):
         """Test that the worker settings are correctly configured."""
-        from worker import GoogleWorkerSettings, retry_delay_func
+        from core_shared import default_retry_delay
 
-        # Verify worker settings
+        from worker import GoogleWorkerSettings
+
+        # Verify worker settings. max_tries (5) and retry_delay come from the
+        # shared SharedARQWorkerSettings base via inheritance; job_timeout/queue
+        # are leaf overrides.
         assert GoogleWorkerSettings.max_tries == 5
-        assert GoogleWorkerSettings.retry_delay == retry_delay_func
+        assert GoogleWorkerSettings.retry_delay == default_retry_delay
         assert GoogleWorkerSettings.job_timeout == 600
         assert GoogleWorkerSettings.queue_name == "google"
 
     @pytest.mark.asyncio
     async def test_retry_delay_exponential_backoff(self):
         """Test that retry delays follow exponential backoff pattern."""
-        from worker import retry_delay_func
+        from core_shared import default_retry_delay as retry_delay_func
 
         # Test multiple retry attempts - collect many samples to verify average behavior
         num_samples = 100

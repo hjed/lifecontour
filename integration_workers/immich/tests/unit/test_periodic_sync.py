@@ -15,6 +15,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from pydantic import SecretStr
 
 
 @pytest.fixture(autouse=True)
@@ -74,14 +75,18 @@ class TestPeriodicSyncSettings:
         """Periodic sync is disabled by default."""
         from immich_settings import ImmichWorkerSettings
 
-        settings = ImmichWorkerSettings(database_url="postgresql://test/test")
+        settings = ImmichWorkerSettings(
+            database_url=SecretStr("postgresql://test/test")
+        )
         assert settings.enable_periodic_sync is False
 
     def test_sync_interval_hours_default(self) -> None:
         """Sync interval defaults to 6 hours."""
         from immich_settings import ImmichWorkerSettings
 
-        settings = ImmichWorkerSettings(database_url="postgresql://test/test")
+        settings = ImmichWorkerSettings(
+            database_url=SecretStr("postgresql://test/test")
+        )
         assert settings.sync_interval_hours == 6
 
 
@@ -266,12 +271,24 @@ class TestSyncImmichPeople:
 
 
 class TestPeriodicSyncConfiguration:
-    """Test cron schedule generation for periodic sync."""
+    """Test cron schedule generation for periodic sync.
+
+    Cron generation now lives in the shared ``core_shared.generate_cron_jobs``
+    helper (exhaustively covered in ``core_shared``'s own tests). These cases pin
+    the Immich worker's effective schedule by driving the shared helper with the
+    worker's periodic task, guaranteeing the migration preserves the prior hours.
+    """
 
     def _get_cron_hours(self, interval: int) -> set[int]:
-        from worker import _generate_cron_jobs
+        from core_shared import generate_cron_jobs
 
-        cron_jobs = _generate_cron_jobs(True, interval)
+        from worker import periodic_sync_all_immich_accounts
+
+        cron_jobs = generate_cron_jobs(
+            periodic_sync_all_immich_accounts,
+            enable_periodic_sync=True,
+            sync_interval_hours=interval,
+        )
         if not cron_jobs:
             return set()
         return cron_jobs[0].hour  # type: ignore
