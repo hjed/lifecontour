@@ -137,13 +137,24 @@ test.describe('Contact Relationships', () => {
       .locator('.space-y-2')
       .filter({ hasText: 'Relationship Type' })
       .getByRole('combobox');
-    await typeTrigger.click();
-    const option = page
-      .getByRole('listbox')
-      .getByRole('option', { name: 'Friend', exact: true });
-    await expect(option).toBeVisible();
-    // Use force: true to bypass Playwright mobile bounding box bug on Radix Select portals
-    await option.click({ force: true });
+    // Select the relationship type via keyboard typeahead rather than clicking
+    // the option. On mobile, clicking the portaled Radix Select item is
+    // unreliable — Playwright mis-computes the option's bounding box, so even
+    // force-clicks miss it and the value never commits (leaving the submit
+    // button disabled). Typing matches by text and avoids coordinates entirely.
+    // Wrap in toPass() to absorb a dropped keystroke while the dropdown is still
+    // opening, retrying until the trigger reflects the chosen value.
+    await expect(async () => {
+      // Close any stale/half-open dropdown from a prior attempt, then open fresh.
+      await page.keyboard.press('Escape');
+      await typeTrigger.click();
+      await expect(page.getByRole('listbox')).toBeVisible();
+      await page.keyboard.type('Friend', { delay: 50 });
+      await page.keyboard.press('Enter');
+      // Confirm the value committed. Short timeout so a dropped keystroke
+      // retries instead of consuming the global 15s expect budget on one pass.
+      await expect(typeTrigger).toContainText('Friend', { timeout: 3000 });
+    }).toPass({ timeout: 15000 });
 
     // Submit
     const addButton = formContainer.getByRole('button', {
@@ -151,24 +162,26 @@ test.describe('Contact Relationships', () => {
     });
     await expect(addButton).toBeEnabled();
 
-    // Wait for the API response
-    const responsePromise = page.waitForResponse(
+    // Register both response waiters BEFORE clicking. The successful POST
+    // triggers a React Query cache invalidation that refetches the contact via
+    // GET; if that GET listener is only registered after awaiting the POST, the
+    // refetch can fire first and the wait times out (the chromium flake). Start
+    // listening up front so neither response can be missed.
+    const postResponse = page.waitForResponse(
       resp =>
         resp.url().includes('/relationships') &&
         resp.request().method() === 'POST' &&
         resp.ok()
     );
-    await addButton.click();
-    await responsePromise;
-
-    // Now wait for the React Query cache invalidation refetch
-    const getResponsePromise = page.waitForResponse(
+    const getResponse = page.waitForResponse(
       resp =>
         resp.url().includes('/api/contacts/') &&
         resp.request().method() === 'GET' &&
         resp.ok()
     );
-    await getResponsePromise;
+    await addButton.click();
+    await postResponse;
+    await getResponse;
 
     // Wait for the relationship to appear in the list with "You" label
     await expect(page.getByTestId('relationship-user-target')).toBeVisible({
