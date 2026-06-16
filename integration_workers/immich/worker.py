@@ -553,14 +553,148 @@ async def sync_immich_album_batch(
         raise
 
 
+async def _unlink_immich_reference_for_event(
+    session: Any,
+    external_id: str,
+    contact_id: int | None,
+) -> dict[str, Any]:
+    """Unlink an orphaned Immich link locally, triggered by a domain event.
+
+    Immich exposes no person-delete, so reconciling a same-service merge clash
+    means removing the source contact's local ``external_references`` row and
+    its ``sync_metadata`` (keyed by the source's remote person id) — never a
+    remote call. Idempotent: deleting zero rows (the link was already cleaned
+    inline by the merge) is success.
+
+    The reference delete is scoped to the source contact's internal entity as
+    well as the remote person id, so a row owned by a different contact that
+    (pathologically) shares the same external person id is never collaterally
+    unlinked.
+
+    Args:
+        session: Database session
+        external_id: Immich person id of the orphaned source link
+        contact_id: Internal id of the source contact whose link is unlinked
+
+    Returns:
+        Result dict with status
+    """
+    from sqlalchemy import text
+
+    await session.execute(
+        text("""
+            DELETE FROM sync_metadata
+            WHERE integration_source = :integration_source
+              AND external_id = :external_id
+        """),
+        {"integration_source": "immich", "external_id": external_id},
+    )
+    await session.execute(
+        text("""
+            DELETE FROM external_references
+            WHERE external_system = :external_system
+              AND external_entity_type = 'person'
+              AND external_entity_id = :external_id
+              AND internal_entity_type = 'contact'
+              AND internal_entity_id = :contact_id
+        """),
+        {
+            "external_system": "immich",
+            "external_id": external_id,
+            "contact_id": contact_id,
+        },
+    )
+
+    logger.info(
+        "Unlinked orphaned Immich reference via event",
+        contact_id=contact_id,
+        external_id=external_id,
+    )
+    return {"status": "unlinked", "external_id": external_id}
+
+
+async def _process_contact_merged_event(
+    ctx: dict[str, Any], event_data: dict[str, Any]
+) -> dict[str, Any]:
+    """Reconcile a contact merge with Immich.
+
+    The merge already re-pointed the survivor's external links and deleted the
+    source contact's *local* ``external_references`` / ``sync_metadata`` inline.
+    A same-service clash — both contacts linked to Immich — is surfaced on
+    ``event_data["external_collisions"]``; each entry carries the source
+    contact's orphaned remote id (``source_external_id``).
+
+    Because the Immich API exposes no person-delete, this keeps the survivor's
+    link and unlinks the source's orphaned local reference (and any residual
+    sync metadata) without any remote call. The survivor's Immich person is
+    reconciled separately by the ``ContactUpdated`` event the merge also emits,
+    so it is intentionally not re-pushed here.
+
+    Args:
+        ctx: ARQ-compatible context dictionary with session_factory
+        event_data: The ``ContactMerged`` payload (survivor/source ids +
+            ``external_collisions``)
+
+    Returns:
+        Task result dictionary with reconciliation status
+    """
+    source_contact_id = event_data.get("source_contact_id")
+    collisions = event_data.get("external_collisions") or []
+
+    # Validate each collision rather than indexing it: a malformed entry must
+    # be skipped (and logged), never raise, so the event is still acknowledged
+    # and never dead-letters. Only person references can be unlinked here.
+    source_external_ids: list[str] = []
+    for collision in collisions:
+        if collision.get("external_system") != "immich":
+            continue
+        if collision.get("external_entity_type") != "person":
+            logger.warning(
+                "Skipping Immich collision with unexpected entity type",
+                source_contact_id=source_contact_id,
+                external_entity_type=collision.get("external_entity_type"),
+            )
+            continue
+        source_external_id = collision.get("source_external_id")
+        if not source_external_id:
+            logger.warning(
+                "Skipping malformed Immich collision missing source_external_id",
+                source_contact_id=source_contact_id,
+            )
+            continue
+        source_external_ids.append(source_external_id)
+
+    if not source_external_ids:
+        logger.info(
+            "ContactMerged has no Immich collisions, skipping",
+            source_contact_id=source_contact_id,
+        )
+        return {"status": "skipped", "reason": "no_immich_collisions"}
+
+    session_factory = ctx["session_factory"]
+
+    async with session_factory() as session:
+        results = []
+        for source_external_id in source_external_ids:
+            result = await _unlink_immich_reference_for_event(
+                session=session,
+                external_id=source_external_id,
+                contact_id=source_contact_id,
+            )
+            results.append(result)
+        await session.commit()
+
+    return {"status": "success", "results": results}
+
+
 @trace_arq_job
 async def process_contact_event(
     ctx: dict[str, Any], event_type: str, event_data: dict[str, Any]
 ) -> dict[str, Any]:
     """Process a single contact event for Immich outbound sync.
 
-    Receives domain events (ContactCreated, ContactUpdated, ContactBirthdayChanged)
-    and pushes the changes to Immich for all synced accounts.
+    Receives domain events (ContactCreated, ContactUpdated, ContactBirthdayChanged,
+    ContactMerged) and pushes the changes to Immich for all synced accounts.
 
     Args:
         ctx: ARQ-compatible context dictionary with session_factory
@@ -573,6 +707,12 @@ async def process_contact_event(
     job_id = ctx.get("job_id", "unknown")
     set_job_id(job_id)
     set_worker_id(settings.worker_id)
+
+    # ContactMerged carries no contact_id (only survivor/source ids and the
+    # external collisions to reconcile), so it is handled before the
+    # contact_id guard below.
+    if event_type == "ContactMerged":
+        return await _process_contact_merged_event(ctx, event_data)
 
     contact_id = event_data.get("contact_id")
     if not contact_id:

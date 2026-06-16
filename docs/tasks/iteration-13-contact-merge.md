@@ -386,8 +386,15 @@ Stop the merge from orphaning links: re-point the source's `external_references`
 **PR Size:** ~190 lines (handler ~60, wiring ~10, tests ~120)
 
 **Acceptance Criteria:**
-- [ ] `ContactMerged` is added to the Immich worker's subscribed event types.
-- [ ] Because the Immich API exposes no person delete, the handler keeps the survivor's link and unlinks the source's orphaned reference (and cleans its `sync_metadata`); it must not attempt a remote delete and must not dead-letter on the event.
+- [x] `ContactMerged` is added to the Immich worker's subscribed event types.
+- [x] Because the Immich API exposes no person delete, the handler keeps the survivor's link and unlinks the source's orphaned reference (and cleans its `sync_metadata`); it must not attempt a remote delete and must not dead-letter on the event.
 
 **Required Test Coverage:**
-- [ ] **Integration (worker):** same-service merge unlinks the source reference and leaves the survivor's Immich link intact; the event is acknowledged without error.
+- [x] **Integration (worker):** same-service merge unlinks the source reference and leaves the survivor's Immich link intact; the event is acknowledged without error.
+
+**Delivered tests:**
+- Unit (handler): `integration_workers/immich/tests/unit/test_process_contact_merged.py::TestProcessContactMerged` — immich collision unlinks via `_unlink_immich_reference_for_event`; different-service/empty collisions skip with `no_immich_collisions`; `ContactMerged` (no `contact_id`) never hits the missing-id error path; asserts **no Immich API client is constructed** (no remote delete).
+- Unit (wiring): `integration_workers/immich/tests/unit/test_stream_consumer.py` — `ContactMerged` added to `_event_type_patterns`; `test_handle_contact_merged_event` routes the raw payload (no injected `contact_id`) to `process_contact_event`.
+- Integration (worker): `integration_workers/immich/tests/integration/test_contact_merged_reconciliation_integration.py` — same-service merge unlinks the source's `external_references` + `sync_metadata` and preserves the survivor's link; a Google-only collision leaves Immich untouched; the post-Phase-1 already-unlinked state still acknowledges successfully (no dead-letter).
+
+**Status:** ✅ DONE — `ContactMerged` subscribed + routed in `stream_consumer_tasks.py`; `_process_contact_merged_event` + `_unlink_immich_reference_for_event` (local-only unlink, no remote call) in `worker.py`. All worker quality gates green locally (`ruff check`, `ruff format`, `mypy`; 173 unit + 34 integration tests pass, incl. 4 new unit + 3 new integration). No E2E this phase — worker-only with no UI/API surface, consistent with the Phase 1/2 precedent.

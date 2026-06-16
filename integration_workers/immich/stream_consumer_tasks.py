@@ -19,11 +19,14 @@ from core_shared.stream_consumer import StreamConsumer
 logger = structlog.get_logger(__name__)
 
 # Event types this consumer is interested in.
-# Phase 2: subscribe but only log. Phase 3+ will add real handlers.
+# ``ContactMerged`` reconciles a same-service merge collision: because Immich
+# exposes no person-delete, the worker unlinks the source's orphaned local
+# reference rather than deleting a remote record.
 _IMMICH_EVENT_TYPES: list[str] = [
     "ContactCreated",
     "ContactUpdated",
     "ContactBirthdayChanged",
+    "ContactMerged",
 ]
 
 
@@ -93,6 +96,14 @@ class ImmichWorkerStreamConsumer(StreamConsumer):
             # Create a shallow copy to avoid mutating the original event data
             event_data = dict(event.event_data) if event.event_data else {}
             event_data["contact_id"] = event.aggregate_id
+            await process_contact_event(ctx, event.event_type, event_data)
+        elif event.event_type == "ContactMerged":
+            from worker import process_contact_event
+
+            # ContactMerged carries no single contact_id — it reconciles a
+            # survivor/source pair via ``external_collisions`` — so the raw
+            # payload is forwarded unchanged for the handler's early dispatch.
+            event_data = dict(event.event_data) if event.event_data else {}
             await process_contact_event(ctx, event.event_type, event_data)
 
 
