@@ -294,6 +294,39 @@ CREATE TABLE contact_interactions (
 );
 ```
 
+#### Sync Jobs — Fan-Out Hierarchy (ITER14-003)
+
+The `sync_jobs` table tracks integration sync-job history. To support **non-blocking
+fan-outs** (orchestrator jobs that dispatch child batch jobs and return immediately
+instead of blocking on `asyncio.gather`), the table carries a parent↔child hierarchy
+and an additional status. Model: `core_shared/core_shared/models/sync_job.py`;
+repository: `core_shared/core_shared/repositories/sync_job_repository.py`.
+
+**`status` value `in_progress`** — added to the `ck_sync_jobs_status` check
+constraint (alongside `queued`, `running`, `completed`, `failed`, `cancelled`). It
+marks a parent (orchestrator) job whose children have been **dispatched and are still
+running**. It is distinct from `running` (a job actively executing on a worker):
+`in_progress` specifically means "fan-out dispatched, awaiting children". A parent is
+finalised to `completed`/`failed` by the periodic reconciliation job (ITER14-003
+Phase 2).
+
+**Hierarchy columns on `sync_jobs`:**
+
+| Column | Type | Notes |
+|---|---|---|
+| `parent_job_id` | `VARCHAR(255)` NULL | Self-referencing FK → `sync_jobs.job_id` (`ON DELETE CASCADE`), indexed. Links a child batch job to its orchestrator; `NULL` for top-level jobs. |
+| `expected_children` | `INTEGER NOT NULL DEFAULT 0` | Number of child jobs the orchestrator dispatched. |
+| `completed_children` | `INTEGER NOT NULL DEFAULT 0` | Children that completed successfully; incremented atomically (`SET completed_children = completed_children + 1`). |
+| `failed_children` | `INTEGER NOT NULL DEFAULT 0` | Children that failed; incremented atomically. |
+
+The counters are a **fast path** only — reconciliation aggregates the actual child
+rows (`SyncJobRepository.aggregate_children`) as the authoritative completion check,
+so a missed counter increment cannot strand a parent. Children are persisted as their
+own `sync_jobs` rows (replacing the previous synthetic, non-persisted batch IDs).
+
+Migration: `backend/app/migrations/versions/0088_add_sync_job_fanout_hierarchy.py`
+(additive; existing rows backfill counters to `0` and keep `parent_job_id` NULL).
+
 ## MeiliSearch Integration
 
 ### Search Engine Architecture

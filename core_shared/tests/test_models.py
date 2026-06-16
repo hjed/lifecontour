@@ -13,6 +13,8 @@ from core_shared.models import (
     ExternalEventLinkSyncStatus,
     ExternalReference,
     JournalExternalEventLink,
+    SyncJob,
+    SyncJobStatus,
     SyncMetadata,
     SyncStatus,
 )
@@ -27,6 +29,59 @@ class TestSyncStatus:
         assert SyncStatus.FAILED.value == "failed"
         assert SyncStatus.IN_PROGRESS.value == "in_progress"
         assert SyncStatus.PENDING.value == "pending"
+
+
+class TestSyncJobStatus:
+    """Test SyncJobStatus enum."""
+
+    def test_existing_status_values_unchanged(self) -> None:
+        """The pre-existing sync job statuses retain their values."""
+        assert SyncJobStatus.QUEUED.value == "queued"
+        assert SyncJobStatus.RUNNING.value == "running"
+        assert SyncJobStatus.COMPLETED.value == "completed"
+        assert SyncJobStatus.FAILED.value == "failed"
+        assert SyncJobStatus.CANCELLED.value == "cancelled"
+
+    def test_in_progress_status_added(self) -> None:
+        """SyncJobStatus gains IN_PROGRESS for dispatched-but-awaiting parents."""
+        assert SyncJobStatus.IN_PROGRESS.value == "in_progress"
+
+    def test_status_value_set_is_complete(self) -> None:
+        """IN_PROGRESS is additive: the full value set is as expected."""
+        assert {s.value for s in SyncJobStatus} == {
+            "queued",
+            "running",
+            "in_progress",
+            "completed",
+            "failed",
+            "cancelled",
+        }
+
+
+class TestSyncJobHierarchyColumns:
+    """Test the SyncJob fan-out hierarchy columns."""
+
+    def test_sync_job_accepts_parent_and_counter_fields(self) -> None:
+        """SyncJob can be instantiated with parent link and child counters."""
+        now = datetime.now(UTC)
+        job = SyncJob(
+            job_id="child-1",
+            user_id="user-1",
+            integration_source="immich",
+            sync_type="full",
+            status=SyncJobStatus.QUEUED.value,
+            parent_job_id="parent-1",
+            expected_children=0,
+            completed_children=0,
+            failed_children=0,
+            created_at=now,
+            updated_at=now,
+        )
+
+        assert job.parent_job_id == "parent-1"
+        assert job.expected_children == 0
+        assert job.completed_children == 0
+        assert job.failed_children == 0
 
 
 class TestExternalEventLinkEnums:

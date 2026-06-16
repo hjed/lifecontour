@@ -13,6 +13,16 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from core_shared.models.sync_job import SyncJob
 
+# Full sync_jobs column list (static identifiers) reused across SELECT/RETURNING
+# clauses so every query stays in sync as the schema grows.
+_SYNC_JOB_COLUMNS = (
+    "id, job_id, user_id, integration_source, sync_type, status, "
+    "created_at, started_at, completed_at, error_message, "
+    "contacts_processed, contacts_created, contacts_updated, "
+    "contacts_deleted, progress, updated_at, "
+    "parent_job_id, expected_children, completed_children, failed_children"
+)
+
 
 class SyncJobRepository:
     """Repository for managing sync job records."""
@@ -33,6 +43,7 @@ class SyncJobRepository:
         integration_source: str,
         sync_type: str,
         status: str = "queued",
+        parent_job_id: str | None = None,
     ) -> SyncJob:
         """
         Create a new sync job record.
@@ -43,23 +54,22 @@ class SyncJobRepository:
             integration_source: Integration source (e.g., 'google')
             sync_type: Type of sync ('smart' or 'full')
             status: Initial status (default: 'queued')
+            parent_job_id: Orchestrator job_id this job is a child of, or None for
+                top-level jobs (links a child batch job to its parent)
 
         Returns:
             Created SyncJob
         """
         now = datetime.now(UTC)
 
-        query = text("""
+        query = text(f"""
             INSERT INTO sync_jobs
                 (job_id, user_id, integration_source, sync_type, status,
-                 created_at, updated_at)
+                 parent_job_id, created_at, updated_at)
             VALUES
                 (:job_id, :user_id, :integration_source, :sync_type, :status,
-                 :created_at, :updated_at)
-            RETURNING id, job_id, user_id, integration_source, sync_type, status,
-                      created_at, started_at, completed_at, error_message,
-                      contacts_processed, contacts_created, contacts_updated,
-                      contacts_deleted, progress, updated_at
+                 :parent_job_id, :created_at, :updated_at)
+            RETURNING {_SYNC_JOB_COLUMNS}
         """)
 
         result = await self.conn.execute(
@@ -70,6 +80,7 @@ class SyncJobRepository:
                 "integration_source": integration_source,
                 "sync_type": sync_type,
                 "status": status,
+                "parent_job_id": parent_job_id,
                 "created_at": now,
                 "updated_at": now,
             },
@@ -157,10 +168,7 @@ class SyncJobRepository:
             "UPDATE sync_jobs "
             "SET " + set_clause + " "
             "WHERE job_id = :job_id "
-            "RETURNING id, job_id, user_id, integration_source, sync_type, status, "
-            "created_at, started_at, completed_at, error_message, "
-            "contacts_processed, contacts_created, contacts_updated, "
-            "contacts_deleted, progress, updated_at"
+            "RETURNING " + _SYNC_JOB_COLUMNS
         )
         query = text(sql)
 
@@ -182,11 +190,8 @@ class SyncJobRepository:
         Returns:
             SyncJob or None if not found
         """
-        query = text("""
-            SELECT id, job_id, user_id, integration_source, sync_type, status,
-                   created_at, started_at, completed_at, error_message,
-                   contacts_processed, contacts_created, contacts_updated,
-                   contacts_deleted, progress, updated_at
+        query = text(f"""
+            SELECT {_SYNC_JOB_COLUMNS}
             FROM sync_jobs
             WHERE job_id = :job_id
         """)
@@ -266,11 +271,8 @@ class SyncJobRepository:
         total = count_result.scalar() or 0
 
         # Get paginated results
-        query_sql = """
-            SELECT id, job_id, user_id, integration_source, sync_type, status,
-                   created_at, started_at, completed_at, error_message,
-                   contacts_processed, contacts_created, contacts_updated,
-                   contacts_deleted, progress, updated_at
+        query_sql = f"""
+            SELECT {_SYNC_JOB_COLUMNS}
             FROM sync_jobs
         """
         if where_clause:
@@ -319,10 +321,7 @@ class SyncJobRepository:
         where_clause = " AND ".join(where_clauses)
 
         query_sql = f"""
-            SELECT id, job_id, user_id, integration_source, sync_type, status,
-                   created_at, started_at, completed_at, error_message,
-                   contacts_processed, contacts_created, contacts_updated,
-                   contacts_deleted, progress, updated_at
+            SELECT {_SYNC_JOB_COLUMNS}
             FROM sync_jobs
             WHERE {where_clause}
             ORDER BY created_at DESC
@@ -405,6 +404,132 @@ class SyncJobRepository:
             "retry_count": 0,
         }
 
+    async def set_expected_children(
+        self, job_id: str, expected_children: int
+    ) -> SyncJob | None:
+        """
+        Set the expected child count on a parent (orchestrator) job.
+
+        Args:
+            job_id: Parent orchestrator job ID
+            expected_children: Number of child jobs dispatched
+
+        Returns:
+            Updated SyncJob or None if the parent was not found
+        """
+        now = datetime.now(UTC)
+        query = text(
+            "UPDATE sync_jobs "
+            "SET expected_children = :expected_children, updated_at = :updated_at "
+            "WHERE job_id = :job_id "
+            "RETURNING " + _SYNC_JOB_COLUMNS
+        )
+
+        result = await self.conn.execute(
+            query,
+            {
+                "job_id": job_id,
+                "expected_children": expected_children,
+                "updated_at": now,
+            },
+        )
+        row = result.fetchone()
+
+        if not row:
+            return None
+
+        return self._row_to_sync_job(row)
+
+    async def increment_completed_children(self, parent_job_id: str) -> None:
+        """Atomically increment a parent's completed-children counter."""
+        await self._increment_child_counter(parent_job_id, "completed_children")
+
+    async def increment_failed_children(self, parent_job_id: str) -> None:
+        """Atomically increment a parent's failed-children counter."""
+        await self._increment_child_counter(parent_job_id, "failed_children")
+
+    async def _increment_child_counter(self, parent_job_id: str, column: str) -> None:
+        """
+        Atomically increment a child counter on the parent row.
+
+        The increment is performed entirely in SQL (``col = col + 1``) so it is
+        safe under concurrent batch-job completions. ``column`` is restricted to a
+        known set of identifiers, so it cannot be used for SQL injection.
+
+        Args:
+            parent_job_id: Parent orchestrator job ID
+            column: Counter column to increment
+        """
+        allowed = {"completed_children", "failed_children"}
+        if column not in allowed:
+            raise ValueError(f"Invalid counter column: {column}")
+
+        query = text(
+            f"UPDATE sync_jobs "
+            f"SET {column} = {column} + 1, updated_at = :updated_at "
+            f"WHERE job_id = :parent_job_id"
+        )
+        await self.conn.execute(
+            query,
+            {"parent_job_id": parent_job_id, "updated_at": datetime.now(UTC)},
+        )
+
+    async def list_children(self, parent_job_id: str) -> list[SyncJob]:
+        """
+        List all child jobs linked to a parent orchestrator job.
+
+        Args:
+            parent_job_id: Parent orchestrator job ID
+
+        Returns:
+            List of child SyncJobs (oldest first)
+        """
+        query = text(f"""
+            SELECT {_SYNC_JOB_COLUMNS}
+            FROM sync_jobs
+            WHERE parent_job_id = :parent_job_id
+            ORDER BY created_at ASC
+        """)
+
+        result = await self.conn.execute(query, {"parent_job_id": parent_job_id})
+        rows = result.fetchall()
+
+        return [self._row_to_sync_job(row) for row in rows]
+
+    async def aggregate_children(self, parent_job_id: str) -> dict[str, int]:
+        """
+        Aggregate child-job statuses for a parent (authoritative completion check).
+
+        Child rows are the source of truth for parent completion; the counter
+        columns are only a fast path.
+
+        Args:
+            parent_job_id: Parent orchestrator job ID
+
+        Returns:
+            Dict with ``total``, ``completed`` and ``failed`` child counts
+        """
+        query = text("""
+            SELECT
+                COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE status = 'completed') AS completed,
+                COUNT(*) FILTER (WHERE status = 'failed') AS failed
+            FROM sync_jobs
+            WHERE parent_job_id = :parent_job_id
+        """)
+
+        result = await self.conn.execute(query, {"parent_job_id": parent_job_id})
+        row = result.fetchone()
+
+        if not row:
+            return {"total": 0, "completed": 0, "failed": 0}
+
+        return {
+            "total": row.total or 0,
+            "completed": row.completed or 0,
+            "failed": row.failed or 0,
+        }
+
     def _row_to_sync_job(self, row: Any) -> SyncJob:
         """Convert a database row to a SyncJob object."""
         return SyncJob(
@@ -424,4 +549,8 @@ class SyncJobRepository:
             contacts_deleted=row.contacts_deleted,
             progress=row.progress,
             updated_at=row.updated_at,
+            parent_job_id=row.parent_job_id,
+            expected_children=row.expected_children,
+            completed_children=row.completed_children,
+            failed_children=row.failed_children,
         )

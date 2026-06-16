@@ -320,20 +320,32 @@ Add the shared ARQ surface to `core_shared`, fully unit-tested. Not yet consumed
 #### Phase 1: Schema, model, migration & repository hierarchy support
 **PR Size:** ~520 lines (model ~40, migration ~70, repository ~150, tests ~260)
 
+**Status:** ✅ DONE
+
 Net-new data layer, additive and not yet driven by orchestrators, so it merges green under test.
 
 **Acceptance Criteria:**
-- [ ] `SyncJobStatus` gains `IN_PROGRESS`; the `ck_sync_jobs_status` check constraint is extended (existing statuses unchanged).
-- [ ] `sync_jobs` gains `parent_job_id` (self-referencing FK, nullable) and `expected_children`, `completed_children`, `failed_children` (default 0).
-- [ ] An Alembic migration adds the status value, columns, and constraint change, created per the `creating-migrations` skill (sequential numbering); it applies and rolls back cleanly.
-- [ ] `SyncJobRepository` gains methods to: create a child linked to a parent, set a parent's `expected_children`, atomically increment `completed_children`/`failed_children`, and list/aggregate children by parent.
+- [x] `SyncJobStatus` gains `IN_PROGRESS`; the `ck_sync_jobs_status` check constraint is extended (existing statuses unchanged).
+- [x] `sync_jobs` gains `parent_job_id` (self-referencing FK, nullable) and `expected_children`, `completed_children`, `failed_children` (default 0).
+- [x] An Alembic migration adds the status value, columns, and constraint change, created per the `creating-migrations` skill (sequential numbering); it applies and rolls back cleanly.
+- [x] `SyncJobRepository` gains methods to: create a child linked to a parent, set a parent's `expected_children`, atomically increment `completed_children`/`failed_children`, and list/aggregate children by parent.
 
 **Required Test Coverage:**
-- **Unit:** status enum + constraint include `IN_PROGRESS`; repository counter increments are correct.
-- **Integration:** create parent + children, increment counters atomically under concurrency, query children by parent; migration up/down verified with `async_connection`/`clean_database`.
+- [x] **Unit:** status enum + constraint include `IN_PROGRESS`; repository counter increments are correct.
+- [x] **Integration:** create parent + children, increment counters atomically under concurrency, query children by parent; migration up/down verified with `async_connection`/`clean_database`.
 
 **Required Documentation Updates:**
-- `docs/architecture/database-design.md` — document the new `sync_jobs` columns and the `IN_PROGRESS` status value.
+- [x] `docs/architecture/database-design.md` — document the new `sync_jobs` columns and the `IN_PROGRESS` status value.
+
+**Progress notes (Phase 1 complete — 2026-06-16, branch `emdash/iter14-003-fanout-schema`):**
+
+- `core_shared/core_shared/models/sync_job.py`: `SyncJobStatus` gains `IN_PROGRESS = "in_progress"` (inserted after `RUNNING`; all other members unchanged). `SyncJob` gains `parent_job_id` (self-`ForeignKey("sync_jobs.job_id", ondelete="CASCADE")`, nullable, indexed) and `expected_children`/`completed_children`/`failed_children` (`Integer`, NOT NULL, `server_default="0"`). `ck_sync_jobs_status` extended to include `in_progress`.
+- **`parent_job_id` references `job_id`, not the int PK** — orchestrators already hold their own ARQ `job_id` from the context and children carry the parent's `job_id`, so linking needs no extra `id` lookup, and the column name matches the natural key (`job_id` is unique, so it is a valid FK target).
+- Migration `backend/app/migrations/versions/0088_add_sync_job_fanout_hierarchy.py` (revises `0087`): adds the four columns + `ix_sync_jobs_parent_job_id` index + `fk_sync_jobs_parent_job_id` self-FK, then swaps `ck_sync_jobs_status`. `downgrade` demotes any `in_progress` rows to `failed` before tightening the constraint, then drops the FK/index/columns. Round-trip (upgrade→head, downgrade→0087) verified green against a throwaway DB.
+- `SyncJobRepository`: `create()` gains an optional `parent_job_id` (default `None`, backward-compatible). New methods `set_expected_children`, `increment_completed_children`/`increment_failed_children` (single-statement atomic `SET col = col + 1` via a whitelisted private `_increment_child_counter`), `list_children`, and `aggregate_children` (status counts via `COUNT(*) FILTER`, authoritative over the counters). All `SELECT`/`RETURNING` clauses and `_row_to_sync_job` were refactored onto a shared `_SYNC_JOB_COLUMNS` constant so the four new columns surface everywhere.
+- **Tests:** unit `core_shared/tests/test_models.py` (enum + hierarchy columns) and `core_shared/tests/unit/repositories/test_sync_job_repository.py` (create-with-parent, set_expected_children, atomic increments, list/aggregate, row mapping); integration `backend/tests/integration/integrations/test_sync_job_hierarchy_repository.py` (parent+children, list/aggregate by parent, sequential accumulation, **true concurrent increments across independent connections** — no lost updates) and `test_sync_job_fanout_migration.py` (up/down round-trip; `in_progress` accepted after upgrade and rejected after downgrade; existing rows preserved). TDD red→green confirmed.
+- **Test scope:** unit + integration only, per the spec's Required Test Coverage for this phase. Phase 1 is additive data-layer code with **no API/UI path**, so there is no meaningful e2e surface here; the e2e check (`IN_PROGRESS` shown in the UI without blocking other syncs) is owned by **ITER14-003 Phase 4** (see its Required Test Coverage). The concurrency integration test deliberately steps outside the savepoint fixture (independent committed connections + `finally` cleanup) because a single asyncpg connection serializes statements and cannot exercise concurrent `UPDATE`s.
+- Quality gates green: `core_shared` `ruff format --check`/`ruff check`/`mypy`/`pytest` (250); `backend` `ruff check`/`mypy`; new integration tests (8) + the full `tests/integration/integrations/` suite + sync-job-touching backend unit tests pass with no regressions.
 
 #### Phase 2: Shared reconciliation job (core_shared)
 **PR Size:** ~450 lines (reconciler ~170, cron wiring ~20, tests ~260)
