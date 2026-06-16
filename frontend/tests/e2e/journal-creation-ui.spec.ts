@@ -994,12 +994,21 @@ test.describe('Journal Creation UI Flow', () => {
       ).toBeVisible();
     }).toPass({ timeout: 15000 });
 
-    // Click create new
-    await page.getByRole('option', { name: /\+ Create new template/i }).click();
-
-    // Verify dialog opens
+    // Click "+ Create new template" and confirm the dialog opens. Wrap in
+    // toPass() because Firefox can swallow the click while the combobox list is
+    // still settling (the option button calls preventDefault on mousedown to
+    // keep the dropdown open), leaving the dropdown open and no dialog. Retrying
+    // re-fires the click until it registers.
     const dialog = page.getByRole('dialog');
-    await expect(dialog).toBeVisible();
+    await expect(async () => {
+      await page
+        .getByRole('option', { name: /\+ Create new template/i })
+        .click();
+      // Short inner timeout so a swallowed click fails fast and toPass loops to
+      // re-click — the global expect timeout (15s) would otherwise block any
+      // retry on the first iteration.
+      await expect(dialog).toBeVisible({ timeout: 3000 });
+    }).toPass({ timeout: 20000 });
 
     // Fill new template
     const templateName = `UI Template ${Date.now()}`;
