@@ -9,9 +9,9 @@ Behaviour-preservation check for the settings migration onto
    database (via ``SecretStr.get_secret_value()``) + Redis URLs (the boot-config
    path).
 2. The already-imported worker module resolves its ARQ ``redis_settings`` via the
-   worker's own ``_parse_redis_url`` helper — asserted self-consistently so the
-   check is independent of test/import ordering. (Replacing ``_parse_redis_url``
-   with the shared helper is ITER14-002, not this phase.)
+   shared ``core_shared.redis_settings_from_url`` helper (ITER14-002 Phase 3
+   replaced the worker-local ``_parse_redis_url`` with it) — asserted
+   self-consistently so the check is independent of test/import ordering.
 
 The required worker env is seeded at module import so ``import worker`` succeeds,
 and the worker module is imported normally (never reloaded) so this test does not
@@ -80,7 +80,7 @@ def test_arq_redis_settings_match_configured_redis_url() -> None:
     """The ARQ worker class derives Redis settings from its own settings."""
     import worker
 
-    expected = worker._parse_redis_url(worker.settings.redis_url)
+    expected = redis_settings_from_url(worker.settings.redis_url)
     actual = worker.WorkerSettings.redis_settings
     assert actual.host == expected.host
     assert actual.port == expected.port
