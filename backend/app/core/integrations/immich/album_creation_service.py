@@ -38,6 +38,7 @@ from app.core.settings.adapters.sql.user_settings_repository import (
 )
 from app.core.settings.timezone_utils import resolve_timezone, to_user_tz
 from app.infrastructure.auth.immich_token_service import ImmichTokenService
+from app.infrastructure.unit_of_work import unit_of_work
 
 logger = structlog.get_logger(__name__)
 
@@ -164,62 +165,70 @@ class ImmichAlbumCreationService:
 
         journal = await self._get_owned_journal(journal_id, user_id)
 
-        # Serialise concurrent create-album requests for the same journal: lock
-        # the journal row so two in-flight calls can't both pass the
-        # "already linked" check below and create duplicate Immich albums. The
-        # lock is held until the request transaction commits.
-        await self.connection.execute(
-            text("SELECT 1 FROM journals WHERE id = :journal_id FOR UPDATE"),
-            {"journal_id": journal_id},
-        )
-
-        if await self.album_link_repo.find_external_links(journal_id):
-            raise AlbumAlreadyLinkedError(
-                f"Journal {journal_id} already has a linked Immich album"
+        # One committed unit of work owns the whole critical section: the row
+        # lock, the "already linked" guard, and the SyncMetadata +
+        # ExternalReference link writes. Committing here (in the service layer,
+        # before the response) is what makes the journal<->album link durable —
+        # without it the writes are rolled back at request teardown (#945) and
+        # the album exists in Immich but is never linked back to the journal.
+        async with unit_of_work(self.connection):
+            # Serialise concurrent create-album requests for the same journal:
+            # lock the journal row so two in-flight calls can't both pass the
+            # "already linked" check below and create duplicate Immich albums.
+            # The lock is held until this unit of work commits.
+            await self.connection.execute(
+                text("SELECT 1 FROM journals WHERE id = :journal_id FOR UPDATE"),
+                {"journal_id": journal_id},
             )
 
-        server_url, api_key = await self._require_credentials(user_id)
+            if await self.album_link_repo.find_external_links(journal_id):
+                raise AlbumAlreadyLinkedError(
+                    f"Journal {journal_id} already has a linked Immich album"
+                )
 
-        # The client guarantees a dict with a non-empty id (else ImmichAlbumApiError).
-        album = await self.api_client.create_album(
-            server_url, api_key, album_name=journal.title, asset_ids=asset_ids
-        )
-        album_id = str(album["id"])
+            server_url, api_key = await self._require_credentials(user_id)
 
-        shared_link_url: str | None = None
-        if create_shared_link:
-            link = await self.api_client.create_shared_link(
-                server_url, api_key, album_id=album_id
+            # The client guarantees a dict with a non-empty id (else
+            # ImmichAlbumApiError).
+            album = await self.api_client.create_album(
+                server_url, api_key, album_name=journal.title, asset_ids=asset_ids
             )
-            key = link.get("key")
-            if key:
-                shared_link_url = f"{server_url.rstrip('/')}/share/{key}"
+            album_id = str(album["id"])
 
-        asset_count = album.get("assetCount") or len(asset_ids)
-        version_hash = compute_album_version_hash(
-            name=journal.title,
-            asset_count=asset_count,
-            shared_link_url=shared_link_url,
-        )
+            shared_link_url: str | None = None
+            if create_shared_link:
+                link = await self.api_client.create_shared_link(
+                    server_url, api_key, album_id=album_id
+                )
+                key = link.get("key")
+                if key:
+                    shared_link_url = f"{server_url.rstrip('/')}/share/{key}"
 
-        await self.sync_metadata_repo.upsert(
-            integration_source=INTEGRATION_SOURCE,
-            external_id=album_id,
-            version_hash=version_hash,
-            internal_id=journal_id,
-        )
+            asset_count = album.get("assetCount") or len(asset_ids)
+            version_hash = compute_album_version_hash(
+                name=journal.title,
+                asset_count=asset_count,
+                shared_link_url=shared_link_url,
+            )
 
-        reference_data = self._reference_data(
-            server_url=server_url,
-            album_id=album_id,
-            album_name=album.get("albumName") or journal.title,
-            asset_count=asset_count,
-            thumbnail_asset_id=album.get("albumThumbnailAssetId"),
-            shared_link_url=shared_link_url,
-        )
-        await self.album_link_repo.upsert_link(
-            journal_id, album_id, reference_data, bump_anchor=True
-        )
+            await self.sync_metadata_repo.upsert(
+                integration_source=INTEGRATION_SOURCE,
+                external_id=album_id,
+                version_hash=version_hash,
+                internal_id=journal_id,
+            )
+
+            reference_data = self._reference_data(
+                server_url=server_url,
+                album_id=album_id,
+                album_name=album.get("albumName") or journal.title,
+                asset_count=asset_count,
+                thumbnail_asset_id=album.get("albumThumbnailAssetId"),
+                shared_link_url=shared_link_url,
+            )
+            await self.album_link_repo.upsert_link(
+                journal_id, album_id, reference_data, bump_anchor=True
+            )
 
         logger.info(
             "Created Immich album from journal",

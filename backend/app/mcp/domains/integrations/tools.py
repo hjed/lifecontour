@@ -515,7 +515,6 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
         service: ImmichAlbumCreationService = mcp_depends(
             get_immich_album_creation_service
         ),
-        connection: AsyncConnection = mcp_depends(get_async_connection),
     ) -> str:
         """
         Create an Immich album from a journal's date range.
@@ -546,14 +545,15 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
         excluded = set(exclude_asset_ids or [])
         asset_ids = [p.asset_id for p in photos if p.asset_id not in excluded]
 
-        # Commit the album link + sync metadata writes before the response.
-        async with unit_of_work(connection):
-            created = await service.create_album(
-                journal_id,
-                user_id,
-                asset_ids=asset_ids,
-                create_shared_link=create_shared_link,
-            )
+        # ``create_album`` owns its own unit of work, committing the album link
+        # + sync metadata writes before the response (the MCP tool, like a
+        # controller, must not open a transaction itself).
+        created = await service.create_album(
+            journal_id,
+            user_id,
+            asset_ids=asset_ids,
+            create_shared_link=create_shared_link,
+        )
 
         result = {
             "journal_id": created.journal_id,

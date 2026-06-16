@@ -7,6 +7,7 @@ link a journal to its new album (and therefore mark it PHOTO_ALBUM).
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
@@ -199,6 +200,50 @@ async def test_create_album_writes_sync_metadata_and_reference() -> None:
     assert reference_data["album_url"] == f"{SERVER_URL}/albums/album-1"
     assert "shared_link_url" not in reference_data
     assert link_args.kwargs["bump_anchor"] is True
+
+
+@pytest.mark.asyncio
+async def test_create_album_commits_link_writes_in_unit_of_work(monkeypatch) -> None:
+    """The journal<->album link writes must run inside a unit of work.
+
+    The created album lives in Immich, but the SyncMetadata + ExternalReference
+    rows that link it back to the journal are committed by the service layer.
+    Without an enclosing unit of work those writes are rolled back at request
+    teardown (the commit-timing race in #945), so the album exists yet the
+    journal is never linked. This pins the commit to the service so the bug
+    can't reappear via a caller (HTTP controller) that forgets to open one.
+    """
+    service, mocks = _build()
+
+    uow: dict[str, Any] = {"active": False, "connection": None}
+
+    @asynccontextmanager
+    async def spy_unit_of_work(connection):
+        uow["active"] = True
+        uow["connection"] = connection
+        try:
+            yield connection
+        finally:
+            uow["active"] = False
+
+    monkeypatch.setattr(
+        "app.core.integrations.immich.album_creation_service.unit_of_work",
+        spy_unit_of_work,
+    )
+
+    async def require_uow(*args: Any, **kwargs: Any) -> None:  # noqa: ARG001
+        assert uow["active"], "link write must run inside unit_of_work"
+
+    mocks.sync_metadata_repo.upsert.side_effect = require_uow
+    mocks.album_link_repo.upsert_link.side_effect = require_uow
+
+    await service.create_album(
+        7, USER_ID, asset_ids=["asset-1"], create_shared_link=False
+    )
+
+    mocks.sync_metadata_repo.upsert.assert_awaited_once()
+    mocks.album_link_repo.upsert_link.assert_awaited_once()
+    assert uow["connection"] is service.connection
 
 
 @pytest.mark.asyncio
