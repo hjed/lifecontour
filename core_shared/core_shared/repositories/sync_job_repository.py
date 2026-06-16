@@ -456,6 +456,11 @@ class SyncJobRepository:
         safe under concurrent batch-job completions. ``column`` is restricted to a
         known set of identifiers, so it cannot be used for SQL injection.
 
+        Raises:
+            ValueError: if ``column`` is not a known counter, or if no parent row
+                matched ``parent_job_id`` (a missing/deleted parent would otherwise
+                silently drop the increment and mislead progress tracking).
+
         Args:
             parent_job_id: Parent orchestrator job ID
             column: Counter column to increment
@@ -469,10 +474,14 @@ class SyncJobRepository:
             f"SET {column} = {column} + 1, updated_at = :updated_at "
             f"WHERE job_id = :parent_job_id"
         )
-        await self.conn.execute(
+        result = await self.conn.execute(
             query,
             {"parent_job_id": parent_job_id, "updated_at": datetime.now(UTC)},
         )
+        if result.rowcount == 0:
+            raise ValueError(
+                f"Cannot increment {column}: no sync job with job_id={parent_job_id!r}"
+            )
 
     async def list_children(self, parent_job_id: str) -> list[SyncJob]:
         """

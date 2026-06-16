@@ -11,6 +11,7 @@ does.
 from __future__ import annotations
 
 import asyncio
+import uuid
 
 import pytest
 from core_shared.models.sync_job import SyncJobStatus
@@ -162,6 +163,14 @@ class TestSyncJobHierarchyRepository:
 
         assert counts == {"total": 0, "completed": 0, "failed": 0}
 
+    @pytest.mark.asyncio
+    async def test_increment_unknown_parent_raises(
+        self, repo: SyncJobRepository
+    ) -> None:
+        """Incrementing a counter for a non-existent parent surfaces an error."""
+        with pytest.raises(ValueError, match="no sync job with job_id"):
+            await repo.increment_completed_children("does-not-exist")
+
 
 @pytest.mark.integration
 @pytest.mark.slow
@@ -178,7 +187,9 @@ class TestSyncJobCounterConcurrency:
     async def test_concurrent_increments_have_no_lost_updates(
         self, async_engine: AsyncEngine
     ) -> None:
-        parent_id = "concurrency-parent-iter14-003"
+        # Unique per run so parallel test workers (e.g. pytest-xdist) sharing the
+        # Postgres instance cannot collide on this committed, cross-connection row.
+        parent_id = f"concurrency-parent-{uuid.uuid4().hex}"
         increments = 50
 
         async def _setup() -> None:

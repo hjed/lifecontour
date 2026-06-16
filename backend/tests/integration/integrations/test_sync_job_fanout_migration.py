@@ -19,7 +19,9 @@ from sqlalchemy.engine import URL
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-THROWAWAY_DB_NAME = "pms_sync_job_fanout_migration_test"
+# Process-unique so parallel test workers (e.g. pytest-xdist) sharing the same
+# Postgres instance each create/drop their own throwaway database.
+THROWAWAY_DB_NAME = f"pms_sync_job_fanout_migration_test_{os.getpid()}"
 BACKEND_DIR = Path(__file__).resolve().parents[3]
 
 _NEW_COLUMNS = (

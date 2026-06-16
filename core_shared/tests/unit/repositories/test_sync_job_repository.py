@@ -292,7 +292,7 @@ class TestSyncJobRepositoryIncrementCounters:
         self, repository: SyncJobRepository, mock_connection: AsyncMock
     ) -> None:
         """increment_completed_children runs a single atomic SQL increment."""
-        mock_connection.execute = AsyncMock(return_value=MagicMock())
+        mock_connection.execute = AsyncMock(return_value=MagicMock(rowcount=1))
 
         await repository.increment_completed_children("parent-1")
 
@@ -308,7 +308,7 @@ class TestSyncJobRepositoryIncrementCounters:
         self, repository: SyncJobRepository, mock_connection: AsyncMock
     ) -> None:
         """increment_failed_children runs a single atomic SQL increment."""
-        mock_connection.execute = AsyncMock(return_value=MagicMock())
+        mock_connection.execute = AsyncMock(return_value=MagicMock(rowcount=1))
 
         await repository.increment_failed_children("parent-1")
 
@@ -318,6 +318,16 @@ class TestSyncJobRepositoryIncrementCounters:
         assert "failed_children = failed_children + 1" in sql
         assert "completed_children" not in sql
         assert params["parent_job_id"] == "parent-1"
+
+    @pytest.mark.asyncio
+    async def test_increment_raises_when_parent_missing(
+        self, repository: SyncJobRepository, mock_connection: AsyncMock
+    ) -> None:
+        """A no-op UPDATE (unknown parent) raises instead of silently dropping."""
+        mock_connection.execute = AsyncMock(return_value=MagicMock(rowcount=0))
+
+        with pytest.raises(ValueError, match="no sync job with job_id"):
+            await repository.increment_completed_children("missing-parent")
 
 
 class TestSyncJobRepositoryListChildren:
