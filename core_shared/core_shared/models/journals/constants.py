@@ -66,10 +66,14 @@ VALID_TRACK_GRADES: list[str] = [
 FRENCH_CANYON_GRADE_PATTERN: str = r"^v[1-7]a[1-7](I{1,3}|IV|V|VI)?(\*{1,3})?$"
 
 # ClimbingData constants (CLIMBING type)
+# These are mutually-exclusive climbing disciplines/styles. "indoor" is NOT a
+# type — it is a separate boolean flag on ClimbingData, since a climb can be
+# indoor in any of these styles.
 VALID_CLIMBING_TYPES: list[str] = [
     "sport",
     "trad",
     "bouldering",
+    "top_rope",
 ]
 
 # AbseilPitch constants (abseil_pitches table)

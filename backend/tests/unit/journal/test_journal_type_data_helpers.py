@@ -12,7 +12,11 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
-from core_shared.models.journals import JournalType, JournalValidationError
+from core_shared.models.journals import (
+    ClimbingData,
+    JournalType,
+    JournalValidationError,
+)
 from core_shared.models.journals.gear_usage_data import GearUsageData
 
 from app.core.journal.services import journal_type_data_helpers as helpers
@@ -71,6 +75,57 @@ _DELETE_REPO_NAMES = [
 
 def _mock_repos(names: list[str]) -> dict[str, AsyncMock]:
     return {name: AsyncMock() for name in names}
+
+
+class TestUpdateClimbingTypeData:
+    @pytest.mark.asyncio
+    async def test_sets_indoor_flag_on_existing_row(self) -> None:
+        repo = AsyncMock()
+        repo.find_by_journal_id.return_value = ClimbingData(journal_id=5)
+
+        await helpers.update_climbing_type_data(5, "CLIMBING", {"indoor": True}, repo)
+
+        repo.save.assert_awaited_once()
+        saved = repo.save.await_args.args[0]
+        assert isinstance(saved, ClimbingData)
+        assert saved.indoor is True
+
+    @pytest.mark.asyncio
+    async def test_indoor_is_independent_of_climbing_type(self) -> None:
+        repo = AsyncMock()
+        repo.find_by_journal_id.return_value = ClimbingData(
+            journal_id=5, climbing_type="sport"
+        )
+
+        await helpers.update_climbing_type_data(5, "CLIMBING", {"indoor": True}, repo)
+
+        saved = repo.save.await_args.args[0]
+        assert saved.climbing_type == "sport"
+        assert saved.indoor is True
+
+    @pytest.mark.asyncio
+    async def test_non_bool_indoor_raises(self) -> None:
+        repo = AsyncMock()
+        repo.find_by_journal_id.return_value = ClimbingData(journal_id=5)
+
+        with pytest.raises(JournalValidationError):
+            await helpers.update_climbing_type_data(
+                5, "CLIMBING", {"indoor": "yes"}, repo
+            )
+
+        repo.save.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_top_rope_climbing_type_is_accepted(self) -> None:
+        repo = AsyncMock()
+        repo.find_by_journal_id.return_value = ClimbingData(journal_id=5)
+
+        await helpers.update_climbing_type_data(
+            5, "CLIMBING", {"climbing_type": "top_rope"}, repo
+        )
+
+        saved = repo.save.await_args.args[0]
+        assert saved.climbing_type == "top_rope"
 
 
 class TestGearUsageCreate:

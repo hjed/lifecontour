@@ -18,6 +18,7 @@ from typing import Any
 
 import httpx
 import structlog
+from core_shared.models.journals import JournalType
 from core_shared.models.outbox import OutboxEvent
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -529,6 +530,11 @@ class StravaSyncService:
             "gpx_xml": transformed.gpx_xml,
             "version_hash": transformed.version_hash,
         }
+
+        # Climbing activities carry the inferred indoor flag so the processor can
+        # set/toggle it on the climbing data row on every (re)sync.
+        if JournalType.CLIMBING in transformed.journal_types:
+            journal_data["climbing_data"] = {"indoor": transformed.climbing_indoor}
 
         # Strava doesn't use calendars, but the outbox event schema requires
         # calendar_info_data for compatibility with the inbound processor.

@@ -86,4 +86,46 @@ describe('ClimbingTypeEditor', () => {
       })
     );
   });
+
+  it('reports indoor via onChange when the indoor toggle is switched on in create mode', async () => {
+    const user = userEvent.setup();
+    const onChange = jest.fn();
+
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <ClimbingTypeEditor createMode={true} onChange={onChange} />
+      </QueryClientProvider>
+    );
+
+    const toggle = screen.getByTestId('climbing-indoor-toggle');
+    expect(toggle).not.toBeChecked();
+
+    await user.click(toggle);
+
+    await waitFor(() => {
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({ indoor: true })
+      );
+    });
+  });
+
+  it('shows the indoor toggle as on when existing climbing data is indoor', () => {
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <ClimbingTypeEditor createMode={true} data={{ indoor: true }} />
+      </QueryClientProvider>
+    );
+
+    expect(screen.getByTestId('climbing-indoor-toggle')).toBeChecked();
+  });
+
+  it('lists Indoor in the summary when the climb is indoor', () => {
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <ClimbingTypeEditor data={{ climbing_type: 'sport', indoor: true }} />
+      </QueryClientProvider>
+    );
+
+    expect(screen.getByText('Indoor')).toBeInTheDocument();
+  });
 });

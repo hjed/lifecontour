@@ -47,29 +47,37 @@ def _make_strava_event_data(
     version_hash: str = "a" * 64,
     existing_journal_id: int | None = None,
     title: str = "Morning Run",
+    journal_types: list[str] | None = None,
+    climbing_data: dict[str, Any] | None = None,
+    sync_action: str = "created",
 ) -> dict[str, Any]:
     """Build a Strava-sourced outbox event payload."""
-    return {
-        "journal_data": {
-            "title": title,
-            "content": "Easy jog in the park",
-            "event_date_range_start": "2026-03-20T08:00:00+00:00",
-            "event_date_range_end": "2026-03-20T09:00:00+00:00",
-            "user_id": "test-user-123",
-            "fitness_data": {
-                "distance": 10000,
-                "elevation_gain": 150,
-                "elevation_loss": 10,
-                "duration": 3400,
-                "calories": 500,
-                "heart_rate_avg": 145,
-                "heart_rate_max": 175,
-                "strava_activity_id": strava_activity_id,
-            },
-            "journal_types": ["jogging", "fitness"],
-            "gpx_xml": gpx_xml,
-            "version_hash": version_hash,
+    journal_data: dict[str, Any] = {
+        "title": title,
+        "content": "Easy jog in the park",
+        "event_date_range_start": "2026-03-20T08:00:00+00:00",
+        "event_date_range_end": "2026-03-20T09:00:00+00:00",
+        "user_id": "test-user-123",
+        "fitness_data": {
+            "distance": 10000,
+            "elevation_gain": 150,
+            "elevation_loss": 10,
+            "duration": 3400,
+            "calories": 500,
+            "heart_rate_avg": 145,
+            "heart_rate_max": 175,
+            "strava_activity_id": strava_activity_id,
         },
+        "journal_types": (
+            journal_types if journal_types is not None else ["jogging", "fitness"]
+        ),
+        "gpx_xml": gpx_xml,
+        "version_hash": version_hash,
+    }
+    if climbing_data is not None:
+        journal_data["climbing_data"] = climbing_data
+    return {
+        "journal_data": journal_data,
         "calendar_info_data": {
             "calendar_id": STRAVA_CALENDAR_ID,
             "is_all_day": False,
@@ -80,7 +88,7 @@ def _make_strava_event_data(
         "integration_source": "strava",
         "external_event_id": f"strava:{strava_activity_id}",
         "calendar_id": STRAVA_CALENDAR_ID,
-        "sync_action": "created",
+        "sync_action": sync_action,
         "sync_timestamp": datetime.now(UTC).isoformat(),
         "etag": None,
         "existing_journal_id": existing_journal_id,
@@ -398,3 +406,158 @@ class TestStravaGPXRouteIntegration:
         fitness_row = fitness_result.fetchone()
         assert fitness_row is not None
         assert fitness_row.elevation_loss == 10, "Elevation loss should be persisted"
+
+
+_CLIMBING_TYPES = ["climbing", "abseiling_trip", "outdoor_activity", "fitness"]
+_SELECT_INDOOR_SQL = "SELECT indoor FROM journal_climbing_data WHERE journal_id = :jid"
+
+
+@pytest.mark.integration
+class TestStravaClimbingIndoorIntegration:
+    """Indoor climbing flag persistence and re-sync toggling via the processor."""
+
+    @pytest.mark.asyncio
+    async def test_indoor_climbing_sets_indoor_true(
+        self,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """A climbing import with indoor=True persists indoor on the climbing row."""
+        await _ensure_strava_calendar(async_connection)
+        processor = await _create_processor(async_connection)
+
+        event = OutboxEvent(
+            id=uuid4(),
+            event_type="journal_event.created",
+            event_data=_make_strava_event_data(
+                strava_activity_id="climb-indoor-1",
+                gpx_xml=None,
+                journal_types=_CLIMBING_TYPES,
+                climbing_data={"indoor": True},
+            ),
+            created_at=datetime.now(UTC),
+            retry_count=0,
+        )
+
+        result = await processor.process_event(event)
+        assert result["status"] == "success"
+        journal_id = result["journal_id"]
+
+        row = (
+            await async_connection.execute(
+                text(_SELECT_INDOOR_SQL),
+                {"jid": journal_id},
+            )
+        ).fetchone()
+        assert row is not None, "Climbing row should exist for a climbing import"
+        assert row.indoor is True
+
+    @pytest.mark.asyncio
+    async def test_resync_toggles_indoor_flag(
+        self,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """Re-syncing the same activity toggles indoor to reflect current state."""
+        await _ensure_strava_calendar(async_connection)
+        processor = await _create_processor(async_connection)
+
+        created = await processor.process_event(
+            OutboxEvent(
+                id=uuid4(),
+                event_type="journal_event.created",
+                event_data=_make_strava_event_data(
+                    strava_activity_id="climb-toggle-1",
+                    gpx_xml=None,
+                    journal_types=_CLIMBING_TYPES,
+                    climbing_data={"indoor": True},
+                ),
+                created_at=datetime.now(UTC),
+                retry_count=0,
+            )
+        )
+        assert created["status"] == "success"
+        journal_id = created["journal_id"]
+
+        # Re-sync the same activity, now detected as outdoor (GPS present).
+        updated = await processor.process_event(
+            OutboxEvent(
+                id=uuid4(),
+                event_type="journal_event.updated",
+                event_data=_make_strava_event_data(
+                    strava_activity_id="climb-toggle-1",
+                    gpx_xml=None,
+                    journal_types=_CLIMBING_TYPES,
+                    climbing_data={"indoor": False},
+                    existing_journal_id=journal_id,
+                    version_hash="c" * 64,
+                    sync_action="updated",
+                ),
+                created_at=datetime.now(UTC),
+                retry_count=0,
+            )
+        )
+        assert updated["status"] == "success"
+
+        row = (
+            await async_connection.execute(
+                text(_SELECT_INDOOR_SQL),
+                {"jid": journal_id},
+            )
+        ).fetchone()
+        assert row is not None
+        assert row.indoor is False, "Re-sync should toggle indoor to False"
+
+    @pytest.mark.asyncio
+    async def test_non_boolean_indoor_is_ignored_not_coerced(
+        self,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """A malformed indoor value is ignored, not coerced (bool('false') is True)."""
+        await _ensure_strava_calendar(async_connection)
+        processor = await _create_processor(async_connection)
+
+        created = await processor.process_event(
+            OutboxEvent(
+                id=uuid4(),
+                event_type="journal_event.created",
+                event_data=_make_strava_event_data(
+                    strava_activity_id="climb-malformed-1",
+                    gpx_xml=None,
+                    journal_types=_CLIMBING_TYPES,
+                    climbing_data={"indoor": False},
+                ),
+                created_at=datetime.now(UTC),
+                retry_count=0,
+            )
+        )
+        assert created["status"] == "success"
+        journal_id = created["journal_id"]
+
+        # Re-sync with a non-boolean string. bool("false") would coerce to True;
+        # the guard must leave the stored False untouched.
+        updated = await processor.process_event(
+            OutboxEvent(
+                id=uuid4(),
+                event_type="journal_event.updated",
+                event_data=_make_strava_event_data(
+                    strava_activity_id="climb-malformed-1",
+                    gpx_xml=None,
+                    journal_types=_CLIMBING_TYPES,
+                    climbing_data={"indoor": "false"},
+                    existing_journal_id=journal_id,
+                    version_hash="d" * 64,
+                    sync_action="updated",
+                ),
+                created_at=datetime.now(UTC),
+                retry_count=0,
+            )
+        )
+        assert updated["status"] == "success"
+
+        row = (
+            await async_connection.execute(
+                text(_SELECT_INDOOR_SQL),
+                {"jid": journal_id},
+            )
+        ).fetchone()
+        assert row is not None
+        assert row.indoor is False, "Malformed indoor must not flip the flag"

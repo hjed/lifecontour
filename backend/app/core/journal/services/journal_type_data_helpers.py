@@ -1137,6 +1137,11 @@ async def update_climbing_type_data(
         updates["grade"] = parse_optional_integer(attrs["grade"], "grade")
     if "length" in attrs:
         updates["length"] = parse_optional_integer(attrs["length"], "length")
+    if "indoor" in attrs:
+        raw_indoor = attrs["indoor"]
+        if not isinstance(raw_indoor, bool):
+            raise JournalValidationError("indoor", "Must be a boolean")
+        updates["indoor"] = raw_indoor
 
     validated_data = dataclasses.replace(climbing_data, **updates)
     await climbing_data_repo.save(validated_data)

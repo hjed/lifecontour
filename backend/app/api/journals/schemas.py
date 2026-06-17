@@ -400,7 +400,7 @@ class ClimbingDataSchema(BaseModel):
     )
     climbing_type: str | None = Field(
         default=None,
-        description="Type of climbing (sport, trad, bouldering)",
+        description="Type of climbing (sport, trad, bouldering, top_rope)",
     )
     grade: int | None = Field(
         default=None,
@@ -411,6 +411,10 @@ class ClimbingDataSchema(BaseModel):
         default=None,
         description="Climb length in metres (non-negative)",
         ge=0,
+    )
+    indoor: bool = Field(
+        default=False,
+        description="Whether the climb was indoors (independent of climbing_type)",
     )
 
 
