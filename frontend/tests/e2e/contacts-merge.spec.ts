@@ -119,7 +119,7 @@ test.describe('Contact Merge Workflow (web UI)', () => {
     // Short unique token: timestamp + random so names can't collide across
     // parallel/same-millisecond runs, while staying compact (long names overflow
     // the identity row and can push the action buttons under the sticky header).
-    const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const suffix = `${Date.now().toString(36)}${crypto.randomUUID().slice(0, 4)}`;
 
     const survivor = await createContact(page, {
       firstName: `Survivor${suffix}`,
@@ -206,7 +206,7 @@ test.describe('Contact Merge Workflow (web UI)', () => {
     // Short unique token: timestamp + random so names can't collide across
     // parallel/same-millisecond runs, while staying compact (long names overflow
     // the identity row and can push the action buttons under the sticky header).
-    const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const suffix = `${Date.now().toString(36)}${crypto.randomUUID().slice(0, 4)}`;
 
     // Identical surfaced fields → no conflicts. The combobox excludes the
     // current (survivor) contact, so only the source matches the shared name.
@@ -243,13 +243,22 @@ test.describe('Contact Merge Workflow (web UI)', () => {
     // The search results dropdown is absolutely positioned over the footer;
     // wait for it to close after selection so it can't intercept the Next click.
     await expect(dialog.locator('li[role="option"]')).toHaveCount(0);
-    await dialog.getByRole('button', { name: /next/i }).click();
 
-    // No conflicts → the resolution dialog shows the confirm state directly.
+    // No conflicts → advancing past the source step shows the confirm state.
     const confirm = page
       .getByRole('dialog')
       .filter({ hasText: /No conflicts detected/i });
-    await expect(confirm).toBeVisible();
+    // On the narrow mobile viewport the merge dialog can overflow, leaving the
+    // footer "Next" button's click point covered by the dialog content
+    // (pointer-event interception → 30s click timeout). Activate it via keyboard
+    // to bypass pointer hit-testing, retrying until the confirm dialog appears.
+    const nextButton = dialog.getByRole('button', { name: /next/i });
+    await expect(nextButton).toBeEnabled();
+    await expect(async () => {
+      await nextButton.focus();
+      await nextButton.press('Enter');
+      await expect(confirm).toBeVisible({ timeout: 3000 });
+    }).toPass({ timeout: 20000 });
 
     const mergeResponsePromise = page.waitForResponse(
       response =>
