@@ -1,6 +1,6 @@
 # Iteration 15: Integration Link Consolidation (fix contact duplication)
 
-**Status:** 🔴 PLANNED
+**Status:** 🟡 IN PROGRESS — Phase 1 complete
 **Dependencies:** Iteration 11 (Immich Integration), Iteration 13 (Contact Merge), Iteration 14 (Worker Standardisation)
 **Goal:** Eliminate the dual-table inconsistency between `external_references` and `sync_metadata` that causes Immich-origin contacts to be duplicated by Google sync, by consolidating onto a single canonical integration-link store — and migrate/clean up the duplicates already created.
 
@@ -83,23 +83,27 @@ P1 (schema) → P2 (**dual-write + backfill**) → P3 (move reads — *the fix*)
 
 ---
 
-#### Phase 1: Schema foundation (additive migration)
+#### Phase 1: Schema foundation (additive migration) — ✅ COMPLETE
 
 **PR Size:** ~3 files
 
 Extend `sync_metadata` into the superset of both tables. Schema only — no data movement, no behaviour change.
 
-- Migration `0088_extend_sync_metadata_for_link_consolidation.py` (additive only):
-  - Add nullable columns: `reference_data` (Text/JSONB), `internal_entity_type` (VARCHAR(50)), `external_entity_type` (VARCHAR(50)).
-  - Backfill `internal_entity_type` / `external_entity_type` for **existing `sync_metadata` rows** from `integration_source` (e.g. `google`/`immich` → `contact`/`person`; `immich_album` → `journal`/`album`; `strava` → `journal`/`activity`; snipe-it variants → `gear_item`/`journal`). (Cross-table backfill from `external_references` is Phase 2, after dual-write is live.)
-- Update the `SyncMetadata` model (`core_shared/.../models/sync_metadata.py`) with the new columns.
+> **Migration number:** the head migration is already `0088_add_sync_job_fanout_hierarchy.py`,
+> so this phase shipped as **`0089_extend_sync_metadata_for_link_consolidation.py`**
+> (`down_revision = "0088"`). The later phases' migration numbers shift up by one accordingly.
+
+- [x] Migration `0089_extend_sync_metadata_for_link_consolidation.py` (additive only):
+  - [x] Add nullable columns: `reference_data` (Text/JSON), `internal_entity_type` (VARCHAR(50)), `external_entity_type` (VARCHAR(50)).
+  - [x] Backfill `internal_entity_type` / `external_entity_type` for **existing `sync_metadata` rows** from `integration_source` (`google`/`immich` → `contact`/`person`; `immich_album` → `journal`/`album`; `strava` → `journal`/`activity`; `snipeit` → `gear_item`/`hardware`; `snipeit_maintenance` → `journal`/`maintenance`; `snipeit_checkout` → `journal`/`checkout`; `firefly_iii` left NULL — no worker). (Cross-table backfill from `external_references` is Phase 2, after dual-write is live.)
+- [x] Update the `SyncMetadata` model (`core_shared/.../models/sync_metadata.py`) with the new columns.
 
 **Required Test Coverage:**
-- **Integration (migration):** isolated-DB migration test (mirror `tests/integration/history/test_field_history_migration.py`) — columns added, entity-type backfill correct per source, existing rows preserved.
-- **Unit:** model column round-trip.
+- [x] **Integration (migration):** isolated-DB migration test (`backend/tests/integration/integrations/test_sync_metadata_link_consolidation_migration.py`, mirrors `test_sync_job_fanout_migration.py`) — columns added & nullable, entity-type backfill correct per source, `firefly_iii`/`reference_data` left NULL, existing rows preserved, downgrade drops the columns.
+- [x] **Unit:** model column round-trip (`core_shared/tests/test_models.py::TestSyncMetadata`).
 
 **Required Documentation Updates:**
-- `docs/architecture/integration-architecture.md` — note `sync_metadata` is becoming the canonical link store (mark `external_references` deprecated, removal pending).
+- [x] `docs/architecture/integration-architecture.md` — note `sync_metadata` is becoming the canonical link store (mark `external_references` deprecated, removal pending).
 
 ---
 

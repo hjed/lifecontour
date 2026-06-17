@@ -152,6 +152,41 @@ class TestSyncMetadata:
         """Test that SyncMetadata has correct table name."""
         assert SyncMetadata.__tablename__ == "sync_metadata"
 
+    def test_sync_metadata_link_columns_round_trip(self) -> None:
+        """Test the consolidated integration-link columns round-trip."""
+        now = datetime.now(UTC)
+
+        sync_metadata = SyncMetadata(
+            internal_id=42,
+            integration_source="immich_album",
+            external_id="album/abc123",
+            last_synced_at=now,
+            version_hash="hash123",
+            sync_status=SyncStatus.SUCCESS.value,
+            reference_data='{"album_name": "Trip"}',
+            internal_entity_type="journal",
+            external_entity_type="album",
+        )
+
+        assert sync_metadata.reference_data == '{"album_name": "Trip"}'
+        assert sync_metadata.internal_entity_type == "journal"
+        assert sync_metadata.external_entity_type == "album"
+
+    def test_sync_metadata_link_columns_default_to_none(self) -> None:
+        """Link columns are optional and default to None when omitted."""
+        sync_metadata = SyncMetadata(
+            internal_id=1,
+            integration_source="google",
+            external_id="people/c1",
+            last_synced_at=datetime.now(UTC),
+            version_hash="hash",
+            sync_status=SyncStatus.SUCCESS.value,
+        )
+
+        assert sync_metadata.reference_data is None
+        assert sync_metadata.internal_entity_type is None
+        assert sync_metadata.external_entity_type is None
+
 
 class TestExternalReference:
     """Test ExternalReference model."""

@@ -76,6 +76,25 @@ class SyncMetadata(Base):
         comment="Current sync status: 'success', 'failed', 'in_progress', 'pending'",
     )
 
+    # Consolidated integration-link metadata (canonical link store).
+    # Absorbs the fields previously held only by ``external_references`` so that
+    # ``sync_metadata`` can become the single source of truth for entity links.
+    reference_data: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Additional link metadata as JSON (e.g. album display fields)",
+    )
+    internal_entity_type: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="Internal entity type (e.g. 'contact', 'journal', 'gear_item')",
+    )
+    external_entity_type: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="External entity type (e.g. 'person', 'album', 'activity')",
+    )
+
     # Error handling and retry logic
     error_message: Mapped[str | None] = mapped_column(
         Text, nullable=True, comment="Error message from the last failed sync"
