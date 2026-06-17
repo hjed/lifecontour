@@ -13,6 +13,16 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from core_shared.models.sync_job import SyncJob
 
+# Full sync_jobs column list (static identifiers) reused across SELECT/RETURNING
+# clauses so every query stays in sync as the schema grows.
+_SYNC_JOB_COLUMNS = (
+    "id, job_id, user_id, integration_source, sync_type, status, "
+    "created_at, started_at, completed_at, error_message, "
+    "contacts_processed, contacts_created, contacts_updated, "
+    "contacts_deleted, progress, updated_at, "
+    "parent_job_id, expected_children, completed_children, failed_children"
+)
+
 
 class SyncJobRepository:
     """Repository for managing sync job records."""
@@ -33,6 +43,7 @@ class SyncJobRepository:
         integration_source: str,
         sync_type: str,
         status: str = "queued",
+        parent_job_id: str | None = None,
     ) -> SyncJob:
         """
         Create a new sync job record.
@@ -43,23 +54,22 @@ class SyncJobRepository:
             integration_source: Integration source (e.g., 'google')
             sync_type: Type of sync ('smart' or 'full')
             status: Initial status (default: 'queued')
+            parent_job_id: Orchestrator job_id this job is a child of, or None for
+                top-level jobs (links a child batch job to its parent)
 
         Returns:
             Created SyncJob
         """
         now = datetime.now(UTC)
 
-        query = text("""
+        query = text(f"""
             INSERT INTO sync_jobs
                 (job_id, user_id, integration_source, sync_type, status,
-                 created_at, updated_at)
+                 parent_job_id, created_at, updated_at)
             VALUES
                 (:job_id, :user_id, :integration_source, :sync_type, :status,
-                 :created_at, :updated_at)
-            RETURNING id, job_id, user_id, integration_source, sync_type, status,
-                      created_at, started_at, completed_at, error_message,
-                      contacts_processed, contacts_created, contacts_updated,
-                      contacts_deleted, progress, updated_at
+                 :parent_job_id, :created_at, :updated_at)
+            RETURNING {_SYNC_JOB_COLUMNS}
         """)
 
         result = await self.conn.execute(
@@ -70,6 +80,7 @@ class SyncJobRepository:
                 "integration_source": integration_source,
                 "sync_type": sync_type,
                 "status": status,
+                "parent_job_id": parent_job_id,
                 "created_at": now,
                 "updated_at": now,
             },
@@ -157,10 +168,7 @@ class SyncJobRepository:
             "UPDATE sync_jobs "
             "SET " + set_clause + " "
             "WHERE job_id = :job_id "
-            "RETURNING id, job_id, user_id, integration_source, sync_type, status, "
-            "created_at, started_at, completed_at, error_message, "
-            "contacts_processed, contacts_created, contacts_updated, "
-            "contacts_deleted, progress, updated_at"
+            "RETURNING " + _SYNC_JOB_COLUMNS
         )
         query = text(sql)
 
@@ -182,11 +190,8 @@ class SyncJobRepository:
         Returns:
             SyncJob or None if not found
         """
-        query = text("""
-            SELECT id, job_id, user_id, integration_source, sync_type, status,
-                   created_at, started_at, completed_at, error_message,
-                   contacts_processed, contacts_created, contacts_updated,
-                   contacts_deleted, progress, updated_at
+        query = text(f"""
+            SELECT {_SYNC_JOB_COLUMNS}
             FROM sync_jobs
             WHERE job_id = :job_id
         """)
@@ -266,11 +271,8 @@ class SyncJobRepository:
         total = count_result.scalar() or 0
 
         # Get paginated results
-        query_sql = """
-            SELECT id, job_id, user_id, integration_source, sync_type, status,
-                   created_at, started_at, completed_at, error_message,
-                   contacts_processed, contacts_created, contacts_updated,
-                   contacts_deleted, progress, updated_at
+        query_sql = f"""
+            SELECT {_SYNC_JOB_COLUMNS}
             FROM sync_jobs
         """
         if where_clause:
@@ -319,10 +321,7 @@ class SyncJobRepository:
         where_clause = " AND ".join(where_clauses)
 
         query_sql = f"""
-            SELECT id, job_id, user_id, integration_source, sync_type, status,
-                   created_at, started_at, completed_at, error_message,
-                   contacts_processed, contacts_created, contacts_updated,
-                   contacts_deleted, progress, updated_at
+            SELECT {_SYNC_JOB_COLUMNS}
             FROM sync_jobs
             WHERE {where_clause}
             ORDER BY created_at DESC
@@ -354,6 +353,7 @@ class SyncJobRepository:
             - failed_jobs: Number of failed jobs
             - cancelled_jobs: Number of cancelled jobs
             - running_jobs: Number of running jobs
+            - in_progress_jobs: Number of fan-out parents awaiting their children
             - queued_jobs: Number of queued jobs
             - retry_count: Number of jobs that were retried (failed then succeeded)
         """
@@ -372,6 +372,8 @@ class SyncJobRepository:
                 COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_jobs,
                 COUNT(CASE WHEN status = 'cancelled' THEN 1 END) as cancelled_jobs,
                 COUNT(CASE WHEN status = 'running' THEN 1 END) as running_jobs,
+                COUNT(CASE WHEN status = 'in_progress' THEN 1 END)
+                    as in_progress_jobs,
                 COUNT(CASE WHEN status = 'queued' THEN 1 END) as queued_jobs
             FROM sync_jobs
             WHERE {where_clause}
@@ -388,6 +390,7 @@ class SyncJobRepository:
                 "failed_jobs": 0,
                 "cancelled_jobs": 0,
                 "running_jobs": 0,
+                "in_progress_jobs": 0,
                 "queued_jobs": 0,
                 "retry_count": 0,
             }
@@ -398,11 +401,156 @@ class SyncJobRepository:
             "failed_jobs": row.failed_jobs or 0,
             "cancelled_jobs": row.cancelled_jobs or 0,
             "running_jobs": row.running_jobs or 0,
+            "in_progress_jobs": row.in_progress_jobs or 0,
             "queued_jobs": row.queued_jobs or 0,
             # Note: Retry tracking requires additional schema changes to track
             # job retry attempts. Currently not implemented as ARQ handles retries
             # internally and we track final job status only.
             "retry_count": 0,
+        }
+
+    async def set_expected_children(
+        self, job_id: str, expected_children: int
+    ) -> SyncJob | None:
+        """
+        Set the expected child count on a parent (orchestrator) job.
+
+        Args:
+            job_id: Parent orchestrator job ID
+            expected_children: Number of child jobs dispatched (must be >= 0)
+
+        Returns:
+            Updated SyncJob or None if the parent was not found
+
+        Raises:
+            ValueError: if ``expected_children`` is negative — an invalid count
+                that would break completion logic assuming non-negative counters.
+        """
+        if expected_children < 0:
+            raise ValueError(
+                f"expected_children must be non-negative, got {expected_children}"
+            )
+
+        now = datetime.now(UTC)
+        query = text(
+            "UPDATE sync_jobs "
+            "SET expected_children = :expected_children, updated_at = :updated_at "
+            "WHERE job_id = :job_id "
+            "RETURNING " + _SYNC_JOB_COLUMNS
+        )
+
+        result = await self.conn.execute(
+            query,
+            {
+                "job_id": job_id,
+                "expected_children": expected_children,
+                "updated_at": now,
+            },
+        )
+        row = result.fetchone()
+
+        if not row:
+            return None
+
+        return self._row_to_sync_job(row)
+
+    async def increment_completed_children(self, parent_job_id: str) -> None:
+        """Atomically increment a parent's completed-children counter."""
+        await self._increment_child_counter(parent_job_id, "completed_children")
+
+    async def increment_failed_children(self, parent_job_id: str) -> None:
+        """Atomically increment a parent's failed-children counter."""
+        await self._increment_child_counter(parent_job_id, "failed_children")
+
+    async def _increment_child_counter(self, parent_job_id: str, column: str) -> None:
+        """
+        Atomically increment a child counter on the parent row.
+
+        The increment is performed entirely in SQL (``col = col + 1``) so it is
+        safe under concurrent batch-job completions. ``column`` is restricted to a
+        known set of identifiers, so it cannot be used for SQL injection.
+
+        Raises:
+            ValueError: if ``column`` is not a known counter, or if no parent row
+                matched ``parent_job_id`` (a missing/deleted parent would otherwise
+                silently drop the increment and mislead progress tracking).
+
+        Args:
+            parent_job_id: Parent orchestrator job ID
+            column: Counter column to increment
+        """
+        allowed = {"completed_children", "failed_children"}
+        if column not in allowed:
+            raise ValueError(f"Invalid counter column: {column}")
+
+        query = text(
+            f"UPDATE sync_jobs "
+            f"SET {column} = {column} + 1, updated_at = :updated_at "
+            f"WHERE job_id = :parent_job_id"
+        )
+        result = await self.conn.execute(
+            query,
+            {"parent_job_id": parent_job_id, "updated_at": datetime.now(UTC)},
+        )
+        if result.rowcount == 0:
+            raise ValueError(
+                f"Cannot increment {column}: no sync job with job_id={parent_job_id!r}"
+            )
+
+    async def list_children(self, parent_job_id: str) -> list[SyncJob]:
+        """
+        List all child jobs linked to a parent orchestrator job.
+
+        Args:
+            parent_job_id: Parent orchestrator job ID
+
+        Returns:
+            List of child SyncJobs (oldest first)
+        """
+        query = text(f"""
+            SELECT {_SYNC_JOB_COLUMNS}
+            FROM sync_jobs
+            WHERE parent_job_id = :parent_job_id
+            ORDER BY created_at ASC
+        """)
+
+        result = await self.conn.execute(query, {"parent_job_id": parent_job_id})
+        rows = result.fetchall()
+
+        return [self._row_to_sync_job(row) for row in rows]
+
+    async def aggregate_children(self, parent_job_id: str) -> dict[str, int]:
+        """
+        Aggregate child-job statuses for a parent (authoritative completion check).
+
+        Child rows are the source of truth for parent completion; the counter
+        columns are only a fast path.
+
+        Args:
+            parent_job_id: Parent orchestrator job ID
+
+        Returns:
+            Dict with ``total``, ``completed`` and ``failed`` child counts
+        """
+        query = text("""
+            SELECT
+                COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE status = 'completed') AS completed,
+                COUNT(*) FILTER (WHERE status = 'failed') AS failed
+            FROM sync_jobs
+            WHERE parent_job_id = :parent_job_id
+        """)
+
+        result = await self.conn.execute(query, {"parent_job_id": parent_job_id})
+        row = result.fetchone()
+
+        if not row:
+            return {"total": 0, "completed": 0, "failed": 0}
+
+        return {
+            "total": row.total or 0,
+            "completed": row.completed or 0,
+            "failed": row.failed or 0,
         }
 
     def _row_to_sync_job(self, row: Any) -> SyncJob:
@@ -424,4 +572,8 @@ class SyncJobRepository:
             contacts_deleted=row.contacts_deleted,
             progress=row.progress,
             updated_at=row.updated_at,
+            parent_job_id=row.parent_job_id,
+            expected_children=row.expected_children,
+            completed_children=row.completed_children,
+            failed_children=row.failed_children,
         )

@@ -8,7 +8,15 @@ Provides persistent storage for job status, progress, and results.
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import CheckConstraint, DateTime, Integer, String, Text, text
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core_shared.models.base import Base
@@ -19,6 +27,7 @@ class SyncJobStatus(Enum):
 
     QUEUED = "queued"
     RUNNING = "running"
+    IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -81,7 +90,10 @@ class SyncJob(Base):
         String(20),
         nullable=False,
         index=True,
-        comment="Job status: 'queued', 'running', 'completed', 'failed', 'cancelled'",
+        comment=(
+            "Job status: 'queued', 'running', 'in_progress', 'completed', "
+            "'failed', 'cancelled'"
+        ),
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -135,6 +147,33 @@ class SyncJob(Base):
         comment="Progress percentage (0-100)",
     )
 
+    # Fan-out hierarchy (parent orchestrator <-> child batch jobs)
+    parent_job_id: Mapped[str | None] = mapped_column(
+        String(255),
+        ForeignKey("sync_jobs.job_id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+        comment="Parent orchestrator job_id for a child batch job (null if top-level)",
+    )
+    expected_children: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+        comment="Number of child jobs dispatched by this orchestrator",
+    )
+    completed_children: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+        comment="Number of child jobs that have completed successfully",
+    )
+    failed_children: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+        comment="Number of child jobs that have failed",
+    )
+
     # Audit tracking
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -145,7 +184,8 @@ class SyncJob(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "status IN ('queued', 'running', 'completed', 'failed', 'cancelled')",
+            "status IN ('queued', 'running', 'in_progress', 'completed', "
+            "'failed', 'cancelled')",
             name="ck_sync_jobs_status",
         ),
         CheckConstraint(

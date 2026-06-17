@@ -266,6 +266,7 @@ class IntegrationHealthService:
                 "failed_jobs": 0,
                 "cancelled_jobs": 0,
                 "running_jobs": 0,
+                "in_progress_jobs": 0,
                 "queued_jobs": 0,
                 "retry_count": 0,
             }
