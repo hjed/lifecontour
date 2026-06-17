@@ -269,6 +269,18 @@ Read these first when working on the active product-alignment streams:
 - Provenance carried in event payloads; row timestamps from `event.occurred_at`
 - See [Activity History Product Specification](./product-specifications/activity-history-product-specification.md) for full spec
 
+### [Iteration 15: Integration Link Consolidation (fix contact duplication)](./tasks/iteration-15-integration-link-consolidation.md)
+**Status:** 🔴 PLANNED
+**Dependencies:** Iteration 11 (Immich), Iteration 13 (Contact Merge), Iteration 14 (Worker Standardisation)
+**Goal:** Consolidate the overlapping `external_references` and `sync_metadata` tables onto a single canonical integration-link store to eliminate the Immich→Google→Immich contact duplication loop, and migrate/clean up the duplicates already created
+
+**Key Deliverables:**
+- `sync_metadata` becomes the single canonical link store; `external_references` retired
+- Contact dedup keyed on the link every worker already writes (fixes the root-cause asymmetry)
+- Additive-first migration with backfill + deterministic conflict quarantine
+- Data migration to merge existing bug-created duplicate contacts
+- Hardening: name-based reconciliation fallback for email-less contacts; local-delete propagation to Google
+
 ---
 
 ## Current Status & Next Steps
