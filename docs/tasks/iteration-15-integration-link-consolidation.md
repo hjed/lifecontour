@@ -53,13 +53,15 @@ The table keeps the name `sync_metadata` to avoid churn across ~30 call sites an
 
 1. **Tests first.** Every phase writes failing tests before implementation (red → green → refactor).
 2. **Green main.** Each phase is an independently reviewable PR (~5–10 files) that leaves the system working with all tests/lint/types passing.
-3. **Additive then subtractive.** Schema and reads change before any writer is removed; `external_references` is dropped only after all reads/writes have moved.
+3. **Parallel change (expand → migrate → contract).** `sync_metadata` must be kept **complete and current by every writer before any reader switches to it.** So we **dual-write first**, then move reads, then remove the old writes, then drop the table. Reads never switch to a store that a live write path might not be populating.
 4. **No silent data loss.** Backfill and cleanup migrations log every quarantined/merged row.
 
 ## Dependency and Parallelisation Notes
 
-Phases are largely **sequential** because each depends on the previous one's schema/contract:
-P1 (schema+backfill) → P2 (reads) → P3 (writes) → P4 (drop + dedupe). P5 (defensive name reconciliation) and P6 (delete propagation) are independent hardening tasks that may run in parallel with P2+ once P1 lands.
+Phases are **sequential** because of the parallel-change ordering — reads must not move before writes keep the new store current:
+P1 (schema) → P2 (**dual-write + backfill**) → P3 (move reads — *the fix*) → P4 (stop writing `external_references`) → P5 (drop + dedupe). P6 (defensive name reconciliation) and P7 (delete propagation) are independent hardening tasks that may run in parallel once P1 lands.
+
+> **Why dual-write before reads?** The P2 backfill is only a point-in-time snapshot. Several paths today write `external_references` without a paired `sync_metadata` write at the same instant (e.g. the Immich worker's name-match auto-link relies on the consumer to write `sync_metadata` later; album `reference_data` updates). If reads moved to `sync_metadata` before every writer populated it, links created in that window would be invisible → broken dedup. Dual-write closes that window; the backfill handles rows that predate it.
 
 ---
 
@@ -81,34 +83,56 @@ P1 (schema+backfill) → P2 (reads) → P3 (writes) → P4 (drop + dedupe). P5 (
 
 ---
 
-#### Phase 1: Schema foundation + backfill (additive migration)
+#### Phase 1: Schema foundation (additive migration)
 
-**PR Size:** ~6 files
+**PR Size:** ~3 files
 
-Extend `sync_metadata` into the superset of both tables, then backfill from `external_references`. No behaviour change.
+Extend `sync_metadata` into the superset of both tables. Schema only — no data movement, no behaviour change.
 
 - Migration `0088_extend_sync_metadata_for_link_consolidation.py` (additive only):
   - Add nullable columns: `reference_data` (Text/JSONB), `internal_entity_type` (VARCHAR(50)), `external_entity_type` (VARCHAR(50)).
-  - Backfill `internal_entity_type` / `external_entity_type` for existing rows from `integration_source` (e.g. `google`/`immich` → `contact`/`person`; `immich_album` → `journal`/`album`; `strava` → `journal`/`activity`; snipe-it variants → `gear_item`/`journal`).
-  - Backfill from `external_references`: for each row, **upsert** a matching `sync_metadata` row keyed on `(external_system→integration_source, external_entity_id→external_id)`, carrying `internal_entity_id→internal_id`, the entity types, and `reference_data`. Where a `sync_metadata` row already exists, copy `reference_data`/entity types onto it.
-  - **Conflict handling:** `external_references` allows duplicate `(external_system, external_entity_id)` rows but `sync_metadata` does not. The migration must deterministically pick one (prefer the row whose `internal_entity_id` matches an existing, non-duplicate contact; tie-break by lowest id) and **log** every skipped row to a temporary `link_backfill_quarantine` audit table for Phase 4.
-  - Backfilled-only rows (no prior sync_metadata) get `version_hash = ''` so the next sync re-validates content.
+  - Backfill `internal_entity_type` / `external_entity_type` for **existing `sync_metadata` rows** from `integration_source` (e.g. `google`/`immich` → `contact`/`person`; `immich_album` → `journal`/`album`; `strava` → `journal`/`activity`; snipe-it variants → `gear_item`/`journal`). (Cross-table backfill from `external_references` is Phase 2, after dual-write is live.)
 - Update the `SyncMetadata` model (`core_shared/.../models/sync_metadata.py`) with the new columns.
 
 **Required Test Coverage:**
-- **Integration (migration):** isolated-DB migration test (mirror `tests/integration/history/test_field_history_migration.py`) covering: contact with only an `external_references(google)` row → backfilled into `sync_metadata`; the bug case (contact with `immich` external_ref + `google` sync_metadata only) → both links present after; duplicate `external_references` rows → one wins, the rest quarantined; album `reference_data` copied intact.
+- **Integration (migration):** isolated-DB migration test (mirror `tests/integration/history/test_field_history_migration.py`) — columns added, entity-type backfill correct per source, existing rows preserved.
 - **Unit:** model column round-trip.
 
 **Required Documentation Updates:**
-- `docs/architecture/integration-architecture.md` — note `sync_metadata` as the canonical link store (mark `external_references` deprecated, removal pending).
+- `docs/architecture/integration-architecture.md` — note `sync_metadata` is becoming the canonical link store (mark `external_references` deprecated, removal pending).
 
 ---
 
-#### Phase 2: Move all reads to `sync_metadata` (this fixes the bug)
+#### Phase 2: Dual-write + backfill (make `sync_metadata` complete & current)
 
 **PR Size:** ~8–10 files
 
-Introduce unified link-lookup methods on `SyncMetadataRepository` (or a thin `IntegrationLinkRepository` wrapper) and repoint every reader off `external_references`:
+Ensure **every path that writes `external_references` also writes the paired `sync_metadata` link** (carrying `reference_data` + entity types), so the new store stays current. Then backfill the rows that predate dual-write. **Reads are unchanged in this phase** — old `external_references` readers stay correct.
+
+- Dual-write — pair a `sync_metadata` upsert with each `external_references` write that doesn't already have one at the same instant:
+  - Immich worker `_create_external_reference` (name-match auto-link) → also upsert `sync_metadata` immediately (today it relies on the consumer's later `contact.updated`).
+  - Album `upsert_or_insert` (`reference_data` updates) → mirror `reference_data` onto `sync_metadata`.
+  - Confirm the inbound consumer create/update paths and the Google/Immich outbound pushes already write `sync_metadata`; add `internal_entity_type`/`external_entity_type` where missing.
+  - All link writes inside the existing committed unit of work (no swallowed-and-uncommitted writes; align with the #945 commit-timing rule).
+- Backfill migration `0089_backfill_sync_metadata_from_external_references.py` (idempotent; ships with / runs after the dual-write deploy so it also closes the dual-write rollout gap):
+  - For each `external_references` row, **upsert** a matching `sync_metadata` row keyed on `(external_system→integration_source, external_entity_id→external_id)`, carrying `internal_entity_id→internal_id`, entity types, and `reference_data`. Where a `sync_metadata` row already exists, copy `reference_data`/entity types onto it.
+  - **Conflict handling:** `external_references` allows duplicate `(external_system, external_entity_id)` rows but `sync_metadata` does not. Deterministically pick one (prefer the row whose `internal_entity_id` matches an existing, non-duplicate contact; tie-break by lowest id) and **log** every skipped row to a temporary `link_backfill_quarantine` audit table for Phase 5.
+  - Backfilled-only rows (no prior sync_metadata) get `version_hash = ''` so the next sync re-validates content.
+
+**Required Test Coverage:**
+- **Integration (dual-write):** each `external_references` write path now produces the paired `sync_metadata` row in the same transaction.
+- **Integration (migration):** contact with only an `external_references(google)` row → backfilled; the bug case (contact with `immich` external_ref + `google` sync_metadata only) → both links present after; duplicate `external_references` rows → one wins, rest quarantined; album `reference_data` copied intact; re-run is idempotent.
+
+**Required Documentation Updates:**
+- `docs/architecture/integration-architecture.md` — describe the dual-write transition state.
+
+---
+
+#### Phase 3: Move all reads to `sync_metadata` (this fixes the bug)
+
+**PR Size:** ~8–10 files
+
+With `sync_metadata` now complete and kept current by dual-write, introduce unified link-lookup methods on `SyncMetadataRepository` (or a thin `IntegrationLinkRepository` wrapper) and repoint every reader off `external_references`:
 
 - `find_link_by_external(integration_source, external_id) -> link | None`
 - `find_internal_by_external(...) -> (internal_id, internal_uuid, internal_entity_type)`
@@ -131,18 +155,16 @@ Readers to repoint:
 
 ---
 
-#### Phase 3: Move all writes to `sync_metadata`; stop writing `external_references`
+#### Phase 4: Stop writing `external_references` (contract)
 
-**PR Size:** ~8–10 files
+**PR Size:** ~6–8 files
 
-Every writer persists the canonical link (and `reference_data`/entity types) to `sync_metadata` only:
+Now that nothing reads `external_references`, remove the old half of the dual-write so every writer persists the canonical link (and `reference_data`/entity types) to `sync_metadata` only:
 
-- Backend `ExternalReferenceService.create/update/upsert_contact_reference` → write `sync_metadata` (or delete the service and inline via the repo).
-- Immich worker `_create_external_reference` → `sync_metadata` upsert.
-- Album `upsert_or_insert` / `delete` → `sync_metadata` (`reference_data`).
+- Backend `ExternalReferenceService.create/update/upsert_contact_reference` → write `sync_metadata` only (or delete the service and inline via the repo).
+- Immich worker `_create_external_reference` → drop the `external_references` write (keep the `sync_metadata` upsert added in P2).
+- Album `upsert_or_insert` / `delete` → `sync_metadata` only.
 - Merge repoint (`repoint_external_references_on_contact_merge`) → operate on `sync_metadata` rows only.
-- Confirm the **Google outbound push** and **Immich outbound push** set `internal_entity_type`/`external_entity_type` (they already write `sync_metadata`).
-- Ensure all link writes occur inside the existing committed unit of work (no swallowed-and-uncommitted writes; align with the #945 commit-timing rule).
 
 **Required Test Coverage:**
 - **Integration:** each write path (inbound create/update, immich auto-link, album create, contact merge) produces the correct single `sync_metadata` row and **zero** `external_references` writes.
@@ -150,14 +172,14 @@ Every writer persists the canonical link (and `reference_data`/entity types) to 
 
 ---
 
-#### Phase 4: Drop `external_references` + clean up existing duplicates
+#### Phase 5: Drop `external_references` + clean up existing duplicates
 
 **PR Size:** ~5–7 files
 
-- Migration `0089_dedupe_bug_created_contacts.py` (data migration):
-  - Identify duplicate contacts created by this bug: an email-less Immich-origin contact and a `google`-sourced contact representing the same person (match on normalised name + Immich/Google link lineage; cross-check the Phase 1 quarantine table). Merge them via the existing contact-merge logic (survivor = the contact retaining the richest data / oldest id), repointing `sync_metadata` links. **Dry-run mode + full logging**; require an explicit flag/threshold guard to avoid over-merging.
+- Migration `0090_dedupe_bug_created_contacts.py` (data migration):
+  - Identify duplicate contacts created by this bug: an email-less Immich-origin contact and a `google`-sourced contact representing the same person (match on normalised name + Immich/Google link lineage; cross-check the Phase 2 quarantine table). Merge them via the existing contact-merge logic (survivor = the contact retaining the richest data / oldest id), repointing `sync_metadata` links. **Dry-run mode + full logging**; require an explicit flag/threshold guard to avoid over-merging.
   - Reconcile orphaned links (sync_metadata rows whose `internal_id` no longer exists).
-- Migration `0090_drop_external_references.py`: drop the `external_references` table and its indexes after confirming no readers/writers remain (grep gate in PR description).
+- Migration `0091_drop_external_references.py`: drop the `external_references` table and its indexes after confirming no readers/writers remain (grep gate in PR description).
 - Remove `external_reference.py` model, `ExternalReferenceService`, `ExternalReferenceRepository`, and dead imports.
 
 **Required Test Coverage:**
@@ -169,7 +191,7 @@ Every writer persists the canonical link (and `reference_data`/entity types) to 
 
 ---
 
-#### Phase 5 (hardening, parallelisable): name-based reconciliation fallback for email-less contacts
+#### Phase 6 (hardening, parallelisable): name-based reconciliation fallback for email-less contacts
 
 **PR Size:** ~4 files
 
@@ -180,7 +202,7 @@ Defence in depth so an email-less contact can never silently duplicate even outs
 
 ---
 
-#### Phase 6 (hardening, parallelisable): propagate local deletes to Google
+#### Phase 7 (hardening, parallelisable): propagate local deletes to Google
 
 **PR Size:** ~3 files
 
@@ -193,7 +215,8 @@ Address the observed "deletes don't stick — Google re-adds them": ensure a loc
 
 ## Risks & Mitigations
 
-- **Backfill ambiguity** (duplicate `external_references` rows): deterministic winner + quarantine table + Phase 4 review (no silent loss).
+- **Reads switching before writes populate the new store:** avoided by the parallel-change ordering — dual-write + backfill (P2) make `sync_metadata` complete and current *before* reads move (P3).
+- **Backfill ambiguity** (duplicate `external_references` rows): deterministic winner + quarantine table + Phase 5 review (no silent loss).
 - **Wide blast radius of read/write repoint:** phased, additive-first, each phase independently green; grep-gate before the drop migration.
-- **Over-aggressive dedupe in Phase 4:** dry-run + logging + conservative match criteria + idempotent re-run.
-- **Worker/backend deploy skew:** Phases 1–2 keep `external_references` intact, so an older worker still writing it stays correct until Phase 3/4.
+- **Over-aggressive dedupe in Phase 5:** dry-run + logging + conservative match criteria + idempotent re-run.
+- **Worker/backend deploy skew:** Phases 1–3 keep `external_references` both written and read (P2 only *adds* `sync_metadata` writes), so an older worker still writing/reading `external_references` stays correct; the old writes are removed only in P4, after reads have moved.
