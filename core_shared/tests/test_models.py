@@ -172,6 +172,23 @@ class TestSyncMetadata:
         assert sync_metadata.internal_entity_type == "journal"
         assert sync_metadata.external_entity_type == "album"
 
+    def test_sync_metadata_link_columns_are_mapped(self) -> None:
+        """The link fields are mapped table columns, not plain attributes."""
+        columns = SyncMetadata.__table__.columns
+
+        assert "reference_data" in columns
+        assert "internal_entity_type" in columns
+        assert "external_entity_type" in columns
+
+        # Nullable so existing rows and old writers stay valid.
+        assert columns["reference_data"].nullable is True
+        assert columns["internal_entity_type"].nullable is True
+        assert columns["external_entity_type"].nullable is True
+
+        # Entity-type columns are bounded to VARCHAR(50) per the migration.
+        assert str(columns["internal_entity_type"].type) == "VARCHAR(50)"
+        assert str(columns["external_entity_type"].type) == "VARCHAR(50)"
+
     def test_sync_metadata_link_columns_default_to_none(self) -> None:
         """Link columns are optional and default to None when omitted."""
         sync_metadata = SyncMetadata(

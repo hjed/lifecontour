@@ -200,6 +200,8 @@ class ImmichAlbumOutboxEventProcessor:
             external_id=payload.external_id,
             version_hash=payload.version_hash,
             internal_id=created.id,
+            internal_entity_type="journal",
+            external_entity_type="album",
         )
 
         # Participants are not merge-protected, so a new album always reconciles
@@ -311,6 +313,8 @@ class ImmichAlbumOutboxEventProcessor:
             external_id=payload.external_id,
             version_hash=payload.version_hash,
             internal_id=journal_id,
+            internal_entity_type="journal",
+            external_entity_type="album",
         )
 
         logger.info(

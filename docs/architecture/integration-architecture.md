@@ -156,7 +156,7 @@ Tracks synchronization state between external systems and internal entities:
 from core_shared import SyncMetadata, SyncStatus
 
 class SyncMetadata(Base):
-    internal_id: int               # FK to internal entity (int)
+    internal_id: Optional[int]     # FK to internal entity (int); null when UUID-keyed
     internal_uuid: Optional[str]   # FK to internal entity (UUID, e.g. Snipe-IT)
     integration_source: str        # 'google', 'immich', etc.
     external_id: str              # External system's ID

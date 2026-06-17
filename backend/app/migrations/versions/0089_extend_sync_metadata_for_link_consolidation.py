@@ -30,6 +30,11 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 # integration_source -> (internal_entity_type, external_entity_type).
+#
+# Each source maps to exactly one entity kind here. Google also syncs calendar
+# events to journals, but those links live in ``journal_external_event_links``,
+# not ``sync_metadata`` (the journal consumer only persists sync_metadata for
+# Strava), so a ``google`` row in this table is always a contact.
 _ENTITY_TYPES_BY_SOURCE: dict[str, tuple[str, str]] = {
     "google": ("contact", "person"),
     "immich": ("contact", "person"),
