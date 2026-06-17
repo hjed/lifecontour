@@ -420,3 +420,52 @@ class TestSyncJobRepositoryAggregateChildren:
         counts = await repository.aggregate_children("parent-1")
 
         assert counts == {"total": 0, "completed": 0, "failed": 0}
+
+
+class TestSyncJobRepositoryListInProgressParents:
+    """Test list_in_progress_parents()."""
+
+    @pytest.mark.asyncio
+    async def test_returns_mapped_rows(
+        self, repository: SyncJobRepository, mock_connection: AsyncMock
+    ) -> None:
+        """The query maps each row via _row_to_sync_job."""
+        rows = [
+            _full_mock_row(job_id="parent-1", status="in_progress"),
+            _full_mock_row(job_id="parent-2", status="in_progress"),
+        ]
+        mock_result = MagicMock()
+        mock_result.fetchall.return_value = rows
+        mock_connection.execute = AsyncMock(return_value=mock_result)
+
+        parents = await repository.list_in_progress_parents()
+
+        assert [p.job_id for p in parents] == ["parent-1", "parent-2"]
+        assert all(p.status == "in_progress" for p in parents)
+
+    @pytest.mark.asyncio
+    async def test_filters_in_progress_top_level_parents(
+        self, repository: SyncJobRepository, mock_connection: AsyncMock
+    ) -> None:
+        """The SQL restricts to in_progress status and null parent_job_id."""
+        mock_result = MagicMock()
+        mock_result.fetchall.return_value = []
+        mock_connection.execute = AsyncMock(return_value=mock_result)
+
+        await repository.list_in_progress_parents()
+
+        query = mock_connection.execute.call_args.args[0]
+        sql = str(query).lower()
+        assert "status = 'in_progress'" in sql
+        assert "parent_job_id is null" in sql
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_when_none(
+        self, repository: SyncJobRepository, mock_connection: AsyncMock
+    ) -> None:
+        """No in-progress parents yields an empty list."""
+        mock_result = MagicMock()
+        mock_result.fetchall.return_value = []
+        mock_connection.execute = AsyncMock(return_value=mock_result)
+
+        assert await repository.list_in_progress_parents() == []

@@ -350,19 +350,30 @@ Net-new data layer, additive and not yet driven by orchestrators, so it merges g
 #### Phase 2: Shared reconciliation job (core_shared)
 **PR Size:** ~450 lines (reconciler ~170, cron wiring ~20, tests ~260)
 
+**Status:** ✅ DONE
+
 Add the shared reconciliation function operating on the Phase 1 schema. It is a safe no-op until orchestrators emit `IN_PROGRESS` parents (Phases 3–4), so it merges green.
 
 **Acceptance Criteria:**
-- [ ] A shared `reconcile_in_progress_parents` function scans `IN_PROGRESS` parents and transitions them to `COMPLETED` (all children completed) or `FAILED` (per failure policy) based on the child rows — counters are a fast path, child rows are authoritative.
-- [ ] Stuck/timeout handling: a parent whose children have not progressed within a configured window is marked `FAILED` (or flagged for retry) rather than remaining `IN_PROGRESS`.
-- [ ] A helper registers the reconciler on a cron (reusing the ITER14-002 cron helper) so any worker using fan-outs can schedule it.
+- [x] A shared `reconcile_in_progress_parents` function scans `IN_PROGRESS` parents and transitions them to `COMPLETED` (all children completed) or `FAILED` (per failure policy) based on the child rows — counters are a fast path, child rows are authoritative.
+- [x] Stuck/timeout handling: a parent whose children have not progressed within a configured window is marked `FAILED` (or flagged for retry) rather than remaining `IN_PROGRESS`.
+- [x] A helper registers the reconciler on a cron (reusing the ITER14-002 cron helper) so any worker using fan-outs can schedule it.
 
 **Required Test Coverage:**
-- **Unit:** transition logic for all-success, partial-failure, all-failure, and stuck/timeout cases.
-- **Integration:** seed `IN_PROGRESS` parents with various child states and verify the reconciler finalises each correctly; verify the no-op case (no in-progress parents).
+- [x] **Unit:** transition logic for all-success, partial-failure, all-failure, and stuck/timeout cases.
+- [x] **Integration:** seed `IN_PROGRESS` parents with various child states and verify the reconciler finalises each correctly; verify the no-op case (no in-progress parents).
 
 **Required Documentation Updates:**
-- `docs/architecture/integration-architecture.md` — document the reconciliation job and the non-blocking fan-out lifecycle.
+- [x] `docs/architecture/integration-architecture.md` — document the reconciliation job and the non-blocking fan-out lifecycle.
+
+**Progress notes (Phase 2 complete — 2026-06-17, branch `emdash/iter14-004-2-reconcile`):**
+
+- `core_shared/core_shared/sync_reconciliation.py` (new): `decide_parent_outcome(...)` is the pure, unit-tested transition rule — child rows (`aggregate_children`) are **authoritative**, the parent counters are only a fast path. `done = total >= expected_children and (completed + failed) >= total`; `done` + `failed > 0` → `FAILED` (fail-if-any, matching the current immich gather policy) with a `"{failed} of {total} …"` summary; `done` + no failures → `COMPLETED`; not `done` and `seconds_since_update > stale_after_seconds` → `FAILED` (stuck/timeout); otherwise leave `IN_PROGRESS`. `reconcile_parents(repo, *, now, stale_after_seconds)` drives the repository loop and returns a `{scanned, completed, failed, still_in_progress}` summary; `reconcile_in_progress_parents(ctx)` is the ARQ entry point (reads `ctx["session_factory"]`/`ctx["settings"]`, opens a session, reconciles, commits). Safe no-op when no parents are `IN_PROGRESS`.
+- `SyncJobRepository.list_in_progress_parents()` (new): `WHERE status = 'in_progress' AND parent_job_id IS NULL ORDER BY created_at ASC` — the only new SQL, kept in the repo layer and reusing `_SYNC_JOB_COLUMNS`/`_row_to_sync_job`. Staleness is read from the parent's `updated_at`, which the Phase 1 counter increments already bump.
+- `BaseWorkerSettings.reconciliation_stale_after_seconds: int = 1800` (30 min) configures the stuck-fan-out window; `generate_reconciliation_cron(func, *, every_minutes=5, unique=True)` in `worker_arq.py` registers the reconciler on a frequent cron (reuses the lazy-`arq.cron` convention of `generate_cron_jobs`). Both new public surfaces plus `reconcile_*` are exported from `core_shared/__init__.py`.
+- **Tests:** unit `core_shared/tests/unit/test_sync_reconciliation.py` (decision matrix + `reconcile_parents` loop + ARQ wrapper commit), `test_worker_arq.py` (cron minute-set/flooring/unique), and `test_sync_job_repository.py` (list_in_progress_parents mapping + SQL filter); integration `backend/tests/integration/integrations/test_sync_job_reconciliation.py` (all-complete→COMPLETED, partial/all-fail→FAILED, running→stays IN_PROGRESS, backdated→stuck FAILED, no-op, list-filter) against real Postgres via `clean_database`. TDD red→green confirmed.
+- **Test scope:** unit + integration only, per the spec's Phase 2 Required Test Coverage. No API/UI surface in this phase, so no e2e here — the `IN_PROGRESS`-in-UI e2e check is owned by ITER14-003 Phase 4.
+- Quality gates green: `core_shared` `ruff format --check`/`ruff check`/`mypy` (104 files)/`pytest` (269); `backend` `ruff`/`mypy` on the new test + reconciliation (7) and hierarchy (10) integration suites pass with no regressions.
 
 #### Phase 3: Migrate Immich fan-outs to non-blocking
 **PR Size:** ~480 lines (orchestrator changes ~160, child counter updates ~70, tests ~250)

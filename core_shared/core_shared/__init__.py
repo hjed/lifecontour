@@ -54,6 +54,10 @@ from core_shared.models import (
     SyncMetadata,
     SyncStatus,
 )
+from core_shared.sync_reconciliation import (
+    reconcile_in_progress_parents,
+    reconcile_parents,
+)
 from core_shared.worker_arq import (
     DEFAULT_HEALTH_CHECK_INTERVAL,
     DEFAULT_JOB_TIMEOUT,
@@ -63,6 +67,7 @@ from core_shared.worker_arq import (
     build_worker_lifecycle,
     default_retry_delay,
     generate_cron_jobs,
+    generate_reconciliation_cron,
 )
 from core_shared.worker_settings import (
     BaseWorkerSettings,
@@ -114,9 +119,13 @@ __all__ = [
     "SharedARQWorkerSettings",
     "default_retry_delay",
     "generate_cron_jobs",
+    "generate_reconciliation_cron",
     "build_worker_lifecycle",
     "DEFAULT_JOB_TIMEOUT",
     "DEFAULT_KEEP_RESULT",
     "DEFAULT_MAX_TRIES",
     "DEFAULT_HEALTH_CHECK_INTERVAL",
+    # Fan-out reconciliation
+    "reconcile_in_progress_parents",
+    "reconcile_parents",
 ]

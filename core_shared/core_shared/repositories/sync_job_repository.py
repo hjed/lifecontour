@@ -553,6 +553,29 @@ class SyncJobRepository:
             "failed": row.failed or 0,
         }
 
+    async def list_in_progress_parents(self) -> list[SyncJob]:
+        """
+        List top-level orchestrator jobs currently awaiting their children.
+
+        Returns every ``IN_PROGRESS`` job that is not itself a child (i.e.
+        ``parent_job_id IS NULL``), oldest first. This is the scan the shared
+        reconciliation job iterates to finalise fan-out parents.
+
+        Returns:
+            List of in-progress parent SyncJobs (oldest first)
+        """
+        query = text(f"""
+            SELECT {_SYNC_JOB_COLUMNS}
+            FROM sync_jobs
+            WHERE status = 'in_progress' AND parent_job_id IS NULL
+            ORDER BY created_at ASC
+        """)
+
+        result = await self.conn.execute(query)
+        rows = result.fetchall()
+
+        return [self._row_to_sync_job(row) for row in rows]
+
     def _row_to_sync_job(self, row: Any) -> SyncJob:
         """Convert a database row to a SyncJob object."""
         return SyncJob(
