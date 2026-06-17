@@ -23,8 +23,15 @@ from core_shared.sync_reconciliation import (
 )
 
 
-def _aggregate(total: int, completed: int, failed: int) -> dict[str, int]:
-    return {"total": total, "completed": completed, "failed": failed}
+def _aggregate(
+    total: int, completed: int, failed: int, cancelled: int = 0
+) -> dict[str, int]:
+    return {
+        "total": total,
+        "completed": completed,
+        "failed": failed,
+        "cancelled": cancelled,
+    }
 
 
 class TestDecideParentOutcome:
@@ -59,6 +66,31 @@ class TestDecideParentOutcome:
         )
         assert decision.status is SyncJobStatus.FAILED
         assert decision.error_message is not None
+
+    def test_cancelled_child_is_terminal_and_fails_parent(self) -> None:
+        # A cancelled child is terminal (never progresses), so the parent is
+        # finalised immediately as FAILED rather than stranded until staleness.
+        decision = decide_parent_outcome(
+            expected_children=3,
+            aggregate=_aggregate(total=3, completed=2, failed=0, cancelled=1),
+            seconds_since_update=5.0,
+            stale_after_seconds=1800.0,
+        )
+        assert decision.status is SyncJobStatus.FAILED
+        assert decision.error_message is not None
+        assert "cancelled" in decision.error_message
+
+    def test_failed_and_cancelled_are_both_reported(self) -> None:
+        decision = decide_parent_outcome(
+            expected_children=3,
+            aggregate=_aggregate(total=3, completed=1, failed=1, cancelled=1),
+            seconds_since_update=5.0,
+            stale_after_seconds=1800.0,
+        )
+        assert decision.status is SyncJobStatus.FAILED
+        assert decision.error_message is not None
+        assert "failed" in decision.error_message
+        assert "cancelled" in decision.error_message
 
     def test_in_progress_not_stale_is_left_unchanged(self) -> None:
         decision = decide_parent_outcome(

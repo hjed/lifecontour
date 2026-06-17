@@ -116,6 +116,30 @@ class TestSyncJobReconciliation:
         assert parent.status == SyncJobStatus.FAILED.value
 
     @pytest.mark.asyncio
+    async def test_cancelled_child_finalises_parent_as_failed(
+        self, repo: SyncJobRepository
+    ) -> None:
+        # A cancelled child is terminal; the parent must not be stranded in
+        # IN_PROGRESS waiting for it to progress.
+        parent_id = await self._create_parent(repo, "parent-cancelled", 2)
+        await self._create_children(
+            repo,
+            parent_id,
+            [SyncJobStatus.COMPLETED.value, SyncJobStatus.CANCELLED.value],
+        )
+
+        summary = await reconcile_parents(
+            repo, now=datetime.now(UTC), stale_after_seconds=1800.0
+        )
+
+        assert summary["failed"] == 1
+        assert summary["still_in_progress"] == 0
+        parent = await repo.get_by_job_id(parent_id)
+        assert parent is not None
+        assert parent.status == SyncJobStatus.FAILED.value
+        assert parent.error_message and "cancelled" in parent.error_message
+
+    @pytest.mark.asyncio
     async def test_running_children_leave_parent_in_progress(
         self, repo: SyncJobRepository
     ) -> None:

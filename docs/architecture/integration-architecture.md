@@ -378,7 +378,8 @@ rows** (`aggregate_children` is authoritative; the parent's counters are only a 
 missed increment cannot strand a parent):
 
 - All expected children present and completed → `COMPLETED`.
-- Any child failed (fail-if-any policy) → `FAILED`, with a failure summary on the parent.
+- Any child failed or was cancelled (fail-if-any policy; a cancelled child is
+  terminal-but-unsuccessful) → `FAILED`, with a failure summary on the parent.
 - Children that have not progressed within `reconciliation_stale_after_seconds`
   (a `BaseWorkerSettings` field, default 30 min) → `FAILED` (stuck/timeout), rather than left
   `IN_PROGRESS` forever. Staleness is measured from the parent's `updated_at`, which bumps on each

@@ -530,13 +530,17 @@ class SyncJobRepository:
             parent_job_id: Parent orchestrator job ID
 
         Returns:
-            Dict with ``total``, ``completed`` and ``failed`` child counts
+            Dict with ``total``, ``completed``, ``failed`` and ``cancelled``
+            child counts. ``cancelled`` is reported separately so callers can
+            treat a cancelled child as terminal (a cancelled child is otherwise
+            neither completed nor failed and would strand the parent).
         """
         query = text("""
             SELECT
                 COUNT(*) AS total,
                 COUNT(*) FILTER (WHERE status = 'completed') AS completed,
-                COUNT(*) FILTER (WHERE status = 'failed') AS failed
+                COUNT(*) FILTER (WHERE status = 'failed') AS failed,
+                COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled
             FROM sync_jobs
             WHERE parent_job_id = :parent_job_id
         """)
@@ -545,12 +549,13 @@ class SyncJobRepository:
         row = result.fetchone()
 
         if not row:
-            return {"total": 0, "completed": 0, "failed": 0}
+            return {"total": 0, "completed": 0, "failed": 0, "cancelled": 0}
 
         return {
             "total": row.total or 0,
             "completed": row.completed or 0,
             "failed": row.failed or 0,
+            "cancelled": row.cancelled or 0,
         }
 
     async def list_in_progress_parents(self) -> list[SyncJob]:

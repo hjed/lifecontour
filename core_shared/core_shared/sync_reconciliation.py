@@ -52,8 +52,10 @@ def decide_parent_outcome(
     """Decide the final status for an ``IN_PROGRESS`` parent (pure).
 
     Child rows are authoritative: ``aggregate`` is the ``{total, completed,
-    failed}`` count of actual child rows (from
-    :meth:`SyncJobRepository.aggregate_children`).
+    failed, cancelled}`` count of actual child rows (from
+    :meth:`SyncJobRepository.aggregate_children`). ``cancelled`` is optional and
+    treated as terminal-but-unsuccessful, so a cancelled child finalises the
+    parent (as ``FAILED``) rather than stranding it until the staleness window.
 
     Args:
         expected_children: Number of children the orchestrator dispatched.
@@ -69,7 +71,11 @@ def decide_parent_outcome(
     total = aggregate["total"]
     completed = aggregate["completed"]
     failed = aggregate["failed"]
-    terminal = completed + failed
+    cancelled = aggregate.get("cancelled", 0)
+    # A cancelled child is terminal (it will never progress) but did not succeed,
+    # so it counts toward "done" and fails the parent under the fail-if-any policy.
+    unsuccessful = failed + cancelled
+    terminal = completed + unsuccessful
 
     # Done only when every expected child both exists and has reached a terminal
     # state. ``expected_children == 0`` (no children) is trivially done.
@@ -78,10 +84,10 @@ def decide_parent_outcome(
     done = all_persisted and all_terminal
 
     if done:
-        if failed > 0:
+        if unsuccessful > 0:
             return ReconcileDecision(
                 SyncJobStatus.FAILED,
-                f"{failed} of {total} child job(s) failed",
+                _failure_summary(total=total, failed=failed, cancelled=cancelled),
             )
         return ReconcileDecision(SyncJobStatus.COMPLETED, None)
 
@@ -99,10 +105,26 @@ def decide_parent_outcome(
     return ReconcileDecision(None, None)
 
 
+def _failure_summary(*, total: int, failed: int, cancelled: int) -> str:
+    """Build a parent failure summary from the unsuccessful child counts."""
+    parts = []
+    if failed:
+        parts.append(f"{failed} failed")
+    if cancelled:
+        parts.append(f"{cancelled} cancelled")
+    return f"{' and '.join(parts)} of {total} child job(s)"
+
+
 def _seconds_since(timestamp: datetime, now: datetime) -> float:
-    """Seconds between ``timestamp`` and ``now`` (treating naive as UTC)."""
+    """Seconds between ``timestamp`` and ``now`` (treating naive as UTC).
+
+    Both operands are normalised to timezone-aware UTC so a naive ``now`` passed
+    by a non-ARQ caller cannot raise on the subtraction.
+    """
     if timestamp.tzinfo is None:
         timestamp = timestamp.replace(tzinfo=UTC)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=UTC)
     return (now - timestamp).total_seconds()
 
 

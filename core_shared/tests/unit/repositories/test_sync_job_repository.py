@@ -392,6 +392,7 @@ class TestSyncJobRepositoryAggregateChildren:
         mock_row.total = 5
         mock_row.completed = 3
         mock_row.failed = 1
+        mock_row.cancelled = 1
         mock_result = MagicMock()
         mock_result.fetchone.return_value = mock_row
         mock_connection.execute = AsyncMock(return_value=mock_result)
@@ -401,6 +402,7 @@ class TestSyncJobRepositoryAggregateChildren:
         assert counts["total"] == 5
         assert counts["completed"] == 3
         assert counts["failed"] == 1
+        assert counts["cancelled"] == 1
         query, params = mock_connection.execute.call_args.args
         assert params["parent_job_id"] == "parent-1"
 
@@ -413,13 +415,14 @@ class TestSyncJobRepositoryAggregateChildren:
         mock_row.total = 0
         mock_row.completed = 0
         mock_row.failed = 0
+        mock_row.cancelled = 0
         mock_result = MagicMock()
         mock_result.fetchone.return_value = mock_row
         mock_connection.execute = AsyncMock(return_value=mock_result)
 
         counts = await repository.aggregate_children("parent-1")
 
-        assert counts == {"total": 0, "completed": 0, "failed": 0}
+        assert counts == {"total": 0, "completed": 0, "failed": 0, "cancelled": 0}
 
 
 class TestSyncJobRepositoryListInProgressParents:
