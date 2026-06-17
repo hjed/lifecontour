@@ -185,6 +185,44 @@ class TestSyncJobHierarchyRepository:
         with pytest.raises(ValueError, match="no sync job with job_id"):
             await repo.increment_completed_children("does-not-exist")
 
+    @pytest.mark.asyncio
+    async def test_job_statistics_counts_in_progress(
+        self, repo: SyncJobRepository
+    ) -> None:
+        """get_job_statistics buckets in_progress so per-status counts sum to total."""
+        source = "immich-stats"
+        statuses = [
+            SyncJobStatus.IN_PROGRESS.value,
+            SyncJobStatus.IN_PROGRESS.value,
+            SyncJobStatus.RUNNING.value,
+            SyncJobStatus.COMPLETED.value,
+        ]
+        for i, status in enumerate(statuses):
+            await repo.create(
+                job_id=f"stats-{i}",
+                user_id="user-1",
+                integration_source=source,
+                sync_type="full",
+                status=status,
+            )
+
+        stats = await repo.get_job_statistics(integration_source=source)
+
+        assert stats["in_progress_jobs"] == 2
+        assert stats["running_jobs"] == 1
+        assert stats["completed_jobs"] == 1
+        assert stats["total_jobs"] == 4
+        # in_progress is no longer unaccounted for: buckets sum to the total.
+        assert (
+            stats["completed_jobs"]
+            + stats["failed_jobs"]
+            + stats["cancelled_jobs"]
+            + stats["running_jobs"]
+            + stats["in_progress_jobs"]
+            + stats["queued_jobs"]
+            == stats["total_jobs"]
+        )
+
 
 @pytest.mark.integration
 @pytest.mark.slow

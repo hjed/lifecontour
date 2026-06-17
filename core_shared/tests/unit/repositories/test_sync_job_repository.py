@@ -98,8 +98,9 @@ class TestSyncJobRepositoryGetJobStatistics:
         mock_row.total_jobs = 100
         mock_row.completed_jobs = 80
         mock_row.failed_jobs = 10
-        mock_row.cancelled_jobs = 5
+        mock_row.cancelled_jobs = 4
         mock_row.running_jobs = 3
+        mock_row.in_progress_jobs = 1
         mock_row.queued_jobs = 2
 
         mock_result = MagicMock()
@@ -115,10 +116,22 @@ class TestSyncJobRepositoryGetJobStatistics:
         assert stats["total_jobs"] == 100
         assert stats["completed_jobs"] == 80
         assert stats["failed_jobs"] == 10
-        assert stats["cancelled_jobs"] == 5
+        assert stats["cancelled_jobs"] == 4
         assert stats["running_jobs"] == 3
+        assert stats["in_progress_jobs"] == 1
         assert stats["queued_jobs"] == 2
         assert stats["retry_count"] == 0  # Not yet implemented
+        # Every job maps to exactly one status bucket, so the per-status counts
+        # sum to the total (in_progress is no longer unaccounted for).
+        assert (
+            stats["completed_jobs"]
+            + stats["failed_jobs"]
+            + stats["cancelled_jobs"]
+            + stats["running_jobs"]
+            + stats["in_progress_jobs"]
+            + stats["queued_jobs"]
+            == stats["total_jobs"]
+        )
         mock_connection.execute.assert_called_once()
 
     @pytest.mark.asyncio
@@ -142,6 +155,7 @@ class TestSyncJobRepositoryGetJobStatistics:
         assert stats["failed_jobs"] == 0
         assert stats["cancelled_jobs"] == 0
         assert stats["running_jobs"] == 0
+        assert stats["in_progress_jobs"] == 0
         assert stats["queued_jobs"] == 0
         assert stats["retry_count"] == 0
         mock_connection.execute.assert_called_once()

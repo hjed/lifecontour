@@ -353,6 +353,7 @@ class SyncJobRepository:
             - failed_jobs: Number of failed jobs
             - cancelled_jobs: Number of cancelled jobs
             - running_jobs: Number of running jobs
+            - in_progress_jobs: Number of fan-out parents awaiting their children
             - queued_jobs: Number of queued jobs
             - retry_count: Number of jobs that were retried (failed then succeeded)
         """
@@ -371,6 +372,8 @@ class SyncJobRepository:
                 COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_jobs,
                 COUNT(CASE WHEN status = 'cancelled' THEN 1 END) as cancelled_jobs,
                 COUNT(CASE WHEN status = 'running' THEN 1 END) as running_jobs,
+                COUNT(CASE WHEN status = 'in_progress' THEN 1 END)
+                    as in_progress_jobs,
                 COUNT(CASE WHEN status = 'queued' THEN 1 END) as queued_jobs
             FROM sync_jobs
             WHERE {where_clause}
@@ -387,6 +390,7 @@ class SyncJobRepository:
                 "failed_jobs": 0,
                 "cancelled_jobs": 0,
                 "running_jobs": 0,
+                "in_progress_jobs": 0,
                 "queued_jobs": 0,
                 "retry_count": 0,
             }
@@ -397,6 +401,7 @@ class SyncJobRepository:
             "failed_jobs": row.failed_jobs or 0,
             "cancelled_jobs": row.cancelled_jobs or 0,
             "running_jobs": row.running_jobs or 0,
+            "in_progress_jobs": row.in_progress_jobs or 0,
             "queued_jobs": row.queued_jobs or 0,
             # Note: Retry tracking requires additional schema changes to track
             # job retry attempts. Currently not implemented as ARQ handles retries
