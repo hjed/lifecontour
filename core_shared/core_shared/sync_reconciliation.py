@@ -51,15 +51,16 @@ def decide_parent_outcome(
 ) -> ReconcileDecision:
     """Decide the final status for an ``IN_PROGRESS`` parent (pure).
 
-    Child rows are authoritative: ``aggregate`` is the ``{total, completed,
-    failed, cancelled}`` count of actual child rows (from
-    :meth:`SyncJobRepository.aggregate_children`). ``cancelled`` is optional and
-    treated as terminal-but-unsuccessful, so a cancelled child finalises the
-    parent (as ``FAILED``) rather than stranding it until the staleness window.
+    Child rows are authoritative: ``aggregate`` is the child-row status count
+    from :meth:`SyncJobRepository.aggregate_children`. The recognised keys —
+    ``total``, ``completed``, ``failed`` and ``cancelled`` — are each optional
+    and default to 0, so a partial dict never raises (``cancelled`` is treated as
+    terminal-but-unsuccessful, so a cancelled child finalises the parent as
+    ``FAILED`` rather than stranding it until the staleness window).
 
     Args:
         expected_children: Number of children the orchestrator dispatched.
-        aggregate: Authoritative child-row status counts.
+        aggregate: Authoritative child-row status counts (missing keys → 0).
         seconds_since_update: Seconds since the parent last progressed
             (its ``updated_at``, which bumps on each child counter increment).
         stale_after_seconds: Staleness window before a non-terminal fan-out is
@@ -68,9 +69,9 @@ def decide_parent_outcome(
     Returns:
         A :class:`ReconcileDecision`.
     """
-    total = aggregate["total"]
-    completed = aggregate["completed"]
-    failed = aggregate["failed"]
+    total = aggregate.get("total", 0)
+    completed = aggregate.get("completed", 0)
+    failed = aggregate.get("failed", 0)
     cancelled = aggregate.get("cancelled", 0)
     # A cancelled child is terminal (it will never progress) but did not succeed,
     # so it counts toward "done" and fails the parent under the fail-if-any policy.

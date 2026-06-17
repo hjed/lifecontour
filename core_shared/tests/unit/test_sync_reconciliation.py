@@ -120,6 +120,16 @@ class TestDecideParentOutcome:
         )
         assert decision == ReconcileDecision(SyncJobStatus.COMPLETED, None)
 
+    def test_partial_aggregate_dict_defaults_missing_keys_to_zero(self) -> None:
+        # An external caller passing only a subset of keys must not raise.
+        decision = decide_parent_outcome(
+            expected_children=0,
+            aggregate={},
+            seconds_since_update=5.0,
+            stale_after_seconds=1800.0,
+        )
+        assert decision == ReconcileDecision(SyncJobStatus.COMPLETED, None)
+
     def test_children_not_all_persisted_yet_is_left_unchanged(self) -> None:
         # Only 2 of the 3 expected children exist; not stale → leave in progress.
         decision = decide_parent_outcome(
