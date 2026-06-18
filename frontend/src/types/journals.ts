@@ -312,9 +312,10 @@ export interface CanoeingData {
 
 export interface ClimbingData {
   template_id?: string | null;
-  climbing_type?: string | null; // e.g. sport, trad, bouldering
+  climbing_type?: string | null; // e.g. sport, trad, bouldering, top_rope
   grade?: number | null;
   length?: number | null; // length in metres
+  indoor?: boolean; // independent of climbing_type; non-nullable on the backend
 }
 
 export interface KayakingData {

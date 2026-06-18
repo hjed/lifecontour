@@ -19,6 +19,7 @@ class TestClimbingData:
         assert data.grade is None
         assert data.length is None
         assert data.template_id is None
+        assert data.indoor is False
         assert data.created_at is None
         assert data.updated_at is None
 
@@ -53,6 +54,34 @@ class TestClimbingData:
         """Test creating climbing data with 'bouldering' climbing type."""
         data = ClimbingData(journal_id=1, climbing_type="bouldering")
         assert data.climbing_type == "bouldering"
+
+    def test_climbing_type_top_rope(self):
+        """Test creating climbing data with 'top_rope' climbing type."""
+        data = ClimbingData(journal_id=1, climbing_type="top_rope")
+        assert data.climbing_type == "top_rope"
+
+    def test_indoor_defaults_to_false(self):
+        """Test that indoor defaults to False when not provided."""
+        data = ClimbingData(journal_id=1)
+        assert data.indoor is False
+
+    def test_indoor_true(self):
+        """Test that indoor can be set to True."""
+        data = ClimbingData(journal_id=1, indoor=True)
+        assert data.indoor is True
+
+    def test_indoor_is_independent_of_climbing_type(self):
+        """Indoor is a separate flag, combinable with any climbing type."""
+        data = ClimbingData(journal_id=1, climbing_type="sport", indoor=True)
+        assert data.climbing_type == "sport"
+        assert data.indoor is True
+
+    def test_invalid_indoor_non_bool(self):
+        """Test that a non-boolean indoor raises validation error."""
+        with pytest.raises(ClimbingDataValidationError) as exc_info:
+            ClimbingData(journal_id=1, indoor="yes")  # type: ignore[arg-type]
+
+        assert "indoor" in str(exc_info.value)
 
     def test_climbing_type_none_is_valid(self):
         """Test that None climbing_type is valid (field is optional)."""

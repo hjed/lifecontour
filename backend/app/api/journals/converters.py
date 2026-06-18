@@ -552,6 +552,7 @@ class TypeDataConverter:
             climbing_type=data.climbing_type,
             grade=data.grade,
             length=data.length,
+            indoor=data.indoor,
         ).model_dump(exclude_none=True)
 
     @staticmethod

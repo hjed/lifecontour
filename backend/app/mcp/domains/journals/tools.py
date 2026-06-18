@@ -1244,6 +1244,7 @@ def _build_climbing_data(climbing_data: Any) -> dict[str, Any]:
         "climbing_type": climbing_data.climbing_type,
         "grade": climbing_data.grade,
         "length": climbing_data.length,
+        "indoor": climbing_data.indoor,
     }
 
 
@@ -1732,7 +1733,7 @@ async def _update_climbing_data(
     existing_climbing = await climbing_data_repo.find_by_journal_id(journal_id)
     if existing_climbing:
         clb_updates: dict[str, Any] = {}
-        for field in ["template_id", "climbing_type", "grade", "length"]:
+        for field in ["template_id", "climbing_type", "grade", "length", "indoor"]:
             if field in type_data_dict:
                 clb_updates[field] = type_data_dict[field]
         validated_climbing = dataclasses.replace(existing_climbing, **clb_updates)
@@ -2250,9 +2251,10 @@ _JOURNAL_TYPE_DATA_FIELDS: dict[str, dict[str, str]] = {
     },
     "CLIMBING": {
         "template_id": "UUID of the activity template (optional)",
-        "climbing_type": "string (optional)",
+        "climbing_type": "string: sport, trad, bouldering, top_rope (optional)",
         "grade": "int (optional)",
         "length": "int in m (optional)",
+        "indoor": "bool (optional, default false) — independent of climbing_type",
     },
     "KAYAKING": {
         "water_type": "string (optional)",

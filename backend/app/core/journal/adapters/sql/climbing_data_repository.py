@@ -28,6 +28,7 @@ class SqlClimbingDataRepository(ClimbingDataRepository):
             climbing_type=row.climbing_type,
             grade=row.grade,
             length=row.length,
+            indoor=row.indoor,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -37,7 +38,7 @@ class SqlClimbingDataRepository(ClimbingDataRepository):
         query = text(
             """
             SELECT journal_id, template_id, climbing_type, grade, length,
-                   created_at, updated_at
+                   indoor, created_at, updated_at
             FROM journal_climbing_data
             WHERE journal_id = :journal_id
             """
@@ -63,19 +64,21 @@ class SqlClimbingDataRepository(ClimbingDataRepository):
         query = text(
             """
             INSERT INTO journal_climbing_data (
-                journal_id, template_id, climbing_type, grade, length
+                journal_id, template_id, climbing_type, grade, length, indoor
             )
             VALUES (
-                :journal_id, :template_id, :climbing_type, :grade, :length
+                :journal_id, :template_id, :climbing_type, :grade, :length,
+                :indoor
             )
             ON CONFLICT (journal_id) DO UPDATE SET
                 template_id = EXCLUDED.template_id,
                 climbing_type = EXCLUDED.climbing_type,
                 grade = EXCLUDED.grade,
                 length = EXCLUDED.length,
+                indoor = EXCLUDED.indoor,
                 updated_at = now()
             RETURNING journal_id, template_id, climbing_type, grade, length,
-                      created_at, updated_at
+                      indoor, created_at, updated_at
             """
         )
         result = await self.conn.execute(
@@ -86,6 +89,7 @@ class SqlClimbingDataRepository(ClimbingDataRepository):
                 "climbing_type": data.climbing_type,
                 "grade": data.grade,
                 "length": data.length,
+                "indoor": data.indoor,
             },
         )
         row = result.fetchone()

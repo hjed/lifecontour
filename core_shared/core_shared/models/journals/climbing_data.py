@@ -34,9 +34,11 @@ class ClimbingData:
     Attributes:
         journal_id: Foreign key to the journal (primary key in DB)
         template_id: Foreign key to the activity template (nullable)
-        climbing_type: Type of climbing (sport, trad, bouldering) (nullable)
+        climbing_type: Type of climbing (sport, trad, bouldering, top_rope) (nullable)
         grade: Numeric climbing grade (nullable, non-negative)
         length: Route length in metres (nullable, non-negative)
+        indoor: Whether the climb was indoors. Independent of climbing_type
+            (any style can be indoor or outdoor); defaults to False.
         created_at: Creation timestamp
         updated_at: Last update timestamp
     """
@@ -46,6 +48,7 @@ class ClimbingData:
     climbing_type: str | None = None
     grade: int | None = None
     length: int | None = None
+    indoor: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -56,6 +59,7 @@ class ClimbingData:
         self._validate_climbing_type()
         self._validate_grade()
         self._validate_length()
+        self._validate_indoor()
 
     def _validate_template_id(self) -> None:
         """Validate template_id is a valid UUID if provided."""
@@ -99,3 +103,8 @@ class ClimbingData:
         """Validate length is non-negative if provided."""
         if self.length is not None and self.length < 0:
             raise ClimbingDataValidationError("length", "Length must be non-negative")
+
+    def _validate_indoor(self) -> None:
+        """Validate indoor is a boolean."""
+        if not isinstance(self.indoor, bool):
+            raise ClimbingDataValidationError("indoor", "Indoor must be a boolean")

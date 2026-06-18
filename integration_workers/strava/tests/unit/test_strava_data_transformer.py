@@ -216,6 +216,30 @@ class TestFieldTransformation:
         result = StravaDataTransformer.transform(activity)
         assert result.content is None
 
+    def test_indoor_rock_climbing_sets_climbing_indoor_true(self) -> None:
+        """RockClimbing with no GPS coordinates is treated as indoor."""
+        activity = _make_activity(
+            type="RockClimbing", sport_type="RockClimbing", start_latlng=None
+        )
+        result = StravaDataTransformer.transform(activity)
+        assert result.climbing_indoor is True
+
+    def test_outdoor_rock_climbing_sets_climbing_indoor_false(self) -> None:
+        """RockClimbing with GPS coordinates is treated as outdoor."""
+        activity = _make_activity(
+            type="RockClimbing",
+            sport_type="RockClimbing",
+            start_latlng=[-33.8, 151.2],
+        )
+        result = StravaDataTransformer.transform(activity)
+        assert result.climbing_indoor is False
+
+    def test_non_climbing_activity_has_climbing_indoor_false(self) -> None:
+        """Non-climbing activities are never marked indoor even without GPS."""
+        activity = _make_activity(type="Run", sport_type="Run", start_latlng=None)
+        result = StravaDataTransformer.transform(activity)
+        assert result.climbing_indoor is False
+
     def test_event_date_range_from_start_date_and_elapsed_time(self) -> None:
         """start_date + elapsed_time → EventDateRange."""
         activity = _make_activity(

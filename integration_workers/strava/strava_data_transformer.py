@@ -118,6 +118,10 @@ class TransformedActivity:
         fitness_data_strava_activity_id: Strava activity ID as string.
         elevation_loss: Elevation loss in metres (derived from altitude stream, nullable).
         gpx_xml: Generated GPX XML string (nullable).
+        climbing_indoor: Whether a climbing activity is indoor. Strava has no
+            distinct indoor-climbing sport type, so this is inferred from the
+            absence of GPS coordinates (indoor activities have no GPS). Always
+            False for non-climbing activities.
     """
 
     title: str
@@ -135,6 +139,7 @@ class TransformedActivity:
     gpx_xml: str | None
     version_hash: str
     strava_athletes: list[dict[str, Any]]
+    climbing_indoor: bool = False
 
 
 class StravaDataTransformer:
@@ -181,6 +186,12 @@ class StravaDataTransformer:
         # Type mapping
         journal_types = StravaDataTransformer.map_activity_types(activity.type)
 
+        # Indoor climbing detection: Strava has no distinct indoor-climbing sport
+        # type, so a climbing activity with no GPS coordinates is treated as indoor.
+        climbing_indoor = (
+            JournalType.CLIMBING in journal_types and not activity.start_latlng
+        )
+
         # Elevation loss from altitude stream
         elevation_loss: int | None = None
         if streams is not None and streams.altitude is not None:
@@ -219,6 +230,7 @@ class StravaDataTransformer:
                 activity.model_dump_json().encode()
             ).hexdigest(),
             strava_athletes=StravaDataTransformer._extract_athletes(activity),
+            climbing_indoor=climbing_indoor,
         )
 
     @staticmethod

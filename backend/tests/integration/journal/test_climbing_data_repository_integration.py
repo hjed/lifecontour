@@ -170,6 +170,66 @@ class TestClimbingDataRepositorySave:
         assert saved.grade == 24
         assert saved.length == 35
 
+    async def test_save_minimal_defaults_indoor_to_false(
+        self,
+        climbing_repository: SqlClimbingDataRepository,
+        test_journal: Journal,
+    ):
+        """Indoor defaults to False when not provided."""
+        data = ClimbingData(journal_id=test_journal.id)  # type: ignore[arg-type]
+
+        saved = await climbing_repository.save(data)
+
+        assert saved.indoor is False
+
+    async def test_save_persists_indoor_flag(
+        self,
+        climbing_repository: SqlClimbingDataRepository,
+        test_journal: Journal,
+    ):
+        """Indoor is round-tripped through the database, combinable with a style."""
+        data = ClimbingData(
+            journal_id=test_journal.id,  # type: ignore[arg-type]
+            climbing_type="bouldering",
+            indoor=True,
+        )
+
+        saved = await climbing_repository.save(data)
+
+        assert saved.climbing_type == "bouldering"
+        assert saved.indoor is True
+
+    async def test_save_toggles_indoor_on_update(
+        self,
+        climbing_repository: SqlClimbingDataRepository,
+        test_journal: Journal,
+    ):
+        """An UPSERT update flips indoor from True back to False."""
+        await climbing_repository.save(
+            ClimbingData(journal_id=test_journal.id, indoor=True)  # type: ignore[arg-type]
+        )
+
+        saved = await climbing_repository.save(
+            ClimbingData(journal_id=test_journal.id, indoor=False)  # type: ignore[arg-type]
+        )
+
+        assert saved.indoor is False
+
+    async def test_save_persists_top_rope_climbing_type(
+        self,
+        climbing_repository: SqlClimbingDataRepository,
+        test_journal: Journal,
+    ):
+        """top_rope is accepted by the DB CHECK constraint and persisted."""
+        data = ClimbingData(
+            journal_id=test_journal.id,  # type: ignore[arg-type]
+            climbing_type="top_rope",
+        )
+
+        saved = await climbing_repository.save(data)
+
+        assert saved.climbing_type == "top_rope"
+
 
 @pytest.mark.integration
 class TestClimbingDataRepositoryFind:

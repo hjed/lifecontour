@@ -820,6 +820,11 @@ class JournalOutboxEventProcessor:
             # already handled above via SqlFitnessDataRepository.
             await self._ensure_type_data_rows(journal_id, raw_types)
 
+            # Apply climbing-specific data (e.g. indoor flag inferred from
+            # Strava). Runs after the row exists so create and re-sync both
+            # set/toggle the value.
+            await self._persist_climbing_data(journal_id, journal_data, raw_types)
+
         # Save gear maintenance data if present (Snipe-IT maintenance events)
         await self._persist_gear_maintenance_data(journal_id, journal_data)
 
@@ -861,6 +866,49 @@ class JournalOutboxEventProcessor:
                 type=type_str,
                 table=table_name,
             )
+
+    async def _persist_climbing_data(
+        self, journal_id: int, journal_data: dict[str, Any], type_strings: list[str]
+    ) -> None:
+        """Persist climbing-specific data from the outbox event payload.
+
+        Currently only the ``indoor`` flag (inferred by the Strava worker from
+        the absence of GPS coordinates). The climbing row is guaranteed to exist
+        by ``_ensure_type_data_rows``; this updates it so that every (re)sync
+        sets/toggles ``indoor`` to reflect the current Strava state.
+        """
+        if JournalType.CLIMBING.value not in type_strings:
+            return
+
+        climbing_data = journal_data.get("climbing_data")
+        if not isinstance(climbing_data, dict) or "indoor" not in climbing_data:
+            return
+
+        # Only persist a genuine boolean. A malformed payload (e.g. the string
+        # "false") must not silently flip the flag, so ignore it instead of
+        # coercing with bool().
+        indoor = climbing_data["indoor"]
+        if not isinstance(indoor, bool):
+            logger.warning(
+                "Ignoring non-boolean climbing indoor flag in outbox event",
+                journal_id=journal_id,
+                indoor=indoor,
+            )
+            return
+
+        await self.connection.execute(
+            text(
+                "UPDATE journal_climbing_data "
+                "SET indoor = :indoor, updated_at = now() "
+                "WHERE journal_id = :journal_id"
+            ),
+            {"indoor": indoor, "journal_id": journal_id},
+        )
+        logger.debug(
+            "Applied climbing indoor flag from outbox event",
+            journal_id=journal_id,
+            indoor=indoor,
+        )
 
     async def _persist_gear_maintenance_data(
         self, journal_id: int, journal_data: dict[str, Any]

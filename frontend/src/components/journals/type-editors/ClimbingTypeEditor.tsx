@@ -4,6 +4,7 @@ import { useId, useState } from 'react';
 import { Compass, Ruler } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import {
   Select,
   SelectContent,
@@ -39,7 +40,9 @@ interface ClimbingTypeEditorProps {
 }
 
 const DEFAULT_DATA: ClimbingData = {};
-const CLIMBING_TYPES = ['sport', 'trad', 'bouldering', 'top_rope', 'indoor'];
+// Mutually-exclusive climbing styles. "indoor" is intentionally NOT here — it is
+// a separate boolean toggle, since a climb of any style can be indoor or outdoor.
+const CLIMBING_TYPES = ['sport', 'trad', 'bouldering', 'top_rope'];
 
 export function ClimbingTypeEditor({
   journalId: _journalId,
@@ -55,6 +58,7 @@ export function ClimbingTypeEditor({
   const climbingTypeFieldId = `${baseId}-climbing-type`;
   const climbingGradeFieldId = `${baseId}-climbing-grade`;
   const climbingLengthFieldId = `${baseId}-climbing-length`;
+  const climbingIndoorFieldId = `${baseId}-climbing-indoor`;
 
   const {
     isEditing,
@@ -133,7 +137,13 @@ export function ClimbingTypeEditor({
       : {
           label: 'Length',
           value: `${data.length} m`,
+        },
+    data?.indoor
+      ? {
+          label: 'Indoor',
+          value: 'Yes',
         }
+      : null
   );
 
   return (
@@ -251,6 +261,22 @@ export function ClimbingTypeEditor({
             }))
           }
           data-testid='climbing-length-input'
+        />
+      </div>
+
+      <div className='flex items-center justify-between gap-2'>
+        <Label htmlFor={climbingIndoorFieldId}>Indoor</Label>
+        <Switch
+          id={climbingIndoorFieldId}
+          checked={editData.indoor ?? false}
+          onCheckedChange={checked =>
+            setEditData(previous => ({
+              ...previous,
+              indoor: checked,
+            }))
+          }
+          data-testid='climbing-indoor-toggle'
+          aria-label='Indoor'
         />
       </div>
     </GenericTypeEditorLayout>
