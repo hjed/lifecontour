@@ -140,6 +140,35 @@ class AlbumSyncReadRepository:
                 params,
             )
 
+        # Dual-write: mirror reference_data onto the canonical sync_metadata link
+        # (created by the album processor before this call) so the consolidated
+        # store carries album display data without a read-path change.
+        mirror = await self.conn.execute(
+            text("""
+                UPDATE sync_metadata
+                SET reference_data = :reference_data, updated_at = :now
+                WHERE integration_source = :integration_source
+                  AND external_id = :external_entity_id
+                  AND internal_id = :journal_id
+            """),
+            {
+                "reference_data": params["reference_data"],
+                "now": now,
+                "integration_source": INTEGRATION_SOURCE,
+                "external_entity_id": album_id,
+                "journal_id": journal_id,
+            },
+        )
+        if mirror.rowcount == 0:
+            # The processor upserts the sync_metadata link before calling this,
+            # so a miss means an unexpected call ordering; surface it rather than
+            # leaving the canonical store silently incomplete.
+            logger.warning(
+                "Album reference_data dual-write found no sync_metadata link",
+                journal_id=journal_id,
+                album_id=album_id,
+            )
+
     async def find_by_journal_id(self, journal_id: int) -> dict[str, Any] | None:
         """Return album display data for a journal, or None if not an album.
 

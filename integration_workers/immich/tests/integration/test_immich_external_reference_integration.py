@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock
 import pytest
 from sqlalchemy import text
 
+from immich_models import ImmichPerson
 from immich_sync_service import ImmichSyncService
 
 
@@ -121,3 +122,72 @@ class TestExternalReferenceDbOperations:
         found = await sync_service._find_external_reference(person_id)
         assert found is not None
         assert found.internal_entity_id == contact_id
+
+
+async def _fetch_sync_metadata(connection: Any, person_id: str) -> Any:
+    """Fetch the Immich sync_metadata row for a person, or None."""
+    result = await connection.execute(
+        text("""
+            SELECT internal_id, internal_entity_type, external_entity_type,
+                   version_hash
+            FROM sync_metadata
+            WHERE integration_source = 'immich'
+              AND external_id = :person_id
+        """),
+        {"person_id": person_id},
+    )
+    return result.fetchone()
+
+
+class TestAutoLinkDualWrite:
+    """The name-match auto-link writes both link tables in one transaction."""
+
+    @pytest.mark.asyncio
+    async def test_upsert_sync_metadata_persists_entity_types(
+        self,
+        sync_service: ImmichSyncService,
+        async_connection: Any,
+    ) -> None:
+        """The worker upsert persists contact/person entity types on real asyncpg."""
+        await sync_service._upsert_sync_metadata(
+            external_id="person-entity-types",
+            internal_id=4242,
+            version_hash="vh-1",
+        )
+
+        row = await _fetch_sync_metadata(async_connection, "person-entity-types")
+        assert row is not None
+        assert row.internal_id == 4242
+        assert row.internal_entity_type == "contact"
+        assert row.external_entity_type == "person"
+
+    @pytest.mark.asyncio
+    async def test_auto_link_writes_both_link_rows(
+        self,
+        sync_service: ImmichSyncService,
+        async_connection: Any,
+    ) -> None:
+        """A single name match dual-writes external_references and sync_metadata."""
+        result = await async_connection.execute(
+            text(
+                "INSERT INTO contacts (first_name, last_name) "
+                "VALUES ('Autolink', 'Dualwrite') RETURNING id"
+            )
+        )
+        contact_id = int(result.fetchone().id)
+        person_id = "auto-link-person-1"
+
+        person = ImmichPerson(id=person_id, name="Autolink Dualwrite")
+        outcome = await sync_service.sync_people_batch([person.model_dump()])
+
+        assert outcome.linked == 1
+
+        # external_references link present.
+        assert await _count_references(async_connection, person_id) == 1
+
+        # paired sync_metadata link present, in the same transaction, typed.
+        row = await _fetch_sync_metadata(async_connection, person_id)
+        assert row is not None
+        assert row.internal_id == contact_id
+        assert row.internal_entity_type == "contact"
+        assert row.external_entity_type == "person"

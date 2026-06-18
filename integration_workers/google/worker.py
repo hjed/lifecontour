@@ -1004,19 +1004,30 @@ async def _upsert_sync_metadata(
 
     now = datetime.now(UTC)
 
+    # Entity types are written so this contact link stays consistent with the
+    # canonical sync_metadata store; COALESCE on conflict means a writer that
+    # omits them never clears existing values.
     stmt = text("""
         INSERT INTO sync_metadata
             (internal_id, integration_source, external_id, last_synced_at,
-             version_hash, sync_status, created_at, updated_at)
+             version_hash, sync_status, internal_entity_type, external_entity_type,
+             created_at, updated_at)
         VALUES
             (:internal_id, :integration_source, :external_id, :last_synced_at,
-             :version_hash, :sync_status, :created_at, :updated_at)
+             :version_hash, :sync_status, :internal_entity_type,
+             :external_entity_type, :created_at, :updated_at)
         ON CONFLICT (integration_source, external_id)
         DO UPDATE SET
             internal_id = EXCLUDED.internal_id,
             last_synced_at = EXCLUDED.last_synced_at,
             version_hash = EXCLUDED.version_hash,
             sync_status = EXCLUDED.sync_status,
+            internal_entity_type = COALESCE(
+                EXCLUDED.internal_entity_type, sync_metadata.internal_entity_type
+            ),
+            external_entity_type = COALESCE(
+                EXCLUDED.external_entity_type, sync_metadata.external_entity_type
+            ),
             updated_at = EXCLUDED.updated_at
     """)
 
@@ -1029,6 +1040,8 @@ async def _upsert_sync_metadata(
             "last_synced_at": now,
             "version_hash": version_hash,
             "sync_status": SyncStatus.SUCCESS.value,
+            "internal_entity_type": "contact",
+            "external_entity_type": "person",
             "created_at": now,
             "updated_at": now,
         },

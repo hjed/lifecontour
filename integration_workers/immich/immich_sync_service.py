@@ -645,6 +645,14 @@ class ImmichSyncService:
             await self._create_external_reference(
                 contact_id=contact.id, person_id=person.id
             )
+            # Dual-write the canonical sync_metadata link in the same unit of
+            # work instead of relying on the consumer's later contact.updated,
+            # so the link store stays current for readers.
+            await self._upsert_sync_metadata(
+                external_id=person.id,
+                internal_id=contact.id,
+                version_hash=version_hash,
+            )
             # Emit contact.updated so the processor updates the contact
             # (adds photo_url, birthday, etc.) through ContactService
             contact_data = self._build_contact_data(person, contact.id)
@@ -900,10 +908,12 @@ class ImmichSyncService:
             INSERT INTO sync_metadata
                 (internal_id, integration_source, external_id,
                  last_synced_at, version_hash, sync_status,
+                 internal_entity_type, external_entity_type,
                  retry_count, created_at, updated_at)
             VALUES
                 (:internal_id, :integration_source, :external_id,
                  :now, :version_hash, 'success',
+                 :internal_entity_type, :external_entity_type,
                  0, :now, :now)
             ON CONFLICT (integration_source, external_id)
             DO UPDATE SET
@@ -911,6 +921,12 @@ class ImmichSyncService:
                 last_synced_at = EXCLUDED.last_synced_at,
                 version_hash = EXCLUDED.version_hash,
                 sync_status = 'success',
+                internal_entity_type = COALESCE(
+                    EXCLUDED.internal_entity_type, sync_metadata.internal_entity_type
+                ),
+                external_entity_type = COALESCE(
+                    EXCLUDED.external_entity_type, sync_metadata.external_entity_type
+                ),
                 retry_count = 0,
                 updated_at = EXCLUDED.updated_at
         """)
@@ -921,6 +937,8 @@ class ImmichSyncService:
                 "integration_source": self._integration_source,
                 "external_id": external_id,
                 "version_hash": version_hash,
+                "internal_entity_type": self._INTERNAL_ENTITY_TYPE,
+                "external_entity_type": self._EXTERNAL_ENTITY_TYPE,
                 "now": now,
             },
         )

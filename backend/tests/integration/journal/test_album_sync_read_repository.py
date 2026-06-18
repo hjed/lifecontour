@@ -1,9 +1,11 @@
 """Integration tests for AlbumSyncReadRepository.
 
 Verifies PHOTO_ALBUM type data is read from sync_metadata + external_references,
-and that a malformed reference_data row degrades gracefully instead of 500ing.
+that a malformed reference_data row degrades gracefully instead of 500ing, and
+that ``upsert_link`` dual-writes the album ``reference_data`` onto sync_metadata.
 """
 
+import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -118,3 +120,69 @@ class TestAlbumSyncReadRepository:
         assert saved.id is not None
 
         assert await repo.find_by_journal_id(saved.id) is None
+
+
+async def _make_album_sync_metadata_only(
+    connection: AsyncConnection, *, album_id: str
+) -> int:
+    """Seed a journal + immich_album sync_metadata row with NULL reference_data.
+
+    Mirrors what the album outbox processor writes before it calls
+    ``upsert_link`` (the sync_metadata row exists; reference_data is not yet set).
+    """
+    now = datetime.now(UTC)
+    saved = await SqlJournalRepository(connection).save(
+        Journal(
+            user_id=USER_ID,
+            title="Album",
+            content="content",
+            event_date_range=EventDateRange(start=now, end=now + timedelta(hours=1)),
+        )
+    )
+    assert saved.id is not None
+    await connection.execute(
+        text("""
+            INSERT INTO sync_metadata (
+                internal_id, integration_source, external_id,
+                last_synced_at, version_hash, sync_status,
+                internal_entity_type, external_entity_type
+            ) VALUES (
+                :internal_id, 'immich_album', :external_id, now(), 'h', 'success',
+                'journal', 'album'
+            )
+        """),
+        {"internal_id": saved.id, "external_id": album_id},
+    )
+    return saved.id
+
+
+@pytest.mark.integration
+class TestAlbumLinkDualWrite:
+    """``upsert_link`` mirrors reference_data onto the sync_metadata link."""
+
+    async def test_upsert_link_mirrors_reference_data_to_sync_metadata(
+        self, repo: AlbumSyncReadRepository, async_connection: AsyncConnection
+    ):
+        album_id = "album-mirror"
+        journal_id = await _make_album_sync_metadata_only(
+            async_connection, album_id=album_id
+        )
+        reference_data = {"album_name": "Mirrored Trip", "asset_count": 12}
+
+        await repo.upsert_link(journal_id, album_id, reference_data, bump_anchor=True)
+
+        # The album reference_data is written to external_references (existing
+        # behaviour) and mirrored onto the canonical sync_metadata link.
+        sm = await async_connection.execute(
+            text("""
+                SELECT reference_data FROM sync_metadata
+                WHERE integration_source = 'immich_album'
+                  AND external_id = :album_id
+                  AND internal_id = :journal_id
+            """),
+            {"album_id": album_id, "journal_id": journal_id},
+        )
+        sm_row = sm.fetchone()
+        assert sm_row is not None
+        assert sm_row.reference_data is not None
+        assert json.loads(sm_row.reference_data) == reference_data

@@ -1523,6 +1523,38 @@ class TestPushSyncLogic:
                 )
 
 
+class TestUpsertSyncMetadataEntityTypes:
+    """Dual-write: worker sync_metadata writes carry contact/person entity types."""
+
+    @pytest.mark.asyncio
+    async def test_upsert_sync_metadata_writes_contact_person_entity_types(self):
+        """``_upsert_sync_metadata`` persists the internal/external entity types.
+
+        Consolidating links onto ``sync_metadata`` needs every writer (including
+        the Google outbound worker's direct-SQL upsert) to populate the entity
+        types so the canonical link store stays complete.
+        """
+        from worker import _upsert_sync_metadata
+
+        session = AsyncMock()
+
+        await _upsert_sync_metadata(
+            session=session,
+            internal_id=20,
+            external_id="people/c_entity_types",
+            etag="etag-1",
+            integration_source="google",
+        )
+
+        session.execute.assert_called_once()
+        stmt, params = session.execute.call_args[0]
+        sql = str(stmt)
+        assert "internal_entity_type" in sql
+        assert "external_entity_type" in sql
+        assert params["internal_entity_type"] == "contact"
+        assert params["external_entity_type"] == "person"
+
+
 class TestContactTypeNormalization:
     """Test cases for contact type normalization."""
 

@@ -136,6 +136,26 @@ def _extract_outbox_events(mock_connection: AsyncMock) -> list[dict[str, Any]]:
     return events
 
 
+def _extract_sync_metadata_upserts(
+    mock_connection: AsyncMock,
+) -> list[dict[str, Any]]:
+    """Extract bound params from ``sync_metadata`` upsert statements.
+
+    ``_upsert_sync_metadata`` issues a raw ``text()`` ``INSERT INTO sync_metadata``
+    with a bound-param dict as the second execute argument, so match on the SQL
+    text and return each call's params for assertion.
+    """
+    upserts = []
+    for call in mock_connection.execute.call_args_list:
+        args = call[0]
+        if len(args) < 2:
+            continue
+        stmt, params = args[0], args[1]
+        if "INSERT INTO sync_metadata" in str(stmt) and isinstance(params, dict):
+            upserts.append(params)
+    return upserts
+
+
 # ---------------------------------------------------------------------------
 # Service fixture
 # ---------------------------------------------------------------------------
@@ -417,6 +437,46 @@ class TestSyncPeopleFlow:
         assert len(contact_data["important_dates"]) == 1
         assert contact_data["important_dates"][0]["date_type"] == "birthday"
         assert contact_data["important_dates"][0]["year"] == 1990
+
+    @pytest.mark.asyncio
+    async def test_auto_link_writes_sync_metadata_with_entity_types(
+        self,
+        service: ImmichSyncService,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Auto-linking dual-writes the paired sync_metadata link immediately.
+
+        The name-match auto-link path historically wrote only
+        ``external_references`` and relied on the consumer's later
+        ``contact.updated`` to populate ``sync_metadata``. Dual-write requires the
+        worker to upsert ``sync_metadata`` in the same unit of work, carrying the
+        contact/person entity types so the canonical link store stays current.
+        """
+        person = _make_person("p1", "Jane Doe", "1990-03-20")
+        service._contacts_cache = [_make_contact(10, "Jane", "Doe")]
+
+        generic_result = MagicMock()
+        mock_connection.execute = AsyncMock(
+            side_effect=[
+                _make_fetchone_none(),  # _find_external_reference -> not found
+                generic_result,  # _create_external_reference -> INSERT
+                generic_result,  # _upsert_sync_metadata -> INSERT/upsert
+                generic_result,  # _emit_outbox_event -> INSERT outbox_events
+            ]
+        )
+
+        result = await service.sync_people_batch([person.model_dump()])
+
+        assert result.linked == 1
+
+        upserts = _extract_sync_metadata_upserts(mock_connection)
+        assert len(upserts) == 1, "auto-link must write exactly one sync_metadata row"
+        params = upserts[0]
+        assert params["internal_id"] == 10
+        assert params["external_id"] == "p1"
+        assert params["integration_source"] == "immich"
+        assert params["internal_entity_type"] == "contact"
+        assert params["external_entity_type"] == "person"
 
     @pytest.mark.asyncio
     async def test_multiple_contact_matches_create_conflict(
