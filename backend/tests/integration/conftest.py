@@ -1013,3 +1013,73 @@ async def sample_journal_id(async_connection: AsyncConnection) -> int:
     row = result.fetchone()
     assert row is not None
     return int(row[0])
+
+
+@pytest.fixture
+def run_alembic() -> Any:
+    """Return a helper that runs ``alembic <command> <target>`` against a db URL.
+
+    Shared by migration round-trip tests so each does not re-implement the
+    subprocess invocation.
+    """
+    import sys
+    from pathlib import Path
+
+    backend_dir = Path(__file__).resolve().parents[2]
+
+    def _run(database_url: str, command: str, target: str) -> None:
+        env = {
+            **os.environ,
+            "ENVIRONMENT": "test",
+            "DATABASE_URL": database_url,
+        }
+        result = subprocess.run(
+            [sys.executable, "-m", "alembic", command, target],
+            cwd=str(backend_dir),
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"alembic {command} {target} failed:\n{result.stdout}\n{result.stderr}"
+            )
+
+    return _run
+
+
+@pytest_asyncio.fixture
+async def throwaway_database(
+    request: pytest.FixtureRequest, async_engine: AsyncEngine
+) -> AsyncGenerator[Any]:
+    """Create and drop an isolated database derived from the test engine URL.
+
+    The database name is unique per test and process so migration round-trip
+    tests can run in parallel without colliding with each other or the shared
+    session database.
+    """
+    import re
+
+    base_url = async_engine.url
+    raw_name = f"tw_{os.getpid()}_{request.node.name}"
+    db_name = re.sub(r"[^a-z0-9_]", "_", raw_name.lower())[:60]
+    admin_url = base_url.set(database="postgres")
+    target_url = base_url.set(database=db_name)
+
+    admin_engine = create_async_engine(
+        admin_url.render_as_string(hide_password=False),
+        isolation_level="AUTOCOMMIT",
+    )
+    try:
+        async with admin_engine.connect() as conn:
+            await conn.execute(
+                text(f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE)')
+            )
+            await conn.execute(text(f'CREATE DATABASE "{db_name}"'))
+        yield target_url
+    finally:
+        async with admin_engine.connect() as conn:
+            await conn.execute(
+                text(f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE)')
+            )
+        await admin_engine.dispose()

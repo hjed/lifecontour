@@ -1681,6 +1681,8 @@ class JournalOutboxEventProcessor:
             integration_source="strava",
             external_id=sync_data.strava_activity_id,
             version_hash=sync_data.version_hash,
+            internal_entity_type="journal",
+            external_entity_type="activity",
         )
 
         logger.info(

@@ -156,7 +156,8 @@ Tracks synchronization state between external systems and internal entities:
 from core_shared import SyncMetadata, SyncStatus
 
 class SyncMetadata(Base):
-    internal_id: int               # FK to internal entity
+    internal_id: Optional[int]     # FK to internal entity (int); null when UUID-keyed
+    internal_uuid: Optional[str]   # FK to internal entity (UUID, e.g. Snipe-IT)
     integration_source: str        # 'google', 'immich', etc.
     external_id: str              # External system's ID
     last_synced_at: datetime
@@ -164,6 +165,9 @@ class SyncMetadata(Base):
     sync_status: str              # SUCCESS, FAILED, IN_PROGRESS, PENDING
     error_message: Optional[str]  # Last error if failed
     retry_count: int              # Number of retry attempts
+    reference_data: Optional[str]      # Link metadata as JSON (e.g. album fields)
+    internal_entity_type: Optional[str]  # 'contact', 'journal', 'gear_item'
+    external_entity_type: Optional[str]  # 'person', 'album', 'activity'
 ```
 
 #### ExternalReference
@@ -193,6 +197,23 @@ class ExternalReference(BaseModel):
     external_url: Optional[str] # Direct link to external resource
     metadata: dict              # Integration-specific metadata
 ```
+
+#### Link Storage Consolidation (canonical link store)
+
+Integration entity links were historically tracked in **two overlapping tables** —
+`external_references` (read by the backend contact dedup/idempotency paths) and
+`sync_metadata` (maintained by every integration worker for change detection,
+concurrency and status). Because no writer kept both consistent, Immich-origin
+(email-less) contacts could be duplicated when re-imported by Google sync.
+
+`sync_metadata` is now being made the **single canonical store for all integration
+entity links**, absorbing the fields `external_references` uniquely provided
+(`reference_data`, and explicit `internal_entity_type` / `external_entity_type`).
+**`external_references` is deprecated; its removal is pending** the staged
+consolidation. See
+[Iteration 15: Integration Link Consolidation](../tasks/iteration-15-integration-link-consolidation.md)
+for the migration plan (schema → dual-write + backfill → move reads → stop writing
+`external_references` → drop + dedupe).
 
 ### 2. Task Queue System
 

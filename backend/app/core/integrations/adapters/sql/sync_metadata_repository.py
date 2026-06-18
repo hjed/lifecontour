@@ -137,6 +137,9 @@ class SyncMetadataRepository:
         internal_uuid: str | None = None,
         sync_status: SyncStatus = SyncStatus.SUCCESS,
         error_message: str | None = None,
+        internal_entity_type: str | None = None,
+        external_entity_type: str | None = None,
+        reference_data: str | None = None,
     ) -> SyncMetadata:
         """
         Insert or update sync metadata atomically.
@@ -149,20 +152,28 @@ class SyncMetadataRepository:
             internal_uuid: Internal entity ID (UUID string)
             sync_status: Sync status
             error_message: Error message if failed
+            internal_entity_type: Internal entity type (e.g. 'contact', 'journal')
+            external_entity_type: External entity type (e.g. 'person', 'album')
+            reference_data: Additional link metadata as a JSON string
 
         Returns:
             Created or updated SyncMetadata
         """
         now = datetime.now(UTC)
 
+        # The link columns use COALESCE on conflict so a writer that does not
+        # supply them (e.g. an integration worker still on the old code path)
+        # never clears values populated by another writer or the backfill.
         query = text("""
             INSERT INTO sync_metadata
                 (internal_id, internal_uuid, integration_source, external_id, last_synced_at,
                  version_hash, sync_status, error_message, retry_count,
+                 internal_entity_type, external_entity_type, reference_data,
                  created_at, updated_at)
             VALUES
                 (:internal_id, :internal_uuid, :integration_source, :external_id, :last_synced_at,
                  :version_hash, :sync_status, :error_message, 0,
+                 :internal_entity_type, :external_entity_type, :reference_data,
                  :created_at, :updated_at)
             ON CONFLICT (integration_source, external_id)
             DO UPDATE SET
@@ -176,10 +187,20 @@ class SyncMetadataRepository:
                     WHEN EXCLUDED.sync_status = 'success' THEN 0
                     ELSE sync_metadata.retry_count + 1
                 END,
+                internal_entity_type = COALESCE(
+                    EXCLUDED.internal_entity_type, sync_metadata.internal_entity_type
+                ),
+                external_entity_type = COALESCE(
+                    EXCLUDED.external_entity_type, sync_metadata.external_entity_type
+                ),
+                reference_data = COALESCE(
+                    EXCLUDED.reference_data, sync_metadata.reference_data
+                ),
                 updated_at = EXCLUDED.updated_at
             RETURNING id, internal_id, internal_uuid, integration_source, external_id,
                       last_synced_at, version_hash, sync_status,
-                      error_message, retry_count, created_at, updated_at
+                      error_message, retry_count, internal_entity_type,
+                      external_entity_type, reference_data, created_at, updated_at
         """)
 
         result = await self.conn.execute(
@@ -193,6 +214,9 @@ class SyncMetadataRepository:
                 "version_hash": version_hash,
                 "sync_status": sync_status.value,
                 "error_message": error_message,
+                "internal_entity_type": internal_entity_type,
+                "external_entity_type": external_entity_type,
+                "reference_data": reference_data,
                 "created_at": now,
                 "updated_at": now,
             },
@@ -213,6 +237,9 @@ class SyncMetadataRepository:
             sync_status=row.sync_status,
             error_message=row.error_message,
             retry_count=row.retry_count,
+            internal_entity_type=row.internal_entity_type,
+            external_entity_type=row.external_entity_type,
+            reference_data=row.reference_data,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )

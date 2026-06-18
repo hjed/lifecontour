@@ -786,6 +786,8 @@ class OutboxEventProcessor:
                 external_id=external_id,
                 version_hash=version_hash,
                 sync_status=SyncStatus.SUCCESS,
+                internal_entity_type="contact",
+                external_entity_type="person",
             )
         except Exception as e:  # noqa: BLE001
             logger.warning(
@@ -1013,6 +1015,8 @@ class OutboxEventProcessor:
                 external_id=external_id,
                 version_hash=new_version_hash,
                 sync_status=SyncStatus.SUCCESS,
+                internal_entity_type="contact",
+                external_entity_type="person",
             )
         except Exception as e:  # noqa: BLE001
             logger.warning(

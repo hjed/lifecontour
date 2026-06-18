@@ -156,6 +156,59 @@ class TestSyncMetadataRepository:
         assert result.id == 1
         assert result.version_hash == "new_hash"
 
+    @pytest.mark.asyncio
+    async def test_upsert_persists_link_columns(
+        self, repository: SyncMetadataRepository, mock_connection: AsyncMock
+    ) -> None:
+        """Upsert forwards the consolidated link columns into the query."""
+        mock_row = MagicMock()
+        mock_row.id = 1
+        mock_row.internal_id = 123
+        mock_row.internal_uuid = None
+        mock_row.integration_source = "google"
+        mock_row.external_id = "people/c123"
+        mock_row.last_synced_at = datetime.now(UTC)
+        mock_row.version_hash = "hash"
+        mock_row.sync_status = "success"
+        mock_row.error_message = None
+        mock_row.retry_count = 0
+        mock_row.internal_entity_type = "contact"
+        mock_row.external_entity_type = "person"
+        mock_row.reference_data = '{"k": "v"}'
+        mock_row.created_at = datetime.now(UTC)
+        mock_row.updated_at = datetime.now(UTC)
+
+        mock_result = MagicMock()
+        mock_result.fetchone.return_value = mock_row
+        mock_connection.execute = AsyncMock(return_value=mock_result)
+
+        result = await repository.upsert(
+            internal_id=123,
+            integration_source="google",
+            external_id="people/c123",
+            version_hash="hash",
+            internal_entity_type="contact",
+            external_entity_type="person",
+            reference_data='{"k": "v"}',
+        )
+
+        # Returned object carries the new columns.
+        assert result.internal_entity_type == "contact"
+        assert result.external_entity_type == "person"
+        assert result.reference_data == '{"k": "v"}'
+
+        # The query targets the new columns and the bind params carry the values.
+        call_args = mock_connection.execute.call_args
+        query_text = str(call_args[0][0])
+        params = call_args[0][1]
+        assert "internal_entity_type" in query_text
+        assert "external_entity_type" in query_text
+        assert "reference_data" in query_text
+        assert "COALESCE" in query_text
+        assert params["internal_entity_type"] == "contact"
+        assert params["external_entity_type"] == "person"
+        assert params["reference_data"] == '{"k": "v"}'
+
     def test_should_sync_no_existing_metadata(
         self, repository: SyncMetadataRepository
     ) -> None:
