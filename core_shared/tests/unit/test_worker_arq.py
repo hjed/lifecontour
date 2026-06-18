@@ -29,6 +29,11 @@ class TestGenerateReconciliationCron:
 
         assert jobs[0].minute == set(range(0, 60))
 
+    def test_interval_above_an_hour_is_clamped_to_hourly(self) -> None:
+        jobs = generate_reconciliation_cron(_dummy_job, every_minutes=90)
+
+        assert jobs[0].minute == {0}
+
     def test_unique_flag_is_passed_through(self) -> None:
         jobs = generate_reconciliation_cron(_dummy_job, unique=False)
 
