@@ -530,13 +530,17 @@ class SyncJobRepository:
             parent_job_id: Parent orchestrator job ID
 
         Returns:
-            Dict with ``total``, ``completed`` and ``failed`` child counts
+            Dict with ``total``, ``completed``, ``failed`` and ``cancelled``
+            child counts. ``cancelled`` is reported separately so callers can
+            treat a cancelled child as terminal (a cancelled child is otherwise
+            neither completed nor failed and would strand the parent).
         """
         query = text("""
             SELECT
                 COUNT(*) AS total,
                 COUNT(*) FILTER (WHERE status = 'completed') AS completed,
-                COUNT(*) FILTER (WHERE status = 'failed') AS failed
+                COUNT(*) FILTER (WHERE status = 'failed') AS failed,
+                COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled
             FROM sync_jobs
             WHERE parent_job_id = :parent_job_id
         """)
@@ -545,13 +549,37 @@ class SyncJobRepository:
         row = result.fetchone()
 
         if not row:
-            return {"total": 0, "completed": 0, "failed": 0}
+            return {"total": 0, "completed": 0, "failed": 0, "cancelled": 0}
 
         return {
             "total": row.total or 0,
             "completed": row.completed or 0,
             "failed": row.failed or 0,
+            "cancelled": row.cancelled or 0,
         }
+
+    async def list_in_progress_parents(self) -> list[SyncJob]:
+        """
+        List top-level orchestrator jobs currently awaiting their children.
+
+        Returns every ``IN_PROGRESS`` job that is not itself a child (i.e.
+        ``parent_job_id IS NULL``), oldest first. This is the scan the shared
+        reconciliation job iterates to finalise fan-out parents.
+
+        Returns:
+            List of in-progress parent SyncJobs (oldest first)
+        """
+        query = text(f"""
+            SELECT {_SYNC_JOB_COLUMNS}
+            FROM sync_jobs
+            WHERE status = 'in_progress' AND parent_job_id IS NULL
+            ORDER BY created_at ASC
+        """)
+
+        result = await self.conn.execute(query)
+        rows = result.fetchall()
+
+        return [self._row_to_sync_job(row) for row in rows]
 
     def _row_to_sync_job(self, row: Any) -> SyncJob:
         """Convert a database row to a SyncJob object."""

@@ -74,6 +74,10 @@ class BaseWorkerSettings(BaseSettings):
     enable_periodic_sync: bool = False
     sync_interval_hours: int = 6
 
+    # Fan-out reconciliation: how long an IN_PROGRESS parent may go without its
+    # children progressing before the reconciler marks it FAILED (stuck/timeout).
+    reconciliation_stale_after_seconds: int = 1800
+
     # OpenTelemetry / observability (disabled by default).
     enable_telemetry: bool = False
     otel_exporter_otlp_endpoint: str = ""

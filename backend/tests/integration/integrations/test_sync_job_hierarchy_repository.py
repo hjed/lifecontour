@@ -175,7 +175,7 @@ class TestSyncJobHierarchyRepository:
 
         counts = await repo.aggregate_children(parent_id)
 
-        assert counts == {"total": 0, "completed": 0, "failed": 0}
+        assert counts == {"total": 0, "completed": 0, "failed": 0, "cancelled": 0}
 
     @pytest.mark.asyncio
     async def test_increment_unknown_parent_raises(

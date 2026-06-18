@@ -155,6 +155,46 @@ def generate_cron_jobs(
     ]
 
 
+def generate_reconciliation_cron(
+    func: Any,
+    *,
+    every_minutes: int = 5,
+    unique: bool = True,
+) -> list[Any]:
+    """Build the ARQ cron list for the fan-out reconciliation job.
+
+    Schedules ``func`` (typically
+    :func:`core_shared.sync_reconciliation.reconcile_in_progress_parents`) at
+    minutes ``{0, every_minutes, 2·every_minutes, …}`` within each hour — far
+    more frequently than the hourly periodic-sync cadence, since reconciliation
+    just finalises already-dispatched fan-outs.
+
+    The schedule resets at the top of every hour, so the cadence is perfectly
+    even only when ``every_minutes`` divides 60 (1, 2, 3, 4, 5, 6, 10, 12, 15,
+    20, 30); other values leave a shorter final gap before ``:00`` (e.g. ``7``
+    fires at ``:56`` then again at ``:00``). ``every_minutes`` is clamped to
+    ``[1, 60]`` — ``60`` (or any larger value) runs once per hour at ``:00``.
+    The default of 5 divides 60. ``unique=True`` deduplicates overlapping runs
+    across worker replicas.
+
+    ``arq`` is imported lazily so importing ``core_shared`` does not require it
+    (see the module docstring); workers that schedule cron jobs always depend on
+    ``arq``.
+    """
+    interval = min(60, max(1, every_minutes))
+    minutes = set(range(0, 60, interval))
+
+    from arq import cron
+
+    return [
+        cron(
+            func,
+            minute=minutes,
+            unique=unique,
+        )
+    ]
+
+
 def _log_consumer_task_done(task: asyncio.Task[None]) -> None:
     """Log unhandled exceptions from the stream-consumer background task.
 

@@ -347,6 +347,60 @@ async def trigger_sync(
     }
 ```
 
+#### Non-Blocking Fan-Outs and Reconciliation
+
+Orchestrator (fan-out) jobs split a large sync into many child batch jobs. Rather than
+**blocking** on `asyncio.gather(*[job.result()])` — which holds an ARQ worker slot for the whole
+fan-out and relies on a brittle hard-coded timeout — orchestrators dispatch their children and
+return immediately. Parent completion is decided out-of-band by a shared reconciliation job.
+
+**Data model** (`core_shared/models/sync_job.py`):
+
+- `SyncJobStatus.IN_PROGRESS` — a parent that has dispatched its children and is awaiting them
+  (distinct from `RUNNING`, which means a job is actively executing on a worker).
+- `sync_jobs.parent_job_id` — self-referencing link from a child to its orchestrator (`NULL` for
+  top-level jobs).
+- `expected_children`, `completed_children`, `failed_children` — child counters on the parent.
+
+**Non-blocking lifecycle:**
+
+1. The orchestrator enqueues the child jobs, persists each as a `sync_jobs` row linked via
+   `parent_job_id`, calls `set_expected_children(...)`, marks itself `IN_PROGRESS`, and returns.
+2. Each child, on completion, updates its own row and atomically increments the parent's
+   `completed_children` / `failed_children` counter.
+3. A periodic **reconciliation job** finalises the parent.
+
+**Reconciliation job** (`core_shared/sync_reconciliation.py`):
+
+`reconcile_in_progress_parents(ctx)` scans every `IN_PROGRESS` parent
+(`SyncJobRepository.list_in_progress_parents()`) and transitions each based on the **actual child
+rows** (`aggregate_children` is authoritative; the parent's counters are only a fast path, so a
+missed increment cannot strand a parent):
+
+- All expected children present and completed → `COMPLETED`.
+- Any child failed or was cancelled (fail-if-any policy; a cancelled child is
+  terminal-but-unsuccessful) → `FAILED`, with a failure summary on the parent.
+- Children that have not progressed within `reconciliation_stale_after_seconds`
+  (a `BaseWorkerSettings` field, default 30 min) → `FAILED` (stuck/timeout), rather than left
+  `IN_PROGRESS` forever. Staleness is measured from the parent's `updated_at`, which bumps on each
+  child counter increment.
+
+The pure decision rules live in `decide_parent_outcome(...)` for unit testing; `reconcile_parents`
+drives the repository loop; `reconcile_in_progress_parents` is the ARQ entry point (opens a session,
+reconciles, commits). It is a safe no-op when no `IN_PROGRESS` parents exist.
+
+**Scheduling.** Any worker that uses fan-outs registers the reconciler on a frequent cron via the
+shared helper, far more often than the hourly periodic-sync cadence:
+
+```python
+from core_shared import generate_reconciliation_cron, reconcile_in_progress_parents
+
+class WorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
+    functions = [reconcile_in_progress_parents, ...]
+    # Reconcile in-progress fan-out parents every 5 minutes.
+    cron_jobs = generate_reconciliation_cron(reconcile_in_progress_parents)
+```
+
 ### 3. Integration Services
 
 Each integration implements a common interface:
