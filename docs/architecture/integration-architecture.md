@@ -215,6 +215,32 @@ consolidation. See
 for the migration plan (schema → dual-write + backfill → move reads → stop writing
 `external_references` → drop + dedupe).
 
+**Transition state (dual-write).** The consolidation is mid-flight: every path that
+writes `external_references` now also writes the paired `sync_metadata` link in the
+same unit of work, so the canonical store stays complete and current:
+
+- The Immich worker's name-match auto-link upserts `sync_metadata` immediately
+  (it no longer relies on the consumer's later `contact.updated`).
+- The album link write (`AlbumSyncReadRepository.upsert_link`) mirrors
+  `reference_data` onto the `immich_album` `sync_metadata` row.
+- The Google and Immich worker `sync_metadata` upserts carry
+  `internal_entity_type` / `external_entity_type` (`contact` / `person`).
+
+A one-off, idempotent migration
+(`0091_backfill_sync_metadata_from_external_references`) backfills rows that predate
+dual-write: it upserts the matching `sync_metadata` link for every
+`external_references` row (copying `reference_data` and entity types), preserving the
+existing `internal_id` / `version_hash` and giving backfilled-only rows
+`version_hash = ''` so the next sync re-validates. Where `external_references` holds
+duplicate `(external_system, external_entity_id)` rows (which `sync_metadata`'s unique
+key disallows), a deterministic winner is chosen and the losers are logged to the
+temporary `link_backfill_quarantine` audit table for later reconciliation — nothing is
+silently dropped.
+
+**Reads are unchanged in this state** — the backend dedup/idempotency paths still read
+`external_references`; they move to `sync_metadata` in a later phase, once dual-write +
+backfill guarantee the canonical store is complete.
+
 ### 2. Task Queue System
 
 **Technology**: ARQ (asyncio-based, Redis-backed)
