@@ -96,6 +96,7 @@ class TestImmichWorkerSettings:
             "sync_immich_album_batch",
             "periodic_sync_all_immich_accounts",
             "process_contact_event",
+            "reconcile_in_progress_parents",
         }
 
     def test_queue_name(self) -> None:
@@ -142,15 +143,36 @@ class TestImmichWorkerSettings:
 
 
 class TestImmichCronScheduling:
-    """Cron jobs are produced by the shared ``generate_cron_jobs`` helper."""
+    """Cron jobs are produced by the shared ``generate_cron_jobs`` helper plus the
+    always-on fan-out reconciliation cron (ITER14-003 Phase 3)."""
 
-    def test_cron_scheduled_when_periodic_sync_enabled(self) -> None:
+    @staticmethod
+    def _reconciliation_crons(cron_jobs: list[Any]) -> list[Any]:
+        """The reconciliation cron fires every 5 minutes ({0,5,…,55})."""
+        return [
+            c
+            for c in cron_jobs
+            if isinstance(getattr(c, "minute", None), set) and len(c.minute) == 12
+        ]
+
+    def test_reconciliation_cron_present_with_periodic_sync(self) -> None:
         worker = _reload_worker(ENABLE_PERIODIC_SYNC="true", SYNC_INTERVAL_HOURS="6")
-        assert len(worker.WorkerSettings.cron_jobs) == 1
+        cron_jobs = worker.WorkerSettings.cron_jobs
+        # Periodic-sync cron + reconciliation cron.
+        assert len(cron_jobs) == 2
+        assert len(self._reconciliation_crons(cron_jobs)) == 1
 
-    def test_no_cron_when_periodic_sync_disabled(self) -> None:
+    def test_reconciliation_cron_present_when_periodic_sync_disabled(self) -> None:
         worker = _reload_worker(ENABLE_PERIODIC_SYNC="false")
-        assert worker.WorkerSettings.cron_jobs == []
+        cron_jobs = worker.WorkerSettings.cron_jobs
+        # Periodic sync off, but reconciliation still runs.
+        assert len(cron_jobs) == 1
+        assert len(self._reconciliation_crons(cron_jobs)) == 1
+
+    def test_reconciliation_cron_targets_reconcile_function(self) -> None:
+        worker = _reload_worker(ENABLE_PERIODIC_SYNC="false")
+        recon = self._reconciliation_crons(worker.WorkerSettings.cron_jobs)[0]
+        assert recon.coroutine.__name__ == "reconcile_in_progress_parents"
 
 
 class TestImmichLifecycleDelegation:

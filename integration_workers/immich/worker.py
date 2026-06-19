@@ -12,14 +12,18 @@ sync tasks. Actual sync logic will be implemented in ITER11-002+.
 from __future__ import annotations
 
 import sys
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any, cast
 
 from arq.typing import StartupShutdown, WorkerSettingsBase
 from core_shared import (
+    DEFAULT_MAX_TRIES,
     SharedARQWorkerSettings,
     build_worker_lifecycle,
     generate_cron_jobs,
+    generate_reconciliation_cron,
+    reconcile_in_progress_parents,
     redis_settings_from_url,
 )
 from core_shared.integration_constants import IMMICH_ARQ_QUEUE_NAME
@@ -29,6 +33,7 @@ from core_shared.logging import (
     set_job_id,
     set_worker_id,
 )
+from core_shared.repositories.sync_job_repository import SyncJobRepository
 from core_shared.telemetry import setup_telemetry, trace_arq_job
 
 from immich_api_client import ImmichApiClient
@@ -64,8 +69,6 @@ async def _update_sync_job_status(
     **kwargs: Any,
 ) -> None:
     """Update a sync_jobs row via SyncJobRepository."""
-    from core_shared.repositories.sync_job_repository import SyncJobRepository
-
     async with session_factory() as session:
         conn = await session.connection()
         repo = SyncJobRepository(conn)
@@ -79,31 +82,163 @@ async def _update_sync_job_status(
             )
 
 
-@trace_arq_job
-async def sync_immich_people(
+def _coerce_int(value: Any, default: int) -> int:
+    """Best-effort int coercion, falling back to ``default`` for bad/missing values."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _is_final_attempt(ctx: dict[str, Any]) -> bool:
+    """Whether ARQ will give up on this job after the current attempt.
+
+    Children only record a terminal ``failed`` row (and bump the parent's
+    ``failed_children``) on the final attempt, so a transient failure that ARQ
+    will retry does not prematurely fail the fan-out. ARQ does not always place
+    ``max_tries`` in the context, so the worker's shared default is the fallback.
+    ``job_try``/``max_tries`` are coerced defensively so a missing/``None``/string
+    value can never raise here and silently skip the failure recording.
+    """
+    job_try = _coerce_int(ctx.get("job_try"), 1)
+    max_tries = _coerce_int(ctx.get("max_tries"), DEFAULT_MAX_TRIES)
+    return job_try >= max_tries
+
+
+async def _record_child_terminal(
+    repo: SyncJobRepository,
+    *,
+    child_job_id: str,
+    parent_job_id: str,
+    status: str,
+    error_message: str | None = None,
+) -> None:
+    """Mark a child row terminal and bump the matching parent counter.
+
+    The parent counter is incremented **only when the child row update actually
+    matched a row**, so a missing/incorrect ``child_job_id`` can never bump a
+    parent's counters (and ``updated_at``) without a corresponding terminal child
+    row — which would otherwise reset the reconciler's staleness window and skew
+    the fast-path counts. Child rows remain reconciliation's source of truth.
+    """
+    updated = await repo.update_status(
+        job_id=child_job_id,
+        status=status,
+        completed_at=datetime.now(UTC),
+        error_message=error_message,
+    )
+    if updated is None:
+        logger.warning(
+            "Child sync job row not found; skipping parent counter increment",
+            child_job_id=child_job_id,
+            parent_job_id=parent_job_id,
+            status=status,
+        )
+        return
+
+    if status == "completed":
+        await repo.increment_completed_children(parent_job_id)
+    else:
+        await repo.increment_failed_children(parent_job_id)
+
+
+async def _record_child_failure(
+    session_factory: Any,
+    child_job_id: str,
+    parent_job_id: str,
+    error_message: str,
+) -> None:
+    """Mark a child row ``failed`` and bump the parent's ``failed_children``.
+
+    Runs in its own committed unit of work because the originating batch
+    transaction has already been rolled back when this is called.
+    """
+    async with session_factory() as session:
+        conn = await session.connection()
+        repo = SyncJobRepository(conn)
+        await _record_child_terminal(
+            repo,
+            child_job_id=child_job_id,
+            parent_job_id=parent_job_id,
+            status="failed",
+            error_message=error_message,
+        )
+        await session.commit()
+
+
+async def _persist_fanout_children(
+    repo: SyncJobRepository,
+    *,
+    parent_job_id: str,
+    user_id: str,
+    sync_type: str,
+    child_id_prefix: str,
+    count: int,
+) -> list[str]:
+    """Persist linked child rows and finalise the parent's pre-dispatch state.
+
+    Creates one ``queued`` child ``sync_jobs`` row per batch (linked via
+    ``parent_job_id``), records ``expected_children``, and transitions the parent
+    to ``in_progress`` — or straight to ``completed`` when there is nothing to
+    fan out. Returns the deterministic child job ids in batch order.
+
+    The caller commits this as a single unit of work *before* dispatching the
+    children, so every child's row already exists when it updates itself and
+    increments the parent counters.
+    """
+    child_ids = [f"{child_id_prefix}{i + 1}" for i in range(count)]
+    for child_id in child_ids:
+        await repo.create(
+            job_id=child_id,
+            user_id=user_id,
+            integration_source="immich",
+            sync_type=sync_type,
+            status="queued",
+            parent_job_id=parent_job_id,
+        )
+
+    await repo.set_expected_children(parent_job_id, count)
+
+    if count == 0:
+        await repo.update_status(
+            job_id=parent_job_id,
+            status="completed",
+            completed_at=datetime.now(UTC),
+            progress=100,
+        )
+    else:
+        await repo.update_status(job_id=parent_job_id, status="in_progress", progress=0)
+
+    return child_ids
+
+
+async def _run_immich_fanout(
     ctx: dict[str, Any],
     user_id: str,
-    sync_type: str = "full",
+    sync_type: str,
+    *,
+    label: str,
+    list_batches: Callable[[ImmichSyncService], AsyncIterator[Any]],
+    batch_task: str,
+    child_id_template: str,
+    failure_message: str,
 ) -> dict[str, Any]:
-    """ARQ task: orchestrate Immich People sync.
+    """Shared non-blocking fan-out orchestration for albums and people.
 
-    Lists people pages from Immich and enqueues a `sync_immich_people_batch`
-    job for each page. Each batch commits independently.
-
-    Args:
-        ctx: ARQ worker context (must contain `session_factory`).
-        user_id: Internal user ID.
-        sync_type: 'full' or 'smart'.
-
-    Returns:
-        Dictionary with sync summary.
+    Drains ``list_batches`` into memory, persists a linked child row per batch,
+    marks the parent ``in_progress`` (or ``completed`` when empty), commits, then
+    dispatches one ``batch_task`` per batch — passing the parent ``job_id`` so
+    each child can update its own row and the parent counters. Returns
+    immediately; the reconciler finalises the parent. The two public
+    orchestrators differ only in the values passed here.
     """
     job_id = ctx.get("job_id", "unknown")
     session_factory = ctx["session_factory"]
     started_at = datetime.now(UTC)
 
     logger.info(
-        "sync_immich_people started",
+        "immich fanout started",
+        task=label,
         user_id=user_id,
         sync_type=sync_type,
         job_id=job_id,
@@ -114,8 +249,10 @@ async def sync_immich_people(
     )
 
     try:
+        batches: list[Any] = []
         async with session_factory() as session:
             conn = await session.connection()
+            repo = SyncJobRepository(conn)
 
             auth_service = ImmichAuthService(settings.encryption_key.get_secret_value())
             api_key = await auth_service.get_api_key(user_id, conn)
@@ -123,137 +260,120 @@ async def sync_immich_people(
 
             if not api_key or not server_url:
                 logger.warning("Immich credentials not found for user", user_id=user_id)
-                await _update_sync_job_status(
-                    session_factory,
-                    job_id,
-                    "failed",
+                await repo.update_status(
+                    job_id=job_id,
+                    status="failed",
                     completed_at=datetime.now(UTC),
                     error_message="Immich credentials not configured",
                 )
+                await session.commit()
                 return {
                     "status": "error",
                     "message": "Immich credentials not configured",
                     "user_id": user_id,
                 }
 
-            batches_enqueued = 0
             api_client = ImmichApiClient.create(server_url, api_key)
             try:
                 sync_service = ImmichSyncService(
-                    api_client=api_client,
-                    connection=conn,
-                    user_id=user_id,
+                    api_client=api_client, connection=conn, user_id=user_id
                 )
-
-                page_number = 0
-                batch_jobs = []
-                import asyncio
-
-                from arq.jobs import Job
-
-                async for people_batch in sync_service.list_people_batches():
-                    page_number += 1
-                    batch_job_id = f"immich-batch-{job_id}-p{page_number}"
-
-                    job = await ctx["redis"].enqueue_job(
-                        "sync_immich_people_batch",
-                        user_id,
-                        people_batch,
-                        _job_id=batch_job_id,
-                        _queue_name=IMMICH_ARQ_QUEUE_NAME,
-                    )
-                    if job:
-                        batches_enqueued += 1
-                        batch_jobs.append(job)
-                        logger.info(
-                            "Enqueued people batch job",
-                            job_id=job.job_id,
-                            batch_size=len(people_batch),
-                            batch_number=page_number,
-                        )
-                    else:
-                        batch_jobs.append(
-                            Job(
-                                batch_job_id,
-                                ctx["redis"],
-                                _queue_name=IMMICH_ARQ_QUEUE_NAME,
-                            )
-                        )
-                        logger.info(
-                            "People batch job already enqueued",
-                            batch_job_id=batch_job_id,
-                            batch_number=page_number,
-                        )
-
+                async for batch in list_batches(sync_service):
+                    batches.append(batch)
             finally:
                 await api_client.close()
 
-        if batch_jobs:
-            logger.info(
-                "Waiting for batch jobs to complete",
-                job_id=job_id,
-                count=len(batch_jobs),
+            child_ids = await _persist_fanout_children(
+                repo,
+                parent_job_id=job_id,
+                user_id=user_id,
+                sync_type=sync_type,
+                child_id_prefix=child_id_template.format(job_id=job_id),
+                count=len(batches),
             )
-            results = await asyncio.gather(
-                *[j.result(timeout=290) for j in batch_jobs], return_exceptions=True
-            )
-            for res in results:
-                if isinstance(res, Exception):
-                    raise res
+            await session.commit()
 
-        await _update_sync_job_status(
-            session_factory,
-            job_id,
-            "completed",
-            completed_at=datetime.now(UTC),
-            progress=100,
+        # Children rows + parent state are committed; dispatch is now safe.
+        dispatched = 0
+        for child_id, batch in zip(child_ids, batches, strict=True):
+            job = await ctx["redis"].enqueue_job(
+                batch_task,
+                user_id,
+                batch,
+                job_id,
+                _job_id=child_id,
+                _queue_name=IMMICH_ARQ_QUEUE_NAME,
+            )
+            if job is None:
+                # Deterministic _job_id means a prior run already enqueued this
+                # child; the child row still exists, so the reconciler stays
+                # correct. Surface it rather than silently over-reporting.
+                logger.warning(
+                    "immich child batch already enqueued; skipping",
+                    task=label,
+                    job_id=job_id,
+                    child_job_id=child_id,
+                )
+            else:
+                dispatched += 1
+
+        logger.info(
+            "immich fanout dispatched",
+            task=label,
+            job_id=job_id,
+            expected_children=len(batches),
+            dispatched=dispatched,
         )
 
         return {
-            "status": "enqueued",
+            "status": "in_progress" if batches else "completed",
             "user_id": user_id,
             "sync_type": sync_type,
-            "batches_enqueued": batches_enqueued,
+            "batches_enqueued": len(batches),
         }
 
     except Exception as e:
         logger.exception(
-            "sync_immich_people failed",
-            user_id=user_id,
-            error=str(e),
+            "immich fanout failed", task=label, user_id=user_id, error=str(e)
         )
-        error_msg = "Immich people sync failed due to an internal error"
         await _update_sync_job_status(
             session_factory,
             job_id,
             "failed",
             completed_at=datetime.now(UTC),
-            error_message=error_msg,
+            error_message=failure_message,
         )
         return {
             "status": "error",
-            "message": error_msg,
+            "message": failure_message,
             "user_id": user_id,
         }
 
 
-@trace_arq_job
-async def sync_immich_people_batch(
+async def _run_immich_batch(
     ctx: dict[str, Any],
     user_id: str,
-    people_data: list[dict[str, Any]],
+    parent_job_id: str | None,
+    *,
+    label: str,
+    batch_size: int,
+    process: Callable[[Any, Any, str], Awaitable[Any]],
+    build_result: Callable[[Any], dict[str, Any]],
 ) -> dict[str, Any]:
-    """ARQ task: process a batch of Immich people.
+    """Shared child-batch scaffolding for albums and people.
 
-    Args:
-        ctx: ARQ worker context.
-        user_id: Internal user ID.
-        people_data: Serialized ImmichPerson dicts.
+    Resolves credentials, runs ``process(api_client, conn, server_url)`` inside a
+    committed unit of work, and — when ``parent_job_id`` is set — marks this
+    child's row ``completed`` and increments the parent's ``completed_children``
+    (only if the row update matched). On a final-attempt failure it records the
+    child ``failed`` and increments ``failed_children``; a non-final failure
+    re-raises untouched so ARQ retries without double-counting.
     """
     session_factory = ctx["session_factory"]
+    child_job_id = ctx.get("job_id", "unknown")
 
     logger.info(
-        "sync_immich_people_batch started", user_id=user_id, batch_size=len(people_data)
+        "immich batch started", task=label, user_id=user_id, batch_size=batch_size
     )
 
     try:
@@ -269,10 +389,14 @@ async def sync_immich_people_batch(
 
             api_client = ImmichApiClient.create(server_url, api_key)
             try:
-                sync_service = ImmichSyncService(
-                    api_client=api_client, connection=conn, user_id=user_id
-                )
-                result = await sync_service.sync_people_batch(people_data)
+                result = await process(api_client, conn, server_url)
+                if parent_job_id:
+                    await _record_child_terminal(
+                        SyncJobRepository(conn),
+                        child_job_id=child_job_id,
+                        parent_job_id=parent_job_id,
+                        status="completed",
+                    )
                 await session.commit()
             except Exception:
                 await session.rollback()
@@ -280,6 +404,82 @@ async def sync_immich_people_batch(
             finally:
                 await api_client.close()
 
+        return build_result(result)
+    except Exception as e:
+        logger.exception(
+            "immich batch failed", task=label, user_id=user_id, error=str(e)
+        )
+        if parent_job_id and _is_final_attempt(ctx):
+            await _record_child_failure(
+                session_factory, child_job_id, parent_job_id, str(e)
+            )
+        raise
+
+
+@trace_arq_job
+async def sync_immich_people(
+    ctx: dict[str, Any],
+    user_id: str,
+    sync_type: str = "full",
+) -> dict[str, Any]:
+    """ARQ task: orchestrate Immich People sync (non-blocking fan-out).
+
+    Lists people pages from Immich, persists one linked child ``sync_jobs`` row
+    per page, enqueues a ``sync_immich_people_batch`` job for each, marks the
+    parent ``in_progress`` and returns immediately — it no longer blocks on the
+    children. The shared reconciliation cron finalises the parent against the
+    child rows.
+
+    Args:
+        ctx: ARQ worker context (must contain `session_factory` and `redis`).
+        user_id: Internal user ID.
+        sync_type: 'full' or 'smart'.
+
+    Returns:
+        Dictionary with sync summary.
+    """
+    return await _run_immich_fanout(
+        ctx,
+        user_id,
+        sync_type,
+        label="sync_immich_people",
+        list_batches=lambda svc: svc.list_people_batches(),
+        batch_task="sync_immich_people_batch",
+        child_id_template="immich-batch-{job_id}-p",
+        failure_message="Immich people sync failed due to an internal error",
+    )
+
+
+@trace_arq_job
+async def sync_immich_people_batch(
+    ctx: dict[str, Any],
+    user_id: str,
+    people_data: list[dict[str, Any]],
+    parent_job_id: str | None = None,
+) -> dict[str, Any]:
+    """ARQ task: process a batch of Immich people.
+
+    On success the batch marks its own child ``sync_jobs`` row ``completed`` and
+    atomically increments the parent's ``completed_children``; on a final-attempt
+    failure it marks the row ``failed`` and increments ``failed_children``. A
+    non-final failure just re-raises so ARQ retries without touching the
+    counters. ``parent_job_id`` is optional so legacy/direct invocations still
+    work (counters are simply skipped).
+
+    Args:
+        ctx: ARQ worker context.
+        user_id: Internal user ID.
+        people_data: Serialized ImmichPerson dicts.
+        parent_job_id: Orchestrator job id for child-row + counter bookkeeping.
+    """
+
+    async def _process(api_client: Any, conn: Any, _server_url: str) -> Any:
+        sync_service = ImmichSyncService(
+            api_client=api_client, connection=conn, user_id=user_id
+        )
+        return await sync_service.sync_people_batch(people_data)
+
+    def _build_result(result: Any) -> dict[str, Any]:
         return {
             "status": "success",
             "user_id": user_id,
@@ -290,11 +490,16 @@ async def sync_immich_people_batch(
             "skipped": result.skipped,
             "conflicts": result.conflicts,
         }
-    except Exception as e:
-        logger.exception(
-            "sync_immich_people_batch failed", user_id=user_id, error=str(e)
-        )
-        raise
+
+    return await _run_immich_batch(
+        ctx,
+        user_id,
+        parent_job_id,
+        label="sync_immich_people_batch",
+        batch_size=len(people_data),
+        process=_process,
+        build_result=_build_result,
+    )
 
 
 @trace_arq_job
@@ -303,152 +508,32 @@ async def sync_immich_albums(
     user_id: str,
     sync_type: str = "full",
 ) -> dict[str, Any]:
-    """ARQ task: orchestrate Immich album sync.
+    """ARQ task: orchestrate Immich album sync (non-blocking fan-out).
 
-    Lists album-ID batches from Immich and enqueues a ``sync_immich_album_batch``
-    job for each batch (mirroring ``sync_immich_people``), so the heavy per-album
-    work is fanned out and no single batch times out. It then waits for the
-    batches and marks the sync job ``completed`` only if they all succeed, or
-    ``failed`` if any batch fails — so the job status reflects the real outcome
-    rather than just dispatch.
+    Lists album-ID batches from Immich, persists one linked child ``sync_jobs``
+    row per batch, enqueues a ``sync_immich_album_batch`` job for each, marks the
+    parent ``in_progress`` and returns immediately — it no longer blocks on
+    ``asyncio.gather``. The shared reconciliation cron finalises the parent
+    (``completed``/``failed``) against the child rows.
 
     Args:
-        ctx: ARQ worker context (must contain ``session_factory``).
+        ctx: ARQ worker context (must contain ``session_factory`` and ``redis``).
         user_id: Internal user ID.
         sync_type: 'full' or 'smart'.
 
     Returns:
         Dictionary with album sync summary.
     """
-    job_id = ctx.get("job_id", "unknown")
-    session_factory = ctx["session_factory"]
-    started_at = datetime.now(UTC)
-
-    logger.info(
-        "sync_immich_albums started",
-        user_id=user_id,
-        sync_type=sync_type,
-        job_id=job_id,
+    return await _run_immich_fanout(
+        ctx,
+        user_id,
+        sync_type,
+        label="sync_immich_albums",
+        list_batches=lambda svc: svc.list_album_id_batches(),
+        batch_task="sync_immich_album_batch",
+        child_id_template="immich-album-batch-{job_id}-b",
+        failure_message="Immich album sync failed due to an internal error",
     )
-
-    await _update_sync_job_status(
-        session_factory, job_id, "running", started_at=started_at, progress=0
-    )
-
-    try:
-        import asyncio
-
-        from arq.jobs import Job
-
-        batch_jobs: list[Any] = []
-        batches_enqueued = 0
-
-        async with session_factory() as session:
-            conn = await session.connection()
-
-            auth_service = ImmichAuthService(settings.encryption_key.get_secret_value())
-            api_key = await auth_service.get_api_key(user_id, conn)
-            server_url = await auth_service.get_server_url(user_id, conn)
-
-            if not api_key or not server_url:
-                logger.warning("Immich credentials not found for user", user_id=user_id)
-                await _update_sync_job_status(
-                    session_factory,
-                    job_id,
-                    "failed",
-                    completed_at=datetime.now(UTC),
-                    error_message="Immich credentials not configured",
-                )
-                return {
-                    "status": "error",
-                    "message": "Immich credentials not configured",
-                    "user_id": user_id,
-                }
-
-            api_client = ImmichApiClient.create(server_url, api_key)
-            try:
-                sync_service = ImmichSyncService(
-                    api_client=api_client, connection=conn, user_id=user_id
-                )
-
-                batch_number = 0
-                async for album_batch in sync_service.list_album_id_batches():
-                    batch_number += 1
-                    batch_job_id = f"immich-album-batch-{job_id}-b{batch_number}"
-
-                    job = await ctx["redis"].enqueue_job(
-                        "sync_immich_album_batch",
-                        user_id,
-                        album_batch,
-                        _job_id=batch_job_id,
-                        _queue_name=IMMICH_ARQ_QUEUE_NAME,
-                    )
-                    if job:
-                        batches_enqueued += 1
-                        batch_jobs.append(job)
-                        logger.info(
-                            "Enqueued album batch job",
-                            job_id=job.job_id,
-                            batch_size=len(album_batch),
-                            batch_number=batch_number,
-                        )
-                    else:
-                        batch_jobs.append(
-                            Job(
-                                batch_job_id,
-                                ctx["redis"],
-                                _queue_name=IMMICH_ARQ_QUEUE_NAME,
-                            )
-                        )
-                        logger.info(
-                            "Album batch job already enqueued",
-                            batch_job_id=batch_job_id,
-                            batch_number=batch_number,
-                        )
-            finally:
-                await api_client.close()
-
-        # Wait for the fanned-out batches so the sync job status reflects whether
-        # the albums actually synced; a failed batch propagates and marks the
-        # job failed below.
-        if batch_jobs:
-            results = await asyncio.gather(
-                *[j.result(timeout=290) for j in batch_jobs], return_exceptions=True
-            )
-            for res in results:
-                if isinstance(res, Exception):
-                    raise res
-
-        await _update_sync_job_status(
-            session_factory,
-            job_id,
-            "completed",
-            completed_at=datetime.now(UTC),
-            progress=100,
-        )
-
-        return {
-            "status": "completed",
-            "user_id": user_id,
-            "sync_type": sync_type,
-            "batches_enqueued": batches_enqueued,
-        }
-
-    except Exception as e:
-        logger.exception("sync_immich_albums failed", user_id=user_id, error=str(e))
-        error_msg = "Immich album sync failed due to an internal error"
-        await _update_sync_job_status(
-            session_factory,
-            job_id,
-            "failed",
-            completed_at=datetime.now(UTC),
-            error_message=error_msg,
-        )
-        return {
-            "status": "error",
-            "message": error_msg,
-            "user_id": user_id,
-        }
 
 
 @trace_arq_job
@@ -456,49 +541,34 @@ async def sync_immich_album_batch(
     ctx: dict[str, Any],
     user_id: str,
     album_ids: list[str],
+    parent_job_id: str | None = None,
 ) -> dict[str, Any]:
     """ARQ task: process a batch of Immich albums.
+
+    On success the batch marks its own child ``sync_jobs`` row ``completed`` and
+    atomically increments the parent's ``completed_children``; on a final-attempt
+    failure it marks the row ``failed`` and increments ``failed_children``. A
+    non-final failure just re-raises so ARQ retries without touching the
+    counters. ``parent_job_id`` is optional so legacy/direct invocations still
+    work (counters are simply skipped).
 
     Args:
         ctx: ARQ worker context.
         user_id: Internal user ID.
         album_ids: Immich album UUIDs to process.
+        parent_job_id: Orchestrator job id for child-row + counter bookkeeping.
     """
-    session_factory = ctx["session_factory"]
 
-    logger.info(
-        "sync_immich_album_batch started",
-        user_id=user_id,
-        batch_size=len(album_ids),
-    )
+    async def _process(api_client: Any, conn: Any, server_url: str) -> Any:
+        sync_service = ImmichSyncService(
+            api_client=api_client,
+            connection=conn,
+            user_id=user_id,
+            server_url=server_url,
+        )
+        return await sync_service.sync_albums_batch(album_ids)
 
-    try:
-        async with session_factory() as session:
-            conn = await session.connection()
-
-            auth_service = ImmichAuthService(settings.encryption_key.get_secret_value())
-            api_key = await auth_service.get_api_key(user_id, conn)
-            server_url = await auth_service.get_server_url(user_id, conn)
-
-            if not api_key or not server_url:
-                raise ValueError("Immich credentials missing")
-
-            api_client = ImmichApiClient.create(server_url, api_key)
-            try:
-                sync_service = ImmichSyncService(
-                    api_client=api_client,
-                    connection=conn,
-                    user_id=user_id,
-                    server_url=server_url,
-                )
-                result = await sync_service.sync_albums_batch(album_ids)
-                await session.commit()
-            except Exception:
-                await session.rollback()
-                raise
-            finally:
-                await api_client.close()
-
+    def _build_result(result: Any) -> dict[str, Any]:
         return {
             "status": "success",
             "user_id": user_id,
@@ -507,11 +577,16 @@ async def sync_immich_album_batch(
             "unchanged": result.unchanged,
             "errors": result.errors,
         }
-    except Exception as e:
-        logger.exception(
-            "sync_immich_album_batch failed", user_id=user_id, error=str(e)
-        )
-        raise
+
+    return await _run_immich_batch(
+        ctx,
+        user_id,
+        parent_job_id,
+        label="sync_immich_album_batch",
+        batch_size=len(album_ids),
+        process=_process,
+        build_result=_build_result,
+    )
 
 
 async def _unlink_immich_reference_for_event(
@@ -935,6 +1010,7 @@ class WorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
         sync_immich_album_batch,
         periodic_sync_all_immich_accounts,
         process_contact_event,
+        reconcile_in_progress_parents,
     ]
 
     # Worker lifecycle (shared factory). Cast to arq's StartupShutdown Protocol:
@@ -952,12 +1028,17 @@ class WorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
     #   to its default of 3600. Redeclaring 30 preserves the pre-migration 30s ping.
     health_check_interval = 30
 
-    # Periodic sync cron (shared helper; empty when periodic sync is disabled).
-    cron_jobs = generate_cron_jobs(
-        periodic_sync_all_immich_accounts,
-        enable_periodic_sync=settings.enable_periodic_sync,
-        sync_interval_hours=settings.sync_interval_hours,
-    )
+    # Cron schedule: the periodic-sync cron (shared helper; empty when periodic
+    # sync is disabled) plus the always-on fan-out reconciliation cron, which
+    # finalises non-blocking ``IN_PROGRESS`` parents against their child rows.
+    cron_jobs = [
+        *generate_cron_jobs(
+            periodic_sync_all_immich_accounts,
+            enable_periodic_sync=settings.enable_periodic_sync,
+            sync_interval_hours=settings.sync_interval_hours,
+        ),
+        *generate_reconciliation_cron(reconcile_in_progress_parents),
+    ]
 
 
 # ---------------------------------------------------------------------------
