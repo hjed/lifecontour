@@ -68,7 +68,15 @@ def _async_gen(items: list[Any]) -> Any:
 
 @pytest_asyncio.fixture
 async def redis_pool() -> AsyncIterator[Any]:
-    """Real Redis pool on an isolated DB index for the fan-out queue."""
+    """Real Redis pool on a dedicated DB index for the fan-out queue.
+
+    Isolation matches the established worker integration convention
+    (cf. ``test_worker_lifecycle_integration.py``): the test Redis is already
+    per-workspace via ``REDIS_TEST_PORT``, and this suite uses its own DB index
+    (5, distinct from the lifecycle suite's 4). ``flushdb`` gives each test a
+    clean queue; queue assertions additionally check for *our* child job ids as a
+    subset (below) so they never depend on exclusive ownership of the DB.
+    """
     redis_settings = RedisSettings.from_dsn(os.environ["REDIS_URL"])
     redis_settings.database = 5
     pool = await create_pool(redis_settings)
@@ -256,8 +264,13 @@ class TestImmichFanout:
         children = await repo.list_children(parent_id)
         assert len(children) == 2
         assert all(c.parent_job_id == parent_id for c in children)
-        queued = await redis_pool.queued_jobs(queue_name=IMMICH_ARQ_QUEUE_NAME)
-        assert len(queued) == 2
+        # Subset check: our two children were dispatched on the real queue,
+        # without assuming exclusive ownership of the Redis DB index.
+        queued_ids = {
+            j.job_id
+            for j in await redis_pool.queued_jobs(queue_name=IMMICH_ARQ_QUEUE_NAME)
+        }
+        assert {c.job_id for c in children} <= queued_ids
 
         # Children complete → counters increment → reconciler completes the parent.
         await _complete_all_children(

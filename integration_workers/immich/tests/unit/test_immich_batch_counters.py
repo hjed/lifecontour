@@ -178,6 +178,26 @@ class TestBatchCounters:
         repo.increment_failed_children.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    ("ctx", "expected"),
+    [
+        ({"job_try": 5, "max_tries": 5}, True),
+        ({"job_try": 1, "max_tries": 5}, False),
+        ({}, False),  # both missing -> defaults (1 >= 5 is False)
+        ({"job_try": None, "max_tries": None}, False),  # None -> defaults
+        ({"job_try": "5", "max_tries": "5"}, True),  # numeric strings coerced
+        ({"job_try": "oops"}, False),  # unparseable -> default job_try=1
+    ],
+)
+def test_is_final_attempt_coerces_defensively(
+    ctx: dict[str, Any], expected: bool
+) -> None:
+    """``_is_final_attempt`` never raises on missing/None/string ctx values."""
+    from worker import _is_final_attempt
+
+    assert _is_final_attempt(ctx) is expected
+
+
 @pytest.mark.asyncio
 async def test_missing_child_row_skips_counter_increment() -> None:
     """If the child row update matches no row, the parent counter is NOT bumped.

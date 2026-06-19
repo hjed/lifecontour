@@ -82,6 +82,14 @@ async def _update_sync_job_status(
             )
 
 
+def _coerce_int(value: Any, default: int) -> int:
+    """Best-effort int coercion, falling back to ``default`` for bad/missing values."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _is_final_attempt(ctx: dict[str, Any]) -> bool:
     """Whether ARQ will give up on this job after the current attempt.
 
@@ -89,10 +97,12 @@ def _is_final_attempt(ctx: dict[str, Any]) -> bool:
     ``failed_children``) on the final attempt, so a transient failure that ARQ
     will retry does not prematurely fail the fan-out. ARQ does not always place
     ``max_tries`` in the context, so the worker's shared default is the fallback.
+    ``job_try``/``max_tries`` are coerced defensively so a missing/``None``/string
+    value can never raise here and silently skip the failure recording.
     """
-    job_try = ctx.get("job_try", 1)
-    max_tries = ctx.get("max_tries", DEFAULT_MAX_TRIES)
-    return bool(job_try >= max_tries)
+    job_try = _coerce_int(ctx.get("job_try"), 1)
+    max_tries = _coerce_int(ctx.get("max_tries"), DEFAULT_MAX_TRIES)
+    return job_try >= max_tries
 
 
 async def _record_child_terminal(
@@ -284,8 +294,9 @@ async def _run_immich_fanout(
             await session.commit()
 
         # Children rows + parent state are committed; dispatch is now safe.
+        dispatched = 0
         for child_id, batch in zip(child_ids, batches, strict=True):
-            await ctx["redis"].enqueue_job(
+            job = await ctx["redis"].enqueue_job(
                 batch_task,
                 user_id,
                 batch,
@@ -293,12 +304,25 @@ async def _run_immich_fanout(
                 _job_id=child_id,
                 _queue_name=IMMICH_ARQ_QUEUE_NAME,
             )
+            if job is None:
+                # Deterministic _job_id means a prior run already enqueued this
+                # child; the child row still exists, so the reconciler stays
+                # correct. Surface it rather than silently over-reporting.
+                logger.warning(
+                    "immich child batch already enqueued; skipping",
+                    task=label,
+                    job_id=job_id,
+                    child_job_id=child_id,
+                )
+            else:
+                dispatched += 1
 
         logger.info(
             "immich fanout dispatched",
             task=label,
             job_id=job_id,
-            batches_enqueued=len(batches),
+            expected_children=len(batches),
+            dispatched=dispatched,
         )
 
         return {
