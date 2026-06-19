@@ -10,6 +10,9 @@ from arq.connections import ArqRedis, RedisSettings
 from core_shared.repositories.external_reference_repository import (
     ExternalReferenceRepository,
 )
+from core_shared.repositories.integration_link_repository import (
+    IntegrationLinkRepository,
+)
 from dishka import Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -340,22 +343,29 @@ class IntegrationProvider(Provider):
         return ExternalReferenceRepository(connection=connection)
 
     @provide(scope=Scope.REQUEST)
+    def provide_integration_link_repository(
+        self, connection: AsyncConnection
+    ) -> IntegrationLinkRepository:
+        """Provide IntegrationLinkRepository (canonical link reads) per request."""
+        return IntegrationLinkRepository(connection=connection)
+
+    @provide(scope=Scope.REQUEST)
     def provide_avatar_proxy_service(
         self,
-        ext_ref_repo: ExternalReferenceRepository,
+        link_repo: IntegrationLinkRepository,
         immich_token_service: ImmichTokenService,
     ) -> AvatarProxyService:
         """Provide avatar proxy service for request scope.
 
         Args:
-            ext_ref_repo: Repository for external reference lookups
+            link_repo: Canonical integration-link repository for person lookups
             immich_token_service: Service for Immich credential management
 
         Returns:
             AvatarProxyService: Service for proxying Immich thumbnails
         """
         return AvatarProxyService(
-            ext_ref_repo=ext_ref_repo,
+            ext_ref_repo=link_repo,
             immich_token_service=immich_token_service,
         )
 

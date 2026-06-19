@@ -1,8 +1,9 @@
 """Integration tests for AlbumSyncReadRepository.
 
-Verifies PHOTO_ALBUM type data is read from sync_metadata + external_references,
-that a malformed reference_data row degrades gracefully instead of 500ing, and
-that ``upsert_link`` dual-writes the album ``reference_data`` onto sync_metadata.
+Verifies PHOTO_ALBUM type data is read from the canonical sync_metadata link
+(``reference_data``), that a malformed reference_data row degrades gracefully
+instead of 500ing, and that ``upsert_link`` dual-writes the album
+``reference_data`` onto sync_metadata.
 """
 
 import json
@@ -40,26 +41,17 @@ async def _make_album_journal(
     saved = await SqlJournalRepository(connection).save(journal)
     assert saved.id is not None
 
+    # Album display data lives in the canonical sync_metadata link; the read
+    # path no longer joins external_references.
     await connection.execute(
         text("""
             INSERT INTO sync_metadata (
                 internal_id, integration_source, external_id,
-                last_synced_at, version_hash, sync_status
+                last_synced_at, version_hash, sync_status,
+                internal_entity_type, external_entity_type, reference_data
             ) VALUES (
-                :internal_id, 'immich_album', :external_id, now(), 'h', 'success'
-            )
-        """),
-        {"internal_id": saved.id, "external_id": album_id},
-    )
-    await connection.execute(
-        text("""
-            INSERT INTO external_references (
-                internal_entity_type, internal_entity_id, external_system,
-                external_entity_type, external_entity_id, reference_data,
-                created_at, updated_at
-            ) VALUES (
-                'journal', :internal_id, 'immich', 'album', :external_id,
-                :reference_data, now(), now()
+                :internal_id, 'immich_album', :external_id, now(), 'h', 'success',
+                'journal', 'album', :reference_data
             )
         """),
         {

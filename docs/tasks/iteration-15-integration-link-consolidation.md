@@ -1,6 +1,6 @@
 # Iteration 15: Integration Link Consolidation (fix contact duplication)
 
-**Status:** 🟡 IN PROGRESS — Phase 1 & 2 complete
+**Status:** 🟡 IN PROGRESS — Phase 1, 2 & 3 complete
 **Dependencies:** Iteration 11 (Immich Integration), Iteration 13 (Contact Merge), Iteration 14 (Worker Standardisation)
 **Goal:** Eliminate the dual-table inconsistency between `external_references` and `sync_metadata` that causes Immich-origin contacts to be duplicated by Google sync, by consolidating onto a single canonical integration-link store — and migrate/clean up the duplicates already created.
 
@@ -139,30 +139,37 @@ Ensure **every path that writes `external_references` also writes the paired `sy
 
 ---
 
-#### Phase 3: Move all reads to `sync_metadata` (this fixes the bug)
+#### Phase 3: Move all reads to `sync_metadata` (this fixes the bug) — ✅ COMPLETE
 
 **PR Size:** ~8–10 files
 
-With `sync_metadata` now complete and kept current by dual-write, introduce unified link-lookup methods on `SyncMetadataRepository` (or a thin `IntegrationLinkRepository` wrapper) and repoint every reader off `external_references`:
+With `sync_metadata` now complete and kept current by dual-write, a thin
+`IntegrationLinkRepository` wrapper (`core_shared/.../repositories/integration_link_repository.py`,
+shared by the backend and the workers) provides the unified link-lookup reads, and every reader is
+repointed off `external_references`:
 
-- `find_link_by_external(integration_source, external_id) -> link | None`
-- `find_internal_by_external(...) -> (internal_id, internal_uuid, internal_entity_type)`
-- `find_external_by_internal(internal_entity_type, internal_id, integration_source)`
+- [x] `find_link_by_external(integration_source, external_id) -> link | None`
+- [x] `find_internal_by_external(...) -> (internal_id, internal_uuid, internal_entity_type)`
+- [x] `find_external_by_internal(internal_entity_type, internal_id, integration_source)`
+- [x] plus `get_immich_person_id` / `get_contact_ids_by_immich_person_ids` (the Immich link reads).
 
-Readers to repoint:
-- **Backend consumer** (`outbox_event_processor.py`): `_process_contact_created` idempotency (`find_by_external_id`) and `_process_contact_updated`'s `find_contact_by_external_reference` → read `sync_metadata`. **← removes the duplication.**
-- `contact_repository.find_by_external_reference` / `get_external_references` → `sync_metadata`.
-- **Immich worker**: `_find_external_reference`, `ExternalReferenceRepository.get_immich_person_id` / `get_person_id_to_contact_id_map` / `find_by_internal_entity` → `sync_metadata` (+ `reference_data`/entity types).
-- **Album read repo** (`album_sync_read_repository.py`): drop the `external_references` join; read `reference_data` from `sync_metadata`.
-- **Merge collision detection** (`repoint_external_references_on_contact_merge` reads) → `sync_metadata`.
+Readers repointed:
+- [x] **Backend consumer** (`outbox_event_processor.py`): `_process_contact_created` idempotency now reads `sync_metadata` (`SyncMetadataRepository.find_by_external_id`); `_process_contact_updated`'s contact lookup (`contact_repository.find_by_external_reference`) reads `sync_metadata`; the email-reconciliation link-existence check reads `sync_metadata`. **← removes the duplication.**
+- [x] `contact_repository.find_by_external_reference` / `get_external_references` → `sync_metadata` (the contacts API + MCP external-links reads follow via the repo).
+- [x] **Immich worker**: `_find_external_reference`, `sync_contact_outbound` link lookup, `get_immich_person_id` (avatar proxy), `get_contact_ids_by_immich_person_ids` (album participant detection) → `sync_metadata`.
+- [x] **Album read repo** (`album_sync_read_repository.py`): the display reads (`find_by_journal_id` / `find_external_links` / `find_cover_asset`) drop the `external_references` join and read `reference_data` from `sync_metadata`.
+- [x] **Merge collision detection** (`ExternalReferenceService.repoint_contact_references` reads) → `sync_metadata` (the dual-table UPDATE/DELETE writes remain until Phase 4).
+
+> **Scope note:** Contact `synced_tags`/`etag` `reference_data` reads (`find_external_reference`, `_update_synced_tags_reference`) stay on `external_references` — Phase 2 mirrors only *album* `reference_data` into `sync_metadata`, so the contact `reference_data` write (and its read) move together in Phase 4. Phase 3 moves the *identity* reads + *album* `reference_data` reads.
 
 **Required Test Coverage:**
-- **Integration (the regression):** reproduce Immich creates email-less contact → outbound push writes `sync_metadata(google,…)` → Google inbound `contact.updated`/`created` → assert **exactly one** contact and it is updated, not duplicated.
-- **Integration:** idempotency — re-delivering `contact.created` for an already-linked external id is skipped; album display data still resolves from `reference_data`.
-- **Worker integration:** Immich create-vs-update decision still correct reading `sync_metadata`.
+- [x] **Integration (the regression):** Immich creates email-less contact → outbound push writes `sync_metadata(google,…)` → Google inbound `contact.updated`/`created` → asserts **exactly one** contact, updated not duplicated (`backend/tests/integration/integrations/test_link_consolidation_reads.py`).
+- [x] **Integration:** idempotency — re-delivering `contact.created` for an already-linked external id is skipped (`test_link_consolidation_reads.py`); album display data resolves from `reference_data` in `sync_metadata` (`backend/tests/integration/journal/test_album_sync_read_repository.py`, `backend/tests/integration/api/test_external_links_endpoints.py`).
+- [x] **Worker integration:** Immich create-vs-update decision reads `sync_metadata` (`integration_workers/immich/tests/integration/test_immich_external_reference_integration.py::TestCreateVsUpdateReadsSyncMetadata`).
+- [x] **Unit:** `IntegrationLinkRepository` lookups (`core_shared/tests/unit/repositories/test_integration_link_repository.py`).
 
 **Required Documentation Updates:**
-- `docs/architecture/integration-architecture.md` — inbound/outbound flow now keys dedup on `sync_metadata`.
+- [x] `docs/architecture/integration-architecture.md` — inbound/outbound flow now keys dedup on `sync_metadata`.
 
 ---
 

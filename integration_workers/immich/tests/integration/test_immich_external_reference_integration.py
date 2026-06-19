@@ -107,21 +107,69 @@ class TestExternalReferenceDbOperations:
         assert await _count_references(async_connection, person_id) == 1
 
     @pytest.mark.asyncio
-    async def test_find_external_reference_round_trip(
+    async def test_find_external_reference_reads_sync_metadata(
         self,
         sync_service: ImmichSyncService,
     ) -> None:
-        """A reference is absent before creation and found afterwards."""
+        """The link lookup resolves from the canonical sync_metadata store.
+
+        It is absent before the link exists and is found once the
+        ``sync_metadata`` link is written (no ``external_references`` row needed).
+        """
         contact_id = 555
         person_id = "11111111-2222-3333-4444-555555555555"
 
         assert await sync_service._find_external_reference(person_id) is None
 
-        await sync_service._create_external_reference(contact_id, person_id)
+        await sync_service._upsert_sync_metadata(
+            external_id=person_id,
+            internal_id=contact_id,
+            version_hash="vh-find",
+        )
 
         found = await sync_service._find_external_reference(person_id)
         assert found is not None
         assert found.internal_entity_id == contact_id
+
+
+class TestCreateVsUpdateReadsSyncMetadata:
+    """The create-vs-update decision keys on the canonical sync_metadata link."""
+
+    @pytest.mark.asyncio
+    async def test_existing_sync_metadata_link_takes_update_path(
+        self,
+        sync_service: ImmichSyncService,
+        async_connection: Any,
+    ) -> None:
+        """A person already linked via sync_metadata is not re-linked/created.
+
+        With only a ``sync_metadata`` link present (no ``external_references``
+        row), the worker must see the existing link and short-circuit to the
+        unchanged/update path instead of name-matching and creating a duplicate.
+        """
+        result = await async_connection.execute(
+            text(
+                "INSERT INTO contacts (first_name, last_name) "
+                "VALUES ('Synced', 'Person') RETURNING id"
+            )
+        )
+        contact_id = int(result.fetchone().id)
+        person_id = "sync-meta-existing-1"
+
+        person = ImmichPerson(id=person_id, name="Synced Person")
+        version_hash = sync_service.calculate_version_hash(person)
+        await sync_service._upsert_sync_metadata(
+            external_id=person_id,
+            internal_id=contact_id,
+            version_hash=version_hash,
+        )
+
+        outcome = await sync_service.sync_people_batch([person.model_dump()])
+
+        # Found via sync_metadata, hash unchanged → no new link, no duplicate.
+        assert outcome.linked == 0
+        assert outcome.unchanged == 1
+        assert await _count_references(async_connection, person_id) == 0
 
 
 async def _fetch_sync_metadata(connection: Any, person_id: str) -> Any:

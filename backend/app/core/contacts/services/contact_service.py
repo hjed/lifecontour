@@ -1975,6 +1975,14 @@ class ContactService:
             external_system=integration_source, external_entity_id=external_id
         )
 
+    async def get_external_references(self, contact_id: int) -> list[dict[str, str]]:
+        """Return a contact's external links from the canonical link store.
+
+        Each entry has ``external_system`` / ``external_entity_id`` /
+        ``external_entity_type``, suitable for ``build_contact_external_links``.
+        """
+        return await self.contact_repo.get_external_references(contact_id)
+
     async def search_contacts(self, query: str, limit: int = 50) -> list[Contact]:
         """Search contacts."""
         return await self.contact_repo.search(query, limit)

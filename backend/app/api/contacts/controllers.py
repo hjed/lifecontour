@@ -188,7 +188,6 @@ async def list_contacts(
 async def get_contact_external_links(
     contact_id: int,
     contact_service: FromDishka[ContactService],
-    connection: FromDishka[AsyncConnection],
     immich_token_service: FromDishka[ImmichTokenService],
     user: FromDishka[SessionUser],
 ) -> ExternalLinksResponse:
@@ -196,32 +195,15 @@ async def get_contact_external_links(
     Get external system links for a contact.
 
     Returns links to external systems (Google Contacts, Strava, Immich) that
-    are associated with this contact, derived from existing reference data.
+    are associated with this contact, read from the canonical ``sync_metadata``
+    link store.
     """
     contact = await contact_service.get_contact_by_id(contact_id)
     if not contact:
         raise ContactNotFoundError(contact_id)
 
-    # Fetch external references for this contact
-    from sqlalchemy import text
-
-    result = await connection.execute(
-        text(
-            "SELECT external_system, external_entity_id, external_entity_type "
-            "FROM external_references "
-            "WHERE internal_entity_type = 'contact' "
-            "AND internal_entity_id = :contact_id"
-        ),
-        {"contact_id": contact_id},
-    )
-    external_references = [
-        {
-            "external_system": row[0],
-            "external_entity_id": row[1],
-            "external_entity_type": row[2],
-        }
-        for row in result
-    ]
+    # Fetch external links for this contact from the canonical link store.
+    external_references = await contact_service.get_external_references(contact_id)
 
     immich_server_url = await immich_token_service.get_server_url(user.id)
 

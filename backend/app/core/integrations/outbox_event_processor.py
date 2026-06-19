@@ -28,6 +28,9 @@ from core_shared.models.outbox_events import (
     SyncCompletedEventData,
 )
 from core_shared.models.sync_metadata import SyncStatus
+from core_shared.repositories.integration_link_repository import (
+    IntegrationLinkRepository,
+)
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.exceptions import (
@@ -123,6 +126,7 @@ class OutboxEventProcessor:
         self.connection = connection
         self.external_reference_service = ExternalReferenceService(connection)
         self.sync_metadata_repo = SyncMetadataRepository(connection)
+        self.link_repo = IntegrationLinkRepository(connection)
         from app.core.contacts.adapters.sql.tag_repository import SqlTagRepository
 
         self.tag_repo = SqlTagRepository(connection)
@@ -325,19 +329,17 @@ class OutboxEventProcessor:
                 "Matched contact is missing an ID during email reconciliation"
             )
 
-        existing_integration_reference = (
-            await self.external_reference_service.find_external_reference(
-                internal_entity_type="contact",
-                internal_entity_id=matched_contact.id,
-                external_system=integration_source,
-            )
+        existing_integration_link = await self.link_repo.find_external_by_internal(
+            internal_entity_type="contact",
+            internal_id=matched_contact.id,
+            integration_source=integration_source,
         )
-        if existing_integration_reference is not None:
+        if existing_integration_link is not None:
             raise ContactReconciliationConflictError(
                 message=(
                     "Matched local contact is already linked to integration source "
                     f"{integration_source} via external ID "
-                    f"{existing_integration_reference.external_entity_id}"
+                    f"{existing_integration_link['external_id']}"
                 ),
                 matched_contact_id=matched_contact.id,
                 integration_source=integration_source,
@@ -587,23 +589,31 @@ class OutboxEventProcessor:
         external_id: str = payload.external_id
         contact_data = self._normalize_contact_data(payload.contact_data)
 
-        # IDEMPOTENCY CHECK: Ensure we don't create duplicate contacts
+        # IDEMPOTENCY CHECK: Ensure we don't create duplicate contacts.
+        # Read the canonical link store (sync_metadata) rather than
+        # external_references — the Google outbound push records the
+        # (google, resourceName) link only in sync_metadata, so reading it here
+        # is what closes the duplication loop on re-import.
         try:
-            existing_ref = await self.external_reference_service.find_by_external_id(
-                external_system=integration_source,
-                external_entity_id=external_id,
+            existing_link = await self.sync_metadata_repo.find_by_external_id(
+                integration_source=integration_source,
+                external_id=external_id,
             )
-            if existing_ref:
+            # Only treat it as already-processed when the link resolves to a real
+            # contact: ``sync_metadata.internal_id`` is nullable, so a partial row
+            # (e.g. an as-yet-unlinked uuid-keyed entry) must not short-circuit
+            # creation with ``contact_id=None``.
+            if existing_link is not None and existing_link.internal_id is not None:
                 logger.info(
                     "Contact creation event already processed, skipping",
-                    contact_id=existing_ref.internal_entity_id,
+                    contact_id=existing_link.internal_id,
                     external_id=external_id,
                     integration_source=integration_source,
                 )
                 return {
                     "status": "skipped",
                     "reason": "already_processed",
-                    "contact_id": existing_ref.internal_entity_id,
+                    "contact_id": existing_link.internal_id,
                 }
         except Exception as e:
             # If we can't check for existing references, this is a critical issue

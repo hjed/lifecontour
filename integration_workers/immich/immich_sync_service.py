@@ -36,6 +36,9 @@ from core_shared.models.outbox import OutboxEvent
 from core_shared.repositories.external_reference_repository import (
     ExternalReferenceRepository,
 )
+from core_shared.repositories.integration_link_repository import (
+    IntegrationLinkRepository,
+)
 from sqlalchemy import insert, text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -354,20 +357,21 @@ class ImmichSyncService:
         Returns:
             Dictionary with sync status.
         """
-        # 1. Find if contact is linked to Immich
-        ext_ref_repo = ExternalReferenceRepository(self._conn)
-        ref = await ext_ref_repo.find_by_internal_entity(
+        # 1. Find if contact is linked to Immich (read the canonical link store)
+        link_repo = IntegrationLinkRepository(self._conn)
+        link = await link_repo.find_external_by_internal(
             internal_entity_type=self._INTERNAL_ENTITY_TYPE,
-            internal_entity_id=contact_id,
-            external_system=self._integration_source,
+            internal_id=contact_id,
+            integration_source=self._integration_source,
             external_entity_type=self._EXTERNAL_ENTITY_TYPE,
         )
-        if not ref:
+        if not link:
             return {"status": "skipped", "reason": "not_linked"}
 
-        person_id = ref["external_entity_id"]
+        person_id = link["external_id"]
 
         # 2. Fetch the contact's name and birthday
+        ext_ref_repo = ExternalReferenceRepository(self._conn)
         contact_data = await ext_ref_repo.find_contact_with_birthday(contact_id)
         if not contact_data:
             return {"status": "error", "reason": "contact_not_found"}
@@ -796,24 +800,32 @@ class ImmichSyncService:
     # -- Database operations (integration-specific) -----------------------
 
     async def _find_external_reference(self, person_id: str) -> Any | None:
-        """Look up an ExternalReference by Immich person ID."""
+        """Look up the person→contact link from the canonical store.
+
+        Reads ``sync_metadata`` (the consolidated link store, ITER15-001) and
+        aliases ``internal_id`` to ``internal_entity_id`` so callers that read
+        ``row.internal_entity_id`` are unchanged.
+        """
+        # ``internal_id`` is nullable; a row without one is not a usable contact
+        # link, so exclude it (callers treat any returned row as an existing link).
         query = text("""
-            SELECT id, internal_entity_id
-            FROM external_references
-            WHERE external_system = :external_system
+            SELECT id, internal_id AS internal_entity_id
+            FROM sync_metadata
+            WHERE integration_source = :integration_source
               AND internal_entity_type = :internal_entity_type
               AND external_entity_type = :external_entity_type
-              AND external_entity_id = :external_entity_id
+              AND external_id = :external_id
+              AND internal_id IS NOT NULL
             ORDER BY id DESC
             LIMIT 1
         """)
         result = await self._conn.execute(
             query,
             {
-                "external_system": self._integration_source,
+                "integration_source": self._integration_source,
                 "internal_entity_type": self._INTERNAL_ENTITY_TYPE,
                 "external_entity_type": self._EXTERNAL_ENTITY_TYPE,
-                "external_entity_id": person_id,
+                "external_id": person_id,
             },
         )
         return result.fetchone()

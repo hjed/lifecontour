@@ -120,19 +120,32 @@ async def _add_sync_metadata(
     internal_id: int,
     integration_source: str,
     external_id: str,
+    *,
+    internal_entity_type: str = "contact",
+    external_entity_type: str = "person",
 ) -> None:
+    # Dual-write/backfill always populate the entity-type columns; the collision
+    # reads filter on internal_entity_type='contact', so seed them like production.
     await connection.execute(
         text(
             """
             INSERT INTO sync_metadata (
                 internal_id, integration_source, external_id, last_synced_at,
-                version_hash, sync_status, retry_count, created_at, updated_at
+                version_hash, sync_status, retry_count,
+                internal_entity_type, external_entity_type, created_at, updated_at
             ) VALUES (
-                :iid, :source, :eid, now(), 'h', 'success', 0, now(), now()
+                :iid, :source, :eid, now(), 'h', 'success', 0,
+                :internal_entity_type, :external_entity_type, now(), now()
             )
             """
         ),
-        {"iid": internal_id, "source": integration_source, "eid": external_id},
+        {
+            "iid": internal_id,
+            "source": integration_source,
+            "eid": external_id,
+            "internal_entity_type": internal_entity_type,
+            "external_entity_type": external_entity_type,
+        },
     )
 
 
@@ -270,7 +283,12 @@ class TestSameServiceCollision:
         await _add_sync_metadata(async_connection, source_id, "google", "people/src")
         # An unrelated journal album sync row that merely shares the integer id.
         await _add_sync_metadata(
-            async_connection, source_id, "immich_album", "album-uuid"
+            async_connection,
+            source_id,
+            "immich_album",
+            "album-uuid",
+            internal_entity_type="journal",
+            external_entity_type="album",
         )
 
         await merge_service.merge_contacts(
@@ -326,6 +344,7 @@ class TestExternalReferenceServiceRepoint:
         await _add_external_ref(async_connection, survivor_id, "google", "people/surv")
         await _add_external_ref(async_connection, source_id, "google", "people/src")
         await _add_external_ref(async_connection, source_id, "immich", "person-uuid")
+        await _add_sync_metadata(async_connection, survivor_id, "google", "people/surv")
         await _add_sync_metadata(async_connection, source_id, "google", "people/src")
         await _add_sync_metadata(async_connection, source_id, "immich", "person-uuid")
 

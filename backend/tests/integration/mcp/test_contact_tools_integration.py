@@ -1317,11 +1317,14 @@ class TestContactConverterAISummaryIntegration:
             Contact(first_name="Jane", last_name="Doe"), clean_database
         )
         assert c1.id is not None
-        # Insert a dummy external reference
+        # Seed the canonical link in sync_metadata (the read path's source).
         await clean_database.execute(
             text(
-                "INSERT INTO external_references (internal_entity_id, internal_entity_type, external_system, external_entity_id, external_entity_type) "
-                "VALUES (:internal_id, 'contact', 'google', 'people/c123456789', 'person')"
+                "INSERT INTO sync_metadata (internal_id, integration_source, "
+                "external_id, last_synced_at, version_hash, sync_status, "
+                "internal_entity_type, external_entity_type) "
+                "VALUES (:internal_id, 'google', 'people/c123456789', now(), 'h', "
+                "'success', 'contact', 'person')"
             ),
             {"internal_id": int(c1.id)},
         )
@@ -1381,10 +1384,11 @@ class TestContactConverterAISummaryIntegration:
         )
         await clean_database.execute(
             text(
-                "INSERT INTO external_references (internal_entity_id, "
-                "internal_entity_type, external_system, external_entity_id, "
-                "external_entity_type) "
-                "VALUES (:internal_id, 'contact', 'immich', 'person-uuid-1', 'person')"
+                "INSERT INTO sync_metadata (internal_id, integration_source, "
+                "external_id, last_synced_at, version_hash, sync_status, "
+                "internal_entity_type, external_entity_type) "
+                "VALUES (:internal_id, 'immich', 'person-uuid-1', now(), 'h', "
+                "'success', 'contact', 'person')"
             ),
             {"internal_id": int(c1.id)},
         )

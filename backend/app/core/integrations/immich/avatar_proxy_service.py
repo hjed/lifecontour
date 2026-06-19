@@ -10,8 +10,8 @@ from urllib.parse import urlparse
 
 import httpx
 import structlog
-from core_shared.repositories.external_reference_repository import (
-    ExternalReferenceRepository,
+from core_shared.repositories.integration_link_repository import (
+    IntegrationLinkRepository,
 )
 
 from app.infrastructure.auth.immich_token_service import ImmichTokenService
@@ -26,17 +26,18 @@ class AvatarNotFoundError(Exception):
 class AvatarProxyService:
     """Proxy service that fetches Immich person thumbnails on behalf of the user.
 
-    Uses ``ExternalReferenceRepository`` for person-ID lookups and
-    ``ImmichTokenService`` for credential resolution — no ad-hoc SQL.
+    Uses ``IntegrationLinkRepository`` (the canonical ``sync_metadata`` link
+    store) for person-ID lookups and ``ImmichTokenService`` for credential
+    resolution — no ad-hoc SQL.
 
     Args:
-        ext_ref_repo: Repository for external reference lookups.
+        ext_ref_repo: Repository for integration-link lookups.
         immich_token_service: Service for Immich credential management.
     """
 
     def __init__(
         self,
-        ext_ref_repo: ExternalReferenceRepository,
+        ext_ref_repo: IntegrationLinkRepository,
         immich_token_service: ImmichTokenService,
     ) -> None:
         self._ext_ref_repo = ext_ref_repo
