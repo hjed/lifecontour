@@ -39,6 +39,25 @@ os.environ.setdefault(
 )
 
 
+# Per-kind config so album and people fan-outs share one set of helpers.
+_KINDS: dict[str, dict[str, Any]] = {
+    "albums": {
+        "orchestrator": "sync_immich_albums",
+        "batch": "sync_immich_album_batch",
+        "payload": ["a1"],
+        "result": SimpleNamespace(created=1, updated=0, unchanged=0, errors=0),
+    },
+    "people": {
+        "orchestrator": "sync_immich_people",
+        "batch": "sync_immich_people_batch",
+        "payload": [{"id": "p1"}],
+        "result": SimpleNamespace(
+            created=1, linked=0, unchanged=0, updated=0, skipped=0, conflicts=0
+        ),
+    },
+}
+
+
 def _async_gen(items: list[Any]) -> Any:
     async def _gen() -> Any:
         for item in items:
@@ -81,8 +100,16 @@ async def repo(async_connection: Any) -> SyncJobRepository:
     return SyncJobRepository(async_connection)
 
 
-def _stub_immich(*, batches: list[Any], kind: str) -> Any:
-    """Patch the external Immich collaborators; the listing yields ``batches``."""
+@asynccontextmanager
+async def _stubbed_immich(
+    *, list_batches: list[Any] | None, sync_side: Any
+) -> AsyncIterator[None]:
+    """Patch the external Immich collaborators for the duration of the block.
+
+    ``list_batches`` configures the orchestrator listing generator (or ``None``
+    for a batch-only run); ``sync_side`` configures both batch sync methods
+    (a return value or an exception ``side_effect``).
+    """
     auth = MagicMock()
     auth.get_api_key = AsyncMock(return_value="key")
     auth.get_server_url = AsyncMock(return_value="https://immich.example.com")
@@ -91,29 +118,24 @@ def _stub_immich(*, batches: list[Any], kind: str) -> Any:
     api_client.close = AsyncMock()
 
     sync_service = MagicMock()
-    if kind == "albums":
-        sync_service.list_album_id_batches = _async_gen(batches)
-    else:
-        sync_service.list_people_batches = _async_gen(batches)
+    if list_batches is not None:
+        sync_service.list_album_id_batches = _async_gen(list_batches)
+        sync_service.list_people_batches = _async_gen(list_batches)
+    mock = (
+        AsyncMock(side_effect=sync_side)
+        if isinstance(sync_side, BaseException)
+        else AsyncMock(return_value=sync_side)
+    )
+    sync_service.sync_albums_batch = mock
+    sync_service.sync_people_batch = mock
 
-    patches = [
+    with (
         patch("worker.ImmichAuthService", return_value=auth),
-        patch("worker.ImmichApiClient"),
+        patch("worker.ImmichApiClient") as api_cls,
         patch("worker.ImmichSyncService", return_value=sync_service),
-    ]
-    return patches, api_client, sync_service
-
-
-@asynccontextmanager
-async def _apply(patches: list[Any], api_client: Any) -> AsyncIterator[None]:
-    started = [p.start() for p in patches]
-    # The ImmichApiClient patch is the second entry; wire its create() factory.
-    started[1].create.return_value = api_client
-    try:
+    ):
+        api_cls.create.return_value = api_client
         yield
-    finally:
-        for p in patches:
-            p.stop()
 
 
 async def _seed_parent(repo: SyncJobRepository, parent_id: str) -> None:
@@ -126,141 +148,169 @@ async def _seed_parent(repo: SyncJobRepository, parent_id: str) -> None:
     )
 
 
-def _batch_ctx(session_factory: Any, redis_pool: Any, job_id: str) -> dict[str, Any]:
+def _ctx(
+    session_factory: Any, redis_pool: Any, job_id: str, **extra: Any
+) -> dict[str, Any]:
     return {
         "session_factory": session_factory,
         "redis": redis_pool,
         "job_id": job_id,
         "job_try": 1,
         "max_tries": 5,
+        **extra,
     }
 
 
+def _worker_fn(name: str) -> Any:
+    import worker
+
+    return getattr(worker, name)
+
+
+async def _dispatch(
+    kind: str,
+    *,
+    batches: list[Any],
+    session_factory: Any,
+    redis_pool: Any,
+    parent_id: str,
+) -> dict[str, Any]:
+    """Run an orchestrator under stubbed Immich and return its result dict."""
+    cfg = _KINDS[kind]
+    async with _stubbed_immich(list_batches=batches, sync_side=cfg["result"]):
+        result: dict[str, Any] = await _worker_fn(cfg["orchestrator"])(
+            _ctx(session_factory, redis_pool, parent_id), "user-1", "full"
+        )
+    return result
+
+
+async def _run_child(
+    kind: str,
+    child_job_id: str,
+    *,
+    session_factory: Any,
+    redis_pool: Any,
+    parent_id: str,
+    error: Exception | None = None,
+    job_try: int = 1,
+) -> None:
+    """Run one batch child under stubbed Immich (raises if ``error`` is set)."""
+    cfg = _KINDS[kind]
+    async with _stubbed_immich(
+        list_batches=None, sync_side=error if error else cfg["result"]
+    ):
+        ctx = _ctx(session_factory, redis_pool, child_job_id, job_try=job_try)
+        await _worker_fn(cfg["batch"])(ctx, "user-1", cfg["payload"], parent_id)
+
+
+async def _complete_all_children(
+    kind: str,
+    repo: SyncJobRepository,
+    *,
+    session_factory: Any,
+    redis_pool: Any,
+    parent_id: str,
+) -> None:
+    for child in await repo.list_children(parent_id):
+        await _run_child(
+            kind,
+            child.job_id,
+            session_factory=session_factory,
+            redis_pool=redis_pool,
+            parent_id=parent_id,
+        )
+
+
+async def _reconcile(repo: SyncJobRepository) -> dict[str, int]:
+    return await reconcile_parents(
+        repo, now=datetime.now(UTC), stale_after_seconds=1800.0
+    )
+
+
 @pytest.mark.integration
-class TestImmichAlbumFanout:
-    """Album fan-out dispatches, counters update, reconciler finalises."""
+class TestImmichFanout:
+    """Album + people fan-out dispatch, counters, and reconciliation end-to-end."""
 
     @pytest.mark.asyncio
-    async def test_album_fanout_returns_in_progress_and_persists_children(
-        self,
-        repo: SyncJobRepository,
-        session_factory: Any,
-        redis_pool: Any,
+    @pytest.mark.parametrize("kind", ["albums", "people"])
+    async def test_fanout_dispatches_persists_children_and_reconciles_completed(
+        self, kind: str, repo: SyncJobRepository, session_factory: Any, redis_pool: Any
     ) -> None:
-        from worker import sync_immich_albums
-
-        parent_id = "albums-int-parent"
+        parent_id = f"{kind}-int-complete"
         await _seed_parent(repo, parent_id)
 
-        patches, api_client, _svc = _stub_immich(
-            batches=[["a1", "a2"], ["a3"]], kind="albums"
+        result = await _dispatch(
+            kind,
+            batches=[_KINDS[kind]["payload"], _KINDS[kind]["payload"]],
+            session_factory=session_factory,
+            redis_pool=redis_pool,
+            parent_id=parent_id,
         )
-        ctx = _batch_ctx(session_factory, redis_pool, parent_id)
-        async with _apply(patches, api_client):
-            result = await sync_immich_albums(ctx, "user-1", "full")
 
+        # Returned immediately as IN_PROGRESS with children persisted + dispatched.
         assert result["status"] == "in_progress"
-
         parent = await repo.get_by_job_id(parent_id)
         assert parent is not None
         assert parent.status == SyncJobStatus.IN_PROGRESS.value
         assert parent.expected_children == 2
-
         children = await repo.list_children(parent_id)
         assert len(children) == 2
         assert all(c.parent_job_id == parent_id for c in children)
-
-        # Children were dispatched on the real Redis queue.
         queued = await redis_pool.queued_jobs(queue_name=IMMICH_ARQ_QUEUE_NAME)
         assert len(queued) == 2
 
-    @pytest.mark.asyncio
-    async def test_batches_complete_then_reconciler_marks_completed(
-        self,
-        repo: SyncJobRepository,
-        session_factory: Any,
-        redis_pool: Any,
-    ) -> None:
-        from worker import sync_immich_album_batch, sync_immich_albums
-
-        parent_id = "albums-int-complete"
-        await _seed_parent(repo, parent_id)
-
-        patches, api_client, _svc = _stub_immich(
-            batches=[["a1"], ["a2"]], kind="albums"
+        # Children complete → counters increment → reconciler completes the parent.
+        await _complete_all_children(
+            kind,
+            repo,
+            session_factory=session_factory,
+            redis_pool=redis_pool,
+            parent_id=parent_id,
         )
-        ctx = _batch_ctx(session_factory, redis_pool, parent_id)
-        async with _apply(patches, api_client):
-            await sync_immich_albums(ctx, "user-1", "full")
-
-        children = await repo.list_children(parent_id)
-
-        album_result = SimpleNamespace(created=1, updated=0, unchanged=0, errors=0)
-        batch_patches, batch_api, batch_svc = _stub_immich(batches=[], kind="albums")
-        batch_svc.sync_albums_batch = AsyncMock(return_value=album_result)
-        async with _apply(batch_patches, batch_api):
-            for child in children:
-                child_ctx = _batch_ctx(session_factory, redis_pool, child.job_id)
-                await sync_immich_album_batch(child_ctx, "user-1", ["a1"], parent_id)
-
         parent = await repo.get_by_job_id(parent_id)
         assert parent is not None
         assert parent.completed_children == 2
 
-        summary = await reconcile_parents(
-            repo, now=datetime.now(UTC), stale_after_seconds=1800.0
-        )
-        assert summary["completed"] == 1
+        assert (await _reconcile(repo))["completed"] == 1
         parent = await repo.get_by_job_id(parent_id)
         assert parent is not None
         assert parent.status == SyncJobStatus.COMPLETED.value
 
     @pytest.mark.asyncio
     async def test_failed_child_reconciles_parent_to_failed(
-        self,
-        repo: SyncJobRepository,
-        session_factory: Any,
-        redis_pool: Any,
+        self, repo: SyncJobRepository, session_factory: Any, redis_pool: Any
     ) -> None:
-        from worker import sync_immich_album_batch, sync_immich_albums
-
         parent_id = "albums-int-fail"
         await _seed_parent(repo, parent_id)
-
-        patches, api_client, _svc = _stub_immich(
-            batches=[["a1"], ["a2"]], kind="albums"
+        await _dispatch(
+            "albums",
+            batches=[["a1"], ["a2"]],
+            session_factory=session_factory,
+            redis_pool=redis_pool,
+            parent_id=parent_id,
         )
-        ctx = _batch_ctx(session_factory, redis_pool, parent_id)
-        async with _apply(patches, api_client):
-            await sync_immich_albums(ctx, "user-1", "full")
 
-        children = await repo.list_children(parent_id)
-        ok, bad = children[0], children[1]
-
-        ok_result = SimpleNamespace(created=1, updated=0, unchanged=0, errors=0)
-        ok_patches, ok_api, ok_svc = _stub_immich(batches=[], kind="albums")
-        ok_svc.sync_albums_batch = AsyncMock(return_value=ok_result)
-        async with _apply(ok_patches, ok_api):
-            await sync_immich_album_batch(
-                _batch_ctx(session_factory, redis_pool, ok.job_id),
-                "user-1",
-                ["a1"],
-                parent_id,
+        ok, bad = await repo.list_children(parent_id)
+        await _run_child(
+            "albums",
+            ok.job_id,
+            session_factory=session_factory,
+            redis_pool=redis_pool,
+            parent_id=parent_id,
+        )
+        # The other child fails on its final attempt.
+        with pytest.raises(RuntimeError):
+            await _run_child(
+                "albums",
+                bad.job_id,
+                session_factory=session_factory,
+                redis_pool=redis_pool,
+                parent_id=parent_id,
+                error=RuntimeError("boom"),
+                job_try=5,
             )
 
-        # The other child fails on its final attempt.
-        bad_patches, bad_api, bad_svc = _stub_immich(batches=[], kind="albums")
-        bad_svc.sync_albums_batch = AsyncMock(side_effect=RuntimeError("boom"))
-        async with _apply(bad_patches, bad_api):
-            bad_ctx = _batch_ctx(session_factory, redis_pool, bad.job_id)
-            bad_ctx["job_try"] = 5
-            with pytest.raises(RuntimeError):
-                await sync_immich_album_batch(bad_ctx, "user-1", ["a2"], parent_id)
-
-        summary = await reconcile_parents(
-            repo, now=datetime.now(UTC), stale_after_seconds=1800.0
-        )
-        assert summary["failed"] == 1
+        assert (await _reconcile(repo))["failed"] == 1
         parent = await repo.get_by_job_id(parent_id)
         assert parent is not None
         assert parent.status == SyncJobStatus.FAILED.value
@@ -268,99 +318,34 @@ class TestImmichAlbumFanout:
 
     @pytest.mark.asyncio
     async def test_large_fanout_completes_with_correct_totals(
-        self,
-        repo: SyncJobRepository,
-        session_factory: Any,
-        redis_pool: Any,
+        self, repo: SyncJobRepository, session_factory: Any, redis_pool: Any
     ) -> None:
-        from worker import sync_immich_album_batch, sync_immich_albums
-
         parent_id = "albums-int-large"
         await _seed_parent(repo, parent_id)
-
-        batches = [[f"a{i}"] for i in range(25)]
-        patches, api_client, _svc = _stub_immich(batches=batches, kind="albums")
-        ctx = _batch_ctx(session_factory, redis_pool, parent_id)
-        async with _apply(patches, api_client):
-            await sync_immich_albums(ctx, "user-1", "full")
+        await _dispatch(
+            "albums",
+            batches=[[f"a{i}"] for i in range(25)],
+            session_factory=session_factory,
+            redis_pool=redis_pool,
+            parent_id=parent_id,
+        )
 
         parent = await repo.get_by_job_id(parent_id)
         assert parent is not None
         assert parent.expected_children == 25
 
-        children = await repo.list_children(parent_id)
-        album_result = SimpleNamespace(created=1, updated=0, unchanged=0, errors=0)
-        batch_patches, batch_api, batch_svc = _stub_immich(batches=[], kind="albums")
-        batch_svc.sync_albums_batch = AsyncMock(return_value=album_result)
-        async with _apply(batch_patches, batch_api):
-            for child in children:
-                await sync_immich_album_batch(
-                    _batch_ctx(session_factory, redis_pool, child.job_id),
-                    "user-1",
-                    ["a1"],
-                    parent_id,
-                )
-
+        await _complete_all_children(
+            "albums",
+            repo,
+            session_factory=session_factory,
+            redis_pool=redis_pool,
+            parent_id=parent_id,
+        )
         parent = await repo.get_by_job_id(parent_id)
         assert parent is not None
         assert parent.completed_children == 25
 
-        await reconcile_parents(repo, now=datetime.now(UTC), stale_after_seconds=1800.0)
-        parent = await repo.get_by_job_id(parent_id)
-        assert parent is not None
-        assert parent.status == SyncJobStatus.COMPLETED.value
-
-
-@pytest.mark.integration
-class TestImmichPeopleFanout:
-    """People fan-out persists children (previously unpersisted) and reconciles."""
-
-    @pytest.mark.asyncio
-    async def test_people_fanout_dispatches_and_reconciles_completed(
-        self,
-        repo: SyncJobRepository,
-        session_factory: Any,
-        redis_pool: Any,
-    ) -> None:
-        from worker import sync_immich_people, sync_immich_people_batch
-
-        parent_id = "people-int-parent"
-        await _seed_parent(repo, parent_id)
-
-        patches, api_client, _svc = _stub_immich(
-            batches=[[{"id": "p1"}], [{"id": "p2"}]], kind="people"
-        )
-        ctx = _batch_ctx(session_factory, redis_pool, parent_id)
-        async with _apply(patches, api_client):
-            result = await sync_immich_people(ctx, "user-1", "full")
-
-        assert result["status"] == "in_progress"
-        parent = await repo.get_by_job_id(parent_id)
-        assert parent is not None
-        assert parent.status == SyncJobStatus.IN_PROGRESS.value
-        assert parent.expected_children == 2
-
-        children = await repo.list_children(parent_id)
-        assert len(children) == 2
-
-        people_result = SimpleNamespace(
-            created=1, linked=0, unchanged=0, updated=0, skipped=0, conflicts=0
-        )
-        batch_patches, batch_api, batch_svc = _stub_immich(batches=[], kind="people")
-        batch_svc.sync_people_batch = AsyncMock(return_value=people_result)
-        async with _apply(batch_patches, batch_api):
-            for child in children:
-                await sync_immich_people_batch(
-                    _batch_ctx(session_factory, redis_pool, child.job_id),
-                    "user-1",
-                    [{"id": "p1"}],
-                    parent_id,
-                )
-
-        summary = await reconcile_parents(
-            repo, now=datetime.now(UTC), stale_after_seconds=1800.0
-        )
-        assert summary["completed"] == 1
+        await _reconcile(repo)
         parent = await repo.get_by_job_id(parent_id)
         assert parent is not None
         assert parent.status == SyncJobStatus.COMPLETED.value
