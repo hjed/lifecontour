@@ -28,27 +28,22 @@ async def _connect_immich(async_connection, server_url=_IMMICH_SERVER_URL):
 async def _link_immich_album(
     async_connection, journal_id, album_id, *, shared_link_url=None
 ):
-    """Seed an Immich album link (sync_metadata + external_references) for a journal."""
-    await async_connection.execute(
-        text(
-            "INSERT INTO sync_metadata "
-            "(internal_id, integration_source, external_id, last_synced_at, "
-            "version_hash, sync_status) "
-            "VALUES (:journal_id, 'immich_album', :album_id, now(), "
-            "'hash-1', 'success')"
-        ),
-        {"journal_id": journal_id, "album_id": album_id},
-    )
+    """Seed an Immich album link in sync_metadata only (the canonical store).
+
+    Album display data lives in ``sync_metadata.reference_data`` (mirrored there
+    by dual-write); the read path no longer joins ``external_references``.
+    """
     reference_data = {"album_id": album_id, "album_name": "Holiday"}
     if shared_link_url is not None:
         reference_data["shared_link_url"] = shared_link_url
     await async_connection.execute(
         text(
-            "INSERT INTO external_references "
-            "(internal_entity_type, internal_entity_id, external_system, "
-            "external_entity_id, external_entity_type, reference_data) "
-            "VALUES ('journal', :journal_id, 'immich', :album_id, 'album', "
-            ":reference_data)"
+            "INSERT INTO sync_metadata "
+            "(internal_id, integration_source, external_id, last_synced_at, "
+            "version_hash, sync_status, internal_entity_type, external_entity_type, "
+            "reference_data) "
+            "VALUES (:journal_id, 'immich_album', :album_id, now(), "
+            "'hash-1', 'success', 'journal', 'album', :reference_data)"
         ),
         {
             "journal_id": journal_id,
@@ -350,14 +345,15 @@ class TestContactExternalLinks:
         """External links endpoint returns Google Contacts link from external_references."""
         contact_id = await self._create_contact(integration_api_client)
 
-        # Insert external reference directly
+        # Seed the canonical link in sync_metadata (the read path's source).
         await async_connection.execute(
             text(
-                "INSERT INTO external_references "
-                "(internal_entity_type, internal_entity_id, "
-                "external_system, external_entity_id, external_entity_type) "
-                "VALUES ('contact', :contact_id, 'google', "
-                ":external_id, 'person')"
+                "INSERT INTO sync_metadata "
+                "(internal_id, integration_source, external_id, last_synced_at, "
+                "version_hash, sync_status, internal_entity_type, "
+                "external_entity_type) "
+                "VALUES (:contact_id, 'google', :external_id, now(), 'h', "
+                "'success', 'contact', 'person')"
             ),
             {
                 "contact_id": contact_id,
@@ -387,11 +383,12 @@ class TestContactExternalLinks:
         await _connect_immich(async_connection)
         await async_connection.execute(
             text(
-                "INSERT INTO external_references "
-                "(internal_entity_type, internal_entity_id, "
-                "external_system, external_entity_id, external_entity_type) "
-                "VALUES ('contact', :contact_id, 'immich', "
-                ":external_id, 'person')"
+                "INSERT INTO sync_metadata "
+                "(internal_id, integration_source, external_id, last_synced_at, "
+                "version_hash, sync_status, internal_entity_type, "
+                "external_entity_type) "
+                "VALUES (:contact_id, 'immich', :external_id, now(), 'h', "
+                "'success', 'contact', 'person')"
             ),
             {"contact_id": contact_id, "external_id": "person-uuid-1"},
         )

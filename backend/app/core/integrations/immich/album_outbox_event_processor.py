@@ -32,8 +32,8 @@ from core_shared.models.journals import (
 from core_shared.models.journals.attendee_status import AttendeeStatus
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.outbox_events import ImmichAlbumSyncEventData
-from core_shared.repositories.external_reference_repository import (
-    ExternalReferenceRepository,
+from core_shared.repositories.integration_link_repository import (
+    IntegrationLinkRepository,
 )
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -69,7 +69,7 @@ class ImmichAlbumOutboxEventProcessor:
         journal_service: JournalService,
         connection: AsyncConnection,
         relationship_repo: SqlJournalContactRelationshipRepository | None = None,
-        ext_ref_repo: ExternalReferenceRepository | None = None,
+        ext_ref_repo: IntegrationLinkRepository | None = None,
         event_publisher: OutboxEventPublisher | None = None,
     ) -> None:
         """Initialize with a journal service and database connection.
@@ -93,7 +93,7 @@ class ImmichAlbumOutboxEventProcessor:
         self.relationship_repo = (
             relationship_repo or SqlJournalContactRelationshipRepository(connection)
         )
-        self.ext_ref_repo = ext_ref_repo or ExternalReferenceRepository(connection)
+        self.ext_ref_repo = ext_ref_repo or IntegrationLinkRepository(connection)
         self.event_publisher = event_publisher or OutboxEventPublisher(connection)
 
     # Album display-metadata fields whose changes are recorded as journal history.

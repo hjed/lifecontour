@@ -743,24 +743,15 @@ class TestSearchJournalsIntegrationSourceFilter:
         immich_album_id = int(row[0])
         ids["immich_album"] = immich_album_id
 
+        # Album display data lives on the canonical sync_metadata link.
         await clean_database.execute(
             text("""
                 INSERT INTO sync_metadata
                     (internal_id, integration_source, external_id, last_synced_at,
-                     version_hash, sync_status)
+                     version_hash, sync_status, internal_entity_type,
+                     external_entity_type, reference_data)
                 VALUES (:journal_id, 'immich_album', 'album-uuid-mixed', now(),
-                        'hash-mixed', 'success')
-            """),
-            {"journal_id": immich_album_id},
-        )
-
-        await clean_database.execute(
-            text("""
-                INSERT INTO external_references
-                    (internal_entity_type, internal_entity_id, external_system,
-                     external_entity_id, external_entity_type, reference_data)
-                VALUES ('journal', :journal_id, 'immich', 'album-uuid-mixed', 'album',
-                        :reference_data)
+                        'hash-mixed', 'success', 'journal', 'album', :reference_data)
             """),
             {
                 "journal_id": immich_album_id,

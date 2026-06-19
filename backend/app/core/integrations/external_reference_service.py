@@ -487,13 +487,15 @@ class ExternalReferenceService:
         Returns:
             One ``ExternalReferenceCollision`` per same-service collision.
         """
+        # Collision detection reads the canonical link store (sync_metadata).
         survivor_result = await transaction.execute(
             text(
                 """
-                SELECT external_system, external_entity_id
-                FROM external_references
+                SELECT integration_source AS external_system,
+                       external_id AS external_entity_id
+                FROM sync_metadata
                 WHERE internal_entity_type = 'contact'
-                  AND internal_entity_id = :survivor_id
+                  AND internal_id = :survivor_id
                 """
             ),
             {"survivor_id": survivor_id},
@@ -506,10 +508,12 @@ class ExternalReferenceService:
         source_result = await transaction.execute(
             text(
                 """
-                SELECT id, external_system, external_entity_type, external_entity_id
-                FROM external_references
+                SELECT integration_source AS external_system,
+                       external_entity_type,
+                       external_id AS external_entity_id
+                FROM sync_metadata
                 WHERE internal_entity_type = 'contact'
-                  AND internal_entity_id = :source_id
+                  AND internal_id = :source_id
                 """
             ),
             {"source_id": source_id},
@@ -521,7 +525,10 @@ class ExternalReferenceService:
             survivor_external_id = survivor_external_id_by_system.get(
                 ref.external_system
             )
-            sync_params = {
+            # Both link tables are still dual-written, so keep them consistent.
+            # Key the legacy external_references row by its identity columns since
+            # the read no longer carries its surrogate id.
+            link_params = {
                 "source_id": source_id,
                 "survivor_id": survivor_id,
                 "integration_source": ref.external_system,
@@ -534,10 +541,13 @@ class ExternalReferenceService:
                         """
                         UPDATE external_references
                         SET internal_entity_id = :survivor_id, updated_at = now()
-                        WHERE id = :ref_id
+                        WHERE internal_entity_type = 'contact'
+                          AND internal_entity_id = :source_id
+                          AND external_system = :integration_source
+                          AND external_entity_id = :external_id
                         """
                     ),
-                    {"survivor_id": survivor_id, "ref_id": ref.id},
+                    link_params,
                 )
                 await transaction.execute(
                     text(
@@ -549,7 +559,7 @@ class ExternalReferenceService:
                           AND external_id = :external_id
                         """
                     ),
-                    sync_params,
+                    link_params,
                 )
             else:
                 # Same service — keep the survivor's link, drop the source's, and
@@ -563,8 +573,16 @@ class ExternalReferenceService:
                     )
                 )
                 await transaction.execute(
-                    text("DELETE FROM external_references WHERE id = :ref_id"),
-                    {"ref_id": ref.id},
+                    text(
+                        """
+                        DELETE FROM external_references
+                        WHERE internal_entity_type = 'contact'
+                          AND internal_entity_id = :source_id
+                          AND external_system = :integration_source
+                          AND external_entity_id = :external_id
+                        """
+                    ),
+                    link_params,
                 )
                 await transaction.execute(
                     text(
@@ -575,7 +593,7 @@ class ExternalReferenceService:
                           AND external_id = :external_id
                         """
                     ),
-                    sync_params,
+                    link_params,
                 )
 
         if collisions:

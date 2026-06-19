@@ -237,9 +237,24 @@ key disallows), a deterministic winner is chosen and the losers are logged to th
 temporary `link_backfill_quarantine` audit table for later reconciliation — nothing is
 silently dropped.
 
-**Reads are unchanged in this state** — the backend dedup/idempotency paths still read
-`external_references`; they move to `sync_metadata` in a later phase, once dual-write +
-backfill guarantee the canonical store is complete.
+**Reads now key on `sync_metadata` (Phase 3 complete).** With dual-write + backfill
+guaranteeing the canonical store is complete and current, every integration-link
+*reader* resolves links from `sync_metadata` via the shared
+`IntegrationLinkRepository` (`find_link_by_external` / `find_internal_by_external` /
+`find_external_by_internal`, plus the Immich `get_immich_person_id` /
+`get_contact_ids_by_immich_person_ids` helpers):
+
+- The inbound consumer's idempotency (`contact.created`) and contact lookup
+  (`contact.updated`) read `sync_metadata`, so a Google re-import of an email-less
+  Immich contact resolves the existing link and **updates rather than duplicates** it —
+  this is the fix for the duplication loop.
+- The contacts external-links API/MCP, the Immich worker's create-vs-update decision and
+  outbound link lookup, the album display reads (`reference_data` from `sync_metadata`),
+  and the contact-merge collision detection all read `sync_metadata`.
+
+The `external_references` *write* half of the dual-write (and the contact
+`synced_tags`/`etag` `reference_data` read/write) remain until Phase 4 stops writing
+`external_references`; the table is dropped in Phase 5.
 
 ### 2. Task Queue System
 

@@ -3,13 +3,14 @@
 ITER11-004 Phase 1: PHOTO_ALBUM is integration-managed. A journal is a
 PHOTO_ALBUM when it has a ``sync_metadata`` row with
 ``integration_source='immich_album'``. Album display data (name, web URL, asset
-count) is sourced from that row and the album ``external_references`` record
-rather than a dedicated data table.
+count) is sourced from that row's ``reference_data`` — the canonical link store
+(ITER15-001) — rather than a dedicated data table.
 
-This repository owns all SQL for the album ``external_references`` link: the
-journal API read path, the album-sync link find/upsert used by
-``ImmichAlbumOutboxEventProcessor``, and cleanup on journal deletion. Album
-content itself is only ever written by Immich album sync.
+This repository owns the SQL for the album link reads (journal API read path)
+and the album-sync link find/upsert used by ``ImmichAlbumOutboxEventProcessor``,
+plus cleanup on journal deletion. The read methods key on ``sync_metadata``;
+the ``external_references`` write half remains until Phase 4. Album content
+itself is only ever written by Immich album sync.
 """
 
 import json
@@ -179,14 +180,8 @@ class AlbumSyncReadRepository:
         result = await self.conn.execute(
             text("""
                 SELECT sm.external_id AS immich_album_id,
-                       er.reference_data AS reference_data
+                       sm.reference_data AS reference_data
                 FROM sync_metadata sm
-                LEFT JOIN external_references er
-                    ON er.external_system = 'immich'
-                    AND er.external_entity_type = 'album'
-                    AND er.external_entity_id = sm.external_id
-                    AND er.internal_entity_type = 'journal'
-                    AND er.internal_entity_id = sm.internal_id
                 WHERE sm.integration_source = :source
                   AND sm.internal_id = :journal_id
                 LIMIT 1
@@ -224,22 +219,13 @@ class AlbumSyncReadRepository:
         result = await self.conn.execute(
             text("""
                 SELECT sm.external_id AS album_id,
-                       er.reference_data AS reference_data
+                       sm.reference_data AS reference_data
                 FROM sync_metadata sm
-                LEFT JOIN external_references er
-                    ON er.external_system = :external_system
-                    AND er.external_entity_type = :external_entity_type
-                    AND er.external_entity_id = sm.external_id
-                    AND er.internal_entity_type = :internal_entity_type
-                    AND er.internal_entity_id = sm.internal_id
                 WHERE sm.integration_source = :source
                   AND sm.internal_id = :journal_id
             """),
             {
                 "source": INTEGRATION_SOURCE,
-                "external_system": EXTERNAL_SYSTEM,
-                "external_entity_type": EXTERNAL_ENTITY_TYPE,
-                "internal_entity_type": INTERNAL_ENTITY_TYPE,
                 "journal_id": journal_id,
             },
         )
@@ -268,14 +254,8 @@ class AlbumSyncReadRepository:
         result = await self.conn.execute(
             text("""
                 SELECT sm.external_id AS album_id,
-                       er.reference_data AS reference_data
+                       sm.reference_data AS reference_data
                 FROM sync_metadata sm
-                LEFT JOIN external_references er
-                    ON er.external_system = 'immich'
-                    AND er.external_entity_type = 'album'
-                    AND er.external_entity_id = sm.external_id
-                    AND er.internal_entity_type = 'journal'
-                    AND er.internal_entity_id = sm.internal_id
                 WHERE sm.integration_source = :source
                   AND sm.internal_id = :journal_id
                 LIMIT 1

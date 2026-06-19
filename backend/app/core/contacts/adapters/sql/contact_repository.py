@@ -352,14 +352,19 @@ class SqlContactRepository(ContactRepository):
     async def find_by_external_reference(
         self, external_system: str, external_entity_id: str
     ) -> Contact | None:
-        """Find a contact by external reference."""
+        """Find a contact by external link, read from the canonical store.
+
+        Resolves the ``(integration_source, external_id)`` link from
+        ``sync_metadata`` — the single source of truth for integration links —
+        rather than ``external_references``.
+        """
         query = text(
             """
             SELECT DISTINCT c.id FROM contacts c
-            JOIN external_references er ON c.id = er.internal_entity_id
-            WHERE er.internal_entity_type = 'contact'
-            AND er.external_system = :external_system
-            AND er.external_entity_id = :external_entity_id
+            JOIN sync_metadata sm ON c.id = sm.internal_id
+            WHERE sm.internal_entity_type = 'contact'
+            AND sm.integration_source = :external_system
+            AND sm.external_id = :external_entity_id
         """
         )
         result = await self.conn.execute(
@@ -376,12 +381,19 @@ class SqlContactRepository(ContactRepository):
         return None
 
     async def get_external_references(self, contact_id: int) -> list[dict[str, str]]:
-        """Get all external references for a contact."""
+        """Get all external links for a contact from the canonical store.
+
+        Reads ``sync_metadata`` (the consolidated link store) and maps its
+        columns onto the legacy external-reference shape consumed by
+        ``build_contact_external_links``.
+        """
         query = text(
             """
-            SELECT external_system, external_entity_id, external_entity_type
-            FROM external_references
-            WHERE internal_entity_type = 'contact' AND internal_entity_id = :contact_id
+            SELECT integration_source AS external_system,
+                   external_id AS external_entity_id,
+                   external_entity_type
+            FROM sync_metadata
+            WHERE internal_entity_type = 'contact' AND internal_id = :contact_id
             """
         )
         result = await self.conn.execute(query, {"contact_id": contact_id})

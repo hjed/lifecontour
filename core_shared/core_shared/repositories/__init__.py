@@ -9,6 +9,13 @@ and integration workers.
 from core_shared.repositories.external_reference_repository import (
     ExternalReferenceRepository,
 )
+from core_shared.repositories.integration_link_repository import (
+    IntegrationLinkRepository,
+)
 from core_shared.repositories.sync_job_repository import SyncJobRepository
 
-__all__ = ["ExternalReferenceRepository", "SyncJobRepository"]
+__all__ = [
+    "ExternalReferenceRepository",
+    "IntegrationLinkRepository",
+    "SyncJobRepository",
+]

@@ -90,7 +90,11 @@ def _event(
 async def _seed_contact_linked_to_person(
     connection: AsyncConnection, first_name: str, person_id: str
 ) -> int:
-    """Create a contact and an Immich person→contact external reference."""
+    """Create a contact and an Immich person→contact link in sync_metadata.
+
+    Participant detection resolves people via the canonical sync_metadata link
+    store (``get_contact_ids_by_immich_person_ids``), so the link is seeded there.
+    """
     contact_id = (
         await connection.execute(
             text("INSERT INTO contacts (first_name) VALUES (:n) RETURNING id"),
@@ -100,12 +104,12 @@ async def _seed_contact_linked_to_person(
     assert contact_id is not None
     await connection.execute(
         text("""
-            INSERT INTO external_references (
-                internal_entity_type, internal_entity_id, external_system,
-                external_entity_type, external_entity_id, reference_data,
-                created_at, updated_at
+            INSERT INTO sync_metadata (
+                internal_id, integration_source, external_id, last_synced_at,
+                version_hash, sync_status, internal_entity_type,
+                external_entity_type
             ) VALUES (
-                'contact', :cid, 'immich', 'person', :pid, '{}', now(), now()
+                :cid, 'immich', :pid, now(), 'h', 'success', 'contact', 'person'
             )
         """),
         {"cid": contact_id, "pid": person_id},
