@@ -72,6 +72,7 @@ class WorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
         sync_immich_album_batch,
         periodic_sync_all_immich_accounts,
         process_contact_event,
+        reconcile_in_progress_parents,   # shared fan-out reconciler (ITER14-003)
     ]
     on_startup = _on_startup        # build_worker_lifecycle(close_session_factory=False,
     on_shutdown = _on_shutdown      #                        log_consumer_errors=True)
@@ -81,12 +82,46 @@ class WorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
     # Documented override (everything else inherits the shared defaults):
     health_check_interval = 30      # see note below
 
-    cron_jobs = generate_cron_jobs(
-        periodic_sync_all_immich_accounts,
-        enable_periodic_sync=settings.enable_periodic_sync,
-        sync_interval_hours=settings.sync_interval_hours,
-    )
+    cron_jobs = [
+        *generate_cron_jobs(
+            periodic_sync_all_immich_accounts,
+            enable_periodic_sync=settings.enable_periodic_sync,
+            sync_interval_hours=settings.sync_interval_hours,
+        ),
+        # Always on: finalises non-blocking IN_PROGRESS fan-out parents.
+        *generate_reconciliation_cron(reconcile_in_progress_parents),
+    ]
 ```
+
+## Non-Blocking Sync Flow & Status Semantics
+
+The album and people syncs are **non-blocking fan-outs** (ITER14-003). An
+orchestrator no longer holds a worker slot waiting on its children:
+
+1. `sync_immich_albums` / `sync_immich_people` list their batches, persist one
+   linked child `sync_jobs` row per batch (`parent_job_id` → orchestrator), set
+   the parent's `expected_children`, mark the parent **`IN_PROGRESS`** and
+   **return immediately** (no `asyncio.gather`). Child rows are committed *before*
+   the children are dispatched, so each child's row already exists when it runs.
+   A fan-out with zero batches is marked `COMPLETED` directly.
+2. Each child batch (`sync_immich_album_batch` / `sync_immich_people_batch`) does
+   its work, then on success marks its own row `COMPLETED` and atomically
+   increments the parent's `completed_children`. On a **final**-attempt failure it
+   marks its row `FAILED` and increments `failed_children`; a transient
+   (non-final) failure just re-raises so ARQ retries without touching counters.
+3. The shared **reconciliation cron** (`reconcile_in_progress_parents`, run every
+   5 minutes) scans `IN_PROGRESS` parents and finalises each against its **child
+   rows** (the authoritative source — counters are only a fast path): all children
+   succeeded → `COMPLETED`; any failed/cancelled → `FAILED` with a summary; a
+   parent whose children stop progressing within
+   `reconciliation_stale_after_seconds` (default 30 min) is treated as stuck and
+   marked `FAILED`.
+
+`IN_PROGRESS` therefore means "fan-out dispatched, awaiting children", distinct
+from `RUNNING` ("actively executing on a worker"). The reconciler being
+authoritative over child rows means a missed counter increment can never strand a
+parent. See `docs/architecture/integration-architecture.md` for the generic
+lifecycle and `core_shared/core_shared/sync_reconciliation.py` for the reconciler.
 
 `job_timeout`, `keep_result`, and the retry backoff match the
 `SharedARQWorkerSettings` baseline — which equals arq's own constructor defaults,

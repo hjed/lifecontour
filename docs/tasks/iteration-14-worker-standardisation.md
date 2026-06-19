@@ -378,20 +378,31 @@ Add the shared reconciliation function operating on the Phase 1 schema. It is a 
 #### Phase 3: Migrate Immich fan-outs to non-blocking
 **PR Size:** ~480 lines (orchestrator changes ~160, child counter updates ~70, tests ~250)
 
+**Status:** ✅ DONE
+
 Make the asymmetric Immich orchestrators consistent and non-blocking.
 
 **Acceptance Criteria:**
-- [ ] `sync_immich_albums` no longer blocks on `asyncio.gather`; it persists children linked to the parent, sets `expected_children`, marks the parent `IN_PROGRESS`, and returns. The reconciler finalises it.
-- [ ] `sync_immich_people` persists a parent + linked children (previously unpersisted), marks the parent `IN_PROGRESS`, and returns.
-- [ ] `sync_immich_album_batch` / `sync_immich_people_batch` update their own child rows and atomically increment the parent counters on completion/failure.
-- [ ] The Immich worker schedules the reconciliation cron.
+- [x] `sync_immich_albums` no longer blocks on `asyncio.gather`; it persists children linked to the parent, sets `expected_children`, marks the parent `IN_PROGRESS`, and returns. The reconciler finalises it.
+- [x] `sync_immich_people` persists a parent + linked children (previously unpersisted), marks the parent `IN_PROGRESS`, and returns.
+- [x] `sync_immich_album_batch` / `sync_immich_people_batch` update their own child rows and atomically increment the parent counters on completion/failure.
+- [x] The Immich worker schedules the reconciliation cron.
 
 **Required Test Coverage:**
-- **Unit:** orchestrators return without awaiting children; batch jobs increment the correct parent counter.
-- **Integration:** an album/people fan-out dispatches children against real Redis/Postgres, returns immediately, children update counters, and the reconciler transitions the parent to the correct final status. Regression: a large fan-out completes and reports correct totals.
+- [x] **Unit:** orchestrators return without awaiting children; batch jobs increment the correct parent counter.
+- [x] **Integration:** an album/people fan-out dispatches children against real Redis/Postgres, returns immediately, children update counters, and the reconciler transitions the parent to the correct final status. Regression: a large fan-out completes and reports correct totals.
 
 **Required Documentation Updates:**
-- `immich` `README.md` — describe the non-blocking sync flow and status semantics.
+- [x] `immich` `README.md` — describe the non-blocking sync flow and status semantics.
+
+**Progress notes (Phase 3 complete — 2026-06-19, branch `iter14-003-3-immich`):**
+
+- `integration_workers/immich/worker.py`: both orchestrators (`sync_immich_albums`, `sync_immich_people`) now **drain their batch generator, persist one linked child `sync_jobs` row per batch, set `expected_children`, mark the parent `IN_PROGRESS`, and return** — the `asyncio.gather(*[j.result(timeout=290)])` blocking blocks (and the `arq.jobs.Job` fallback wiring) are deleted. Child rows are persisted and **committed before dispatch** (persist-then-enqueue) so a fast child can never update a not-yet-existing row. A shared `_persist_fanout_children(...)` helper does the create-children + `set_expected_children` + parent-status transition for both, collapsing the previously-asymmetric orchestrators onto one path; a zero-batch fan-out is marked `COMPLETED` directly (nothing to reconcile).
+- Both batch jobs gained an optional `parent_job_id` param (orchestrator passes the parent's `job_id` positionally at enqueue; default `None` keeps direct/legacy invocation working). On success a batch marks **its own** row `COMPLETED` + `increment_completed_children(parent)` inside the same committed unit of work as the sync; on a **final**-attempt failure (`_is_final_attempt` reads `job_try`/`max_tries`, falling back to `DEFAULT_MAX_TRIES`) it records `FAILED` + `increment_failed_children(parent)` via `_record_child_failure` (own committed UoW, since the batch tx is already rolled back). A non-final failure just re-raises so ARQ retries without bumping a counter — child rows stay the reconciler's authoritative source.
+- `WorkerSettings`: `reconcile_in_progress_parents` added to `functions`; `cron_jobs` is now `[*generate_cron_jobs(...), *generate_reconciliation_cron(reconcile_in_progress_parents)]` so the reconciler runs every 5 min regardless of whether periodic sync is enabled. Stale window comes from the inherited `BaseWorkerSettings.reconciliation_stale_after_seconds` (30 min); the startup hook already populates `ctx["session_factory"]`/`ctx["settings"]` the reconciler reads.
+- **Tests (TDD red→green):** unit `tests/unit/test_immich_albums_orchestrator.py` + `test_immich_people_orchestrator.py` (return-without-awaiting, child persistence + `expected_children` + `IN_PROGRESS`, zero-batch→`COMPLETED`, credential-missing→`FAILED`), `test_immich_batch_counters.py` (success→completed+increment, final-failure→failed+increment, non-final-failure→no counter, legacy-no-parent skips counters), and `test_worker.py` (reconciler in `functions`; reconciliation cron present with periodic on **and** off, targeting `reconcile_in_progress_parents`); integration `tests/integration/test_immich_fanout_integration.py` (album + people fan-out against real Postgres/Redis: returns `IN_PROGRESS`, children persisted + dispatched on the real queue, batches increment counters, reconciler → `COMPLETED`; a final-try child failure → reconciler `FAILED` with message; large 25-batch fan-out reports correct totals → `COMPLETED`). The integration suite backs every worker session with a `session_factory` bound to the rolled-back `async_connection` (savepoint mode) and stubs only the external Immich SaaS (auth/API/sync service) — DB, repository and Redis queue are real.
+- **Test scope:** unit + integration only, per this phase's Required Test Coverage. No frontend surface here, so no e2e — the `IN_PROGRESS`-in-UI e2e check is owned by **ITER14-003 Phase 4** (Strava + UI).
+- Quality gates green: immich `ruff format --check`/`ruff check`/`mypy` (worker + new tests); unit suite (190) and the full integration suite (44, incl. the 5 new fan-out tests) pass with no regressions.
 
 #### Phase 4: Migrate Strava fan-out to non-blocking
 **PR Size:** ~360 lines (orchestrator changes ~120, child counter updates ~60, tests ~180)
