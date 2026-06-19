@@ -1,14 +1,11 @@
 """
-Integration tests for ImmichSyncService external_reference DB operations.
+Integration tests for ImmichSyncService integration-link DB operations.
 
-These exercise the raw SQL in ``_create_external_reference`` and
-``_find_external_reference`` against a real PostgreSQL database via asyncpg.
+These exercise the raw SQL in ``_find_external_reference`` and
+``_upsert_sync_metadata`` against a real PostgreSQL database via asyncpg.
 
-They guard against the asyncpg ``AmbiguousParameterError`` ("inconsistent
-types deduced for parameter") that the mocked unit tests cannot catch: the
-INSERT projects bind parameters bare in the SELECT list while reusing them in
-the WHERE NOT EXISTS comparison, so the parameter types must be cast
-consistently for asyncpg to accept the query.
+Since ITER15-001 Phase 4 the worker writes the canonical link to
+``sync_metadata`` only — it no longer writes ``external_references``.
 """
 
 from __future__ import annotations
@@ -55,56 +52,7 @@ async def _count_references(connection: Any, person_id: str) -> int:
 
 
 class TestExternalReferenceDbOperations:
-    """Real-database tests for the external_reference SQL."""
-
-    @pytest.mark.asyncio
-    async def test_create_external_reference_inserts_row(
-        self,
-        sync_service: ImmichSyncService,
-        async_connection: Any,
-    ) -> None:
-        """Creating a reference inserts a correctly typed row.
-
-        Regression test for the asyncpg AmbiguousParameterError: this fails
-        against real asyncpg if the INSERT ... SELECT parameters are not cast.
-        """
-        contact_id = 436173
-        person_id = "d796a719-ad3f-4a68-ba15-2dc5bc9a2651"
-
-        await sync_service._create_external_reference(contact_id, person_id)
-
-        result = await async_connection.execute(
-            text("""
-                SELECT internal_entity_type, internal_entity_id, external_system,
-                       external_entity_type, external_entity_id
-                FROM external_references
-                WHERE external_system = 'immich'
-                  AND external_entity_id = :person_id
-            """),
-            {"person_id": person_id},
-        )
-        row = result.fetchone()
-        assert row is not None
-        assert row.internal_entity_type == "contact"
-        assert row.internal_entity_id == contact_id
-        assert row.external_system == "immich"
-        assert row.external_entity_type == "person"
-        assert row.external_entity_id == person_id
-
-    @pytest.mark.asyncio
-    async def test_create_external_reference_is_idempotent(
-        self,
-        sync_service: ImmichSyncService,
-        async_connection: Any,
-    ) -> None:
-        """The WHERE NOT EXISTS guard prevents duplicate references."""
-        contact_id = 100
-        person_id = "8eb4363b-4a27-4162-bf25-a07b4ac6e481"
-
-        await sync_service._create_external_reference(contact_id, person_id)
-        await sync_service._create_external_reference(contact_id, person_id)
-
-        assert await _count_references(async_connection, person_id) == 1
+    """Real-database tests for the integration-link SQL."""
 
     @pytest.mark.asyncio
     async def test_find_external_reference_reads_sync_metadata(
@@ -188,7 +136,7 @@ async def _fetch_sync_metadata(connection: Any, person_id: str) -> Any:
 
 
 class TestAutoLinkDualWrite:
-    """The name-match auto-link writes both link tables in one transaction."""
+    """The name-match auto-link writes the canonical sync_metadata link only."""
 
     @pytest.mark.asyncio
     async def test_upsert_sync_metadata_persists_entity_types(
@@ -210,32 +158,32 @@ class TestAutoLinkDualWrite:
         assert row.external_entity_type == "person"
 
     @pytest.mark.asyncio
-    async def test_auto_link_writes_both_link_rows(
+    async def test_auto_link_writes_sync_metadata_only(
         self,
         sync_service: ImmichSyncService,
         async_connection: Any,
     ) -> None:
-        """A single name match dual-writes external_references and sync_metadata."""
+        """A single name match writes the sync_metadata link and zero external_references."""
         result = await async_connection.execute(
             text(
                 "INSERT INTO contacts (first_name, last_name) "
-                "VALUES ('Autolink', 'Dualwrite') RETURNING id"
+                "VALUES ('Autolink', 'Onlywrite') RETURNING id"
             )
         )
         contact_id = int(result.fetchone().id)
         person_id = "auto-link-person-1"
 
-        person = ImmichPerson(id=person_id, name="Autolink Dualwrite")
+        person = ImmichPerson(id=person_id, name="Autolink Onlywrite")
         outcome = await sync_service.sync_people_batch([person.model_dump()])
 
         assert outcome.linked == 1
 
-        # external_references link present.
-        assert await _count_references(async_connection, person_id) == 1
-
-        # paired sync_metadata link present, in the same transaction, typed.
+        # The canonical sync_metadata link is present and typed...
         row = await _fetch_sync_metadata(async_connection, person_id)
         assert row is not None
         assert row.internal_id == contact_id
         assert row.internal_entity_type == "contact"
         assert row.external_entity_type == "person"
+
+        # ...and no external_references row is written.
+        assert await _count_references(async_connection, person_id) == 0

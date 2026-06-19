@@ -206,25 +206,19 @@ Integration entity links were historically tracked in **two overlapping tables**
 concurrency and status). Because no writer kept both consistent, Immich-origin
 (email-less) contacts could be duplicated when re-imported by Google sync.
 
-`sync_metadata` is now being made the **single canonical store for all integration
-entity links**, absorbing the fields `external_references` uniquely provided
+`sync_metadata` is now the **single canonical store for all integration entity
+links**, absorbing the fields `external_references` uniquely provided
 (`reference_data`, and explicit `internal_entity_type` / `external_entity_type`).
-**`external_references` is deprecated; its removal is pending** the staged
-consolidation. See
+**`external_references` is now write-free and read-free; its removal is pending** the
+final consolidation step. See
 [Iteration 15: Integration Link Consolidation](../tasks/iteration-15-integration-link-consolidation.md)
 for the migration plan (schema → dual-write + backfill → move reads → stop writing
 `external_references` → drop + dedupe).
 
-**Transition state (dual-write).** The consolidation is mid-flight: every path that
-writes `external_references` now also writes the paired `sync_metadata` link in the
-same unit of work, so the canonical store stays complete and current:
-
-- The Immich worker's name-match auto-link upserts `sync_metadata` immediately
-  (it no longer relies on the consumer's later `contact.updated`).
-- The album link write (`AlbumSyncReadRepository.upsert_link`) mirrors
-  `reference_data` onto the `immich_album` `sync_metadata` row.
-- The Google and Immich worker `sync_metadata` upserts carry
-  `internal_entity_type` / `external_entity_type` (`contact` / `person`).
+**Earlier transition state (dual-write).** During Phases 2–3 the consolidation
+dual-wrote: every path that wrote `external_references` also wrote the paired
+`sync_metadata` link in the same unit of work, so the canonical store stayed complete
+and current while reads moved over.
 
 A one-off, idempotent migration
 (`0091_backfill_sync_metadata_from_external_references`) backfills rows that predate
@@ -252,9 +246,28 @@ guaranteeing the canonical store is complete and current, every integration-link
   outbound link lookup, the album display reads (`reference_data` from `sync_metadata`),
   and the contact-merge collision detection all read `sync_metadata`.
 
-The `external_references` *write* half of the dual-write (and the contact
-`synced_tags`/`etag` `reference_data` read/write) remain until Phase 4 stops writing
-`external_references`; the table is dropped in Phase 5.
+**Writes consolidated onto `sync_metadata` (Phase 4 complete).** The old half of the
+dual-write has been removed: every writer now persists the canonical link (plus
+`reference_data` and entity types) to `sync_metadata` **only** — nothing writes
+`external_references` anymore:
+
+- The inbound contact create/update paths write the link and its `reference_data`
+  (`resource_name`/`etag`/`synced_tags`) onto `sync_metadata` (the `synced_tags`/`etag`
+  read/write moved here too, via `SyncMetadataRepository.update_reference_data`).
+- `ExternalReferenceService.upsert_contact_reference` (manual Immich linking) and
+  `repoint_contact_references` (contact merge) operate on `sync_metadata` only.
+- The Immich worker's name-match auto-link and merge-cleanup unlink write/delete only
+  `sync_metadata`.
+- `AlbumSyncReadRepository.upsert_link` is the single writer of the album
+  `sync_metadata` row (carrying `version_hash` + `reference_data` + the
+  merge-protection anchor on `updated_at`); `find_link` and `delete` key on
+  `sync_metadata`. Owning `updated_at` in `upsert_link` (rather than via a separate
+  generic upsert that would unconditionally bump it) keeps the anchor meaningful on the
+  consolidated store.
+
+`external_references` is now **write-free** (and read-free); the table, the
+`ExternalReference` model/service/repository shell, and the duplicate-cleanup are
+removed in Phase 5.
 
 ### 2. Task Queue System
 

@@ -3,12 +3,15 @@
 A contact merge that collides on Immich (both contacts linked to an Immich
 person) surfaces the clash on ``ContactMerged.external_collisions``. Because the
 Immich API exposes no person-delete, the worker keeps the survivor's link and
-unlinks the source contact's orphaned *local* reference and ``sync_metadata``
-(using ``source_external_id`` from the payload). It must not attempt a remote
-delete and must acknowledge the event without error.
+unlinks the source contact's orphaned canonical ``sync_metadata`` link (using
+``source_external_id`` from the payload). It must not attempt a remote delete and
+must acknowledge the event without error.
 
-These tests exercise the real database via ``db_session`` (real
-external_references / sync_metadata rows) with no Immich API involvement at all.
+Since ITER15-001 Phase 4 the handler cleans the ``sync_metadata`` link only and
+no longer touches ``external_references`` (dropped in Phase 5).
+
+These tests exercise the real database via ``db_session`` with no Immich API
+involvement at all.
 """
 
 from collections.abc import AsyncIterator
@@ -131,7 +134,7 @@ class TestContactMergedImmichReconciliation:
     async def test_same_service_unlinks_source_keeps_survivor(
         self, merge_setup: AsyncSession
     ) -> None:
-        """Same-service collision unlinks the source ref and its sync metadata."""
+        """Same-service collision unlinks the source's canonical sync_metadata link."""
         db_session = merge_setup
 
         result = await process_contact_event(
@@ -151,9 +154,10 @@ class TestContactMergedImmichReconciliation:
         assert _SOURCE_PERSON not in remaining_meta  # source sync_metadata cleaned
         assert _SURVIVOR_PERSON in remaining_meta  # survivor link preserved
 
+        # external_references is no longer written by the handler: the seeded
+        # legacy rows are left untouched (the table is dropped in Phase 5).
         remaining_refs = await _external_reference_ids(db_session)
-        assert _SOURCE_PERSON not in remaining_refs  # source reference unlinked
-        assert _SURVIVOR_PERSON in remaining_refs  # survivor reference preserved
+        assert {_SOURCE_PERSON, _SURVIVOR_PERSON} <= remaining_refs
 
     async def test_different_service_collision_leaves_immich_untouched(
         self, merge_setup: AsyncSession
@@ -189,19 +193,17 @@ class TestContactMergedImmichReconciliation:
             db_session
         )
 
-    async def test_unlink_scoped_to_source_contact_preserves_other_owners(
+    async def test_unlink_does_not_write_external_references(
         self, merge_setup: AsyncSession
     ) -> None:
-        """A reference owned by a different contact is not collaterally unlinked.
+        """The handler removes only the source's sync_metadata link.
 
-        The DELETE is scoped to the source contact's internal entity, so even a
-        (pathological) row sharing the source's external person id but owned by
-        another contact survives — bounding the blast radius.
+        Phase 4 consolidates link writes onto ``sync_metadata``; the handler must
+        not delete (or otherwise write) ``external_references`` — those legacy
+        rows are left intact until the table is dropped in Phase 5.
         """
         db_session = merge_setup
-        other_contact = 99
-        await _seed_external_reference(db_session, other_contact, _SOURCE_PERSON)
-        await db_session.flush()
+        refs_before = await _external_reference_ids(db_session)
 
         result = await process_contact_event(
             ctx=_ctx(db_session),
@@ -215,21 +217,10 @@ class TestContactMergedImmichReconciliation:
 
         assert result["status"] == "success"
 
-        # The other owner's reference for the same external id is preserved.
-        owner_ids = await db_session.execute(
-            text(
-                """
-                SELECT internal_entity_id FROM external_references
-                WHERE external_system = 'immich'
-                  AND external_entity_type = 'person'
-                  AND external_entity_id = :ext
-                """
-            ),
-            {"ext": _SOURCE_PERSON},
-        )
-        remaining_owners = {row.internal_entity_id for row in owner_ids.fetchall()}
-        assert other_contact in remaining_owners  # unrelated owner untouched
-        assert _SOURCE_CONTACT not in remaining_owners  # source owner unlinked
+        # The source's canonical link is gone; external_references is unchanged.
+        remaining_meta = await _sync_metadata_external_ids(db_session)
+        assert _SOURCE_PERSON not in remaining_meta
+        assert await _external_reference_ids(db_session) == refs_before
 
     async def test_idempotent_when_source_already_unlinked(
         self, db_session: AsyncSession

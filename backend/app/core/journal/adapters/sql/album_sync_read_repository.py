@@ -8,9 +8,11 @@ count) is sourced from that row's ``reference_data`` — the canonical link stor
 
 This repository owns the SQL for the album link reads (journal API read path)
 and the album-sync link find/upsert used by ``ImmichAlbumOutboxEventProcessor``,
-plus cleanup on journal deletion. The read methods key on ``sync_metadata``;
-the ``external_references`` write half remains until Phase 4. Album content
-itself is only ever written by Immich album sync.
+plus cleanup on journal deletion. Since ITER15-001 Phase 4 every read and write
+keys on ``sync_metadata`` (the canonical link store) — including the
+merge-protection anchor (``sync_metadata.updated_at``); ``external_references``
+is no longer touched. Album content itself is only ever written by Immich album
+sync.
 """
 
 import json
@@ -28,8 +30,8 @@ EXTERNAL_SYSTEM = "immich"
 EXTERNAL_ENTITY_TYPE = "album"
 INTERNAL_ENTITY_TYPE = "journal"
 
-# Far-past merge anchor used when a link row is (re)created without applying
-# inbound changes, so a locally edited journal stays protected on the next sync.
+# Far-past merge anchor used when a link row is created without applying inbound
+# changes, so a locally edited journal stays protected on the next sync.
 _UNSYNCED_ANCHOR = datetime(1970, 1, 1, tzinfo=UTC)
 
 
@@ -43,32 +45,31 @@ class AlbumSyncReadRepository:
     async def find_link(
         self, album_id: str, journal_id: int | None = None
     ) -> Any | None:
-        """Find the album ``external_references`` row for ``album_id``.
+        """Find the canonical ``sync_metadata`` album link for ``album_id``.
 
-        When ``journal_id`` is given, the lookup is constrained to the reference
-        pointing at that journal, so merge protection compares against the right
-        anchor even if multiple references exist for the same album.
+        Returns the row carrying ``updated_at`` (the merge-protection anchor) and
+        ``reference_data``. When ``journal_id`` is given, the lookup is
+        constrained to the link pointing at that journal, so merge protection
+        compares against the right anchor even if multiple links exist for the
+        same album.
         """
         result = await self.conn.execute(
             text("""
-                SELECT id, internal_entity_id, updated_at, reference_data
-                FROM external_references
-                WHERE external_system = :external_system
-                  AND external_entity_type = :external_entity_type
-                  AND external_entity_id = :external_entity_id
-                  AND internal_entity_type = :internal_entity_type
+                SELECT id, internal_id AS internal_entity_id,
+                       updated_at, reference_data
+                FROM sync_metadata
+                WHERE integration_source = :integration_source
+                  AND external_id = :external_entity_id
                   AND (
                       CAST(:journal_id AS INTEGER) IS NULL
-                      OR internal_entity_id = :journal_id
+                      OR internal_id = :journal_id
                   )
                 ORDER BY id DESC
                 LIMIT 1
             """),
             {
-                "external_system": EXTERNAL_SYSTEM,
-                "external_entity_type": EXTERNAL_ENTITY_TYPE,
+                "integration_source": INTEGRATION_SOURCE,
                 "external_entity_id": album_id,
-                "internal_entity_type": INTERNAL_ENTITY_TYPE,
                 "journal_id": journal_id,
             },
         )
@@ -80,95 +81,70 @@ class AlbumSyncReadRepository:
         album_id: str,
         reference_data: dict[str, Any],
         *,
+        version_hash: str,
         bump_anchor: bool,
     ) -> None:
-        """Insert or update the ``(journal, album)`` external_reference link.
+        """Upsert the canonical ``(journal, album)`` link in ``sync_metadata``.
 
-        Scoped to this specific journal so stray references for the same album
-        are never repointed or duplicated. ``updated_at`` (the merge-protection
-        anchor) is only advanced when ``bump_anchor`` is True; when False the
-        existing anchor is preserved so a locally edited journal stays protected.
+        This is the single writer of the album ``sync_metadata`` row: it sets the
+        ``version_hash``, the album display ``reference_data`` and the
+        merge-protection anchor (``updated_at``).
 
-        On the INSERT path (the link row was lost), the anchor is set to ``now``
-        only when ``bump_anchor`` is True; otherwise it is set to a far-past
-        sentinel so a re-established link during a *protected* update keeps the
-        journal protected on the next sync rather than re-enabling overwrite.
+        ``updated_at`` is the merge anchor. It is only advanced (to ``now``) when
+        ``bump_anchor`` is True — i.e. when inbound changes were actually applied.
+        When False the existing anchor is preserved (on update) or set to a
+        far-past sentinel (on insert), so a locally edited journal stays protected
+        and is not re-enabled for overwrite on the next sync.
+
+        Owning ``updated_at`` here (rather than via a separate generic
+        ``sync_metadata`` upsert, which would unconditionally bump it) is what
+        keeps the anchor meaningful on the consolidated link store.
         """
         now = datetime.now(UTC)
-        # The merge anchor for a freshly inserted row: advancing it (now) is only
-        # correct when we applied inbound changes. Otherwise keep it in the past.
+        # The anchor for a freshly inserted row: advancing it (now) is only
+        # correct when we applied inbound changes; otherwise keep it in the past.
         insert_anchor = now if bump_anchor else _UNSYNCED_ANCHOR
-        params: dict[str, Any] = {
-            "journal_id": journal_id,
-            "reference_data": json.dumps(reference_data),
-            "external_system": EXTERNAL_SYSTEM,
-            "external_entity_type": EXTERNAL_ENTITY_TYPE,
-            "external_entity_id": album_id,
-            "internal_entity_type": INTERNAL_ENTITY_TYPE,
-            "now": now,
-            "insert_anchor": insert_anchor,
-            "bump_anchor": bump_anchor,
-        }
 
         # A SQL CASE keeps the conditional anchor parametrised (no f-strings).
-        result = await self.conn.execute(
+        await self.conn.execute(
             text("""
-                UPDATE external_references
-                SET reference_data = :reference_data,
+                INSERT INTO sync_metadata
+                    (internal_id, integration_source, external_id, last_synced_at,
+                     version_hash, sync_status, retry_count,
+                     internal_entity_type, external_entity_type, reference_data,
+                     created_at, updated_at)
+                VALUES
+                    (:journal_id, :integration_source, :external_entity_id, :now,
+                     :version_hash, 'success', 0,
+                     :internal_entity_type, :external_entity_type, :reference_data,
+                     :now, :insert_anchor)
+                ON CONFLICT (integration_source, external_id)
+                DO UPDATE SET
+                    internal_id = EXCLUDED.internal_id,
+                    last_synced_at = EXCLUDED.last_synced_at,
+                    version_hash = EXCLUDED.version_hash,
+                    sync_status = 'success',
+                    retry_count = 0,
+                    internal_entity_type = EXCLUDED.internal_entity_type,
+                    external_entity_type = EXCLUDED.external_entity_type,
+                    reference_data = EXCLUDED.reference_data,
                     updated_at = CASE
-                        WHEN :bump_anchor THEN :now ELSE updated_at
+                        WHEN :bump_anchor THEN :now ELSE sync_metadata.updated_at
                     END
-                WHERE external_system = :external_system
-                  AND external_entity_type = :external_entity_type
-                  AND external_entity_id = :external_entity_id
-                  AND internal_entity_type = :internal_entity_type
-                  AND internal_entity_id = :journal_id
-            """),
-            params,
-        )
-        if result.rowcount == 0:
-            await self.conn.execute(
-                text("""
-                    INSERT INTO external_references
-                        (internal_entity_type, internal_entity_id, external_system,
-                         external_entity_type, external_entity_id, reference_data,
-                         created_at, updated_at)
-                    VALUES
-                        (:internal_entity_type, :journal_id, :external_system,
-                         :external_entity_type, :external_entity_id,
-                         :reference_data, :now, :insert_anchor)
-                """),
-                params,
-            )
-
-        # Dual-write: mirror reference_data onto the canonical sync_metadata link
-        # (created by the album processor before this call) so the consolidated
-        # store carries album display data without a read-path change.
-        mirror = await self.conn.execute(
-            text("""
-                UPDATE sync_metadata
-                SET reference_data = :reference_data, updated_at = :now
-                WHERE integration_source = :integration_source
-                  AND external_id = :external_entity_id
-                  AND internal_id = :journal_id
             """),
             {
-                "reference_data": params["reference_data"],
-                "now": now,
+                "journal_id": journal_id,
                 "integration_source": INTEGRATION_SOURCE,
                 "external_entity_id": album_id,
-                "journal_id": journal_id,
+                "now": now,
+                "version_hash": version_hash,
+                "internal_entity_type": INTERNAL_ENTITY_TYPE,
+                "external_entity_type": EXTERNAL_ENTITY_TYPE,
+                "reference_data": json.dumps(reference_data),
+                "insert_anchor": insert_anchor,
+                "bump_anchor": bump_anchor,
             },
         )
-        if mirror.rowcount == 0:
-            # The processor upserts the sync_metadata link before calling this,
-            # so a miss means an unexpected call ordering; surface it rather than
-            # leaving the canonical store silently incomplete.
-            logger.warning(
-                "Album reference_data dual-write found no sync_metadata link",
-                journal_id=journal_id,
-                album_id=album_id,
-            )
 
     async def find_by_journal_id(self, journal_id: int) -> dict[str, Any] | None:
         """Return album display data for a journal, or None if not an album.
@@ -299,21 +275,11 @@ class AlbumSyncReadRepository:
         return decoded
 
     async def delete(self, journal_id: int) -> None:
-        """Remove a journal's album sync metadata and external reference.
+        """Remove a journal's album ``sync_metadata`` link.
 
         Called when a journal is deleted so album links do not outlive the
         journal they belonged to.
         """
-        await self.conn.execute(
-            text("""
-                DELETE FROM external_references
-                WHERE internal_entity_type = 'journal'
-                  AND internal_entity_id = :journal_id
-                  AND external_system = 'immich'
-                  AND external_entity_type = 'album'
-            """),
-            {"journal_id": journal_id},
-        )
         await self.conn.execute(
             text("""
                 DELETE FROM sync_metadata

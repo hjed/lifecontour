@@ -405,16 +405,14 @@ class TestSyncPeopleFlow:
         generic_result = MagicMock()
 
         # Call sequence for "auto-link":
-        # 1. _find_external_reference -> not found
-        # 2. _create_external_reference -> INSERT
+        # 1. _find_external_reference -> not found (reads sync_metadata)
+        # 2. _upsert_sync_metadata -> upsert (the canonical link)
         # 3. _emit_outbox_event -> INSERT into outbox_events
-        # 4. _upsert_sync_metadata -> upsert
         mock_connection.execute = AsyncMock(
             side_effect=[
-                _make_fetchone_none(),  # ext ref not found
-                generic_result,  # create ext ref
-                generic_result,  # outbox event insert
+                _make_fetchone_none(),  # link not found
                 generic_result,  # sync metadata upsert
+                generic_result,  # outbox event insert
             ]
         )
 
@@ -444,13 +442,13 @@ class TestSyncPeopleFlow:
         service: ImmichSyncService,
         mock_connection: AsyncMock,
     ) -> None:
-        """Auto-linking dual-writes the paired sync_metadata link immediately.
+        """Auto-linking writes the canonical sync_metadata link immediately.
 
-        The name-match auto-link path historically wrote only
-        ``external_references`` and relied on the consumer's later
-        ``contact.updated`` to populate ``sync_metadata``. Dual-write requires the
-        worker to upsert ``sync_metadata`` in the same unit of work, carrying the
-        contact/person entity types so the canonical link store stays current.
+        The name-match auto-link path writes the ``sync_metadata`` link in the
+        same unit of work (rather than relying on the consumer's later
+        ``contact.updated``), carrying the contact/person entity types so the
+        canonical link store stays current. It no longer writes
+        ``external_references``.
         """
         person = _make_person("p1", "Jane Doe", "1990-03-20")
         service._contacts_cache = [_make_contact(10, "Jane", "Doe")]
@@ -459,7 +457,6 @@ class TestSyncPeopleFlow:
         mock_connection.execute = AsyncMock(
             side_effect=[
                 _make_fetchone_none(),  # _find_external_reference -> not found
-                generic_result,  # _create_external_reference -> INSERT
                 generic_result,  # _upsert_sync_metadata -> INSERT/upsert
                 generic_result,  # _emit_outbox_event -> INSERT outbox_events
             ]

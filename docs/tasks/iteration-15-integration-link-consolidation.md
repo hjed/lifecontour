@@ -1,6 +1,6 @@
 # Iteration 15: Integration Link Consolidation (fix contact duplication)
 
-**Status:** 🟡 IN PROGRESS — Phase 1, 2 & 3 complete
+**Status:** 🟡 IN PROGRESS — Phase 1, 2, 3 & 4 complete
 **Dependencies:** Iteration 11 (Immich Integration), Iteration 13 (Contact Merge), Iteration 14 (Worker Standardisation)
 **Goal:** Eliminate the dual-table inconsistency between `external_references` and `sync_metadata` that causes Immich-origin contacts to be duplicated by Google sync, by consolidating onto a single canonical integration-link store — and migrate/clean up the duplicates already created.
 
@@ -173,20 +173,26 @@ Readers repointed:
 
 ---
 
-#### Phase 4: Stop writing `external_references` (contract)
+#### Phase 4: Stop writing `external_references` (contract) — ✅ COMPLETE
 
 **PR Size:** ~6–8 files
 
-Now that nothing reads `external_references`, remove the old half of the dual-write so every writer persists the canonical link (and `reference_data`/entity types) to `sync_metadata` only:
+Now that nothing reads `external_references`, the old half of the dual-write is removed so every writer persists the canonical link (and `reference_data`/entity types) to `sync_metadata` only:
 
-- Backend `ExternalReferenceService.create/update/upsert_contact_reference` → write `sync_metadata` only (or delete the service and inline via the repo).
-- Immich worker `_create_external_reference` → drop the `external_references` write (keep the `sync_metadata` upsert added in P2).
-- Album `upsert_or_insert` / `delete` → `sync_metadata` only.
-- Merge repoint (`repoint_external_references_on_contact_merge`) → operate on `sync_metadata` rows only.
+- [x] Backend `ExternalReferenceService`: `upsert_contact_reference` → `sync_metadata` upsert (`version_hash=''`); `repoint_contact_references` → `sync_metadata` rows only; the dead write helpers (`create_external_reference`, `update_external_reference`, `_get_external_reference_by_id`) removed.
+- [x] Inbound contact create/update (`outbox_event_processor`): the link `reference_data` (`resource_name`/`etag`/`synced_tags`) is written onto `sync_metadata`; the contact `synced_tags`/`etag` read moved to `IntegrationLinkRepository.find_link_by_external` and the write to the new `SyncMetadataRepository.update_reference_data` (which leaves `version_hash` untouched). *(This is the contact `reference_data` move the Phase 3 scope note deferred to P4.)*
+- [x] Immich worker `_create_external_reference` → removed (auto-link keeps the `sync_metadata` upsert); merge-cleanup `_unlink_immich_reference_for_event` deletes `sync_metadata` only.
+- [x] Album `AlbumSyncReadRepository.upsert_link` / `find_link` / `delete` → `sync_metadata` only. `upsert_link` became the single writer of the album `sync_metadata` row (`version_hash` + `reference_data` + the merge-protection anchor on `updated_at`); the redundant generic `sync_metadata` upserts in the album processors/creation service were removed so the anchor is never unconditionally bumped.
+- [x] Merge repoint (`repoint_contact_references`) → operates on `sync_metadata` rows only.
 
 **Required Test Coverage:**
-- **Integration:** each write path (inbound create/update, immich auto-link, album create, contact merge) produces the correct single `sync_metadata` row and **zero** `external_references` writes.
-- **Unit:** repository write methods.
+- [x] **Integration:** each write path produces the correct single `sync_metadata` row and **zero** `external_references` writes — inbound create/update (`test_link_consolidation_writes.py`), immich auto-link (`test_immich_external_reference_integration.py::TestAutoLinkDualWrite`), album create + anchor (`test_album_sync_read_repository.py::TestAlbumLinkWrite`, `test_immich_album_outbox_processor.py`, `test_immich_album_creation_api.py`), contact merge (`test_contact_merge_external_refs_integration.py`), manual immich link (`test_immich_conflicts_api.py`), worker merge-cleanup (`test_contact_merged_reconciliation_integration.py`).
+- [x] **Unit:** repository write methods — `SyncMetadataRepository.update_reference_data` (`test_sync_metadata_repository.py`); outbox create carries `reference_data` + synced-tags write to `sync_metadata` (`test_outbox_event_processor.py`); immich auto-link emits no `external_references` (`test_immich_sync_service.py`).
+
+**E2E:** not applicable — Phase 4 only contracts backend/worker write paths; reads (and therefore frontend behaviour) are unchanged from Phase 3. The Phase-3 duplication-loop regression test stays green.
+
+**Required Documentation Updates:**
+- [x] `docs/architecture/integration-architecture.md` — `external_references` is now write-free/read-free; album merge anchor lives on `sync_metadata.updated_at`, owned by `upsert_link`.
 
 ---
 

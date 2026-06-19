@@ -82,9 +82,6 @@ def _build(
     journal_repo = MagicMock()
     journal_repo.find_by_id = AsyncMock(return_value=journal)
 
-    sync_metadata_repo = MagicMock()
-    sync_metadata_repo.upsert = AsyncMock()
-
     album_link_repo = MagicMock()
     album_link_repo.find_external_links = AsyncMock(return_value=existing_links or [])
     album_link_repo.upsert_link = AsyncMock()
@@ -100,7 +97,6 @@ def _build(
         token_service=token_service,
         api_client=api_client,
         journal_repo=journal_repo,
-        sync_metadata_repo=sync_metadata_repo,
         album_link_repo=album_link_repo,
         user_settings_repo=user_settings_repo,
     )
@@ -108,7 +104,6 @@ def _build(
         token_service=token_service,
         api_client=api_client,
         journal_repo=journal_repo,
-        sync_metadata_repo=sync_metadata_repo,
         album_link_repo=album_link_repo,
         user_settings_repo=user_settings_repo,
     )
@@ -186,12 +181,7 @@ async def test_create_album_writes_sync_metadata_and_reference() -> None:
     assert create_kwargs["asset_ids"] == ["asset-1", "asset-2"]
     mocks.api_client.create_shared_link.assert_not_awaited()
 
-    sync_kwargs = mocks.sync_metadata_repo.upsert.await_args.kwargs
-    assert sync_kwargs["integration_source"] == "immich_album"
-    assert sync_kwargs["external_id"] == "album-1"
-    assert sync_kwargs["internal_id"] == 7
-    assert sync_kwargs["version_hash"]
-
+    # upsert_link is the single writer of the album sync_metadata link.
     link_args = mocks.album_link_repo.upsert_link.await_args
     assert link_args.args[0] == 7
     assert link_args.args[1] == "album-1"
@@ -199,6 +189,7 @@ async def test_create_album_writes_sync_metadata_and_reference() -> None:
     assert reference_data["album_id"] == "album-1"
     assert reference_data["album_url"] == f"{SERVER_URL}/albums/album-1"
     assert "shared_link_url" not in reference_data
+    assert link_args.kwargs["version_hash"]
     assert link_args.kwargs["bump_anchor"] is True
 
 
@@ -206,12 +197,12 @@ async def test_create_album_writes_sync_metadata_and_reference() -> None:
 async def test_create_album_commits_link_writes_in_unit_of_work(monkeypatch) -> None:
     """The journal<->album link writes must run inside a unit of work.
 
-    The created album lives in Immich, but the SyncMetadata + ExternalReference
-    rows that link it back to the journal are committed by the service layer.
-    Without an enclosing unit of work those writes are rolled back at request
-    teardown (the commit-timing race in #945), so the album exists yet the
-    journal is never linked. This pins the commit to the service so the bug
-    can't reappear via a caller (HTTP controller) that forgets to open one.
+    The created album lives in Immich, but the sync_metadata link row that ties
+    it back to the journal is committed by the service layer. Without an
+    enclosing unit of work that write is rolled back at request teardown (the
+    commit-timing race in #945), so the album exists yet the journal is never
+    linked. This pins the commit to the service so the bug can't reappear via a
+    caller (HTTP controller) that forgets to open one.
     """
     service, mocks = _build()
 
@@ -234,14 +225,12 @@ async def test_create_album_commits_link_writes_in_unit_of_work(monkeypatch) -> 
     async def require_uow(*args: Any, **kwargs: Any) -> None:  # noqa: ARG001
         assert uow["active"], "link write must run inside unit_of_work"
 
-    mocks.sync_metadata_repo.upsert.side_effect = require_uow
     mocks.album_link_repo.upsert_link.side_effect = require_uow
 
     await service.create_album(
         7, USER_ID, asset_ids=["asset-1"], create_shared_link=False
     )
 
-    mocks.sync_metadata_repo.upsert.assert_awaited_once()
     mocks.album_link_repo.upsert_link.assert_awaited_once()
     assert uow["connection"] is service.connection
 
@@ -272,7 +261,7 @@ async def test_create_album_already_linked_raises_and_skips_immich() -> None:
         )
 
     mocks.api_client.create_album.assert_not_awaited()
-    mocks.sync_metadata_repo.upsert.assert_not_awaited()
+    mocks.album_link_repo.upsert_link.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -283,7 +272,7 @@ async def test_create_album_empty_asset_ids_raises_before_immich() -> None:
         await service.create_album(7, USER_ID, asset_ids=[], create_shared_link=False)
 
     mocks.api_client.create_album.assert_not_awaited()
-    mocks.sync_metadata_repo.upsert.assert_not_awaited()
+    mocks.album_link_repo.upsert_link.assert_not_awaited()
 
 
 @pytest.mark.asyncio

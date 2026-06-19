@@ -209,6 +209,32 @@ class TestSyncMetadataRepository:
         assert params["external_entity_type"] == "person"
         assert params["reference_data"] == '{"k": "v"}'
 
+    @pytest.mark.asyncio
+    async def test_update_reference_data_targets_reference_data_only(
+        self, repository: SyncMetadataRepository, mock_connection: AsyncMock
+    ) -> None:
+        """update_reference_data updates reference_data without touching the hash."""
+        mock_connection.execute = AsyncMock(return_value=MagicMock())
+
+        await repository.update_reference_data(
+            integration_source="google",
+            external_id="people/c123",
+            reference_data='{"synced_tags": ["VIP"]}',
+        )
+
+        call_args = mock_connection.execute.call_args
+        query_text = str(call_args[0][0])
+        params = call_args[0][1]
+        # Only reference_data + updated_at are set; version_hash/internal_id
+        # are intentionally absent so this never looks like a content change.
+        assert "UPDATE sync_metadata" in query_text
+        assert "reference_data = :reference_data" in query_text
+        assert "version_hash" not in query_text
+        assert "internal_id" not in query_text
+        assert params["reference_data"] == '{"synced_tags": ["VIP"]}'
+        assert params["integration_source"] == "google"
+        assert params["external_id"] == "people/c123"
+
     def test_should_sync_no_existing_metadata(
         self, repository: SyncMetadataRepository
     ) -> None:

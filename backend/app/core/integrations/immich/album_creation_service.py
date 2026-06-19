@@ -24,12 +24,8 @@ from core_shared.models.journals import Journal
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.integrations.adapters.sql.sync_metadata_repository import (
-    SyncMetadataRepository,
-)
 from app.core.integrations.immich.adapters.album_api_client import ImmichAlbumApiClient
 from app.core.journal.adapters.sql.album_sync_read_repository import (
-    INTEGRATION_SOURCE,
     AlbumSyncReadRepository,
 )
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
@@ -117,7 +113,6 @@ class ImmichAlbumCreationService:
         token_service: ImmichTokenService,
         api_client: ImmichAlbumApiClient,
         journal_repo: SqlJournalRepository,
-        sync_metadata_repo: SyncMetadataRepository,
         album_link_repo: AlbumSyncReadRepository,
         user_settings_repo: SqlUserSettingsRepository,
     ) -> None:
@@ -125,7 +120,6 @@ class ImmichAlbumCreationService:
         self.token_service = token_service
         self.api_client = api_client
         self.journal_repo = journal_repo
-        self.sync_metadata_repo = sync_metadata_repo
         self.album_link_repo = album_link_repo
         self.user_settings_repo = user_settings_repo
 
@@ -211,13 +205,6 @@ class ImmichAlbumCreationService:
                 shared_link_url=shared_link_url,
             )
 
-            await self.sync_metadata_repo.upsert(
-                integration_source=INTEGRATION_SOURCE,
-                external_id=album_id,
-                version_hash=version_hash,
-                internal_id=journal_id,
-            )
-
             reference_data = self._reference_data(
                 server_url=server_url,
                 album_id=album_id,
@@ -226,8 +213,14 @@ class ImmichAlbumCreationService:
                 thumbnail_asset_id=album.get("albumThumbnailAssetId"),
                 shared_link_url=shared_link_url,
             )
+            # upsert_link is the single writer of the album sync_metadata link
+            # (version_hash + reference_data + anchor).
             await self.album_link_repo.upsert_link(
-                journal_id, album_id, reference_data, bump_anchor=True
+                journal_id,
+                album_id,
+                reference_data,
+                version_hash=version_hash,
+                bump_anchor=True,
             )
 
         logger.info(

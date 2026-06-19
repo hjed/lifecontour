@@ -195,15 +195,6 @@ class ImmichAlbumOutboxEventProcessor:
         if created.id is None:
             raise ImmichAlbumOutboxEventProcessingError("Created journal has no ID")
 
-        await self.sync_metadata_repo.upsert(
-            integration_source=INTEGRATION_SOURCE,
-            external_id=payload.external_id,
-            version_hash=payload.version_hash,
-            internal_id=created.id,
-            internal_entity_type="journal",
-            external_entity_type="album",
-        )
-
         # Participants are not merge-protected, so a new album always reconciles
         # its tagged people. There is no prior immich set on create.
         reference_data = self._reference_data(payload)
@@ -211,10 +202,13 @@ class ImmichAlbumOutboxEventProcessor:
             created.id, payload, {}, has_local_edits=False
         )
 
+        # upsert_link is the single writer of the album sync_metadata link
+        # (version_hash + reference_data + anchor).
         await self.album_link_repo.upsert_link(
             created.id,
             payload.external_id,
             reference_data,
+            version_hash=payload.version_hash,
             bump_anchor=True,
         )
 
@@ -301,20 +295,16 @@ class ImmichAlbumOutboxEventProcessor:
         # cannot go stale. Only advance the merge anchor (updated_at) when we
         # actually applied inbound changes, so a locally edited journal stays
         # protected on future syncs.
+        # upsert_link is the single writer of the album sync_metadata link
+        # (version_hash + reference_data + anchor). The anchor (updated_at) is
+        # only advanced when inbound changes were applied, so a locally edited
+        # journal stays protected on future syncs.
         await self.album_link_repo.upsert_link(
             journal_id,
             payload.external_id,
             reference_data,
-            bump_anchor=not has_local_edits,
-        )
-
-        await self.sync_metadata_repo.upsert(
-            integration_source=INTEGRATION_SOURCE,
-            external_id=payload.external_id,
             version_hash=payload.version_hash,
-            internal_id=journal_id,
-            internal_entity_type="journal",
-            external_entity_type="album",
+            bump_anchor=not has_local_edits,
         )
 
         logger.info(
