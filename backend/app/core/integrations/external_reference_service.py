@@ -527,12 +527,17 @@ class ExternalReferenceService:
             )
             # Both link tables are still dual-written, so keep them consistent.
             # Key the legacy external_references row by its identity columns since
-            # the read no longer carries its surrogate id.
+            # the read no longer carries its surrogate id. ``external_entity_type``
+            # further scopes the row so a sibling reference sharing the same
+            # ``(system, external_id)`` but a different type is never touched; the
+            # match is NULL-safe so rows whose sync_metadata type is unset still
+            # carry over.
             link_params = {
                 "source_id": source_id,
                 "survivor_id": survivor_id,
                 "integration_source": ref.external_system,
                 "external_id": ref.external_entity_id,
+                "external_entity_type": ref.external_entity_type,
             }
             if survivor_external_id is None:
                 # Different service — carry the link and its sync row over.
@@ -545,6 +550,10 @@ class ExternalReferenceService:
                           AND internal_entity_id = :source_id
                           AND external_system = :integration_source
                           AND external_entity_id = :external_id
+                          AND (
+                              CAST(:external_entity_type AS VARCHAR) IS NULL
+                              OR external_entity_type = :external_entity_type
+                          )
                         """
                     ),
                     link_params,
@@ -580,6 +589,10 @@ class ExternalReferenceService:
                           AND internal_entity_id = :source_id
                           AND external_system = :integration_source
                           AND external_entity_id = :external_id
+                          AND (
+                              CAST(:external_entity_type AS VARCHAR) IS NULL
+                              OR external_entity_type = :external_entity_type
+                          )
                         """
                     ),
                     link_params,
