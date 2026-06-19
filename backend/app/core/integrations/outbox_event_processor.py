@@ -599,7 +599,11 @@ class OutboxEventProcessor:
                 integration_source=integration_source,
                 external_id=external_id,
             )
-            if existing_link:
+            # Only treat it as already-processed when the link resolves to a real
+            # contact: ``sync_metadata.internal_id`` is nullable, so a partial row
+            # (e.g. an as-yet-unlinked uuid-keyed entry) must not short-circuit
+            # creation with ``contact_id=None``.
+            if existing_link is not None and existing_link.internal_id is not None:
                 logger.info(
                     "Contact creation event already processed, skipping",
                     contact_id=existing_link.internal_id,

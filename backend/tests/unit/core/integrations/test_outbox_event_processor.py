@@ -548,6 +548,55 @@ class TestOutboxEventProcessor:
         mock_contact_service.create_contact.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_process_contact_created_existing_link_skips_as_processed(
+        self,
+        processor: OutboxEventProcessor,
+        contact_created_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+        mock_sync_metadata_repo: AsyncMock,
+    ):
+        """A sync_metadata link with a real contact id short-circuits as processed."""
+        from core_shared.models.sync_metadata import SyncMetadata
+
+        mock_sync_metadata_repo.find_by_external_id.return_value = SyncMetadata(
+            internal_id=123,
+            integration_source="google",
+            external_id="people/c123456789",
+        )
+
+        result = await processor.process_event(contact_created_event)
+
+        assert result["status"] == "skipped"
+        assert result["reason"] == "already_processed"
+        assert result["contact_id"] == 123
+        mock_contact_service.create_contact.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_process_contact_created_link_without_internal_id_does_not_skip(
+        self,
+        processor: OutboxEventProcessor,
+        contact_created_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+        mock_sync_metadata_repo: AsyncMock,
+    ):
+        """A link whose nullable internal_id is unset must not skip (would yield None)."""
+        from core_shared.models.sync_metadata import SyncMetadata
+
+        mock_sync_metadata_repo.find_by_external_id.return_value = SyncMetadata(
+            internal_id=None,
+            integration_source="google",
+            external_id="people/c123456789",
+        )
+        created = Contact(id=777, first_name="John", last_name="Doe")
+        mock_contact_service.create_contact.return_value = created
+        mock_contact_service.get_contact_by_email.return_value = None
+
+        result = await processor.process_event(contact_created_event)
+
+        assert result["status"] == "success"
+        mock_contact_service.create_contact.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_process_contact_updated_duplicate_email_returns_conflict(
         self,
         processor: OutboxEventProcessor,

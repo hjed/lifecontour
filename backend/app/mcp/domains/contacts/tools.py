@@ -185,9 +185,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         )
         from app.mcp.domains.journals.schemas import ExternalLinkSchema
 
-        external_references = (
-            await contact_service.contact_repo.get_external_references(contact_id)
-        )
+        external_references = await contact_service.get_external_references(contact_id)
 
         # Resolve the user's Immich server URL (no API-key decryption) so Immich
         # person references can be rendered as clickable links.

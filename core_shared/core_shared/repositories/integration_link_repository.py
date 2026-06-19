@@ -20,12 +20,6 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 logger = structlog.get_logger(__name__)
 
-# Columns selected for a full link row, shared across the lookups below.
-_LINK_COLUMNS = (
-    "internal_id, internal_uuid, integration_source, external_id, "
-    "internal_entity_type, external_entity_type, reference_data, version_hash"
-)
-
 
 class IntegrationLinkRepository:
     """Read access to integration entity links stored in ``sync_metadata``.
@@ -49,8 +43,10 @@ class IntegrationLinkRepository:
         Returns:
             A dict describing the link, or ``None`` when no link exists.
         """
-        query = text(f"""
-            SELECT {_LINK_COLUMNS}
+        query = text("""
+            SELECT internal_id, internal_uuid, integration_source, external_id,
+                   internal_entity_type, external_entity_type, reference_data,
+                   version_hash
             FROM sync_metadata
             WHERE integration_source = :integration_source
               AND external_id = :external_id
@@ -107,8 +103,10 @@ class IntegrationLinkRepository:
             "integration_source": integration_source,
             "external_entity_type": external_entity_type,
         }
-        query = text(f"""
-            SELECT {_LINK_COLUMNS}
+        query = text("""
+            SELECT internal_id, internal_uuid, integration_source, external_id,
+                   internal_entity_type, external_entity_type, reference_data,
+                   version_hash
             FROM sync_metadata
             WHERE integration_source = :integration_source
               AND internal_id = :internal_id
@@ -164,12 +162,15 @@ class IntegrationLinkRepository:
         if not person_ids:
             return {}
 
+        # ``internal_id`` is nullable; filtering it out keeps the return type
+        # honest (``dict[str, int]``) and matches the "omit unresolved" contract.
         query = text("""
             SELECT external_id, internal_id
             FROM sync_metadata
             WHERE integration_source = 'immich'
               AND internal_entity_type = 'contact'
               AND external_entity_type = 'person'
+              AND internal_id IS NOT NULL
               AND external_id = ANY(:person_ids)
         """)
         result = await self._conn.execute(query, {"person_ids": person_ids})

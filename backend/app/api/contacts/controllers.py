@@ -203,9 +203,7 @@ async def get_contact_external_links(
         raise ContactNotFoundError(contact_id)
 
     # Fetch external links for this contact from the canonical link store.
-    external_references = await contact_service.contact_repo.get_external_references(
-        contact_id
-    )
+    external_references = await contact_service.get_external_references(contact_id)
 
     immich_server_url = await immich_token_service.get_server_url(user.id)
 

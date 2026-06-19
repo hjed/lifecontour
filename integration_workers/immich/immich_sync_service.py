@@ -806,6 +806,8 @@ class ImmichSyncService:
         aliases ``internal_id`` to ``internal_entity_id`` so callers that read
         ``row.internal_entity_id`` are unchanged.
         """
+        # ``internal_id`` is nullable; a row without one is not a usable contact
+        # link, so exclude it (callers treat any returned row as an existing link).
         query = text("""
             SELECT id, internal_id AS internal_entity_id
             FROM sync_metadata
@@ -813,6 +815,7 @@ class ImmichSyncService:
               AND internal_entity_type = :internal_entity_type
               AND external_entity_type = :external_entity_type
               AND external_id = :external_id
+              AND internal_id IS NOT NULL
             ORDER BY id DESC
             LIMIT 1
         """)
