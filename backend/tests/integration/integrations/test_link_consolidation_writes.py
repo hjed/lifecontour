@@ -16,47 +16,10 @@ from core_shared.models.outbox import OutboxEvent
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.contacts.adapters.sql import (
-    SqlContactEventPublisher,
-    SqlContactFieldHistoryRepository,
-    SqlContactRepository,
-    SqlTagRepository,
-)
-from app.core.contacts.services import ContactService
 from app.core.integrations.outbox_event_processor import OutboxEventProcessor
-
-
-def _build_contact_service(conn: AsyncConnection) -> ContactService:
-    """Build a real ContactService bound to the test connection."""
-    from app.core.contacts.services import (
-        AddressValidationService,
-        ContactHistoryService,
-        ContactValidationService,
-        TagHierarchyService,
-        TagService,
-    )
-
-    contact_repo = SqlContactRepository(conn)
-    tag_repo = SqlTagRepository(conn)
-    history_repo = SqlContactFieldHistoryRepository(conn)
-    event_publisher = SqlContactEventPublisher(conn)
-    tag_hierarchy_service = TagHierarchyService(tag_repo)
-
-    return ContactService(
-        contact_repo=contact_repo,
-        tag_repo=tag_repo,
-        history_repo=history_repo,
-        event_publisher=event_publisher,
-        address_validation_service=AddressValidationService(),
-        contact_validation_service=ContactValidationService(contact_repo),
-        history_service=ContactHistoryService(history_repo),
-        tag_hierarchy_service=tag_hierarchy_service,
-        tag_service=TagService(
-            tag_repo=tag_repo,
-            tag_hierarchy_service=tag_hierarchy_service,
-            event_publisher=event_publisher,
-        ),
-    )
+from tests.integration.integrations.link_consolidation_helpers import (
+    build_contact_service,
+)
 
 
 async def _count_external_refs(conn: AsyncConnection) -> int:
@@ -75,12 +38,19 @@ async def _sync_metadata_row(conn: AsyncConnection, external_id: str) -> Any:
     return result.fetchone()
 
 
-def _created_event(
-    *, external_id: str, first_name: str, last_name: str, etag: str
+def _contact_event(
+    event_type: str,
+    *,
+    external_id: str,
+    first_name: str,
+    last_name: str,
+    etag: str,
+    tag: str,
 ) -> OutboxEvent:
+    """Build a Google ``contact.created`` / ``contact.updated`` event."""
     return OutboxEvent(
-        event_id=f"evt-created-{external_id}",
-        event_type="contact.created",
+        event_id=f"evt-{event_type}-{external_id}",
+        event_type=event_type,
         aggregate_id=0,
         event_data={
             "integration_source": "google",
@@ -88,32 +58,10 @@ def _created_event(
             "contact_data": {
                 "first_name": first_name,
                 "last_name": last_name,
-                "tags": [{"name": "VIP"}],
+                "tags": [{"name": tag}],
             },
             "sync_timestamp": "2026-01-01T10:00:00Z",
-            "sync_type": "created",
-            "etag": etag,
-        },
-    )
-
-
-def _updated_event(
-    *, external_id: str, first_name: str, last_name: str, etag: str
-) -> OutboxEvent:
-    return OutboxEvent(
-        event_id=f"evt-updated-{external_id}",
-        event_type="contact.updated",
-        aggregate_id=0,
-        event_data={
-            "integration_source": "google",
-            "external_id": external_id,
-            "contact_data": {
-                "first_name": first_name,
-                "last_name": last_name,
-                "tags": [{"name": "Family"}],
-            },
-            "sync_timestamp": "2026-01-02T10:00:00Z",
-            "sync_type": "updated",
+            "sync_type": event_type.split(".")[1],
             "etag": etag,
         },
     )
@@ -158,14 +106,16 @@ class TestLinkConsolidationWrites:
         external_id = "people/cCreate"
 
         processor = OutboxEventProcessor(
-            _build_contact_service(async_connection), async_connection
+            build_contact_service(async_connection), async_connection
         )
         result = await processor.process_event(
-            _created_event(
+            _contact_event(
+                "contact.created",
                 external_id=external_id,
                 first_name="New",
                 last_name="Contact",
                 etag="etag-create",
+                tag="VIP",
             )
         )
 
@@ -206,14 +156,16 @@ class TestLinkConsolidationWrites:
         )
 
         processor = OutboxEventProcessor(
-            _build_contact_service(async_connection), async_connection
+            build_contact_service(async_connection), async_connection
         )
         result = await processor.process_event(
-            _updated_event(
+            _contact_event(
+                "contact.updated",
                 external_id=external_id,
                 first_name="Old",
                 last_name="Name",
                 etag="new-etag",
+                tag="Family",
             )
         )
 
@@ -228,3 +180,54 @@ class TestLinkConsolidationWrites:
         assert ref["synced_tags"] == ["Family"]
         # The resource_name from the original link is preserved.
         assert ref["resource_name"] == external_id
+
+    @pytest.mark.asyncio
+    async def test_contact_updated_establishes_synced_tags_on_null_reference_data(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """A link with NULL reference_data still gets synced_tags established.
+
+        Manual Immich links (and pre-``reference_data``-column rows) carry a
+        ``sync_metadata`` link with NULL ``reference_data``; a later contact
+        update with tags must establish ``synced_tags`` rather than skip.
+        """
+        external_id = "people/cNullRef"
+        contact_id_result = await async_connection.execute(
+            text(
+                "INSERT INTO contacts (first_name, last_name) "
+                "VALUES ('Null', 'Ref') RETURNING id"
+            )
+        )
+        contact_id = int(contact_id_result.scalar_one())
+        # Link present, but no reference_data yet (NULL).
+        await async_connection.execute(
+            text(
+                "INSERT INTO sync_metadata "
+                "(internal_id, integration_source, external_id, last_synced_at, "
+                "version_hash, sync_status, internal_entity_type, external_entity_type) "
+                "VALUES (:iid, 'google', :eid, now(), 'old-etag', 'success', "
+                "'contact', 'person')"
+            ),
+            {"iid": contact_id, "eid": external_id},
+        )
+
+        processor = OutboxEventProcessor(
+            build_contact_service(async_connection), async_connection
+        )
+        result = await processor.process_event(
+            _contact_event(
+                "contact.updated",
+                external_id=external_id,
+                first_name="Null",
+                last_name="Ref",
+                etag="new-etag",
+                tag="Family",
+            )
+        )
+
+        assert result["status"] == "success"
+        assert await _count_external_refs(async_connection) == 0
+        row = await _sync_metadata_row(async_connection, external_id)
+        assert row is not None
+        assert row.reference_data is not None
+        assert json.loads(row.reference_data)["synced_tags"] == ["Family"]

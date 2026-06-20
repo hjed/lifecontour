@@ -377,6 +377,66 @@ class TestOutboxEventProcessor:
         assert updated_ref_data["synced_tags"] == ["VIP"]
 
     @pytest.mark.asyncio
+    async def test_process_contact_updated_establishes_synced_tags_on_null_reference_data(
+        self,
+        processor: OutboxEventProcessor,
+        contact_updated_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+        mock_connection: AsyncConnection,
+        mock_link_repo: AsyncMock,
+        mock_sync_metadata_repo: AsyncMock,
+    ):
+        """A link with NULL reference_data still gets synced_tags established.
+
+        Manual-link and pre-``reference_data``-column rows have NULL
+        ``reference_data``; the synced-tags write must treat that as ``{}`` and
+        still persist, rather than skipping (which would drop the metadata).
+        """
+        contact_updated_event.event_data["contact_data"]["tags"] = [{"name": "VIP"}]
+
+        # The helper sets up the contact lookup; override the link to carry no
+        # reference_data while still existing.
+        self._setup_contact_and_reference_mocks(
+            mock_contact_service, mock_link_repo, {}
+        )
+        link = mock_link_repo.find_link_by_external.return_value
+        link["reference_data"] = None
+
+        await processor.process_event(contact_updated_event)
+
+        mock_sync_metadata_repo.update_reference_data.assert_called_once()
+        call_kwargs = mock_sync_metadata_repo.update_reference_data.call_args[1]
+        import json
+
+        assert json.loads(call_kwargs["reference_data"])["synced_tags"] == ["VIP"]
+
+    @pytest.mark.asyncio
+    async def test_process_contact_updated_skips_synced_tags_when_no_link(
+        self,
+        processor: OutboxEventProcessor,
+        contact_updated_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+        mock_connection: AsyncConnection,
+        mock_link_repo: AsyncMock,
+        mock_sync_metadata_repo: AsyncMock,
+    ):
+        """With no canonical link there is nothing to write synced_tags onto."""
+        contact_updated_event.event_data["contact_data"]["tags"] = [{"name": "VIP"}]
+
+        existing_contact = Contact(id=123, first_name="John", last_name="Doe", tags=[])
+        mock_contact_service.find_contact_by_external_reference.return_value = (
+            existing_contact
+        )
+        mock_contact_service.get_contact_by_id.return_value = existing_contact
+        mock_contact_service.update_contact.return_value = existing_contact
+        # No link resolves for this external id.
+        mock_link_repo.find_link_by_external.return_value = None
+
+        await processor.process_event(contact_updated_event)
+
+        mock_sync_metadata_repo.update_reference_data.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_process_contact_updated_omits_reference_data_tags(
         self,
         processor: OutboxEventProcessor,

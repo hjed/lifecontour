@@ -529,6 +529,8 @@ class OutboxEventProcessor:
         self,
         integration_source: str,
         external_id: str,
+        *,
+        link_exists: bool,
         existing_reference_data: str | None,
         contact_data: dict[str, Any],
     ) -> None:
@@ -537,9 +539,14 @@ class OutboxEventProcessor:
         Writes ``reference_data`` on the ``sync_metadata`` link keyed by
         ``(integration_source, external_id)``; ``version_hash`` is untouched so a
         tag-metadata change never registers as a content change for the next sync.
+
+        Gated on the link's *existence* — not on whether it already has
+        ``reference_data`` — so a link whose ``reference_data`` is NULL (a
+        manual-link or pre-``reference_data``-column row) still gets ``synced_tags``
+        established; missing/NULL ``reference_data`` is treated as ``{}``.
         """
         if (
-            existing_reference_data is None
+            not link_exists
             or "tags" not in contact_data
             or contact_data["tags"] is None
         ):
@@ -547,10 +554,12 @@ class OutboxEventProcessor:
 
         incoming_tag_names = [tag_data["name"] for tag_data in contact_data["tags"]]
 
+        # Missing/NULL reference_data on an existing link starts from an empty dict.
         new_ref_data: dict[str, Any] = {}
-        parsed = self._parse_reference_data(existing_reference_data)
-        if parsed is not None:
-            new_ref_data = parsed
+        if existing_reference_data:
+            parsed = self._parse_reference_data(existing_reference_data)
+            if parsed is not None:
+                new_ref_data = parsed
 
         # Skip update if synced_tags already matches
         if new_ref_data.get("synced_tags") == incoming_tag_names:
@@ -989,7 +998,11 @@ class OutboxEventProcessor:
         # and synced_tags metadata will self-heal on the next sync cycle.
         try:
             await self._update_synced_tags_reference(
-                integration_source, external_id, existing_reference_data, contact_data
+                integration_source,
+                external_id,
+                link_exists=existing_link is not None,
+                existing_reference_data=existing_reference_data,
+                contact_data=contact_data,
             )
         except Exception as e:  # noqa: BLE001
             logger.warning(
