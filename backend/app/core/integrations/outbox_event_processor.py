@@ -780,6 +780,12 @@ class OutboxEventProcessor:
             else calculate_contact_version_hash(contact_data)
         )
 
+        # The sync_metadata row is the canonical integration link and the dedup
+        # key for re-imports — if it fails the contact must NOT be left linkless
+        # (that re-opens the duplication path, especially for email-less
+        # contacts). Fail the event so the whole unit of work rolls back and is
+        # retried, rather than swallowing the error (which would also leave the
+        # asyncpg transaction poisoned for the commit anyway).
         try:
             await self.sync_metadata_repo.upsert(
                 internal_id=created_contact.id,
@@ -791,17 +797,11 @@ class OutboxEventProcessor:
                 external_entity_type="person",
                 reference_data=json.dumps(initial_ref_data),
             )
-        except Exception as e:  # noqa: BLE001
-            logger.warning(
-                "Failed to create sync metadata - will be created on first update",
-                contact_id=created_contact.id,
-                integration_source=integration_source,
-                external_id=external_id,
-                error=str(e),
-            )
-            # Don't fail the entire operation if sync metadata creation fails
-            # The sync_metadata will be created automatically on the first contact.updated event
-            # This provides better resilience - contact creation succeeds even if sync_metadata fails
+        except Exception as e:
+            raise OutboxEventProcessingError(
+                f"Failed to write sync_metadata link for contact "
+                f"{created_contact.id}: {e}"
+            ) from e
 
         logger.info(
             "Successfully processed contact creation from outbox event",
@@ -993,17 +993,20 @@ class OutboxEventProcessor:
                 f"Failed to update contact: {str(e)}"
             ) from e
 
-        # Update reference data with new synced tags.
-        # Non-fatal: if this fails the contact update is already committed,
-        # and synced_tags metadata will self-heal on the next sync cycle.
+        # Update reference data with new synced tags. Non-fatal: synced_tags
+        # metadata self-heals on the next sync cycle. Wrapped in a savepoint so a
+        # DB failure rolls back only this write and leaves the outer transaction
+        # healthy — the version-hash upsert and commit below must still succeed
+        # (catching the error alone would not un-poison the asyncpg transaction).
         try:
-            await self._update_synced_tags_reference(
-                integration_source,
-                external_id,
-                link_exists=existing_link is not None,
-                existing_reference_data=existing_reference_data,
-                contact_data=contact_data,
-            )
+            async with self.connection.begin_nested():
+                await self._update_synced_tags_reference(
+                    integration_source,
+                    external_id,
+                    link_exists=existing_link is not None,
+                    existing_reference_data=existing_reference_data,
+                    contact_data=contact_data,
+                )
         except Exception as e:  # noqa: BLE001
             logger.warning(
                 "Failed to update synced_tags reference data after contact update",

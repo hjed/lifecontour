@@ -245,6 +245,27 @@ class TestOutboxEventProcessor:
         assert result["contact_id"] == 123
 
     @pytest.mark.asyncio
+    async def test_process_contact_created_fails_event_when_link_write_fails(
+        self,
+        processor: OutboxEventProcessor,
+        contact_created_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+        mock_sync_metadata_repo: AsyncMock,
+    ):
+        """A failed sync_metadata link write must fail the event, not be swallowed.
+
+        sync_metadata is the sole dedup link, so a contact left unlinked re-opens
+        the duplication path; the event must roll back and retry instead.
+        """
+        created_contact = Contact(id=123, first_name="John", last_name="Doe")
+        mock_contact_service.create_contact.return_value = created_contact
+        mock_contact_service.get_contact_by_email.return_value = None
+        mock_sync_metadata_repo.upsert.side_effect = RuntimeError("db down")
+
+        with pytest.raises(OutboxEventProcessingError):
+            await processor.process_event(contact_created_event)
+
+    @pytest.mark.asyncio
     async def test_process_contact_updated_event(
         self,
         processor: OutboxEventProcessor,

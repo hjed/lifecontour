@@ -48,10 +48,10 @@ class AlbumSyncReadRepository:
         """Find the canonical ``sync_metadata`` album link for ``album_id``.
 
         Returns the row carrying ``updated_at`` (the merge-protection anchor) and
-        ``reference_data``. When ``journal_id`` is given, the lookup is
-        constrained to the link pointing at that journal, so merge protection
-        compares against the right anchor even if multiple links exist for the
-        same album.
+        ``reference_data``. ``sync_metadata`` is unique on
+        ``(integration_source, external_id)`` so an album id maps to a single
+        link; ``journal_id`` is accepted as an extra defensive scope so the
+        anchor lookup is tied to the journal being updated.
         """
         result = await self.conn.execute(
             text("""
