@@ -148,18 +148,18 @@ async def test_resolve_immich_conflict_link(
     assert row.status == "resolved"
     assert row.resolved_contact_id == contact_id
 
-    # Check that an external reference was created
+    # Check that the canonical sync_metadata link was created.
     ref_query = text("""
-        SELECT external_entity_id
-        FROM external_references
+        SELECT external_id
+        FROM sync_metadata
         WHERE internal_entity_type = 'contact'
-          AND internal_entity_id = :contact_id
-          AND external_system = 'immich'
+          AND internal_id = :contact_id
+          AND integration_source = 'immich'
     """)
     ref_res = await async_connection.execute(ref_query, {"contact_id": contact_id})
     ref_row = ref_res.fetchone()
     assert ref_row is not None
-    assert ref_row.external_entity_id == "person-123"
+    assert ref_row.external_id == "person-123"
 
 
 @pytest.mark.asyncio
@@ -200,18 +200,18 @@ async def test_resolve_immich_conflict_create(
     assert c_row.first_name == "John"
     assert c_row.last_name == "Doe"
 
-    # Check that an external reference was created
+    # Check that the canonical sync_metadata link was created.
     ref_query = text("""
-        SELECT external_entity_id
-        FROM external_references
+        SELECT external_id
+        FROM sync_metadata
         WHERE internal_entity_type = 'contact'
-          AND internal_entity_id = :contact_id
-          AND external_system = 'immich'
+          AND internal_id = :contact_id
+          AND integration_source = 'immich'
     """)
     ref_res = await async_connection.execute(ref_query, {"contact_id": contact_id})
     ref_row = ref_res.fetchone()
     assert ref_row is not None
-    assert ref_row.external_entity_id == "person-123"
+    assert ref_row.external_id == "person-123"
 
 
 @pytest.mark.asyncio

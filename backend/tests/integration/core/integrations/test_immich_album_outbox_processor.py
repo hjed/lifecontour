@@ -54,6 +54,7 @@ def _event(
     asset_count: int = 3,
     people: list[dict[str, str]] | None = None,
     shared_link_url: str | None = None,
+    existing_journal_id: int | None = None,
 ) -> OutboxEvent:
     album_metadata: dict[str, object] = {
         "album_name": title,
@@ -63,25 +64,28 @@ def _event(
         album_metadata["people"] = people
     if shared_link_url is not None:
         album_metadata["shared_link_url"] = shared_link_url
+    event_data: dict[str, object] = {
+        "integration_source": "immich_album",
+        "external_id": album_id,
+        "version_hash": version_hash,
+        "sync_action": event_type.split(".")[1],
+        "journal_data": {
+            "user_id": USER_ID,
+            "title": title,
+            "content": content,
+            "event_date_range_start": start.isoformat(),
+            "event_date_range_end": end.isoformat(),
+        },
+        "album_metadata": album_metadata,
+        "sync_timestamp": datetime.now(UTC).isoformat(),
+    }
+    if existing_journal_id is not None:
+        event_data["existing_journal_id"] = existing_journal_id
     return OutboxEvent(
         id=uuid.uuid4(),
         event_type=event_type,
         aggregate_id="0",
-        event_data={
-            "integration_source": "immich_album",
-            "external_id": album_id,
-            "version_hash": version_hash,
-            "sync_action": event_type.split(".")[1],
-            "journal_data": {
-                "user_id": USER_ID,
-                "title": title,
-                "content": content,
-                "event_date_range_start": start.isoformat(),
-                "event_date_range_end": end.isoformat(),
-            },
-            "album_metadata": album_metadata,
-            "sync_timestamp": datetime.now(UTC).isoformat(),
-        },
+        event_data=event_data,
         occurred_at=datetime.now(UTC),
         retry_count=0,
     )
@@ -140,13 +144,17 @@ async def _journal_row(connection: AsyncConnection, journal_id: int):
 
 
 async def _album_ref(connection: AsyncConnection, album_id: str):
+    """Read the canonical album link (sync_metadata) carrying display metadata.
+
+    ``internal_id`` is aliased to ``internal_entity_id`` so callers that predate
+    the link consolidation keep working; ``updated_at`` is the merge anchor.
+    """
     result = await connection.execute(
         text("""
-            SELECT internal_entity_id, reference_data, updated_at
-            FROM external_references
-            WHERE external_system = 'immich'
-              AND external_entity_type = 'album'
-              AND external_entity_id = :id
+            SELECT internal_id AS internal_entity_id, reference_data, updated_at
+            FROM sync_metadata
+            WHERE integration_source = 'immich_album'
+              AND external_id = :id
         """),
         {"id": album_id},
     )
@@ -188,18 +196,8 @@ async def test_create_album_journal_sets_date_range_and_links(
     assert meta.internal_id == journal_id
     assert meta.version_hash == "v1"
 
-    # external_reference link with album metadata
-    ref = (
-        await async_connection.execute(
-            text("""
-                SELECT internal_entity_id, reference_data FROM external_references
-                WHERE external_system = 'immich'
-                  AND external_entity_type = 'album'
-                  AND external_entity_id = :id
-            """),
-            {"id": album_id},
-        )
-    ).fetchone()
+    # The canonical link carries the album display metadata.
+    ref = await _album_ref(async_connection, album_id)
     assert ref is not None
     assert ref.internal_entity_id == journal_id
     assert json.loads(ref.reference_data)["album_name"] == "Summer Trip"
@@ -405,11 +403,10 @@ async def test_created_retry_without_external_reference_does_not_duplicate(
     async_connection: AsyncConnection,
     clean_database: None,  # noqa: ARG001
 ) -> None:
-    """A retried create is idempotent even if only sync_metadata survives.
+    """A retried create is idempotent: the sync_metadata link dedups it.
 
-    If the external_reference row is missing but sync_metadata still links the
-    album to a journal, re-processing a created event must update that journal
-    rather than creating a duplicate.
+    Re-processing a created event for an album already linked via sync_metadata
+    must update that journal rather than creating a duplicate.
     """
     album_id = str(uuid.uuid4())
     processor = _processor(async_connection)
@@ -418,17 +415,6 @@ async def test_created_retry_without_external_reference_does_not_duplicate(
         _event(EVENT_TYPE_IMMICH_ALBUM_CREATED, album_id=album_id, version_hash="v1")
     )
     journal_id = created["journal_id"]
-
-    # Simulate a lost external_reference row (sync_metadata still present).
-    await async_connection.execute(
-        text("""
-            DELETE FROM external_references
-            WHERE external_system = 'immich'
-              AND external_entity_type = 'album'
-              AND external_entity_id = :id
-        """),
-        {"id": album_id},
-    )
 
     # Re-send a created event with changed metadata.
     result = await processor.process_event(
@@ -471,8 +457,9 @@ async def test_missing_link_anchor_protects_local_edits(
 ) -> None:
     """A re-sync with a missing link anchor must not overwrite local edits.
 
-    If the album external_reference is lost, we cannot tell whether the journal
-    was edited locally, so the safe default is to protect it (no data loss).
+    If the album link row is lost, we cannot tell whether the journal was edited
+    locally, so the safe default is to protect it (no data loss). The journal is
+    still resolvable via the event's ``existing_journal_id``.
     """
     album_id = str(uuid.uuid4())
     processor = _processor(async_connection)
@@ -482,27 +469,28 @@ async def test_missing_link_anchor_protects_local_edits(
     )
     journal_id = created["journal_id"]
 
-    # User edits the journal locally, then the link row is lost.
+    # User edits the journal locally, then the canonical link row is lost.
     await async_connection.execute(
         text("UPDATE journals SET title = 'Local Title' WHERE id = :id"),
         {"id": journal_id},
     )
     await async_connection.execute(
         text("""
-            DELETE FROM external_references
-            WHERE external_system = 'immich'
-              AND external_entity_type = 'album'
-              AND external_entity_id = :id
+            DELETE FROM sync_metadata
+            WHERE integration_source = 'immich_album' AND external_id = :id
         """),
         {"id": album_id},
     )
 
+    # The journal is still resolvable via existing_journal_id, but no link anchor
+    # exists, so the update must protect the local edit.
     result = await processor.process_event(
         _event(
             EVENT_TYPE_IMMICH_ALBUM_UPDATED,
             album_id=album_id,
             version_hash="v2",
             title="Immich Overwrite",
+            existing_journal_id=journal_id,
         )
     )
 
@@ -530,11 +518,11 @@ async def test_merge_protection_uses_the_anchor_for_the_target_journal(
     async_connection: AsyncConnection,
     clean_database: None,  # noqa: ARG001
 ) -> None:
-    """Merge protection must compare against this journal's own anchor.
+    """Merge protection compares against this journal's own anchor.
 
-    If a stray, newer external_reference exists for the same album (pointing at
-    a different entity), the protection decision must still use the anchor of
-    the journal actually being updated — not the newest row.
+    The canonical ``sync_metadata`` link is unique per album, so the
+    journal-scoped anchor lookup always resolves the right row; a local edit
+    after the last sync must protect the journal from being overwritten.
     """
     album_id = str(uuid.uuid4())
     processor = _processor(async_connection)
@@ -552,23 +540,6 @@ async def test_merge_protection_uses_the_anchor_for_the_target_journal(
             WHERE id = :id
         """),
         {"id": journal_id},
-    )
-
-    # A stray, newer reference for the same album pointing at a different (here
-    # non-existent) entity, with a far-future anchor that would defeat
-    # protection if it were (incorrectly) selected.
-    await async_connection.execute(
-        text("""
-            INSERT INTO external_references (
-                internal_entity_type, internal_entity_id, external_system,
-                external_entity_type, external_entity_id, reference_data,
-                created_at, updated_at
-            ) VALUES (
-                'journal', 99999999, 'immich', 'album', :id, '{}',
-                now(), now() + interval '1 day'
-            )
-        """),
-        {"id": album_id},
     )
 
     result = await processor.process_event(
@@ -814,9 +785,8 @@ async def test_resync_tolerates_malformed_participant_contact_ids(
     bad["participant_contact_ids"] = [alice, None, "x", True]
     await async_connection.execute(
         text("""
-            UPDATE external_references SET reference_data = :rd
-            WHERE external_system = 'immich' AND external_entity_type = 'album'
-              AND external_entity_id = :id
+            UPDATE sync_metadata SET reference_data = :rd
+            WHERE integration_source = 'immich_album' AND external_id = :id
         """),
         {"rd": json.dumps(bad), "id": album_id},
     )

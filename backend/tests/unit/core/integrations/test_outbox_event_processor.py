@@ -47,15 +47,6 @@ class TestOutboxEventProcessor:
         return conn
 
     @pytest.fixture
-    def mock_external_ref_service(self) -> AsyncMock:
-        """Create mock external reference service."""
-        service = AsyncMock()
-        service.find_by_external_id.return_value = None
-        service.find_external_reference.return_value = None
-        service.create_external_reference.return_value = AsyncMock()
-        return service
-
-    @pytest.fixture
     def mock_sync_metadata_repo(self) -> AsyncMock:
         """Create mock sync metadata repository."""
         repo = AsyncMock()
@@ -86,7 +77,6 @@ class TestOutboxEventProcessor:
         self,
         mock_contact_service: AsyncMock,
         mock_connection: AsyncConnection,
-        mock_external_ref_service: AsyncMock,
         mock_sync_metadata_repo: AsyncMock,
         mock_link_repo: AsyncMock,
         mock_tag_repo: AsyncMock,
@@ -95,7 +85,6 @@ class TestOutboxEventProcessor:
         processor = OutboxEventProcessor(
             contact_service=mock_contact_service, connection=mock_connection
         )
-        processor.external_reference_service = mock_external_ref_service
         processor.sync_metadata_repo = mock_sync_metadata_repo
         processor.link_repo = mock_link_repo
         processor.tag_repo = mock_tag_repo
@@ -203,7 +192,6 @@ class TestOutboxEventProcessor:
         contact_created_event: OutboxEvent,
         mock_contact_service: AsyncMock,
         mock_connection: AsyncConnection,
-        mock_external_ref_service: AsyncMock,
         mock_sync_metadata_repo: AsyncMock,
     ):
         """Test processing a contact.created event."""
@@ -231,6 +219,13 @@ class TestOutboxEventProcessor:
         # Verify contact service was called correctly
         mock_contact_service.create_contact.assert_called_once()
         mock_sync_metadata_repo.upsert.assert_called_once()
+        # The canonical link carries the contact reference_data (resource_name/etag).
+        import json
+
+        upsert_kwargs = mock_sync_metadata_repo.upsert.call_args[1]
+        assert upsert_kwargs["reference_data"] is not None
+        ref_data = json.loads(upsert_kwargs["reference_data"])
+        assert ref_data["resource_name"] == "people/c123456789"
         created_contact_arg = mock_contact_service.create_contact.call_args[0][0]
 
         assert created_contact_arg.first_name == "John"
@@ -250,13 +245,33 @@ class TestOutboxEventProcessor:
         assert result["contact_id"] == 123
 
     @pytest.mark.asyncio
+    async def test_process_contact_created_fails_event_when_link_write_fails(
+        self,
+        processor: OutboxEventProcessor,
+        contact_created_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+        mock_sync_metadata_repo: AsyncMock,
+    ):
+        """A failed sync_metadata link write must fail the event, not be swallowed.
+
+        sync_metadata is the sole dedup link, so a contact left unlinked re-opens
+        the duplication path; the event must roll back and retry instead.
+        """
+        created_contact = Contact(id=123, first_name="John", last_name="Doe")
+        mock_contact_service.create_contact.return_value = created_contact
+        mock_contact_service.get_contact_by_email.return_value = None
+        mock_sync_metadata_repo.upsert.side_effect = RuntimeError("db down")
+
+        with pytest.raises(OutboxEventProcessingError):
+            await processor.process_event(contact_created_event)
+
+    @pytest.mark.asyncio
     async def test_process_contact_updated_event(
         self,
         processor: OutboxEventProcessor,
         contact_updated_event: OutboxEvent,
         mock_contact_service: AsyncMock,
         mock_connection: AsyncConnection,
-        mock_external_ref_service: AsyncMock,
         mock_sync_metadata_repo: AsyncMock,
     ):
         """Test processing a contact.updated event."""
@@ -304,12 +319,10 @@ class TestOutboxEventProcessor:
     def _setup_contact_and_reference_mocks(
         self,
         mock_contact_service: AsyncMock,
-        mock_external_ref_service: AsyncMock,
+        mock_link_repo: AsyncMock,
         reference_data_dict: dict[str, Any],
     ) -> Contact:
         import json
-
-        from core_shared.models.external_reference import ExternalReference
 
         existing_contact = Contact(id=123, first_name="John", last_name="Doe", tags=[])
         mock_contact_service.find_contact_by_external_reference.return_value = (
@@ -318,19 +331,18 @@ class TestOutboxEventProcessor:
         mock_contact_service.get_contact_by_id.return_value = existing_contact
         mock_contact_service.update_contact.return_value = existing_contact
 
-        mock_external_ref_service.find_external_reference.return_value = (
-            ExternalReference(
-                id=99,
-                internal_entity_type="contact",
-                internal_entity_id=123,
-                external_system="google",
-                external_entity_type="person",
-                external_entity_id="people/c123456789",
-                reference_data=json.dumps(reference_data_dict),
-                created_at=datetime.now(UTC),
-                updated_at=datetime.now(UTC),
-            )
-        )
+        # The synced-tags reference_data is read from the canonical sync_metadata
+        # link via the IntegrationLinkRepository.
+        mock_link_repo.find_link_by_external.return_value = {
+            "internal_id": 123,
+            "internal_uuid": None,
+            "integration_source": "google",
+            "external_id": "people/c123456789",
+            "internal_entity_type": "contact",
+            "external_entity_type": "person",
+            "reference_data": json.dumps(reference_data_dict),
+            "version_hash": "h",
+        }
         return existing_contact
 
     def _create_invalid_event(self) -> OutboxEvent:
@@ -358,23 +370,25 @@ class TestOutboxEventProcessor:
         contact_updated_event: OutboxEvent,
         mock_contact_service: AsyncMock,
         mock_connection: AsyncConnection,
-        mock_external_ref_service: AsyncMock,
+        mock_link_repo: AsyncMock,
+        mock_sync_metadata_repo: AsyncMock,
     ):
-        """Test that updating a contact also parses and updates existing reference_data JSON correctly."""
+        """Updating a contact writes synced_tags onto the sync_metadata link."""
         # We will add some fake "tags" to the event payload to test the synced_tags update
         contact_updated_event.event_data["contact_data"]["tags"] = [{"name": "VIP"}]
 
         self._setup_contact_and_reference_mocks(
-            mock_contact_service, mock_external_ref_service, {"old_key": "old_value"}
+            mock_contact_service, mock_link_repo, {"old_key": "old_value"}
         )
 
         await processor.process_event(contact_updated_event)
 
-        mock_external_ref_service.update_external_reference.assert_called_once()
-        call_kwargs = mock_external_ref_service.update_external_reference.call_args[1]
-        assert call_kwargs["reference_id"] == 99
+        mock_sync_metadata_repo.update_reference_data.assert_called_once()
+        call_kwargs = mock_sync_metadata_repo.update_reference_data.call_args[1]
+        assert call_kwargs["integration_source"] == "google"
+        assert call_kwargs["external_id"] == "people/c123456789"
 
-        # Verify JSON
+        # Verify JSON carries both the preserved key and the new synced_tags.
         updated_ref_data_str = call_kwargs["reference_data"]
         assert isinstance(updated_ref_data_str, str)
         import json
@@ -384,28 +398,89 @@ class TestOutboxEventProcessor:
         assert updated_ref_data["synced_tags"] == ["VIP"]
 
     @pytest.mark.asyncio
+    async def test_process_contact_updated_establishes_synced_tags_on_null_reference_data(
+        self,
+        processor: OutboxEventProcessor,
+        contact_updated_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+        mock_connection: AsyncConnection,
+        mock_link_repo: AsyncMock,
+        mock_sync_metadata_repo: AsyncMock,
+    ):
+        """A link with NULL reference_data still gets synced_tags established.
+
+        Manual-link and pre-``reference_data``-column rows have NULL
+        ``reference_data``; the synced-tags write must treat that as ``{}`` and
+        still persist, rather than skipping (which would drop the metadata).
+        """
+        contact_updated_event.event_data["contact_data"]["tags"] = [{"name": "VIP"}]
+
+        # The helper sets up the contact lookup; override the link to carry no
+        # reference_data while still existing.
+        self._setup_contact_and_reference_mocks(
+            mock_contact_service, mock_link_repo, {}
+        )
+        link = mock_link_repo.find_link_by_external.return_value
+        link["reference_data"] = None
+
+        await processor.process_event(contact_updated_event)
+
+        mock_sync_metadata_repo.update_reference_data.assert_called_once()
+        call_kwargs = mock_sync_metadata_repo.update_reference_data.call_args[1]
+        import json
+
+        assert json.loads(call_kwargs["reference_data"])["synced_tags"] == ["VIP"]
+
+    @pytest.mark.asyncio
+    async def test_process_contact_updated_skips_synced_tags_when_no_link(
+        self,
+        processor: OutboxEventProcessor,
+        contact_updated_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+        mock_connection: AsyncConnection,
+        mock_link_repo: AsyncMock,
+        mock_sync_metadata_repo: AsyncMock,
+    ):
+        """With no canonical link there is nothing to write synced_tags onto."""
+        contact_updated_event.event_data["contact_data"]["tags"] = [{"name": "VIP"}]
+
+        existing_contact = Contact(id=123, first_name="John", last_name="Doe", tags=[])
+        mock_contact_service.find_contact_by_external_reference.return_value = (
+            existing_contact
+        )
+        mock_contact_service.get_contact_by_id.return_value = existing_contact
+        mock_contact_service.update_contact.return_value = existing_contact
+        # No link resolves for this external id.
+        mock_link_repo.find_link_by_external.return_value = None
+
+        await processor.process_event(contact_updated_event)
+
+        mock_sync_metadata_repo.update_reference_data.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_process_contact_updated_omits_reference_data_tags(
         self,
         processor: OutboxEventProcessor,
         contact_updated_event: OutboxEvent,
         mock_contact_service: AsyncMock,
         mock_connection: AsyncConnection,
-        mock_external_ref_service: AsyncMock,
+        mock_link_repo: AsyncMock,
+        mock_sync_metadata_repo: AsyncMock,
     ):
-        """Test that omitting tags in a contact update does not overwrite existing synced_tags in reference_data."""
+        """Omitting tags in a contact update does not overwrite synced_tags."""
         # Remove "tags" from contact data
         if "tags" in contact_updated_event.event_data["contact_data"]:
             del contact_updated_event.event_data["contact_data"]["tags"]
 
         self._setup_contact_and_reference_mocks(
             mock_contact_service,
-            mock_external_ref_service,
+            mock_link_repo,
             {"old_key": "old_value", "synced_tags": ["Work"]},
         )
 
         await processor.process_event(contact_updated_event)
 
-        mock_external_ref_service.update_external_reference.assert_not_called()
+        mock_sync_metadata_repo.update_reference_data.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_process_contact_updated_none_tags_reference_data(
@@ -414,16 +489,16 @@ class TestOutboxEventProcessor:
         contact_updated_event: OutboxEvent,
         mock_contact_service: AsyncMock,
         mock_connection: AsyncConnection,
-        mock_external_ref_service: AsyncMock,
+        mock_link_repo: AsyncMock,
         mock_sync_metadata_repo: AsyncMock,
     ):
-        """Test that explicitly setting tags to None in contact update does not overwrite existing synced_tags."""
+        """Explicitly setting tags to None does not overwrite existing synced_tags."""
         # Explicitly set tags to None
         contact_updated_event.event_data["contact_data"]["tags"] = None
 
         self._setup_contact_and_reference_mocks(
             mock_contact_service,
-            mock_external_ref_service,
+            mock_link_repo,
             {"old_key": "old_value", "synced_tags": ["Work"]},
         )
 
@@ -433,7 +508,7 @@ class TestOutboxEventProcessor:
 
         await processor.process_event(contact_updated_event)
 
-        mock_external_ref_service.update_external_reference.assert_not_called()
+        mock_sync_metadata_repo.update_reference_data.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_process_sync_completed_event(
@@ -603,7 +678,6 @@ class TestOutboxEventProcessor:
         contact_updated_event: OutboxEvent,
         mock_contact_service: AsyncMock,
         mock_connection: AsyncConnection,
-        mock_external_ref_service: AsyncMock,
         mock_sync_metadata_repo: AsyncMock,
     ):
         """Test that DuplicateEmailError during update returns conflict and records in sync_metadata."""
@@ -643,28 +717,26 @@ class TestOutboxEventProcessor:
         contact_updated_event: OutboxEvent,
         mock_contact_service: AsyncMock,
         mock_connection: AsyncConnection,
-        mock_external_ref_service: AsyncMock,
+        mock_sync_metadata_repo: AsyncMock,
     ):
         """contact.updated for an unknown contact upserts via the create path.
 
         Google's incremental sync emits ``contact.updated`` for contacts that were
         added remotely after the initial full sync, so the backend has never seen
         them. Rather than erroring, the processor falls back to the create path
-        which creates the contact and its external reference.
+        which creates the contact and its canonical sync_metadata link.
         """
         # No local contact for this external reference triggers the upsert.
         mock_contact_service.find_contact_by_external_reference.return_value = None
-        # No existing external reference and no email match -> create a new contact.
-        mock_external_ref_service.find_by_external_id.return_value = None
         mock_contact_service.get_contact_by_email.return_value = None
         created_contact = Contact(id=456, first_name="Johnny", last_name="Doe")
         mock_contact_service.create_contact.return_value = created_contact
 
         result = await processor.process_event(contact_updated_event)
 
-        # Delegated to the create path: contact and external reference created.
+        # Delegated to the create path: contact and its sync_metadata link created.
         mock_contact_service.create_contact.assert_called_once()
-        mock_external_ref_service.create_external_reference.assert_called_once()
+        mock_sync_metadata_repo.upsert.assert_called_once()
         mock_contact_service.update_contact.assert_not_called()
 
         assert result["status"] == "success"
@@ -738,7 +810,6 @@ class TestOutboxEventProcessor:
         processor: OutboxEventProcessor,
         mock_contact_service: AsyncMock,
         mock_connection: AsyncConnection,
-        mock_external_ref_service: AsyncMock,
         mock_sync_metadata_repo: AsyncMock,
     ):
         """Test that contact.created with missing first_name defaults to 'Unknown' and succeeds."""
@@ -922,7 +993,6 @@ class TestOutboxEventProcessor:
         contact_created_event: OutboxEvent,
         mock_contact_service: AsyncMock,
         mock_connection: AsyncConnection,
-        mock_external_ref_service: AsyncMock,
         mock_sync_metadata_repo: AsyncMock,
     ):
         """Test that contact.created events pass changed_by='google_sync' to contact service."""
@@ -956,7 +1026,6 @@ class TestOutboxEventProcessor:
         contact_updated_event: OutboxEvent,
         mock_contact_service: AsyncMock,
         mock_connection: AsyncConnection,
-        mock_external_ref_service: AsyncMock,
         mock_sync_metadata_repo: AsyncMock,
     ):
         """Test that contact.updated events pass changed_by='google_sync' to contact service."""
@@ -979,7 +1048,6 @@ class TestOutboxEventProcessor:
         processor: OutboxEventProcessor,
         mock_contact_service: AsyncMock,
         mock_connection: AsyncConnection,
-        mock_external_ref_service: AsyncMock,
         mock_sync_metadata_repo: AsyncMock,
     ):
         """Test that contact.created with legacy 'google_contacts' normalizes to 'google'."""
@@ -1019,15 +1087,13 @@ class TestOutboxEventProcessor:
         assert result["status"] == "success"
         assert result["integration_source"] == "google"
 
-        # Verify sync metadata was called with normalized 'google', not 'google_contacts'
+        # Verify the canonical sync_metadata link was written with the
+        # normalized 'google' source (not 'google_contacts') and carries the
+        # link reference_data.
         mock_sync_metadata_repo.upsert.assert_called_once()
         upsert_kwargs = mock_sync_metadata_repo.upsert.call_args[1]
         assert upsert_kwargs["integration_source"] == "google"
-
-        # Verify external reference was called with normalized 'google'
-        mock_external_ref_service.create_external_reference.assert_called_once()
-        ref_kwargs = mock_external_ref_service.create_external_reference.call_args[1]
-        assert ref_kwargs["external_system"] == "google"
+        assert upsert_kwargs["reference_data"] is not None
 
         # Verify changed_by uses the normalized source
         call_kwargs = mock_contact_service.create_contact.call_args
@@ -1039,7 +1105,6 @@ class TestOutboxEventProcessor:
         processor: OutboxEventProcessor,
         mock_contact_service: AsyncMock,
         mock_connection: AsyncConnection,
-        mock_external_ref_service: AsyncMock,
         mock_sync_metadata_repo: AsyncMock,
     ):
         """Test that contact.updated with legacy 'google_contacts' normalizes to 'google'."""

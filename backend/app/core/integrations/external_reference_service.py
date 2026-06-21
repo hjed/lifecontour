@@ -6,12 +6,15 @@ that link internal entities (like contacts) to external system entities.
 """
 
 from dataclasses import asdict, dataclass
-from typing import Any
 
 import structlog
 from core_shared.models.external_reference import ExternalReference
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
+
+from app.core.integrations.adapters.sql.sync_metadata_repository import (
+    SyncMetadataRepository,
+)
 
 logger = structlog.get_logger()
 
@@ -59,102 +62,6 @@ class ExternalReferenceService:
         """
         self.connection = connection
 
-    async def create_external_reference(
-        self,
-        internal_entity_type: str,
-        internal_entity_id: int,
-        external_system: str,
-        external_entity_type: str,
-        external_entity_id: str,
-        reference_data: str | None = None,
-    ) -> ExternalReference:
-        """
-        Create an external reference linking internal and external entities.
-
-        Args:
-            internal_entity_type: Type of internal entity (e.g., 'contact')
-            internal_entity_id: ID of the internal entity
-            external_system: Name of external system (e.g., 'google')
-            external_entity_type: Type of external entity (e.g., 'person')
-            external_entity_id: External system's ID for the entity
-            reference_data: Optional additional reference data
-
-        Returns:
-            Created ExternalReference instance
-
-        Raises:
-            ExternalReferenceError: If creation fails
-        """
-        logger.info(
-            "Creating external reference",
-            internal_entity_type=internal_entity_type,
-            internal_entity_id=internal_entity_id,
-            external_system=external_system,
-            external_entity_id=external_entity_id,
-        )
-
-        try:
-            # Insert the external reference
-            query = text(
-                """
-                INSERT INTO external_references
-                (internal_entity_type, internal_entity_id, external_system,
-                 external_entity_type, external_entity_id, reference_data)
-                VALUES (:internal_entity_type, :internal_entity_id, :external_system,
-                        :external_entity_type, :external_entity_id, :reference_data)
-                RETURNING id, created_at, updated_at
-                """
-            )
-
-            result = await self.connection.execute(
-                query,
-                {
-                    "internal_entity_type": internal_entity_type,
-                    "internal_entity_id": internal_entity_id,
-                    "external_system": external_system,
-                    "external_entity_type": external_entity_type,
-                    "external_entity_id": external_entity_id,
-                    "reference_data": reference_data,
-                },
-            )
-
-            row = result.fetchone()
-            if not row:
-                raise ExternalReferenceError("Failed to create external reference")
-
-            logger.info(
-                "Successfully created external reference",
-                reference_id=row.id,
-                internal_entity_type=internal_entity_type,
-                internal_entity_id=internal_entity_id,
-                external_system=external_system,
-                external_entity_id=external_entity_id,
-            )
-
-            # Return the created reference (simplified for now)
-            return ExternalReference(
-                id=row.id,
-                internal_entity_type=internal_entity_type,
-                internal_entity_id=internal_entity_id,
-                external_system=external_system,
-                external_entity_type=external_entity_type,
-                external_entity_id=external_entity_id,
-                reference_data=reference_data,
-                created_at=row.created_at,
-                updated_at=row.updated_at,
-            )
-
-        except Exception as e:
-            logger.error(
-                "Failed to create external reference",
-                internal_entity_type=internal_entity_type,
-                internal_entity_id=internal_entity_id,
-                external_system=external_system,
-                external_entity_id=external_entity_id,
-                error=str(e),
-            )
-            raise
-
     async def find_external_reference(
         self,
         internal_entity_type: str,
@@ -194,111 +101,6 @@ class ExternalReferenceService:
         )
 
         row = result.fetchone()
-        if not row:
-            return None
-
-        return ExternalReference(
-            id=row.id,
-            internal_entity_type=row.internal_entity_type,
-            internal_entity_id=row.internal_entity_id,
-            external_system=row.external_system,
-            external_entity_type=row.external_entity_type,
-            external_entity_id=row.external_entity_id,
-            reference_data=row.reference_data,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-        )
-
-    async def update_external_reference(
-        self,
-        reference_id: int,
-        external_entity_id: str | None = None,
-        reference_data: str | None = None,
-    ) -> ExternalReference | None:
-        """
-        Update an existing external reference.
-
-        Args:
-            reference_id: ID of the external reference to update
-            external_entity_id: New external entity ID (optional)
-            reference_data: New reference data (optional)
-
-        Returns:
-            Updated ExternalReference if found, None otherwise
-        """
-        # Build parameterized update query to prevent SQL injection
-        params: dict[str, Any] = {"reference_id": reference_id}
-
-        # Determine which fields to update based on provided parameters
-        update_external_entity_id = external_entity_id is not None
-        update_reference_data = reference_data is not None
-
-        if update_external_entity_id:
-            params["external_entity_id"] = external_entity_id
-
-        if update_reference_data:
-            params["reference_data"] = reference_data
-
-        if not (update_external_entity_id or update_reference_data):
-            # No fields to update
-            return await self._get_external_reference_by_id(reference_id)
-
-        # Build query with conditional SET clauses using CASE statements
-        # This avoids string concatenation in SQL construction
-        query_parts = ["UPDATE external_references SET"]
-        set_clauses = []
-
-        if update_external_entity_id:
-            set_clauses.append("external_entity_id = :external_entity_id")
-        if update_reference_data:
-            set_clauses.append("reference_data = :reference_data")
-
-        # Always update timestamp
-        set_clauses.append("updated_at = now()")
-
-        query_parts.append(", ".join(set_clauses))
-        query_parts.append("WHERE id = :reference_id")
-        query_parts.append("""RETURNING id, internal_entity_type, internal_entity_id, external_system,
-                      external_entity_type, external_entity_id, reference_data,
-                      created_at, updated_at""")
-
-        query = text(" ".join(query_parts))
-
-        result = await self.connection.execute(query, params)
-        row = result.fetchone()
-
-        if not row:
-            return None
-
-        return ExternalReference(
-            id=row.id,
-            internal_entity_type=row.internal_entity_type,
-            internal_entity_id=row.internal_entity_id,
-            external_system=row.external_system,
-            external_entity_type=row.external_entity_type,
-            external_entity_id=row.external_entity_id,
-            reference_data=row.reference_data,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-        )
-
-    async def _get_external_reference_by_id(
-        self, reference_id: int
-    ) -> ExternalReference | None:
-        """Get an external reference by ID."""
-        query = text(
-            """
-            SELECT id, internal_entity_type, internal_entity_id, external_system,
-                   external_entity_type, external_entity_id, reference_data,
-                   created_at, updated_at
-            FROM external_references
-            WHERE id = :reference_id
-            """
-        )
-
-        result = await self.connection.execute(query, {"reference_id": reference_id})
-        row = result.fetchone()
-
         if not row:
             return None
 
@@ -382,59 +184,29 @@ class ExternalReferenceService:
         external_system: str,
         external_entity_type: str,
         external_entity_id: str,
-    ) -> ExternalReference:
-        """Find an existing contact external reference and update it, or create a new one.
+    ) -> None:
+        """Link a contact to an external entity in the canonical link store.
 
-        Uses ``ORDER BY id LIMIT 1`` for deterministic row selection when
-        multiple references exist for the same contact, system, and entity type.
+        Writes the ``(integration_source, external_id) → contact`` link onto
+        ``sync_metadata`` (the canonical integration link), which dedups on
+        ``UNIQUE(integration_source, external_id)``. ``version_hash`` is left
+        empty so the next sync re-validates the entity's content. The link
+        columns use ``COALESCE`` on conflict, so re-linking the same external id
+        never clears existing metadata.
 
         Args:
             contact_id: Internal contact ID.
             external_system: External system name (e.g. 'immich').
             external_entity_type: External entity type (e.g. 'person').
             external_entity_id: External entity ID to link.
-
-        Returns:
-            Created or updated ExternalReference.
         """
-        # Scoped lookup: filter by entity type and use ORDER BY for determinism
-        query = text("""
-            SELECT id, internal_entity_type, internal_entity_id, external_system,
-                   external_entity_type, external_entity_id, reference_data,
-                   created_at, updated_at
-            FROM external_references
-            WHERE internal_entity_type = 'contact'
-              AND internal_entity_id = :contact_id
-              AND external_system = :external_system
-              AND external_entity_type = :external_entity_type
-            ORDER BY id
-            LIMIT 1
-        """)
-        result = await self.connection.execute(
-            query,
-            {
-                "contact_id": contact_id,
-                "external_system": external_system,
-                "external_entity_type": external_entity_type,
-            },
-        )
-        row = result.fetchone()
-
-        if row:
-            updated = await self.update_external_reference(
-                reference_id=row.id,
-                external_entity_id=external_entity_id,
-            )
-            if updated:
-                return updated
-            # Fall through to create if update returned None (shouldn't happen)
-
-        return await self.create_external_reference(
+        await SyncMetadataRepository(self.connection).upsert(
+            integration_source=external_system,
+            external_id=external_entity_id,
+            version_hash="",
+            internal_id=contact_id,
             internal_entity_type="contact",
-            internal_entity_id=contact_id,
-            external_system=external_system,
             external_entity_type=external_entity_type,
-            external_entity_id=external_entity_id,
         )
 
     async def contact_exists(self, contact_id: int) -> bool:
@@ -459,20 +231,22 @@ class ExternalReferenceService:
         """Re-point a source contact's external links onto the survivor on merge.
 
         Runs inline in the merge transaction (a local re-point, never a remote
-        call) so a deleted source never leaves resolvable-looking orphans — the
-        ``external_references`` / ``sync_metadata`` tables have no
-        ``ON DELETE CASCADE``.
+        call) so a deleted source never leaves resolvable-looking orphans in the
+        canonical ``sync_metadata`` link store, which has no ``ON DELETE
+        CASCADE``. Since ITER15-001 Phase 4 this operates on ``sync_metadata``
+        only; legacy ``external_references`` rows are intentionally left untouched
+        (the table is dropped in Phase 5).
 
-        For each of the source's contact ``external_references``:
+        For each of the source's contact ``sync_metadata`` links:
 
         - **Different service** (the survivor has no link for that
-          ``external_system``): the reference, and its matching ``sync_metadata``
-          row, are re-pointed onto the survivor.
+          ``external_system``): the ``sync_metadata`` row is re-pointed onto the
+          survivor.
         - **Same service** (the survivor already has a link for that
           ``external_system``): the survivor's link is kept; the source's
-          reference and its ``sync_metadata`` row are deleted, and the collision
-          is returned so the caller can hand the source's remote id to the
-          integration workers for remote reconciliation.
+          ``sync_metadata`` row is deleted, and the collision is returned so the
+          caller can hand the source's remote id to the integration workers for
+          remote reconciliation.
 
         ``sync_metadata`` is keyed to each reference by ``(integration_source,
         external_id)`` so only the rows backing a contact's external link are
@@ -525,39 +299,17 @@ class ExternalReferenceService:
             survivor_external_id = survivor_external_id_by_system.get(
                 ref.external_system
             )
-            # Both link tables are still dual-written, so keep them consistent.
-            # Key the legacy external_references row by its identity columns since
-            # the read no longer carries its surrogate id. ``external_entity_type``
-            # further scopes the row so a sibling reference sharing the same
-            # ``(system, external_id)`` but a different type is never touched; the
-            # match is NULL-safe so rows whose sync_metadata type is unset still
-            # carry over.
+            # The canonical link is the ``sync_metadata`` row, keyed by
+            # ``(integration_source, external_id)`` so only the rows backing a
+            # contact's external link are touched.
             link_params = {
                 "source_id": source_id,
                 "survivor_id": survivor_id,
                 "integration_source": ref.external_system,
                 "external_id": ref.external_entity_id,
-                "external_entity_type": ref.external_entity_type,
             }
             if survivor_external_id is None:
-                # Different service — carry the link and its sync row over.
-                await transaction.execute(
-                    text(
-                        """
-                        UPDATE external_references
-                        SET internal_entity_id = :survivor_id, updated_at = now()
-                        WHERE internal_entity_type = 'contact'
-                          AND internal_entity_id = :source_id
-                          AND external_system = :integration_source
-                          AND external_entity_id = :external_id
-                          AND (
-                              CAST(:external_entity_type AS VARCHAR) IS NULL
-                              OR external_entity_type = :external_entity_type
-                          )
-                        """
-                    ),
-                    link_params,
-                )
+                # Different service — carry the sync row over to the survivor.
                 await transaction.execute(
                     text(
                         """
@@ -580,22 +332,6 @@ class ExternalReferenceService:
                         source_external_id=ref.external_entity_id,
                         survivor_external_id=survivor_external_id,
                     )
-                )
-                await transaction.execute(
-                    text(
-                        """
-                        DELETE FROM external_references
-                        WHERE internal_entity_type = 'contact'
-                          AND internal_entity_id = :source_id
-                          AND external_system = :integration_source
-                          AND external_entity_id = :external_id
-                          AND (
-                              CAST(:external_entity_type AS VARCHAR) IS NULL
-                              OR external_entity_type = :external_entity_type
-                          )
-                        """
-                    ),
-                    link_params,
                 )
                 await transaction.execute(
                     text(

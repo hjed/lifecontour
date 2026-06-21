@@ -166,14 +166,13 @@ async def test_create_album_links_journal_and_marks_photo_album(
     assert sm is not None
     assert sm.external_id == "album-uuid-1"
 
-    # ExternalReference records the album link with display metadata.
+    # The canonical sync_metadata link records the album display metadata.
     ref = (
         await clean_database.execute(
             text("""
-                SELECT reference_data FROM external_references
-                WHERE internal_entity_id = :jid
-                  AND external_system = 'immich'
-                  AND external_entity_type = 'album'
+                SELECT reference_data FROM sync_metadata
+                WHERE internal_id = :jid
+                  AND integration_source = 'immich_album'
             """),
             {"jid": journal_id},
         )
@@ -225,9 +224,9 @@ async def test_create_album_with_shared_link_persists_url(
     ref = (
         await clean_database.execute(
             text("""
-                SELECT reference_data FROM external_references
-                WHERE internal_entity_id = :jid
-                  AND external_entity_type = 'album'
+                SELECT reference_data FROM sync_metadata
+                WHERE internal_id = :jid
+                  AND integration_source = 'immich_album'
             """),
             {"jid": journal_id},
         )
@@ -260,7 +259,11 @@ async def test_create_album_409_when_already_linked(
         internal_id=journal_id,
     )
     await AlbumSyncReadRepository(clean_database).upsert_link(
-        journal_id, "existing-album", {"album_id": "existing-album"}, bump_anchor=True
+        journal_id,
+        "existing-album",
+        {"album_id": "existing-album"},
+        version_hash="v1",
+        bump_anchor=True,
     )
 
     with patch(_GET_CREDS, new_callable=AsyncMock, return_value=CREDS):

@@ -175,9 +175,8 @@ class TestContactOutboxEmission:
         person_id = "22222222-2222-4222-8222-222222222222"
         contact_id = await _insert_contact(async_connection, "Existing", "Person")
 
-        # Link the person and seed sync metadata with a *different* hash so the
-        # next sync detects a change.
-        await sync_service._create_external_reference(contact_id, person_id)
+        # Link the person via the canonical sync_metadata store with a *different*
+        # hash so the next sync detects a change.
         await sync_service._upsert_sync_metadata(
             external_id=person_id,
             internal_id=contact_id,

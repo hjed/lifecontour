@@ -244,6 +244,42 @@ class SyncMetadataRepository:
             updated_at=row.updated_at,
         )
 
+    async def update_reference_data(
+        self,
+        integration_source: str,
+        external_id: str,
+        reference_data: str,
+    ) -> None:
+        """Update only the ``reference_data`` of an existing link.
+
+        Used for link metadata that changes independently of the entity's
+        version (e.g. a contact's ``synced_tags``): ``version_hash`` and the
+        identity columns are deliberately left untouched so this write never
+        looks like a content change to the next sync's ``should_sync`` check.
+
+        A no-op when no row matches ``(integration_source, external_id)``.
+
+        Args:
+            integration_source: Integration source (e.g. 'google').
+            external_id: External entity ID.
+            reference_data: New reference data as a JSON string.
+        """
+        query = text("""
+            UPDATE sync_metadata
+            SET reference_data = :reference_data, updated_at = :now
+            WHERE integration_source = :integration_source
+              AND external_id = :external_id
+        """)
+        await self.conn.execute(
+            query,
+            {
+                "reference_data": reference_data,
+                "now": datetime.now(UTC),
+                "integration_source": integration_source,
+                "external_id": external_id,
+            },
+        )
+
     def should_sync(
         self, existing_metadata: SyncMetadata | None, new_version_hash: str
     ) -> bool:

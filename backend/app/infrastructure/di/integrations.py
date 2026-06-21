@@ -409,9 +409,6 @@ class IntegrationProvider(Provider):
         api_client: ImmichAlbumApiClient,
     ) -> ImmichAlbumCreationService:
         """Provide the Immich album creation service for request scope."""
-        from app.core.integrations.adapters.sql.sync_metadata_repository import (
-            SyncMetadataRepository,
-        )
         from app.core.journal.adapters.sql.album_sync_read_repository import (
             AlbumSyncReadRepository,
         )
@@ -427,7 +424,6 @@ class IntegrationProvider(Provider):
             token_service=immich_token_service,
             api_client=api_client,
             journal_repo=SqlJournalRepository(connection),
-            sync_metadata_repo=SyncMetadataRepository(connection),
             album_link_repo=AlbumSyncReadRepository(connection),
             user_settings_repo=SqlUserSettingsRepository(connection),
         )

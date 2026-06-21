@@ -597,15 +597,10 @@ async def _unlink_immich_reference_for_event(
     """Unlink an orphaned Immich link locally, triggered by a domain event.
 
     Immich exposes no person-delete, so reconciling a same-service merge clash
-    means removing the source contact's local ``external_references`` row and
-    its ``sync_metadata`` (keyed by the source's remote person id) — never a
-    remote call. Idempotent: deleting zero rows (the link was already cleaned
-    inline by the merge) is success.
-
-    The reference delete is scoped to the source contact's internal entity as
-    well as the remote person id, so a row owned by a different contact that
-    (pathologically) shares the same external person id is never collaterally
-    unlinked.
+    means removing the source contact's canonical ``sync_metadata`` link (keyed
+    by the source's remote person id) — never a remote call. Idempotent:
+    deleting zero rows (the link was already cleaned inline by the merge) is
+    success.
 
     Args:
         session: Database session
@@ -624,21 +619,6 @@ async def _unlink_immich_reference_for_event(
               AND external_id = :external_id
         """),
         {"integration_source": "immich", "external_id": external_id},
-    )
-    await session.execute(
-        text("""
-            DELETE FROM external_references
-            WHERE external_system = :external_system
-              AND external_entity_type = 'person'
-              AND external_entity_id = :external_id
-              AND internal_entity_type = 'contact'
-              AND internal_entity_id = :contact_id
-        """),
-        {
-            "external_system": "immich",
-            "external_id": external_id,
-            "contact_id": contact_id,
-        },
     )
 
     logger.info(

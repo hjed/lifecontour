@@ -2,8 +2,8 @@
 
 Verifies PHOTO_ALBUM type data is read from the canonical sync_metadata link
 (``reference_data``), that a malformed reference_data row degrades gracefully
-instead of 500ing, and that ``upsert_link`` dual-writes the album
-``reference_data`` onto sync_metadata.
+instead of 500ing, and that ``upsert_link`` writes the album link (and merge
+anchor) onto sync_metadata only.
 """
 
 import json
@@ -148,11 +148,43 @@ async def _make_album_sync_metadata_only(
     return saved.id
 
 
-@pytest.mark.integration
-class TestAlbumLinkDualWrite:
-    """``upsert_link`` mirrors reference_data onto the sync_metadata link."""
+async def _count_album_external_refs(connection: AsyncConnection, album_id: str) -> int:
+    """Count legacy external_references album rows for an album id."""
+    result = await connection.execute(
+        text("""
+            SELECT count(*) AS n FROM external_references
+            WHERE external_system = 'immich'
+              AND external_entity_type = 'album'
+              AND external_entity_id = :album_id
+        """),
+        {"album_id": album_id},
+    )
+    return int(result.scalar_one())
 
-    async def test_upsert_link_mirrors_reference_data_to_sync_metadata(
+
+async def _sync_metadata_anchor(
+    connection: AsyncConnection, album_id: str, journal_id: int
+) -> datetime:
+    result = await connection.execute(
+        text("""
+            SELECT updated_at FROM sync_metadata
+            WHERE integration_source = 'immich_album'
+              AND external_id = :album_id
+              AND internal_id = :journal_id
+        """),
+        {"album_id": album_id, "journal_id": journal_id},
+    )
+    row = result.fetchone()
+    assert row is not None
+    anchor: datetime = row.updated_at
+    return anchor
+
+
+@pytest.mark.integration
+class TestAlbumLinkWrite:
+    """``upsert_link`` writes the canonical sync_metadata link only (Phase 4)."""
+
+    async def test_upsert_link_writes_sync_metadata_only(
         self, repo: AlbumSyncReadRepository, async_connection: AsyncConnection
     ):
         album_id = "album-mirror"
@@ -161,10 +193,11 @@ class TestAlbumLinkDualWrite:
         )
         reference_data = {"album_name": "Mirrored Trip", "asset_count": 12}
 
-        await repo.upsert_link(journal_id, album_id, reference_data, bump_anchor=True)
+        await repo.upsert_link(
+            journal_id, album_id, reference_data, version_hash="v1", bump_anchor=True
+        )
 
-        # The album reference_data is written to external_references (existing
-        # behaviour) and mirrored onto the canonical sync_metadata link.
+        # The album reference_data is written onto the canonical sync_metadata link.
         sm = await async_connection.execute(
             text("""
                 SELECT reference_data FROM sync_metadata
@@ -178,3 +211,126 @@ class TestAlbumLinkDualWrite:
         assert sm_row is not None
         assert sm_row.reference_data is not None
         assert json.loads(sm_row.reference_data) == reference_data
+
+        # ...and no external_references row is written.
+        assert await _count_album_external_refs(async_connection, album_id) == 0
+
+    async def test_upsert_link_clears_stale_error_on_success(
+        self, repo: AlbumSyncReadRepository, async_connection: AsyncConnection
+    ):
+        """A successful upsert clears a prior failure's sync_status/error_message."""
+        album_id = "album-recover"
+        journal_id = await _make_album_sync_metadata_only(
+            async_connection, album_id=album_id
+        )
+        # Simulate a prior failed sync leaving a status + error message behind.
+        await async_connection.execute(
+            text("""
+                UPDATE sync_metadata
+                SET sync_status = 'failed', error_message = 'boom'
+                WHERE integration_source = 'immich_album'
+                  AND external_id = :album_id AND internal_id = :journal_id
+            """),
+            {"album_id": album_id, "journal_id": journal_id},
+        )
+
+        await repo.upsert_link(
+            journal_id,
+            album_id,
+            {"album_name": "Recovered"},
+            version_hash="v2",
+            bump_anchor=True,
+        )
+
+        row = (
+            await async_connection.execute(
+                text("""
+                    SELECT sync_status, error_message FROM sync_metadata
+                    WHERE integration_source = 'immich_album'
+                      AND external_id = :album_id AND internal_id = :journal_id
+                """),
+                {"album_id": album_id, "journal_id": journal_id},
+            )
+        ).fetchone()
+        assert row is not None
+        assert row.sync_status == "success"
+        assert row.error_message is None
+
+    async def test_find_link_reads_sync_metadata_anchor(
+        self, repo: AlbumSyncReadRepository, async_connection: AsyncConnection
+    ):
+        album_id = "album-anchor-read"
+        journal_id = await _make_album_sync_metadata_only(
+            async_connection, album_id=album_id
+        )
+
+        link = await repo.find_link(album_id, journal_id=journal_id)
+
+        assert link is not None
+        assert link.internal_entity_id == journal_id
+        # The anchor matches the sync_metadata row's updated_at.
+        assert link.updated_at == await _sync_metadata_anchor(
+            async_connection, album_id, journal_id
+        )
+
+    async def test_bump_anchor_advances_then_preserves(
+        self, repo: AlbumSyncReadRepository, async_connection: AsyncConnection
+    ):
+        album_id = "album-anchor-bump"
+        journal_id = await _make_album_sync_metadata_only(
+            async_connection, album_id=album_id
+        )
+        # Pin the anchor to a known past value.
+        past = datetime(2020, 1, 1, tzinfo=UTC)
+        await async_connection.execute(
+            text("""
+                UPDATE sync_metadata SET updated_at = :past
+                WHERE integration_source = 'immich_album'
+                  AND external_id = :album_id AND internal_id = :journal_id
+            """),
+            {"past": past, "album_id": album_id, "journal_id": journal_id},
+        )
+
+        # bump_anchor=False preserves the anchor (locally edited journal stays
+        # protected) while still writing reference_data.
+        await repo.upsert_link(
+            journal_id,
+            album_id,
+            {"album_name": "A"},
+            version_hash="v2",
+            bump_anchor=False,
+        )
+        assert (
+            await _sync_metadata_anchor(async_connection, album_id, journal_id) == past
+        )
+
+        # bump_anchor=True advances the anchor.
+        await repo.upsert_link(
+            journal_id,
+            album_id,
+            {"album_name": "B"},
+            version_hash="v3",
+            bump_anchor=True,
+        )
+        assert (
+            await _sync_metadata_anchor(async_connection, album_id, journal_id) > past
+        )
+
+    async def test_delete_removes_sync_metadata_only(
+        self, repo: AlbumSyncReadRepository, async_connection: AsyncConnection
+    ):
+        album_id = "album-delete"
+        journal_id = await _make_album_sync_metadata_only(
+            async_connection, album_id=album_id
+        )
+
+        await repo.delete(journal_id)
+
+        remaining = await async_connection.execute(
+            text("""
+                SELECT count(*) FROM sync_metadata
+                WHERE integration_source = 'immich_album' AND internal_id = :journal_id
+            """),
+            {"journal_id": journal_id},
+        )
+        assert int(remaining.scalar_one()) == 0

@@ -643,15 +643,11 @@ class ImmichSyncService:
         matches = ContactNameMatcher.find_matches(person.name, contacts)
 
         if len(matches) == 1:
-            # Single match — auto-link
+            # Single match — auto-link by writing the canonical sync_metadata
+            # link in the same unit of work, instead of relying on the consumer's
+            # later contact.updated, so the link store stays current for readers.
             contact = matches[0]
             assert contact.id is not None
-            await self._create_external_reference(
-                contact_id=contact.id, person_id=person.id
-            )
-            # Dual-write the canonical sync_metadata link in the same unit of
-            # work instead of relying on the consumer's later contact.updated,
-            # so the link store stays current for readers.
             await self._upsert_sync_metadata(
                 external_id=person.id,
                 internal_id=contact.id,
@@ -869,44 +865,6 @@ class ImmichSyncService:
             )
             for row in rows
         ]
-
-    async def _create_external_reference(self, contact_id: int, person_id: str) -> None:
-        """Create an ExternalReference linking a contact to an Immich person."""
-        # The parameters are projected bare in the SELECT list *and* reused in
-        # the WHERE NOT EXISTS comparison. Without explicit casts asyncpg
-        # deduces an unqualified ``text`` type for the projection but
-        # ``character varying`` for the column comparison, raising
-        # AmbiguousParameterError ("inconsistent types deduced for parameter").
-        # Pinning each parameter to its column type keeps the deduction
-        # consistent.
-        query = text("""
-            INSERT INTO external_references
-                (internal_entity_type, internal_entity_id, external_system,
-                 external_entity_type, external_entity_id)
-            SELECT
-                CAST(:internal_entity_type AS VARCHAR),
-                CAST(:internal_entity_id AS INTEGER),
-                CAST(:external_system AS VARCHAR),
-                CAST(:external_entity_type AS VARCHAR),
-                CAST(:external_entity_id AS VARCHAR)
-            WHERE NOT EXISTS (
-                SELECT 1 FROM external_references
-                WHERE external_system = :external_system
-                  AND internal_entity_type = :internal_entity_type
-                  AND external_entity_type = :external_entity_type
-                  AND external_entity_id = :external_entity_id
-            )
-        """)
-        await self._conn.execute(
-            query,
-            {
-                "internal_entity_type": self._INTERNAL_ENTITY_TYPE,
-                "internal_entity_id": contact_id,
-                "external_system": self._integration_source,
-                "external_entity_type": self._EXTERNAL_ENTITY_TYPE,
-                "external_entity_id": person_id,
-            },
-        )
 
     async def _upsert_sync_metadata(
         self,

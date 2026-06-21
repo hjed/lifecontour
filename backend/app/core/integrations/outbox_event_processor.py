@@ -21,7 +21,6 @@ from core_shared.models.contacts.serialization import (
     deserialize_contact,
 )
 from core_shared.models.contacts.value_objects import Provenance
-from core_shared.models.external_reference import ExternalReference
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.outbox_events import (
     ContactSyncEventData,
@@ -41,7 +40,6 @@ from app.core.contacts.services.contact_service import ContactService
 from app.core.integrations.adapters.sql.sync_metadata_repository import (
     SyncMetadataRepository,
 )
-from app.core.integrations.external_reference_service import ExternalReferenceService
 from app.core.integrations.utils.version_hash import calculate_contact_version_hash
 
 logger = structlog.get_logger()
@@ -124,7 +122,6 @@ class OutboxEventProcessor:
         """
         self.contact_service = contact_service
         self.connection = connection
-        self.external_reference_service = ExternalReferenceService(connection)
         self.sync_metadata_repo = SyncMetadataRepository(connection)
         self.link_repo = IntegrationLinkRepository(connection)
         from app.core.contacts.adapters.sql.tag_repository import SqlTagRepository
@@ -530,11 +527,26 @@ class OutboxEventProcessor:
 
     async def _update_synced_tags_reference(
         self,
-        existing_ref: ExternalReference | None,
+        integration_source: str,
+        external_id: str,
+        *,
+        link_exists: bool,
+        existing_reference_data: str | None,
         contact_data: dict[str, Any],
     ) -> None:
+        """Persist the contact's ``synced_tags`` onto the canonical link.
+
+        Writes ``reference_data`` on the ``sync_metadata`` link keyed by
+        ``(integration_source, external_id)``; ``version_hash`` is untouched so a
+        tag-metadata change never registers as a content change for the next sync.
+
+        Gated on the link's *existence* — not on whether it already has
+        ``reference_data`` — so a link whose ``reference_data`` is NULL (a
+        manual-link or pre-``reference_data``-column row) still gets ``synced_tags``
+        established; missing/NULL ``reference_data`` is treated as ``{}``.
+        """
         if (
-            not existing_ref
+            not link_exists
             or "tags" not in contact_data
             or contact_data["tags"] is None
         ):
@@ -542,11 +554,10 @@ class OutboxEventProcessor:
 
         incoming_tag_names = [tag_data["name"] for tag_data in contact_data["tags"]]
 
+        # Missing/NULL reference_data on an existing link starts from an empty dict.
         new_ref_data: dict[str, Any] = {}
-        if existing_ref.reference_data:
-            parsed = self._parse_reference_data(
-                existing_ref.reference_data, existing_ref.id
-            )
+        if existing_reference_data:
+            parsed = self._parse_reference_data(existing_reference_data)
             if parsed is not None:
                 new_ref_data = parsed
 
@@ -555,8 +566,9 @@ class OutboxEventProcessor:
             return
 
         new_ref_data["synced_tags"] = incoming_tag_names
-        await self.external_reference_service.update_external_reference(
-            reference_id=existing_ref.id,
+        await self.sync_metadata_repo.update_reference_data(
+            integration_source=integration_source,
+            external_id=external_id,
             reference_data=json.dumps(new_ref_data),
         )
 
@@ -564,15 +576,13 @@ class OutboxEventProcessor:
         self,
         contact_data: dict[str, Any],
         updated_contact_data: Contact,
-        existing_ref: ExternalReference | None,
+        existing_reference_data: str | None,
         existing_tags: list[Tag],
     ) -> None:
-        ref_data_str = existing_ref.reference_data if existing_ref else None
         if "tags" in contact_data and contact_data["tags"] is not None:
             resolved_tags = await self._resolve_contact_tags(
                 contact_data,
-                existing_reference_data=ref_data_str,
-                existing_reference_id=existing_ref.id if existing_ref else None,
+                existing_reference_data=existing_reference_data,
                 existing_contact_tags=existing_tags,
             )
             updated_contact_data.tags = resolved_tags
@@ -750,38 +760,19 @@ class OutboxEventProcessor:
         if created_contact.id is None:
             raise OutboxEventProcessingError("Created contact has no ID")
 
-        try:
-            # Include synced_tags so the diff strategy can correctly
-            # remove previously-synced tags on the very first update.
-            initial_ref_data: dict[str, Any] = {
-                "resource_name": external_id,
-                "etag": payload.etag,
-                "sync_timestamp": payload.sync_timestamp,
-            }
-            if contact.tags:
-                initial_ref_data["synced_tags"] = [
-                    str(tag.name) for tag in contact.tags
-                ]
-            await self.external_reference_service.create_external_reference(
-                internal_entity_type="contact",
-                internal_entity_id=created_contact.id,
-                external_system=integration_source,
-                external_entity_type="person",
-                external_entity_id=external_id,
-                reference_data=json.dumps(initial_ref_data),
-            )
-        except Exception as e:  # noqa: BLE001
-            logger.warning(
-                "Failed to create external reference",
-                contact_id=created_contact.id,
-                integration_source=integration_source,
-                external_id=external_id,
-                error=str(e),
-            )
-            # Don't fail the entire operation if external reference creation fails
+        # Build the link metadata carried on the canonical sync_metadata row.
+        # Include synced_tags so the diff strategy can correctly remove
+        # previously-synced tags on the very first update.
+        initial_ref_data: dict[str, Any] = {
+            "resource_name": external_id,
+            "etag": payload.etag,
+            "sync_timestamp": payload.sync_timestamp,
+        }
+        if contact.tags:
+            initial_ref_data["synced_tags"] = [str(tag.name) for tag in contact.tags]
 
-        # Create initial sync metadata
-        # Calculate version hash for the contact data
+        # Create initial sync metadata (the canonical integration link).
+        # Calculate version hash for the contact data.
         # Use integration-provided etag if available, fallback to contact data hash
         version_hash = (
             payload.etag
@@ -789,6 +780,12 @@ class OutboxEventProcessor:
             else calculate_contact_version_hash(contact_data)
         )
 
+        # The sync_metadata row is the canonical integration link and the dedup
+        # key for re-imports — if it fails the contact must NOT be left linkless
+        # (that re-opens the duplication path, especially for email-less
+        # contacts). Fail the event so the whole unit of work rolls back and is
+        # retried, rather than swallowing the error (which would also leave the
+        # asyncpg transaction poisoned for the commit anyway).
         try:
             await self.sync_metadata_repo.upsert(
                 internal_id=created_contact.id,
@@ -798,18 +795,13 @@ class OutboxEventProcessor:
                 sync_status=SyncStatus.SUCCESS,
                 internal_entity_type="contact",
                 external_entity_type="person",
+                reference_data=json.dumps(initial_ref_data),
             )
-        except Exception as e:  # noqa: BLE001
-            logger.warning(
-                "Failed to create sync metadata - will be created on first update",
-                contact_id=created_contact.id,
-                integration_source=integration_source,
-                external_id=external_id,
-                error=str(e),
-            )
-            # Don't fail the entire operation if sync metadata creation fails
-            # The sync_metadata will be created automatically on the first contact.updated event
-            # This provides better resilience - contact creation succeeds even if sync_metadata fails
+        except Exception as e:
+            raise OutboxEventProcessingError(
+                f"Failed to write sync_metadata link for contact "
+                f"{created_contact.id}: {e}"
+            ) from e
 
         logger.info(
             "Successfully processed contact creation from outbox event",
@@ -937,19 +929,20 @@ class OutboxEventProcessor:
                 full_existing_contact.tags or [] if full_existing_contact else []
             )
 
-            # Find existing integration reference
-            existing_ref = (
-                await self.external_reference_service.find_external_reference(
-                    internal_entity_type="contact",
-                    internal_entity_id=existing_contact.id,
-                    external_system=integration_source,
-                )
+            # Find the existing integration link (canonical sync_metadata store)
+            # to carry forward its reference_data (synced_tags/etag).
+            existing_link = await self.link_repo.find_link_by_external(
+                integration_source=integration_source,
+                external_id=external_id,
+            )
+            existing_reference_data = (
+                existing_link["reference_data"] if existing_link else None
             )
 
             await self._apply_resolved_tags_to_contact_data(
                 contact_data,
                 updated_contact_data,
-                existing_ref,
+                existing_reference_data,
                 existing_tags,
             )
         except ContactDeserializationError as e:
@@ -1000,11 +993,20 @@ class OutboxEventProcessor:
                 f"Failed to update contact: {str(e)}"
             ) from e
 
-        # Update reference data with new synced tags.
-        # Non-fatal: if this fails the contact update is already committed,
-        # and synced_tags metadata will self-heal on the next sync cycle.
+        # Update reference data with new synced tags. Non-fatal: synced_tags
+        # metadata self-heals on the next sync cycle. Wrapped in a savepoint so a
+        # DB failure rolls back only this write and leaves the outer transaction
+        # healthy — the version-hash upsert and commit below must still succeed
+        # (catching the error alone would not un-poison the asyncpg transaction).
         try:
-            await self._update_synced_tags_reference(existing_ref, contact_data)
+            async with self.connection.begin_nested():
+                await self._update_synced_tags_reference(
+                    integration_source,
+                    external_id,
+                    link_exists=existing_link is not None,
+                    existing_reference_data=existing_reference_data,
+                    contact_data=contact_data,
+                )
         except Exception as e:  # noqa: BLE001
             logger.warning(
                 "Failed to update synced_tags reference data after contact update",
