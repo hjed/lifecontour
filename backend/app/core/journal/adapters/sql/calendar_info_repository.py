@@ -11,6 +11,7 @@ from core_shared.models import (
 from core_shared.models.journals import (
     CalendarInfo,
     CalendarInfoValidationError,
+    event_date_in_timezone,
 )
 from core_shared.models.journals.event_state import EventState
 from sqlalchemy import text
@@ -63,28 +64,7 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
         tz_str = getattr(row, "timezone", None)
 
         def _get_local_date(dt: datetime | Any) -> date | None:
-            if not dt:
-                return None
-
-            # Since SQLAlchemy stores it with timezone context in Postgres (or naive UTC context)
-            if not isinstance(dt, datetime):
-                # Fallback if it's not a datetime object somehow
-                return dt.date()  # type: ignore[no-any-return]
-
-            from datetime import UTC
-            from zoneinfo import ZoneInfo
-
-            # Ensure the dt is timezone-aware (assumed UTC if naive from DB)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=UTC)
-
-            if not tz_str:
-                return dt.date()
-            try:
-                tz = ZoneInfo(tz_str)
-                return dt.astimezone(tz).date()
-            except Exception:  # noqa: BLE001
-                return dt.date()
+            return event_date_in_timezone(dt, tz_str)
 
         if (
             start_date is None

@@ -1,6 +1,6 @@
 """Unit tests for CalendarInfo entity (EVENT type)."""
 
-from datetime import time
+from datetime import UTC, date, datetime, time
 from uuid import uuid4
 
 import pytest
@@ -8,7 +8,34 @@ from core_shared.models.journals import (
     MAX_LOCATION_LENGTH,
     CalendarInfo,
     CalendarInfoValidationError,
+    event_date_in_timezone,
 )
+
+
+@pytest.mark.unit
+class TestEventDateInTimezone:
+    """Test the event_date_in_timezone helper used to anchor clock-only times."""
+
+    def test_none_returns_none(self):
+        assert event_date_in_timezone(None, "Australia/Sydney") is None
+
+    def test_naive_datetime_treated_as_utc(self):
+        dt = datetime(2026, 6, 21, 23, 0)  # naive
+        assert event_date_in_timezone(dt, None) == date(2026, 6, 21)
+
+    def test_converts_to_local_date(self):
+        # 13:00 UTC is 23:00 in Sydney (UTC+10, no DST in June) -> same calendar day.
+        dt = datetime(2026, 6, 21, 13, 0, tzinfo=UTC)
+        assert event_date_in_timezone(dt, "Australia/Sydney") == date(2026, 6, 21)
+
+    def test_local_date_rolls_to_next_day(self):
+        # 15:00 UTC is 01:00 the next day in Sydney.
+        dt = datetime(2026, 6, 21, 15, 0, tzinfo=UTC)
+        assert event_date_in_timezone(dt, "Australia/Sydney") == date(2026, 6, 22)
+
+    def test_invalid_timezone_falls_back_to_utc_date(self):
+        dt = datetime(2026, 6, 21, 23, 0, tzinfo=UTC)
+        assert event_date_in_timezone(dt, "Not/AZone") == date(2026, 6, 21)
 
 
 @pytest.mark.unit

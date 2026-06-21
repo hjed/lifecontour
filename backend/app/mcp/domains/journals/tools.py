@@ -1562,6 +1562,13 @@ async def _update_event_data(
     if calendar_id is None:
         return
 
+    # Anchor clock-only times to the journal's event date range (carried on the
+    # existing record via the journals JOIN) so cross-midnight events pass the
+    # start<=end validation instead of being wrongly rejected.
+    existing = await calendar_info_repo.find_by_journal_id(journal_id)
+    event_start_date = existing.event_start_date if existing else None
+    event_end_date = existing.event_end_date if existing else None
+
     calendar_info = CalendarInfo(
         journal_id=journal_id,
         calendar_id=calendar_id,
@@ -1574,6 +1581,8 @@ async def _update_event_data(
         sync_invitees=type_data_dict.get("sync_invitees", False),
         private_description=type_data_dict.get("private_description", False),
         event_state=type_data_dict.get("event_state", "confirmed"),
+        event_start_date=event_start_date,
+        event_end_date=event_end_date,
     )
     await calendar_info_repo.save(calendar_info)
 
