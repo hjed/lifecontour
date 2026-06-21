@@ -862,9 +862,28 @@ class JournalWriteService:
             from datetime import time as dt_time
             from uuid import UUID
 
-            from core_shared.models.journals import CalendarInfo
+            from core_shared.models.journals import (
+                CalendarInfo,
+                event_date_in_timezone,
+            )
 
             event_data = normalized_type_data["event"]
+
+            # CalendarInfo stores clock-only times; anchor them to the journal's
+            # event date range so cross-midnight events (e.g. 23:00→01:00) pass
+            # the start<=end validation instead of being wrongly rejected.
+            journal = await self.journal_service.journal_repo.find_by_id(journal_id)
+            event_timezone = event_data.get("timezone")
+            event_start_date = (
+                event_date_in_timezone(journal.event_date_range.start, event_timezone)
+                if journal is not None
+                else None
+            )
+            event_end_date = (
+                event_date_in_timezone(journal.event_date_range.end, event_timezone)
+                if journal is not None
+                else None
+            )
 
             try:
 
@@ -900,6 +919,8 @@ class JournalWriteService:
                     timezone=event_data.get("timezone"),
                     sync_invitees=event_data.get("sync_invitees", False),
                     private_description=event_data.get("private_description", False),
+                    event_start_date=event_start_date,
+                    event_end_date=event_end_date,
                 )
                 await self.calendar_info_repo.save(calendar_info)
 

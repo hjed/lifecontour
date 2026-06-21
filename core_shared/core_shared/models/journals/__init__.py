@@ -6,7 +6,7 @@ from .activity_template import ActivityTemplate
 from .attendee_status import AttendeeStatus
 from .bushwalking_data import BushwalkingData
 from .calendar import Calendar
-from .calendar_info import CalendarInfo
+from .calendar_info import CalendarInfo, event_date_in_timezone
 from .canoeing_data import CanoeingData
 from .canyoning_data import CanyoningData
 from .caving_data import CavingData
@@ -186,6 +186,7 @@ __all__ = [
     "Journal",
     "Calendar",
     "CalendarInfo",
+    "event_date_in_timezone",
     "FitnessData",
     "MoodData",
     "PlanData",

@@ -16,6 +16,36 @@ from .event_state import EventState
 from .exceptions import CalendarInfoValidationError
 
 
+def event_date_in_timezone(dt: datetime | None, timezone: str | None) -> date | None:
+    """Return the local calendar date of a (UTC) datetime in ``timezone``.
+
+    Journal ``event_date_range`` bounds are stored as UTC datetimes while
+    :class:`CalendarInfo` carries clock-only ``start_time``/``end_time`` values.
+    To validate cross-midnight events correctly those times must be anchored to
+    the local dates the event actually spans, so callers derive
+    ``event_start_date``/``event_end_date`` from the journal's range using the
+    event's IANA timezone (falling back to UTC when it is absent or invalid).
+    """
+    if dt is None:
+        return None
+    if not isinstance(dt, datetime):
+        # Already a plain date (or date-like) — use it as-is.
+        return dt.date()
+
+    from datetime import UTC
+    from zoneinfo import ZoneInfo
+
+    # DB datetimes may be naive; treat those as UTC (matches storage convention).
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    if not timezone:
+        return dt.date()
+    try:
+        return dt.astimezone(ZoneInfo(timezone)).date()
+    except Exception:  # noqa: BLE001
+        return dt.date()
+
+
 @dataclass
 class CalendarInfo:
     """

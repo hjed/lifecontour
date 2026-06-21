@@ -193,6 +193,47 @@ class TestCreateJournal:
         mock_journal_service.add_type_to_journal.assert_not_awaited()
 
 
+class TestProcessEventTypeData:
+    @pytest.mark.asyncio
+    async def test_cross_midnight_event_anchored_to_journal_date_range(
+        self, write_service, mock_journal_service, mock_transaction
+    ):
+        """A cross-midnight event (23:00→01:00) is persisted, not rejected.
+
+        CalendarInfo carries clock-only times, so the create path must anchor
+        them to the journal's event date range (which spans two days here) or the
+        start<=end validation wrongly rejects the event with
+        CALENDAR_INFO_VALIDATION_ERROR.
+        """
+        journal = Journal(
+            id=42,
+            user_id="user-1",
+            title="Late event",
+            content="",
+            event_date_range=EventDateRange(
+                start=datetime(2026, 6, 21, 23, 0, tzinfo=UTC),
+                end=datetime(2026, 6, 22, 1, 0, tzinfo=UTC),
+            ),
+        )
+        mock_journal_service.journal_repo.find_by_id.return_value = journal
+
+        await write_service._process_journal_type_data(
+            42,
+            {
+                "event": {
+                    "calendar_id": str(uuid4()),
+                    "start_time": "23:00",
+                    "end_time": "01:00",
+                }
+            },
+            mock_transaction,
+        )
+
+        saved = write_service.calendar_info_repo.save.await_args.args[0]
+        assert saved.start_time.hour == 23
+        assert saved.end_time.hour == 1
+
+
 class TestDeleteJournal:
     @pytest.mark.asyncio
     async def test_delete_journal_delegates(
