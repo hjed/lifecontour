@@ -231,9 +231,11 @@ class ExternalReferenceService:
         """Re-point a source contact's external links onto the survivor on merge.
 
         Runs inline in the merge transaction (a local re-point, never a remote
-        call) so a deleted source never leaves resolvable-looking orphans — the
-        ``external_references`` / ``sync_metadata`` tables have no
-        ``ON DELETE CASCADE``.
+        call) so a deleted source never leaves resolvable-looking orphans in the
+        canonical ``sync_metadata`` link store, which has no ``ON DELETE
+        CASCADE``. Since ITER15-001 Phase 4 this operates on ``sync_metadata``
+        only; legacy ``external_references`` rows are intentionally left untouched
+        (the table is dropped in Phase 5).
 
         For each of the source's contact ``sync_metadata`` links:
 

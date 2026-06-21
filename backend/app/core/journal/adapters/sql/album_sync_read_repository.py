@@ -124,6 +124,7 @@ class AlbumSyncReadRepository:
                     last_synced_at = EXCLUDED.last_synced_at,
                     version_hash = EXCLUDED.version_hash,
                     sync_status = 'success',
+                    error_message = NULL,
                     retry_count = 0,
                     internal_entity_type = EXCLUDED.internal_entity_type,
                     external_entity_type = EXCLUDED.external_entity_type,

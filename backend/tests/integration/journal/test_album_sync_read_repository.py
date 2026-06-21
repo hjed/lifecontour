@@ -2,8 +2,8 @@
 
 Verifies PHOTO_ALBUM type data is read from the canonical sync_metadata link
 (``reference_data``), that a malformed reference_data row degrades gracefully
-instead of 500ing, and that ``upsert_link`` dual-writes the album
-``reference_data`` onto sync_metadata.
+instead of 500ing, and that ``upsert_link`` writes the album link (and merge
+anchor) onto sync_metadata only.
 """
 
 import json
@@ -214,6 +214,47 @@ class TestAlbumLinkWrite:
 
         # ...and no external_references row is written.
         assert await _count_album_external_refs(async_connection, album_id) == 0
+
+    async def test_upsert_link_clears_stale_error_on_success(
+        self, repo: AlbumSyncReadRepository, async_connection: AsyncConnection
+    ):
+        """A successful upsert clears a prior failure's sync_status/error_message."""
+        album_id = "album-recover"
+        journal_id = await _make_album_sync_metadata_only(
+            async_connection, album_id=album_id
+        )
+        # Simulate a prior failed sync leaving a status + error message behind.
+        await async_connection.execute(
+            text("""
+                UPDATE sync_metadata
+                SET sync_status = 'failed', error_message = 'boom'
+                WHERE integration_source = 'immich_album'
+                  AND external_id = :album_id AND internal_id = :journal_id
+            """),
+            {"album_id": album_id, "journal_id": journal_id},
+        )
+
+        await repo.upsert_link(
+            journal_id,
+            album_id,
+            {"album_name": "Recovered"},
+            version_hash="v2",
+            bump_anchor=True,
+        )
+
+        row = (
+            await async_connection.execute(
+                text("""
+                    SELECT sync_status, error_message FROM sync_metadata
+                    WHERE integration_source = 'immich_album'
+                      AND external_id = :album_id AND internal_id = :journal_id
+                """),
+                {"album_id": album_id, "journal_id": journal_id},
+            )
+        ).fetchone()
+        assert row is not None
+        assert row.sync_status == "success"
+        assert row.error_message is None
 
     async def test_find_link_reads_sync_metadata_anchor(
         self, repo: AlbumSyncReadRepository, async_connection: AsyncConnection
