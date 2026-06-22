@@ -8,26 +8,30 @@ import { ContactAvatar } from '../ContactAvatar';
  * load/error state machine deterministically. URLs containing "broken" simulate an
  * error; any other URL simulates a successful load.
  */
+type MockImageListener = (event: { currentTarget: MockImage }) => void;
+
 class MockImage {
-  private listeners: Record<string, Array<() => void>> = {};
+  private listeners: Record<string, MockImageListener[]> = {};
   naturalWidth = 0;
   complete = false;
   referrerPolicy = '';
   crossOrigin: string | null = null;
   private _src = '';
 
-  addEventListener(event: string, cb: () => void): void {
+  addEventListener(event: string, cb: MockImageListener): void {
     (this.listeners[event] ??= []).push(cb);
   }
 
-  removeEventListener(event: string, cb: () => void): void {
+  removeEventListener(event: string, cb: MockImageListener): void {
     this.listeners[event] = (this.listeners[event] ?? []).filter(
       listener => listener !== cb
     );
   }
 
   private dispatch(event: string): void {
-    (this.listeners[event] ?? []).forEach(cb => cb());
+    // Radix's load handler reads `event.currentTarget` to inspect the image's
+    // `complete`/`naturalWidth` state, so pass the image itself as the target.
+    (this.listeners[event] ?? []).forEach(cb => cb({ currentTarget: this }));
   }
 
   set src(value: string) {
