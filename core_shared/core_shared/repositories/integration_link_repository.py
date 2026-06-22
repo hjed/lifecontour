@@ -5,9 +5,9 @@ This repository provides the unified link-lookup reads used by both the backend
 consumer and the integration workers, replacing the legacy
 ``external_references`` reads. Writes remain on the existing upsert paths.
 
-The repository is read-only and intentionally mirrors the constructor and raw-SQL
-style of :class:`ExternalReferenceRepository` so it is a drop-in for the link
-reads, available to both ``core_shared`` consumers and workers.
+The repository provides the link-lookup reads (plus the contact reads behind an
+outbound sync) used by both ``core_shared`` consumers and the integration workers,
+in the same constructor and raw-SQL style as the rest of the data layer.
 """
 
 from __future__ import annotations
@@ -121,6 +121,43 @@ class IntegrationLinkRepository:
         result = await self._conn.execute(query, params)
         row = result.fetchone()
         return self._row_to_dict(row) if row else None
+
+    async def find_contact_with_birthday(
+        self, contact_id: int
+    ) -> dict[str, Any] | None:
+        """Fetch a contact's name fields and full-precision birthday.
+
+        Reads the ``contacts`` / ``contact_important_dates`` tables (not a link
+        table); colocated here so the integration workers have a single
+        ``core_shared`` repository for the reads behind an outbound sync.
+
+        Args:
+            contact_id: Internal contact ID.
+
+        Returns:
+            Dictionary with name and birthday fields, or ``None``.
+        """
+        query = text("""
+            SELECT c.first_name, c.last_name, c.middle_name,
+                   d.year, d.month, d.day
+            FROM contacts c
+            LEFT JOIN contact_important_dates d
+              ON c.id = d.contact_id AND d.date_type = 'birthday' AND d.precision = 'full'
+            WHERE c.id = :contact_id
+        """)
+        result = await self._conn.execute(query, {"contact_id": contact_id})
+        row = result.fetchone()
+        if not row:
+            return None
+
+        return {
+            "first_name": row.first_name,
+            "last_name": row.last_name,
+            "middle_name": row.middle_name,
+            "year": row.year,
+            "month": row.month,
+            "day": row.day,
+        }
 
     async def get_immich_person_id(self, contact_id: int) -> str | None:
         """Look up the Immich person id linked to a contact.

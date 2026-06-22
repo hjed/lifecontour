@@ -23,7 +23,7 @@ The integration architecture uses an **Isolated Worker Architecture** pattern th
 app/core/integrations/
 ├── shared/
 │   ├── __init__.py
-│   ├── base_models.py      # Common sync patterns (SyncMetadata, ExternalReference)
+│   ├── base_models.py      # Common sync patterns (SyncMetadata — canonical link store)
 │   ├── base_service.py     # Common integration logic
 │   ├── task_queue.py       # ARQ setup and configuration
 │   └── exceptions.py       # Integration-specific exceptions
@@ -95,7 +95,7 @@ core_shared/
 │   ├── models/             # SQLAlchemy models
 │   │   ├── __init__.py
 │   │   ├── contact.py      # Contact, ContactMethod, etc.
-│   │   ├── sync_metadata.py # SyncMetadata, ExternalReference
+│   │   ├── sync_metadata.py # SyncMetadata (canonical integration link store)
 │   │   └── base.py         # Base model classes
 │   ├── database/           # Database session management
 │   │   ├── __init__.py
@@ -170,34 +170,6 @@ class SyncMetadata(Base):
     external_entity_type: Optional[str]  # 'person', 'album', 'activity'
 ```
 
-#### ExternalReference
-Tracks references between internal entities and external system entities:
-
-```python
-from core_shared import ExternalReference
-
-class ExternalReference(Base):
-    internal_entity_type: str     # 'contact', 'journal_entry', etc.
-    internal_entity_id: int       # ID of internal entity
-    external_system: str          # 'google', 'immich', etc.
-    external_entity_type: str     # 'person', 'photo', 'album', etc.
-    external_entity_id: str       # External system's ID
-    reference_data: Optional[str] # Additional metadata as JSON
-```
-
-#### ExternalReference
-Links internal entities to external resources:
-
-```python
-class ExternalReference(BaseModel):
-    entity_id: UUID               # Internal entity ID
-    entity_type: str             # 'contact', 'photo', 'journal_entry'
-    integration_source: str      # Source system
-    external_id: str            # External resource ID
-    external_url: Optional[str] # Direct link to external resource
-    metadata: dict              # Integration-specific metadata
-```
-
 #### Link Storage Consolidation (canonical link store)
 
 Integration entity links were historically tracked in **two overlapping tables** —
@@ -209,10 +181,10 @@ concurrency and status). Because no writer kept both consistent, Immich-origin
 `sync_metadata` is now the **single canonical store for all integration entity
 links**, absorbing the fields `external_references` uniquely provided
 (`reference_data`, and explicit `internal_entity_type` / `external_entity_type`).
-**`external_references` is now write-free and read-free; its removal is pending** the
-final consolidation step. See
+**`external_references` has been dropped (Phase 5 complete); `sync_metadata` is the
+sole link store.** See
 [Iteration 15: Integration Link Consolidation](../tasks/iteration-15-integration-link-consolidation.md)
-for the migration plan (schema → dual-write + backfill → move reads → stop writing
+for the migration history (schema → dual-write + backfill → move reads → stop writing
 `external_references` → drop + dedupe).
 
 **Earlier transition state (dual-write).** During Phases 2–3 the consolidation
@@ -254,8 +226,8 @@ dual-write has been removed: every writer now persists the canonical link (plus
 - The inbound contact create/update paths write the link and its `reference_data`
   (`resource_name`/`etag`/`synced_tags`) onto `sync_metadata` (the `synced_tags`/`etag`
   read/write moved here too, via `SyncMetadataRepository.update_reference_data`).
-- `ExternalReferenceService.upsert_contact_reference` (manual Immich linking) and
-  `repoint_contact_references` (contact merge) operate on `sync_metadata` only.
+- `SyncMetadataRepository.upsert_contact_link` (manual Immich linking) and
+  `repoint_contact_links` (contact merge) operate on `sync_metadata` only.
 - The Immich worker's name-match auto-link and merge-cleanup unlink write/delete only
   `sync_metadata`.
 - `AlbumSyncReadRepository.upsert_link` is the single writer of the album
@@ -265,9 +237,15 @@ dual-write has been removed: every writer now persists the canonical link (plus
   generic upsert that would unconditionally bump it) keeps the anchor meaningful on the
   consolidated store.
 
-`external_references` is now **write-free** (and read-free); the table, the
-`ExternalReference` model/service/repository shell, and the duplicate-cleanup are
-removed in Phase 5.
+**`external_references` dropped (Phase 5 complete).** The table, its indexes, and the
+temporary `link_backfill_quarantine` audit table were dropped
+(`0093_drop_external_references`) after a data migration
+(`0092_dedupe_bug_created_contacts`) merged the bug-created duplicate contacts and
+reconciled orphaned links. The `ExternalReference` model, `ExternalReferenceService`
+and `ExternalReferenceRepository` are deleted; their live link operations were
+relocated to `SyncMetadataRepository` (`upsert_contact_link`, `repoint_contact_links`,
+returning `IntegrationLinkCollision`), `IntegrationLinkRepository`
+(`find_contact_with_birthday`) and `SqlContactRepository` (`contact_exists`).
 
 ### 2. Task Queue System
 

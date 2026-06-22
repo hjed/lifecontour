@@ -5,11 +5,12 @@ pointing at the deleted source (the table has no ``ON DELETE CASCADE``). The
 merge re-points links for services the survivor lacks, and for a same-service
 collision keeps the survivor's link, removes the source's row, and flags the
 collision once on the ``ContactMerged`` event for the worker phases to reconcile
-remotely. Since ITER15-001 Phase 4 the re-point operates on ``sync_metadata``
-only (the canonical store); ``external_references`` is no longer written.
+remotely. Since ITER15-001 the re-point operates on the canonical
+``sync_metadata`` link store via ``SyncMetadataRepository.repoint_contact_links``
+(``external_references`` has been retired).
 
-Drives the real ``ContactMergeService`` and ``ExternalReferenceService`` against
-a Docker PostgreSQL database via the ``async_connection`` / ``clean_database``
+Drives the real ``ContactMergeService`` and ``SyncMetadataRepository`` against a
+Docker PostgreSQL database via the ``async_connection`` / ``clean_database``
 fixtures from ``tests/integration/conftest.py`` (never a custom DB provider).
 """
 
@@ -34,7 +35,9 @@ from app.core.contacts.services.contact_merge_service import ContactMergeService
 from app.core.history.adapters.sql.field_history_repository import (
     SqlFieldHistoryRepository,
 )
-from app.core.integrations.external_reference_service import ExternalReferenceService
+from app.core.integrations.adapters.sql.sync_metadata_repository import (
+    SyncMetadataRepository,
+)
 from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
     SqlJournalContactRelationshipRepository,
 )
@@ -77,7 +80,7 @@ async def merge_service(
         ),
         event_publisher=event_publisher,
         history_repo=SqlFieldHistoryRepository(async_connection),
-        external_reference_service=ExternalReferenceService(async_connection),
+        sync_metadata_repo=SyncMetadataRepository(async_connection),
     )
 
 
@@ -85,35 +88,6 @@ async def _make_contact(repo: SqlContactRepository, first_name: str) -> int:
     saved = await repo.save(Contact(first_name=first_name))
     assert saved.id is not None
     return saved.id
-
-
-async def _add_external_ref(
-    connection: AsyncConnection,
-    contact_id: int,
-    external_system: str,
-    external_entity_id: str,
-    *,
-    external_entity_type: str = "person",
-) -> None:
-    await connection.execute(
-        text(
-            """
-            INSERT INTO external_references (
-                internal_entity_type, internal_entity_id, external_system,
-                external_entity_type, external_entity_id, reference_data,
-                created_at, updated_at
-            ) VALUES (
-                'contact', :cid, :system, :etype, :eid, '{}', now(), now()
-            )
-            """
-        ),
-        {
-            "cid": contact_id,
-            "system": external_system,
-            "etype": external_entity_type,
-            "eid": external_entity_id,
-        },
-    )
 
 
 async def _add_sync_metadata(
@@ -160,17 +134,6 @@ async def _linked_systems(connection: AsyncConnection, contact_id: int) -> set[s
         {"cid": contact_id},
     )
     return {row.integration_source for row in result.fetchall()}
-
-
-async def _count_external_refs(connection: AsyncConnection, contact_id: int) -> int:
-    result = await connection.execute(
-        text(
-            "SELECT count(*) FROM external_references "
-            "WHERE internal_entity_type = 'contact' AND internal_entity_id = :cid"
-        ),
-        {"cid": contact_id},
-    )
-    return int(result.scalar_one())
 
 
 async def _count_sync_metadata(connection: AsyncConnection, internal_id: int) -> int:
@@ -322,7 +285,7 @@ class TestSameServiceCollision:
         assert await _count_sync_metadata(async_connection, source_id) == 0
 
 
-class TestExternalReferenceServiceRepoint:
+class TestSyncMetadataRepoint:
     """The re-point method directly, against the database."""
 
     @pytest.mark.asyncio
@@ -337,8 +300,8 @@ class TestExternalReferenceServiceRepoint:
         await _add_sync_metadata(async_connection, source_id, "google", "people/src")
         await _add_sync_metadata(async_connection, source_id, "immich", "person-uuid")
 
-        service = ExternalReferenceService(async_connection)
-        collisions = await service.repoint_contact_references(
+        repo = SyncMetadataRepository(async_connection)
+        collisions = await repo.repoint_contact_links(
             source_id, survivor_id, async_connection
         )
 
@@ -352,34 +315,3 @@ class TestExternalReferenceServiceRepoint:
             "immich",
         }
         assert await _count_sync_metadata(async_connection, source_id) == 0
-
-    @pytest.mark.asyncio
-    async def test_repoint_does_not_write_external_references(
-        self,
-        async_connection: AsyncConnection,
-        contact_repo: SqlContactRepository,
-    ) -> None:
-        """Phase 4: the merge re-point operates on sync_metadata only.
-
-        A legacy ``external_references`` row for the source is left exactly as it
-        was — the re-point neither moves nor deletes it (writes are consolidated
-        onto ``sync_metadata``; the table is dropped in Phase 5).
-        """
-        survivor_id = await _make_contact(contact_repo, "Survivor")
-        source_id = await _make_contact(contact_repo, "Source")
-        # Canonical link drives the re-point.
-        await _add_sync_metadata(async_connection, source_id, "immich", "person-uuid")
-        # A leftover legacy row on the source that must NOT be touched.
-        await _add_external_ref(async_connection, source_id, "immich", "person-uuid")
-
-        service = ExternalReferenceService(async_connection)
-        await service.repoint_contact_references(
-            source_id, survivor_id, async_connection
-        )
-
-        # sync_metadata carried over to the survivor; the legacy external_references
-        # row is untouched (still on the source — zero external_references writes).
-        assert await _linked_systems(async_connection, survivor_id) == {"immich"}
-        assert await _count_sync_metadata(async_connection, source_id) == 0
-        assert await _count_external_refs(async_connection, source_id) == 1
-        assert await _count_external_refs(async_connection, survivor_id) == 0

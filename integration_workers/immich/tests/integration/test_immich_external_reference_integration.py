@@ -4,8 +4,8 @@ Integration tests for ImmichSyncService integration-link DB operations.
 These exercise the raw SQL in ``_find_external_reference`` and
 ``_upsert_sync_metadata`` against a real PostgreSQL database via asyncpg.
 
-Since ITER15-001 Phase 4 the worker writes the canonical link to
-``sync_metadata`` only — it no longer writes ``external_references``.
+Since ITER15-001 the worker writes the canonical link to ``sync_metadata`` only
+(``external_references`` has been retired).
 """
 
 from __future__ import annotations
@@ -33,22 +33,6 @@ def sync_service(async_connection: Any) -> ImmichSyncService:
         user_id="test-user-immich",
         integration_source="immich",
     )
-
-
-async def _count_references(connection: Any, person_id: str) -> int:
-    """Count external_references rows for an Immich person."""
-    result = await connection.execute(
-        text("""
-            SELECT count(*) AS n
-            FROM external_references
-            WHERE external_system = 'immich'
-              AND internal_entity_type = 'contact'
-              AND external_entity_type = 'person'
-              AND external_entity_id = :person_id
-        """),
-        {"person_id": person_id},
-    )
-    return int(result.fetchone().n)
 
 
 class TestExternalReferenceDbOperations:
@@ -91,9 +75,9 @@ class TestCreateVsUpdateReadsSyncMetadata:
     ) -> None:
         """A person already linked via sync_metadata is not re-linked/created.
 
-        With only a ``sync_metadata`` link present (no ``external_references``
-        row), the worker must see the existing link and short-circuit to the
-        unchanged/update path instead of name-matching and creating a duplicate.
+        With a ``sync_metadata`` link present, the worker must see the existing
+        link and short-circuit to the unchanged/update path instead of
+        name-matching and creating a duplicate.
         """
         result = await async_connection.execute(
             text(
@@ -117,7 +101,6 @@ class TestCreateVsUpdateReadsSyncMetadata:
         # Found via sync_metadata, hash unchanged → no new link, no duplicate.
         assert outcome.linked == 0
         assert outcome.unchanged == 1
-        assert await _count_references(async_connection, person_id) == 0
 
 
 async def _fetch_sync_metadata(connection: Any, person_id: str) -> Any:
@@ -163,7 +146,7 @@ class TestAutoLinkDualWrite:
         sync_service: ImmichSyncService,
         async_connection: Any,
     ) -> None:
-        """A single name match writes the sync_metadata link and zero external_references."""
+        """A single name match writes the canonical sync_metadata link."""
         result = await async_connection.execute(
             text(
                 "INSERT INTO contacts (first_name, last_name) "
@@ -184,6 +167,3 @@ class TestAutoLinkDualWrite:
         assert row.internal_id == contact_id
         assert row.internal_entity_type == "contact"
         assert row.external_entity_type == "person"
-
-        # ...and no external_references row is written.
-        assert await _count_references(async_connection, person_id) == 0

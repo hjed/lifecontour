@@ -51,6 +51,14 @@ class ContactRepository(ABC):
         pass
 
     @abstractmethod
+    async def contact_exists(self, contact_id: int) -> bool:
+        """Return whether a contact with the given ID exists.
+
+        A lightweight existence check that does not hydrate the aggregate.
+        """
+        pass
+
+    @abstractmethod
     async def find_names_by_ids(
         self, contact_ids: list[int]
     ) -> dict[int, tuple[str | None, str | None, str | None]]:

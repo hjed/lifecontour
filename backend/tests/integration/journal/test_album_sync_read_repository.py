@@ -148,20 +148,6 @@ async def _make_album_sync_metadata_only(
     return saved.id
 
 
-async def _count_album_external_refs(connection: AsyncConnection, album_id: str) -> int:
-    """Count legacy external_references album rows for an album id."""
-    result = await connection.execute(
-        text("""
-            SELECT count(*) AS n FROM external_references
-            WHERE external_system = 'immich'
-              AND external_entity_type = 'album'
-              AND external_entity_id = :album_id
-        """),
-        {"album_id": album_id},
-    )
-    return int(result.scalar_one())
-
-
 async def _sync_metadata_anchor(
     connection: AsyncConnection, album_id: str, journal_id: int
 ) -> datetime:
@@ -211,9 +197,6 @@ class TestAlbumLinkWrite:
         assert sm_row is not None
         assert sm_row.reference_data is not None
         assert json.loads(sm_row.reference_data) == reference_data
-
-        # ...and no external_references row is written.
-        assert await _count_album_external_refs(async_connection, album_id) == 0
 
     async def test_upsert_link_clears_stale_error_on_success(
         self, repo: AlbumSyncReadRepository, async_connection: AsyncConnection

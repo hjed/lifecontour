@@ -6,7 +6,6 @@ to track synchronization state and external references.
 """
 
 from core_shared.models.base import Base
-from core_shared.models.external_reference import ExternalReference
 from core_shared.models.journal_external_event_link import (
     ExternalEventLinkSyncCapability,
     ExternalEventLinkSyncStatus,
@@ -37,7 +36,6 @@ __all__ = [
     "SyncJob",
     "SyncJobStatus",
     "SyncType",
-    "ExternalReference",
     "JournalExternalEventLink",
     "ExternalEventLinkSyncCapability",
     "ExternalEventLinkSyncStatus",

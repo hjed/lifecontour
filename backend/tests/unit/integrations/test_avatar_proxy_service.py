@@ -1,7 +1,7 @@
 """Unit tests for the AvatarProxyService.
 
 Tests are structured around the refactored service that uses
-``ExternalReferenceRepository`` for person-ID lookups and
+``IntegrationLinkRepository`` for person-ID lookups and
 ``ImmichTokenService`` for credential resolution.
 """
 
@@ -18,7 +18,7 @@ from app.core.integrations.immich.avatar_proxy_service import (
 
 @pytest.fixture
 def mock_ext_ref_repo() -> AsyncMock:
-    """Provide a mock ExternalReferenceRepository."""
+    """Provide a mock IntegrationLinkRepository."""
     return AsyncMock()
 
 
@@ -48,7 +48,7 @@ class TestGetImmichPersonId:
         service: AvatarProxyService,
         mock_ext_ref_repo: AsyncMock,
     ) -> None:
-        """Should return the person_id from ExternalReferenceRepository."""
+        """Should return the person_id from IntegrationLinkRepository."""
         mock_ext_ref_repo.get_immich_person_id.return_value = "immich-person-uuid"
 
         result = await mock_ext_ref_repo.get_immich_person_id(42)

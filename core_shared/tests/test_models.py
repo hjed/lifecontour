@@ -11,7 +11,6 @@ from uuid import UUID
 from core_shared.models import (
     ExternalEventLinkSyncCapability,
     ExternalEventLinkSyncStatus,
-    ExternalReference,
     JournalExternalEventLink,
     SyncJob,
     SyncJobStatus,
@@ -205,54 +204,6 @@ class TestSyncMetadata:
         assert sync_metadata.external_entity_type is None
 
 
-class TestExternalReference:
-    """Test ExternalReference model."""
-
-    def test_external_reference_creation(self) -> None:
-        """Test creating ExternalReference instance."""
-        now = datetime.now(UTC)
-
-        reference = ExternalReference(
-            internal_entity_type="contact",
-            internal_entity_id=123,
-            external_system="immich",
-            external_entity_type="person",
-            external_entity_id="person_uuid_456",
-            reference_data='{"url": "https://example.com/person/456"}',
-            created_at=now,
-            updated_at=now,
-        )
-
-        assert reference.internal_entity_type == "contact"
-        assert reference.internal_entity_id == 123
-        assert reference.external_system == "immich"
-        assert reference.external_entity_type == "person"
-        assert reference.external_entity_id == "person_uuid_456"
-        assert reference.reference_data == '{"url": "https://example.com/person/456"}'
-
-    def test_external_reference_repr(self) -> None:
-        """Test ExternalReference string representation."""
-        reference = ExternalReference(
-            id=1,
-            internal_entity_type="contact",
-            internal_entity_id=123,
-            external_system="immich",
-            external_entity_type="person",
-            external_entity_id="person_uuid_456",
-            created_at=datetime.now(UTC),
-            updated_at=datetime.now(UTC),
-        )
-
-        repr_str = repr(reference)
-        assert "ExternalReference(id=1" in repr_str
-        assert "internal=contact:123" in repr_str
-        assert "external=immich:person_uuid_456" in repr_str
-
-    def test_external_reference_table_name(self) -> None:
-        """Test that ExternalReference has correct table name."""
-        assert ExternalReference.__tablename__ == "external_references"
-
-
 class TestJournalExternalEventLink:
     """Test JournalExternalEventLink model."""
 
@@ -312,7 +263,6 @@ class TestModelImports:
             Base,
             ExternalEventLinkSyncCapability,
             ExternalEventLinkSyncStatus,
-            ExternalReference,
             JournalExternalEventLink,
             SyncMetadata,
             SyncStatus,
@@ -321,7 +271,6 @@ class TestModelImports:
         # Test that classes are available
         assert SyncMetadata is not None
         assert SyncStatus is not None
-        assert ExternalReference is not None
         assert JournalExternalEventLink is not None
         assert ExternalEventLinkSyncCapability is not None
         assert ExternalEventLinkSyncStatus is not None
@@ -329,7 +278,6 @@ class TestModelImports:
 
         # Test that they are the correct types
         assert issubclass(SyncMetadata, Base)
-        assert issubclass(ExternalReference, Base)
         assert issubclass(JournalExternalEventLink, Base)
 
     def test_import_from_models_package(self) -> None:
@@ -338,7 +286,6 @@ class TestModelImports:
             Base,
             ExternalEventLinkSyncCapability,
             ExternalEventLinkSyncStatus,
-            ExternalReference,
             JournalExternalEventLink,
             SyncMetadata,
             SyncStatus,
@@ -347,7 +294,6 @@ class TestModelImports:
         # Test that classes are available
         assert SyncMetadata is not None
         assert SyncStatus is not None
-        assert ExternalReference is not None
         assert JournalExternalEventLink is not None
         assert ExternalEventLinkSyncCapability is not None
         assert ExternalEventLinkSyncStatus is not None

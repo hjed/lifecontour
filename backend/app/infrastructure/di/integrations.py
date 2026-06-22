@@ -7,9 +7,6 @@ registry.
 """
 
 from arq.connections import ArqRedis, RedisSettings
-from core_shared.repositories.external_reference_repository import (
-    ExternalReferenceRepository,
-)
 from core_shared.repositories.integration_link_repository import (
     IntegrationLinkRepository,
 )
@@ -27,9 +24,11 @@ from app.core.integrations.adapters.sql.snipeit_settings_repository import (
 from app.core.integrations.adapters.sql.strava_athlete_mapping_repository import (
     SqlStravaAthleteMappingRepository,
 )
+from app.core.integrations.adapters.sql.sync_metadata_repository import (
+    SyncMetadataRepository,
+)
 from app.core.integrations.database import IntegrationDatabaseManager
 from app.core.integrations.encryption import EncryptionService
-from app.core.integrations.external_reference_service import ExternalReferenceService
 from app.core.integrations.health_service import IntegrationHealthService
 from app.core.integrations.immich.adapters.album_api_client import ImmichAlbumApiClient
 from app.core.integrations.immich.album_cover_proxy_service import (
@@ -111,19 +110,11 @@ class IntegrationProvider(Provider):
         return EncryptionService(settings)
 
     @provide(scope=Scope.REQUEST)
-    def provide_external_reference_service(
+    def provide_sync_metadata_repository(
         self, connection: AsyncConnection
-    ) -> ExternalReferenceService:
-        """
-        Provide external reference service for request scope.
-
-        Args:
-            connection: Database connection
-
-        Returns:
-            ExternalReferenceService: External reference service instance
-        """
-        return ExternalReferenceService(connection)
+    ) -> SyncMetadataRepository:
+        """Provide SyncMetadataRepository (canonical link writes) per request."""
+        return SyncMetadataRepository(connection)
 
     @provide(scope=Scope.REQUEST)
     def provide_outbox_event_processor(
@@ -334,13 +325,6 @@ class IntegrationProvider(Provider):
             connection=connection,
             encryption_key=settings.immich_encryption_key,
         )
-
-    @provide(scope=Scope.REQUEST)
-    def provide_external_reference_repository(
-        self, connection: AsyncConnection
-    ) -> ExternalReferenceRepository:
-        """Provide ExternalReferenceRepository for request scope."""
-        return ExternalReferenceRepository(connection=connection)
 
     @provide(scope=Scope.REQUEST)
     def provide_integration_link_repository(

@@ -146,14 +146,12 @@ class TestOutboundSyncPushesNameToImmich:
 
         with (
             patch("immich_sync_service.IntegrationLinkRepository") as MockLinkRepo,
-            patch("immich_sync_service.ExternalReferenceRepository") as MockRepo,
         ):
-            repo_instance = MockRepo.return_value
             link_instance = MockLinkRepo.return_value
             link_instance.find_external_by_internal = AsyncMock(
                 return_value=_make_link_dict()
             )
-            repo_instance.find_contact_with_birthday = AsyncMock(
+            link_instance.find_contact_with_birthday = AsyncMock(
                 return_value=_make_contact_data(first_name="John", last_name="Smith")
             )
 
@@ -183,14 +181,12 @@ class TestOutboundSyncNameFormatting:
 
         with (
             patch("immich_sync_service.IntegrationLinkRepository") as MockLinkRepo,
-            patch("immich_sync_service.ExternalReferenceRepository") as MockRepo,
         ):
-            repo_instance = MockRepo.return_value
             link_instance = MockLinkRepo.return_value
             link_instance.find_external_by_internal = AsyncMock(
                 return_value=_make_link_dict()
             )
-            repo_instance.find_contact_with_birthday = AsyncMock(
+            link_instance.find_contact_with_birthday = AsyncMock(
                 return_value=_make_contact_data(
                     first_name="John", middle_name="Michael", last_name="Smith"
                 )
@@ -216,14 +212,12 @@ class TestOutboundSyncNameFormatting:
 
         with (
             patch("immich_sync_service.IntegrationLinkRepository") as MockLinkRepo,
-            patch("immich_sync_service.ExternalReferenceRepository") as MockRepo,
         ):
-            repo_instance = MockRepo.return_value
             link_instance = MockLinkRepo.return_value
             link_instance.find_external_by_internal = AsyncMock(
                 return_value=_make_link_dict()
             )
-            repo_instance.find_contact_with_birthday = AsyncMock(
+            link_instance.find_contact_with_birthday = AsyncMock(
                 return_value=_make_contact_data(first_name="Madonna", last_name=None)
             )
 
@@ -251,14 +245,12 @@ class TestOutboundSyncBirthdayPrecision:
 
         with (
             patch("immich_sync_service.IntegrationLinkRepository") as MockLinkRepo,
-            patch("immich_sync_service.ExternalReferenceRepository") as MockRepo,
         ):
-            repo_instance = MockRepo.return_value
             link_instance = MockLinkRepo.return_value
             link_instance.find_external_by_internal = AsyncMock(
                 return_value=_make_link_dict()
             )
-            repo_instance.find_contact_with_birthday = AsyncMock(
+            link_instance.find_contact_with_birthday = AsyncMock(
                 return_value=_make_contact_data(year=1990, month=5, day=15)
             )
 
@@ -287,15 +279,13 @@ class TestOutboundSyncBirthdayPrecision:
 
         with (
             patch("immich_sync_service.IntegrationLinkRepository") as MockLinkRepo,
-            patch("immich_sync_service.ExternalReferenceRepository") as MockRepo,
         ):
-            repo_instance = MockRepo.return_value
             link_instance = MockLinkRepo.return_value
             link_instance.find_external_by_internal = AsyncMock(
                 return_value=_make_link_dict()
             )
             # No year/month/day → non-full precision birthday
-            repo_instance.find_contact_with_birthday = AsyncMock(
+            link_instance.find_contact_with_birthday = AsyncMock(
                 return_value=_make_contact_data(year=None, month=None, day=None)
             )
 
@@ -325,15 +315,13 @@ class TestOutboundSyncBirthdayPrecision:
 
         with (
             patch("immich_sync_service.IntegrationLinkRepository") as MockLinkRepo,
-            patch("immich_sync_service.ExternalReferenceRepository") as MockRepo,
         ):
-            repo_instance = MockRepo.return_value
             link_instance = MockLinkRepo.return_value
             link_instance.find_external_by_internal = AsyncMock(
                 return_value=_make_link_dict()
             )
             # Local contact has no full-precision birthday
-            repo_instance.find_contact_with_birthday = AsyncMock(
+            link_instance.find_contact_with_birthday = AsyncMock(
                 return_value=_make_contact_data(year=None, month=None, day=None)
             )
 
@@ -369,14 +357,12 @@ class TestOutboundSyncMetadataUpdate:
 
         with (
             patch("immich_sync_service.IntegrationLinkRepository") as MockLinkRepo,
-            patch("immich_sync_service.ExternalReferenceRepository") as MockRepo,
         ):
-            repo_instance = MockRepo.return_value
             link_instance = MockLinkRepo.return_value
             link_instance.find_external_by_internal = AsyncMock(
                 return_value=_make_link_dict()
             )
-            repo_instance.find_contact_with_birthday = AsyncMock(
+            link_instance.find_contact_with_birthday = AsyncMock(
                 return_value=_make_contact_data()
             )
 
@@ -402,14 +388,12 @@ class TestOutboundSyncContactNotFound:
         """Contact referenced but not found returns error status."""
         with (
             patch("immich_sync_service.IntegrationLinkRepository") as MockLinkRepo,
-            patch("immich_sync_service.ExternalReferenceRepository") as MockRepo,
         ):
-            repo_instance = MockRepo.return_value
             link_instance = MockLinkRepo.return_value
             link_instance.find_external_by_internal = AsyncMock(
                 return_value=_make_link_dict()
             )
-            repo_instance.find_contact_with_birthday = AsyncMock(return_value=None)
+            link_instance.find_contact_with_birthday = AsyncMock(return_value=None)
 
             result = await service.sync_contact_outbound(contact_id=42)
 
@@ -439,14 +423,12 @@ class TestOutboundSyncSourceOfTruth:
 
         with (
             patch("immich_sync_service.IntegrationLinkRepository") as MockLinkRepo,
-            patch("immich_sync_service.ExternalReferenceRepository") as MockRepo,
         ):
-            repo_instance = MockRepo.return_value
             link_instance = MockLinkRepo.return_value
             link_instance.find_external_by_internal = AsyncMock(
                 return_value=_make_link_dict()
             )
-            repo_instance.find_contact_with_birthday = AsyncMock(
+            link_instance.find_contact_with_birthday = AsyncMock(
                 return_value=_make_contact_data(first_name="Jane", last_name="Doe")
             )
 
@@ -475,14 +457,12 @@ class TestOutboundSyncSourceOfTruth:
 
         with (
             patch("immich_sync_service.IntegrationLinkRepository") as MockLinkRepo,
-            patch("immich_sync_service.ExternalReferenceRepository") as MockRepo,
         ):
-            repo_instance = MockRepo.return_value
             link_instance = MockLinkRepo.return_value
             link_instance.find_external_by_internal = AsyncMock(
                 return_value=_make_link_dict()
             )
-            repo_instance.find_contact_with_birthday = AsyncMock(
+            link_instance.find_contact_with_birthday = AsyncMock(
                 return_value=_make_contact_data(year=1990, month=6, day=15)
             )
 

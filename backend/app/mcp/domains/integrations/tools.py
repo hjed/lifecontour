@@ -367,8 +367,11 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
             PendingEntityMappingRepository,
         )
 
-        from app.core.integrations.external_reference_service import (
-            ExternalReferenceService,
+        from app.core.contacts.adapters.sql.contact_repository import (
+            SqlContactRepository,
+        )
+        from app.core.integrations.adapters.sql.sync_metadata_repository import (
+            SyncMetadataRepository,
         )
 
         logger.info(
@@ -382,7 +385,8 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
             raise ValueError(f"Invalid action '{action}'. Must be 'link' or 'create'.")
 
         repo = PendingEntityMappingRepository(connection)
-        ext_ref_service = ExternalReferenceService(connection)
+        contact_repo = SqlContactRepository(connection)
+        sync_metadata_repo = SyncMetadataRepository(connection)
 
         # Single atomic operation: resolve the conflict, (optionally) create the
         # contact, and upsert the external reference must all commit together
@@ -425,7 +429,7 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
                 raise ValueError("contact_id is required when action is 'link'.")
 
             if action == "link":
-                if not await ext_ref_service.contact_exists(resolved_contact_id):
+                if not await contact_repo.contact_exists(resolved_contact_id):
                     raise ValueError(f"Contact {resolved_contact_id} not found.")
 
             updated = await repo.resolve(
@@ -435,7 +439,7 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
             if not updated:
                 raise ValueError(f"Failed to resolve conflict {conflict_id}.")
 
-            await ext_ref_service.upsert_contact_reference(
+            await sync_metadata_repo.upsert_contact_link(
                 contact_id=resolved_contact_id,
                 external_system="immich",
                 external_entity_type="person",

@@ -237,29 +237,19 @@ async def _link_immich_album(
 ) -> None:
     """Link a journal to an Immich album (PHOTO_ALBUM) with reference_data.
 
-    Mirrors the sync_metadata + external_references rows written by the Immich
-    album outbox processor, so the logbook export sees a real PHOTO_ALBUM link.
+    Mirrors the canonical ``sync_metadata`` album link written by the Immich album
+    outbox processor (the sole link store since ITER15-001), with ``reference_data``
+    carried on that row, so the logbook export sees a real PHOTO_ALBUM link.
     """
     await connection.execute(
         text("""
             INSERT INTO sync_metadata (
                 internal_id, integration_source, external_id,
-                last_synced_at, version_hash, sync_status
+                last_synced_at, version_hash, sync_status,
+                internal_entity_type, external_entity_type, reference_data
             ) VALUES (
-                :internal_id, 'immich_album', :external_id, now(), 'h', 'success'
-            )
-        """),
-        {"internal_id": journal_id, "external_id": album_id},
-    )
-    await connection.execute(
-        text("""
-            INSERT INTO external_references (
-                internal_entity_type, internal_entity_id, external_system,
-                external_entity_type, external_entity_id, reference_data,
-                created_at, updated_at
-            ) VALUES (
-                'journal', :internal_id, 'immich', 'album', :external_id,
-                :reference_data, now(), now()
+                :internal_id, 'immich_album', :external_id, now(), 'h', 'success',
+                'journal', 'album', :reference_data
             )
         """),
         {
