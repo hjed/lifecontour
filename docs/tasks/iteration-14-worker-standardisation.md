@@ -436,7 +436,7 @@ Make the asymmetric Immich orchestrators consistent and non-blocking.
 #### Phase 5: Extract shared fan-out helpers to `core_shared`
 **PR Size:** ~450 lines (shared module + tests ~250, two-worker migrate-and-delete ~200)
 
-**Status:** 🚧 IN PROGRESS
+**Status:** ✅ DONE
 
 Phases 3–4 migrated Immich and Strava onto the non-blocking fan-out pattern, but
 the worker-agnostic helper logic (`persist_fanout_children`, `record_child_terminal`,
@@ -448,15 +448,22 @@ It also propagates Phase 4's retry-idempotency + authoritative-`expected_childre
 hardening (originally added only to Strava) to Immich via the shared implementation.
 
 **Acceptance Criteria:**
-- [ ] `core_shared` exposes `persist_fanout_children`, `record_child_terminal`, `is_final_attempt`, `coerce_int` (worker-agnostic; `persist_fanout_children` parameterised by `integration_source`, idempotent across retries, sets `expected_children` to the authoritative persisted-child count).
-- [ ] `immich/worker.py` and `strava/worker.py` import these from `core_shared` and their local duplicates are deleted (the thin per-worker session wrappers and Strava's `_ensure_parent_row` remain, as they legitimately differ).
-- [ ] Behaviour is unchanged for both workers; Immich gains the retry-idempotency/authoritative-count hardening for free.
+- [x] `core_shared` exposes `persist_fanout_children`, `record_child_terminal`, `is_final_attempt`, `coerce_int` (worker-agnostic; `persist_fanout_children` parameterised by `integration_source`, idempotent across retries, sets `expected_children` to the authoritative persisted-child count).
+- [x] `immich/worker.py` and `strava/worker.py` import these from `core_shared` and their local duplicates are deleted (the thin per-worker session wrappers and Strava's `_ensure_parent_row` remain, as they legitimately differ).
+- [x] Behaviour is unchanged for both workers; Immich gains the retry-idempotency/authoritative-count hardening for free.
 
 **Required Test Coverage:**
-- **Unit:** `core_shared/tests/unit/test_fanout.py` covers the four helpers directly (coercion table, terminal row-match→increment vs unmatched→skip, persist creates N + idempotent skip-existing + authoritative `expected_children` + zero→`COMPLETED`). Both workers' existing unit + integration suites continue to pass against the shared implementation.
+- [x] **Unit:** `core_shared/tests/unit/test_fanout.py` covers the four helpers directly (coercion table, terminal row-match→increment vs unmatched→skip, persist creates N + idempotent skip-existing + authoritative `expected_children` + zero→`COMPLETED`). Both workers' existing unit + integration suites continue to pass against the shared implementation.
 
 **Required Documentation Updates:**
-- `immich`/`strava` `README.md` — note the shared `core_shared` fan-out helpers.
+- [x] `immich`/`strava` `README.md` — note the shared `core_shared` fan-out helpers.
+
+**Progress notes (Phase 5 complete — 2026-06-22, branch `iter14-003-4-strava-fanout`):**
+
+- `core_shared/core_shared/fanout.py` (new) hosts the worker-agnostic helpers — `coerce_int`, `is_final_attempt`, `record_child_terminal`, and `persist_fanout_children` (now parameterised by `integration_source`, idempotent skip-if-exists, authoritative `expected_children = max(drained, persisted)`). All four are exported from `core_shared/__init__.py` (+ `__all__`).
+- `integration_workers/strava/worker.py` and `integration_workers/immich/worker.py` import the four via `from core_shared.fanout import … as _…` (private aliases preserve the existing call sites + tests) and **delete** their local copies; each orchestrator's `persist_fanout_children` call passes its `integration_source`. The per-worker session wrappers (`_record_child_completion`/`_record_child_failure`) and Strava's `_ensure_parent_row` remain local — they legitimately differ (Immich finalises a successful child inline in the sync session; Strava's batch owns its own per-activity transactions; only Strava must create its own parent row). Immich inherits Phase 4's retry-idempotency/authoritative-count hardening for free.
+- **Tests:** `core_shared/tests/unit/test_fanout.py` (18) covers the helpers directly; the Immich orchestrator unit `_make_repo` gained a `list_children` mock (the shared persist queries it). No behavioural test changes were needed in either worker — the existing suites assert the same contract against the shared implementation.
+- Quality gates green: `core_shared` `ruff format --check`/`ruff check`/`mypy`/`pytest` (304); `strava` `ruff`/`mypy` + 195 unit + 6 fan-out integration; `immich` `ruff`/`mypy` + 198 unit + 4 fan-out integration. Net diff is duplication-negative (−243/+412, the additions being the shared module + its tests + docs), clearing the SonarCloud new-code duplication finding from Phase 4.
 
 ---
 
