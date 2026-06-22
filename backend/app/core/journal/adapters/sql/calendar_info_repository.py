@@ -41,6 +41,9 @@ def project_calendar_info_to_linked_calendar(
         event_end_date=calendar_info.event_end_date,
         created_at=calendar_info.created_at,
         updated_at=calendar_info.updated_at,
+        # Projecting already-persisted data: mirror the read path and skip
+        # validation so an invalid legacy row cannot crash calendar reads.
+        validate=False,
     )
 
 
@@ -95,6 +98,10 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
             event_end_date=end_date,
             created_at=row.created_at,
             updated_at=row.updated_at,
+            # Hydrating persisted data: never re-run write-time validation, so a
+            # single invalid legacy/externally-synced row cannot crash read paths
+            # such as the journals list.
+            validate=False,
         )
 
     async def find_by_journal_id(self, journal_id: int) -> CalendarInfo | None:

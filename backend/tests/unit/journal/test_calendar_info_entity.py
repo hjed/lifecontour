@@ -1,6 +1,7 @@
 """Unit tests for CalendarInfo entity (EVENT type)."""
 
 from datetime import UTC, date, datetime, time
+from typing import cast
 from uuid import uuid4
 
 import pytest
@@ -8,6 +9,7 @@ from core_shared.models.journals import (
     MAX_LOCATION_LENGTH,
     CalendarInfo,
     CalendarInfoValidationError,
+    EventState,
     event_date_in_timezone,
 )
 
@@ -265,6 +267,48 @@ class TestCalendarInfoTimeValidation:
                 start_time=time(17, 0),
                 end_time=time(9, 0),
             )
+
+
+@pytest.mark.unit
+class TestCalendarInfoHydration:
+    """validate=False hydrates persisted data without enforcing invariants."""
+
+    def test_reversed_times_do_not_raise_when_hydrating(self):
+        """A persisted row with reversed same-day times must not crash on read."""
+        info = CalendarInfo(
+            journal_id=1,
+            calendar_id=uuid4(),
+            start_time=time(17, 0),
+            end_time=time(9, 0),
+            event_start_date=date(2026, 6, 21),
+            event_end_date=date(2026, 6, 21),
+            validate=False,
+        )
+        assert info.start_time == time(17, 0)
+        assert info.end_time == time(9, 0)
+
+    def test_invalid_timezone_does_not_raise_when_hydrating(self):
+        """Other invariants (e.g. timezone) are also skipped on hydration."""
+        info = CalendarInfo(
+            journal_id=1,
+            calendar_id=uuid4(),
+            is_all_day=True,
+            timezone="Not/AZone",
+            validate=False,
+        )
+        assert info.timezone == "Not/AZone"
+
+    def test_event_state_string_coerced_to_enum_when_hydrating(self):
+        """event_state is still coerced to the enum for a consistent read type."""
+        info = CalendarInfo(
+            journal_id=1,
+            calendar_id=uuid4(),
+            is_all_day=True,
+            # Simulate a raw persisted value reaching the constructor.
+            event_state=cast(EventState, "confirmed"),
+            validate=False,
+        )
+        assert info.event_state is EventState.CONFIRMED
 
 
 @pytest.mark.unit
