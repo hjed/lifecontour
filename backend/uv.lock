@@ -616,7 +616,7 @@ wheels = [
 
 [[package]]
 name = "fastapi"
-version = "0.137.0"
+version = "0.138.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "annotated-doc" },
@@ -625,9 +625,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "typing-inspection" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/da/fe/fb25c287ff7e0f79fc6acf2e8b812725dad28d2a1446c0410bab1422ac90/fastapi-0.137.0.tar.gz", hash = "sha256:d0565d551f65a803ecff245390840867186f456ef98971f750724eed16e1541c", size = 408023, upload-time = "2026-06-14T12:51:30.672Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/5b/58/ff455d9fe47c60abadb34b9e05a304b1f05f5ab8000ac01565156b6f5e43/fastapi-0.138.0.tar.gz", hash = "sha256:d445a4877636ad191e7053e08c9bf98cb921a6756776848400bb773d1740c061", size = 419240, upload-time = "2026-06-20T01:18:05.259Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e7/f1/b38481428e50131e5345b535414d11d196f14990122fe69c9020c64e5683/fastapi-0.137.0-py3-none-any.whl", hash = "sha256:6dcbde8d464f92117c1accb9e42720f8e423fa9b86cb563b1f5862f785a06498", size = 121777, upload-time = "2026-06-14T12:51:29.067Z" },
+    { url = "https://files.pythonhosted.org/packages/6c/ff/8496d9847a5fedae775eb49460722d3efaa80487854273e9647ae876218c/fastapi-0.138.0-py3-none-any.whl", hash = "sha256:b6f54fd1bd72c80b0f899f172c61a600f6f7af9b43d4d772a018f35624048cb0", size = 126779, upload-time = "2026-06-20T01:18:03.483Z" },
 ]
 
 [[package]]
@@ -1196,15 +1196,15 @@ wheels = [
 
 [[package]]
 name = "meilisearch"
-version = "0.41.0"
+version = "0.41.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "camel-converter", extra = ["pydantic"] },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/35/3d/f0f4de580446f69b3df416f63d3df46cceecddb1a3815d2b2be364a3b1e9/meilisearch-0.41.0.tar.gz", hash = "sha256:317e96e18ae6628eb19a3b4533af165fc24b6b2c8aa7a7238c76bc081e7122ee", size = 32762, upload-time = "2026-04-22T05:17:29.525Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/67/20/1a0586f466a52bec20f8540b6c798be3f25dba1acdfd3ed3c4d04caf3cdb/meilisearch-0.41.1.tar.gz", hash = "sha256:40786fdbe43b5f8691155d620a5b701b78279d6af74bd022eed265a732d70a69", size = 32957, upload-time = "2026-06-16T03:32:22.44Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/db/79/773acfa746126450eef7a084f09bda02be2aed8fbcf312dfcccfff6cce66/meilisearch-0.41.0-py3-none-any.whl", hash = "sha256:87f542031d3ee8cce89ee47576ef6137ebd7245039845f0ad2bea29e2a535851", size = 33128, upload-time = "2026-04-22T05:17:28.17Z" },
+    { url = "https://files.pythonhosted.org/packages/a8/62/a19b0291232a064c716620a5b8c570c5c2e124425f044bc0d9f28c4075b9/meilisearch-0.41.1-py3-none-any.whl", hash = "sha256:457e3edc93a80b0ccad8bb85eb3758a57e83c5851ed9271aab66f0eb1b126d61", size = 33144, upload-time = "2026-06-16T03:32:21.376Z" },
 ]
 
 [[package]]
@@ -1631,7 +1631,7 @@ requires-dist = [
     { name = "core-shared", editable = "../core_shared" },
     { name = "cryptography", specifier = ">=49.0.0" },
     { name = "dishka", specifier = ">=1.10.1" },
-    { name = "fastapi", specifier = ">=0.137.0" },
+    { name = "fastapi", specifier = ">=0.138.0" },
     { name = "fastmcp", specifier = ">=3.4.2" },
     { name = "google-api-python-client", specifier = ">=2.197.0" },
     { name = "google-auth-httplib2", specifier = ">=0.4.0" },
@@ -1642,7 +1642,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.25.0" },
     { name = "importlib-metadata", specifier = "<10.0" },
     { name = "itsdangerous", specifier = ">=2.1.0" },
-    { name = "meilisearch", specifier = ">=0.41.0" },
+    { name = "meilisearch", specifier = ">=0.41.1" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=2.1.0" },
     { name = "opentelemetry-api", specifier = ">=1.42.1" },
     { name = "opentelemetry-exporter-otlp", specifier = ">=1.41.1" },
