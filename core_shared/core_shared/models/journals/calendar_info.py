@@ -7,7 +7,7 @@ This entity stores calendar-specific information like times, location,
 and sync settings for event-type journals.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import InitVar, dataclass, field
 from datetime import date, datetime, time
 from uuid import UUID
 
@@ -74,6 +74,11 @@ class CalendarInfo:
         event_end_date: Optional event end date (same as above)
         created_at: Creation timestamp
         updated_at: Last update timestamp
+        validate: When True (default) construction enforces the domain invariants.
+            Set False ONLY when hydrating an already-persisted row from the
+            database, so a single legacy/externally-synced row that violates the
+            invariants cannot crash read paths (e.g. the journals list). Writes
+            and ``dataclasses.replace`` always validate.
     """
 
     calendar_id: UUID
@@ -91,9 +96,21 @@ class CalendarInfo:
     event_end_date: date | None = field(default=None, repr=False)
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    validate: InitVar[bool] = True
 
-    def __post_init__(self) -> None:
-        """Validate calendar info properties."""
+    def __post_init__(self, validate: bool) -> None:
+        """Validate calendar info properties unless hydrating persisted data."""
+        if not validate:
+            # Hydrating an already-persisted row: coerce event_state to the enum
+            # for a consistent type, but do NOT enforce the invariants. A single
+            # legacy or externally-synced row that violates them must not crash
+            # read paths such as the journals list.
+            if not isinstance(self.event_state, EventState):
+                try:
+                    self.event_state = EventState(self.event_state)
+                except ValueError, KeyError, TypeError:
+                    pass
+            return
         self._validate_journal_id()
         self._validate_calendar_id()
         self._validate_times()
