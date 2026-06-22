@@ -254,6 +254,57 @@ class TestStravaOrchestrator:
         assert mock_redis.enqueue_job.await_count == 2
 
     @pytest.mark.asyncio
+    async def test_retry_drift_expects_authoritative_child_count(self) -> None:
+        """If a retry drains fewer pages than were persisted, ``expected_children``
+        tracks the authoritative persisted total, not the smaller fresh count."""
+        worker = _import_worker()
+        job_id = "strava-parent-drift"
+        ctx, mock_redis, _job = _make_ctx(job_id)
+        existing = [
+            MagicMock(job_id=f"strava-batch-{job_id}-p1"),
+            MagicMock(job_id=f"strava-batch-{job_id}-p2"),
+            MagicMock(job_id=f"strava-batch-{job_id}-p3"),
+        ]
+        repo = _make_repo(existing_children=existing)
+        # Fresh drain yields only 2 pages, but 3 children are already persisted.
+        async with _patched(repo=repo, batches=[[1], [2]]):
+            result = await worker.sync_strava_activities(ctx, "user-1", "full")
+
+        repo.set_expected_children.assert_awaited_once_with(job_id, 3)
+        assert result["status"] == "in_progress"
+        # Only the freshly-drained pages are (re-)dispatched.
+        assert mock_redis.enqueue_job.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_parent_row_created_before_drain(self) -> None:
+        """The parent row is owned up-front so a drain that rate-limits still
+        leaves an in-flight row for the dashboard (and survives the ARQ retry)."""
+        from arq import Retry
+
+        from strava_rate_limiter import StravaRateLimitError
+
+        worker = _import_worker()
+        job_id = "strava-parent-predrain"
+        ctx, mock_redis, _job = _make_ctx(job_id)
+        repo = _make_repo(parent_exists=False)
+        async with _patched(
+            repo=repo,
+            batches=[[1]],
+            raise_exc=StravaRateLimitError("rate limited", retry_after=60),
+        ):
+            with pytest.raises(Retry):
+                await worker.sync_strava_activities(ctx, "user-1", "full")
+
+        # The parent row was created before the drain raised — no children yet.
+        parent_creates = [
+            c for c in repo.create.await_args_list if not c.kwargs.get("parent_job_id")
+        ]
+        assert len(parent_creates) == 1
+        assert parent_creates[0].kwargs["job_id"] == job_id
+        mock_redis.enqueue_job.assert_not_called()
+        repo.set_expected_children.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_zero_batches_marks_parent_completed(self) -> None:
         worker = _import_worker()
         ctx, mock_redis, _job = _make_ctx("strava-empty")

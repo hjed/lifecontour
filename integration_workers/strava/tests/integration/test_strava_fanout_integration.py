@@ -356,6 +356,57 @@ class TestStravaFanout:
         assert parent.status == SyncJobStatus.IN_PROGRESS.value
 
     @pytest.mark.asyncio
+    async def test_parent_row_persisted_before_drain_rate_limit(
+        self, repo: SyncJobRepository, session_factory: Any, redis_pool: Any
+    ) -> None:
+        """A rate limit during the drain still leaves an in-flight parent row.
+
+        The orchestrator commits the parent ``running`` row before draining, so
+        the dashboard shows the sync even while the ARQ retry is deferred.
+        """
+        from arq import Retry
+
+        from strava_rate_limiter import StravaRateLimitError
+
+        parent_id = "strava-int-predrain"
+
+        def _raising_gen(*_a: Any, **_k: Any) -> Any:
+            async def _inner() -> Any:
+                raise StravaRateLimitError("rate limited", retry_after=60)
+                yield  # pragma: no cover - makes this an async generator
+
+            return _inner()
+
+        sync_service = MagicMock()
+        sync_service.list_activity_batches = _raising_gen
+        sync_service._api_client = MagicMock()
+        sync_service._api_client.close = AsyncMock()
+
+        with (
+            patch(
+                "worker._resolve_user_by_id",
+                AsyncMock(
+                    return_value={
+                        "encrypted_access_token": "a",
+                        "encrypted_refresh_token": "r",
+                    }
+                ),
+            ),
+            patch("worker._create_sync_service", return_value=sync_service),
+        ):
+            with pytest.raises(Retry):
+                await _worker_fn("sync_strava_activities")(
+                    _ctx(session_factory, redis_pool, parent_id), "user-1", "full"
+                )
+
+        parent = await repo.get_by_job_id(parent_id)
+        assert parent is not None
+        assert parent.status == SyncJobStatus.RUNNING.value
+        assert parent.integration_source == "strava"
+        # No children persisted yet — the drain never produced any.
+        assert await repo.list_children(parent_id) == []
+
+    @pytest.mark.asyncio
     async def test_zero_batches_marks_parent_completed(
         self, repo: SyncJobRepository, session_factory: Any, redis_pool: Any
     ) -> None:

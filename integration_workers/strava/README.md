@@ -92,13 +92,18 @@ inline cron block were removed.
 Activity import is a **non-blocking fan-out** (ITER14-003). The orchestrator no
 longer holds a worker slot waiting on its children:
 
-1. `sync_strava_activities` drains the activity-page generator, then owns its
-   parent `sync_jobs` row (its own `job_id` — Strava creates this row idempotently
-   since nothing enqueues one ahead of it), persists one linked child row per page
-   (`parent_job_id` → orchestrator), sets the parent's `expected_children`, marks
-   the parent **`IN_PROGRESS`** and **returns immediately**. Child rows are
-   committed *before* the children are dispatched, so each child's row already
-   exists when it runs. A fan-out with zero pages is marked `COMPLETED` directly.
+1. `sync_strava_activities` first owns its parent `sync_jobs` row (its own
+   `job_id` — Strava creates this row idempotently since nothing enqueues one
+   ahead of it) and commits it as `running` **before draining**, so the dashboard
+   shows an in-flight sync even if the drain defers on a rate limit. It then
+   drains the activity-page generator, persists one linked child row per page
+   (`parent_job_id` → orchestrator), sets the parent's `expected_children` to the
+   authoritative persisted-child count, marks the parent **`IN_PROGRESS`** and
+   **returns immediately**. Child rows are committed *before* the children are
+   dispatched, so each child's row already exists when it runs. A fan-out with
+   zero pages is marked `COMPLETED` directly. The persist step is idempotent
+   across ARQ retries (deterministic child ids, skip-if-exists), so a re-run never
+   raises a duplicate-key error.
 2. Each `sync_strava_activity_batch` processes its page (each activity in its own
    transaction via the outbox), then on success marks its own row `COMPLETED` and
    atomically increments the parent's `completed_children`. On a **final**-attempt

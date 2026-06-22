@@ -290,6 +290,14 @@ async def _persist_fanout_children(
     ``ON CONFLICT``), so a child row that already exists is skipped rather than
     raising a duplicate-key error — the deterministic ids let a retry re-dispatch
     the same children safely.
+
+    ``expected_children`` is set to the **authoritative** number of persisted
+    child rows, not the fresh ``count``. Should a retry's drain yield a different
+    page count than a prior attempt (e.g. activities created/deleted in between),
+    this keeps the parent's expected total consistent with the rows that actually
+    exist, so the reconciler never under-counts and finalises against the
+    authoritative child rows (a genuinely orphaned child is still bounded by the
+    staleness window).
     """
     child_ids = [f"{child_id_prefix}{i + 1}" for i in range(count)]
     existing_child_ids = {
@@ -307,9 +315,20 @@ async def _persist_fanout_children(
             parent_job_id=parent_job_id,
         )
 
-    await repo.set_expected_children(parent_job_id, count)
+    # The deterministic ids are a dense ``p1..pN`` prefix, so the persisted total
+    # after the create loop is ``max(count, prior count)``. Expect against that —
+    # never blindly the fresh count — so a drifting drain can't strand children.
+    expected_children = max(count, len(existing_child_ids))
+    if expected_children != count:
+        logger.warning(
+            "Strava fan-out child count drifted across attempts",
+            parent_job_id=parent_job_id,
+            drained_count=count,
+            persisted_count=expected_children,
+        )
+    await repo.set_expected_children(parent_job_id, expected_children)
 
-    if count == 0:
+    if expected_children == 0:
         await repo.update_status(
             job_id=parent_job_id,
             status="completed",
@@ -601,6 +620,21 @@ async def sync_strava_activities(
         )
         return {"status": "error", "reason": "no_auth"}
 
+    # Own the parent row up-front — before draining — so the integrations
+    # dashboard shows an in-flight sync immediately, even if the drain defers on
+    # a rate limit (the ARQ retry then re-runs against an already-running row).
+    async with session_factory() as session:
+        conn = await session.connection()
+        repo = SyncJobRepository(conn)
+        await _ensure_parent_row(
+            repo,
+            job_id=job_id,
+            user_id=user_id,
+            sync_type=sync_type,
+            started_at=started_at,
+        )
+        await session.commit()
+
     sync_service = _create_sync_service(
         user_id, auth_data, worker_settings, session_factory
     )
@@ -622,13 +656,6 @@ async def sync_strava_activities(
         async with session_factory() as session:
             conn = await session.connection()
             repo = SyncJobRepository(conn)
-            await _ensure_parent_row(
-                repo,
-                job_id=job_id,
-                user_id=user_id,
-                sync_type=sync_type,
-                started_at=started_at,
-            )
             child_ids = await _persist_fanout_children(
                 repo,
                 parent_job_id=job_id,
