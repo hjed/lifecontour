@@ -29,7 +29,24 @@ function getSyncStatusVariant(
 ): 'default' | 'destructive' | 'secondary' {
   if (status === 'completed') return 'default';
   if (status === 'failed') return 'destructive';
+  // Active, non-terminal states (queued / running / in_progress / cancelled)
+  // share the neutral "secondary" treatment.
   return 'secondary';
+}
+
+// Human-readable status labels so the badge announces a meaningful state to
+// screen readers (e.g. "In Progress") rather than the raw snake_case value.
+const SYNC_STATUS_LABELS: Record<string, string> = {
+  queued: 'Queued',
+  running: 'Running',
+  in_progress: 'In Progress',
+  completed: 'Completed',
+  failed: 'Failed',
+  cancelled: 'Cancelled',
+};
+
+function getSyncStatusLabel(status: string): string {
+  return SYNC_STATUS_LABELS[status] ?? status;
 }
 
 export interface SyncHistoryProps {
@@ -89,7 +106,7 @@ export function SyncHistory({ integrationId }: SyncHistoryProps) {
                       <Badge
                         variant={getSyncStatusVariant(job.attributes.status)}
                       >
-                        {job.attributes.status}
+                        {getSyncStatusLabel(job.attributes.status)}
                       </Badge>
                       <span className='text-sm font-medium'>
                         {job.attributes.syncType} sync

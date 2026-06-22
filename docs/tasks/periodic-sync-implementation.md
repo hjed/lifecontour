@@ -4,6 +4,8 @@
 
 This document outlines the implementation plan for adding automatic periodic synchronization to integration workers. Currently, integration workers can pull data from external systems (e.g., Google Contacts) when triggered manually via API, but there is no automatic/scheduled sync mechanism.
 
+> **Related cron — fan-out reconciliation (ITER14-003):** Alongside the periodic-sync cron described here, workers that use the non-blocking fan-out pattern (Immich, Strava) also schedule an always-on `reconcile_in_progress_parents` cron (every 5 minutes) via `generate_reconciliation_cron`. It is independent of `ENABLE_PERIODIC_SYNC` and finalises `IN_PROGRESS` parent `sync_jobs` against their child rows. See the worker READMEs' "Non-Blocking Sync Flow & Status Semantics" sections and `core_shared/core_shared/sync_reconciliation.py`.
+
 ## Problem Statement
 
 **Current State:**

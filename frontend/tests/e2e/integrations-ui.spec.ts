@@ -452,4 +452,154 @@ test.describe('Strava Integration Panel (mocked API)', () => {
     const reqBody = JSON.parse(request.postData() ?? '{}');
     expect(reqBody.sync_type).toBe('smart');
   });
+
+  const googleConnected = {
+    id: 'google',
+    type: 'integration',
+    attributes: {
+      name: 'Google',
+      status: 'connected',
+      capabilities: ['contacts_sync'],
+      sync_summary: {
+        last_sync_time: '2026-01-01T12:00:00Z',
+        sync_count: 1,
+        error_count: 0,
+      },
+      needs_reauth: false,
+      needs_reconsent: false,
+    },
+  };
+
+  test('strava import shows IN_PROGRESS then resolves, without blocking other syncs', async ({
+    authenticatedPage,
+  }) => {
+    await setupIntegrationsMocks(authenticatedPage, [
+      stravaConnected,
+      googleConnected,
+    ]);
+
+    // The Strava parent sync job's status — starts IN_PROGRESS (non-blocking
+    // fan-out) and is flipped to completed once the reconciler finalises it.
+    let stravaStatus = 'in_progress';
+    await authenticatedPage.route(
+      '**/api/integrations/strava/sync-history**',
+      (route: Route) =>
+        route.fulfill(
+          json({
+            data: [
+              {
+                id: 'strava-job-1',
+                type: 'sync-job',
+                attributes: {
+                  status: stravaStatus,
+                  syncType: 'smart',
+                  createdAt: new Date().toISOString(),
+                  progress: stravaStatus === 'in_progress' ? 10 : 100,
+                },
+              },
+            ],
+            meta: { total: 1, page: 1, pageSize: 5 },
+          })
+        )
+    );
+
+    // The import endpoint returns immediately with IN_PROGRESS (the orchestrator
+    // releases its worker slot rather than blocking on the children).
+    await authenticatedPage.route(
+      '**/api/integrations/strava/activity_import/sync',
+      (route: Route) => {
+        if (route.request().method() !== 'POST') return route.fallback();
+        return route.fulfill(
+          json({
+            data: {
+              id: 'strava-job-1',
+              type: 'sync-job',
+              attributes: {
+                status: 'in_progress',
+                syncType: 'smart',
+                createdAt: new Date().toISOString(),
+                progress: 0,
+              },
+            },
+          })
+        );
+      }
+    );
+
+    // A different integration's sync can still be triggered while Strava is
+    // in progress — the fan-out does not hold a shared worker slot.
+    let googleSyncTriggered = false;
+    await authenticatedPage.route(
+      '**/api/integrations/google/contacts/sync',
+      (route: Route) => {
+        if (route.request().method() !== 'POST') return route.fallback();
+        googleSyncTriggered = true;
+        return route.fulfill(
+          json({
+            data: {
+              id: 'google-job-1',
+              type: 'sync-job',
+              attributes: {
+                status: 'queued',
+                syncType: 'smart',
+                createdAt: new Date().toISOString(),
+                progress: 0,
+              },
+            },
+          })
+        );
+      }
+    );
+
+    await authenticatedPage.goto('/integrations');
+
+    const stravaPanel = authenticatedPage.getByTestId(
+      'integration-panel-strava'
+    );
+
+    // Trigger the Strava import — returns immediately (non-blocking).
+    const stravaSyncReq = authenticatedPage.waitForRequest(
+      request =>
+        request
+          .url()
+          .includes('/api/integrations/strava/activity_import/sync') &&
+        request.method() === 'POST'
+    );
+    await stravaPanel
+      .locator('[data-testid="trigger-strava-activity_import-sync"]')
+      .click();
+    await stravaSyncReq;
+
+    // The Sync History surface renders IN_PROGRESS as an active state with a
+    // human-readable label (not the raw snake_case, not a terminal/error style).
+    await stravaPanel.getByRole('button', { name: /Sync History/i }).click();
+    const jobItem = authenticatedPage
+      .locator('[data-testid="sync-job-item"]')
+      .first();
+    await expect(jobItem).toContainText('In Progress');
+    await expect(jobItem).not.toContainText('Failed');
+    await authenticatedPage.keyboard.press('Escape');
+    await expect(authenticatedPage.getByRole('dialog')).toBeHidden();
+
+    // Other integrations are not blocked while Strava is in progress.
+    const googleSyncReq = authenticatedPage.waitForRequest(
+      request =>
+        request.url().includes('/api/integrations/google/contacts/sync') &&
+        request.method() === 'POST'
+    );
+    await authenticatedPage.click(
+      '[data-testid="trigger-google-contacts-sync"]'
+    );
+    await googleSyncReq;
+    expect(googleSyncTriggered).toBe(true);
+
+    // The fan-out resolves: with the parent now completed, the same surface
+    // renders the terminal state (reload clears the 30s-cached history query).
+    stravaStatus = 'completed';
+    await authenticatedPage.reload();
+    await stravaPanel.getByRole('button', { name: /Sync History/i }).click();
+    await expect(
+      authenticatedPage.locator('[data-testid="sync-job-item"]').first()
+    ).toContainText('Completed');
+  });
 });

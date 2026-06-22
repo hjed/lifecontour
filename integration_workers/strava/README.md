@@ -55,6 +55,7 @@ class StravaWorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
         sync_strava_activities,
         sync_strava_activity_batch,
         periodic_sync_all_strava_accounts,
+        reconcile_in_progress_parents,   # shared fan-out reconciler (ITER14-003)
     ]
     on_startup = _on_startup        # build_worker_lifecycle(log_consumer_errors=True)
     on_shutdown = _on_shutdown
@@ -65,11 +66,15 @@ class StravaWorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
     max_tries = 20                  # many retries to span Strava's daily-limit reset
     max_jobs = 5                    # cap concurrency below arq's default of 10
 
-    cron_jobs = generate_cron_jobs(
-        periodic_sync_all_strava_accounts,
-        enable_periodic_sync=settings.enable_periodic_sync,
-        sync_interval_hours=settings.sync_interval_hours,
-    )
+    cron_jobs = [
+        *generate_cron_jobs(
+            periodic_sync_all_strava_accounts,
+            enable_periodic_sync=settings.enable_periodic_sync,
+            sync_interval_hours=settings.sync_interval_hours,
+        ),
+        # Always on: finalises non-blocking IN_PROGRESS fan-out parents.
+        *generate_reconciliation_cron(reconcile_in_progress_parents),
+    ]
 ```
 
 `job_timeout`, `keep_result`, and the retry backoff match the
@@ -81,6 +86,52 @@ arq's default is `3600`, so this worker (which does not redeclare it) runs at
 `3600` — the shared `30` applies only to workers that declare it on the leaf. The
 per-worker `startup`/`shutdown`, the `_on_consumer_task_done` callback, and the
 inline cron block were removed.
+
+## Non-Blocking Sync Flow & Status Semantics
+
+Activity import is a **non-blocking fan-out** (ITER14-003). The orchestrator no
+longer holds a worker slot waiting on its children:
+
+1. `sync_strava_activities` first owns its parent `sync_jobs` row (its own
+   `job_id` — Strava creates this row idempotently since nothing enqueues one
+   ahead of it) and commits it as `running` **before draining**, so the dashboard
+   shows an in-flight sync even if the drain defers on a rate limit. It then
+   drains the activity-page generator, persists one linked child row per page
+   (`parent_job_id` → orchestrator), sets the parent's `expected_children` to the
+   authoritative persisted-child count, marks the parent **`IN_PROGRESS`** and
+   **returns immediately**. Child rows are committed *before* the children are
+   dispatched, so each child's row already exists when it runs. A fan-out with
+   zero pages is marked `COMPLETED` directly. The persist step is idempotent
+   across ARQ retries (deterministic child ids, skip-if-exists), so a re-run never
+   raises a duplicate-key error.
+2. Each `sync_strava_activity_batch` processes its page (each activity in its own
+   transaction via the outbox), then on success marks its own row `COMPLETED` and
+   atomically increments the parent's `completed_children`. On a **final**-attempt
+   failure it marks its row `FAILED` and increments `failed_children`; a transient
+   failure — including a rate-limit `Retry` deferral — just propagates so ARQ
+   retries without touching counters.
+3. The shared **reconciliation cron** (`reconcile_in_progress_parents`, run every
+   5 minutes) scans `IN_PROGRESS` parents and finalises each against its **child
+   rows** (the authoritative source — counters are only a fast path): all children
+   succeeded → `COMPLETED`; any failed/cancelled → `FAILED` with a summary; a
+   parent whose children stop progressing within
+   `reconciliation_stale_after_seconds` is treated as stuck and marked `FAILED`.
+   Strava **widens this window to 6 hours** (the shared default is 30 min)
+   because a rate-limited batch can be deferred by up to ~1 hour per attempt — a
+   30-minute window would fail a parent whose children are still legitimately
+   retrying. It stays env-overridable via `RECONCILIATION_STALE_AFTER_SECONDS`,
+   and activity data is imported idempotently via the outbox regardless of the
+   parent's final status.
+
+`IN_PROGRESS` therefore means "fan-out dispatched, awaiting children", distinct
+from `RUNNING` ("actively executing on a worker"); the integrations dashboard
+renders it as an active (non-terminal) state. The reconciler being authoritative
+over child rows means a missed counter increment can never strand a parent. See
+`docs/architecture/integration-architecture.md` for the generic lifecycle and
+`core_shared/core_shared/sync_reconciliation.py` for the reconciler. The
+worker-agnostic fan-out steps (`persist_fanout_children`, `record_child_terminal`,
+`is_final_attempt`) are shared in `core_shared/core_shared/fanout.py`; only the
+Strava-specific parent-row ownership and per-batch session wrappers live here.
 
 ## Running the Worker
 

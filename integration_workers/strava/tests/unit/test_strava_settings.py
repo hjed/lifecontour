@@ -98,6 +98,35 @@ def test_per_worker_identity_overrides(clean_env: None) -> None:
     assert settings.otel_service_name == "strava-worker"
 
 
+def test_reconciliation_window_widened_for_rate_limits(clean_env: None) -> None:
+    """Strava widens the reconciliation staleness window past its ~1h deferrals.
+
+    The shared base default is 30 min, which would prematurely fail a parent
+    whose children are legitimately deferred by a rate limit; Strava overrides it
+    to 6 hours (still env-overridable).
+    """
+    settings = _make_settings()
+
+    assert settings.reconciliation_stale_after_seconds == 6 * 60 * 60
+    assert (
+        settings.reconciliation_stale_after_seconds
+        > BaseWorkerSettings.model_fields[
+            "reconciliation_stale_after_seconds"
+        ].get_default()
+    )
+
+
+def test_reconciliation_window_env_overridable(
+    clean_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The widened window can still be tuned via the environment."""
+    monkeypatch.setenv("RECONCILIATION_STALE_AFTER_SECONDS", "43200")
+
+    settings = _make_settings()
+
+    assert settings.reconciliation_stale_after_seconds == 43200
+
+
 def test_secrets_are_masked(clean_env: None) -> None:
     """All secrets are SecretStr: masked in repr/str, raw via accessor."""
     settings = _make_settings()

@@ -116,6 +116,9 @@ def _make_repo() -> MagicMock:
     repo.create = AsyncMock()
     repo.set_expected_children = AsyncMock()
     repo.update_status = AsyncMock()
+    # The shared ``persist_fanout_children`` queries existing children to stay
+    # idempotent across retries; default to none persisted yet.
+    repo.list_children = AsyncMock(return_value=[])
     return repo
 
 

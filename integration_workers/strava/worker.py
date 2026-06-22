@@ -9,6 +9,7 @@ event fan-out.
 """
 
 import random
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from arq import Retry, run_worker
@@ -17,10 +18,22 @@ from core_shared import (
     SharedARQWorkerSettings,
     build_worker_lifecycle,
     generate_cron_jobs,
+    generate_reconciliation_cron,
+    reconcile_in_progress_parents,
     redis_settings_from_url,
+)
+from core_shared.fanout import (
+    is_final_attempt as _is_final_attempt,
+)
+from core_shared.fanout import (
+    persist_fanout_children as _persist_fanout_children,
+)
+from core_shared.fanout import (
+    record_child_terminal as _record_child_terminal,
 )
 from core_shared.integration_constants import STRAVA_ARQ_QUEUE_NAME
 from core_shared.logging import configure_logging, get_logger
+from core_shared.repositories.sync_job_repository import SyncJobRepository
 from core_shared.telemetry import setup_telemetry, trace_arq_job
 
 from strava_rate_limiter import StravaRateLimitError
@@ -204,6 +217,89 @@ def _create_sync_service(
     )
 
 
+# ---------------------------------------------------------------------------
+# Non-blocking fan-out helpers
+#
+# The worker-agnostic pieces (`persist_fanout_children`, `record_child_terminal`,
+# `is_final_attempt`) live in `core_shared.fanout` and are imported above. The
+# helpers below are Strava-specific: it owns its parent row up-front
+# (`_ensure_parent_row`) since nothing enqueues one ahead of the orchestrator,
+# and its batch sync manages its own per-activity transactions, so the child
+# terminal updates run in their own committed unit of work.
+# ---------------------------------------------------------------------------
+
+
+async def _ensure_parent_row(
+    repo: SyncJobRepository,
+    *,
+    job_id: str,
+    user_id: str,
+    sync_type: str,
+    started_at: datetime,
+) -> None:
+    """Idempotently own the orchestrator's parent ``sync_jobs`` row.
+
+    The orchestrator's own ``job_id`` is the parent. On the first run no row
+    exists yet (nothing enqueues a row for Strava), so create it; on an ARQ
+    retry it already exists. Either way mark it ``running`` with ``started_at``
+    before the children are persisted.
+    """
+    existing = await repo.get_by_job_id(job_id)
+    if existing is None:
+        await repo.create(
+            job_id=job_id,
+            user_id=user_id,
+            integration_source="strava",
+            sync_type=sync_type,
+            status="running",
+        )
+    await repo.update_status(
+        job_id=job_id, status="running", started_at=started_at, progress=0
+    )
+
+
+async def _record_child_completion(
+    session_factory: Any,
+    child_job_id: str,
+    parent_job_id: str,
+) -> None:
+    """Mark a child row ``completed`` and bump ``completed_children``.
+
+    Runs in its own committed unit of work because the Strava batch sync owns its
+    per-activity transactions internally, so there is no shared session to join.
+    """
+    async with session_factory() as session:
+        conn = await session.connection()
+        repo = SyncJobRepository(conn)
+        await _record_child_terminal(
+            repo,
+            child_job_id=child_job_id,
+            parent_job_id=parent_job_id,
+            status="completed",
+        )
+        await session.commit()
+
+
+async def _record_child_failure(
+    session_factory: Any,
+    child_job_id: str,
+    parent_job_id: str,
+    error_message: str,
+) -> None:
+    """Mark a child row ``failed`` and bump the parent's ``failed_children``."""
+    async with session_factory() as session:
+        conn = await session.connection()
+        repo = SyncJobRepository(conn)
+        await _record_child_terminal(
+            repo,
+            child_job_id=child_job_id,
+            parent_job_id=parent_job_id,
+            status="failed",
+            error_message=error_message,
+        )
+        await session.commit()
+
+
 @trace_arq_job
 async def process_strava_webhook_event(
     ctx: dict[str, Any],
@@ -364,19 +460,21 @@ async def sync_strava_activities(
     sync_type: str = "full",
 ) -> dict[str, Any]:
     """
-    ARQ task: orchestrate Strava activity sync for a user.
+    ARQ task: orchestrate Strava activity sync (non-blocking fan-out).
 
-    Lists activity pages from Strava and enqueues a
-    ``sync_strava_activity_batch`` job for each page. Each batch
-    commits independently, so progress is preserved even if later
-    batches fail. ARQ's ``max_tries`` provides automatic retries
-    per batch.
+    Drains the activity-page generator, owns the parent ``sync_jobs`` row
+    (its ``ctx['job_id']``), persists one linked child row per page, sets
+    ``expected_children``, marks the parent ``in_progress`` and returns
+    immediately — it never awaits the children. The shared reconciliation cron
+    finalises the parent (``completed``/``failed``) against the child rows. Each
+    child batch commits independently and updates its own row + the parent
+    counters.
 
-    Called when the user clicks "Import Activities" in the UI or
-    when a full sync is triggered programmatically.
+    Called when the user clicks "Import Activities" in the UI or when a full
+    sync is triggered programmatically.
 
     Args:
-        ctx: ARQ worker context (must contain ``redis`` ARQ pool).
+        ctx: ARQ worker context (must contain ``redis``, ``session_factory``).
         user_id: Internal user ID.
         sync_type: 'full' or 'smart'.
 
@@ -385,11 +483,14 @@ async def sync_strava_activities(
     """
     worker_settings: StravaSettings = ctx["settings"]
     session_factory = ctx["session_factory"]
+    job_id = ctx.get("job_id", "unknown")
+    started_at = datetime.now(UTC)
 
     logger.info(
         "Starting Strava activity sync orchestrator",
         user_id=user_id,
         sync_type=sync_type,
+        job_id=job_id,
     )
 
     auth_data = await _resolve_user_by_id(session_factory, user_id)
@@ -400,60 +501,87 @@ async def sync_strava_activities(
         )
         return {"status": "error", "reason": "no_auth"}
 
+    # Own the parent row up-front — before draining — so the integrations
+    # dashboard shows an in-flight sync immediately, even if the drain defers on
+    # a rate limit (the ARQ retry then re-runs against an already-running row).
+    async with session_factory() as session:
+        conn = await session.connection()
+        repo = SyncJobRepository(conn)
+        await _ensure_parent_row(
+            repo,
+            job_id=job_id,
+            user_id=user_id,
+            sync_type=sync_type,
+            started_at=started_at,
+        )
+        await session.commit()
+
     sync_service = _create_sync_service(
         user_id, auth_data, worker_settings, session_factory
     )
 
     try:
-        # For smart sync, we could use after_timestamp from last sync
-        # For now, full sync imports everything
+        # For smart sync, we could use after_timestamp from last sync.
+        # For now, full sync imports everything.
         after_ts = None
-        batches_enqueued = 0
-        page_number = 0
 
-        async for activity_ids in sync_service.list_activity_batches(
-            after_timestamp=after_ts,
-        ):
-            page_number += 1
+        # Drain every page into memory first so the child count is known before
+        # we persist the hierarchy (persist-then-dispatch).
+        batches: list[list[int]] = [
+            activity_ids
+            async for activity_ids in sync_service.list_activity_batches(
+                after_timestamp=after_ts,
+            )
+        ]
 
-            # Deterministic job ID prevents duplicate enqueues if the
-            # orchestrator is retried by ARQ after a partial run.
-            batch_job_id = f"strava-batch-{user_id}-p{page_number}"
+        async with session_factory() as session:
+            conn = await session.connection()
+            repo = SyncJobRepository(conn)
+            child_ids = await _persist_fanout_children(
+                repo,
+                parent_job_id=job_id,
+                user_id=user_id,
+                integration_source="strava",
+                sync_type=sync_type,
+                child_id_prefix=f"strava-batch-{job_id}-p",
+                count=len(batches),
+            )
+            await session.commit()
 
+        # Child rows + parent state are committed; dispatch is now safe.
+        dispatched = 0
+        for child_id, activity_ids in zip(child_ids, batches, strict=True):
             job = await ctx["redis"].enqueue_job(
                 "sync_strava_activity_batch",
                 user_id,
                 activity_ids,
-                _job_id=batch_job_id,
+                job_id,
+                _job_id=child_id,
                 _queue_name=STRAVA_ARQ_QUEUE_NAME,
             )
-            if job:
-                batches_enqueued += 1
-                logger.info(
-                    "Enqueued activity batch job",
-                    job_id=job.job_id,
-                    batch_size=len(activity_ids),
-                    batch_number=page_number,
+            if job is None:
+                # Deterministic _job_id means a prior run already enqueued this
+                # child; the child row still exists, so the reconciler stays
+                # correct. Surface it rather than silently over-reporting.
+                logger.warning(
+                    "Strava activity batch already enqueued; skipping",
+                    job_id=job_id,
+                    child_job_id=child_id,
                 )
             else:
-                # enqueue_job returns None when a job with the same
-                # _job_id already exists — this is expected on retries.
-                logger.info(
-                    "Activity batch job already enqueued (idempotent)",
-                    batch_job_id=batch_job_id,
-                    batch_number=page_number,
-                )
+                dispatched += 1
 
         logger.info(
-            "Strava sync orchestrator completed",
+            "Strava sync orchestrator dispatched",
             user_id=user_id,
-            batches_enqueued=batches_enqueued,
-            total_pages=page_number,
+            job_id=job_id,
+            expected_children=len(batches),
+            dispatched=dispatched,
         )
         return {
-            "status": "enqueued",
+            "status": "in_progress" if batches else "completed",
             "sync_type": sync_type,
-            "batches_enqueued": batches_enqueued,
+            "batches_enqueued": len(batches),
         }
     except StravaRateLimitError as exc:
         defer = _rate_limit_defer(exc)
@@ -472,30 +600,41 @@ async def sync_strava_activity_batch(
     ctx: dict[str, Any],
     user_id: str,
     activity_ids: list[int],
+    parent_job_id: str | None = None,
 ) -> dict[str, Any]:
     """
     ARQ task: process a batch of Strava activity IDs.
 
-    Fetches full activity details + streams from Strava and creates
-    outbox events. Each activity is processed independently so one
-    failure doesn't block others. ARQ's ``max_tries`` handles
-    automatic retries on job-level failures (e.g. timeout).
+    Fetches full activity details + streams from Strava and creates outbox
+    events. Each activity is processed independently so one failure doesn't
+    block others. ARQ's ``max_tries`` handles automatic retries on job-level
+    failures (e.g. timeout).
+
+    On success the batch marks **its own** child ``sync_jobs`` row ``completed``
+    and atomically increments the parent's ``completed_children``; on a
+    **final**-attempt failure it marks the row ``failed`` and increments
+    ``failed_children``. A non-final failure (and a rate-limit ``Retry``) just
+    propagates so ARQ retries without touching the counters. ``parent_job_id``
+    is optional so legacy/direct invocations still work (counters are skipped).
 
     Args:
         ctx: ARQ worker context.
         user_id: Internal user ID.
         activity_ids: Strava activity IDs to process.
+        parent_job_id: Orchestrator job id for child-row + counter bookkeeping.
 
     Returns:
         Dict with batch processing result.
     """
     session_factory = ctx["session_factory"]
     worker_settings: StravaSettings = ctx["settings"]
+    child_job_id = ctx.get("job_id", "unknown")
 
     logger.info(
         "Processing Strava activity batch",
         user_id=user_id,
         batch_size=len(activity_ids),
+        parent_job_id=parent_job_id,
     )
 
     auth_data = await _resolve_user_by_id(session_factory, user_id)
@@ -516,6 +655,9 @@ async def sync_strava_activity_batch(
             session_factory=session_factory,
         )
 
+        if parent_job_id:
+            await _record_child_completion(session_factory, child_job_id, parent_job_id)
+
         logger.info(
             "Strava activity batch completed",
             user_id=user_id,
@@ -526,6 +668,7 @@ async def sync_strava_activity_batch(
             **result,
         }
     except StravaRateLimitError as exc:
+        # Transient: ARQ retries without recording a terminal child row.
         defer = _rate_limit_defer(exc)
         logger.warning(
             "Rate limit reached in batch sync, retrying",
@@ -533,6 +676,13 @@ async def sync_strava_activity_batch(
             defer_seconds=defer,
         )
         raise Retry(defer=defer) from exc
+    except Exception as e:
+        logger.exception("Strava activity batch failed", user_id=user_id, error=str(e))
+        if parent_job_id and _is_final_attempt(ctx):
+            await _record_child_failure(
+                session_factory, child_job_id, parent_job_id, str(e)
+            )
+        raise
     finally:
         await sync_service._api_client.close()
 
@@ -687,6 +837,7 @@ class StravaWorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
         sync_strava_activities,
         sync_strava_activity_batch,
         periodic_sync_all_strava_accounts,
+        reconcile_in_progress_parents,
     ]
 
     # Worker lifecycle (shared factory). Cast to arq's StartupShutdown Protocol:
@@ -709,12 +860,17 @@ class StravaWorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
     max_tries = 20
     max_jobs = 5
 
-    # Periodic sync cron (shared helper; empty when periodic sync is disabled).
-    cron_jobs = generate_cron_jobs(
-        periodic_sync_all_strava_accounts,
-        enable_periodic_sync=settings.enable_periodic_sync,
-        sync_interval_hours=settings.sync_interval_hours,
-    )
+    # Cron schedule: the periodic-sync cron (shared helper; empty when periodic
+    # sync is disabled) plus the always-on fan-out reconciliation cron, which
+    # finalises non-blocking ``IN_PROGRESS`` parents against their child rows.
+    cron_jobs = [
+        *generate_cron_jobs(
+            periodic_sync_all_strava_accounts,
+            enable_periodic_sync=settings.enable_periodic_sync,
+            sync_interval_hours=settings.sync_interval_hours,
+        ),
+        *generate_reconciliation_cron(reconcile_in_progress_parents),
+    ]
 
 
 if __name__ == "__main__":

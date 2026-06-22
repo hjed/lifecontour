@@ -41,6 +41,19 @@ def get_async_database_url() -> str:
     return database_url
 
 
+# Set required environment variables for worker settings before imports happen.
+# Importing ``worker`` constructs ``StravaSettings()`` at module load, which
+# requires these fields; provide deterministic test values when unset.
+if "DATABASE_URL" not in os.environ:
+    os.environ["DATABASE_URL"] = get_async_database_url()
+if "ENCRYPTION_KEY" not in os.environ:
+    os.environ["ENCRYPTION_KEY"] = "ooL44Zmgckd-qzhAlEr-NndhL7qby1UV_HkmWSze8mQ="
+if "STRAVA_CLIENT_ID" not in os.environ:
+    os.environ["STRAVA_CLIENT_ID"] = "test_client"
+if "STRAVA_CLIENT_SECRET" not in os.environ:
+    os.environ["STRAVA_CLIENT_SECRET"] = "test_secret"  # noqa: S105
+
+
 @pytest_asyncio.fixture(scope="function")
 async def async_engine() -> Any:
     """Create async database engine for testing."""
