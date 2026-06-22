@@ -433,7 +433,11 @@ class SyncMetadataRepository:
                 collisions.append(
                     IntegrationLinkCollision(
                         external_system=ref.external_system,
-                        external_entity_type=ref.external_entity_type,
+                        # A contact's external link is always to a 'person'; default
+                        # a legacy NULL-typed row so the dataclass stays non-null and
+                        # the worker's ``external_entity_type == 'person'`` collision
+                        # filter still matches.
+                        external_entity_type=ref.external_entity_type or "person",
                         source_external_id=ref.external_entity_id,
                         survivor_external_id=survivor_external_id,
                     )
