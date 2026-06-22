@@ -419,7 +419,8 @@ class SyncMetadataRepository:
                         """
                         UPDATE sync_metadata
                         SET internal_id = :survivor_id, updated_at = now()
-                        WHERE internal_id = :source_id
+                        WHERE internal_entity_type = 'contact'
+                          AND internal_id = :source_id
                           AND integration_source = :integration_source
                           AND external_id = :external_id
                         """
@@ -441,7 +442,8 @@ class SyncMetadataRepository:
                     text(
                         """
                         DELETE FROM sync_metadata
-                        WHERE internal_id = :source_id
+                        WHERE internal_entity_type = 'contact'
+                          AND internal_id = :source_id
                           AND integration_source = :integration_source
                           AND external_id = :external_id
                         """

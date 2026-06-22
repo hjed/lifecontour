@@ -59,21 +59,19 @@ _DEFAULT_MAX_PAIRS = 1000
 # Normalised full name: trimmed, whitespace-collapsed, lower-cased — mirrors
 # ``ContactNameMatcher`` normalisation so the SQL match is the conservative
 # exact-name case.
-_NORM_NAME = (
-    r"lower(regexp_replace(trim("
-    r"coalesce(c.first_name, '') || ' ' || coalesce(c.last_name, '')"
-    r"), '\s+', ' ', 'g'))"
-)
-
 # Build the unambiguous 1:1 survivor/source candidate pairs into a temp table.
 # A = email-less contact with an Immich person link; B = email-less contact with a
 # Google contact link and NO Immich link. The pair must share a normalised name
-# and resolve to exactly one survivor and one source for that name, and neither
-# contact may also appear on the other side of a different pair (no chains).
-_BUILD_CANDIDATES = sa.text(f"""
+# (trimmed, whitespace-collapsed, lower-cased — mirrors ``ContactNameMatcher``) and
+# resolve to exactly one survivor and one source for that name, and neither contact
+# may also appear on the other side of a different pair (no chains).
+_BUILD_CANDIDATES = sa.text(r"""
     CREATE TEMP TABLE _dedupe_candidates ON COMMIT DROP AS
     WITH immich_emailless AS (
-        SELECT DISTINCT sm.internal_id AS contact_id, {_NORM_NAME} AS norm_name
+        SELECT DISTINCT sm.internal_id AS contact_id,
+               lower(regexp_replace(trim(
+                   coalesce(c.first_name, '') || ' ' || coalesce(c.last_name, '')
+               ), '\s+', ' ', 'g')) AS norm_name
         FROM sync_metadata sm
         JOIN contacts c ON c.id = sm.internal_id
         WHERE sm.integration_source = 'immich'
@@ -86,11 +84,15 @@ _BUILD_CANDIDATES = sa.text(f"""
           )
     ),
     google_emailless AS (
-        SELECT DISTINCT sm.internal_id AS contact_id, {_NORM_NAME} AS norm_name
+        SELECT DISTINCT sm.internal_id AS contact_id,
+               lower(regexp_replace(trim(
+                   coalesce(c.first_name, '') || ' ' || coalesce(c.last_name, '')
+               ), '\s+', ' ', 'g')) AS norm_name
         FROM sync_metadata sm
         JOIN contacts c ON c.id = sm.internal_id
         WHERE sm.integration_source = 'google'
           AND sm.internal_entity_type = 'contact'
+          AND sm.external_entity_type = 'person'
           AND sm.internal_id IS NOT NULL
           AND NOT EXISTS (
               SELECT 1 FROM contact_methods m
@@ -155,6 +157,7 @@ _AMBIGUOUS = sa.text(r"""
         JOIN contacts c ON c.id = sm.internal_id
         WHERE sm.integration_source = 'google'
           AND sm.internal_entity_type = 'contact'
+          AND sm.external_entity_type = 'person'
           AND sm.internal_id IS NOT NULL
           AND NOT EXISTS (
               SELECT 1 FROM contact_methods m
