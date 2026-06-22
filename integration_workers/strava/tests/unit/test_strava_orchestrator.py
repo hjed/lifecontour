@@ -92,12 +92,15 @@ def _make_ctx(job_id: str) -> tuple[dict[str, Any], MagicMock, MagicMock]:
     return ctx, mock_redis, enqueued_job
 
 
-def _make_repo(*, parent_exists: bool = True) -> MagicMock:
+def _make_repo(
+    *, parent_exists: bool = True, existing_children: list[Any] | None = None
+) -> MagicMock:
     repo = MagicMock()
     repo.create = AsyncMock()
     repo.set_expected_children = AsyncMock()
     repo.update_status = AsyncMock(return_value=MagicMock())
     repo.get_by_job_id = AsyncMock(return_value=MagicMock() if parent_exists else None)
+    repo.list_children = AsyncMock(return_value=existing_children or [])
     return repo
 
 
@@ -221,6 +224,34 @@ class TestStravaOrchestrator:
         assert parent_creates[0].kwargs["job_id"] == job_id
         assert parent_creates[0].kwargs["integration_source"] == "strava"
         assert parent_creates[0].kwargs["sync_type"] == "smart"
+
+    @pytest.mark.asyncio
+    async def test_retry_skips_already_persisted_children(self) -> None:
+        """An ARQ retry after a prior commit must not re-create child rows.
+
+        ``create`` is a plain INSERT, so re-creating the deterministic child ids
+        would raise a duplicate-key error. The orchestrator skips children that
+        already exist and still re-dispatches them.
+        """
+        worker = _import_worker()
+        job_id = "strava-parent-retry"
+        ctx, mock_redis, _job = _make_ctx(job_id)
+        existing = [
+            MagicMock(job_id=f"strava-batch-{job_id}-p1"),
+            MagicMock(job_id=f"strava-batch-{job_id}-p2"),
+        ]
+        repo = _make_repo(existing_children=existing)
+        async with _patched(repo=repo, batches=[[1], [2]]):
+            result = await worker.sync_strava_activities(ctx, "user-1", "full")
+
+        # No child rows re-created, but the fan-out still re-dispatches + reports.
+        child_creates = [
+            c for c in repo.create.await_args_list if c.kwargs.get("parent_job_id")
+        ]
+        assert child_creates == []
+        repo.set_expected_children.assert_awaited_once_with(job_id, 2)
+        assert result["status"] == "in_progress"
+        assert mock_redis.enqueue_job.await_count == 2
 
     @pytest.mark.asyncio
     async def test_zero_batches_marks_parent_completed(self) -> None:

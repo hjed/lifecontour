@@ -320,6 +320,42 @@ class TestStravaFanout:
         assert parent.status == SyncJobStatus.COMPLETED.value
 
     @pytest.mark.asyncio
+    async def test_orchestrator_retry_is_idempotent(
+        self, repo: SyncJobRepository, session_factory: Any, redis_pool: Any
+    ) -> None:
+        """Re-running the orchestrator (ARQ retry) must not duplicate or error.
+
+        The deterministic child ids + plain-INSERT ``create`` would raise a
+        duplicate-key error on a naive retry; the orchestrator skips already
+        persisted children instead.
+        """
+        parent_id = "strava-int-retry"
+        first = await _dispatch(
+            batches=[[1], [2]],
+            session_factory=session_factory,
+            redis_pool=redis_pool,
+            parent_id=parent_id,
+        )
+        assert first["status"] == "in_progress"
+
+        # Second run with the same parent + same drained batches (a retry). It
+        # must not raise a duplicate-key error and must leave exactly 2 children.
+        second = await _dispatch(
+            batches=[[1], [2]],
+            session_factory=session_factory,
+            redis_pool=redis_pool,
+            parent_id=parent_id,
+        )
+        assert second["status"] == "in_progress"
+
+        children = await repo.list_children(parent_id)
+        assert len(children) == 2
+        parent = await repo.get_by_job_id(parent_id)
+        assert parent is not None
+        assert parent.expected_children == 2
+        assert parent.status == SyncJobStatus.IN_PROGRESS.value
+
+    @pytest.mark.asyncio
     async def test_zero_batches_marks_parent_completed(
         self, repo: SyncJobRepository, session_factory: Any, redis_pool: Any
     ) -> None:

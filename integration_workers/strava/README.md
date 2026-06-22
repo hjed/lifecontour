@@ -110,8 +110,13 @@ longer holds a worker slot waiting on its children:
    rows** (the authoritative source — counters are only a fast path): all children
    succeeded → `COMPLETED`; any failed/cancelled → `FAILED` with a summary; a
    parent whose children stop progressing within
-   `reconciliation_stale_after_seconds` (default 30 min) is treated as stuck and
-   marked `FAILED`.
+   `reconciliation_stale_after_seconds` is treated as stuck and marked `FAILED`.
+   Strava **widens this window to 6 hours** (the shared default is 30 min)
+   because a rate-limited batch can be deferred by up to ~1 hour per attempt — a
+   30-minute window would fail a parent whose children are still legitimately
+   retrying. It stays env-overridable via `RECONCILIATION_STALE_AFTER_SECONDS`,
+   and activity data is imported idempotently via the outbox regardless of the
+   parent's final status.
 
 `IN_PROGRESS` therefore means "fan-out dispatched, awaiting children", distinct
 from `RUNNING` ("actively executing on a worker"); the integrations dashboard

@@ -283,9 +283,21 @@ async def _persist_fanout_children(
     The caller commits this as a single unit of work *before* dispatching the
     children, so every child's row already exists when it updates itself and
     increments the parent counters.
+
+    Idempotent across orchestrator retries: ARQ may re-run the orchestrator after
+    a prior attempt already committed these rows (e.g. a crash or error during the
+    post-commit dispatch loop). ``create`` is a plain ``INSERT`` (no
+    ``ON CONFLICT``), so a child row that already exists is skipped rather than
+    raising a duplicate-key error — the deterministic ids let a retry re-dispatch
+    the same children safely.
     """
     child_ids = [f"{child_id_prefix}{i + 1}" for i in range(count)]
+    existing_child_ids = {
+        child.job_id for child in await repo.list_children(parent_job_id)
+    }
     for child_id in child_ids:
+        if child_id in existing_child_ids:
+            continue
         await repo.create(
             job_id=child_id,
             user_id=user_id,
