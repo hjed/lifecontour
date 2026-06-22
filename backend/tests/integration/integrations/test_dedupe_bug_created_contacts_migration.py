@@ -4,10 +4,12 @@ Verifies the data migration that merges the duplicate contacts produced by the
 Immich -> Google -> Immich loop before ``external_references`` is dropped:
 
 - the bug shape (email-less Immich-linked **A** + email-less Google-linked **B**
-  with the same normalised name) collapses to a single contact: B is merged into
-  the survivor A, which afterwards holds **both** the Immich and Google links and
-  carries B's re-pointed sub-entities (note, phone, birthday);
+  with the same normalised name **and** the same full-precision birthday) collapses
+  to a single contact: B is merged into the survivor A, which afterwards holds
+  **both** the Immich and Google links and carries B's re-pointed sub-entities;
 - a non-duplicate contact with an email is left untouched;
+- a legitimately email-less Google contact that shares the name but has a different
+  birthday (or no birthday) is left untouched (over-merge guard);
 - an ambiguous name (two survivors share one source candidate) is **not** merged
   (over-merge protection);
 - orphaned ``sync_metadata`` links (internal entity gone) are reconciled;
@@ -96,17 +98,33 @@ async def _add_email(conn: AsyncConnection, contact_id: int, value: str) -> None
     )
 
 
+async def _add_birthday(
+    conn: AsyncConnection, contact_id: int, year: int, month: int, day: int
+) -> None:
+    await conn.execute(
+        text(
+            "INSERT INTO contact_important_dates "
+            "(contact_id, date_type, precision, year, month, day) "
+            "VALUES (:cid, 'birthday', 'full', :y, :m, :d)"
+        ),
+        {"cid": contact_id, "y": year, "m": month, "d": day},
+    )
+
+
 async def _seed(engine_url: str) -> dict[str, int]:
     """Seed the bug-shaped and control data at the 0091 schema. Returns key ids."""
     engine = create_async_engine(engine_url)
     ids: dict[str, int] = {}
     try:
         async with engine.begin() as conn:
-            # Bug pair: A (immich, email-less) + B (google, email-less), same name.
+            # Bug pair: A (immich, email-less) + B (google, email-less), same name
+            # AND same full-precision birthday (the discriminator).
             ids["survivor"] = await _insert_contact(conn, "John", "Smith")
             ids["source"] = await _insert_contact(conn, "John", "Smith")
             await _link(conn, ids["survivor"], "immich", "immich-person-1")
             await _link(conn, ids["source"], "google", "people/c_dup")
+            await _add_birthday(conn, ids["survivor"], 1990, 5, 6)
+            await _add_birthday(conn, ids["source"], 1990, 5, 6)
             # B carries data that must survive the merge onto A.
             await conn.execute(
                 text(
@@ -122,14 +140,6 @@ async def _seed(engine_url: str) -> dict[str, int]:
                 ),
                 {"cid": ids["source"]},
             )
-            await conn.execute(
-                text(
-                    "INSERT INTO contact_important_dates "
-                    "(contact_id, date_type, precision, year, month, day) "
-                    "VALUES (:cid, 'birthday', 'full', 1990, 5, 6)"
-                ),
-                {"cid": ids["source"]},
-            )
 
             # Control 1: a Google contact named John Smith but WITH an email — not
             # email-less, so it must never be merged.
@@ -137,19 +147,35 @@ async def _seed(engine_url: str) -> dict[str, int]:
             await _link(conn, ids["with_email"], "google", "people/c_email")
             await _add_email(conn, ids["with_email"], "john@example.com")
 
-            # Control 2: a distinct, untouched contact.
+            # Control 2: a *legitimately* email-less Google contact (e.g. phone-only)
+            # that happens to share the survivor's name but has a DIFFERENT birthday
+            # — must NOT be merged (the over-merge guard the birthday match provides).
+            ids["diff_birthday"] = await _insert_contact(conn, "John", "Smith")
+            await _link(conn, ids["diff_birthday"], "google", "people/c_diff")
+            await _add_birthday(conn, ids["diff_birthday"], 1975, 1, 1)
+
+            # Control 3: an email-less Google contact sharing the name but with NO
+            # birthday at all — also must NOT be merged (no birthday to corroborate).
+            ids["no_birthday"] = await _insert_contact(conn, "John", "Smith")
+            await _link(conn, ids["no_birthday"], "google", "people/c_nobd")
+
+            # Control 4: a distinct, untouched contact.
             ids["unrelated"] = await _insert_contact(conn, "Jane", "Doe")
             await _link(conn, ids["unrelated"], "google", "people/c_jane")
             await _add_email(conn, ids["unrelated"], "jane@example.com")
 
             # Ambiguous trio: two immich email-less "Sam Lee" + one google
-            # email-less "Sam Lee" -> 2 survivors / 1 source -> skipped.
+            # email-less "Sam Lee", all sharing one birthday -> 2 survivors / 1
+            # source for that (name, birthday) key -> skipped.
             ids["amb_a1"] = await _insert_contact(conn, "Sam", "Lee")
             ids["amb_a2"] = await _insert_contact(conn, "Sam", "Lee")
             ids["amb_b"] = await _insert_contact(conn, "Sam", "Lee")
             await _link(conn, ids["amb_a1"], "immich", "immich-sam-1")
             await _link(conn, ids["amb_a2"], "immich", "immich-sam-2")
             await _link(conn, ids["amb_b"], "google", "people/c_sam")
+            await _add_birthday(conn, ids["amb_a1"], 1988, 8, 8)
+            await _add_birthday(conn, ids["amb_a2"], 1988, 8, 8)
+            await _add_birthday(conn, ids["amb_b"], 1988, 8, 8)
 
             # Orphan link: a contact link whose contact no longer exists.
             await conn.execute(
@@ -287,6 +313,20 @@ class TestDedupeBugCreatedContactsMigration:
             )
             == 1
         )
+
+        # 4b. Email-less Google same-name contacts that do NOT corroborate on
+        #     birthday (different birthday / no birthday) are left untouched — the
+        #     guard against over-merging legitimately email-less Google contacts.
+        for key in ("diff_birthday", "no_birthday"):
+            assert (
+                await _scalar(
+                    url,
+                    "SELECT count(*) FROM contacts WHERE id = :id",
+                    {"id": ids[key]},
+                )
+                == 1
+            )
+            assert await _links_for(url, ids[key]) == {"google"}
 
         # 5. The ambiguous "Sam Lee" trio is left untouched (no guessing).
         for key in ("amb_a1", "amb_a2", "amb_b"):

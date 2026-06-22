@@ -8,18 +8,25 @@ Cleans up the duplicate contacts created by the Immich -> Google -> Immich
 duplication loop before ``external_references`` is dropped (0093). The loop
 produced pairs of the same person:
 
-- **A (survivor)** — the original, email-less, Immich-origin contact (only Immich
-  produces email-less contacts), linked by ``sync_metadata(immich, person)``.
-- **B (source)** — an email-less duplicate re-imported by Google sync, linked by
+- **A (survivor)** — the original, email-less, Immich-origin contact carrying a
+  full-precision birthday (Immich contacts are "name + birthday only"), linked by
+  ``sync_metadata(immich, person)``.
+- **B (source)** — an email-less duplicate re-imported by Google sync (the
+  round-trip preserves the name and birthday), linked by
   ``sync_metadata(google, person)`` and carrying no Immich link.
 
-This data migration identifies that exact shape — an email-less Immich-linked
-contact and an email-less Google-linked contact sharing a normalised name — and
-merges B into A using the **same re-point SQL the live ``ContactMergeService``
-uses** (relationships, journal links, methods, addresses, notes, important dates,
-tags, top-level history, and the canonical ``sync_metadata`` links), then deletes
-B. Orphaned ``sync_metadata`` links (whose internal entity no longer exists) are
-reconciled afterwards.
+This data migration identifies that shape and merges B into A using the **same
+re-point SQL the live ``ContactMergeService`` uses** (relationships, journal links,
+methods, addresses, notes, important dates, tags, top-level history, and the
+canonical ``sync_metadata`` links), then deletes B. Orphaned ``sync_metadata``
+links (whose internal entity no longer exists) are reconciled afterwards.
+
+**Match discriminator.** Email-less is *not* exclusive to Immich (Google can also
+import phone-only/empty contacts), so name alone would risk merging two genuinely
+different people who share a name. A candidate pair must therefore share a
+normalised name **and** an identical full-precision birthday — the attribute the
+Immich-origin contact always carries and the round-trip preserves — so an accidental
+merge would require two distinct people with the same exact name and birthday.
 
 Safety (no over-merging, no silent loss):
 
@@ -61,19 +68,36 @@ _DEFAULT_MAX_PAIRS = 1000
 # exact-name case.
 # Build the unambiguous 1:1 survivor/source candidate pairs into a temp table.
 # A = email-less contact with an Immich person link; B = email-less contact with a
-# Google contact link and NO Immich link. The pair must share a normalised name
-# (trimmed, whitespace-collapsed, lower-cased — mirrors ``ContactNameMatcher``) and
-# resolve to exactly one survivor and one source for that name, and neither contact
-# may also appear on the other side of a different pair (no chains).
+# Google contact link and NO Immich link.
+#
+# Email-less is NOT exclusive to Immich (the Google inbound transformer can also
+# create phone-only/empty contacts), so a shared normalised name alone is too weak
+# a discriminator — two genuinely different people who happen to share a name could
+# be merged. The bug only ever produces an Immich-origin contact, which carries a
+# full-precision **birthday** (Immich contacts are "name + birthday only"), and the
+# Immich->Google->Immich round-trip preserves it. So a candidate pair must share a
+# normalised name AND an identical full-precision birthday — making a false merge
+# require two distinct people with the same exact name and birthday. Pairs that
+# don't corroborate on birthday are left for manual review rather than merged.
+#
+# A pair must additionally resolve to exactly one survivor and one source for that
+# (name, birthday) key, and neither contact may appear on the other side of another
+# pair (no chains).
 _BUILD_CANDIDATES = sa.text(r"""
     CREATE TEMP TABLE _dedupe_candidates ON COMMIT DROP AS
     WITH immich_emailless AS (
         SELECT DISTINCT sm.internal_id AS contact_id,
                lower(regexp_replace(trim(
                    coalesce(c.first_name, '') || ' ' || coalesce(c.last_name, '')
-               ), '\s+', ' ', 'g')) AS norm_name
+               ), '\s+', ' ', 'g')) AS norm_name,
+               bd.year AS bd_year, bd.month AS bd_month, bd.day AS bd_day
         FROM sync_metadata sm
         JOIN contacts c ON c.id = sm.internal_id
+        JOIN contact_important_dates bd
+          ON bd.contact_id = c.id
+         AND bd.date_type = 'birthday'
+         AND bd.precision = 'full'
+         AND bd.year IS NOT NULL AND bd.month IS NOT NULL AND bd.day IS NOT NULL
         WHERE sm.integration_source = 'immich'
           AND sm.internal_entity_type = 'contact'
           AND sm.external_entity_type = 'person'
@@ -87,9 +111,15 @@ _BUILD_CANDIDATES = sa.text(r"""
         SELECT DISTINCT sm.internal_id AS contact_id,
                lower(regexp_replace(trim(
                    coalesce(c.first_name, '') || ' ' || coalesce(c.last_name, '')
-               ), '\s+', ' ', 'g')) AS norm_name
+               ), '\s+', ' ', 'g')) AS norm_name,
+               bd.year AS bd_year, bd.month AS bd_month, bd.day AS bd_day
         FROM sync_metadata sm
         JOIN contacts c ON c.id = sm.internal_id
+        JOIN contact_important_dates bd
+          ON bd.contact_id = c.id
+         AND bd.date_type = 'birthday'
+         AND bd.precision = 'full'
+         AND bd.year IS NOT NULL AND bd.month IS NOT NULL AND bd.day IS NOT NULL
         WHERE sm.integration_source = 'google'
           AND sm.internal_entity_type = 'contact'
           AND sm.external_entity_type = 'person'
@@ -108,37 +138,50 @@ _BUILD_CANDIDATES = sa.text(r"""
     pairs AS (
         SELECT a.contact_id AS survivor_id,
                b.contact_id AS source_id,
-               a.norm_name
+               a.norm_name, a.bd_year, a.bd_month, a.bd_day
         FROM immich_emailless a
         JOIN google_emailless b
           ON b.norm_name = a.norm_name
+         AND b.bd_year = a.bd_year
+         AND b.bd_month = a.bd_month
+         AND b.bd_day = a.bd_day
          AND b.contact_id <> a.contact_id
         WHERE a.norm_name <> ''
     ),
     unambiguous AS (
-        SELECT norm_name
+        SELECT norm_name, bd_year, bd_month, bd_day
         FROM pairs
-        GROUP BY norm_name
+        GROUP BY norm_name, bd_year, bd_month, bd_day
         HAVING count(DISTINCT survivor_id) = 1
            AND count(DISTINCT source_id) = 1
     )
-    SELECT p.survivor_id, p.source_id, p.norm_name
+    SELECT p.survivor_id, p.source_id
     FROM pairs p
-    JOIN unambiguous u ON u.norm_name = p.norm_name
+    JOIN unambiguous u
+      ON u.norm_name = p.norm_name
+     AND u.bd_year = p.bd_year
+     AND u.bd_month = p.bd_month
+     AND u.bd_day = p.bd_day
     WHERE p.survivor_id NOT IN (SELECT source_id FROM pairs)
       AND p.source_id NOT IN (SELECT survivor_id FROM pairs)
 """)
 
-# Names that produced more than one survivor/source — recorded for the operator,
-# never merged automatically.
+# (name, birthday) keys that produced more than one survivor/source — recorded for
+# the operator, never merged automatically.
 _AMBIGUOUS = sa.text(r"""
     WITH immich_emailless AS (
         SELECT DISTINCT sm.internal_id AS contact_id,
                lower(regexp_replace(trim(
                    coalesce(c.first_name, '') || ' ' || coalesce(c.last_name, '')
-               ), '\s+', ' ', 'g')) AS norm_name
+               ), '\s+', ' ', 'g')) AS norm_name,
+               bd.year AS bd_year, bd.month AS bd_month, bd.day AS bd_day
         FROM sync_metadata sm
         JOIN contacts c ON c.id = sm.internal_id
+        JOIN contact_important_dates bd
+          ON bd.contact_id = c.id
+         AND bd.date_type = 'birthday'
+         AND bd.precision = 'full'
+         AND bd.year IS NOT NULL AND bd.month IS NOT NULL AND bd.day IS NOT NULL
         WHERE sm.integration_source = 'immich'
           AND sm.internal_entity_type = 'contact'
           AND sm.external_entity_type = 'person'
@@ -152,9 +195,15 @@ _AMBIGUOUS = sa.text(r"""
         SELECT DISTINCT sm.internal_id AS contact_id,
                lower(regexp_replace(trim(
                    coalesce(c.first_name, '') || ' ' || coalesce(c.last_name, '')
-               ), '\s+', ' ', 'g')) AS norm_name
+               ), '\s+', ' ', 'g')) AS norm_name,
+               bd.year AS bd_year, bd.month AS bd_month, bd.day AS bd_day
         FROM sync_metadata sm
         JOIN contacts c ON c.id = sm.internal_id
+        JOIN contact_important_dates bd
+          ON bd.contact_id = c.id
+         AND bd.date_type = 'birthday'
+         AND bd.precision = 'full'
+         AND bd.year IS NOT NULL AND bd.month IS NOT NULL AND bd.day IS NOT NULL
         WHERE sm.integration_source = 'google'
           AND sm.internal_entity_type = 'contact'
           AND sm.external_entity_type = 'person'
@@ -171,16 +220,22 @@ _AMBIGUOUS = sa.text(r"""
           )
     ),
     pairs AS (
-        SELECT a.contact_id AS survivor_id, b.contact_id AS source_id, a.norm_name
+        SELECT a.contact_id AS survivor_id, b.contact_id AS source_id,
+               a.norm_name, a.bd_year, a.bd_month, a.bd_day
         FROM immich_emailless a
         JOIN google_emailless b
-          ON b.norm_name = a.norm_name AND b.contact_id <> a.contact_id
+          ON b.norm_name = a.norm_name
+         AND b.bd_year = a.bd_year
+         AND b.bd_month = a.bd_month
+         AND b.bd_day = a.bd_day
+         AND b.contact_id <> a.contact_id
         WHERE a.norm_name <> ''
     )
-    SELECT norm_name, count(DISTINCT survivor_id) AS survivors,
+    SELECT norm_name, bd_year, bd_month, bd_day,
+           count(DISTINCT survivor_id) AS survivors,
            count(DISTINCT source_id) AS sources
     FROM pairs
-    GROUP BY norm_name
+    GROUP BY norm_name, bd_year, bd_month, bd_day
     HAVING count(DISTINCT survivor_id) > 1 OR count(DISTINCT source_id) > 1
 """)
 
@@ -482,8 +537,11 @@ def upgrade() -> None:
     for row in bind.execute(_AMBIGUOUS).fetchall():
         log.warning(
             "link-consolidation dedupe: skipping ambiguous name '%s' "
-            "(%s survivors, %s sources) — needs manual review",
+            "(birthday %s-%s-%s; %s survivors, %s sources) — needs manual review",
             row.norm_name,
+            row.bd_year,
+            row.bd_month,
+            row.bd_day,
             row.survivors,
             row.sources,
         )
