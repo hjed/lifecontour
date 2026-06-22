@@ -249,6 +249,7 @@ class TestStravaWorkerSettings:
             "sync_strava_activities",
             "sync_strava_activity_batch",
             "periodic_sync_all_strava_accounts",
+            "reconcile_in_progress_parents",
         }
 
     def test_documented_overrides(self) -> None:
@@ -310,18 +311,39 @@ class TestStravaWorkerSettings:
 
 
 class TestStravaCronScheduling:
-    """Cron generation delegates to the shared ``generate_cron_jobs`` helper."""
+    """Cron jobs are the shared ``generate_cron_jobs`` periodic-sync cron plus the
+    always-on fan-out reconciliation cron (ITER14-003 Phase 4)."""
 
-    def test_no_cron_when_periodic_sync_disabled(self) -> None:
+    @staticmethod
+    def _reconciliation_crons(cron_jobs: list[Any]) -> list[Any]:
+        """The reconciliation cron fires every 5 minutes ({0,5,…,55})."""
+        return [
+            c
+            for c in cron_jobs
+            if isinstance(getattr(c, "minute", None), set) and len(c.minute) == 12
+        ]
+
+    def test_reconciliation_cron_present_when_periodic_sync_disabled(self) -> None:
         worker_mod = _import_worker(enable_periodic_sync=False)
-        assert worker_mod.StravaWorkerSettings.cron_jobs == []
+        cron_jobs = worker_mod.StravaWorkerSettings.cron_jobs
+        # Periodic sync off, but reconciliation still runs.
+        assert len(cron_jobs) == 1
+        assert len(self._reconciliation_crons(cron_jobs)) == 1
 
-    def test_cron_scheduled_at_interval_hours(self) -> None:
+    def test_reconciliation_cron_present_with_periodic_sync(self) -> None:
         worker_mod = _import_worker(enable_periodic_sync=True, sync_interval_hours=6)
         cron_jobs = worker_mod.StravaWorkerSettings.cron_jobs
-        assert len(cron_jobs) == 1
-        # arq CronJob stores the scheduled hours on `.hour`.
-        assert cron_jobs[0].hour == {0, 6, 12, 18}
+        # Periodic-sync cron + reconciliation cron.
+        assert len(cron_jobs) == 2
+        assert len(self._reconciliation_crons(cron_jobs)) == 1
+        # The periodic-sync cron keeps firing at the configured interval hours.
+        periodic = [c for c in cron_jobs if getattr(c, "hour", None) == {0, 6, 12, 18}]
+        assert len(periodic) == 1
+
+    def test_reconciliation_cron_targets_reconcile_function(self) -> None:
+        worker_mod = _import_worker(enable_periodic_sync=False)
+        recon = self._reconciliation_crons(worker_mod.StravaWorkerSettings.cron_jobs)[0]
+        assert recon.coroutine.__name__ == "reconcile_in_progress_parents"
 
 
 class TestStravaLifecycleDelegation:

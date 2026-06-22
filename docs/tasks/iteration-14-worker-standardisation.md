@@ -407,20 +407,31 @@ Make the asymmetric Immich orchestrators consistent and non-blocking.
 #### Phase 4: Migrate Strava fan-out to non-blocking
 **PR Size:** ~360 lines (orchestrator changes ~120, child counter updates ~60, tests ~180)
 
+**Status:** ✅ DONE
+
 **Acceptance Criteria:**
-- [ ] `sync_strava_activities` persists a parent + linked children, sets `expected_children`, marks the parent `IN_PROGRESS`, and returns (it already does not block, but now persists hierarchy and status).
-- [ ] `sync_strava_activity_batch` updates its child row and atomically increments the parent counters.
-- [ ] The Strava worker schedules the reconciliation cron.
-- [ ] Sync status surfaces sensibly wherever sync jobs are displayed (`IN_PROGRESS` renders as an active state; no UI regression).
+- [x] `sync_strava_activities` persists a parent + linked children, sets `expected_children`, marks the parent `IN_PROGRESS`, and returns (it already does not block, but now persists hierarchy and status).
+- [x] `sync_strava_activity_batch` updates its child row and atomically increments the parent counters.
+- [x] The Strava worker schedules the reconciliation cron.
+- [x] Sync status surfaces sensibly wherever sync jobs are displayed (`IN_PROGRESS` renders as an active state; no UI regression).
 
 **Required Test Coverage:**
-- **Unit:** orchestrator persists hierarchy and returns; batch increments counters.
-- **Integration:** a Strava activity fan-out dispatches children, returns immediately, and the reconciler finalises the parent correctly.
-- **E2E (where surfaced):** trigger a Strava import from the integration dashboard and verify it shows `IN_PROGRESS` then resolves without blocking other syncs.
+- [x] **Unit:** orchestrator persists hierarchy and returns; batch increments counters.
+- [x] **Integration:** a Strava activity fan-out dispatches children, returns immediately, and the reconciler finalises the parent correctly.
+- [x] **E2E (where surfaced):** trigger a Strava import from the integration dashboard and verify it shows `IN_PROGRESS` then resolves without blocking other syncs.
 
 **Required Documentation Updates:**
-- `strava` `README.md` — describe the non-blocking sync flow.
-- `docs/tasks/periodic-sync-implementation.md` — cross-reference the reconciliation cron.
+- [x] `strava` `README.md` — describe the non-blocking sync flow.
+- [x] `docs/tasks/periodic-sync-implementation.md` — cross-reference the reconciliation cron.
+
+**Progress notes (Phase 4 complete — 2026-06-22, branch `iter14-003-4-strava-fanout`):**
+
+- `integration_workers/strava/worker.py`: `sync_strava_activities` now **drains the activity-page generator into memory, idempotently owns its parent `sync_jobs` row, persists one linked child row per page, sets `expected_children`, marks the parent `IN_PROGRESS` and returns** — children are committed *before* dispatch (persist-then-enqueue). Unlike Immich (whose enqueuer seeds the parent), Strava enqueues no parent row anywhere, so the orchestrator owns it via `_ensure_parent_row` (create-if-missing on its own `ctx["job_id"]`, then mark `running`); a zero-page fan-out is marked `COMPLETED` directly. The drained loop keeps the `StravaRateLimitError`→`Retry` deferral. Strava-local fan-out helpers (`_persist_fanout_children`, `_record_child_terminal`/`_record_child_completion`/`_record_child_failure`, `_is_final_attempt`, `_coerce_int`) mirror the Immich worker's (workers stay isolated; the truly-shared reconciler already lives in `core_shared`).
+- `sync_strava_activity_batch` gained an optional `parent_job_id` (orchestrator passes the parent's `job_id` positionally at enqueue; default `None` keeps direct/legacy invocation working). On success it marks **its own** child row `COMPLETED` + `increment_completed_children(parent)` in its own committed unit of work (the Strava batch owns per-activity transactions internally, so there is no shared session to join); on a **final**-attempt failure it records `FAILED` + `increment_failed_children(parent)`; a non-final failure — including a rate-limit `Retry` — just propagates so ARQ retries without bumping a counter. Child rows stay the reconciler's authoritative source (a counter is only bumped when the child-row update matched).
+- `StravaWorkerSettings`: `reconcile_in_progress_parents` added to `functions`; `cron_jobs` is now `[*generate_cron_jobs(...), *generate_reconciliation_cron(reconcile_in_progress_parents)]` so the reconciler runs every 5 min regardless of whether periodic sync is enabled.
+- **Frontend (`IN_PROGRESS` surface):** added `'in_progress'` to the `SyncStatus` union (`frontend/src/types/integrations.ts`); `useSyncJobStatus` keeps polling `in_progress` like `running`/`queued` (`frontend/src/lib/api/integrations.ts`); `SyncHistory` renders all statuses with human-readable labels (`In Progress`/`Completed`/…) and maps `in_progress` to the active (non-destructive) badge variant (`frontend/src/components/integrations/SyncHistory.tsx`). No component refactor; additive only (Strava surfaced no sync jobs before, so no regression).
+- **Tests (TDD red→green):** unit `tests/unit/test_strava_orchestrator.py` (returns `in_progress` without awaiting children; child persistence + `expected_children` + `IN_PROGRESS`; persist-before-dispatch ordering + parent-id passed positionally; parent-row created when missing; zero-batch→`COMPLETED`; missing-auth→error; rate-limit mid-drain→`Retry`), `tests/unit/test_strava_batch_counters.py` (success→completed+increment, final-failure→failed+increment, non-final-failure→no counter, rate-limit→`Retry` no counter, legacy-no-parent skips counters, missing-child-row skips increment, `_is_final_attempt` coercion table), and `tests/unit/test_worker.py` (reconciler in `functions`; reconciliation cron present with periodic on **and** off, targeting `reconcile_in_progress_parents`); integration `tests/integration/test_strava_fanout_integration.py` (real Postgres/Redis: returns `IN_PROGRESS`, children persisted + dispatched on the real Strava queue, batches increment counters, reconciler→`COMPLETED`; a final-try child failure→reconciler `FAILED` with message; 25-batch fan-out totals correct; zero batches→`COMPLETED`). Frontend `SyncHistory.test.tsx` (RTL: `in_progress`→active "In Progress" badge; existing statuses unchanged) and e2e `integrations-ui.spec.ts` (trigger Strava import → Sync History shows the active `In Progress` state, another integration's sync still triggers while Strava is `IN_PROGRESS`, then resolves to `Completed`). The integration suite backs every worker session with a `session_factory` bound to the rolled-back `async_connection` (savepoint mode) and stubs only the external Strava SaaS (auth resolution + sync service) — DB, repository and Redis queue are real.
+- Quality gates green: strava `ruff format --check`/`ruff check`/`mypy` (worker + new tests); unit suite (190) and the full integration suite (23, incl. the 4 new fan-out tests) pass with no regressions; frontend `pnpm quality:check` (format + lint + type-check) clean, `SyncHistory` RTL test passes, and the Strava e2e block (4 tests incl. the new `IN_PROGRESS` flow) passes on Chromium.
 
 ---
 

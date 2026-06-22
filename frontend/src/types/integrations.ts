@@ -11,6 +11,7 @@ export type SyncType = 'smart' | 'full';
 export type SyncStatus =
   | 'queued'
   | 'running'
+  | 'in_progress'
   | 'completed'
   | 'failed'
   | 'cancelled';

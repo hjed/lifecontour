@@ -388,7 +388,13 @@ export function useSyncJobStatus(jobId: string | null) {
     refetchInterval: query => {
       // Poll with progressive intervals for better performance
       const status = query.state.data?.data?.attributes?.status;
-      if (status === 'running' || status === 'queued') {
+      // 'in_progress' is the non-blocking fan-out's active parent state — keep
+      // polling it like 'running'/'queued' until the reconciler finalises it.
+      if (
+        status === 'running' ||
+        status === 'queued' ||
+        status === 'in_progress'
+      ) {
         const fetchCount = query.state.dataUpdateCount || 0;
         return fetchCount < INITIAL_POLL_COUNT
           ? INITIAL_POLL_INTERVAL
