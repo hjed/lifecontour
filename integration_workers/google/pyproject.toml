@@ -20,7 +20,7 @@ dependencies = [
     "google-auth-oauthlib==1.4.0",
 
     # Database
-    "sqlalchemy[asyncio]>=2.0.50",
+    "sqlalchemy[asyncio]>=2.0.51",
     "asyncpg==0.31.0",
 
     # HTTP client
