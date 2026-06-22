@@ -15,13 +15,21 @@ from typing import Any, cast
 from arq import Retry, run_worker
 from arq.typing import StartupShutdown, WorkerSettingsBase
 from core_shared import (
-    DEFAULT_MAX_TRIES,
     SharedARQWorkerSettings,
     build_worker_lifecycle,
     generate_cron_jobs,
     generate_reconciliation_cron,
     reconcile_in_progress_parents,
     redis_settings_from_url,
+)
+from core_shared.fanout import (
+    is_final_attempt as _is_final_attempt,
+)
+from core_shared.fanout import (
+    persist_fanout_children as _persist_fanout_children,
+)
+from core_shared.fanout import (
+    record_child_terminal as _record_child_terminal,
 )
 from core_shared.integration_constants import STRAVA_ARQ_QUEUE_NAME
 from core_shared.logging import configure_logging, get_logger
@@ -211,28 +219,14 @@ def _create_sync_service(
 
 # ---------------------------------------------------------------------------
 # Non-blocking fan-out helpers
+#
+# The worker-agnostic pieces (`persist_fanout_children`, `record_child_terminal`,
+# `is_final_attempt`) live in `core_shared.fanout` and are imported above. The
+# helpers below are Strava-specific: it owns its parent row up-front
+# (`_ensure_parent_row`) since nothing enqueues one ahead of the orchestrator,
+# and its batch sync manages its own per-activity transactions, so the child
+# terminal updates run in their own committed unit of work.
 # ---------------------------------------------------------------------------
-
-
-def _coerce_int(value: Any, default: int) -> int:
-    """Best-effort int coercion, falling back to ``default`` for bad/missing values."""
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def _is_final_attempt(ctx: dict[str, Any]) -> bool:
-    """Whether ARQ will give up on this job after the current attempt.
-
-    Children only record a terminal ``failed`` row (and bump the parent's
-    ``failed_children``) on the final attempt, so a transient failure that ARQ
-    will retry does not prematurely fail the fan-out. ``job_try``/``max_tries``
-    are coerced defensively so a missing/``None``/string value can never raise.
-    """
-    job_try = _coerce_int(ctx.get("job_try"), 1)
-    max_tries = _coerce_int(ctx.get("max_tries"), DEFAULT_MAX_TRIES)
-    return job_try >= max_tries
 
 
 async def _ensure_parent_row(
@@ -262,119 +256,6 @@ async def _ensure_parent_row(
     await repo.update_status(
         job_id=job_id, status="running", started_at=started_at, progress=0
     )
-
-
-async def _persist_fanout_children(
-    repo: SyncJobRepository,
-    *,
-    parent_job_id: str,
-    user_id: str,
-    sync_type: str,
-    child_id_prefix: str,
-    count: int,
-) -> list[str]:
-    """Persist linked child rows and finalise the parent's pre-dispatch state.
-
-    Creates one ``queued`` child ``sync_jobs`` row per batch (linked via
-    ``parent_job_id``), records ``expected_children``, and transitions the parent
-    to ``in_progress`` — or straight to ``completed`` when there is nothing to
-    fan out. Returns the deterministic child job ids in batch order.
-
-    The caller commits this as a single unit of work *before* dispatching the
-    children, so every child's row already exists when it updates itself and
-    increments the parent counters.
-
-    Idempotent across orchestrator retries: ARQ may re-run the orchestrator after
-    a prior attempt already committed these rows (e.g. a crash or error during the
-    post-commit dispatch loop). ``create`` is a plain ``INSERT`` (no
-    ``ON CONFLICT``), so a child row that already exists is skipped rather than
-    raising a duplicate-key error — the deterministic ids let a retry re-dispatch
-    the same children safely.
-
-    ``expected_children`` is set to the **authoritative** number of persisted
-    child rows, not the fresh ``count``. Should a retry's drain yield a different
-    page count than a prior attempt (e.g. activities created/deleted in between),
-    this keeps the parent's expected total consistent with the rows that actually
-    exist, so the reconciler never under-counts and finalises against the
-    authoritative child rows (a genuinely orphaned child is still bounded by the
-    staleness window).
-    """
-    child_ids = [f"{child_id_prefix}{i + 1}" for i in range(count)]
-    existing_child_ids = {
-        child.job_id for child in await repo.list_children(parent_job_id)
-    }
-    for child_id in child_ids:
-        if child_id in existing_child_ids:
-            continue
-        await repo.create(
-            job_id=child_id,
-            user_id=user_id,
-            integration_source="strava",
-            sync_type=sync_type,
-            status="queued",
-            parent_job_id=parent_job_id,
-        )
-
-    # The deterministic ids are a dense ``p1..pN`` prefix, so the persisted total
-    # after the create loop is ``max(count, prior count)``. Expect against that —
-    # never blindly the fresh count — so a drifting drain can't strand children.
-    expected_children = max(count, len(existing_child_ids))
-    if expected_children != count:
-        logger.warning(
-            "Strava fan-out child count drifted across attempts",
-            parent_job_id=parent_job_id,
-            drained_count=count,
-            persisted_count=expected_children,
-        )
-    await repo.set_expected_children(parent_job_id, expected_children)
-
-    if expected_children == 0:
-        await repo.update_status(
-            job_id=parent_job_id,
-            status="completed",
-            completed_at=datetime.now(UTC),
-            progress=100,
-        )
-    else:
-        await repo.update_status(job_id=parent_job_id, status="in_progress", progress=0)
-
-    return child_ids
-
-
-async def _record_child_terminal(
-    repo: SyncJobRepository,
-    *,
-    child_job_id: str,
-    parent_job_id: str,
-    status: str,
-    error_message: str | None = None,
-) -> None:
-    """Mark a child row terminal and bump the matching parent counter.
-
-    The parent counter is incremented **only when the child row update actually
-    matched a row**, so a missing/incorrect ``child_job_id`` can never bump a
-    parent's counters without a corresponding terminal child row. Child rows
-    remain reconciliation's source of truth.
-    """
-    updated = await repo.update_status(
-        job_id=child_job_id,
-        status=status,
-        completed_at=datetime.now(UTC),
-        error_message=error_message,
-    )
-    if updated is None:
-        logger.warning(
-            "Child sync job row not found; skipping parent counter increment",
-            child_job_id=child_job_id,
-            parent_job_id=parent_job_id,
-            status=status,
-        )
-        return
-
-    if status == "completed":
-        await repo.increment_completed_children(parent_job_id)
-    else:
-        await repo.increment_failed_children(parent_job_id)
 
 
 async def _record_child_completion(
@@ -660,6 +541,7 @@ async def sync_strava_activities(
                 repo,
                 parent_job_id=job_id,
                 user_id=user_id,
+                integration_source="strava",
                 sync_type=sync_type,
                 child_id_prefix=f"strava-batch-{job_id}-p",
                 count=len(batches),

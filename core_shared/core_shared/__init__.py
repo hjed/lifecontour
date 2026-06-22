@@ -22,6 +22,12 @@ from core_shared.database.engine import (
     create_async_engine_from_url,
     create_session_factory,
 )
+from core_shared.fanout import (
+    coerce_int,
+    is_final_attempt,
+    persist_fanout_children,
+    record_child_terminal,
+)
 from core_shared.logging import (
     clear_context,
     configure_logging,
@@ -128,4 +134,9 @@ __all__ = [
     # Fan-out reconciliation
     "reconcile_in_progress_parents",
     "reconcile_parents",
+    # Fan-out helpers
+    "coerce_int",
+    "is_final_attempt",
+    "persist_fanout_children",
+    "record_child_terminal",
 ]

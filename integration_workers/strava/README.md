@@ -128,7 +128,10 @@ from `RUNNING` ("actively executing on a worker"); the integrations dashboard
 renders it as an active (non-terminal) state. The reconciler being authoritative
 over child rows means a missed counter increment can never strand a parent. See
 `docs/architecture/integration-architecture.md` for the generic lifecycle and
-`core_shared/core_shared/sync_reconciliation.py` for the reconciler.
+`core_shared/core_shared/sync_reconciliation.py` for the reconciler. The
+worker-agnostic fan-out steps (`persist_fanout_children`, `record_child_terminal`,
+`is_final_attempt`) are shared in `core_shared/core_shared/fanout.py`; only the
+Strava-specific parent-row ownership and per-batch session wrappers live here.
 
 ## Running the Worker
 

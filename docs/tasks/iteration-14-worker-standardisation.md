@@ -433,6 +433,31 @@ Make the asymmetric Immich orchestrators consistent and non-blocking.
 - **Tests (TDD red→green):** unit `tests/unit/test_strava_orchestrator.py` (returns `in_progress` without awaiting children; child persistence + `expected_children` + `IN_PROGRESS`; persist-before-dispatch ordering + parent-id passed positionally; parent-row created when missing; zero-batch→`COMPLETED`; missing-auth→error; rate-limit mid-drain→`Retry`), `tests/unit/test_strava_batch_counters.py` (success→completed+increment, final-failure→failed+increment, non-final-failure→no counter, rate-limit→`Retry` no counter, legacy-no-parent skips counters, missing-child-row skips increment, `_is_final_attempt` coercion table), and `tests/unit/test_worker.py` (reconciler in `functions`; reconciliation cron present with periodic on **and** off, targeting `reconcile_in_progress_parents`); integration `tests/integration/test_strava_fanout_integration.py` (real Postgres/Redis: returns `IN_PROGRESS`, children persisted + dispatched on the real Strava queue, batches increment counters, reconciler→`COMPLETED`; a final-try child failure→reconciler `FAILED` with message; 25-batch fan-out totals correct; zero batches→`COMPLETED`). Frontend `SyncHistory.test.tsx` (RTL: `in_progress`→active "In Progress" badge; existing statuses unchanged) and e2e `integrations-ui.spec.ts` (trigger Strava import → Sync History shows the active `In Progress` state, another integration's sync still triggers while Strava is `IN_PROGRESS`, then resolves to `Completed`). The integration suite backs every worker session with a `session_factory` bound to the rolled-back `async_connection` (savepoint mode) and stubs only the external Strava SaaS (auth resolution + sync service) — DB, repository and Redis queue are real.
 - Quality gates green: strava `ruff format --check`/`ruff check`/`mypy` (worker + new tests); unit suite (190) and the full integration suite (23, incl. the 4 new fan-out tests) pass with no regressions; frontend `pnpm quality:check` (format + lint + type-check) clean, `SyncHistory` RTL test passes, and the Strava e2e block (4 tests incl. the new `IN_PROGRESS` flow) passes on Chromium.
 
+#### Phase 5: Extract shared fan-out helpers to `core_shared`
+**PR Size:** ~450 lines (shared module + tests ~250, two-worker migrate-and-delete ~200)
+
+**Status:** 🚧 IN PROGRESS
+
+Phases 3–4 migrated Immich and Strava onto the non-blocking fan-out pattern, but
+the worker-agnostic helper logic (`persist_fanout_children`, `record_child_terminal`,
+`is_final_attempt`, `coerce_int`) was copied byte-for-byte into both `immich/worker.py`
+and `strava/worker.py` (flagged as duplication by SonarCloud, and contrary to the
+delivery rule "no dead duplicate left behind"). This phase moves that logic into a
+single `core_shared` module and migrates both workers onto it, deleting the copies.
+It also propagates Phase 4's retry-idempotency + authoritative-`expected_children`
+hardening (originally added only to Strava) to Immich via the shared implementation.
+
+**Acceptance Criteria:**
+- [ ] `core_shared` exposes `persist_fanout_children`, `record_child_terminal`, `is_final_attempt`, `coerce_int` (worker-agnostic; `persist_fanout_children` parameterised by `integration_source`, idempotent across retries, sets `expected_children` to the authoritative persisted-child count).
+- [ ] `immich/worker.py` and `strava/worker.py` import these from `core_shared` and their local duplicates are deleted (the thin per-worker session wrappers and Strava's `_ensure_parent_row` remain, as they legitimately differ).
+- [ ] Behaviour is unchanged for both workers; Immich gains the retry-idempotency/authoritative-count hardening for free.
+
+**Required Test Coverage:**
+- **Unit:** `core_shared/tests/unit/test_fanout.py` covers the four helpers directly (coercion table, terminal row-match→increment vs unmatched→skip, persist creates N + idempotent skip-existing + authoritative `expected_children` + zero→`COMPLETED`). Both workers' existing unit + integration suites continue to pass against the shared implementation.
+
+**Required Documentation Updates:**
+- `immich`/`strava` `README.md` — note the shared `core_shared` fan-out helpers.
+
 ---
 
 ### ITER14-004: Shared Stream-Consumer Registration
