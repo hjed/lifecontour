@@ -9,7 +9,7 @@ readme = "README.md"
 license = {text = "AGPL-3.0"}
 requires-python = ">=3.14"
 dependencies = [
-    "fastapi>=0.137.0",
+    "fastapi>=0.138.0",
     "uvicorn>=0.49.0",
     "pydantic>=2.13.4",
     "pydantic-settings>=2.14.1",
@@ -30,7 +30,7 @@ dependencies = [
     "opentelemetry-exporter-otlp>=1.41.1",
     "python-stdnum>=1.20",
     "pycountry>=23.12.11",
-    "meilisearch>=0.41.0",
+    "meilisearch>=0.41.1",
     "itsdangerous>=2.1.0",
     "fastmcp>=3.4.2",
     "dishka>=1.10.1",
