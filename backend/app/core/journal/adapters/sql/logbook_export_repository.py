@@ -32,10 +32,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.album_sync_read_repository import (
-    EXTERNAL_ENTITY_TYPE,
-    EXTERNAL_SYSTEM,
     INTEGRATION_SOURCE,
-    INTERNAL_ENTITY_TYPE,
     AlbumSyncReadRepository,
 )
 from app.core.journal.models.repositories import LogbookExportRepository
@@ -371,27 +368,22 @@ class SqlLogbookExportRepository(LogbookExportRepository):
         # reuses its malformed-tolerant reference_data decoder so a corrupt row
         # can never 500 the export. The field is singular, so the first
         # non-empty shared link per journal wins (ordered for determinism).
+        # ITER15-001 Phase 5: ``reference_data`` is read directly from the
+        # canonical ``sync_metadata`` link store (the album link is the sole
+        # writer of it since Phase 4) — the legacy ``external_references`` join
+        # was removed ahead of dropping that table.
         album_links_sql = """
             SELECT sm.internal_id AS journal_id,
-                   er.reference_data AS reference_data
+                   sm.reference_data AS reference_data
             FROM sync_metadata sm
-            LEFT JOIN external_references er
-                ON er.external_system = :external_system
-                AND er.external_entity_type = :external_entity_type
-                AND er.external_entity_id = sm.external_id
-                AND er.internal_entity_type = :internal_entity_type
-                AND er.internal_entity_id = sm.internal_id
             WHERE sm.integration_source = :source
               AND sm.internal_id = ANY(:journal_ids)
-            ORDER BY er.id
+            ORDER BY sm.id
         """
         result = await self.connection.execute(
             text(album_links_sql),
             {
                 "source": INTEGRATION_SOURCE,
-                "external_system": EXTERNAL_SYSTEM,
-                "external_entity_type": EXTERNAL_ENTITY_TYPE,
-                "internal_entity_type": INTERNAL_ENTITY_TYPE,
                 "journal_ids": final_journal_ids,
             },
         )

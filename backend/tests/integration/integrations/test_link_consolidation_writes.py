@@ -22,11 +22,6 @@ from tests.integration.integrations.link_consolidation_helpers import (
 )
 
 
-async def _count_external_refs(conn: AsyncConnection) -> int:
-    result = await conn.execute(text("SELECT count(*) FROM external_references"))
-    return int(result.scalar_one())
-
-
 async def _sync_metadata_row(conn: AsyncConnection, external_id: str) -> Any:
     result = await conn.execute(
         text(
@@ -120,8 +115,6 @@ class TestLinkConsolidationWrites:
         )
 
         assert result["status"] == "success"
-        # Zero external_references written.
-        assert await _count_external_refs(async_connection) == 0
         # One canonical sync_metadata link carrying the contact reference_data.
         row = await _sync_metadata_row(async_connection, external_id)
         assert row is not None
@@ -171,8 +164,6 @@ class TestLinkConsolidationWrites:
 
         assert result["status"] == "success"
         assert result["contact_id"] == contact_id
-        # Zero external_references written.
-        assert await _count_external_refs(async_connection) == 0
         # synced_tags updated in the canonical link's reference_data.
         row = await _sync_metadata_row(async_connection, external_id)
         assert row is not None
@@ -226,7 +217,6 @@ class TestLinkConsolidationWrites:
         )
 
         assert result["status"] == "success"
-        assert await _count_external_refs(async_connection) == 0
         row = await _sync_metadata_row(async_connection, external_id)
         assert row is not None
         assert row.reference_data is not None

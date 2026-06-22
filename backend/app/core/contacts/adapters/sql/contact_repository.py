@@ -48,6 +48,14 @@ class SqlContactRepository(ContactRepository):
             return value.strip()
         return value
 
+    async def contact_exists(self, contact_id: int) -> bool:
+        """Return whether a contact with the given ID exists."""
+        result = await self.conn.execute(
+            text("SELECT 1 FROM contacts WHERE id = :contact_id"),
+            {"contact_id": contact_id},
+        )
+        return result.first() is not None
+
     async def find_by_id(self, contact_id: int) -> Contact | None:
         """Find a contact by ID with all related data."""
         # Get contact basic info

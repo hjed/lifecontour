@@ -234,7 +234,6 @@ async def integration_health_check(
         # Import and verify core_shared models are accessible
         # These imports are intentionally tested to verify package accessibility
         from core_shared.base_service import BaseIntegrationService, SyncResult
-        from core_shared.models.external_reference import ExternalReference
         from core_shared.models.sync_metadata import SyncMetadata, SyncStatus
 
         # Verify enums work correctly (test that they can be accessed)
@@ -244,7 +243,6 @@ async def integration_health_check(
         # Test that we can reference the classes (for health check verification)
         available_models = [
             SyncMetadata.__name__,
-            ExternalReference.__name__,
             BaseIntegrationService.__name__,
         ]
 

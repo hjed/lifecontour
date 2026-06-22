@@ -255,20 +255,10 @@ async def test_pdf_generation_includes_album_shared_link(
         text("""
             INSERT INTO sync_metadata (
                 internal_id, integration_source, external_id,
-                last_synced_at, version_hash, sync_status
-            ) VALUES (:id, 'immich_album', 'album-pdf-1', now(), 'h', 'success')
-        """),
-        {"id": journal.id},
-    )
-    await async_connection.execute(
-        text("""
-            INSERT INTO external_references (
-                internal_entity_type, internal_entity_id, external_system,
-                external_entity_type, external_entity_id, reference_data,
-                created_at, updated_at
-            ) VALUES (
-                'journal', :id, 'immich', 'album', 'album-pdf-1', :ref, now(), now()
-            )
+                last_synced_at, version_hash, sync_status,
+                internal_entity_type, external_entity_type, reference_data
+            ) VALUES (:id, 'immich_album', 'album-pdf-1', now(), 'h', 'success',
+                      'journal', 'album', :ref)
         """),
         {
             "id": journal.id,

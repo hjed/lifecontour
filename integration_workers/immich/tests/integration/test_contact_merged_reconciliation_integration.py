@@ -7,8 +7,8 @@ unlinks the source contact's orphaned canonical ``sync_metadata`` link (using
 ``source_external_id`` from the payload). It must not attempt a remote delete and
 must acknowledge the event without error.
 
-Since ITER15-001 Phase 4 the handler cleans the ``sync_metadata`` link only and
-no longer touches ``external_references`` (dropped in Phase 5).
+Since ITER15-001 the handler cleans the canonical ``sync_metadata`` link only
+(``external_references`` has been retired).
 
 These tests exercise the real database via ``db_session`` with no Immich API
 involvement at all.
@@ -73,23 +73,6 @@ async def _seed_sync_metadata(
     )
 
 
-async def _seed_external_reference(
-    db_session: AsyncSession, internal_id: int, external_id: str
-) -> None:
-    await db_session.execute(
-        text(
-            """
-            INSERT INTO external_references
-                (internal_entity_type, internal_entity_id, external_system,
-                 external_entity_type, external_entity_id)
-            VALUES
-                ('contact', :cid, 'immich', 'person', :ext)
-            """
-        ),
-        {"cid": internal_id, "ext": external_id},
-    )
-
-
 async def _sync_metadata_external_ids(db_session: AsyncSession) -> set[str]:
     result = await db_session.execute(
         text(
@@ -99,30 +82,16 @@ async def _sync_metadata_external_ids(db_session: AsyncSession) -> set[str]:
     return {row.external_id for row in result.fetchall()}
 
 
-async def _external_reference_ids(db_session: AsyncSession) -> set[str]:
-    result = await db_session.execute(
-        text(
-            """
-            SELECT external_entity_id FROM external_references
-            WHERE external_system = 'immich' AND external_entity_type = 'person'
-            """
-        )
-    )
-    return {row.external_entity_id for row in result.fetchall()}
-
-
 @pytest_asyncio.fixture
 async def merge_setup(db_session: AsyncSession) -> AsyncSession:
-    """Seed survivor and source Immich references plus sync_metadata.
+    """Seed survivor and source Immich ``sync_metadata`` links.
 
-    In production Phase 1 removes the source's local rows inline; we seed
-    residual source rows here to deterministically prove the worker unlinks
-    them (the handler is idempotent if they are already gone).
+    In production Phase 1 removes the source's local link inline; we seed a
+    residual source link here to deterministically prove the worker unlinks it
+    (the handler is idempotent if it is already gone).
     """
     await _seed_sync_metadata(db_session, _SURVIVOR_CONTACT, _SURVIVOR_PERSON)
-    await _seed_external_reference(db_session, _SURVIVOR_CONTACT, _SURVIVOR_PERSON)
     await _seed_sync_metadata(db_session, _SOURCE_CONTACT, _SOURCE_PERSON)
-    await _seed_external_reference(db_session, _SOURCE_CONTACT, _SOURCE_PERSON)
     await db_session.flush()
     return db_session
 
@@ -154,11 +123,6 @@ class TestContactMergedImmichReconciliation:
         assert _SOURCE_PERSON not in remaining_meta  # source sync_metadata cleaned
         assert _SURVIVOR_PERSON in remaining_meta  # survivor link preserved
 
-        # external_references is no longer written by the handler: the seeded
-        # legacy rows are left untouched (the table is dropped in Phase 5).
-        remaining_refs = await _external_reference_ids(db_session)
-        assert {_SOURCE_PERSON, _SURVIVOR_PERSON} <= remaining_refs
-
     async def test_different_service_collision_leaves_immich_untouched(
         self, merge_setup: AsyncSession
     ) -> None:
@@ -189,46 +153,13 @@ class TestContactMergedImmichReconciliation:
         assert {_SURVIVOR_PERSON, _SOURCE_PERSON} <= await _sync_metadata_external_ids(
             db_session
         )
-        assert {_SURVIVOR_PERSON, _SOURCE_PERSON} <= await _external_reference_ids(
-            db_session
-        )
-
-    async def test_unlink_does_not_write_external_references(
-        self, merge_setup: AsyncSession
-    ) -> None:
-        """The handler removes only the source's sync_metadata link.
-
-        Phase 4 consolidates link writes onto ``sync_metadata``; the handler must
-        not delete (or otherwise write) ``external_references`` — those legacy
-        rows are left intact until the table is dropped in Phase 5.
-        """
-        db_session = merge_setup
-        refs_before = await _external_reference_ids(db_session)
-
-        result = await process_contact_event(
-            ctx=_ctx(db_session),
-            event_type="ContactMerged",
-            event_data={
-                "survivor_contact_id": _SURVIVOR_CONTACT,
-                "source_contact_id": _SOURCE_CONTACT,
-                "external_collisions": [_immich_collision()],
-            },
-        )
-
-        assert result["status"] == "success"
-
-        # The source's canonical link is gone; external_references is unchanged.
-        remaining_meta = await _sync_metadata_external_ids(db_session)
-        assert _SOURCE_PERSON not in remaining_meta
-        assert await _external_reference_ids(db_session) == refs_before
 
     async def test_idempotent_when_source_already_unlinked(
         self, db_session: AsyncSession
     ) -> None:
-        """The real post-Phase-1 state (source rows gone) succeeds, no dead-letter."""
-        # Only the survivor rows exist; the source was already cleaned inline.
+        """The real post-Phase-1 state (source link gone) succeeds, no dead-letter."""
+        # Only the survivor link exists; the source was already cleaned inline.
         await _seed_sync_metadata(db_session, _SURVIVOR_CONTACT, _SURVIVOR_PERSON)
-        await _seed_external_reference(db_session, _SURVIVOR_CONTACT, _SURVIVOR_PERSON)
         await db_session.flush()
 
         result = await process_contact_event(
@@ -244,4 +175,3 @@ class TestContactMergedImmichReconciliation:
         # No row to remove, but the handler still acknowledges successfully.
         assert result["status"] == "success"
         assert _SURVIVOR_PERSON in await _sync_metadata_external_ids(db_session)
-        assert _SURVIVOR_PERSON in await _external_reference_ids(db_session)

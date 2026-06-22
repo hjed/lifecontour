@@ -7,11 +7,32 @@ This repository implements production-grade resilience patterns:
 3. Atomic upsert operations
 """
 
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 
 from core_shared.models.sync_metadata import SyncMetadata, SyncStatus
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
+
+
+@dataclass(frozen=True)
+class IntegrationLinkCollision:
+    """A same-service integration link that could not simply carry over on merge.
+
+    Both the source and the surviving contact were linked to ``external_system``,
+    each to a distinct remote record. The survivor's link is kept and the source's
+    local row is removed; this records the source's remote id (alongside the
+    survivor's) so the integration workers can reconcile the remote records.
+    """
+
+    external_system: str
+    external_entity_type: str
+    source_external_id: str
+    survivor_external_id: str
+
+    def as_dict(self) -> dict[str, str]:
+        """Serialise for inclusion in the ``ContactMerged`` event payload."""
+        return asdict(self)
 
 
 class SyncMetadataRepository:
@@ -279,6 +300,162 @@ class SyncMetadataRepository:
                 "external_id": external_id,
             },
         )
+
+    async def upsert_contact_link(
+        self,
+        contact_id: int,
+        external_system: str,
+        external_entity_type: str,
+        external_entity_id: str,
+    ) -> None:
+        """Link a contact to an external entity in the canonical link store.
+
+        Writes the ``(integration_source, external_id) → contact`` link onto
+        ``sync_metadata``, which dedups on ``UNIQUE(integration_source,
+        external_id)``. ``version_hash`` is left empty so the next sync
+        re-validates the entity's content. The link columns use ``COALESCE`` on
+        conflict (see :meth:`upsert`), so re-linking the same external id never
+        clears existing metadata.
+
+        Args:
+            contact_id: Internal contact ID.
+            external_system: External system name (e.g. 'immich').
+            external_entity_type: External entity type (e.g. 'person').
+            external_entity_id: External entity ID to link.
+        """
+        await self.upsert(
+            integration_source=external_system,
+            external_id=external_entity_id,
+            version_hash="",
+            internal_id=contact_id,
+            internal_entity_type="contact",
+            external_entity_type=external_entity_type,
+        )
+
+    async def repoint_contact_links(
+        self,
+        source_id: int,
+        survivor_id: int,
+        transaction: AsyncConnection,
+    ) -> list[IntegrationLinkCollision]:
+        """Re-point a source contact's external links onto the survivor on merge.
+
+        Runs inline in the merge transaction (a local re-point, never a remote
+        call) so a deleted source never leaves resolvable-looking orphans in the
+        canonical ``sync_metadata`` link store, which has no ``ON DELETE
+        CASCADE``.
+
+        For each of the source's contact ``sync_metadata`` links:
+
+        - **Different service** (the survivor has no link for that
+          ``integration_source``): the ``sync_metadata`` row is re-pointed onto
+          the survivor.
+        - **Same service** (the survivor already has a link for that
+          ``integration_source``): the survivor's link is kept; the source's
+          ``sync_metadata`` row is deleted, and the collision is returned so the
+          caller can hand the source's remote id to the integration workers for
+          remote reconciliation.
+
+        ``sync_metadata`` is keyed to each reference by ``(integration_source,
+        external_id)`` so only the rows backing a contact's external link are
+        touched — a journal sync row that merely shares the source's integer id is
+        left alone.
+
+        Args:
+            source_id: The contact being absorbed (and then deleted).
+            survivor_id: The surviving contact that keeps its id.
+            transaction: The merge transaction's connection.
+
+        Returns:
+            One ``IntegrationLinkCollision`` per same-service collision.
+        """
+        survivor_result = await transaction.execute(
+            text(
+                """
+                SELECT integration_source AS external_system,
+                       external_id AS external_entity_id
+                FROM sync_metadata
+                WHERE internal_entity_type = 'contact'
+                  AND internal_id = :survivor_id
+                """
+            ),
+            {"survivor_id": survivor_id},
+        )
+        survivor_external_id_by_system = {
+            row.external_system: row.external_entity_id
+            for row in survivor_result.fetchall()
+        }
+
+        source_result = await transaction.execute(
+            text(
+                """
+                SELECT integration_source AS external_system,
+                       external_entity_type,
+                       external_id AS external_entity_id
+                FROM sync_metadata
+                WHERE internal_entity_type = 'contact'
+                  AND internal_id = :source_id
+                """
+            ),
+            {"source_id": source_id},
+        )
+        source_refs = source_result.fetchall()
+
+        collisions: list[IntegrationLinkCollision] = []
+        for ref in source_refs:
+            survivor_external_id = survivor_external_id_by_system.get(
+                ref.external_system
+            )
+            link_params = {
+                "source_id": source_id,
+                "survivor_id": survivor_id,
+                "integration_source": ref.external_system,
+                "external_id": ref.external_entity_id,
+            }
+            if survivor_external_id is None:
+                # Different service — carry the sync row over to the survivor.
+                await transaction.execute(
+                    text(
+                        """
+                        UPDATE sync_metadata
+                        SET internal_id = :survivor_id, updated_at = now()
+                        WHERE internal_entity_type = 'contact'
+                          AND internal_id = :source_id
+                          AND integration_source = :integration_source
+                          AND external_id = :external_id
+                        """
+                    ),
+                    link_params,
+                )
+            else:
+                # Same service — keep the survivor's link, drop the source's, and
+                # record the collision for remote reconciliation by the workers.
+                collisions.append(
+                    IntegrationLinkCollision(
+                        external_system=ref.external_system,
+                        # A contact's external link is always to a 'person'; default
+                        # a legacy NULL-typed row so the dataclass stays non-null and
+                        # the worker's ``external_entity_type == 'person'`` collision
+                        # filter still matches.
+                        external_entity_type=ref.external_entity_type or "person",
+                        source_external_id=ref.external_entity_id,
+                        survivor_external_id=survivor_external_id,
+                    )
+                )
+                await transaction.execute(
+                    text(
+                        """
+                        DELETE FROM sync_metadata
+                        WHERE internal_entity_type = 'contact'
+                          AND internal_id = :source_id
+                          AND integration_source = :integration_source
+                          AND external_id = :external_id
+                        """
+                    ),
+                    link_params,
+                )
+
+        return collisions
 
     def should_sync(
         self, existing_metadata: SyncMetadata | None, new_version_hash: str

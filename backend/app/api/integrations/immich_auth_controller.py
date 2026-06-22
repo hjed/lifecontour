@@ -321,12 +321,14 @@ async def resolve_immich_conflict(
     contact_service: FromDishka[ContactService],
 ) -> ImmichConflictResponse:
     """Resolve a conflict by linking to an existing contact or creating a new one."""
-    from app.core.integrations.external_reference_service import (
-        ExternalReferenceService,
+    from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
+    from app.core.integrations.adapters.sql.sync_metadata_repository import (
+        SyncMetadataRepository,
     )
 
     repo = PendingEntityMappingRepository(connection)
-    ext_ref_service = ExternalReferenceService(connection)
+    contact_repo = SqlContactRepository(connection)
+    sync_metadata_repo = SyncMetadataRepository(connection)
 
     # Atomic unit of work (issue #945): create_contact joins re-entrantly,
     # and the conflict-resolution writes commit together before the response.
@@ -375,7 +377,7 @@ async def resolve_immich_conflict(
 
         # Validate the contact exists before linking
         if request.action == ConflictResolutionAction.LINK:
-            if not await ext_ref_service.contact_exists(contact_id):
+            if not await contact_repo.contact_exists(contact_id):
                 raise HTTPException(
                     status_code=404,
                     detail=f"Contact {contact_id} not found",
@@ -391,8 +393,8 @@ async def resolve_immich_conflict(
                 status_code=404, detail=f"Conflict {conflict_id} not found"
             )
 
-        # Upsert external reference (find-or-create/update)
-        await ext_ref_service.upsert_contact_reference(
+        # Upsert the canonical integration link (find-or-create/update)
+        await sync_metadata_repo.upsert_contact_link(
             contact_id=contact_id,
             external_system="immich",
             external_entity_type="person",

@@ -2,9 +2,6 @@
 Unit tests for integration domain entities.
 
 Tests the SyncMetadata entity for proper validation and business logic.
-
-Note: ExternalReference tests have been removed as the production code now uses
-the SQLAlchemy model from core_shared.models.external_reference directly.
 """
 
 from datetime import datetime

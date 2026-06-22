@@ -31,7 +31,9 @@ from app.core.contacts.models.repositories import (
     ContactRepository,
 )
 from app.core.history.models import FieldHistoryRepository
-from app.core.integrations.external_reference_service import ExternalReferenceService
+from app.core.integrations.adapters.sql.sync_metadata_repository import (
+    SyncMetadataRepository,
+)
 from app.core.journal.models.repositories import JournalContactRelationshipRepository
 from app.infrastructure.unit_of_work import transactional
 
@@ -79,14 +81,14 @@ class ContactMergeService:
         journal_relationship_repo: JournalContactRelationshipRepository,
         event_publisher: ContactEventPublisher,
         history_repo: FieldHistoryRepository,
-        external_reference_service: ExternalReferenceService,
+        sync_metadata_repo: SyncMetadataRepository,
     ):
         self.contact_repo = contact_repo
         self.relationship_repo = relationship_repo
         self.journal_relationship_repo = journal_relationship_repo
         self.event_publisher = event_publisher
         self.history_repo = history_repo
-        self.external_reference_service = external_reference_service
+        self.sync_metadata_repo = sync_metadata_repo
 
     def has_scalar_conflicts(self, survivor: Contact, source: Contact) -> bool:
         """Report whether two contacts have conflicting scalar identity fields.
@@ -168,11 +170,11 @@ class ContactMergeService:
         )
 
         # 1c. Re-point the source's external links onto the survivor so the merge
-        #     does not orphan ``external_references`` / ``sync_metadata`` rows (no
+        #     does not orphan ``sync_metadata`` link rows (no
         #     ON DELETE CASCADE). Same-service collisions are surfaced for remote
         #     reconciliation by the integration workers. Local-only re-point — the
         #     remote calls stay in the workers consuming ``ContactMerged``.
-        collisions = await self.external_reference_service.repoint_contact_references(
+        collisions = await self.sync_metadata_repo.repoint_contact_links(
             source_id, survivor_id, transaction
         )
 

@@ -1,6 +1,6 @@
 # Iteration 15: Integration Link Consolidation (fix contact duplication)
 
-**Status:** 🟡 IN PROGRESS — Phase 1, 2, 3 & 4 complete
+**Status:** 🟡 IN PROGRESS — Phase 1, 2, 3, 4 & 5 complete
 **Dependencies:** Iteration 11 (Immich Integration), Iteration 13 (Contact Merge), Iteration 14 (Worker Standardisation)
 **Goal:** Eliminate the dual-table inconsistency between `external_references` and `sync_metadata` that causes Immich-origin contacts to be duplicated by Google sync, by consolidating onto a single canonical integration-link store — and migrate/clean up the duplicates already created.
 
@@ -76,10 +76,10 @@ P1 (schema) → P2 (**dual-write + backfill**) → P3 (move reads — *the fix*)
 - [Database Design](../architecture/database-design.md)
 
 **Acceptance Criteria (task-level):**
-- [ ] Immich → Google → Immich round-trip never creates a duplicate contact (integration test).
-- [ ] `external_references` table is dropped; no code reads or writes it.
-- [ ] Existing bug-created duplicate contacts are merged; orphaned link rows reconciled.
-- [ ] All integration link reads/writes flow through one repository with one schema.
+- [x] Immich → Google → Immich round-trip never creates a duplicate contact (integration test — `test_link_consolidation_reads.py`, green through Phase 5).
+- [x] `external_references` table is dropped; no code reads or writes it (Phase 5; grep-gated).
+- [x] Existing bug-created duplicate contacts are merged; orphaned link rows reconciled (`0092`).
+- [x] All integration link reads/writes flow through one repository with one schema (`sync_metadata` via `SyncMetadataRepository` / `IntegrationLinkRepository`).
 
 ---
 
@@ -196,22 +196,44 @@ Now that nothing reads `external_references`, the old half of the dual-write is 
 
 ---
 
-#### Phase 5: Drop `external_references` + clean up existing duplicates
+#### Phase 5: Drop `external_references` + clean up existing duplicates — ✅ COMPLETE
 
 **PR Size:** ~5–7 files
 
-- Migration `0092_dedupe_bug_created_contacts.py` (data migration):
-  - Identify duplicate contacts created by this bug: an email-less Immich-origin contact and a `google`-sourced contact representing the same person (match on normalised name + Immich/Google link lineage; cross-check the Phase 2 quarantine table). Merge them via the existing contact-merge logic (survivor = the contact retaining the richest data / oldest id), repointing `sync_metadata` links. **Dry-run mode + full logging**; require an explicit flag/threshold guard to avoid over-merging.
-  - Reconcile orphaned links (sync_metadata rows whose `internal_id` no longer exists).
-- Migration `0093_drop_external_references.py`: drop the `external_references` table and its indexes after confirming no readers/writers remain (grep gate in PR description). The Phase 2 `link_backfill_quarantine` audit table is reconciled and dropped here too.
-- Remove `external_reference.py` model, `ExternalReferenceService`, `ExternalReferenceRepository`, and dead imports.
+> **Discovered during Phase 5:** one live reader was missed by Phase 3 —
+> `logbook_export_repository.py` still `LEFT JOIN external_references` to read album
+> `reference_data`. It is repointed to `sync_metadata.reference_data` here (Phase 4 already
+> made `sync_metadata` the sole album link store) before the drop migration runs.
+>
+> **Migration numbers:** the head is `0091`, so the dedupe ships as
+> **`0092_dedupe_bug_created_contacts.py`** (`down_revision = "0091"`) and the drop as
+> **`0093_drop_external_references.py`** (`down_revision = "0092"`).
+>
+> **Live-method relocation (full removal):** `ExternalReferenceService` /
+> `ExternalReferenceRepository` still hosted methods operating on `sync_metadata`/`contacts`.
+> They are relocated to the canonical repos: `repoint_contact_references` →
+> `SyncMetadataRepository.repoint_contact_links` (+ `ExternalReferenceCollision` renamed
+> `IntegrationLinkCollision`); `upsert_contact_reference` → `SyncMetadataRepository.upsert_contact_link`;
+> `contact_exists` → `SqlContactRepository.contact_exists`; `find_contact_with_birthday` →
+> `IntegrationLinkRepository`. The dead `external_references` readers are deleted.
+
+- [x] Repoint the last live reader (`logbook_export_repository.py`) off the
+  `external_references` LEFT JOIN to read album `reference_data` directly from
+  `sync_metadata` (a Phase-3 reader missed at the time).
+- [x] Migration `0092_dedupe_bug_created_contacts.py` (data migration):
+  - [x] Identify duplicate contacts created by this bug: an email-less Immich-origin contact (A) and an email-less `google`-linked contact (B) representing the same person. **Match discriminator:** since email-less is *not* exclusive to Immich (Google can import phone-only/empty contacts), name alone is too weak — a pair must share a normalised name **and** an identical full-precision **birthday** (the attribute the Immich-origin contact always carries and the round-trip preserves), so a false merge would need two distinct people with the same exact name and birthday. Merge B into A (survivor = the email-less Immich-linked original) with the **same re-point SQL the live `ContactMergeService` uses** (relationships, journal links, methods, addresses, notes, important dates, tags, top-level history, `sync_metadata` links), then delete B. **Dry-run mode (`-x dedupe_dry_run`) + full logging**; explicit threshold guard (`-x dedupe_max`/`dedupe_force`) and 1:1-only matching avoid over-merging.
+  - [x] Reconcile orphaned links (sync_metadata rows whose `internal_id` no longer exists).
+- [x] Migration `0093_drop_external_references.py`: drop the `external_references` table and its indexes after confirming no readers/writers remain (grep gate). The Phase 2 `link_backfill_quarantine` audit table is dropped here too.
+- [x] Remove `external_reference.py` model, `ExternalReferenceService`, `ExternalReferenceRepository`, and dead imports — relocating the live methods to the canonical repos (`SyncMetadataRepository.upsert_contact_link` / `repoint_contact_links` + `IntegrationLinkCollision`, `IntegrationLinkRepository.find_contact_with_birthday`, `SqlContactRepository.contact_exists`).
 
 **Required Test Coverage:**
-- **Integration (migration):** seed bug-shaped duplicates in an isolated DB → run dedupe → assert single merged contact with both links; assert idempotent (re-run is a no-op); assert non-duplicates untouched.
-- **Integration:** drop migration leaves all sync flows green.
+- [x] **Integration (migration):** seed bug-shaped duplicates in an isolated DB → run dedupe → assert single merged contact with both links; assert idempotent (re-run is a no-op); assert non-duplicates untouched (`backend/tests/integration/integrations/test_dedupe_bug_created_contacts_migration.py`, which also covers ambiguous-skip, orphan reconciliation, dry-run, and the threshold guard).
+- [x] **Integration:** drop migration leaves all sync flows green (`backend/tests/integration/integrations/test_drop_external_references_migration.py` + the full affected integration suite stays green; the Phase-3 duplication regression `test_link_consolidation_reads.py` remains green).
+
+**E2E:** not applicable — Phase 5 only changes migrations + backend/worker internals; no API/UI behaviour change.
 
 **Required Documentation Updates:**
-- `docs/architecture/integration-architecture.md` & `database-design.md` — remove `external_references`; document the consolidated schema.
+- [x] `docs/architecture/integration-architecture.md` — `external_references` dropped; `sync_metadata` documented as the sole canonical link store; relocated live methods noted. (`database-design.md` already had no `external_references` references.)
 
 ---
 

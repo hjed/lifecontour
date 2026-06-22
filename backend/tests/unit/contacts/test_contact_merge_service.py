@@ -79,11 +79,11 @@ def mock_history_repo() -> AsyncMock:
 
 
 @pytest.fixture
-def mock_external_reference_service() -> AsyncMock:
-    service = AsyncMock()
+def mock_sync_metadata_repo() -> AsyncMock:
+    repo = AsyncMock()
     # Default: no external links to reconcile.
-    service.repoint_contact_references.return_value = []
-    return service
+    repo.repoint_contact_links.return_value = []
+    return repo
 
 
 @pytest.fixture
@@ -93,7 +93,7 @@ def merge_service(
     mock_journal_rel_repo,
     mock_event_publisher,
     mock_history_repo,
-    mock_external_reference_service,
+    mock_sync_metadata_repo,
 ) -> ContactMergeService:
     return ContactMergeService(
         contact_repo=mock_contact_repo,
@@ -101,7 +101,7 @@ def merge_service(
         journal_relationship_repo=mock_journal_rel_repo,
         event_publisher=mock_event_publisher,
         history_repo=mock_history_repo,
-        external_reference_service=mock_external_reference_service,
+        sync_metadata_repo=mock_sync_metadata_repo,
     )
 
 
@@ -380,8 +380,8 @@ class TestContactMergeSideEffects:
 class TestContactMergeExternalReferences:
     """ITER13-005 Phase 1: the merge re-points the source's external links.
 
-    The local re-point of ``external_references`` / ``sync_metadata`` runs inline
-    in the merge transaction (a local ``UPDATE``/``DELETE``, never a remote call).
+    The local re-point of the canonical ``sync_metadata`` links runs inline in the
+    merge transaction (a local ``UPDATE``/``DELETE``, never a remote call).
     Same-service collisions surfaced by the re-point are carried on the
     ``ContactMerged`` event so the integration workers (Phases 2/3) can reconcile
     the remote records after the source's local row has gone.
@@ -399,12 +399,12 @@ class TestContactMergeExternalReferences:
         self,
         merge_service,
         mock_contact_repo,
-        mock_external_reference_service,
+        mock_sync_metadata_repo,
         mock_transaction,
     ) -> None:
         manager = MagicMock()
         manager.attach_mock(
-            mock_external_reference_service.repoint_contact_references, "repoint_refs"
+            mock_sync_metadata_repo.repoint_contact_links, "repoint_refs"
         )
         manager.attach_mock(mock_contact_repo.delete, "delete")
 
@@ -412,7 +412,7 @@ class TestContactMergeExternalReferences:
             SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
         )
 
-        mock_external_reference_service.repoint_contact_references.assert_awaited_once_with(
+        mock_sync_metadata_repo.repoint_contact_links.assert_awaited_once_with(
             SOURCE_ID, SURVIVOR_ID, mock_transaction
         )
         ordered = [call[0] for call in manager.mock_calls]
@@ -423,22 +423,20 @@ class TestContactMergeExternalReferences:
         self,
         merge_service,
         mock_event_publisher,
-        mock_external_reference_service,
+        mock_sync_metadata_repo,
         mock_transaction,
     ) -> None:
-        from app.core.integrations.external_reference_service import (
-            ExternalReferenceCollision,
+        from app.core.integrations.adapters.sql.sync_metadata_repository import (
+            IntegrationLinkCollision,
         )
 
-        collision = ExternalReferenceCollision(
+        collision = IntegrationLinkCollision(
             external_system="google",
             external_entity_type="person",
             source_external_id="people/source",
             survivor_external_id="people/survivor",
         )
-        mock_external_reference_service.repoint_contact_references.return_value = [
-            collision
-        ]
+        mock_sync_metadata_repo.repoint_contact_links.return_value = [collision]
 
         await merge_service.merge_contacts(
             SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction

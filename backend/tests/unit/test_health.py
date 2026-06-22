@@ -114,7 +114,6 @@ def test_integration_health_check_components_importable() -> None:
     # Test core_shared package accessibility
     try:
         from core_shared.base_service import BaseIntegrationService, SyncResult
-        from core_shared.models.external_reference import ExternalReference
         from core_shared.models.sync_metadata import SyncMetadata, SyncStatus
 
         # Verify enums work correctly
@@ -124,12 +123,10 @@ def test_integration_health_check_components_importable() -> None:
         # Test that we can reference the classes
         available_models = [
             SyncMetadata.__name__,
-            ExternalReference.__name__,
             BaseIntegrationService.__name__,
         ]
-        assert len(available_models) == 3
+        assert len(available_models) == 2
         assert "SyncMetadata" in available_models
-        assert "ExternalReference" in available_models
         assert "BaseIntegrationService" in available_models
 
     except (ImportError, AttributeError) as e:

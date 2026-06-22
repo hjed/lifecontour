@@ -33,9 +33,6 @@ from core_shared.models.contacts.important_date_types import (
 )
 from core_shared.models.contacts.serialization import serialize_contact
 from core_shared.models.outbox import OutboxEvent
-from core_shared.repositories.external_reference_repository import (
-    ExternalReferenceRepository,
-)
 from core_shared.repositories.integration_link_repository import (
     IntegrationLinkRepository,
 )
@@ -371,8 +368,7 @@ class ImmichSyncService:
         person_id = link["external_id"]
 
         # 2. Fetch the contact's name and birthday
-        ext_ref_repo = ExternalReferenceRepository(self._conn)
-        contact_data = await ext_ref_repo.find_contact_with_birthday(contact_id)
+        contact_data = await link_repo.find_contact_with_birthday(contact_id)
         if not contact_data:
             return {"status": "error", "reason": "contact_not_found"}
 
