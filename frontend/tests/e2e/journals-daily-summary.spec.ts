@@ -207,24 +207,38 @@ test.describe('Journals AI Daily Summary', () => {
       await dataManager.cleanup();
     });
 
-    // Mock the initial fetch
-    await mockDailySummaryRoute(authenticatedPage, journalDateId, {
-      summary_text: 'Initial summary',
-    });
+    // Stateful GET mock: returns the initial summary until a regenerate
+    // happens, then returns the regenerated text. This mirrors the real backend
+    // (regeneration is persisted), so any background refetch — including the
+    // Next.js dev-server Fast Refresh that can run mid-test — stays consistent
+    // instead of reverting the UI to the stale summary.
+    let regenerated = false;
+    await authenticatedPage.route(
+      `**/api/journals/daily-summary/${journalDateId}`,
+      async route => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: buildSummaryResponse(journalDateId, {
+            summary_text: regenerated
+              ? 'Regenerated summary text'
+              : 'Initial summary',
+          }),
+        });
+      }
+    );
 
-    // Mock the regenerate POST
-    let regenerateCalled = false;
+    // Mock the regenerate POST to return the regenerated, completed summary.
     await authenticatedPage.route(
       `**/api/journals/daily-summary/${journalDateId}/regenerate`,
       async route => {
         if (route.request().method() === 'POST') {
-          regenerateCalled = true;
+          regenerated = true;
           await route.fulfill({
             status: 200,
             contentType: 'application/json',
             body: buildSummaryResponse(journalDateId, {
               summary_text: 'Regenerated summary text',
-              status: 'generating',
             }),
           });
         } else {
@@ -240,16 +254,30 @@ test.describe('Journals AI Daily Summary', () => {
       authenticatedPage.getByTestId(`summary-text-${journalDateId}`)
     ).toContainText('Initial summary');
 
-    // Click refresh
-    const refreshBtn = authenticatedPage.getByTestId(
-      `refresh-summary-btn-${journalDateId}`
+    // Arm the response wait BEFORE the click so the round-trip can't be missed.
+    const regenerateResponse = authenticatedPage.waitForResponse(
+      response =>
+        response
+          .url()
+          .includes(
+            `/api/journals/daily-summary/${journalDateId}/regenerate`
+          ) && response.request().method() === 'POST'
     );
-    await refreshBtn.click();
 
-    // Verify the UI updated (Playwright will auto-retry until the badge appears, which
-    // proves the POST completed and the response was rendered)
-    await expect(authenticatedPage.getByText('Generating...')).toBeVisible();
-    // Now safe to check the synchronous side-effect flag
-    expect(regenerateCalled).toBe(true);
+    // Click refresh
+    await authenticatedPage
+      .getByTestId(`refresh-summary-btn-${journalDateId}`)
+      .click();
+
+    // Deterministically confirm the regenerate request fired and succeeded,
+    // rather than asserting on a transient "Generating..." badge.
+    const response = await regenerateResponse;
+    expect(response.status()).toBe(200);
+
+    // Verify the persistent, user-visible outcome: the summary updates to the
+    // regenerated text. Playwright auto-retries until the new summary settles.
+    await expect(
+      authenticatedPage.getByTestId(`summary-text-${journalDateId}`)
+    ).toContainText('Regenerated summary text');
   });
 });
