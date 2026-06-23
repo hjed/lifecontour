@@ -303,9 +303,11 @@ class DailySummaryService:
 
         from fastmcp import Client
         from google import genai
-        from google.genai import types
 
-        from app.mcp.shared.read_only_tools import create_read_only_mcp_server
+        from app.mcp.shared.read_only_tools import (
+            build_gemini_session_config,
+            create_read_only_mcp_server,
+        )
 
         read_only_mcp = await create_read_only_mcp_server(
             "Daily Summary Generation Tools"
@@ -317,15 +319,13 @@ class DailySummaryService:
         base_delay = 1.0
 
         async with Client(read_only_mcp) as mcp_client:
+            config = build_gemini_session_config(mcp_client.session)
             for attempt in range(max_attempts):
                 try:
                     response = await client.aio.models.generate_content(
                         model=self._gemini_model,
                         contents=prompt,
-                        config=types.GenerateContentConfig(
-                            tools=[mcp_client.session],
-                            temperature=0.3,
-                        ),
+                        config=config,
                     )
                     return response.text or ""
                 except Exception as e:
