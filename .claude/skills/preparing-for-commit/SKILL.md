@@ -27,3 +27,5 @@ DO NOT make commit names such as "fix pr comments", the commit message should re
 
 # Handling the precomit hook output/failures
 After implementing changes, run all tests, pre-commit hooks (ruff, prettier), and quality gates before raising a PR; re-stage any files reformatted by hooks.
+
+If the lock files are changed, they should be committed
