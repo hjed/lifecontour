@@ -13,7 +13,9 @@ Snipe-IT returns nested ``{id, name}`` objects for related entities
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from typing import Any
+
+from pydantic import BaseModel, Field, model_validator
 
 
 class SnipeItNestedObject(BaseModel):
@@ -36,6 +38,20 @@ class SnipeItDateObject(BaseModel):
     date: str | None = Field(default=None, alias="date")
     datetime: str | None = None
     formatted: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_bare_string(cls, data: Any) -> Any:
+        """Coerce a bare date string into the ``{"date": ...}`` object form.
+
+        Snipe-IT GET responses wrap dates as ``{"date": ..., "formatted": ...}``,
+        but the POST/PATCH ``payload`` returns them as plain strings (e.g.
+        ``"2026-06-23"`` or ``"2026-06-23T10:16:11.000000Z"``). Normalising here
+        lets both response shapes validate against this model.
+        """
+        if isinstance(data, str):
+            return {"date": data}
+        return data
 
 
 class SnipeItAssignedTo(BaseModel):
