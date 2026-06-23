@@ -59,6 +59,13 @@ from core_shared.models import (
     SyncMetadata,
     SyncStatus,
 )
+from core_shared.stream_client import StreamClient, StreamEvent
+from core_shared.stream_consumer import (
+    EventHandler,
+    EventRoute,
+    StreamConsumer,
+    event_type_matches,
+)
 from core_shared.sync_reconciliation import (
     reconcile_in_progress_parents,
     reconcile_parents,
@@ -129,6 +136,13 @@ __all__ = [
     "DEFAULT_KEEP_RESULT",
     "DEFAULT_MAX_TRIES",
     "DEFAULT_HEALTH_CHECK_INTERVAL",
+    # Stream consumer / route registration
+    "StreamClient",
+    "StreamConsumer",
+    "StreamEvent",
+    "EventRoute",
+    "EventHandler",
+    "event_type_matches",
     # Fan-out reconciliation
     "reconcile_in_progress_parents",
     "reconcile_parents",

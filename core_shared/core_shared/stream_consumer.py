@@ -1,12 +1,19 @@
 """
 Base StreamConsumer class for Redis Streams consumer groups.
 
-Provides abstract consumer with XREADGROUP, event filtering by type pattern,
+Provides a consumer with XREADGROUP, event filtering by type pattern,
 XACK acknowledgement, and retry logic via XPENDING + XCLAIM.
+
+A consumer declares either a **route table** (``routes``) — a list of
+:class:`EventRoute` mapping an event-type pattern to a handler coroutine, with
+the shared infrastructure running the loop/ack/retry and dispatching matched
+events — or overrides ``_handle_event`` directly (the legacy path, retained for
+backward compatibility until workers migrate to routes).
 """
 
 import asyncio
-from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
 
 import structlog
 
@@ -14,13 +21,49 @@ from core_shared.stream_client import PendingEntry, StreamClient, StreamEvent
 
 logger = structlog.get_logger()
 
+# A route handler receives a single matched event. Raising leaves the event
+# unacknowledged so the base class retries it via the pending-entries path.
+EventHandler = Callable[[StreamEvent], Awaitable[None]]
 
-class StreamConsumer(ABC):
-    """Abstract base class for Redis Streams consumer groups.
 
-    Subclasses implement ``_handle_event`` for actual event processing.
-    The base class manages consumer group creation, event filtering by
-    type patterns, acknowledgement, and retry of stale pending entries.
+def event_type_matches(pattern: str, event_type: str) -> bool:
+    """Return whether ``event_type`` matches a single pattern.
+
+    Supports two modes:
+    - **Prefix match**: patterns ending with ``"."`` (e.g. ``"contact."``)
+      match any ``event_type`` starting with the pattern.
+    - **Exact match**: patterns without a trailing ``"."`` must match exactly.
+    """
+    if pattern.endswith("."):
+        return event_type.startswith(pattern)
+    return event_type == pattern
+
+
+@dataclass(frozen=True)
+class EventRoute:
+    """A declarative route: an event-type pattern mapped to a handler.
+
+    Attributes:
+        pattern: Event-type pattern using the prefix/exact semantics of
+            :func:`event_type_matches` (e.g. ``"strava."`` or ``"ContactCreated"``).
+        handler: Coroutine invoked with the matched :class:`StreamEvent`.
+    """
+
+    pattern: str
+    handler: EventHandler
+
+
+class StreamConsumer:
+    """Base class for Redis Streams consumer groups.
+
+    The base class manages consumer group creation, event filtering by type
+    patterns, acknowledgement, and retry of stale pending entries.
+
+    Workers declare a **route table** via ``routes`` (an :class:`EventRoute`
+    list); the shared :meth:`_handle_event` dispatches each matched event to the
+    first route whose pattern matches. Alternatively, subclasses may override
+    :meth:`_handle_event` directly (the legacy path) and pass
+    ``event_type_patterns`` instead.
 
     Event type matching supports two modes:
     - **Prefix match**: patterns ending with ``.`` (e.g. ``"contact."``)
@@ -34,7 +77,8 @@ class StreamConsumer(ABC):
         stream_name: str,
         group_name: str,
         consumer_name: str,
-        event_type_patterns: list[str],
+        event_type_patterns: list[str] | None = None,
+        routes: Sequence[EventRoute] | None = None,
         batch_size: int = 10,
         block_ms: int = 5000,
         retry_min_idle_ms: int = 60000,
@@ -43,18 +87,37 @@ class StreamConsumer(ABC):
     ) -> None:
         """Initialize the consumer.
 
+        Provide either ``routes`` (declarative dispatch via :meth:`_handle_event`)
+        or ``event_type_patterns`` (with a ``_handle_event`` override). When
+        ``routes`` are given and ``event_type_patterns`` is omitted, the consumed
+        patterns are derived from the route table, so the route table is the
+        single source of truth for the consumed-event set.
+
         Args:
             stream_client: Redis Streams client
             stream_name: Name of the Redis Stream to consume from
             group_name: Consumer group name (e.g. "search-indexer")
             consumer_name: Individual consumer name within the group
-            event_type_patterns: List of event type patterns to process
+            event_type_patterns: List of event type patterns to process. Optional
+                when ``routes`` are supplied (derived from the route patterns).
+            routes: Declarative route table mapping patterns to handlers.
             batch_size: Maximum events to read per XREADGROUP call
             block_ms: Milliseconds to block waiting for new events
             retry_min_idle_ms: Minimum idle time (ms) before retrying pending entries
             retry_batch_size: Maximum pending entries to claim per retry cycle
             max_delivery_count: Maximum times an event can be delivered before dead-lettering
+
+        Raises:
+            ValueError: If neither ``routes`` nor ``event_type_patterns`` is given.
         """
+        self._routes: list[EventRoute] = list(routes) if routes is not None else []
+        if event_type_patterns is None:
+            if not self._routes:
+                raise ValueError(
+                    "StreamConsumer requires either 'routes' or 'event_type_patterns'"
+                )
+            event_type_patterns = [route.pattern for route in self._routes]
+
         self._stream_client = stream_client
         self._stream_name = stream_name
         self._group_name = group_name
@@ -109,17 +172,46 @@ class StreamConsumer(ABC):
         """Signal the consumer to stop reading."""
         self._running = False
 
-    @abstractmethod
     async def _handle_event(self, event: StreamEvent) -> None:
         """Process a single matched event.
 
-        Subclasses implement this method. If the method raises an exception,
-        the event will **not** be acknowledged and will remain in the
+        The default implementation dispatches to the first :class:`EventRoute`
+        whose pattern matches ``event.event_type``. Subclasses may override this
+        method instead of declaring ``routes`` (the legacy path). If the handler
+        (or override) raises, the event is **not** acknowledged and remains in the
         pending entries list for retry.
 
         Args:
             event: The stream event to process
+
+        Raises:
+            NotImplementedError: If the consumer declares no routes and this
+                method is not overridden.
         """
+        if not self._routes:
+            raise NotImplementedError(
+                "StreamConsumer must declare 'routes' or override '_handle_event'"
+            )
+        route = self._match_route(event.event_type)
+        if route is None:
+            # Event passed the pattern filter but matches no specific route.
+            # With routes-derived patterns this is unreachable; log and skip so
+            # the caller acknowledges it rather than leaving it pending.
+            logger.debug(
+                "No route matched event, skipping",
+                event_type=event.event_type,
+                event_id=event.event_id,
+                group=self._group_name,
+            )
+            return
+        await route.handler(event)
+
+    def _match_route(self, event_type: str) -> EventRoute | None:
+        """Return the first route whose pattern matches ``event_type``."""
+        for route in self._routes:
+            if event_type_matches(route.pattern, event_type):
+                return route
+        return None
 
     async def _handle_dead_letter(
         self, event: StreamEvent, pending_entry: PendingEntry
@@ -302,11 +394,7 @@ class StreamConsumer(ABC):
         Returns:
             True if the event type matches any pattern
         """
-        for pattern in self._event_type_patterns:
-            if pattern.endswith("."):
-                if event_type.startswith(pattern):
-                    return True
-            else:
-                if event_type == pattern:
-                    return True
-        return False
+        return any(
+            event_type_matches(pattern, event_type)
+            for pattern in self._event_type_patterns
+        )
