@@ -1,6 +1,6 @@
 """Integration tests for the declarative routed StreamConsumer against real Redis.
 
-ITER14-004 Phase 1 adds a route table (event-type pattern -> handler) to
+A consumer declares a route table (event-type pattern -> handler) on
 ``core_shared``'s :class:`StreamConsumer`. These tests exercise the *generic*
 routed consumer (no worker needed) end-to-end against a real Redis stream,
 confirming the shared infrastructure dispatches matched events, acks unmatched

@@ -1,10 +1,9 @@
 """Unit tests for the declarative route-registration convention on StreamConsumer.
 
-ITER14-004 Phase 1 adds a declarative route table (event-type pattern -> handler)
-to ``core_shared``'s :class:`StreamConsumer`. The shared infrastructure runs the
-``XREADGROUP``/ack/retry loop and dispatches matched events to the registered
-handler; unmatched events are acked immediately. The existing ``_handle_event``
-subclass-override path remains supported (backward compatible) until workers migrate.
+A consumer declares a route table (event-type pattern -> handler) and the shared
+infrastructure runs the ``XREADGROUP``/ack/retry loop and dispatches matched events
+to the registered handler; unmatched events are acked immediately. The existing
+``_handle_event`` subclass-override path remains supported (backward compatible).
 
 These cover the worker-agnostic mechanism in isolation with a mocked stream client.
 """
@@ -300,6 +299,25 @@ class TestBackwardCompatibility:
                 stream_name=STREAM_NAME,
                 group_name=GROUP_NAME,
                 consumer_name=CONSUMER_NAME,
+            )
+
+    def test_construction_rejects_routes_and_patterns_together(self) -> None:
+        """Supplying both routes and event_type_patterns is rejected.
+
+        The two would otherwise let the pattern filter and the route dispatch set
+        diverge — an event could pass ``_matches_event_type`` yet match no route,
+        silently acking with no handler. The route table is the single source of
+        truth, so the combination is a configuration error.
+        """
+        client = _make_stream_client()
+        with pytest.raises(ValueError):
+            StreamConsumer(
+                stream_client=client,
+                stream_name=STREAM_NAME,
+                group_name=GROUP_NAME,
+                consumer_name=CONSUMER_NAME,
+                event_type_patterns=["ContactCreated"],
+                routes=[EventRoute("JournalCreated", AsyncMock())],
             )
 
 

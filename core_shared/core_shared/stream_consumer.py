@@ -108,8 +108,16 @@ class StreamConsumer:
             max_delivery_count: Maximum times an event can be delivered before dead-lettering
 
         Raises:
-            ValueError: If neither ``routes`` nor ``event_type_patterns`` is given.
+            ValueError: If neither ``routes`` nor ``event_type_patterns`` is given,
+                or if both are given (the combination is ambiguous — the filter set
+                and the dispatch set could diverge and silently drop events).
         """
+        if routes is not None and event_type_patterns is not None:
+            raise ValueError(
+                "StreamConsumer accepts 'routes' or 'event_type_patterns', not both; "
+                "with 'routes' the consumed patterns are derived from the route table"
+            )
+
         self._routes: list[EventRoute] = list(routes) if routes is not None else []
         if event_type_patterns is None:
             if not self._routes:
