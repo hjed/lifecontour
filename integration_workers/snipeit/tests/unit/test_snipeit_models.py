@@ -58,6 +58,20 @@ class TestSnipeItDateObject:
         obj = SnipeItDateObject.model_validate({})
         assert obj.date is None
 
+    def test_parse_bare_date_string(self) -> None:
+        """A bare date string is coerced into the object form.
+
+        Snipe-IT's POST/PATCH ``payload`` returns dates as plain strings
+        (e.g. ``"2026-06-23"``) rather than ``{"date": ...}`` objects.
+        """
+        obj = SnipeItDateObject.model_validate("2026-06-23")
+        assert obj.date == "2026-06-23"
+
+    def test_parse_bare_datetime_string(self) -> None:
+        """A bare datetime string is coerced into the object form."""
+        obj = SnipeItDateObject.model_validate("2026-06-23T10:16:11.000000Z")
+        assert obj.date == "2026-06-23T10:16:11.000000Z"
+
 
 class TestSnipeItAsset:
     """Tests for the SnipeItAsset model."""
@@ -316,6 +330,30 @@ class TestSnipeItMaintenanceWriteResponse:
         assert m.id == 501
         assert m.asset_id == 42
         assert m.title == "Rope Inspection"
+
+    def test_parse_post_response_with_bare_string_dates(self) -> None:
+        """POST payload with bare string dates parses correctly.
+
+        Regression test: Snipe-IT's real POST ``/maintenances`` payload
+        returns ``start_date``/``completion_date``/``updated_at`` as plain
+        strings, not ``{"date": ...}`` objects (see prod ValidationError).
+        """
+        data = {
+            "id": 501,
+            "asset_id": 42,
+            "title": "Rope Inspection",
+            "asset_maintenance_type": "PAT Test",
+            "start_date": "2026-06-23",
+            "completion_date": "2026-06-23",
+            "notes": "All ropes checked",
+            "updated_at": "2026-06-23T10:16:11.000000Z",
+        }
+        m = SnipeItMaintenanceWriteResponse.model_validate(data)
+
+        assert m.id == 501
+        assert m.asset_id == 42
+        assert m.start_date_str == "2026-06-23"
+        assert m.completion_date_str == "2026-06-23"
 
     def test_missing_asset_id_raises_validation_error(self) -> None:
         """POST/PATCH payload without asset_id raises ValidationError."""
