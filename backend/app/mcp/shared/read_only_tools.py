@@ -9,7 +9,10 @@ around boolean-schema values that crash google-genai's ``_filter_to_supported_sc
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from google.genai import types
 
 logger = logging.getLogger(__name__)
 
@@ -72,3 +75,21 @@ async def create_read_only_mcp_server(server_name: str = "AI Generation Tools") 
             read_only_mcp._local_provider.add_tool(t)
 
     return read_only_mcp
+
+
+def build_gemini_session_config(
+    session: Any, *, temperature: float = 0.3
+) -> types.GenerateContentConfigDict:
+    """Build the google-genai config for a request that uses a live MCP session.
+
+    Returns the config as a **dict**, NOT a ``GenerateContentConfig`` object.
+    google-genai 2.9.0 deep-copies a config passed as an object before use
+    (``models.py:8551-8556`` -> ``model_copy(deep=True)``). The config carries
+    the live FastMCP ``ClientSession`` as a tool, and deep-copying the session's
+    ``_asyncio.Future`` objects raises "cannot pickle '_asyncio.Future' object".
+    A dict takes genai's no-deep-copy branch, so the live session survives.
+
+    Both AI summary generators (daily summary and contact summary) share this
+    helper so the workaround lives in exactly one place.
+    """
+    return {"tools": [session], "temperature": temperature}

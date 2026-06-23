@@ -303,9 +303,11 @@ class DailySummaryService:
 
         from fastmcp import Client
         from google import genai
-        from google.genai import types
 
-        from app.mcp.shared.read_only_tools import create_read_only_mcp_server
+        from app.mcp.shared.read_only_tools import (
+            build_gemini_session_config,
+            create_read_only_mcp_server,
+        )
 
         read_only_mcp = await create_read_only_mcp_server(
             "Daily Summary Generation Tools"
@@ -317,17 +319,7 @@ class DailySummaryService:
         base_delay = 1.0
 
         async with Client(read_only_mcp) as mcp_client:
-            # Pass the config as a dict, NOT a GenerateContentConfig object. The
-            # config carries the live FastMCP ClientSession as a tool, and
-            # google-genai 2.9.0 deep-copies a config *object* before use
-            # (models.py:8551-8556 -> model_copy(deep=True)); deep-copying the
-            # session's _asyncio.Future objects raises "cannot pickle
-            # '_asyncio.Future' object" (issue #970 follow-up). A dict takes
-            # genai's no-deep-copy branch, so the live session survives.
-            config: types.GenerateContentConfigDict = {
-                "tools": [mcp_client.session],
-                "temperature": 0.3,
-            }
+            config = build_gemini_session_config(mcp_client.session)
             for attempt in range(max_attempts):
                 try:
                     response = await client.aio.models.generate_content(

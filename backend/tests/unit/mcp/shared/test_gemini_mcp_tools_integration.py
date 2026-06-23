@@ -17,7 +17,8 @@ their config this way.
 
 These tests exercise the exact integration path both services rely on, mocking
 only the network layer (``_generate_content``) so the real ``generate_content``
-orchestrator (including the deep-copy branch) still runs.
+config handling still runs — with a dict config it takes the safe
+``GenerateContentConfig(**config)`` branch and skips ``model_copy(deep=True)``.
 """
 
 from __future__ import annotations
@@ -49,17 +50,18 @@ def _text_response(text: str) -> types.GenerateContentResponse:
 async def test_generate_content_with_live_mcp_session_does_not_pickle() -> None:
     """The dict-config workaround must not raise a pickle error.
 
-    Reproduces the daily-summary failure at the library boundary: a real
+    Reproduces the daily-summary scenario at the library boundary: a real
     read-only MCP server + live ``fastmcp`` session passed to
-    ``generate_content``. Only the network call is mocked, so the buggy
-    ``model_copy(deep=True)`` path in google-genai still executes — passing the
-    config as a *dict* is what keeps it from deep-copying the live session.
+    ``generate_content``. Only the network call is mocked, so google-genai's
+    real config-handling runs — and because the config is a *dict* it takes the
+    ``GenerateContentConfig(**config)`` branch instead of the
+    ``model_copy(deep=True)`` branch that would pickle-crash on the live session.
     """
     read_only_mcp = await create_read_only_mcp_server("Daily Summary Generation Tools")
 
     client = genai.Client(api_key="test-key")
-    # Mock the network layer; the real ``generate_content`` orchestrator (which
-    # deep-copies an *object* config on 2.8.0+) still runs.
+    # Mock the network layer; the real ``generate_content`` config handling still
+    # runs (it deep-copies an *object* config on 2.8.0+, which a dict avoids).
     client.aio.models._generate_content = AsyncMock(  # type: ignore[method-assign]
         return_value=_text_response("a summary of the day")
     )
@@ -112,9 +114,9 @@ async def test_read_only_mcp_session_config_is_passed_through() -> None:
 def _mock_gemini_transport(text: str) -> Iterator[None]:
     """Patch ``genai.Client`` so its network layer returns ``text``.
 
-    The real ``generate_content`` orchestrator still runs (including the 2.8.0
-    deep-copy path), so this exercises the genuine service code path while
-    avoiding any network call.
+    The real ``generate_content`` config handling still runs, so this exercises
+    the genuine service code path (which passes a dict config to route around
+    the 2.8.0+ deep-copy regression) while avoiding any network call.
     """
     original_client_cls = genai.Client
 
