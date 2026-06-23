@@ -1,20 +1,23 @@
 """Regression tests for the Gemini + read-only-MCP tool-calling integration.
 
 The AI summary services (daily summary and contact summary) pass a *live*
-``fastmcp`` MCP ``ClientSession`` to ``google-genai`` as a tool — the pattern
-recommended by both libraries' docs:
+``fastmcp`` MCP ``ClientSession`` to ``google-genai`` as a tool.
 
-    config=types.GenerateContentConfig(tools=[mcp_client.session])
+google-genai 2.8.0 introduced — and 2.9.0 keeps — a regression where
+``generate_content`` deep-copies a ``config`` passed as a
+``GenerateContentConfig`` *object* (``models.py:8551-8556`` ->
+``config.model_copy(deep=True)``). The live session holds ``_asyncio.Future``
+objects, so the deep copy raises ``cannot pickle '_asyncio.Future' object`` on
+the very first request — which is what broke daily-summary sync.
 
-google-genai 2.8.0 introduced a regression where ``generate_content`` does
-``config.model_copy(deep=True)`` at the top of the call (models.py:8543). The
-live session holds ``_asyncio.Future`` objects, so the deep copy raises
-``cannot pickle '_asyncio.Future' object`` on the very first request — which is
-what broke daily-summary sync.
+The fix/workaround is to pass the config as a *dict* instead of an object:
+genai reconstructs a dict config with ``GenerateContentConfig(**config)``
+(no deep copy), so the live session survives by reference. Both services build
+their config this way.
 
 These tests exercise the exact integration path both services rely on, mocking
-only the network layer (``_generate_content``). They fail on google-genai 2.8.0
-and pass on 2.7.0, guarding the ``google-genai<2.8.0`` pin in pyproject.toml.
+only the network layer (``_generate_content``) so the real ``generate_content``
+orchestrator (including the deep-copy branch) still runs.
 """
 
 from __future__ import annotations
@@ -44,30 +47,32 @@ def _text_response(text: str) -> types.GenerateContentResponse:
 
 
 async def test_generate_content_with_live_mcp_session_does_not_pickle() -> None:
-    """The documented ``tools=[session]`` pattern must not raise a pickle error.
+    """The dict-config workaround must not raise a pickle error.
 
     Reproduces the daily-summary failure at the library boundary: a real
     read-only MCP server + live ``fastmcp`` session passed to
     ``generate_content``. Only the network call is mocked, so the buggy
-    ``model_copy(deep=True)`` path in google-genai still executes.
+    ``model_copy(deep=True)`` path in google-genai still executes — passing the
+    config as a *dict* is what keeps it from deep-copying the live session.
     """
     read_only_mcp = await create_read_only_mcp_server("Daily Summary Generation Tools")
 
     client = genai.Client(api_key="test-key")
     # Mock the network layer; the real ``generate_content`` orchestrator (which
-    # deep-copies the config on 2.8.0) still runs.
+    # deep-copies an *object* config on 2.8.0+) still runs.
     client.aio.models._generate_content = AsyncMock(  # type: ignore[method-assign]
         return_value=_text_response("a summary of the day")
     )
 
     async with Client(read_only_mcp) as mcp_client:
+        config: types.GenerateContentConfigDict = {
+            "tools": [mcp_client.session],
+            "temperature": 0.3,
+        }
         response = await client.aio.models.generate_content(
             model="gemini-2.5-flash",
             contents="Summarise the day",
-            config=types.GenerateContentConfig(
-                tools=[mcp_client.session],
-                temperature=0.3,
-            ),
+            config=config,
         )
 
     assert response.text == "a summary of the day"
@@ -77,7 +82,7 @@ async def test_read_only_mcp_session_config_is_passed_through() -> None:
     """The live session is accepted as a tool and converted by the SDK.
 
     Confirms the read-only server exposes tools and that a session-backed
-    config reaches the (mocked) transport without error.
+    dict config reaches the (mocked) transport without error.
     """
     read_only_mcp = await create_read_only_mcp_server("Summary Generation Tools")
 
@@ -89,13 +94,14 @@ async def test_read_only_mcp_session_config_is_passed_through() -> None:
         tools = await mcp_client.list_tools()
         assert tools, "read-only server should expose at least one tool"
 
+        config: types.GenerateContentConfigDict = {
+            "tools": [mcp_client.session],
+            "temperature": 0.3,
+        }
         result = await client.aio.models.generate_content(
             model="gemini-2.5-flash",
             contents="hi",
-            config=types.GenerateContentConfig(
-                tools=[mcp_client.session],
-                temperature=0.3,
-            ),
+            config=config,
         )
 
     assert result.text == "ok"
