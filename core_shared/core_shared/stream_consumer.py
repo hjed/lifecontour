@@ -78,12 +78,13 @@ class StreamConsumer:
         group_name: str,
         consumer_name: str,
         event_type_patterns: list[str] | None = None,
-        routes: Sequence[EventRoute] | None = None,
         batch_size: int = 10,
         block_ms: int = 5000,
         retry_min_idle_ms: int = 60000,
         retry_batch_size: int = 10,
         max_delivery_count: int = 5,
+        *,
+        routes: Sequence[EventRoute] | None = None,
     ) -> None:
         """Initialize the consumer.
 
@@ -93,6 +94,10 @@ class StreamConsumer:
         patterns are derived from the route table, so the route table is the
         single source of truth for the consumed-event set.
 
+        ``routes`` is keyword-only and appended after the original parameters, so
+        the positional argument order is unchanged from before route support was
+        added (existing positional and keyword callers are unaffected).
+
         Args:
             stream_client: Redis Streams client
             stream_name: Name of the Redis Stream to consume from
@@ -100,17 +105,20 @@ class StreamConsumer:
             consumer_name: Individual consumer name within the group
             event_type_patterns: List of event type patterns to process. Optional
                 when ``routes`` are supplied (derived from the route patterns).
-            routes: Declarative route table mapping patterns to handlers.
             batch_size: Maximum events to read per XREADGROUP call
             block_ms: Milliseconds to block waiting for new events
             retry_min_idle_ms: Minimum idle time (ms) before retrying pending entries
             retry_batch_size: Maximum pending entries to claim per retry cycle
             max_delivery_count: Maximum times an event can be delivered before dead-lettering
+            routes: Declarative route table mapping patterns to handlers (keyword-only).
 
         Raises:
-            ValueError: If neither ``routes`` nor ``event_type_patterns`` is given,
-                or if both are given (the combination is ambiguous — the filter set
-                and the dispatch set could diverge and silently drop events).
+            ValueError: If neither ``routes`` nor ``event_type_patterns`` is given;
+                if both are given (the combination is ambiguous — the filter set and
+                the dispatch set could diverge and silently drop events); or if
+                ``event_type_patterns`` is given without ``routes`` and ``_handle_event``
+                is not overridden (a misconfiguration that would otherwise only surface
+                when the first event is processed).
         """
         if routes is not None and event_type_patterns is not None:
             raise ValueError(
@@ -125,6 +133,17 @@ class StreamConsumer:
                     "StreamConsumer requires either 'routes' or 'event_type_patterns'"
                 )
             event_type_patterns = [route.pattern for route in self._routes]
+        elif (
+            not self._routes
+            and type(self)._handle_event is StreamConsumer._handle_event
+        ):
+            # event_type_patterns supplied, but no routes and no _handle_event
+            # override — fail fast rather than acking-then-raising at the first
+            # event (which would leave messages pending until dead-lettering).
+            raise ValueError(
+                "StreamConsumer requires 'routes' or a '_handle_event' override; "
+                "'event_type_patterns' alone has no handler to dispatch to"
+            )
 
         self._stream_client = stream_client
         self._stream_name = stream_name

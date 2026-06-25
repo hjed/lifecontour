@@ -276,19 +276,22 @@ class TestBackwardCompatibility:
         assert consumer._matches_event_type("ContactCreated") is True
         assert consumer._matches_event_type("JournalCreated") is False
 
-    @pytest.mark.asyncio
-    async def test_base_without_routes_or_override_raises(self) -> None:
-        """A base consumer with neither routes nor override raises on dispatch."""
+    def test_base_without_routes_or_override_raises_at_construction(self) -> None:
+        """A base consumer with patterns but no routes/override fails fast on init.
+
+        Without a ``_handle_event`` override or routes there is no handler to
+        dispatch to; constructing must raise immediately rather than acking-then-
+        failing at the first event (which would leave messages pending).
+        """
         client = _make_stream_client()
-        consumer = StreamConsumer(
-            stream_client=client,
-            stream_name=STREAM_NAME,
-            group_name=GROUP_NAME,
-            consumer_name=CONSUMER_NAME,
-            event_type_patterns=["ContactCreated"],
-        )
-        with pytest.raises(NotImplementedError):
-            await consumer._handle_event(_make_event(event_type="ContactCreated"))
+        with pytest.raises(ValueError):
+            StreamConsumer(
+                stream_client=client,
+                stream_name=STREAM_NAME,
+                group_name=GROUP_NAME,
+                consumer_name=CONSUMER_NAME,
+                event_type_patterns=["ContactCreated"],
+            )
 
     def test_construction_requires_routes_or_patterns(self) -> None:
         """Constructing with neither routes nor patterns is a configuration error."""
