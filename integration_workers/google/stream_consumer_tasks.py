@@ -18,28 +18,26 @@ from typing import Any
 
 import structlog
 from core_shared.stream_client import StreamClient, StreamEvent, create_stream_redis
-from core_shared.stream_consumer import StreamConsumer
+from core_shared.stream_consumer import EventRoute, StreamConsumer
 
 from worker import process_contact_event, process_journal_event, process_tag_event
 
 logger = structlog.get_logger()
 
 # Journal event types that trigger outbound processing.
-_JOURNAL_EVENT_TYPES = frozenset({"JournalCreated", "JournalUpdated", "JournalDeleted"})
+_JOURNAL_EVENT_TYPES = ("JournalCreated", "JournalUpdated", "JournalDeleted")
 
 # Tag event types that trigger outbound processing.
-_TAG_EVENT_TYPES = frozenset({"TagUpdated", "TagDeleted"})
+_TAG_EVENT_TYPES = ("TagUpdated", "TagDeleted")
 
 # Contact event types that trigger outbound push to Google.
 # ``ContactMerged`` (ITER13-005 Phase 2) reconciles a same-service merge by
 # deleting the source contact's orphaned remote Google record.
-_CONTACT_EVENT_TYPES = frozenset(
-    {"ContactCreated", "ContactUpdated", "ContactDeleted", "ContactMerged"}
-)
-
-# Combined event type list for pattern matching (exact match).
-_OUTBOUND_EVENT_TYPES: list[str] = sorted(
-    _JOURNAL_EVENT_TYPES | _TAG_EVENT_TYPES | _CONTACT_EVENT_TYPES
+_CONTACT_EVENT_TYPES = (
+    "ContactCreated",
+    "ContactUpdated",
+    "ContactDeleted",
+    "ContactMerged",
 )
 
 
@@ -48,9 +46,12 @@ class GoogleWorkerStreamConsumer(StreamConsumer):
 
     Listens to journal, tag, and contact domain events on the
     ``pms:domain-events`` stream using the ``google-worker`` consumer
-    group. Routes events directly to ``process_journal_event``,
-    ``process_tag_event``, and ``process_contact_event`` worker
-    functions without ARQ enqueue.
+    group. The declarative route table (see :meth:`_build_routes`) maps each
+    consumed event type to ``process_journal_event``, ``process_tag_event``, or
+    ``process_contact_event`` worker functions; the shared
+    :class:`~core_shared.stream_consumer.StreamConsumer` runs the read/ack/retry
+    loop and dispatches matched events. The route table is the single source of
+    truth for the consumed-event set.
     """
 
     def __init__(
@@ -72,55 +73,57 @@ class GoogleWorkerStreamConsumer(StreamConsumer):
             batch_size: Maximum events to read per XREADGROUP call
             block_ms: Milliseconds to block waiting for new events
         """
+        self._session_factory = session_factory
         super().__init__(
             stream_client=stream_client,
             stream_name=stream_name,
             group_name="google-worker",
             consumer_name=consumer_name,
-            event_type_patterns=_OUTBOUND_EVENT_TYPES,
             batch_size=batch_size,
             block_ms=block_ms,
+            routes=self._build_routes(),
         )
-        self._session_factory = session_factory
 
-    async def _handle_event(self, event: StreamEvent) -> None:
-        """Process an event by routing to the appropriate worker function.
+    def _build_routes(self) -> list[EventRoute]:
+        """Declare the event-type → handler routes for this worker."""
+        return [
+            *(EventRoute(t, self._handle_journal) for t in _JOURNAL_EVENT_TYPES),
+            *(EventRoute(t, self._handle_tag) for t in _TAG_EVENT_TYPES),
+            *(EventRoute(t, self._handle_contact) for t in _CONTACT_EVENT_TYPES),
+        ]
 
-        Builds a minimal ARQ-compatible context dict and calls the
-        worker function directly. The context includes the session_factory
-        and uses the event_id as the job_id for logging consistency.
+    def _build_ctx(self, event: StreamEvent) -> dict[str, Any]:
+        """Build the minimal ARQ-compatible context dict for a worker function."""
+        return {"session_factory": self._session_factory, "job_id": event.event_id}
 
-        Args:
-            event: The stream event to process
+    async def _handle_journal(self, event: StreamEvent) -> None:
+        """Route a journal event to ``process_journal_event``."""
+        await process_journal_event(
+            ctx=self._build_ctx(event),
+            event_type=event.event_type,
+            event_data=event.event_data,
+        )
+        self._log_processed(event)
 
-        Raises:
-            Exception: Any exception from the worker function propagates
-                for the base class retry mechanism.
-        """
-        ctx = {
-            "session_factory": self._session_factory,
-            "job_id": event.event_id,
-        }
+    async def _handle_tag(self, event: StreamEvent) -> None:
+        """Route a tag event to ``process_tag_event``."""
+        await process_tag_event(
+            ctx=self._build_ctx(event),
+            event_type=event.event_type,
+            event_data=event.event_data,
+        )
+        self._log_processed(event)
 
-        if event.event_type in _JOURNAL_EVENT_TYPES:
-            await process_journal_event(
-                ctx=ctx,
-                event_type=event.event_type,
-                event_data=event.event_data,
-            )
-        elif event.event_type in _TAG_EVENT_TYPES:
-            await process_tag_event(
-                ctx=ctx,
-                event_type=event.event_type,
-                event_data=event.event_data,
-            )
-        elif event.event_type in _CONTACT_EVENT_TYPES:
-            await process_contact_event(
-                ctx=ctx,
-                event_type=event.event_type,
-                event_data=event.event_data,
-            )
+    async def _handle_contact(self, event: StreamEvent) -> None:
+        """Route a contact event to ``process_contact_event``."""
+        await process_contact_event(
+            ctx=self._build_ctx(event),
+            event_type=event.event_type,
+            event_data=event.event_data,
+        )
+        self._log_processed(event)
 
+    def _log_processed(self, event: StreamEvent) -> None:
         logger.info(
             "Google worker processed event from stream",
             event_id=event.event_id,

@@ -501,16 +501,18 @@ Extend `core_shared`'s `StreamConsumer` with a declarative route table + dispatc
 #### Phase 2: Migrate `google` + `immich` consumers to declarative routes
 **PR Size:** ~300 lines (per-worker route tables ~120, tests ~180)
 
+**Status:** ✅ Complete.
+
 **Acceptance Criteria:**
-- [ ] `google` and `immich` declare route tables instead of subclassing/overriding `_handle_event`; the per-worker routing boilerplate is deleted.
-- [ ] Each worker's consumed-event set is unchanged (regression-checked against the prior patterns).
+- [x] `google` and `immich` declare route tables instead of subclassing/overriding `_handle_event`; the per-worker routing boilerplate is deleted. → both `GoogleWorkerStreamConsumer` and `ImmichWorkerStreamConsumer` now pass `routes=self._build_routes()` to `StreamConsumer` and no longer override `_handle_event`.
+- [x] Each worker's consumed-event set is unchanged (regression-checked against the prior patterns). → route-table unit tests assert the exact consumed-event set (google: 3 journal + 2 tag + 4 contact; immich: 4 contact); existing routing tests retained as regression.
 
 **Required Test Coverage:**
-- **Unit:** each worker's route table maps the expected event types to the right handlers; unmatched events acked.
-- **Integration:** a consumer reads real events from a Redis stream, dispatches matched events, acks unmatched, and retries a failing handler.
+- [x] **Unit:** each worker's route table maps the expected event types to the right handlers; unmatched events acked. → `test_google_worker_route_table.py`, `test_stream_consumer_route_table.py` (immich).
+- [x] **Integration:** a consumer reads real events from a Redis stream, dispatches matched events, acks unmatched, and retries a failing handler. → `test_google_worker_stream_consumer_integration.py` (extended with retry-on-failure) and new `test_immich_worker_stream_consumer_integration.py`.
 
 **Required Documentation Updates:**
-- `google`/`immich` `README.md` consumer sections updated to the declarative pattern.
+- [x] `google`/`immich` `README.md` consumer sections updated to the declarative pattern. → "Stream Consumer" subsection added to each README with the route table.
 
 #### Phase 3: Migrate `strava` + `snipeit` consumers to declarative routes
 **PR Size:** ~300 lines (per-worker route tables ~120, tests ~180)

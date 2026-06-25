@@ -1167,6 +1167,10 @@ A handler is an `async def handler(event: StreamEvent) -> None`. For backward co
 migration, the legacy path — subclassing `StreamConsumer` and overriding `_handle_event` with
 `event_type_patterns` — remains fully supported; route-based and override-based consumers coexist.
 
+The `google` and `immich` workers have been migrated to declarative route tables (see their
+`stream_consumer_tasks.py` and the "Stream Consumer" section in each worker `README.md`); `strava`
+and `snipeit` follow in a later phase.
+
 ### Inbound Sync Flow (Pulling Data from External Systems)
 
 **Critical Architecture Pattern**: The outbox pattern is used for BOTH outbound events (local → external) AND inbound sync processing (external → local).
