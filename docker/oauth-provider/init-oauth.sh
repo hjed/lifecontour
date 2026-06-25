@@ -138,7 +138,7 @@ CLIENT_CONFIG=$(cat <<EOF
     "response_types": ["code"],
     "redirect_uris": ["${FRONTEND_URL}/auth/callback"],
     "post_logout_redirect_uris": ["${FRONTEND_URL}/"],
-    "scope": "openid profile email",
+    "scope": "openid profile email offline_access",
     "audience": [],
     "skip_consent": true,
     "skip_logout_consent": true,

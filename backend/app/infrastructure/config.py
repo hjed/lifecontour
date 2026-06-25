@@ -161,6 +161,24 @@ class Settings(BaseSettings):
         default="openid profile email",
         description="Generic OAuth scopes (space-separated)",
     )
+    oauth_token_refresh_threshold_seconds: int = Field(
+        default=300,
+        description="Seconds before MCP token expiry to proactively refresh "
+        "upstream tokens",
+    )
+    mcp_jwt_signing_key: str = Field(
+        default="",
+        description="Stable secret for signing MCP OAuth-proxy JWTs and "
+        "encrypting persisted OAuth state; survives restarts independent of "
+        "the OAuth client secret. Empty falls back to FastMCP's default "
+        "(HKDF-from-client-secret) behaviour.",
+    )
+    mcp_oauth_use_redis_storage: bool = Field(
+        default=True,
+        description="Store MCP OAuth-proxy state (client registrations and "
+        "refresh tokens) in Redis instead of the on-disk file store, so it "
+        "survives restarts/redeploys and is shared across replicas",
+    )
 
     # External services
     google_client_id: str = Field(default="", description="Google OAuth client ID")

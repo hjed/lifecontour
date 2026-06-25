@@ -5,15 +5,28 @@ Tests that create_mcp_auth_provider() returns the correct provider
 based on configured OAuth settings.
 """
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from fastmcp.server.auth.oauth_proxy.proxy import OAuthProxy
 from fastmcp.server.auth.providers.azure import AzureProvider
 from fastmcp.server.auth.providers.discord import DiscordProvider
 from fastmcp.server.auth.providers.github import GitHubProvider
+from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
 
 from app.infrastructure.config import Settings
 from app.mcp.auth.providers import create_mcp_auth_provider
+
+
+def _generic_settings(**overrides: object) -> Settings:
+    """Settings with a fully configured generic OAuth provider."""
+    base: dict[str, object] = {
+        "oauth_client_id": "generic-id",
+        "oauth_client_secret": "generic-secret",
+        "oauth_authorization_url": "https://auth.example.com/authorize",
+        "oauth_token_url": "https://auth.example.com/token",
+    }
+    base.update(overrides)
+    return _settings(**base)
 
 
 def _settings(**overrides: object) -> Settings:
@@ -135,3 +148,96 @@ class TestCreateMCPAuthProvider:
         )
         result = create_mcp_auth_provider(settings)
         assert isinstance(result, AzureProvider)
+
+
+class TestGenericOAuthRefreshConfig:
+    """Generic OAuth proxy is wired for auto-refresh and persistent storage."""
+
+    @patch("app.mcp.auth.providers.OAuthProxy.__init__", return_value=None)
+    def test_default_scope_excludes_offline_access(self, mock_init: MagicMock) -> None:
+        """Default scope stays provider-safe (no offline_access for Kanidm)."""
+        create_mcp_auth_provider(_generic_settings())
+        kwargs = mock_init.call_args.kwargs
+        assert kwargs["extra_authorize_params"] == {"scope": "openid profile email"}
+
+    @patch("app.mcp.auth.providers.OAuthProxy.__init__", return_value=None)
+    def test_offline_access_scope_passed_through_when_configured(
+        self, mock_init: MagicMock
+    ) -> None:
+        """offline_access (dev/Hydra) is forwarded when set via settings."""
+        settings = _generic_settings(oauth_scopes="openid profile email offline_access")
+        create_mcp_auth_provider(settings)
+        kwargs = mock_init.call_args.kwargs
+        assert kwargs["extra_authorize_params"] == {
+            "scope": "openid profile email offline_access"
+        }
+
+    @patch("app.mcp.auth.providers.OAuthProxy.__init__", return_value=None)
+    def test_refresh_threshold_default_passed(self, mock_init: MagicMock) -> None:
+        """Proactive refresh threshold defaults to 300s and is forwarded."""
+        create_mcp_auth_provider(_generic_settings())
+        assert mock_init.call_args.kwargs["token_expiry_threshold_seconds"] == 300
+
+    @patch("app.mcp.auth.providers.OAuthProxy.__init__", return_value=None)
+    def test_refresh_threshold_override_passed(self, mock_init: MagicMock) -> None:
+        """An overridden refresh threshold flows through to OAuthProxy."""
+        settings = _generic_settings(oauth_token_refresh_threshold_seconds=120)
+        create_mcp_auth_provider(settings)
+        assert mock_init.call_args.kwargs["token_expiry_threshold_seconds"] == 120
+
+    @patch("app.mcp.auth.providers.OAuthProxy.__init__", return_value=None)
+    def test_jwt_signing_key_passed_when_set(self, mock_init: MagicMock) -> None:
+        """A configured signing key is pinned on the proxy."""
+        settings = _generic_settings(mcp_jwt_signing_key="pinned-secret")
+        create_mcp_auth_provider(settings)
+        assert mock_init.call_args.kwargs["jwt_signing_key"] == "pinned-secret"
+
+    @patch("app.mcp.auth.providers.OAuthProxy.__init__", return_value=None)
+    def test_jwt_signing_key_none_when_empty(self, mock_init: MagicMock) -> None:
+        """Empty signing key falls back to FastMCP's HKDF behaviour (None)."""
+        create_mcp_auth_provider(_generic_settings(mcp_jwt_signing_key=""))
+        assert mock_init.call_args.kwargs["jwt_signing_key"] is None
+
+    @patch("app.mcp.auth.providers.RedisStore")
+    @patch("app.mcp.auth.providers.OAuthProxy.__init__", return_value=None)
+    def test_redis_client_storage_used_when_enabled(
+        self, mock_init: MagicMock, mock_redis: MagicMock
+    ) -> None:
+        """Redis-backed, Fernet-wrapped storage is built when enabled + keyed."""
+        settings = _generic_settings(
+            mcp_oauth_use_redis_storage=True,
+            mcp_jwt_signing_key="pinned-secret",
+            redis_url="redis://cache:6379",
+        )
+        create_mcp_auth_provider(settings)
+        mock_redis.assert_called_once()
+        storage = mock_init.call_args.kwargs["client_storage"]
+        assert isinstance(storage, FernetEncryptionWrapper)
+
+    @patch("app.mcp.auth.providers.RedisStore")
+    @patch("app.mcp.auth.providers.OAuthProxy.__init__", return_value=None)
+    def test_no_redis_storage_when_disabled(
+        self, mock_init: MagicMock, mock_redis: MagicMock
+    ) -> None:
+        """Disabling redis storage falls back to FastMCP's file store (None)."""
+        settings = _generic_settings(
+            mcp_oauth_use_redis_storage=False,
+            mcp_jwt_signing_key="pinned-secret",
+        )
+        create_mcp_auth_provider(settings)
+        mock_redis.assert_not_called()
+        assert mock_init.call_args.kwargs["client_storage"] is None
+
+    @patch("app.mcp.auth.providers.RedisStore")
+    @patch("app.mcp.auth.providers.OAuthProxy.__init__", return_value=None)
+    def test_no_redis_storage_without_signing_key(
+        self, mock_init: MagicMock, mock_redis: MagicMock
+    ) -> None:
+        """Without a signing key we cannot encrypt; fall back to file store."""
+        settings = _generic_settings(
+            mcp_oauth_use_redis_storage=True,
+            mcp_jwt_signing_key="",
+        )
+        create_mcp_auth_provider(settings)
+        mock_redis.assert_not_called()
+        assert mock_init.call_args.kwargs["client_storage"] is None
