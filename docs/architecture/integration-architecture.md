@@ -1126,9 +1126,46 @@ table via the `DeadLetterConsumerMixin`.
 | `SummaryConsumer` | `app.infrastructure.events.summary_consumer` | `summary-generator` | AI contact summary generation + post-generation index update |
 | `InboundEventConsumer` | `app.infrastructure.events.inbound_event_consumer` | `inbound-processor` | Contact sync (`contact.*`), journal sync (`journal_event.*`), Immich album import (`immich_album.*`), and match detection (`journal_review.*`) |
 | `GoogleWorkerStreamConsumer` | `integration_workers/google` | `google-worker` | Journal/tag event processing for Google Calendar sync |
-| `StreamConsumer` (base) | `core_shared.stream_client` | — | XREADGROUP loop, event filtering, XACK |
+| `StreamConsumer` (base) | `core_shared.stream_consumer` | — | XREADGROUP loop, event filtering, XACK, retry; declarative route dispatch (see below) |
+| `EventRoute` | `core_shared.stream_consumer` | — | Declarative `pattern → handler` route used by route-based consumers |
 | `stream_event_to_outbox_event` | `app.infrastructure.events.stream_event_adapter` | — | Converts `StreamEvent` → `OutboxEvent` for reuse of existing processors |
 | `DeadLetterConsumerMixin` | `app.infrastructure.events.dead_letter_consumer_mixin` | — | Persists permanently failed events to `dead_letter_events` table |
+
+#### Stream-Consumer Route Registration
+
+The standard way a worker declares which domain events it consumes is a **route table** — a
+list of `EventRoute(pattern, handler)` entries passed to `StreamConsumer(..., routes=[...])`. The
+shared `core_shared.stream_consumer` infrastructure runs the `XREADGROUP`/ack/retry loop and
+dispatches each matched event to the **first** route whose pattern matches; events matching no
+route pattern are acknowledged immediately. Pattern matching follows `event_type_matches`:
+
+- **Prefix match** — a pattern ending in `.` (e.g. `"strava."`) matches any event type with that
+  prefix.
+- **Exact match** — a pattern without a trailing `.` (e.g. `"ContactCreated"`) matches exactly.
+
+```python
+from core_shared import EventRoute, StreamConsumer
+
+consumer = StreamConsumer(
+    stream_client=stream_client,
+    stream_name="pms:domain-events",
+    group_name="example-worker",
+    consumer_name="example-worker-1",
+    routes=[
+        EventRoute("ContactCreated", handle_contact_event),
+        EventRoute("strava.", handle_strava_event),  # prefix route
+    ],
+)
+```
+
+When `routes` are supplied and `event_type_patterns` is omitted, the consumed-event set is derived
+from the route patterns, so **the route table is the single, reviewable source of truth** for what
+a worker consumes. Failure isolation and at-least-once semantics are unchanged: a handler that
+raises leaves its event unacknowledged for retry via the pending-entries path.
+
+A handler is an `async def handler(event: StreamEvent) -> None`. For backward compatibility during
+migration, the legacy path — subclassing `StreamConsumer` and overriding `_handle_event` with
+`event_type_patterns` — remains fully supported; route-based and override-based consumers coexist.
 
 ### Inbound Sync Flow (Pulling Data from External Systems)
 

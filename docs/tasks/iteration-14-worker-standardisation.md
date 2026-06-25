@@ -481,20 +481,22 @@ hardening (originally added only to Strava) to Immich via the shared implementat
 - Per-worker consumer boilerplate is deleted; the consumed-event set is reviewable from the route table.
 - Failure isolation and at-least-once semantics are preserved.
 
-#### Phase 1: Route-registration convention in `core_shared`
+#### Phase 1: Route-registration convention in `core_shared` ✅ COMPLETE
 **PR Size:** ~350 lines (registry + dispatch ~150, tests ~200)
 
 Extend `core_shared`'s `StreamConsumer` with a declarative route table + dispatch, fully unit-tested. Not yet consumed, so it merges green.
 
+**Status:** Implemented. `EventRoute`/`EventHandler`, `event_type_matches`, and route-based dispatch added to `core_shared/core_shared/stream_consumer.py` (concrete `_handle_event` + `_match_route`; `routes` derive `event_type_patterns`); exported from `core_shared/__init__.py`. Legacy `_handle_event` override path preserved (existing backend + worker subclasses untouched, suites green).
+
 **Acceptance Criteria:**
-- [ ] `core_shared` provides a way to declare routes (`event-type pattern → handler`); shared dispatch matches an event, invokes the handler, and acks; unmatched events are acked immediately.
-- [ ] Retry-on-failure via pending entries is preserved; the existing subclass override path remains supported (backward compatible) until workers migrate.
+- [x] `core_shared` provides a way to declare routes (`event-type pattern → handler`); shared dispatch matches an event, invokes the handler, and acks; unmatched events are acked immediately.
+- [x] Retry-on-failure via pending entries is preserved; the existing subclass override path remains supported (backward compatible) until workers migrate.
 
 **Required Test Coverage:**
-- **Unit:** route matching (pattern → handler, unmatched → immediate ack), handler dispatch, retry-on-failure via pending entries.
+- [x] **Unit:** route matching (pattern → handler, unmatched → immediate ack), handler dispatch, retry-on-failure via pending entries. → `core_shared/tests/unit/test_stream_routing.py` (21 tests). Plus a real-Redis integration test of the generic routed consumer: `backend/tests/integration/infrastructure/events/test_routed_stream_consumer_integration.py` (3 tests).
 
 **Required Documentation Updates:**
-- `docs/architecture/integration-architecture.md` — document the route-registration convention as the standard way workers consume domain events.
+- [x] `docs/architecture/integration-architecture.md` — document the route-registration convention as the standard way workers consume domain events. → "Stream-Consumer Route Registration" subsection added.
 
 #### Phase 2: Migrate `google` + `immich` consumers to declarative routes
 **PR Size:** ~300 lines (per-worker route tables ~120, tests ~180)
