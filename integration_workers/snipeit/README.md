@@ -14,6 +14,27 @@ Per-user Snipe-IT credentials (API key + base URL) are stored **encrypted in the
 database** (`user_snipe_it_auth`), not in environment variables; the worker
 decrypts them at runtime using `ENCRYPTION_KEY`.
 
+### Stream Consumer
+
+`SnipeItWorkerStreamConsumer` (in [`stream_consumer_tasks.py`](stream_consumer_tasks.py))
+consumes domain events from the `pms:domain-events` Redis stream using the
+`snipeit-worker` consumer group. It declares a **declarative route table** (a list
+of `core_shared.EventRoute`) instead of overriding `_handle_event`; the shared
+`StreamConsumer` runs the `XREADGROUP`/ack/retry loop, dispatches each matched
+event to its handler, and immediately acks unmatched events. The route table is
+the single source of truth for the worker's consumed-event set:
+
+| Event type | Handler | Behaviour |
+|---|---|---|
+| `GearItemUpdated` | `_handle_gear_item_updated` | pushes local gear changes to Snipe-IT |
+| `JournalCreated`, `JournalUpdated` | `_handle_journal_maintenance_event` | syncs gear-maintenance / gear-usage journals |
+| `snipeit.webhook_received` | `_handle_webhook_received` | syncs the webhook's asset (or routes maintenance actions to `_handle_maintenance_webhook`) |
+
+A handler that raises leaves its event unacknowledged so the base class retries
+it via the pending-entries path. See
+[Stream-Consumer Route Registration](../../docs/architecture/integration-architecture.md)
+for the shared convention.
+
 ## Configuration
 
 Settings live in [`snipeit_settings.py`](snipeit_settings.py) as

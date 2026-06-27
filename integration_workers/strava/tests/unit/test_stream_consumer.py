@@ -42,7 +42,7 @@ class TestStravaWorkerStreamConsumer:
     async def test_handle_event_logs_placeholder(
         self, consumer: StravaWorkerStreamConsumer
     ) -> None:
-        """_handle_event processes events without error (placeholder)."""
+        """_handle_event route-dispatches a strava event without error."""
         from core_shared.stream_client import StreamEvent
 
         event = StreamEvent(
@@ -53,7 +53,7 @@ class TestStravaWorkerStreamConsumer:
             event_data={"object_id": 123},
             occurred_at="2026-01-01T00:00:00Z",
         )
-        # Should not raise — placeholder implementation just logs
+        # Should not raise — routes to the placeholder handler that just logs
         await consumer._handle_event(event)
 
     def test_stream_name_default(self, consumer: StravaWorkerStreamConsumer) -> None:

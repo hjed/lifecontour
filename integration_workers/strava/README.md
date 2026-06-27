@@ -133,6 +133,27 @@ worker-agnostic fan-out steps (`persist_fanout_children`, `record_child_terminal
 `is_final_attempt`) are shared in `core_shared/core_shared/fanout.py`; only the
 Strava-specific parent-row ownership and per-batch session wrappers live here.
 
+## Stream Consumer
+
+`StravaWorkerStreamConsumer` (in [`stream_consumer_tasks.py`](stream_consumer_tasks.py))
+consumes domain events from the `pms:domain-events` Redis stream using the
+`strava-worker` consumer group. It declares a **declarative route table** (a list
+of `core_shared.EventRoute`) instead of overriding `_handle_event`; the shared
+`StreamConsumer` runs the `XREADGROUP`/ack/retry loop, dispatches each matched
+event to its handler, and immediately acks unmatched events. The route table is
+the single source of truth for the worker's consumed-event set:
+
+| Event-type pattern | Handler |
+|---|---|
+| `strava.` (prefix — all `strava.*` events) | `_handle_strava_event` |
+
+The `strava.` route is a **prefix match**, so every `strava.*` domain event is
+dispatched to `_handle_strava_event` (currently a placeholder that logs; activity
+processing lands in a later iteration). A handler that raises leaves its event
+unacknowledged so the base class retries it via the pending-entries path. See
+[Stream-Consumer Route Registration](../../docs/architecture/integration-architecture.md)
+for the shared convention.
+
 ## Running the Worker
 
 ```bash

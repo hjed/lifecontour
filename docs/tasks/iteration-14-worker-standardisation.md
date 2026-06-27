@@ -517,16 +517,24 @@ Extend `core_shared`'s `StreamConsumer` with a declarative route table + dispatc
 #### Phase 3: Migrate `strava` + `snipeit` consumers to declarative routes
 **PR Size:** ~300 lines (per-worker route tables ~120, tests ~180)
 
+**Status:** ✅ Complete.
+
 **Acceptance Criteria:**
-- [ ] `strava` and `snipeit` declare route tables; per-worker routing boilerplate deleted.
-- [ ] Consumed-event sets unchanged (`strava.*` prefix routing and the snipeit event set preserved).
+- [x] `strava` and `snipeit` declare route tables; per-worker routing boilerplate deleted. → both `StravaWorkerStreamConsumer` and `SnipeItWorkerStreamConsumer` now pass `routes=self._build_routes()` to `StreamConsumer` and no longer override `_handle_event`; the snipeit `snipeit.webhook_received` body was extracted into a dedicated `_handle_webhook_received` handler.
+- [x] Consumed-event sets unchanged (`strava.*` prefix routing and the snipeit event set preserved). → route-table unit tests assert the exact consumed-event set (strava: single `strava.` prefix route; snipeit: `snipeit.webhook_received` + `GearItemUpdated` + `JournalCreated` + `JournalUpdated`); existing per-handler suites retained as regression.
 
 **Required Test Coverage:**
-- **Unit:** route tables map the expected event types; prefix/pattern matching preserved.
-- **Integration:** each consumer reads, dispatches, acks unmatched, and retries a failing handler against real Redis.
+- [x] **Unit:** route tables map the expected event types; prefix/pattern matching preserved. → `test_strava_worker_route_table.py` (prefix dispatch + exact set), `test_snipeit_worker_route_table.py` (per-handler mapping + exact set + unmatched ack); existing `test_stream_consumer.py` (strava) and `test_stream_consumer_tasks.py` (snipeit) retained.
+- [x] **Integration:** each consumer reads, dispatches, acks unmatched, and retries a failing handler against real Redis. → new `test_strava_worker_stream_consumer_integration.py` (3 tests) and `test_snipeit_worker_route_consumer_integration.py` (3 tests); existing snipeit `test_stream_consumer_integration.py` (2 DB-backed handler tests) retained.
 
 **Required Documentation Updates:**
-- `strava`/`snipeit` `README.md` consumer sections updated.
+- [x] `strava`/`snipeit` `README.md` consumer sections updated. → "Stream Consumer" subsection added to each README with the route table.
+
+**Progress notes (Phase 3 complete — branch `iter14-004-3-strava-and-snipeit`):**
+
+- `integration_workers/strava/stream_consumer_tasks.py` + `integration_workers/snipeit/stream_consumer_tasks.py` import `EventRoute` from `core_shared.stream_consumer`, declare `_build_routes()`, and delete their `_handle_event` overrides and `event_type_patterns`/`_STRAVA_EVENT_PATTERNS`/`_SNIPEIT_EVENT_TYPES` constants. Strava's single `strava.` prefix route preserves its wildcard semantics (placeholder handler still logs); snipeit's four exact routes preserve its consumed set, with the inline webhook routing moved verbatim into `_handle_webhook_received` and the per-event "processed event from stream" log preserved via a shared `_log_processed` helper called by each route handler.
+- **Tests:** new route-table unit tests + real-Redis routed integration tests for both workers (dispatch matched / ack unmatched / retry-on-failure via pending entries), mirroring the google/immich Phase 2 pattern; existing handler suites kept as regression.
+- Local quality gates run green: strava `ruff format`/`ruff check`/`mypy` + 200 unit + 3 consumer integration; snipeit `ruff`/`mypy` + 178 unit + 5 consumer integration. These are the worker lint/type/unit/integration checks enforced in CI; `core_shared` is untouched. (The real-Redis integration-test scaffolding is intentionally kept per-worker here — sharing it across workers is ITER14-005's `core_shared/testing/` scope.)
 
 ---
 
