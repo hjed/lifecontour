@@ -31,6 +31,33 @@ logger = structlog.get_logger()
 _STORAGE_ENCRYPTION_SALT = "mcp-oauth-storage-encryption"
 
 
+class _LoggingFernetEncryptionWrapper(FernetEncryptionWrapper):
+    """Fernet wrapper that logs (instead of silently dropping) decrypt failures.
+
+    We keep ``raise_on_decryption_error=False`` so a key mismatch or corrupt
+    entry degrades to re-registration rather than crashing requests (matching
+    FastMCP's own file-store behaviour). But a silent drop of persisted refresh
+    tokens looks like a re-auth loop, so we surface it as a warning to make a
+    rotated/mismatched MCP_JWT_SIGNING_KEY diagnosable.
+    """
+
+    def _decrypt_value(
+        self, value: dict[str, object] | None
+    ) -> dict[str, object] | None:
+        result = super()._decrypt_value(value)
+        # A non-None input that decrypts to None only happens on the
+        # decryption-failure branch (a genuine miss returns None for None input,
+        # and unencrypted dicts are returned as-is).
+        if value is not None and result is None:
+            logger.warning(
+                "MCP: failed to decrypt persisted OAuth state; treating it as a "
+                "cache miss. Affected MCP clients must re-authenticate. This "
+                "usually means MCP_JWT_SIGNING_KEY changed or the stored data "
+                "is corrupt."
+            )
+        return result
+
+
 def create_mcp_auth_provider(settings: Settings) -> AuthProvider | None:
     """Create the MCP auth provider based on configured OAuth settings.
 
@@ -178,7 +205,7 @@ def _build_mcp_client_storage(settings: Settings) -> AsyncKeyValue | None:
         default_collection="mcp-oauth-proxy",
     )
     logger.info("MCP: Using Redis-backed OAuth-proxy storage")
-    return FernetEncryptionWrapper(
+    return _LoggingFernetEncryptionWrapper(
         key_value=store,
         fernet=Fernet(key=encryption_key),
         raise_on_decryption_error=False,

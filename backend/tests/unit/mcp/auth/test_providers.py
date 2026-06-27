@@ -7,6 +7,7 @@ based on configured OAuth settings.
 
 from unittest.mock import MagicMock, patch
 
+from cryptography.fernet import Fernet
 from fastmcp.server.auth.oauth_proxy.proxy import OAuthProxy
 from fastmcp.server.auth.providers.azure import AzureProvider
 from fastmcp.server.auth.providers.discord import DiscordProvider
@@ -14,7 +15,10 @@ from fastmcp.server.auth.providers.github import GitHubProvider
 from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
 
 from app.infrastructure.config import Settings
-from app.mcp.auth.providers import create_mcp_auth_provider
+from app.mcp.auth.providers import (
+    _LoggingFernetEncryptionWrapper,
+    create_mcp_auth_provider,
+)
 
 
 def _generic_settings(**overrides: object) -> Settings:
@@ -174,9 +178,9 @@ class TestGenericOAuthRefreshConfig:
 
     @patch("app.mcp.auth.providers.OAuthProxy.__init__", return_value=None)
     def test_refresh_threshold_default_passed(self, mock_init: MagicMock) -> None:
-        """Proactive refresh threshold defaults to 300s and is forwarded."""
+        """Proactive refresh threshold defaults to 60s and is forwarded."""
         create_mcp_auth_provider(_generic_settings())
-        assert mock_init.call_args.kwargs["token_expiry_threshold_seconds"] == 300
+        assert mock_init.call_args.kwargs["token_expiry_threshold_seconds"] == 60
 
     @patch("app.mcp.auth.providers.OAuthProxy.__init__", return_value=None)
     def test_refresh_threshold_override_passed(self, mock_init: MagicMock) -> None:
@@ -241,3 +245,55 @@ class TestGenericOAuthRefreshConfig:
         create_mcp_auth_provider(settings)
         mock_redis.assert_not_called()
         assert mock_init.call_args.kwargs["client_storage"] is None
+
+
+class TestLoggingFernetEncryptionWrapper:
+    """The storage wrapper surfaces decryption failures instead of hiding them."""
+
+    def _encrypted_payload(self, key: bytes) -> dict[str, object]:
+        """Encrypt a payload with the given Fernet key."""
+        encoder = FernetEncryptionWrapper(
+            key_value=MagicMock(),
+            fernet=Fernet(key=key),
+        )
+        return encoder._encrypt_value({"refresh_token": "secret"})
+
+    def test_decrypt_failure_logs_warning(self) -> None:
+        """A key mismatch is logged (not silently dropped) and yields None."""
+        payload = self._encrypted_payload(Fernet.generate_key())
+        # Wrap with a DIFFERENT key so decryption fails.
+        wrapper = _LoggingFernetEncryptionWrapper(
+            key_value=MagicMock(),
+            fernet=Fernet(key=Fernet.generate_key()),
+            raise_on_decryption_error=False,
+        )
+        with patch("app.mcp.auth.providers.logger") as mock_logger:
+            result = wrapper._decrypt_value(payload)
+        assert result is None
+        mock_logger.warning.assert_called_once()
+
+    def test_decrypt_success_does_not_warn(self) -> None:
+        """A successful round-trip returns the value and logs nothing."""
+        key = Fernet.generate_key()
+        payload = self._encrypted_payload(key)
+        wrapper = _LoggingFernetEncryptionWrapper(
+            key_value=MagicMock(),
+            fernet=Fernet(key=key),
+            raise_on_decryption_error=False,
+        )
+        with patch("app.mcp.auth.providers.logger") as mock_logger:
+            result = wrapper._decrypt_value(payload)
+        assert result == {"refresh_token": "secret"}
+        mock_logger.warning.assert_not_called()
+
+    def test_missing_value_does_not_warn(self) -> None:
+        """A genuine cache miss (None input) is not treated as a failure."""
+        wrapper = _LoggingFernetEncryptionWrapper(
+            key_value=MagicMock(),
+            fernet=Fernet(key=Fernet.generate_key()),
+            raise_on_decryption_error=False,
+        )
+        with patch("app.mcp.auth.providers.logger") as mock_logger:
+            result = wrapper._decrypt_value(None)
+        assert result is None
+        mock_logger.warning.assert_not_called()

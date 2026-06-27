@@ -162,9 +162,11 @@ class Settings(BaseSettings):
         description="Generic OAuth scopes (space-separated)",
     )
     oauth_token_refresh_threshold_seconds: int = Field(
-        default=300,
+        default=60,
         description="Seconds before MCP token expiry to proactively refresh "
-        "upstream tokens",
+        "upstream tokens. This is an absolute lead time, so it must stay well "
+        "below the upstream access-token lifetime to avoid refreshing on every "
+        "request",
     )
     mcp_jwt_signing_key: str = Field(
         default="",
