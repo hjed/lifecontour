@@ -14,6 +14,26 @@ Per-user Immich credentials (API key + server URL) are stored **encrypted in the
 database** (`user_immich_auth`), not in environment variables; the worker
 decrypts them at runtime using `ENCRYPTION_KEY`.
 
+### Stream Consumer
+
+`ImmichWorkerStreamConsumer` (in [`stream_consumer_tasks.py`](stream_consumer_tasks.py))
+consumes domain events from the `pms:domain-events` Redis stream using the
+`immich-worker` consumer group. It declares a **declarative route table** (a list
+of `core_shared.EventRoute`) instead of overriding `_handle_event`; the shared
+`StreamConsumer` runs the `XREADGROUP`/ack/retry loop, dispatches each matched
+event to its handler, and immediately acks unmatched events. The route table is
+the single source of truth for the worker's consumed-event set:
+
+| Event type | Handler | Payload handling |
+|---|---|---|
+| `ContactCreated`, `ContactUpdated`, `ContactBirthdayChanged` | `process_contact_event` | injects `contact_id` from the event's `aggregate_id` |
+| `ContactMerged` | `process_contact_event` | forwards the raw payload unchanged (survivor/source pair via `external_collisions`) |
+
+A handler that raises leaves its event unacknowledged so the base class retries
+it via the pending-entries path. See
+[Stream-Consumer Route Registration](../../docs/architecture/integration-architecture.md)
+for the shared convention.
+
 ## Configuration
 
 Settings live in [`immich_settings.py`](immich_settings.py) as

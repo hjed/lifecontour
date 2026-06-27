@@ -238,6 +238,81 @@ class TestGoogleWorkerStreamConsumerIntegration:
         )
         assert len(pending) == 0
 
+    async def test_failing_handler_retried_via_pending_entries(
+        self,
+        stream_client: StreamClient,
+        redis_client: Any,
+        unique_stream_name: str,
+        cleanup_stream: Any,
+    ) -> None:
+        """A handler that fails leaves the event pending, then a retry acks it.
+
+        First delivery raises (event stays pending, unacked); the pending entry
+        is then claimed and re-dispatched, succeeds, and is acknowledged.
+        """
+        mock_session_factory = AsyncMock()
+        event_data = {"journal_id": 7, "title": "Retry Journal"}
+
+        await redis_client.xadd(
+            unique_stream_name,
+            {
+                "event_id": f"evt-{uuid.uuid4().hex[:8]}",
+                "event_type": "JournalCreated",
+                "aggregate_id": "7",
+                "event_data": json.dumps(event_data),
+                "occurred_at": "2024-06-15T10:30:00+00:00",
+            },
+        )
+
+        consumer = GoogleWorkerStreamConsumer(
+            stream_client=stream_client,
+            session_factory=mock_session_factory,
+            stream_name=unique_stream_name,
+            batch_size=1,
+            block_ms=1000,
+        )
+        consumer._retry_min_idle_ms = 0  # retry immediately for the test
+
+        await stream_client.ensure_consumer_group(unique_stream_name, "google-worker")
+
+        call_count = 0
+
+        async def flaky_process_journal(
+            ctx: Any, event_type: str, event_data: Any
+        ) -> dict[str, str]:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("transient failure")
+            return {"status": "success"}
+
+        with patch(
+            "stream_consumer_tasks.process_journal_event",
+            side_effect=flaky_process_journal,
+        ):
+            # First batch: handler raises, event left pending (unacked).
+            await consumer._process_batch()
+            pending_after_failure = await stream_client.get_pending_entries(
+                stream_name=unique_stream_name,
+                group_name="google-worker",
+                min_idle_time_ms=0,
+                count=10,
+            )
+            assert len(pending_after_failure) == 1
+
+            # Retry cycle: claim the pending entry, re-dispatch, succeed, ack.
+            retried = await consumer._retry_pending()
+
+        assert retried == 1
+        assert call_count == 2
+        pending_after_retry = await stream_client.get_pending_entries(
+            stream_name=unique_stream_name,
+            group_name="google-worker",
+            min_idle_time_ms=0,
+            count=10,
+        )
+        assert len(pending_after_retry) == 0
+
     async def test_consumer_start_stop_lifecycle(
         self,
         stream_client: StreamClient,
