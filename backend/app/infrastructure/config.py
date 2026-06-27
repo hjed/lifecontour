@@ -162,6 +162,33 @@ class Settings(BaseSettings):
         description="Generic OAuth scopes (space-separated)",
     )
 
+    # Direct bearer-token (API client) authentication.
+    # When ``oauth_issuer`` is set, REST endpoints additionally accept an
+    # ``Authorization: Bearer <jwt>`` access token issued by the IdP, validated
+    # locally against the IdP's JWKS (resolved via OIDC discovery).
+    oauth_issuer: str = Field(
+        default="",
+        description="OAuth/OIDC issuer URL. Enables direct bearer-token API "
+        "auth and is the base for OIDC discovery "
+        "({issuer}/.well-known/openid-configuration).",
+    )
+    oauth_discovery_url: str = Field(
+        default="",
+        description="Optional explicit OIDC discovery document URL. Defaults to "
+        "{oauth_issuer}/.well-known/openid-configuration when empty.",
+    )
+    oauth_audience: str = Field(
+        default="",
+        description="Expected 'aud' claim for bearer access tokens "
+        "(this API's resource identifier).",
+    )
+    oauth_enforce_scopes: bool = Field(
+        default=True,
+        description="Enforce pms:read/pms:write/pms:admin scopes on bearer "
+        "tokens that carry them. When False (or a token has no pms:* scope), "
+        "any valid token is accepted.",
+    )
+
     # External services
     google_client_id: str = Field(default="", description="Google OAuth client ID")
     google_client_secret: str = Field(

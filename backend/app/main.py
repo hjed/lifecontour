@@ -355,7 +355,49 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             auth_enabled=auth_provider is not None,
         )
 
+    _configure_openapi_security(app, settings)
+
     return app
+
+
+def _configure_openapi_security(app: FastAPI, settings: Settings) -> None:
+    """Document the bearer-token security scheme in the OpenAPI schema.
+
+    Adds an optional HTTP bearer (JWT) scheme so interactive docs show an
+    "Authorize" button for direct API-token authentication. Runtime auth is
+    enforced by the Dishka auth providers, not by this scheme.
+    """
+    if not settings.oauth_issuer:
+        return
+
+    from fastapi.openapi.utils import get_openapi
+
+    def custom_openapi() -> dict[str, Any]:
+        if app.openapi_schema:
+            return app.openapi_schema
+        schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            description=app.description,
+            routes=app.routes,
+        )
+        schema.setdefault("components", {}).setdefault("securitySchemes", {})[
+            "bearerAuth"
+        ] = {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+            "description": (
+                "IdP-issued OAuth2 access token. Scopes: pms:read, pms:write, "
+                "pms:admin."
+            ),
+        }
+        # Optional security: endpoints also accept the session cookie.
+        schema["security"] = [{"bearerAuth": []}]
+        app.openapi_schema = schema
+        return schema
+
+    app.openapi = custom_openapi  # type: ignore[method-assign]
 
 
 def run_app(settings: Settings | None = None) -> None:

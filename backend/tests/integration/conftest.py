@@ -415,6 +415,7 @@ async def _authenticated_client_context(
     from app.infrastructure.auth.models import SessionUser
     from app.infrastructure.auth.oauth_service import OAuthService
     from app.infrastructure.config import Settings
+    from app.infrastructure.di.auth import AdminAccess
     from app.infrastructure.di.contacts import ContactProvider
     from app.infrastructure.di.infrastructure import InfrastructureProvider
     from app.infrastructure.di.integrations import IntegrationProvider
@@ -446,6 +447,11 @@ async def _authenticated_client_context(
         @provide(scope=Scope.REQUEST)
         def get_session_user(self) -> SessionUser:
             return cast(SessionUser, test_user)
+
+        @provide(scope=Scope.REQUEST)
+        def require_admin(self) -> AdminAccess:
+            # Test session users hold all scopes, including admin.
+            return AdminAccess()
 
         @provide(scope=Scope.REQUEST)
         def get_oauth_service(self, settings: Settings) -> OAuthService:
@@ -766,6 +772,7 @@ def authenticated_search_client(
 
     from app.infrastructure.auth.models import SessionUser
     from app.infrastructure.config import Settings
+    from app.infrastructure.di.auth import AdminAccess
     from app.infrastructure.search.search_service import SearchService
 
     # Use a mutable container to store the mock service so it can be updated
@@ -798,6 +805,11 @@ def authenticated_search_client(
         @provide(scope=Scope.REQUEST)
         def get_session_user(self) -> SessionUser:
             return cast(SessionUser, test_user)
+
+        @provide(scope=Scope.REQUEST)
+        def require_admin(self) -> AdminAccess:
+            # Test session users hold all scopes, including admin.
+            return AdminAccess()
 
         @provide(scope=Scope.APP)
         def get_search_service(self) -> SearchService:
