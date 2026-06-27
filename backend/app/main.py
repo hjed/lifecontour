@@ -392,10 +392,11 @@ def _configure_openapi_security(app: FastAPI, settings: Settings) -> None:
                 "pms:admin."
             ),
         }
-        # Only define the scheme (so docs show an Authorize button); do NOT set
-        # a global `security` requirement — that would mark every operation,
-        # including public ones (/api/health), as requiring auth in generated
-        # clients. Endpoints also accept a session cookie, so auth is optional.
+        # Optional bearer auth: the `{}` entry keeps every operation callable
+        # anonymously (so public endpoints like /api/health aren't marked as
+        # protected), while listing `bearerAuth` lets Swagger UI actually send
+        # the Authorization header once you use "Authorize".
+        schema["security"] = [{}, {"bearerAuth": []}]
         app.openapi_schema = schema
         return schema
 

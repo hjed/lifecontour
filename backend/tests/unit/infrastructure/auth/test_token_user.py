@@ -51,6 +51,12 @@ class TestSessionUserFromClaims:
         user = session_user_from_claims({"sub": "x"}, client_id=None, provider="p")
         assert user.email == ""
 
+    def test_null_email_claim_becomes_empty_string(self) -> None:
+        user = session_user_from_claims(
+            {"sub": "x", "email": None}, client_id=None, provider="p"
+        )
+        assert user.email == ""
+
     def test_none_claims_treated_as_empty(self) -> None:
         user = session_user_from_claims(None, client_id="client-abc", provider="p")
         assert user.id == "client-abc"

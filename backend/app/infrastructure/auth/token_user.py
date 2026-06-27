@@ -32,7 +32,9 @@ def session_user_from_claims(
         raise ValueError("Token has no usable identifier (sub/id/client_id)")
     return SessionUser(
         id=str(identifier),
-        email=str(claims.get("email", "")),
+        # `or ""` (not a get default) so a present-but-null claim normalizes to
+        # "" rather than the literal string "None".
+        email=str(claims.get("email") or ""),
         name=str(
             claims.get("name") or claims.get("login") or claims.get("username") or ""
         ),

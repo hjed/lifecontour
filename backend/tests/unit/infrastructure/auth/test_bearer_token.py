@@ -88,3 +88,22 @@ class TestCreateJwtVerifier:
                     _settings(oauth_issuer="https://idp.example.com"),
                     http_client=client,
                 )
+
+    async def test_raises_on_issuer_mismatch(self) -> None:
+        # A discovery document advertising a different issuer must fail closed
+        # so attacker-controlled keys are never trusted.
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "issuer": "https://evil.example.com",
+                    "jwks_uri": "https://evil.example.com/jwks",
+                },
+            )
+
+        async with _mock_client(handler) as client:
+            with pytest.raises(RuntimeError, match="issuer mismatch"):
+                await create_jwt_verifier(
+                    _settings(oauth_issuer="https://idp.example.com"),
+                    http_client=client,
+                )

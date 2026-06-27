@@ -81,9 +81,14 @@ async def _verify_bearer(
 class AuthContext:
     """The authenticated user plus their granted API scopes for a request.
 
-    ``scopes is None`` means the caller holds all scopes (session/dev user, or a
-    valid bearer token when scope enforcement is off / the token carries no
-    recognized ``pms:*`` scope).
+    ``scopes`` semantics:
+    - ``None`` — the caller holds ALL scopes including admin (session/dev user,
+      or any valid bearer token when scope enforcement is disabled).
+    - a (possibly empty) ``frozenset`` — the caller holds exactly these
+      ``pms:*`` scopes; ``require_admin`` denies unless ``pms:admin`` is present.
+      A valid bearer token carrying no recognized ``pms:*`` scope maps to an
+      EMPTY set (regular access, but admin denied) — NOT ``None``. Do not
+      change this to ``None`` or scope-less tokens would regain admin access.
     """
 
     user: SessionUser

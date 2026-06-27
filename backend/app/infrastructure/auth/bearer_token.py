@@ -59,14 +59,18 @@ async def create_jwt_verifier(
     if not jwks_uri:
         raise RuntimeError(f"OIDC discovery document at {url} is missing 'jwks_uri'.")
 
+    # Fail closed on issuer mismatch: a mispointed or tampered discovery
+    # document could otherwise supply attacker-controlled keys (jwks_uri) while
+    # tokens still carry the configured `iss`. Per OIDC, the document's issuer
+    # MUST equal the configured issuer.
     advertised_issuer = document.get("issuer")
     if advertised_issuer and advertised_issuer.rstrip("/") != (
         settings.oauth_issuer.rstrip("/")
     ):
-        logger.warning(
-            "OIDC issuer mismatch between config and discovery document",
-            configured=settings.oauth_issuer,
-            advertised=advertised_issuer,
+        raise RuntimeError(
+            "OIDC issuer mismatch: discovery document at "
+            f"{url} advertises issuer {advertised_issuer!r} but "
+            f"OAUTH_ISSUER is {settings.oauth_issuer!r}. Refusing to trust its keys."
         )
 
     if not settings.oauth_audience:
