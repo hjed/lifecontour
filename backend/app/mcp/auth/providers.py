@@ -10,16 +10,52 @@ token issuance, and consent screens.
 from __future__ import annotations
 
 import structlog
+from cryptography.fernet import Fernet
 from fastmcp.server.auth.auth import AuthProvider
+from fastmcp.server.auth.jwt_issuer import derive_jwt_key
 from fastmcp.server.auth.oauth_proxy.proxy import OAuthProxy
 from fastmcp.server.auth.providers.azure import AzureProvider
 from fastmcp.server.auth.providers.debug import DebugTokenVerifier
 from fastmcp.server.auth.providers.discord import DiscordProvider
 from fastmcp.server.auth.providers.github import GitHubProvider
+from key_value.aio.protocols.key_value import AsyncKeyValue
+from key_value.aio.stores.redis import RedisStore
+from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
 
 from app.infrastructure.config import Settings
 
 logger = structlog.get_logger()
+
+# Salt for deriving the OAuth-state encryption key from the signing key.
+# Distinct from FastMCP's internal salts so the keys never collide.
+_STORAGE_ENCRYPTION_SALT = "mcp-oauth-storage-encryption"
+
+
+class _LoggingFernetEncryptionWrapper(FernetEncryptionWrapper):
+    """Fernet wrapper that logs (instead of silently dropping) decrypt failures.
+
+    We keep ``raise_on_decryption_error=False`` so a key mismatch or corrupt
+    entry degrades to re-registration rather than crashing requests (matching
+    FastMCP's own file-store behaviour). But a silent drop of persisted refresh
+    tokens looks like a re-auth loop, so we surface it as a warning to make a
+    rotated/mismatched MCP_JWT_SIGNING_KEY diagnosable.
+    """
+
+    def _decrypt_value(
+        self, value: dict[str, object] | None
+    ) -> dict[str, object] | None:
+        result = super()._decrypt_value(value)
+        # A non-None input that decrypts to None only happens on the
+        # decryption-failure branch (a genuine miss returns None for None input,
+        # and unencrypted dicts are returned as-is).
+        if value is not None and result is None:
+            logger.warning(
+                "MCP: failed to decrypt persisted OAuth state; treating it as a "
+                "cache miss. Affected MCP clients must re-authenticate. This "
+                "usually means MCP_JWT_SIGNING_KEY changed or the stored data "
+                "is corrupt."
+            )
+        return result
 
 
 def create_mcp_auth_provider(settings: Settings) -> AuthProvider | None:
@@ -84,6 +120,18 @@ def create_mcp_auth_provider(settings: Settings) -> AuthProvider | None:
             extra_authorize_params={"scope": settings.oauth_scopes}
             if settings.oauth_scopes
             else None,
+            # Refresh the upstream token shortly before it expires so MCP
+            # sessions survive without a full re-auth (relies on the upstream
+            # issuing a refresh token).
+            token_expiry_threshold_seconds=(
+                settings.oauth_token_refresh_threshold_seconds
+            ),
+            # Pin the signing key so issued tokens stay valid across restarts;
+            # None preserves FastMCP's HKDF-from-client-secret default.
+            jwt_signing_key=settings.mcp_jwt_signing_key or None,
+            # Persist client registrations and refresh tokens in Redis so they
+            # survive restarts/redeploys instead of the per-container file store.
+            client_storage=_build_mcp_client_storage(settings),
         )
 
     # Priority 2: GitHub
@@ -123,6 +171,45 @@ def create_mcp_auth_provider(settings: Settings) -> AuthProvider | None:
 
     logger.info("MCP: No OAuth providers configured, MCP auth unavailable")
     return None
+
+
+def _build_mcp_client_storage(settings: Settings) -> AsyncKeyValue | None:
+    """Build the persistent storage backend for OAuth-proxy state.
+
+    Returns a Redis-backed, Fernet-encrypted store so client registrations and
+    refresh tokens survive restarts/redeploys and are shared across replicas.
+
+    FastMCP only encrypts the file store it creates itself; a caller-supplied
+    ``client_storage`` is used verbatim, so we must wrap Redis in encryption
+    ourselves to avoid persisting refresh tokens in plaintext.
+
+    Returns None (FastMCP's encrypted on-disk file store) when Redis storage is
+    disabled or no signing key is configured to derive the encryption key from.
+    """
+    if not settings.mcp_oauth_use_redis_storage:
+        return None
+    if not settings.mcp_jwt_signing_key:
+        logger.warning(
+            "MCP: Redis OAuth storage requested but MCP_JWT_SIGNING_KEY is "
+            "unset; falling back to the on-disk file store to keep refresh "
+            "tokens encrypted."
+        )
+        return None
+
+    encryption_key = derive_jwt_key(
+        low_entropy_material=settings.mcp_jwt_signing_key,
+        salt=_STORAGE_ENCRYPTION_SALT,
+    )
+    store = RedisStore(
+        url=settings.redis_url,
+        default_collection="mcp-oauth-proxy",
+    )
+    logger.info("MCP: Using Redis-backed OAuth-proxy storage")
+    return _LoggingFernetEncryptionWrapper(
+        key_value=store,
+        fernet=Fernet(key=encryption_key),
+        raise_on_decryption_error=False,
+    )
 
 
 def _get_mcp_base_url(settings: Settings) -> str:

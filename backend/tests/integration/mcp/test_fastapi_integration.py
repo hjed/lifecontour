@@ -194,3 +194,34 @@ class TestMCPOAuthIntegration:
         # Should raise RuntimeError at app creation — fail closed
         with pytest.raises(RuntimeError, match="WEBHOOK_BASE_URL"):
             create_app(settings)
+
+    def test_generic_oauth_with_redis_storage_builds(self, db_config):
+        """Generic OAuth + Redis-backed auto-refresh storage builds cleanly.
+
+        Exercises the full provider wiring (refresh threshold, pinned signing
+        key, Redis-backed Fernet-encrypted client_storage) so a config error
+        in that path fails fast at app creation. RedisStore connects lazily,
+        so no live Redis is required to construct the app.
+        """
+        settings = Settings(
+            database_url=db_config.get_async_url().replace(
+                "postgresql+asyncpg://", "postgresql://"
+            ),
+            mcp_enabled=True,
+            mcp_mount_path="/mcp-server",
+            webhook_base_url="https://test.example.com",
+            oauth_client_id="generic-id",
+            oauth_client_secret="generic-secret",
+            oauth_authorization_url="https://auth.example.com/authorize",
+            oauth_token_url="https://auth.example.com/token",
+            oauth_scopes="openid profile email offline_access",
+            mcp_jwt_signing_key="pinned-test-signing-secret",
+            mcp_oauth_use_redis_storage=True,
+            allowed_hosts=["*"],
+        )
+        app = create_app(settings)
+        client = TestClient(app)
+
+        response = client.get("/.well-known/oauth-authorization-server")
+        assert response.status_code == 200
+        assert "token_endpoint" in response.json()
