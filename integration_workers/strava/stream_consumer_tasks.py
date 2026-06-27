@@ -2,11 +2,12 @@
 Strava Worker Stream Consumer for Redis Streams.
 
 Reads domain events from the pms:domain-events stream using the
-'strava-worker' consumer group. Routes events to appropriate handler
-functions.
+'strava-worker' consumer group. Declares a declarative route table
+(``core_shared.EventRoute``) mapping its consumed-event set to handlers;
+the shared ``StreamConsumer`` runs the read/ack/retry loop and dispatch.
 
-In Phase 3 this is a placeholder that logs events. Actual activity
-processing will be implemented in ITER5-004.
+In Phase 3 the single ``strava.`` prefix route is a placeholder that logs
+events. Actual activity processing will be implemented in ITER5-004.
 """
 
 import asyncio
@@ -14,23 +15,19 @@ from typing import Any
 
 import structlog
 from core_shared.stream_client import StreamClient, StreamEvent, create_stream_redis
-from core_shared.stream_consumer import StreamConsumer
+from core_shared.stream_consumer import EventRoute, StreamConsumer
 
 logger = structlog.get_logger(__name__)
-
-# Event type patterns this consumer is interested in
-# Currently subscribed to strava-specific events (future use)
-_STRAVA_EVENT_PATTERNS: list[str] = [
-    "strava.",  # Prefix match for all strava domain events
-]
 
 
 class StravaWorkerStreamConsumer(StreamConsumer):
     """Stream consumer for Strava integration event processing.
 
-    Listens to domain events on the ``pms:domain-events`` stream using
-    the ``strava-worker`` consumer group. Routes events to appropriate
-    handler functions.
+    Listens to domain events on the ``pms:domain-events`` stream using the
+    ``strava-worker`` consumer group. The declarative route table maps the
+    ``strava.`` event-type prefix to a handler; the shared ``StreamConsumer``
+    runs the read/ack/retry loop and dispatches matched events. The route
+    table is the single source of truth for the consumed-event set.
     """
 
     def __init__(
@@ -52,19 +49,23 @@ class StravaWorkerStreamConsumer(StreamConsumer):
             batch_size: Maximum events to read per XREADGROUP call.
             block_ms: Milliseconds to block waiting for new events.
         """
+        self._session_factory = session_factory
         super().__init__(
             stream_client=stream_client,
             stream_name=stream_name,
             group_name="strava-worker",
             consumer_name=consumer_name,
-            event_type_patterns=_STRAVA_EVENT_PATTERNS,
             batch_size=batch_size,
             block_ms=block_ms,
+            routes=self._build_routes(),
         )
-        self._session_factory = session_factory
 
-    async def _handle_event(self, event: StreamEvent) -> None:
-        """Handle a matched domain event.
+    def _build_routes(self) -> list[EventRoute]:
+        """Declare the event-type → handler routes for this worker."""
+        return [EventRoute("strava.", self._handle_strava_event)]
+
+    async def _handle_strava_event(self, event: StreamEvent) -> None:
+        """Handle a matched ``strava.``-prefixed domain event.
 
         Args:
             event: The stream event to process.

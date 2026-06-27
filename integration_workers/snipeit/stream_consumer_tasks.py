@@ -11,25 +11,20 @@ from typing import Any
 
 import structlog
 from core_shared.stream_client import StreamClient, StreamEvent, create_stream_redis
-from core_shared.stream_consumer import StreamConsumer
+from core_shared.stream_consumer import EventRoute, StreamConsumer
 
 logger = structlog.get_logger()
-
-_SNIPEIT_EVENT_TYPES = frozenset(
-    {
-        "snipeit.webhook_received",
-        "GearItemUpdated",
-        "JournalCreated",
-        "JournalUpdated",
-    }
-)
 
 
 class SnipeItWorkerStreamConsumer(StreamConsumer):
     """Stream consumer for Snipe-IT integration event processing.
 
-    Listens to Snipe-IT webhook events on the ``pms:domain-events`` stream
-    using the ``snipeit-worker`` consumer group.
+    Listens to Snipe-IT webhook and maintenance events on the
+    ``pms:domain-events`` stream using the ``snipeit-worker`` consumer group.
+    The declarative route table maps each consumed event type to a handler;
+    the shared ``StreamConsumer`` runs the read/ack/retry loop and dispatches
+    matched events. The route table is the single source of truth for the
+    consumed-event set.
     """
 
     def __init__(
@@ -41,23 +36,27 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
         batch_size: int = 10,
         block_ms: int = 5000,
     ) -> None:
+        self._session_factory = session_factory
         super().__init__(
             stream_client=stream_client,
             stream_name=stream_name,
             group_name="snipeit-worker",
             consumer_name=consumer_name,
-            event_type_patterns=list(_SNIPEIT_EVENT_TYPES),
             batch_size=batch_size,
             block_ms=block_ms,
+            routes=self._build_routes(),
         )
-        self._session_factory = session_factory
 
-    async def _handle_event(self, event: StreamEvent) -> None:
-        """Process an event from the stream.
+    def _build_routes(self) -> list[EventRoute]:
+        """Declare the event-type → handler routes for this worker."""
+        return [
+            EventRoute("GearItemUpdated", self._handle_gear_item_updated),
+            EventRoute("JournalCreated", self._handle_journal_maintenance_event),
+            EventRoute("JournalUpdated", self._handle_journal_maintenance_event),
+            EventRoute("snipeit.webhook_received", self._handle_webhook_received),
+        ]
 
-        Processes snipeit.webhook_received events by extracting the asset ID
-        and synchronizing it for all users that have a Snipe-IT configuration.
-        """
+    def _log_processed(self, event: StreamEvent) -> None:
         logger.info(
             "Snipe-IT worker processed event from stream",
             event_id=event.event_id,
@@ -65,16 +64,14 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
             aggregate_id=event.aggregate_id,
         )
 
-        if event.event_type == "GearItemUpdated":
-            await self._handle_gear_item_updated(event)
-            return
+    async def _handle_webhook_received(self, event: StreamEvent) -> None:
+        """Process a ``snipeit.webhook_received`` event.
 
-        if event.event_type in ("JournalCreated", "JournalUpdated"):
-            await self._handle_journal_maintenance_event(event)
-            return
-
-        if event.event_type != "snipeit.webhook_received":
-            return
+        Extracts the asset ID and synchronizes it for all users that have a
+        Snipe-IT configuration, routing maintenance-related actions to the
+        maintenance handler.
+        """
+        self._log_processed(event)
 
         item = event.event_data.get("item")
         if not item or not isinstance(item, dict):
@@ -182,6 +179,7 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
 
     async def _handle_gear_item_updated(self, event: StreamEvent) -> None:
         """Process GearItemUpdated outbox events to push changes to Snipe-IT."""
+        self._log_processed(event)
         gear_item_id = event.event_data.get("gear_item_id")
         changed_fields = event.event_data.get("changed_fields")
 
@@ -324,6 +322,7 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
         then pushes the creation or update to Snipe-IT for users with active
         Snipe-IT settings.
         """
+        self._log_processed(event)
         journal_id = event.event_data.get("journal_id")
         if not journal_id:
             logger.debug("Skipping journal event: missing journal_id")
