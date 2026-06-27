@@ -117,6 +117,7 @@ from app.core.search.exceptions import SearchServiceUnavailableError
 from app.infrastructure.auth.immich_token_service import ImmichTokenService
 from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.config import Settings
+from app.infrastructure.di.auth import AdminAccess
 from app.infrastructure.search.search_service import SearchService
 
 logger = structlog.get_logger()
@@ -1416,6 +1417,7 @@ async def create_review_item(
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],
     settings: FromDishka[Settings],
+    _admin: FromDishka[AdminAccess],
 ) -> dict[str, Any]:
     """
     Create a review item (test-only endpoint).

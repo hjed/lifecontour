@@ -1,7 +1,9 @@
 """
 Unit tests for auth provider exception handling.
 
-Tests that auth providers properly raise domain exceptions.
+Tests that auth providers properly raise domain exceptions. Session-cookie
+authentication is resolved in ``get_auth_context``; ``get_current_user`` simply
+unwraps it.
 """
 
 from datetime import UTC, datetime
@@ -12,130 +14,98 @@ from fastapi import HTTPException
 
 from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.config import Settings
-from app.infrastructure.di.auth import AuthProvider
+from app.infrastructure.di.auth import AuthContext, AuthProvider
+
+_VALID_SESSION = {
+    "id": "12345",
+    "email": "test@example.com",
+    "name": "Test User",
+    "avatar_url": "https://example.com/avatar.jpg",
+    "provider": "github",
+    "authenticated_at": datetime.now(UTC).isoformat(),
+}
+
+
+def _request(session: dict[str, object]) -> Mock:
+    """Mock request with the given session and no Authorization header."""
+    request = Mock()
+    request.session = session
+    request.headers = {}
+    return request
+
+
+def _settings() -> Mock:
+    settings = Mock(spec=Settings)
+    settings.disable_auth = False
+    settings.oauth_enforce_scopes = True
+    return settings
 
 
 class TestAuthProviderExceptionHandling:
     """Test that auth providers properly raise domain exceptions."""
 
-    def test_auth_provider_get_current_user_with_valid_session(self):
-        """Test that auth provider works correctly with valid session."""
-        # Create mock request with valid session data
-        user_data = {
-            "id": "12345",
-            "email": "test@example.com",
-            "name": "Test User",
-            "avatar_url": "https://example.com/avatar.jpg",
-            "provider": "github",
-            "authenticated_at": datetime.now(UTC).isoformat(),
-        }
-        mock_request = Mock()
-        mock_request.session = {"user": user_data}
-
-        # Create mock settings with auth enabled
-        mock_settings = Mock(spec=Settings)
-        mock_settings.disable_auth = False
-
+    async def test_auth_context_with_valid_session(self) -> None:
+        """get_auth_context resolves a SessionUser from a valid session."""
         auth_provider = AuthProvider()
 
-        # Should return valid SessionUser
-        result = auth_provider.get_current_user(mock_request, mock_settings)
-        assert isinstance(result, SessionUser)
-        assert result.id == "12345"
-        assert result.email == "test@example.com"
-        assert result.name == "Test User"
-        assert result.provider == "github"
+        context = await auth_provider.get_auth_context(
+            _request({"user": _VALID_SESSION}), _settings(), verifier=None
+        )
 
-    def test_auth_provider_get_current_user_with_no_session(self):
-        """Test that auth provider raises HTTPException for no session."""
-        # Create mock request with no session data
-        mock_request = Mock()
-        mock_request.session = {}
+        assert isinstance(context, AuthContext)
+        assert context.user.id == "12345"
+        assert context.user.email == "test@example.com"
+        assert context.user.provider == "github"
+        # get_current_user unwraps the context's user.
+        assert auth_provider.get_current_user(context) is context.user
 
-        # Create mock settings with auth enabled
-        mock_settings = Mock(spec=Settings)
-        mock_settings.disable_auth = False
-
+    async def test_auth_context_with_no_session(self) -> None:
+        """get_auth_context raises HTTP 401 when no session is present."""
         auth_provider = AuthProvider()
 
-        # Should raise HTTPException for no session
         with pytest.raises(HTTPException) as exc_info:
-            auth_provider.get_current_user(mock_request, mock_settings)
+            await auth_provider.get_auth_context(
+                _request({}), _settings(), verifier=None
+            )
 
         assert exc_info.value.status_code == 401
         assert "Authentication required" in str(exc_info.value.detail)
 
-    def test_auth_provider_get_current_user_with_invalid_session(self):
-        """Test that auth provider raises HTTPException for invalid session."""
-        # Create mock request with invalid session data
-        mock_request = Mock()
-        mock_request.session = {"user": "invalid_data"}
-
-        # Create mock settings with auth enabled
-        mock_settings = Mock(spec=Settings)
-        mock_settings.disable_auth = False
-
+    async def test_auth_context_with_invalid_session(self) -> None:
+        """get_auth_context raises HTTP 401 for malformed session data."""
         auth_provider = AuthProvider()
 
-        # Should raise HTTPException for invalid session data
         with pytest.raises(HTTPException) as exc_info:
-            auth_provider.get_current_user(mock_request, mock_settings)
+            await auth_provider.get_auth_context(
+                _request({"user": "invalid_data"}), _settings(), verifier=None
+            )
 
         assert exc_info.value.status_code == 401
 
-    def test_auth_provider_get_optional_user_with_no_session(self):
-        """Test that auth provider returns None for no session."""
-        # Create mock request with no session data
-        mock_request = Mock()
-        mock_request.session = {}
-
-        # Create mock settings with auth enabled
-        mock_settings = Mock(spec=Settings)
-        mock_settings.disable_auth = False
-
+    async def test_get_optional_user_with_no_session(self) -> None:
+        """get_optional_user returns None when no session is present."""
         auth_provider = AuthProvider()
 
-        # Should return None for no session
-        result = auth_provider.get_optional_user(mock_request, mock_settings)
+        result = await auth_provider.get_optional_user(
+            _request({}), _settings(), verifier=None
+        )
         assert result is None
 
-    def test_auth_provider_get_optional_user_with_valid_session(self):
-        """Test that auth provider returns SessionUser for valid session."""
-        # Create mock request with valid session data
-        user_data = {
-            "id": "12345",
-            "email": "test@example.com",
-            "name": "Test User",
-            "avatar_url": "https://example.com/avatar.jpg",
-            "provider": "github",
-            "authenticated_at": datetime.now(UTC).isoformat(),
-        }
-        mock_request = Mock()
-        mock_request.session = {"user": user_data}
-
-        # Create mock settings with auth enabled
-        mock_settings = Mock(spec=Settings)
-        mock_settings.disable_auth = False
-
+    async def test_get_optional_user_with_valid_session(self) -> None:
+        """get_optional_user returns the SessionUser for a valid session."""
         auth_provider = AuthProvider()
 
-        # Should return valid SessionUser
-        result = auth_provider.get_optional_user(mock_request, mock_settings)
+        result = await auth_provider.get_optional_user(
+            _request({"user": _VALID_SESSION}), _settings(), verifier=None
+        )
         assert isinstance(result, SessionUser)
         assert result.id == "12345"
 
-    def test_auth_provider_get_optional_user_with_invalid_session(self):
-        """Test that auth provider returns None for invalid session."""
-        # Create mock request with invalid session data
-        mock_request = Mock()
-        mock_request.session = {"user": "invalid_data"}
-
-        # Create mock settings with auth enabled
-        mock_settings = Mock(spec=Settings)
-        mock_settings.disable_auth = False
-
+    async def test_get_optional_user_with_invalid_session(self) -> None:
+        """get_optional_user returns None for malformed session data."""
         auth_provider = AuthProvider()
 
-        # Should return None for invalid session (graceful handling)
-        result = auth_provider.get_optional_user(mock_request, mock_settings)
+        result = await auth_provider.get_optional_user(
+            _request({"user": "invalid_data"}), _settings(), verifier=None
+        )
         assert result is None

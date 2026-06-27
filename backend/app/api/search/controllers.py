@@ -37,6 +37,7 @@ from app.api.search.utils import (
 from app.core.search.exceptions import SearchServiceUnavailableError
 from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.config import Settings
+from app.infrastructure.di.auth import AdminAccess
 from app.infrastructure.search.reindex_service import ReindexService
 from app.infrastructure.search.search_service import SearchService
 
@@ -291,6 +292,7 @@ async def reindex_search(
     reindex_service: FromDishka[ReindexService],
     settings: FromDishka[Settings],
     user: FromDishka[SessionUser],
+    _admin: FromDishka[AdminAccess],
     entity_type: Annotated[
         Literal["contacts", "journals"] | None,
         Query(

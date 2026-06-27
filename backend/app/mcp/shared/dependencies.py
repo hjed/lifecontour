@@ -28,6 +28,7 @@ from app.core.journal.services.journal_write_service import JournalWriteService
 from app.core.journal.services.review_item_service import ReviewItemService
 from app.infrastructure.auth.immich_token_service import ImmichTokenService
 from app.infrastructure.auth.models import SessionUser
+from app.infrastructure.auth.token_user import session_user_from_claims
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.search.search_service import SearchService
 
@@ -104,17 +105,8 @@ async def get_session_user() -> SessionUser:
 
     if token is not None:
         # Authenticated via OAuth — extract user identity from token claims
-        claims = token.claims or {}
-        return SessionUser(
-            id=str(claims.get("sub") or claims.get("id") or token.client_id),
-            email=str(claims.get("email", "")),
-            name=str(
-                claims.get("name")
-                or claims.get("login")
-                or claims.get("username")
-                or ""
-            ),
-            provider="mcp-oauth",
+        return session_user_from_claims(
+            token.claims, token.client_id, provider="mcp-oauth"
         )
 
     # No access token — auth is disabled (dev mode).
