@@ -19,8 +19,10 @@ class ApiScope(StrEnum):
     ADMIN = "pms:admin"
 
 
-# Each scope implicitly grants itself and every lower-privileged scope.
-_IMPLIED_BY: dict[ApiScope, frozenset[ApiScope]] = {
+# Maps a REQUIRED scope to the set of GRANTED scopes that satisfy it. A higher-
+# privileged grant satisfies lower-privileged requirements, so e.g. a required
+# READ is satisfied by holding READ, WRITE, or ADMIN.
+_SATISFIED_BY: dict[ApiScope, frozenset[ApiScope]] = {
     ApiScope.READ: frozenset({ApiScope.READ, ApiScope.WRITE, ApiScope.ADMIN}),
     ApiScope.WRITE: frozenset({ApiScope.WRITE, ApiScope.ADMIN}),
     ApiScope.ADMIN: frozenset({ApiScope.ADMIN}),
@@ -40,7 +42,7 @@ def required_scope_for_method(method: str) -> ApiScope:
 
 def token_satisfies(granted: set[str], required: ApiScope) -> bool:
     """Whether the granted scopes satisfy the required scope via the hierarchy."""
-    accepted = _IMPLIED_BY[required]
+    accepted = _SATISFIED_BY[required]
     return any(scope in granted for scope in accepted)
 
 

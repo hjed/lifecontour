@@ -201,16 +201,19 @@ class TestScopeEnforcement:
         assert resp.status_code == 403
         assert "pms:admin" in resp.json()["detail"]
 
-    async def test_token_without_pms_scopes_accepted_as_full(
+    async def test_token_without_pms_scopes_allows_regular_denies_admin(
         self, client_factory: Callable[..., Any], key_pair: RSAKeyPair
     ) -> None:
-        # No recognized pms:* scope -> accept-any fallback grants full access.
+        # No recognized pms:* scope -> accepted for regular read/write access,
+        # but admin requires an explicit pms:admin scope.
         token = _make_token(key_pair, scopes=["openid", "profile"])
         async with client_factory() as client:
+            get_resp = await client.get("/whoami", headers=_bearer(token))
             post_resp = await client.post("/whoami", headers=_bearer(token))
             admin_resp = await client.post("/admin-action", headers=_bearer(token))
+        assert get_resp.status_code == 200
         assert post_resp.status_code == 200
-        assert admin_resp.status_code == 200
+        assert admin_resp.status_code == 403
 
     async def test_enforcement_off_ignores_scopes(
         self, client_factory: Callable[..., Any], key_pair: RSAKeyPair

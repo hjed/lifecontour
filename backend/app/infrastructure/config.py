@@ -180,7 +180,9 @@ class Settings(BaseSettings):
     oauth_audience: str = Field(
         default="",
         description="Expected 'aud' claim for bearer access tokens "
-        "(this API's resource identifier).",
+        "(this API's resource identifier). SECURITY: when empty, audience "
+        "validation is skipped and any valid token from the same issuer is "
+        "accepted — set this in production.",
     )
     oauth_enforce_scopes: bool = Field(
         default=True,

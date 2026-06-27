@@ -66,9 +66,14 @@ async def _verify_bearer(
     access = await verifier.verify_token(token)
     if access is None:
         return None
-    user = session_user_from_claims(
-        access.claims, access.client_id, provider="oauth-token"
-    )
+    try:
+        user = session_user_from_claims(
+            access.claims, access.client_id, provider="oauth-token"
+        )
+    except ValueError:
+        # Verified token carried no usable identity claim — treat as invalid.
+        logger.warning("Bearer token has no usable identity claim")
+        return None
     return user, frozenset(access.scopes or [])
 
 
@@ -141,8 +146,12 @@ class AuthProvider(Provider):
                     headers={"WWW-Authenticate": "Bearer"},
                 )
             user, granted = result
+            if not settings.oauth_enforce_scopes:
+                # Enforcement disabled: any valid token has full access.
+                return AuthContext(user=user, scopes=None)
+
             recognized = recognized_scopes(set(granted))
-            if settings.oauth_enforce_scopes and recognized:
+            if recognized:
                 required = required_scope_for_method(request.method)
                 if not token_satisfies(recognized, required):
                     raise HTTPException(
@@ -150,8 +159,11 @@ class AuthProvider(Provider):
                         detail=f"Requires '{required.value}' scope",
                     )
                 return AuthContext(user=user, scopes=frozenset(recognized))
-            # No recognized scopes / enforcement off: accept any valid token.
-            return AuthContext(user=user, scopes=None)
+            # Valid token carrying no recognized pms:* scopes: accept for regular
+            # (read/write) access but never admin — admin requires an explicit
+            # pms:admin scope. Represented as an empty (non-None) scope set so
+            # require_admin denies it.
+            return AuthContext(user=user, scopes=frozenset())
 
         return AuthContext(user=_session_user(request), scopes=None)
 

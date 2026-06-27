@@ -392,8 +392,10 @@ def _configure_openapi_security(app: FastAPI, settings: Settings) -> None:
                 "pms:admin."
             ),
         }
-        # Optional security: endpoints also accept the session cookie.
-        schema["security"] = [{"bearerAuth": []}]
+        # Only define the scheme (so docs show an Authorize button); do NOT set
+        # a global `security` requirement — that would mark every operation,
+        # including public ones (/api/health), as requiring auth in generated
+        # clients. Endpoints also accept a session cookie, so auth is optional.
         app.openapi_schema = schema
         return schema
 

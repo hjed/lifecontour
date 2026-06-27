@@ -69,6 +69,17 @@ async def create_jwt_verifier(
             advertised=advertised_issuer,
         )
 
+    if not settings.oauth_audience:
+        # No audience => JWTVerifier skips the `aud` check, so a valid token
+        # minted for ANY service sharing this issuer would be accepted. Set
+        # OAUTH_AUDIENCE to this API's resource identifier in production.
+        logger.warning(
+            "Bearer-token audience validation DISABLED (OAUTH_AUDIENCE unset). "
+            "Tokens issued for other services on the same issuer will be "
+            "accepted. Set OAUTH_AUDIENCE to this API's resource identifier.",
+            issuer=settings.oauth_issuer,
+        )
+
     logger.info(
         "Bearer-token auth enabled",
         issuer=settings.oauth_issuer,

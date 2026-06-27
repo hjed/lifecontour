@@ -21,10 +21,17 @@ def session_user_from_claims(
     - id:    ``sub`` -> ``id`` -> ``client_id``
     - email: ``email`` (empty string when absent)
     - name:  ``name`` -> ``login`` -> ``username``
+
+    Raises:
+        ValueError: if no usable identifier can be derived (avoids minting an
+            identity with the literal id ``"None"``).
     """
     claims = claims or {}
+    identifier = claims.get("sub") or claims.get("id") or client_id
+    if not identifier:
+        raise ValueError("Token has no usable identifier (sub/id/client_id)")
     return SessionUser(
-        id=str(claims.get("sub") or claims.get("id") or client_id),
+        id=str(identifier),
         email=str(claims.get("email", "")),
         name=str(
             claims.get("name") or claims.get("login") or claims.get("username") or ""

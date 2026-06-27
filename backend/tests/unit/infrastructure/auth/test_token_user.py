@@ -1,5 +1,7 @@
 """Unit tests for the shared OAuth-claims -> SessionUser mapping."""
 
+import pytest
+
 from app.infrastructure.auth.token_user import session_user_from_claims
 
 
@@ -52,3 +54,7 @@ class TestSessionUserFromClaims:
     def test_none_claims_treated_as_empty(self) -> None:
         user = session_user_from_claims(None, client_id="client-abc", provider="p")
         assert user.id == "client-abc"
+
+    def test_raises_when_no_identifier(self) -> None:
+        with pytest.raises(ValueError, match="identifier"):
+            session_user_from_claims({"email": "a@b.com"}, client_id=None, provider="p")

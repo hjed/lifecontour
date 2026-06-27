@@ -1,5 +1,8 @@
 """Unit tests for bearer-token verifier construction via OIDC discovery."""
 
+from collections.abc import AsyncGenerator, Callable
+from contextlib import asynccontextmanager
+
 import httpx
 import pytest
 
@@ -31,8 +34,12 @@ class TestDiscoveryUrl:
         assert url == "https://idp.example.com/custom/.well-known"
 
 
-def _mock_client(handler: object) -> httpx.AsyncClient:
-    return httpx.AsyncClient(transport=httpx.MockTransport(handler))  # type: ignore[arg-type]
+@asynccontextmanager
+async def _mock_client(
+    handler: Callable[[httpx.Request], httpx.Response],
+) -> AsyncGenerator[httpx.AsyncClient]:
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        yield client
 
 
 class TestCreateJwtVerifier:
@@ -50,31 +57,34 @@ class TestCreateJwtVerifier:
                 },
             )
 
-        verifier = await create_jwt_verifier(
-            _settings(
-                oauth_issuer="https://idp.example.com",
-                oauth_audience="pms-api",
-            ),
-            http_client=_mock_client(handler),
-        )
+        async with _mock_client(handler) as client:
+            verifier = await create_jwt_verifier(
+                _settings(
+                    oauth_issuer="https://idp.example.com",
+                    oauth_audience="pms-api",
+                ),
+                http_client=client,
+            )
         assert verifier is not None
 
     async def test_raises_on_missing_jwks_uri(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(200, json={"issuer": "https://idp.example.com"})
 
-        with pytest.raises(RuntimeError, match="jwks_uri"):
-            await create_jwt_verifier(
-                _settings(oauth_issuer="https://idp.example.com"),
-                http_client=_mock_client(handler),
-            )
+        async with _mock_client(handler) as client:
+            with pytest.raises(RuntimeError, match="jwks_uri"):
+                await create_jwt_verifier(
+                    _settings(oauth_issuer="https://idp.example.com"),
+                    http_client=client,
+                )
 
     async def test_raises_on_discovery_http_error(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(404)
 
-        with pytest.raises(RuntimeError, match="discovery"):
-            await create_jwt_verifier(
-                _settings(oauth_issuer="https://idp.example.com"),
-                http_client=_mock_client(handler),
-            )
+        async with _mock_client(handler) as client:
+            with pytest.raises(RuntimeError, match="discovery"):
+                await create_jwt_verifier(
+                    _settings(oauth_issuer="https://idp.example.com"),
+                    http_client=client,
+                )
