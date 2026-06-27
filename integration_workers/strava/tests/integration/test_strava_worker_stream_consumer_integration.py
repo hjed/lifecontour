@@ -29,6 +29,8 @@ os.environ.setdefault(
     f"redis://localhost:{get_workspace_env().get('REDIS_TEST_PORT', '6380')}",
 )
 
+GROUP_NAME = "strava-worker"
+
 
 @pytest_asyncio.fixture
 async def redis_client() -> AsyncIterator[Any]:
@@ -50,6 +52,31 @@ async def unique_stream_name(redis_client: Any) -> AsyncIterator[str]:
     name = f"test:strava-consumer:{uuid.uuid4().hex[:8]}"
     yield name
     await redis_client.delete(name)
+
+
+async def _publish(redis_client: Any, stream_name: str, event_type: str) -> None:
+    """Publish a single domain event onto the stream under test."""
+    await redis_client.xadd(
+        stream_name,
+        {
+            "event_id": f"evt-{event_type}",
+            "event_type": event_type,
+            "aggregate_id": "55",
+            "event_data": json.dumps({"object_id": 55}),
+            "occurred_at": "2024-06-15T10:30:00+00:00",
+        },
+    )
+
+
+async def _pending_count(stream_client: StreamClient, stream_name: str) -> int:
+    """Return the number of pending (unacked) entries for the consumer group."""
+    entries = await stream_client.get_pending_entries(
+        stream_name=stream_name,
+        group_name=GROUP_NAME,
+        min_idle_time_ms=0,
+        count=10,
+    )
+    return len(entries)
 
 
 def _consumer(
@@ -75,33 +102,18 @@ class TestStravaWorkerStreamConsumerIntegration:
         unique_stream_name: str,
     ) -> None:
         """A ``strava.`` event read from real Redis is dispatched and acked."""
-        await redis_client.xadd(
-            unique_stream_name,
-            {
-                "event_id": "evt-strava-1",
-                "event_type": "strava.activity.created",
-                "aggregate_id": "55",
-                "event_data": json.dumps({"object_id": 55}),
-                "occurred_at": "2024-06-15T10:30:00+00:00",
-            },
-        )
+        await _publish(redis_client, unique_stream_name, "strava.activity.created")
 
         consumer = _consumer(stream_client, unique_stream_name)
         consumer._handle_strava_event = AsyncMock()  # type: ignore[method-assign]
         consumer._routes = consumer._build_routes()
-        await stream_client.ensure_consumer_group(unique_stream_name, "strava-worker")
+        await stream_client.ensure_consumer_group(unique_stream_name, GROUP_NAME)
 
         processed = await consumer._process_batch()
 
         assert processed == 1
         consumer._handle_strava_event.assert_awaited_once()
-        pending = await stream_client.get_pending_entries(
-            stream_name=unique_stream_name,
-            group_name="strava-worker",
-            min_idle_time_ms=0,
-            count=10,
-        )
-        assert len(pending) == 0
+        assert await _pending_count(stream_client, unique_stream_name) == 0
 
     async def test_unmatched_event_acked_without_dispatch(
         self,
@@ -110,32 +122,17 @@ class TestStravaWorkerStreamConsumerIntegration:
         unique_stream_name: str,
     ) -> None:
         """A non-``strava.`` event is acked and the handler is never invoked."""
-        await redis_client.xadd(
-            unique_stream_name,
-            {
-                "event_id": "evt-strava-skip",
-                "event_type": "ContactCreated",
-                "aggregate_id": "99",
-                "event_data": json.dumps({"contact_id": 1}),
-                "occurred_at": "2024-06-15T10:30:00+00:00",
-            },
-        )
+        await _publish(redis_client, unique_stream_name, "ContactCreated")
 
         consumer = _consumer(stream_client, unique_stream_name)
         consumer._handle_strava_event = AsyncMock()  # type: ignore[method-assign]
-        await stream_client.ensure_consumer_group(unique_stream_name, "strava-worker")
+        await stream_client.ensure_consumer_group(unique_stream_name, GROUP_NAME)
 
         processed = await consumer._process_batch()
 
         assert processed == 1
         consumer._handle_strava_event.assert_not_awaited()
-        pending = await stream_client.get_pending_entries(
-            stream_name=unique_stream_name,
-            group_name="strava-worker",
-            min_idle_time_ms=0,
-            count=10,
-        )
-        assert len(pending) == 0
+        assert await _pending_count(stream_client, unique_stream_name) == 0
 
     async def test_failing_handler_retried_via_pending_entries(
         self,
@@ -144,16 +141,7 @@ class TestStravaWorkerStreamConsumerIntegration:
         unique_stream_name: str,
     ) -> None:
         """A failing handler leaves the event pending, then a retry acks it."""
-        await redis_client.xadd(
-            unique_stream_name,
-            {
-                "event_id": "evt-strava-retry",
-                "event_type": "strava.activity.updated",
-                "aggregate_id": "77",
-                "event_data": json.dumps({"object_id": 77}),
-                "occurred_at": "2024-06-15T10:30:00+00:00",
-            },
-        )
+        await _publish(redis_client, unique_stream_name, "strava.activity.updated")
 
         call_count = 0
 
@@ -167,25 +155,13 @@ class TestStravaWorkerStreamConsumerIntegration:
         consumer._handle_strava_event = AsyncMock(side_effect=flaky)  # type: ignore[method-assign]
         consumer._routes = consumer._build_routes()
         consumer._retry_min_idle_ms = 0  # retry immediately for the test
-        await stream_client.ensure_consumer_group(unique_stream_name, "strava-worker")
+        await stream_client.ensure_consumer_group(unique_stream_name, GROUP_NAME)
 
         await consumer._process_batch()
-        pending_after_failure = await stream_client.get_pending_entries(
-            stream_name=unique_stream_name,
-            group_name="strava-worker",
-            min_idle_time_ms=0,
-            count=10,
-        )
-        assert len(pending_after_failure) == 1
+        assert await _pending_count(stream_client, unique_stream_name) == 1
 
         retried = await consumer._retry_pending()
 
         assert retried == 1
         assert call_count == 2
-        pending_after_retry = await stream_client.get_pending_entries(
-            stream_name=unique_stream_name,
-            group_name="strava-worker",
-            min_idle_time_ms=0,
-            count=10,
-        )
-        assert len(pending_after_retry) == 0
+        assert await _pending_count(stream_client, unique_stream_name) == 0

@@ -534,7 +534,7 @@ Extend `core_shared`'s `StreamConsumer` with a declarative route table + dispatc
 
 - `integration_workers/strava/stream_consumer_tasks.py` + `integration_workers/snipeit/stream_consumer_tasks.py` import `EventRoute` from `core_shared.stream_consumer`, declare `_build_routes()`, and delete their `_handle_event` overrides and `event_type_patterns`/`_STRAVA_EVENT_PATTERNS`/`_SNIPEIT_EVENT_TYPES` constants. Strava's single `strava.` prefix route preserves its wildcard semantics (placeholder handler still logs); snipeit's four exact routes preserve its consumed set, with the inline webhook routing moved verbatim into `_handle_webhook_received` and the per-event "processed event from stream" log preserved via a shared `_log_processed` helper called by each route handler.
 - **Tests:** new route-table unit tests + real-Redis routed integration tests for both workers (dispatch matched / ack unmatched / retry-on-failure via pending entries), mirroring the google/immich Phase 2 pattern; existing handler suites kept as regression.
-- Quality gates green: strava `ruff`/`mypy` + 200 unit + 3 consumer integration; snipeit `ruff`/`mypy` + 178 unit + 5 consumer integration. `core_shared` untouched.
+- Local quality gates run green: strava `ruff format`/`ruff check`/`mypy` + 200 unit + 3 consumer integration; snipeit `ruff`/`mypy` + 178 unit + 5 consumer integration. These are the worker lint/type/unit/integration checks enforced in CI; `core_shared` is untouched. (The real-Redis integration-test scaffolding is intentionally kept per-worker here — sharing it across workers is ITER14-005's `core_shared/testing/` scope.)
 
 ---
 

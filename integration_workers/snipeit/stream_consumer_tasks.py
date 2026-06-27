@@ -1,9 +1,10 @@
 """
 Snipe-IT Worker Stream Consumer for Redis Streams.
 
-Reads events from the pms:domain-events stream using the 'snipeit-worker' consumer group.
-Currently listens for snipeit.webhook_received events, which will be processed in
-subsequent phases.
+Reads events from the pms:domain-events stream using the 'snipeit-worker'
+consumer group. The declarative route table consumes ``snipeit.webhook_received``
+(asset / maintenance sync), ``GearItemUpdated`` (push local gear changes), and
+``JournalCreated`` / ``JournalUpdated`` (gear-maintenance / gear-usage sync).
 """
 
 import asyncio
