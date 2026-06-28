@@ -201,19 +201,28 @@ class TestScopeEnforcement:
         assert resp.status_code == 403
         assert "pms_admin" in resp.json()["detail"]
 
-    async def test_token_without_pms_scopes_allows_regular_denies_admin(
+    async def test_token_without_pms_scopes_denied_when_enforced(
         self, client_factory: Callable[..., Any], key_pair: RSAKeyPair
     ) -> None:
-        # No recognized pms_* scope -> accepted for regular read/write access,
-        # but admin requires an explicit pms_admin scope.
+        # Scopes are always enforced: a token with no pms_* scope satisfies
+        # nothing and is denied on every method, including safe GETs.
         token = _make_token(key_pair, scopes=["openid", "profile"])
         async with client_factory() as client:
             get_resp = await client.get("/whoami", headers=_bearer(token))
             post_resp = await client.post("/whoami", headers=_bearer(token))
             admin_resp = await client.post("/admin-action", headers=_bearer(token))
-        assert get_resp.status_code == 200
-        assert post_resp.status_code == 200
+        assert get_resp.status_code == 403
+        assert post_resp.status_code == 403
         assert admin_resp.status_code == 403
+
+    async def test_unrelated_pms_prefixed_scope_denied(
+        self, client_factory: Callable[..., Any], key_pair: RSAKeyPair
+    ) -> None:
+        # A pms_*-prefixed scope that isn't a known permission grants nothing.
+        token = _make_token(key_pair, scopes=["pms_unknown"])
+        async with client_factory() as client:
+            resp = await client.get("/whoami", headers=_bearer(token))
+        assert resp.status_code == 403
 
     async def test_enforcement_off_ignores_scopes(
         self, client_factory: Callable[..., Any], key_pair: RSAKeyPair

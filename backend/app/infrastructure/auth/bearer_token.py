@@ -21,20 +21,25 @@ logger = structlog.get_logger()
 
 _DISCOVERY_SUFFIX = "/.well-known/openid-configuration"
 
-# Asymmetric algorithms we accept from discovery, in preference order. Symmetric
-# (HS*) algorithms are intentionally excluded: JWKS-based verification is
-# asymmetric, and accepting HS* would open a key-confusion attack surface.
-_SUPPORTED_ALGORITHMS = ("ES256", "ES384", "ES512", "RS256", "RS384", "RS512")
+# Asymmetric algorithms we accept from discovery. Symmetric (HS*) algorithms
+# are intentionally excluded: JWKS-based verification is asymmetric, and
+# accepting HS* would open a key-confusion attack surface. This is an
+# acceptance set, not a preference order — selection follows the IdP's
+# advertised order (IdPs list their signing default first).
+_SUPPORTED_ALGORITHMS = frozenset(
+    {"ES256", "ES384", "ES512", "RS256", "RS384", "RS512"}
+)
 
 
 def _select_algorithm(document: dict[str, Any], url: str) -> str | None:
     """Pick the token signing algorithm from the discovery document.
 
     Reads ``id_token_signing_alg_values_supported`` and returns the first
-    advertised algorithm we support. Returns ``None`` when the field is absent
-    (the verifier then applies its RS256 default). Raises if the IdP advertises
-    algorithms but none are supported — failing loud beats silently defaulting
-    to RS256 and then rejecting every token.
+    algorithm the IdP advertises that we support, honoring the IdP's ordering
+    (its signing default is listed first). Returns ``None`` when the field is
+    absent (the verifier then applies its RS256 default). Raises if the IdP
+    advertises algorithms but none are supported — failing loud beats silently
+    defaulting to RS256 and then rejecting every token.
     """
     advertised = document.get("id_token_signing_alg_values_supported") or []
     supported = [alg for alg in advertised if alg in _SUPPORTED_ALGORITHMS]

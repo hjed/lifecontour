@@ -206,11 +206,11 @@ class Settings(BaseSettings):
     )
     oauth_enforce_scopes: bool = Field(
         default=True,
-        description="Enforce pms_read/pms_write/pms_admin scopes on bearer "
-        "tokens that carry them. A valid token with no pms_* scope still gets "
-        "regular read/write access but is denied admin endpoints (admin always "
-        "requires an explicit pms_admin scope). Set False to accept any valid "
-        "token for everything, including admin.",
+        description="When True (default), every bearer-token request must carry "
+        "a pms_* scope satisfying the request method (pms_read for safe methods, "
+        "pms_write for mutating, pms_admin for admin endpoints); tokens without a "
+        "suitable scope are denied. Set False to skip scope checks and accept "
+        "any valid token for everything, including admin.",
     )
 
     # External services

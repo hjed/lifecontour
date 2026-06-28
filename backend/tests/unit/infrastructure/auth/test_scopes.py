@@ -62,11 +62,15 @@ class TestTokenSatisfies:
 
 
 class TestRecognizedScopes:
-    """Only the pms_* subset counts as recognized API scopes."""
+    """Only known ApiScope values count as recognized API scopes."""
 
-    def test_filters_to_pms_scopes(self) -> None:
+    def test_filters_to_known_api_scopes(self) -> None:
         granted = {"openid", "profile", "pms_read", "pms_admin", "email"}
         assert recognized_scopes(granted) == {"pms_read", "pms_admin"}
 
-    def test_empty_when_no_pms_scopes(self) -> None:
+    def test_ignores_unrelated_pms_prefixed_scope(self) -> None:
+        # An unrelated pms_* scope is not a recognized permission.
+        assert recognized_scopes({"pms_something_else", "pms_read"}) == {"pms_read"}
+
+    def test_empty_when_no_api_scopes(self) -> None:
         assert recognized_scopes({"openid", "profile", "email"}) == set()

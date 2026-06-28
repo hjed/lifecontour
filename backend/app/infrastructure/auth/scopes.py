@@ -11,8 +11,6 @@ notably Kanidm, reject ``:`` in scope names.
 
 from enum import StrEnum
 
-SCOPE_PREFIX = "pms_"
-
 
 class ApiScope(StrEnum):
     """App-scoped API permissions, ordered least to most privileged."""
@@ -20,6 +18,9 @@ class ApiScope(StrEnum):
     READ = "pms_read"
     WRITE = "pms_write"
     ADMIN = "pms_admin"
+
+
+_API_SCOPE_VALUES: frozenset[str] = frozenset(scope.value for scope in ApiScope)
 
 
 # Maps a REQUIRED scope to the set of GRANTED scopes that satisfy it. A higher-
@@ -50,5 +51,9 @@ def token_satisfies(granted: set[str], required: ApiScope) -> bool:
 
 
 def recognized_scopes(granted: set[str]) -> set[str]:
-    """Return the subset of granted scopes that are recognized ``pms_*`` scopes."""
-    return {scope for scope in granted if scope.startswith(SCOPE_PREFIX)}
+    """Return the granted scopes that are known ApiScope values.
+
+    Matches exact ``ApiScope`` values (not a ``pms_`` prefix), so an unrelated
+    ``pms_*`` scope is ignored rather than treated as a permission.
+    """
+    return granted & _API_SCOPE_VALUES
