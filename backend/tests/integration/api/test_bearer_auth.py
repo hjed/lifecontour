@@ -57,11 +57,10 @@ def _make_token(
     )
 
 
-def _build_settings(*, enforce_scopes: bool = True) -> Settings:
+def _build_settings() -> Settings:
     return Settings(
         oauth_issuer=ISSUER,
         oauth_audience=AUDIENCE,
-        oauth_enforce_scopes=enforce_scopes,
         session_secret_key=SESSION_SECRET,
         disable_auth=False,
     )
@@ -70,10 +69,8 @@ def _build_settings(*, enforce_scopes: bool = True) -> Settings:
 @asynccontextmanager
 async def _client(
     key_pair: RSAKeyPair,
-    *,
-    enforce_scopes: bool = True,
 ) -> AsyncGenerator[AsyncClient]:
-    settings = _build_settings(enforce_scopes=enforce_scopes)
+    settings = _build_settings()
     verifier = JWTVerifier(
         public_key=key_pair.public_key,
         issuer=ISSUER,
@@ -144,8 +141,8 @@ def _bearer(token: str) -> dict[str, str]:
 
 @pytest.fixture
 def client_factory(key_pair: RSAKeyPair) -> Callable[..., Any]:
-    def factory(*, enforce_scopes: bool = True) -> Any:
-        return _client(key_pair, enforce_scopes=enforce_scopes)
+    def factory() -> Any:
+        return _client(key_pair)
 
     return factory
 
@@ -224,12 +221,13 @@ class TestScopeEnforcement:
             resp = await client.get("/whoami", headers=_bearer(token))
         assert resp.status_code == 403
 
-    async def test_enforcement_off_ignores_scopes(
+    async def test_unknown_scope_ignored_alongside_valid_scope(
         self, client_factory: Callable[..., Any], key_pair: RSAKeyPair
     ) -> None:
-        token = _make_token(key_pair, scopes=["pms_read"])
-        async with client_factory(enforce_scopes=False) as client:
-            resp = await client.post("/admin-action", headers=_bearer(token))
+        # Unknown pms_* values are ignored; the valid pms_read still grants read.
+        token = _make_token(key_pair, scopes=["pms_unknown", "pms_read"])
+        async with client_factory() as client:
+            resp = await client.get("/whoami", headers=_bearer(token))
         assert resp.status_code == 200
 
 

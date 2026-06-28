@@ -11,8 +11,8 @@ Two authentication methods are supported and resolved in order:
 2. Session cookie — established via the interactive OAuth login (browser).
 
 Session and dev users implicitly hold all scopes. For bearer tokens, scopes
-are always enforced (unless ``oauth_enforce_scopes`` is disabled): a token must
-carry a ``pms_*`` scope satisfying the request method or it is denied.
+are always enforced: a token must carry a ``pms_*`` scope satisfying the request
+method or it is denied.
 """
 
 from dataclasses import dataclass
@@ -83,8 +83,7 @@ class AuthContext:
     """The authenticated user plus their granted API scopes for a request.
 
     ``scopes`` semantics:
-    - ``None`` — the caller holds ALL scopes including admin (session/dev user,
-      or any valid bearer token when scope enforcement is disabled).
+    - ``None`` — the caller holds ALL scopes including admin (session/dev user).
     - a ``frozenset`` — the caller's granted ``pms_*`` scopes. The per-method
       scope check has already passed in ``get_auth_context``; ``require_admin``
       additionally denies unless ``pms_admin`` is present. Bearer tokens with no
@@ -152,13 +151,10 @@ class AuthProvider(Provider):
                     headers={"WWW-Authenticate": "Bearer"},
                 )
             user, granted = result
-            if not settings.oauth_enforce_scopes:
-                # Enforcement disabled: any valid token has full access.
-                return AuthContext(user=user, scopes=None)
-
             # Scopes are always enforced: a bearer token must carry a scope that
-            # satisfies the request method, even if it carries no pms_* scope at
-            # all (which then satisfies nothing -> denied).
+            # satisfies the request method. A token with no recognized pms_*
+            # scope satisfies nothing and is denied (unrelated scopes, including
+            # any other pms_* values, are ignored).
             granted_set = set(granted)
             required = required_scope_for_method(request.method)
             if not token_satisfies(granted_set, required):

@@ -204,14 +204,6 @@ class Settings(BaseSettings):
         "validation is skipped and any valid token from the same issuer is "
         "accepted — set this in production.",
     )
-    oauth_enforce_scopes: bool = Field(
-        default=True,
-        description="When True (default), every bearer-token request must carry "
-        "a pms_* scope satisfying the request method (pms_read for safe methods, "
-        "pms_write for mutating, pms_admin for admin endpoints); tokens without a "
-        "suitable scope are denied. Set False to skip scope checks and accept "
-        "any valid token for everything, including admin.",
-    )
 
     # External services
     google_client_id: str = Field(default="", description="Google OAuth client ID")
