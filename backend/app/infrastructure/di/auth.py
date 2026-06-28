@@ -7,11 +7,11 @@ Two authentication methods are supported and resolved in order:
 
 1. ``Authorization: Bearer <jwt>`` — an IdP-issued access token, validated
    locally against the IdP's JWKS (for non-browser API clients). May carry
-   ``pms:read``/``pms:write``/``pms:admin`` scopes that are enforced per request.
+   ``pms_read``/``pms_write``/``pms_admin`` scopes that are enforced per request.
 2. Session cookie — established via the interactive OAuth login (browser).
 
 Session and dev users implicitly hold all scopes; scope enforcement only
-applies to bearer tokens that carry recognized ``pms:*`` scopes.
+applies to bearer tokens that carry recognized ``pms_*`` scopes.
 """
 
 from dataclasses import dataclass
@@ -85,8 +85,8 @@ class AuthContext:
     - ``None`` — the caller holds ALL scopes including admin (session/dev user,
       or any valid bearer token when scope enforcement is disabled).
     - a (possibly empty) ``frozenset`` — the caller holds exactly these
-      ``pms:*`` scopes; ``require_admin`` denies unless ``pms:admin`` is present.
-      A valid bearer token carrying no recognized ``pms:*`` scope maps to an
+      ``pms_*`` scopes; ``require_admin`` denies unless ``pms_admin`` is present.
+      A valid bearer token carrying no recognized ``pms_*`` scope maps to an
       EMPTY set (regular access, but admin denied) — NOT ``None``. Do not
       change this to ``None`` or scope-less tokens would regain admin access.
     """
@@ -164,9 +164,9 @@ class AuthProvider(Provider):
                         detail=f"Requires '{required.value}' scope",
                     )
                 return AuthContext(user=user, scopes=frozenset(recognized))
-            # Valid token carrying no recognized pms:* scopes: accept for regular
+            # Valid token carrying no recognized pms_* scopes: accept for regular
             # (read/write) access but never admin — admin requires an explicit
-            # pms:admin scope. Represented as an empty (non-None) scope set so
+            # pms_admin scope. Represented as an empty (non-None) scope set so
             # require_admin denies it.
             return AuthContext(user=user, scopes=frozenset())
 

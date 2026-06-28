@@ -54,6 +54,8 @@ class TestCreateJwtVerifier:
                 json={
                     "issuer": "https://idp.example.com",
                     "jwks_uri": "https://idp.example.com/jwks",
+                    # Kanidm-style: ES256-only.
+                    "id_token_signing_alg_values_supported": ["ES256"],
                 },
             )
 
@@ -66,6 +68,44 @@ class TestCreateJwtVerifier:
                 http_client=client,
             )
         assert verifier is not None
+        # Algorithm is taken from discovery, not an env var.
+        assert verifier.algorithm == "ES256"
+
+    async def test_algorithm_defaults_when_not_advertised(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "issuer": "https://idp.example.com",
+                    "jwks_uri": "https://idp.example.com/jwks",
+                },
+            )
+
+        async with _mock_client(handler) as client:
+            verifier = await create_jwt_verifier(
+                _settings(oauth_issuer="https://idp.example.com"),
+                http_client=client,
+            )
+        assert verifier is not None
+        assert verifier.algorithm == "RS256"
+
+    async def test_raises_when_no_supported_algorithm(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "issuer": "https://idp.example.com",
+                    "jwks_uri": "https://idp.example.com/jwks",
+                    "id_token_signing_alg_values_supported": ["EdDSA", "HS256"],
+                },
+            )
+
+        async with _mock_client(handler) as client:
+            with pytest.raises(RuntimeError, match="signing algorithm"):
+                await create_jwt_verifier(
+                    _settings(oauth_issuer="https://idp.example.com"),
+                    http_client=client,
+                )
 
     async def test_raises_on_missing_jwks_uri(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:

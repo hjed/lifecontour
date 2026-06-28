@@ -154,7 +154,7 @@ class TestBearerHappyPath:
     async def test_read_token_allows_get(
         self, client_factory: Callable[..., Any], key_pair: RSAKeyPair
     ) -> None:
-        token = _make_token(key_pair, scopes=["pms:read"])
+        token = _make_token(key_pair, scopes=["pms_read"])
         async with client_factory() as client:
             resp = await client.get("/whoami", headers=_bearer(token))
         assert resp.status_code == 200
@@ -166,7 +166,7 @@ class TestBearerHappyPath:
     async def test_write_token_allows_get_and_post(
         self, client_factory: Callable[..., Any], key_pair: RSAKeyPair
     ) -> None:
-        token = _make_token(key_pair, scopes=["pms:write"])
+        token = _make_token(key_pair, scopes=["pms_write"])
         async with client_factory() as client:
             get_resp = await client.get("/whoami", headers=_bearer(token))
             post_resp = await client.post("/whoami", headers=_bearer(token))
@@ -176,7 +176,7 @@ class TestBearerHappyPath:
     async def test_admin_token_allows_admin_action(
         self, client_factory: Callable[..., Any], key_pair: RSAKeyPair
     ) -> None:
-        token = _make_token(key_pair, scopes=["pms:admin"])
+        token = _make_token(key_pair, scopes=["pms_admin"])
         async with client_factory() as client:
             resp = await client.post("/admin-action", headers=_bearer(token))
         assert resp.status_code == 200
@@ -186,26 +186,26 @@ class TestScopeEnforcement:
     async def test_read_token_forbidden_on_post(
         self, client_factory: Callable[..., Any], key_pair: RSAKeyPair
     ) -> None:
-        token = _make_token(key_pair, scopes=["pms:read"])
+        token = _make_token(key_pair, scopes=["pms_read"])
         async with client_factory() as client:
             resp = await client.post("/whoami", headers=_bearer(token))
         assert resp.status_code == 403
-        assert "pms:write" in resp.json()["detail"]
+        assert "pms_write" in resp.json()["detail"]
 
     async def test_write_token_forbidden_on_admin(
         self, client_factory: Callable[..., Any], key_pair: RSAKeyPair
     ) -> None:
-        token = _make_token(key_pair, scopes=["pms:write"])
+        token = _make_token(key_pair, scopes=["pms_write"])
         async with client_factory() as client:
             resp = await client.post("/admin-action", headers=_bearer(token))
         assert resp.status_code == 403
-        assert "pms:admin" in resp.json()["detail"]
+        assert "pms_admin" in resp.json()["detail"]
 
     async def test_token_without_pms_scopes_allows_regular_denies_admin(
         self, client_factory: Callable[..., Any], key_pair: RSAKeyPair
     ) -> None:
-        # No recognized pms:* scope -> accepted for regular read/write access,
-        # but admin requires an explicit pms:admin scope.
+        # No recognized pms_* scope -> accepted for regular read/write access,
+        # but admin requires an explicit pms_admin scope.
         token = _make_token(key_pair, scopes=["openid", "profile"])
         async with client_factory() as client:
             get_resp = await client.get("/whoami", headers=_bearer(token))
@@ -218,7 +218,7 @@ class TestScopeEnforcement:
     async def test_enforcement_off_ignores_scopes(
         self, client_factory: Callable[..., Any], key_pair: RSAKeyPair
     ) -> None:
-        token = _make_token(key_pair, scopes=["pms:read"])
+        token = _make_token(key_pair, scopes=["pms_read"])
         async with client_factory(enforce_scopes=False) as client:
             resp = await client.post("/admin-action", headers=_bearer(token))
         assert resp.status_code == 200
@@ -235,7 +235,7 @@ class TestInvalidTokens:
     async def test_wrong_audience_unauthorized(
         self, client_factory: Callable[..., Any], key_pair: RSAKeyPair
     ) -> None:
-        token = _make_token(key_pair, scopes=["pms:read"], audience="other-api")
+        token = _make_token(key_pair, scopes=["pms_read"], audience="other-api")
         async with client_factory() as client:
             resp = await client.get("/whoami", headers=_bearer(token))
         assert resp.status_code == 401
@@ -244,7 +244,7 @@ class TestInvalidTokens:
         self, client_factory: Callable[..., Any], key_pair: RSAKeyPair
     ) -> None:
         token = _make_token(
-            key_pair, scopes=["pms:read"], issuer="https://evil.example.com"
+            key_pair, scopes=["pms_read"], issuer="https://evil.example.com"
         )
         async with client_factory() as client:
             resp = await client.get("/whoami", headers=_bearer(token))
@@ -285,7 +285,7 @@ class TestSessionFallback:
     async def test_optional_user_resolves_bearer(
         self, client_factory: Callable[..., Any], key_pair: RSAKeyPair
     ) -> None:
-        token = _make_token(key_pair, scopes=["pms:read"])
+        token = _make_token(key_pair, scopes=["pms_read"])
         async with client_factory() as client:
             resp = await client.get("/maybe", headers=_bearer(token))
         assert resp.status_code == 200
