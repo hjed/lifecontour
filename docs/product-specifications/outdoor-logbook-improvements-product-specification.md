@@ -218,7 +218,8 @@ is added. Both list the relevant **activities by journal name**, with each name 
 hyperlink** that jumps to that entry in the PDF.
 
 - **Participant index:** keeps the existing threshold — contacts appearing as PARTICIPANT or INVITEE
-  in **more than three** journal entries within the export scope. Each listed contact now shows the
+  in **three or more** journal entries within the export scope (the current `min_appearances = 3`
+  behaviour; "three or more", i.e. `>= 3`, not "more than three"). Each listed contact now shows the
   linked list of the journals they appear in (in addition to, or in place of, a bare count).
 - **Activity-type index:** for each activity type, lists the journals of that type as linked names.
 

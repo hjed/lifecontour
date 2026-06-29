@@ -143,7 +143,7 @@ Each sub-iteration defines its objective, the specification section it realises,
 
 **Incompleteness rules** (each matched rule shown as a distinct reason):
 1. **No attributes set** — the subtype's own type-specific fields are all empty (shared OUTDOOR_ACTIVITY fields don't count); evaluated per subtype for multi-subtype journals.
-2. **Abseiling activity missing a template** — `ABSEILING_TRIP` is in the dependency chain (ABSEILING_TRIP / CANYONING / CLIMBING / CAVING) and the relevant subtype `template_id` is null.
+2. **Abseiling activity missing a template** — `ABSEILING_TRIP` is in the dependency chain (ABSEILING_TRIP / CANYONING / CLIMBING / CAVING) and the consolidated `abseiling_data.template_id` is null (single-column check, per ITER16-001).
 3. **No participants (except hiking)** — a non-`BUSHWALKING` outdoor activity with no PARTICIPANT contacts.
 
 **Outcomes the phases must satisfy:**
@@ -257,7 +257,7 @@ Each sub-iteration defines its objective, the specification section it realises,
 
 **Phase 3 — Linked participant + activity-type indexes.** PR ~450 lines.
 - Convert the participant index (keep `min_appearances=3`) to list each contact's journals as internal hyperlinks; add a new activity-type index listing each type's journals as linked names.
-- **Tests:** unit — participant entries carry internal-link anchors; activity-type index present and linked; integration (`test_logbook_export_api.py`) — seed a >3-appearance contact and multiple types, assert both indexes link to entries.
+- **Tests:** unit — participant entries carry internal-link anchors; activity-type index present and linked; integration (`test_logbook_export_api.py`) — seed a contact appearing in ≥3 entries (the `min_appearances=3` boundary, e.g. exactly 3) and multiple types, assert both indexes link to entries.
 
 **Phase 4 — Per-type icon glyphs + Immich album links.** PR ~300 lines.
 - Render an emoji/unicode glyph per journal type (mirroring `JournalTypeBadges.tsx`) next to type labels on entries and in the indexes, no image assets. Guarantee Immich album link(s) render when present (multiple albums supported), omitted otherwise.
