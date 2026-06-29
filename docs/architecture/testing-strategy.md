@@ -58,6 +58,35 @@ rather than raw class attributes — this surfaces what arq actually consumes (e
   against the database, and shutdown cancels/reaps the consumer task with no leaked
   background task.
 
+**Shared worker test fixtures — `core_shared.testing` (ITER14-005)**
+
+The common unit-test scaffolding every worker used to hand-roll lives once in
+`core_shared/core_shared/testing/`, exposed as a **pytest plugin**. A worker test suite
+opts in by adding one line to its top-level `conftest.py`:
+
+```python
+# integration_workers/<worker>/tests/conftest.py
+pytest_plugins = ["core_shared.testing"]
+```
+
+After that, these fixtures are available as test arguments (the matching `make_*` factory
+helpers are importable from `core_shared.testing` for tests that need several instances or
+deeper overrides):
+
+| Fixture | Helper | Provides |
+|---------|--------|----------|
+| `mock_redis` | `make_mock_redis()` | An `AsyncMock` `redis.asyncio.Redis` double with every stream op the `StreamClient`/`StreamConsumer` use pre-seeded — scalar ops (`xadd`, `xack`, `xgroup_create`, `ping`, `xlen`) and the list-returning reads (`xreadgroup`, `xpending_range`, `xclaim`, `xinfo_groups` → `[]`) so a full consumer loop, including the retry-pending path, runs without extra setup. |
+| `worker_settings` | `make_worker_settings(settings_cls=..., **overrides)` | A real, deterministic `BaseWorkerSettings` (or a worker subclass) with a valid `SecretStr` database URL and `_env_file=None` so no ambient `.env` leaks in. |
+| `session_factory_mock` | `make_session_factory_mock()` | A mock async session factory: `async with factory() as session` yields an `AsyncMock` session, and `factory.close` is an awaitable matching what `build_worker_lifecycle` closes on shutdown. |
+| `arq_ctx` | `make_arq_ctx(**overrides)` | An ARQ `ctx` dict primed with the lifecycle keys (`session_factory`, `settings`); merge in overrides or a `stream_consumer_task`. |
+
+The fixtures are synchronous-construction (they return ready-made objects), so they work
+under pytest-asyncio's STRICT mode without `@pytest_asyncio.fixture`. They are self-tested in
+`core_shared/tests/unit/test_testing_fixtures.py`, with a worker-shaped example driving
+`build_worker_lifecycle` purely on these fixtures in
+`core_shared/tests/unit/test_sample_worker_style.py`. Per-worker `conftest.py` keeps only its
+integration-specific fixtures.
+
 #### 2. Core Application Tests
 **Scope**: Core FastAPI application without integration workers
 **Location**: `backend/tests/`
