@@ -52,7 +52,7 @@ These apply to every sub-iteration (and every phase once broken out):
 
 Established by reviewing the current code; these drive the scope and acceptance criteria below.
 
-- **`template_id` already exists on canyoning, climbing, AND caving — only `ABSEILING_TRIP` lacks it.** The spec text says "add `template_id` to ABSEILING_TRIP and CAVING", but `CavingData` (`core_shared/core_shared/models/journals/caving_data.py`) already has `template_id` (added inline in migration `0060`), alongside `CanyoningData` (mig `0056`) and `ClimbingData` (mig `0058`). The only abseiling-derived subtype without it is **`AbseilingData`** (`core_shared/core_shared/models/journals/abseiling_data.py`). ITER16-001 is therefore scoped to **`ABSEILING_TRIP` only** plus the template-type enum, not two subtypes. (This corrects §2 of the spec.)
+- **`template_id` is currently split across three subtype tables and should be consolidated to the abseiling level.** `CanyoningData` (mig `0056`), `ClimbingData` (mig `0058`), and `CavingData` (mig `0060`) each carry their own `template_id`; `AbseilingData` (`core_shared/core_shared/models/journals/abseiling_data.py`) has none. But the abseil **pitches already live on `abseiling_data`** (the `abseil_pitches` child table), and CANYONING/CLIMBING/CAVING all have ABSEILING_TRIP in their dependency chain — so every abseiling-derived journal already has an `abseiling_data` row. **Decision (product owner, PR #1075):** consolidate `template_id` onto `abseiling_data`, co-locating it with the pitch data it populated — backfill the three existing columns into `abseiling_data`, then retire them. This gives a single source of truth, so the "missing template" rule and the templates-done widget each query one column. (Corrects the earlier "add to ABSEILING_TRIP and CAVING" framing in §2 of the spec.)
 - **`ActivityTemplateType` is `canyoning | caving | climbing`** (`core_shared/core_shared/models/journals/activity_template.py`). A plain `ABSEILING_TRIP` journal has no matching template type, so ITER16-001 adds an **`abseiling`** template type so abseiling trips can reference a template.
 - **Template pitch-copy is frontend-only today.** On template selection, the frontend (`JournalCreateForm.tsx` ~595–623, `JournalDetailView.tsx` ~316–343) copies `template.pitches` into `ABSEILING_TRIP.pitches` and recomputes totals; the backend just stores whatever `type_data` it receives. So "reference persists when pitches are edited" is mostly already true (editing pitches never touched `template_id`) — the work is to (a) add the field for `ABSEILING_TRIP`, (b) ensure the update path never silently drops it, and (c) surface it.
 - **Three subtypes have no type-specific fields at all.** `SnorkellingData`, `DivingData`, `DownhillSkiingData` store only `journal_id` + timestamps. Under a literal "type-specific fields all empty" reading, they would be **flagged as incomplete forever**. **Resolved (product decision):** subtypes with no type-specific attributes are **exempt from rule 1** (SNORKELLING, DIVING, DOWNHILL_SKIING today); they can still be flagged by rules 2/3. The exemption is defined by the absence of fillable fields, not a hard-coded list, so it self-maintains if such a subtype later gains fields.
@@ -97,31 +97,35 @@ Each sub-iteration defines its objective, the specification section it realises,
 **Deliverable:** An abseiling activity (ABSEILING_TRIP, and by extension canyoning/climbing/caving which already store it) shows "based on: <template name>" in the UI and PDF, persists that link across pitch edits, and exposes it through MCP.
 
 **Outcomes the phases must satisfy:**
-- `AbseilingData` (`ABSEILING_TRIP`) stores a nullable `template_id` FK to `activity_templates.id` (`ON DELETE SET NULL`), matching canyoning/climbing/caving.
+- `template_id` is consolidated onto `AbseilingData` / `journal_abseiling_data` (nullable UUID FK to `activity_templates.id`, `ON DELETE SET NULL`); the existing canyoning/climbing/caving `template_id` columns are backfilled into it and retired.
 - `ActivityTemplateType` gains `abseiling`; template create/update/search accept it.
 - `template_id` is **never cleared** by editing pitches or other fields (UI path and `update_journal_entry`).
 - Journal detail and the PDF show the referenced template name for any abseiling-derived journal that has one.
-- MCP create/update accept and preserve `template_id` for ABSEILING_TRIP; the referenced template (incl. pitches) is retrievable for any abseiling-derived journal.
+- MCP create/update accept and preserve the consolidated `template_id` for any abseiling-derived journal; the referenced template (incl. pitches) is retrievable.
 
 **Phase Breakdown:**
 
-**Phase 1 — Data layer: `abseiling` template type + `template_id` column (additive).** PR ~300 lines.
-- Add `ActivityTemplateType.abseiling` and extend the template-type CHECK constraint. Add `template_id` to `AbseilingData` / `journal_abseiling_data` (nullable UUID FK, `ON DELETE SET NULL`). Alembic migration (`0094` at time of writing, per the `creating-migrations` skill) — applies/rolls back cleanly. The abseiling repository reads/writes `template_id`. Not yet processed by the journal write-service, so it merges green as additive code.
-- **Tests:** unit — `AbseilingData` accepts/validates `template_id`, `abseiling` enum round-trips; integration — migration up/down with `async_connection`/`clean_database`, repo persists/reads `template_id`.
-- **Docs:** `docs/architecture/database-design.md` — new column + `abseiling` template type.
+**Phase 1 — Data layer: `abseiling` template type + consolidated `template_id` column + backfill (additive).** PR ~350 lines.
+- Add `ActivityTemplateType.abseiling` and extend the template-type CHECK constraint. Add `template_id` to `AbseilingData` / `journal_abseiling_data` (nullable UUID FK, `ON DELETE SET NULL`). Alembic migration (`0094` at time of writing, per the `creating-migrations` skill) adds the column and **backfills it from the existing `canyoning_data` / `climbing_data` / `caving_data` `template_id` values** (each maps to the journal's `abseiling_data` row); the old columns are **left in place** for now (additive — both coexist). The abseiling repository reads/writes `template_id`. Not yet processed by the journal write-service, so it merges green.
+- **Tests:** unit — `AbseilingData` accepts/validates `template_id`, `abseiling` enum round-trips; integration — migration up/down with `async_connection`/`clean_database`, backfill copies existing subtype `template_id`s onto `abseiling_data`, repo persists/reads `template_id`.
+- **Docs:** `docs/architecture/database-design.md` — new column + `abseiling` template type + the consolidation/backfill plan.
 
-**Phase 2 — Service + MCP wiring.** PR ~350 lines.
-- The journal write-service processes `ABSEILING_TRIP.template_id` on create and composite update, preserving it when only pitches change. Add the template-on-journal retrieval path (returns the referenced template incl. standard pitches). `create_journal_entry`/`update_journal_entry` accept and preserve `template_id` for ABSEILING_TRIP.
-- **Tests:** unit — write-service preserves `template_id` on a pitch-only edit; integration — create-with-template then edit a pitch keeps it; MCP create/update preserve it; retrieval returns the template + pitches despite modified journal pitches.
-- **Docs:** correct spec §2 (caving already had `template_id`; only ABSEILING_TRIP is added). *(Done in this iteration's spec already; confirm no regressions.)*
+**Phase 2 — Service + MCP wiring (write/read at the abseiling level).** PR ~400 lines.
+- The journal write-service reads/writes the consolidated `abseiling_data.template_id` for **all** abseiling-derived types on create and composite update, preserving it when only pitches change; the canyoning/climbing/caving write paths stop writing their own `template_id` (now unused). Add the template-on-journal retrieval path (returns the referenced template incl. standard pitches). `create_journal_entry`/`update_journal_entry` accept and preserve `template_id` for any abseiling-derived journal.
+- **Tests:** unit — write-service preserves `template_id` on a pitch-only edit (canyoning/climbing/caving/abseiling); integration — create-with-template then edit a pitch keeps it; MCP create/update preserve it; retrieval returns the template + pitches despite modified journal pitches.
 
 **Phase 3 — Frontend display + selection.** PR ~350 lines.
-- Journal detail shows "based on: <template>" (linking to the template) for any abseiling-derived journal with a `template_id`. The create/edit form lets an `ABSEILING_TRIP` journal select an abseiling template and persists `template_id` (reusing the existing pitch-copy behaviour).
+- Journal detail shows "based on: <template>" (linking to the template) for any abseiling-derived journal with a `template_id`. The create/edit form persists the selected template onto the consolidated field for abseiling-derived journals (reusing the existing pitch-copy behaviour), including plain `ABSEILING_TRIP`.
 - **Tests:** RTL — detail renders/omits the link by presence of `template_id`; e2e (Playwright) — create an abseiling trip from a template, edit a pitch height, reload, confirm the reference is still shown.
 
 **Phase 4 — Template name in the PDF.** PR ~120 lines.
 - The PDF entry renders the template-reference name when present for abseiling-derived types — small and additive, independent of the ITER16-004 rework.
 - **Tests:** unit (renderer shows the name when present) + integration (export includes it).
+
+**Phase 5 — Retire the per-subtype `template_id` columns (cleanup migration).** PR ~200 lines.
+- Once Phases 2–3 have moved all reads/writes to `abseiling_data.template_id`, drop the now-unused `template_id` columns (and their FKs) from `canyoning_data`, `climbing_data`, and `caving_data`. Separate phase so the read/write switch deploys and is verified before the columns are removed (additive-first, then drop).
+- **Tests:** integration — migration up/down; no code path references the dropped columns (grep/asserted); existing abseiling-derived journal suites stay green.
+- **Docs:** `database-design.md` — mark the old columns retired.
 
 ---
 
@@ -289,7 +293,7 @@ Confirmed with the product owner (2026-06-29):
 
 | Sub-iteration | Deliverable | UI | MCP | Depends on |
 |---|---|---|---|---|
-| ITER16-001: Durable Template Reference | `template_id` on ABSEILING_TRIP + `abseiling` template type, preserved on edit, shown in journal/PDF/MCP | ✅ | ✅ | — |
+| ITER16-001: Durable Template Reference | `template_id` consolidated onto `abseiling_data` + `abseiling` template type, preserved on edit, shown in journal/PDF/MCP | ✅ | ✅ | — |
 | ITER16-002: Incomplete Review | Outdoor-specific incomplete list (3 rules) with reversible dismiss | ✅ | ✅ | -001 |
 | ITER16-003: Outdoor Dashboard | Overview page: upcoming, checked-out gear, recent totals, templates done | ✅ | ✅ | -001 (soft -002) |
 | ITER16-004: PDF Improvements | Summary-first, TOC, linked indexes, icons, Immich links, GPX maps, outline | ✅ (export) | n/a (data MCP-retrievable) | — (soft -001) |
@@ -298,10 +302,10 @@ Confirmed with the product owner (2026-06-29):
 
 | Sub-iteration | Phases | Est. PRs |
 |---|---|---|
-| ITER16-001: Durable Template Reference | 4 | 4 |
+| ITER16-001: Durable Template Reference | 5 | 5 |
 | ITER16-002: Incomplete Review | 4 | 4 |
 | ITER16-003: Outdoor Dashboard | 5 | 5 |
 | ITER16-004: PDF Improvements | 6 | 6 |
-| **Total** | **19** | **19** |
+| **Total** | **20** | **20** |
 
 **Suggested delivery order:** ITER16-001 (unblocks the missing-template rule and templates-done widget) → ITER16-002 (introduces the overview page shell) → ITER16-003 (adds dashboard widgets to the shell). ITER16-004 is independent and can run in parallel from the start, landing whenever capacity allows. Within ITER16-004, Phase 1 precedes Phases 2–3, and Phase 5 precedes Phase 6; Phase 4 is independent.

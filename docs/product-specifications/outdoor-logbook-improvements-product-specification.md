@@ -63,8 +63,10 @@ The improvements should help the user:
   - An **incomplete outdoor activities** review list (with dismiss).
   - A **dashboard** (upcoming activities, checked-out gear, recent activity totals, abseil templates done).
 - A durable **template reference on every abseiling-derived activity**, displayed even when modified.
-- Adding `template_id` to the abseiling-derived types that lack it (ABSEILING_TRIP, CAVING) and
-  corresponding template types.
+- Consolidating the durable `template_id` reference onto the **ABSEILING_TRIP (`abseiling_data`)
+  level** — where the abseil pitches already live — by adding it to `abseiling_data`, backfilling the
+  existing canyoning/climbing/caving references, and retiring the per-subtype columns, plus adding an
+  `abseiling` template type.
 - **PDF logbook output improvements**: summary first, table of contents, linked participant and
   activity-type indexes, per-type icons, Immich album links, GPX track-log images, and a PDF outline.
 - **MCP parity** for the incomplete review, the dashboard data, and template-on-journal retrieval.
@@ -112,8 +114,9 @@ matched rule is shown as a distinct reason on the entry.
 
 2. **Abseiling activity missing a template** — the journal has abseiling data (i.e. ABSEILING_TRIP is
    in its dependency chain: ABSEILING_TRIP, CANYONING, CLIMBING, CAVING) and has **no associated
-   template** (`template_id` is null). See Section 2 for the template-reference changes that make
-   this rule applicable to all abseiling-derived types.
+   template** (the consolidated `abseiling_data.template_id` is null). See Section 2 for the
+   template-reference changes that make this rule a single-column check across all abseiling-derived
+   types.
 
 3. **No participants (except hiking)** — the journal is an outdoor activity **other than BUSHWALKING**
    (hiking) and has **no contacts in the PARTICIPANT relationship**. Bushwalking is exempt because
@@ -145,21 +148,30 @@ reliable record of canyons, caves, and climbs that have been done.
 ### Behaviour
 
 - Every abseiling-derived activity stores a **durable reference to the template it was created from**
-  (`template_id`). Today canyoning, climbing, **and caving** already store this; the only
-  abseiling-derived type still missing it is **ABSEILING_TRIP**. This specification adds it there so
-  the reference exists everywhere abseiling data does:
+  (`template_id`). The reference belongs at the **ABSEILING_TRIP (`abseiling_data`) level**: the
+  abseil **pitches already live there**, and because CANYONING, CLIMBING, and CAVING all have
+  ABSEILING_TRIP in their dependency chain, every abseiling-derived journal already has an
+  `abseiling_data` row. This specification therefore **consolidates `template_id` onto
+  `abseiling_data`**, co-locating it with the pitch data it populated:
 
   | Type | Template reference today | After this spec |
   |------|--------------------------|-----------------|
-  | CANYONING | yes | yes |
-  | CLIMBING | yes | yes |
-  | CAVING | yes | yes |
-  | ABSEILING_TRIP | no | **yes** |
+  | CANYONING | on `canyoning_data` | on `abseiling_data` |
+  | CLIMBING | on `climbing_data` | on `abseiling_data` |
+  | CAVING | on `caving_data` | on `abseiling_data` |
+  | ABSEILING_TRIP | none | on `abseiling_data` |
+
+  The existing per-subtype `template_id` columns (canyoning/climbing/caving) are **backfilled into
+  `abseiling_data` and then retired**, leaving a single source of truth. Because a journal has one set
+  of abseil pitches regardless of how many subtypes it carries, a single `template_id` at this level
+  is the natural fit, and the "missing template" incomplete rule (Section 1) and the templates-done
+  dashboard widget (Section 4) each query one column.
 
 - An **abseiling** template type is added so a plain abseiling trip can reference an appropriately
   typed template. The canyoning, caving, and climbing template types already exist. (An abseiling
   template uses the common template fields — name, region, description, and standard pitches — with no
-  additional type-specific fields.)
+  additional type-specific fields.) The consolidated `abseiling_data.template_id` may reference a
+  template of any of these types, matching the journal's most specific abseiling-derived activity.
 
 - **The reference persists independently of the pitch data.** When a template is selected, its
   standard pitches are copied into the journal as editable defaults (existing behaviour). Editing
@@ -182,10 +194,11 @@ reliable record of canyons, caves, and climbs that have been done.
 
 ## 3. PDF Logbook Output Improvements
 
-The existing PDF logbook export (cover page, hierarchical entries, yearly summaries, participant
-index, activity-type index, Immich shared link) is improved as follows. All other existing export
-behaviour (scope, chronological ordering by topmost parent, hierarchy, per-entry content, filters)
-is unchanged.
+The existing PDF logbook export (cover page, hierarchical entries, yearly summaries placed at the end,
+a participant index, and an Immich shared link per entry) is improved as follows. There is **no**
+table of contents, activity-type index, per-type icon, GPX map, or document outline today — those are
+added here. All other existing export behaviour (scope, chronological ordering by topmost parent,
+hierarchy, per-entry content, filters) is unchanged.
 
 ### 3.1 Summary first
 
@@ -200,8 +213,9 @@ entries / each top-level trip, indexes) with internal links to each.
 
 ### 3.3 Linked participant and activity-type indexes
 
-Both the **participant index** and the **activity-type index** list the relevant **activities by
-journal name**, with each name being an **internal hyperlink** that jumps to that entry in the PDF.
+The existing **participant index** is upgraded with internal links, and a **new activity-type index**
+is added. Both list the relevant **activities by journal name**, with each name being an **internal
+hyperlink** that jumps to that entry in the PDF.
 
 - **Participant index:** keeps the existing threshold — contacts appearing as PARTICIPANT or INVITEE
   in **more than three** journal entries within the export scope. Each listed contact now shows the
@@ -298,8 +312,8 @@ Specifically:
   referenced template (including its standard pitches), even when the journal's pitches have been
   modified.
 - **Template references on create/update** — the generic `create_journal_entry` / `update_journal_entry`
-  flow accepts and preserves `template_id` for all abseiling-derived types (ABSEILING_TRIP, CAVING,
-  canyoning, climbing).
+  flow accepts and preserves the consolidated `abseiling_data.template_id` for any abseiling-derived
+  journal (ABSEILING_TRIP, CANYONING, CLIMBING, CAVING).
 
 The **PDF logbook export remains user-initiated in the UI** (consistent with the original outdoor
 logbook specification); the data it is built from is retrievable through the existing and above MCP
@@ -332,10 +346,10 @@ on.
 
 Suggested phasing:
 
-1. **Durable template reference:** add `template_id` to ABSEILING_TRIP (canyoning, climbing, and
-   caving already have it) plus an `abseiling` template type, ensure it is preserved on edit, and
-   display it on the journal and in MCP. This unblocks the "missing template" incomplete rule and the
-   templates-done dashboard widget.
+1. **Durable template reference:** consolidate `template_id` onto `abseiling_data` (backfill the
+   existing canyoning/climbing/caving columns, then retire them) plus an `abseiling` template type,
+   ensure it is preserved on edit, and display it on the journal and in MCP. This unblocks the
+   "missing template" incomplete rule and the templates-done dashboard widget.
 2. **Incomplete review:** the incomplete-activities list with the three rules, dismiss/un-dismiss, UI
    surface, and MCP tool.
 3. **Dashboard:** the overview page widgets (upcoming, checked-out gear, recent totals, templates

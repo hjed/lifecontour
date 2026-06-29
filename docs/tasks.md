@@ -282,12 +282,12 @@ Read these first when working on the active product-alignment streams:
 - Hardening: name-based reconciliation fallback for email-less contacts; local-delete propagation to Google
 
 ### [Iteration 16: Outdoor Logbook Improvements](./tasks/iteration-16-outdoor-logbook-improvements.md)
-**Status:** 🔵 PLANNED — sub-iterations and PR-sized phases defined (19 phases); ready to implement
+**Status:** 🔵 PLANNED — sub-iterations and PR-sized phases defined (20 phases); ready to implement
 **Dependencies:** Iteration 9 (Outdoor Logbook), Iteration 10 (SnipeIT gear checkout), Iteration 11 (Immich album links), Iteration 12 (Activity History provenance)
 **Goal:** Add the review, surfacing, and reporting layer on top of the outdoor logbook — find incomplete activities, durable template references, an overview/dashboard page, and a polished PDF — with full UI and MCP parity
 
 **Sub-Iterations:**
-- ITER16-001: Durable template reference on abseiling activities (`template_id` on ABSEILING_TRIP + `abseiling` template type, preserved on edit, shown in journal/PDF/MCP)
+- ITER16-001: Durable template reference on abseiling activities (`template_id` consolidated onto `abseiling_data` + `abseiling` template type, preserved on edit, shown in journal/PDF/MCP)
 - ITER16-002: Incomplete outdoor activities review (3 rules: no attributes / missing template / no participants) with reversible whole-entry dismiss
 - ITER16-003: Outdoor Logbook overview dashboard (upcoming activities, checked-out gear, recent totals by type, abseil templates done)
 - ITER16-004: PDF logbook output improvements (summary-first, TOC, linked indexes, type icons, Immich links, GPX track maps, document outline)
