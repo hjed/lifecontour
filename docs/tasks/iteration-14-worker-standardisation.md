@@ -560,14 +560,21 @@ Extend `core_shared`'s `StreamConsumer` with a declarative route table + dispatc
 Add shared fixtures, self-tested. Not yet adopted by workers, so it merges green.
 
 **Acceptance Criteria:**
-- [ ] `core_shared/testing/` provides shared worker fixtures (Redis mock/client, session-factory mock, ARQ context/harness, fake `BaseWorkerSettings`), importable by worker test suites.
-- [ ] Fixtures are documented and behave as specified.
+- [x] `core_shared/testing/` provides shared worker fixtures (Redis mock/client, session-factory mock, ARQ context/harness, fake `BaseWorkerSettings`), importable by worker test suites. → `core_shared/core_shared/testing/` (pytest plugin).
+- [x] Fixtures are documented and behave as specified. → docstrings + `testing-strategy.md`; behaviour asserted by self-tests.
 
 **Required Test Coverage:**
-- **Unit:** each fixture produces the expected object; a sample worker-style test runs purely on the shared fixtures.
+- [x] **Unit:** each fixture produces the expected object; a sample worker-style test runs purely on the shared fixtures. → `test_testing_fixtures.py` (12 tests) + `test_sample_worker_style.py` (1 test).
 
 **Required Documentation Updates:**
-- `docs/architecture/testing-strategy.md` — document `core_shared/testing/` fixtures and how worker tests should consume them.
+- [x] `docs/architecture/testing-strategy.md` — document `core_shared/testing/` fixtures and how worker tests should consume them. → "Shared worker test fixtures — `core_shared.testing`" subsection added.
+
+**Progress notes (Phase 1 complete — branch `iter14-005-1-shared-fixtures`):**
+
+- Added shared worker unit-test fixtures under `core_shared/core_shared/testing/` (`__init__.py` declares the pytest-plugin surface; `fixtures.py` holds the implementations), consumed via `pytest_plugins = ["core_shared.testing"]`. Provides: `mock_redis` (AsyncMock Redis double with stream ops pre-seeded), `make_worker_settings`/`worker_settings` (real `BaseWorkerSettings` or subclass via `settings_cls`, `_env_file=None`, kwargs overrides), `session_factory_mock` (mock async session factory with awaitable `close` + `async with` session, matching `build_worker_lifecycle`'s contract), and `make_arq_ctx`/`arq_ctx` (ARQ `ctx` primed with `session_factory`/`settings`). The `make_*` helpers are also importable directly.
+- **Additive only** — no worker adopts them yet (that is Phase 2), so `main` stays green.
+- **Tests:** `core_shared/tests/unit/test_testing_fixtures.py` asserts each fixture/helper produces the expected object; `core_shared/tests/unit/test_sample_worker_style.py` is the spec-mandated worker-shaped test driving `build_worker_lifecycle` purely on the shared fixtures. Registered via a new top-level `core_shared/tests/conftest.py`.
+- **Local quality gates green:** `ruff format --check` (112 files) + `ruff check` + `mypy core_shared` (83 files, no issues) + full `pytest` (333 passed, incl. 13 new). No worker/backend/frontend changes this phase. Used PEP 695 generics for `make_worker_settings` (`[SettingsT: BaseWorkerSettings]`) per ruff UP047.
 
 #### Phase 2: Adopt shared fixtures across all workers
 **PR Size:** ~350 lines (mostly deletions + imports across 4 conftests, ~90 net)
