@@ -1,12 +1,15 @@
 """Bearer-token verifier construction for direct API authentication.
 
 Builds a FastMCP :class:`JWTVerifier` for validating IdP-issued access tokens
-on REST endpoints. The JWKS endpoint is resolved via OIDC discovery
-(``{issuer}/.well-known/openid-configuration``) so only the issuer needs to be
-configured. Returns ``None`` when bearer auth is not configured.
+on REST endpoints. The JWKS endpoint and the token signing algorithm are both
+resolved via OIDC discovery (``{issuer}/.well-known/openid-configuration``) so
+only the issuer needs to be configured. Returns ``None`` when bearer auth is
+not configured.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 import httpx
 import structlog
@@ -17,6 +20,36 @@ from app.infrastructure.config import Settings
 logger = structlog.get_logger()
 
 _DISCOVERY_SUFFIX = "/.well-known/openid-configuration"
+
+# Asymmetric algorithms we accept from discovery. Symmetric (HS*) algorithms
+# are intentionally excluded: JWKS-based verification is asymmetric, and
+# accepting HS* would open a key-confusion attack surface. This is an
+# acceptance set, not a preference order — selection follows the IdP's
+# advertised order (IdPs list their signing default first).
+_SUPPORTED_ALGORITHMS = frozenset(
+    {"ES256", "ES384", "ES512", "RS256", "RS384", "RS512"}
+)
+
+
+def _select_algorithm(document: dict[str, Any], url: str) -> str | None:
+    """Pick the token signing algorithm from the discovery document.
+
+    Reads ``id_token_signing_alg_values_supported`` and returns the first
+    algorithm the IdP advertises that we support, honoring the IdP's ordering
+    (its signing default is listed first). Returns ``None`` when the field is
+    absent (the verifier then applies its RS256 default). Raises if the IdP
+    advertises algorithms but none are supported — failing loud beats silently
+    defaulting to RS256 and then rejecting every token.
+    """
+    advertised = document.get("id_token_signing_alg_values_supported") or []
+    supported = [alg for alg in advertised if alg in _SUPPORTED_ALGORITHMS]
+    if advertised and not supported:
+        raise RuntimeError(
+            f"OIDC discovery document at {url} advertises no supported "
+            f"asymmetric signing algorithm (got {advertised!r}; supported: "
+            f"{list(_SUPPORTED_ALGORITHMS)})."
+        )
+    return supported[0] if supported else None
 
 
 def discovery_url(settings: Settings) -> str:
@@ -84,14 +117,18 @@ async def create_jwt_verifier(
             issuer=settings.oauth_issuer,
         )
 
+    algorithm = _select_algorithm(document, url)
+
     logger.info(
         "Bearer-token auth enabled",
         issuer=settings.oauth_issuer,
         jwks_uri=jwks_uri,
         audience=settings.oauth_audience or None,
+        algorithm=algorithm or "RS256 (default)",
     )
     return JWTVerifier(
         jwks_uri=jwks_uri,
         issuer=settings.oauth_issuer,
         audience=settings.oauth_audience or None,
+        algorithm=algorithm,
     )

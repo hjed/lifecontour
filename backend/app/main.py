@@ -388,8 +388,8 @@ def _configure_openapi_security(app: FastAPI, settings: Settings) -> None:
             "scheme": "bearer",
             "bearerFormat": "JWT",
             "description": (
-                "IdP-issued OAuth2 access token. Scopes: pms:read, pms:write, "
-                "pms:admin."
+                "IdP-issued OAuth2 access token. Scopes: pms_read, pms_write, "
+                "pms_admin."
             ),
         }
         # Optional bearer auth: the `{}` entry keeps every operation callable

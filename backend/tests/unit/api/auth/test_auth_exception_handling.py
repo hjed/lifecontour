@@ -37,7 +37,6 @@ def _request(session: dict[str, object]) -> Mock:
 def _settings() -> Mock:
     settings = Mock(spec=Settings)
     settings.disable_auth = False
-    settings.oauth_enforce_scopes = True
     return settings
 
 

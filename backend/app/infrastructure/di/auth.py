@@ -7,11 +7,12 @@ Two authentication methods are supported and resolved in order:
 
 1. ``Authorization: Bearer <jwt>`` — an IdP-issued access token, validated
    locally against the IdP's JWKS (for non-browser API clients). May carry
-   ``pms:read``/``pms:write``/``pms:admin`` scopes that are enforced per request.
+   ``pms_read``/``pms_write``/``pms_admin`` scopes that are enforced per request.
 2. Session cookie — established via the interactive OAuth login (browser).
 
-Session and dev users implicitly hold all scopes; scope enforcement only
-applies to bearer tokens that carry recognized ``pms:*`` scopes.
+Session and dev users implicitly hold all scopes. For bearer tokens, scopes
+are always enforced: a token must carry a ``pms_*`` scope satisfying the request
+method or it is denied.
 """
 
 from dataclasses import dataclass
@@ -82,13 +83,12 @@ class AuthContext:
     """The authenticated user plus their granted API scopes for a request.
 
     ``scopes`` semantics:
-    - ``None`` — the caller holds ALL scopes including admin (session/dev user,
-      or any valid bearer token when scope enforcement is disabled).
-    - a (possibly empty) ``frozenset`` — the caller holds exactly these
-      ``pms:*`` scopes; ``require_admin`` denies unless ``pms:admin`` is present.
-      A valid bearer token carrying no recognized ``pms:*`` scope maps to an
-      EMPTY set (regular access, but admin denied) — NOT ``None``. Do not
-      change this to ``None`` or scope-less tokens would regain admin access.
+    - ``None`` — the caller holds ALL scopes including admin (session/dev user).
+    - a ``frozenset`` — the caller's granted ``pms_*`` scopes. The per-method
+      scope check has already passed in ``get_auth_context``; ``require_admin``
+      additionally denies unless ``pms_admin`` is present. Bearer tokens with no
+      satisfying scope are rejected upstream (403), so this is never ``None``
+      for a scoped token — keep it a set so admin gating stays explicit.
     """
 
     user: SessionUser
@@ -136,7 +136,7 @@ class AuthProvider(Provider):
         """Authenticate the request via bearer token or session cookie.
 
         Raises HTTP 401 if neither method authenticates, and HTTP 403 if a
-        scoped bearer token lacks the scope required for the request method.
+        bearer token lacks the scope required for the request method.
         """
         if settings.disable_auth:
             return AuthContext(user=_dev_user(), scopes=None)
@@ -151,24 +151,20 @@ class AuthProvider(Provider):
                     headers={"WWW-Authenticate": "Bearer"},
                 )
             user, granted = result
-            if not settings.oauth_enforce_scopes:
-                # Enforcement disabled: any valid token has full access.
-                return AuthContext(user=user, scopes=None)
-
-            recognized = recognized_scopes(set(granted))
-            if recognized:
-                required = required_scope_for_method(request.method)
-                if not token_satisfies(recognized, required):
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail=f"Requires '{required.value}' scope",
-                    )
-                return AuthContext(user=user, scopes=frozenset(recognized))
-            # Valid token carrying no recognized pms:* scopes: accept for regular
-            # (read/write) access but never admin — admin requires an explicit
-            # pms:admin scope. Represented as an empty (non-None) scope set so
-            # require_admin denies it.
-            return AuthContext(user=user, scopes=frozenset())
+            # Scopes are always enforced: a bearer token must carry a scope that
+            # satisfies the request method. A token with no recognized pms_*
+            # scope satisfies nothing and is denied (unrelated scopes, including
+            # any other pms_* values, are ignored).
+            granted_set = set(granted)
+            required = required_scope_for_method(request.method)
+            if not token_satisfies(granted_set, required):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Requires '{required.value}' scope",
+                )
+            return AuthContext(
+                user=user, scopes=frozenset(recognized_scopes(granted_set))
+            )
 
         return AuthContext(user=_session_user(request), scopes=None)
 

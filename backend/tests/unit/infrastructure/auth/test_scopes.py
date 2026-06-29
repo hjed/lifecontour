@@ -14,9 +14,9 @@ class TestApiScopeValues:
     """The scope enum values are app-prefixed."""
 
     def test_scope_string_values(self) -> None:
-        assert ApiScope.READ.value == "pms:read"
-        assert ApiScope.WRITE.value == "pms:write"
-        assert ApiScope.ADMIN.value == "pms:admin"
+        assert ApiScope.READ.value == "pms_read"
+        assert ApiScope.WRITE.value == "pms_write"
+        assert ApiScope.ADMIN.value == "pms_admin"
 
 
 class TestRequiredScopeForMethod:
@@ -32,7 +32,7 @@ class TestRequiredScopeForMethod:
 
 
 class TestTokenSatisfies:
-    """Scope hierarchy: pms:admin > pms:write > pms:read."""
+    """Scope hierarchy: pms_admin > pms_write > pms_read."""
 
     def test_read_grants_read_only(self) -> None:
         granted = {ApiScope.READ.value}
@@ -62,11 +62,15 @@ class TestTokenSatisfies:
 
 
 class TestRecognizedScopes:
-    """Only the pms:* subset counts as recognized API scopes."""
+    """Only known ApiScope values count as recognized API scopes."""
 
-    def test_filters_to_pms_scopes(self) -> None:
-        granted = {"openid", "profile", "pms:read", "pms:admin", "email"}
-        assert recognized_scopes(granted) == {"pms:read", "pms:admin"}
+    def test_filters_to_known_api_scopes(self) -> None:
+        granted = {"openid", "profile", "pms_read", "pms_admin", "email"}
+        assert recognized_scopes(granted) == {"pms_read", "pms_admin"}
 
-    def test_empty_when_no_pms_scopes(self) -> None:
+    def test_ignores_unrelated_pms_prefixed_scope(self) -> None:
+        # An unrelated pms_* scope is not a recognized permission.
+        assert recognized_scopes({"pms_something_else", "pms_read"}) == {"pms_read"}
+
+    def test_empty_when_no_api_scopes(self) -> None:
         assert recognized_scopes({"openid", "profile", "email"}) == set()
