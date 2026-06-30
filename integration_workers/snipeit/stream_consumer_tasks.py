@@ -541,15 +541,21 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
         )
 
         try:
-            await sync_service.push_checkin_create(
+            checked_in = await sync_service.push_checkin_create(
                 journal_id=journal_id,
                 session_factory=self._session_factory,
                 note="Gear usage journal deleted",
             )
-            logger.info(
-                "Successfully processed journal deletion checkin",
-                journal_id=journal_id,
-            )
+            if checked_in:
+                logger.info(
+                    "Checked in asset on journal deletion",
+                    journal_id=journal_id,
+                )
+            else:
+                logger.debug(
+                    "Journal deletion checkin was a no-op",
+                    journal_id=journal_id,
+                )
         except SnipeItAPIError as exc:
             if exc.status_code in (403, 404):
                 logger.debug(

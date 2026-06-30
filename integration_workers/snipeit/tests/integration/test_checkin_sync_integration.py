@@ -321,7 +321,7 @@ class TestCheckinSyncIntegration:
             text("""
                 INSERT INTO journals (title, content, user_id,
                     event_date_range_start, event_date_range_end)
-                VALUES ('Overdue', '', 'user-123', '2024-01-01', '2024-01-02')
+                VALUES ('Overdue', '', 'user-123', '2000-01-01', '2000-01-02')
                 RETURNING id
             """)
         )
@@ -343,7 +343,7 @@ class TestCheckinSyncIntegration:
             text("""
                 INSERT INTO journals (title, content, user_id,
                     event_date_range_start, event_date_range_end)
-                VALUES ('Done', '', 'user-123', '2024-01-01', '2024-01-02')
+                VALUES ('Done', '', 'user-123', '2000-01-01', '2000-01-02')
                 RETURNING id
             """)
         )
