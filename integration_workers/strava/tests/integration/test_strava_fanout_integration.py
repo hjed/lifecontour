@@ -29,8 +29,7 @@ from core_shared.integration_constants import STRAVA_ARQ_QUEUE_NAME
 from core_shared.models.sync_job import SyncJobStatus
 from core_shared.repositories.sync_job_repository import SyncJobRepository
 from core_shared.sync_reconciliation import reconcile_parents
-
-from .conftest import get_workspace_env
+from core_shared.testing.integration import get_workspace_env
 
 os.environ.setdefault(
     "REDIS_URL",

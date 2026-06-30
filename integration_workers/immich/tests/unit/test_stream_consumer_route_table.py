@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from core_shared.stream_client import StreamEvent
+from core_shared.testing import make_session_factory_mock
 
 from stream_consumer_tasks import ImmichWorkerStreamConsumer
 
@@ -22,7 +23,7 @@ def consumer() -> ImmichWorkerStreamConsumer:
     """Return a configured ImmichWorkerStreamConsumer with mock dependencies."""
     return ImmichWorkerStreamConsumer(
         stream_client=MagicMock(),
-        session_factory=AsyncMock(),
+        session_factory=make_session_factory_mock(),
     )
 
 

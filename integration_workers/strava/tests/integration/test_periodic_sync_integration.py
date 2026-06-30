@@ -11,10 +11,9 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from core_shared.testing.integration import get_async_database_url
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from .conftest import get_async_database_url
 
 os.environ["STRAVA_CLIENT_ID"] = "test"
 os.environ["STRAVA_CLIENT_SECRET"] = "test"

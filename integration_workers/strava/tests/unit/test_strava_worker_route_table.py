@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from core_shared.stream_client import StreamClient, StreamEvent
+from core_shared.testing import make_session_factory_mock
 
 from stream_consumer_tasks import StravaWorkerStreamConsumer
 
@@ -34,7 +35,7 @@ def consumer() -> StravaWorkerStreamConsumer:
     """Create a StravaWorkerStreamConsumer with mock dependencies."""
     return StravaWorkerStreamConsumer(
         stream_client=MagicMock(spec=StreamClient),
-        session_factory=MagicMock(),
+        session_factory=make_session_factory_mock(),
         stream_name="pms:domain-events",
     )
 

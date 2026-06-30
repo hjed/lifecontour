@@ -5,6 +5,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from core_shared.testing import make_arq_ctx, make_mock_redis
 
 # We need to import after setting up env vars (conftest handles this)
 
@@ -73,10 +74,9 @@ class TestSyncCalendarEvents:
 
     @pytest.fixture
     def mock_ctx(self, mock_session_factory: MagicMock) -> dict[str, Any]:
-        return {
-            "session_factory": mock_session_factory,
-            "redis": AsyncMock(),
-        }
+        return make_arq_ctx(
+            session_factory=mock_session_factory, redis=make_mock_redis()
+        )
 
     @pytest.fixture
     def mock_google_client(self) -> MagicMock:

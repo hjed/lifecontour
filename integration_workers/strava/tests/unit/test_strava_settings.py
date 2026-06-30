@@ -13,6 +13,7 @@ observe the subclass defaults deterministically.
 from __future__ import annotations
 
 import pytest
+from core_shared.testing import make_worker_settings
 from core_shared.worker_settings import BaseWorkerSettings
 from pydantic import SecretStr, ValidationError
 
@@ -55,10 +56,9 @@ def _make_settings(**overrides: object) -> StravaSettings:
         "strava_client_id": "strava-client-id",
         "strava_client_secret": SecretStr(_CLIENT_SECRET),
         "encryption_key": SecretStr(_ENCRYPTION_KEY),
-        "_env_file": None,
     }
     kwargs.update(overrides)
-    return StravaSettings(**kwargs)  # type: ignore[arg-type]
+    return make_worker_settings(StravaSettings, **kwargs)
 
 
 def test_subclasses_base_worker_settings() -> None:

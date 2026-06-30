@@ -582,14 +582,22 @@ Add shared fixtures, self-tested. Not yet adopted by workers, so it merges green
 Migrate each worker's `tests/conftest.py` / `tests/integration/conftest.py` to import the shared fixtures and delete the duplicated common fixtures. Tests verify behaviour is unchanged.
 
 **Acceptance Criteria:**
-- [ ] Each worker's `conftest.py` imports the shared fixtures and retains only integration-specific fixtures; duplicated common fixtures are deleted.
-- [ ] Every worker's existing test suite passes unchanged against the shared fixtures.
+- [x] Each worker's `conftest.py` imports the shared fixtures and retains only integration-specific fixtures; duplicated common fixtures are deleted. → unit plugin via `pytest_plugins = ["core_shared.testing"]` in each top-level `tests/conftest.py`; DB fixtures imported from `core_shared.testing.integration` into each `tests/integration/conftest.py` (env preamble kept).
+- [x] Every worker's existing test suite passes unchanged against the shared fixtures. → all unit + integration suites green at unchanged test counts (see progress notes).
 
 **Required Test Coverage:**
-- **Integration:** each worker's full suite runs green against the shared fixtures (no new tests required beyond confirming green; add a thin smoke test per worker if a fixture seam needs it).
+- [x] **Integration:** each worker's full suite runs green against the shared fixtures (no new tests required beyond confirming green; add a thin smoke test per worker if a fixture seam needs it). → per-worker `tests/unit/test_shared_fixtures_wired.py` (unit seam) + `tests/integration/test_shared_db_fixtures.py` (DB seam); full suites green.
 
 **Required Documentation Updates:**
-- Worker `README.md` testing sections updated to reference the shared fixtures.
+- [x] Worker `README.md` testing sections updated to reference the shared fixtures. → all four worker `README.md`s + `google/tests/README.md` + `testing-strategy.md` updated.
+
+**Progress notes (Phase 2 complete — branch `iter14-005-2-adopt-shared-fixtures`):**
+
+- **DB integration fixtures extracted to `core_shared`.** The single biggest byte-identical cross-worker duplication was the DB scaffolding (`async_engine`, `async_connection`, `db_session`, autouse `apply_migrations`) plus the `get_workspace_env`/`get_async_database_url` helpers — repeated verbatim in all four `tests/integration/conftest.py`. Phase 1 only shared the unit mocks, so these were extracted here into a new `core_shared/core_shared/testing/integration.py` (with a robust `get_repo_root()` replacing the brittle `parent.parent…` chains). Pure helpers self-tested in `core_shared/tests/unit/test_testing_integration.py` (6 tests); DB fixtures validated by the worker integration suites.
+- **Wiring decision — plugin vs import.** Unit fixtures are registered via `pytest_plugins = ["core_shared.testing"]` in each worker's **top-level** `tests/conftest.py` (created for immich/strava/snipeit; added to google's). The integration DB fixtures are **imported by name** into each `tests/integration/conftest.py` (re-exported via `__all__`), *not* via `pytest_plugins`. Reason: `pytest_plugins` is only honoured in the top-level conftest, and `apply_migrations` is `autouse=True, scope="session"` — a global plugin registration would force every unit-test run to `alembic upgrade head`. Importing keeps the autouse migration scoped to the integration subtree exactly as before. 12 test modules that imported `get_workspace_env`/`get_async_database_url` from `.conftest` were repointed at `core_shared.testing.integration`.
+- **Aggressive unit-mock migration.** Each worker's dedicated `test_*_settings.py` `_make_settings` helper now delegates to `make_worker_settings(<WorkerSettings>, **kwargs)` (settings_cls passed **positionally** — the keyword form resolves to the bare `**overrides` overload and infers `BaseWorkerSettings`); inline ARQ `ctx`, redis-double, and lifecycle session-factory fixtures were migrated to `make_arq_ctx`/`make_mock_redis`/`make_session_factory_mock` where they matched the shared contract. Genuinely test-specific harnesses (strava's import-time-cron `_build_mock_settings`/`_import_worker`, session factories returning specific query rows, redis doubles with asserted `enqueue_job` returns) were deliberately left — aggressive ≠ breaking behaviour; no assertion or test was changed and per-worker test counts are unchanged.
+- **Smoke tests added (8):** `test_shared_fixtures_wired.py` (4 unit) assert the shared unit fixtures resolve; `test_shared_db_fixtures.py` (4 integration) run `SELECT 1` via the shared `db_session`/`async_connection`.
+- **Local quality gates green:** `core_shared` — ruff format/check, mypy (84 files), 340 pytest. Each worker — ruff format/check, mypy, and full suites: google 337 unit / 59 (+1 skip) integration; immich 208 / 46; strava 204 / 30; snipeit 182 / 21. Unit counts unchanged from baseline (only the 4 smoke tests added per the integration dir).
 
 #### Phase 3: Shared tooling config + canonical Dockerfile
 **PR Size:** ~300 lines (shared config ~120, per-worker pyproject trims ~120, docs ~60)

@@ -24,10 +24,9 @@ import pytest
 import pytest_asyncio
 import redis.asyncio as redis_async
 from core_shared.stream_client import StreamClient
+from core_shared.testing.integration import get_workspace_env
 
 from stream_consumer_tasks import ImmichWorkerStreamConsumer
-
-from .conftest import get_workspace_env
 
 os.environ.setdefault(
     "REDIS_URL",

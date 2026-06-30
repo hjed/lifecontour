@@ -9,6 +9,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from core_shared.testing import make_session_factory_mock
 
 from stream_consumer_tasks import StravaWorkerStreamConsumer
 
@@ -20,7 +21,7 @@ class TestStravaWorkerStreamConsumer:
     def consumer(self) -> StravaWorkerStreamConsumer:
         """Create a StravaWorkerStreamConsumer with mocked dependencies."""
         mock_stream_client = MagicMock()
-        mock_session_factory = MagicMock()
+        mock_session_factory = make_session_factory_mock()
         return StravaWorkerStreamConsumer(
             stream_client=mock_stream_client,
             session_factory=mock_session_factory,

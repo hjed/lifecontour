@@ -87,6 +87,48 @@ under pytest-asyncio's STRICT mode without `@pytest_asyncio.fixture`. They are s
 `core_shared/tests/unit/test_sample_worker_style.py`. Per-worker `conftest.py` keeps only its
 integration-specific fixtures.
 
+A worker registers the unit plugin in its **top-level** `tests/conftest.py` (this is required —
+`pytest_plugins` is only honoured in the top-level conftest, never a nested one):
+
+```python
+# integration_workers/<worker>/tests/conftest.py
+pytest_plugins = ["core_shared.testing"]
+```
+
+**Shared worker *integration* fixtures — `core_shared.testing.integration` (ITER14-005)**
+
+The database scaffolding every worker hand-rolled in its
+`tests/integration/conftest.py` — a per-test `async_engine`, a session-scoped autouse
+`apply_migrations` (`alembic upgrade head`), a savepoint-wrapped `async_connection`, and a
+savepoint `db_session` — lives once in `core_shared/core_shared/testing/integration.py`, together
+with the `get_workspace_env` / `get_async_database_url` / `get_repo_root` helpers that derive the
+workspace-isolated test database.
+
+These are consumed **by import, not via `pytest_plugins`**. A worker's
+`tests/integration/conftest.py` imports the fixtures it needs (and re-exports them via `__all__`
+so the linter sees them as used):
+
+```python
+# integration_workers/<worker>/tests/integration/conftest.py
+from core_shared.testing.integration import (
+    apply_migrations,
+    async_connection,
+    async_engine,
+    db_session,
+)
+
+__all__ = ["apply_migrations", "async_connection", "async_engine", "db_session"]
+```
+
+Importing (rather than registering a plugin) is deliberate: `apply_migrations` is
+`autouse=True, scope="session"`, and importing it into the integration conftest keeps it scoped
+to the **integration subtree** only — a `pytest_plugins` registration would be global and force
+every unit-test session to run `alembic upgrade head`. Each worker keeps only its
+worker-specific environment preamble (e.g. `ENCRYPTION_KEY`, client credentials) in that
+conftest. Test modules needing the helpers import them from `core_shared.testing.integration`
+directly. The pure helpers are unit-tested in `core_shared/tests/unit/test_testing_integration.py`;
+the DB fixtures are validated by every worker's integration suite.
+
 #### 2. Core Application Tests
 **Scope**: Core FastAPI application without integration workers
 **Location**: `backend/tests/`

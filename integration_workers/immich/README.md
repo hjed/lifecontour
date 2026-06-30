@@ -171,6 +171,17 @@ uv run ruff format --check .
 uv run mypy .
 ```
 
+### Shared test fixtures
+
+Common test scaffolding is shared via `core_shared.testing` (ITER14-005). The top-level
+`tests/conftest.py` registers the unit-fixture plugin
+(`pytest_plugins = ["core_shared.testing"]`), making `mock_redis`, `worker_settings`,
+`session_factory_mock`, and `arq_ctx` (plus the `make_*` helpers) available to unit tests. The DB
+fixtures (`async_engine`, `async_connection`, `db_session`, `apply_migrations`) are imported into
+`tests/integration/conftest.py` from `core_shared.testing.integration`; only this worker's
+environment preamble remains there. See
+[testing-strategy.md](../../docs/architecture/testing-strategy.md) for details.
+
 ## License
 
 AGPL-3.0

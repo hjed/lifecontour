@@ -92,9 +92,27 @@ Current test coverage for retry strategy implementation:
 
 ## Writing New Tests
 
+### Shared fixtures (`core_shared.testing`)
+
+Common scaffolding is provided by the shared pytest plugin registered in `tests/conftest.py`
+(`pytest_plugins = ["core_shared.testing"]`, ITER14-005). Prefer these over hand-rolling mocks:
+
+- `mock_redis` / `make_mock_redis()` — an `AsyncMock` Redis double with stream ops pre-seeded.
+- `worker_settings` / `make_worker_settings(GoogleSettings, **overrides)` — a real,
+  deterministic settings object (`_env_file=None` forced). Pass the settings class
+  positionally; the keyword form resolves to the bare overload and infers `BaseWorkerSettings`.
+- `session_factory_mock` / `make_session_factory_mock()` — a mock async session factory.
+- `arq_ctx` / `make_arq_ctx(**overrides)` — an ARQ `ctx` dict primed with the lifecycle keys.
+
+The integration DB fixtures (`async_engine`, `async_connection`, `db_session`,
+`apply_migrations`) come from `core_shared.testing.integration`, imported in
+`tests/integration/conftest.py`. See
+[testing-strategy.md](../../../docs/architecture/testing-strategy.md).
+
 ### Unit Tests
 
-Place in `tests/unit/` and use mocks for external dependencies:
+Place in `tests/unit/` and prefer the shared fixtures above; use ad-hoc mocks only for
+worker-specific behaviour:
 
 ```python
 from unittest.mock import AsyncMock, patch

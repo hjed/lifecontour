@@ -14,6 +14,7 @@ observe the subclass defaults deterministically.
 from __future__ import annotations
 
 import pytest
+from core_shared.testing import make_worker_settings
 from core_shared.worker_settings import BaseWorkerSettings
 from pydantic import SecretStr, ValidationError
 
@@ -51,10 +52,9 @@ def _make_settings(**overrides: object) -> ImmichWorkerSettings:
     kwargs: dict[str, object] = {
         "database_url": SecretStr(_DB_URL),
         "encryption_key": SecretStr(_ENCRYPTION_KEY),
-        "_env_file": None,
     }
     kwargs.update(overrides)
-    return ImmichWorkerSettings(**kwargs)  # type: ignore[arg-type]
+    return make_worker_settings(ImmichWorkerSettings, **kwargs)
 
 
 def test_subclasses_base_worker_settings() -> None:

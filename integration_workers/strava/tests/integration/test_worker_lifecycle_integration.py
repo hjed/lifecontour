@@ -17,9 +17,8 @@ import pytest
 import pytest_asyncio
 from arq import Worker, create_pool
 from arq.connections import RedisSettings
+from core_shared.testing.integration import get_async_database_url, get_workspace_env
 from sqlalchemy import text
-
-from .conftest import get_async_database_url, get_workspace_env
 
 # The worker module instantiates StravaSettings at import time, so the required
 # settings (and the test Redis URL) must be present in the environment first.
