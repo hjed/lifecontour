@@ -1,8 +1,8 @@
 """add snipeit_checkin to integration_source check constraint
 
-Revision ID: 0094
-Revises: 0093
-Create Date: 2026-06-30 09:00:00.000000
+Revision ID: 0095
+Revises: 0094
+Create Date: 2026-06-30 12:00:00.000000
 
 """
 
@@ -11,8 +11,8 @@ from collections.abc import Sequence
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "0094"
-down_revision: str | None = "0093"
+revision: str = "0095"
+down_revision: str | None = "0094"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -24,7 +24,7 @@ def upgrade() -> None:
     op.create_check_constraint(
         "ck_sync_metadata_integration_source",
         "sync_metadata",
-        "integration_source IN ('google', 'immich', 'strava', 'firefly_iii', 'snipeit', 'snipeit_maintenance', 'snipeit_checkout', 'snipeit_checkin')",
+        "integration_source IN ('google', 'immich', 'immich_album', 'strava', 'firefly_iii', 'snipeit', 'snipeit_maintenance', 'snipeit_checkout', 'snipeit_checkin')",
     )
 
 
@@ -38,5 +38,5 @@ def downgrade() -> None:
     op.create_check_constraint(
         "ck_sync_metadata_integration_source",
         "sync_metadata",
-        "integration_source IN ('google', 'immich', 'strava', 'firefly_iii', 'snipeit', 'snipeit_maintenance', 'snipeit_checkout')",
+        "integration_source IN ('google', 'immich', 'immich_album', 'strava', 'firefly_iii', 'snipeit', 'snipeit_maintenance', 'snipeit_checkout')",
     )
