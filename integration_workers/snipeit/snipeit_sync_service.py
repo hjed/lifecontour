@@ -46,21 +46,32 @@ def _format_date_for_snipeit(value: date | datetime | str | None) -> str | None:
     return str(value)[:10]
 
 
-def _date_is_in_past(
-    value: date | datetime | str | None, *, today: date | None = None
+def _usage_period_has_ended(
+    value: date | datetime | str | None, *, now: datetime | None = None
 ) -> bool:
-    """Return ``True`` if ``value``'s date is strictly before today.
+    """Return ``True`` if the usage period end ``value`` is in the past.
 
-    Normalises ``value`` to a ``YYYY-MM-DD`` string (via
-    :func:`_format_date_for_snipeit`) and compares it lexicographically against
-    today, which is equivalent to a date comparison for that format. Returns
-    ``False`` for falsy/unparseable inputs.
+    Compares full timestamps against ``now`` (consistent with the periodic
+    sweep's ``COALESCE(...) < now()`` query), so a check-in time earlier *today*
+    is correctly treated as past — a date-only comparison would leave the asset
+    checked out until the next calendar day. Naive datetimes are assumed UTC.
+    Returns ``False`` for falsy/unparseable inputs.
     """
+    if value is None:
+        return False
+    now = now or datetime.now(tz=UTC)
+    # ``datetime`` must be checked before ``date`` (datetime subclasses date).
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        return value < now
+    if isinstance(value, date):
+        return value < now.date()
+    # String fallback: compare by date prefix.
     formatted = _format_date_for_snipeit(value)
     if not formatted:
         return False
-    today_str = (today or datetime.now(tz=UTC).date()).isoformat()
-    return formatted < today_str
+    return formatted < now.date().isoformat()
 
 
 # Internal signalling exceptions
@@ -1292,7 +1303,7 @@ class SnipeItSyncService:
 
         # If the usage period is already over (e.g. logging a past trip), the
         # asset must not stay checked out — immediately record the check-in.
-        if _date_is_in_past(checkin_date):
+        if _usage_period_has_ended(checkin_date):
             await self.push_checkin_create(
                 journal_id=journal_id,
                 session_factory=session_factory,
@@ -1340,7 +1351,7 @@ class SnipeItSyncService:
         journal_id: int,
         session_factory: Any,
         note: str | None = None,
-    ) -> None:
+    ) -> bool:
         """Return (check in) the asset previously checked out for a GEAR_USAGE journal.
 
         The asset is resolved from the existing ``snipeit_checkout`` sync metadata
@@ -1356,6 +1367,11 @@ class SnipeItSyncService:
             note: Optional note recorded on the Snipe-IT check-in (Snipe-IT does
                 not accept a backdated return date, so the usage window is carried
                 here when known).
+
+        Returns:
+            ``True`` only when a check-in was actively performed against Snipe-IT;
+            ``False`` for any no-op (no checkout, already checked in, lock
+            contention) or terminal non-retryable outcome (403/404).
         """
         # 1. Resolve the asset and confirm a successful checkout exists.
         async with session_factory() as session:
@@ -1375,7 +1391,7 @@ class SnipeItSyncService:
                 "Skipping checkin: no successful checkout recorded for journal",
                 journal_id=journal_id,
             )
-            return
+            return False
 
         # external_id format: 'snipeit_checkout:{asset_id}:{journal_id}'
         try:
@@ -1386,7 +1402,7 @@ class SnipeItSyncService:
                 external_id=checkout_row.external_id,
                 journal_id=journal_id,
             )
-            return
+            return False
 
         external_id = f"snipeit_checkin:{snipeit_asset_id}:{journal_id}"
 
@@ -1410,7 +1426,7 @@ class SnipeItSyncService:
                             "Skipping checkin: already checked in",
                             journal_id=journal_id,
                         )
-                        return
+                        return False
                     if (
                         row.sync_status == "pending"
                         and row.age_seconds is not None
@@ -1420,7 +1436,7 @@ class SnipeItSyncService:
                             "Skipping checkin: currently processing in another worker",
                             journal_id=journal_id,
                         )
-                        return
+                        return False
 
                     await session.execute(
                         text("""
@@ -1453,7 +1469,7 @@ class SnipeItSyncService:
                             "Skipping checkin: locked by another process",
                             journal_id=journal_id,
                         )
-                        return
+                        return False
 
         # 3. Build the checkin payload and POST to Snipe-IT.
         payload: dict[str, Any] = {}
@@ -1466,21 +1482,24 @@ class SnipeItSyncService:
                 payload=payload,
             )
         except SnipeItAPIError as exc:
-            # 403/404 (asset gone or already checked in): nothing to retry.
+            # 403/404 is non-retryable: the asset is already returned / gone (404)
+            # or we are not permitted to return it (403). Record a terminal
+            # outcome so the periodic sweep and update reconcile stop re-attempting
+            # it (a 'failed' row would be re-selected every sweep).
             if exc.status_code in (403, 404):
                 logger.warning(
-                    "Snipe-IT checkin failed (not found/forbidden)",
+                    "Snipe-IT checkin failed (not found/forbidden); marking terminal",
                     journal_id=journal_id,
                     snipeit_asset_id=snipeit_asset_id,
                     status_code=exc.status_code,
                 )
-                await self._unlock_pending_checkin(
+                await self._finalize_checkin(
                     journal_id,
                     external_id,
                     session_factory,
-                    f"API Error {exc.status_code}",
+                    error_message=f"Terminal: API {exc.status_code}",
                 )
-                return
+                return False
 
             await self._unlock_pending_checkin(
                 journal_id, external_id, session_factory, str(exc)[:255]
@@ -1493,6 +1512,28 @@ class SnipeItSyncService:
             raise
 
         # 4. Record the checkin as successful.
+        await self._finalize_checkin(journal_id, external_id, session_factory)
+
+        logger.info(
+            "Successfully checked in asset to Snipe-IT",
+            journal_id=journal_id,
+            snipeit_asset_id=snipeit_asset_id,
+        )
+        return True
+
+    async def _finalize_checkin(
+        self,
+        journal_id: int,
+        external_id: str,
+        session_factory: Any,
+        error_message: str | None = None,
+    ) -> None:
+        """Mark a checkin sync row terminal (``success``) so it is not retried.
+
+        Used both for a confirmed return and for non-retryable 403/404 outcomes
+        (which carry an ``error_message`` for diagnostics). A terminal ``success``
+        row removes the journal from the periodic sweep's selection.
+        """
         async with session_factory() as session:
             async with session.begin():
                 await session.execute(
@@ -1501,7 +1542,7 @@ class SnipeItSyncService:
                         SET version_hash = 'CHECKED_IN',
                             last_synced_at = now(),
                             sync_status = 'success',
-                            error_message = NULL,
+                            error_message = :error_message,
                             updated_at = now()
                         WHERE integration_source = 'snipeit_checkin'
                           AND internal_uuid = :internal_uuid
@@ -1510,14 +1551,9 @@ class SnipeItSyncService:
                     {
                         "internal_uuid": str(journal_id),
                         "external_id": external_id,
+                        "error_message": error_message,
                     },
                 )
-
-        logger.info(
-            "Successfully checked in asset to Snipe-IT",
-            journal_id=journal_id,
-            snipeit_asset_id=snipeit_asset_id,
-        )
 
     async def _unlock_pending_checkin(
         self,
@@ -1594,7 +1630,7 @@ class SnipeItSyncService:
 
         journal_row, usage_data_row, _ = data
         checkin_date = usage_data_row.checkin_date or journal_row.event_date_range_end
-        if _date_is_in_past(checkin_date):
+        if _usage_period_has_ended(checkin_date):
             checkout_date = (
                 usage_data_row.checkout_date or journal_row.event_date_range_start
             )

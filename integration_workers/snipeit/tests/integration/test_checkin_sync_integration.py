@@ -11,79 +11,15 @@ sweep's overdue-selection query.
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
 
-import httpx
 import pytest
-import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
-from snipeit_api_client import SnipeItAPIClient
-from snipeit_sync_service import SnipeItSyncService
-
-
-class MockTransport(httpx.AsyncBaseTransport):
-    def __init__(self) -> None:
-        self.responses: list[tuple[str, int, object, dict[str, str]]] = []
-        self.requests: list[httpx.Request] = []
-
-    def add_response(
-        self,
-        url_pattern: str,
-        status_code: int = 200,
-        json_data: object = None,
-        headers: dict[str, str] | None = None,
-    ) -> None:
-        self.responses.append((url_pattern, status_code, json_data, headers or {}))
-
-    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        self.requests.append(request)
-        url = str(request.url)
-        for i, (pattern, status, data, hdrs) in enumerate(self.responses):
-            if pattern in url:
-                self.responses.pop(i)
-                content = json.dumps(data).encode() if data is not None else b""
-                return httpx.Response(
-                    status_code=status,
-                    content=content,
-                    headers={**hdrs, "content-type": "application/json"},
-                    request=request,
-                )
-        raise ValueError(f"No mock response configured for {url}")
-
-
-@pytest.fixture
-def mock_transport() -> MockTransport:
-    return MockTransport()
-
-
-@pytest_asyncio.fixture
-async def integration_client(
-    mock_transport: MockTransport,
-) -> AsyncGenerator[SnipeItAPIClient, None]:
-    client = SnipeItAPIClient.create(
-        base_url="https://snipeit.example.com/api/v1/",
-        api_key="test-api-key",
-    )
-    client._client = httpx.AsyncClient(
-        transport=mock_transport,
-        base_url="https://snipeit.example.com/api/v1/",
-        headers={"Authorization": "Bearer test-api-key"},
-    )
-    yield client
-    await client._client.aclose()
-
-
-@pytest.fixture
-def checkin_sync_service(integration_client: SnipeItAPIClient) -> SnipeItSyncService:
-    return SnipeItSyncService(
-        api_client=integration_client,
-        user_id="user-123",
-        snipeit_user_id="5",
-    )
+# ``MockTransport``, ``mock_transport``, ``integration_client`` and
+# ``snipeit_sync_service`` are shared fixtures defined in ``conftest.py``.
 
 
 async def _insert_checkout_metadata(
@@ -117,14 +53,21 @@ async def _session_factory(async_connection: AsyncConnection) -> Any:
         yield session
 
 
+def _returned_id(result: Any) -> Any:
+    """Return the ``id`` of an ``INSERT ... RETURNING id`` result, asserting present."""
+    row = result.fetchone()
+    assert row is not None
+    return row.id
+
+
 class TestCheckinSyncIntegration:
     """Integration tests for the Snipe-IT check-in pipeline."""
 
     @pytest.mark.asyncio
     async def test_push_checkin_create_posts_to_snipeit(
         self,
-        checkin_sync_service: SnipeItSyncService,
-        mock_transport: MockTransport,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
         async_connection: AsyncConnection,
     ) -> None:
         """A recorded checkout is returned and a snipeit_checkin row is saved."""
@@ -152,7 +95,7 @@ class TestCheckinSyncIntegration:
         def factory() -> Any:
             return _session_factory(async_connection)
 
-        await checkin_sync_service.push_checkin_create(
+        await snipeit_sync_service.push_checkin_create(
             journal_id=journal_id,
             session_factory=factory,
             note="Returned after trip",
@@ -184,8 +127,8 @@ class TestCheckinSyncIntegration:
     @pytest.mark.asyncio
     async def test_push_checkin_resolves_asset_after_journal_deleted(
         self,
-        checkin_sync_service: SnipeItSyncService,
-        mock_transport: MockTransport,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
         async_connection: AsyncConnection,
     ) -> None:
         """Check-in works when the journal/usage data is gone (deletion path).
@@ -207,7 +150,7 @@ class TestCheckinSyncIntegration:
         def factory() -> Any:
             return _session_factory(async_connection)
 
-        await checkin_sync_service.push_checkin_create(
+        await snipeit_sync_service.push_checkin_create(
             journal_id=deleted_journal_id,
             session_factory=factory,
             note="Gear usage journal deleted",
@@ -219,8 +162,8 @@ class TestCheckinSyncIntegration:
     @pytest.mark.asyncio
     async def test_push_checkin_skips_without_checkout(
         self,
-        checkin_sync_service: SnipeItSyncService,
-        mock_transport: MockTransport,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
         async_connection: AsyncConnection,
     ) -> None:
         """No recorded checkout means there is nothing to check in."""
@@ -228,7 +171,7 @@ class TestCheckinSyncIntegration:
         def factory() -> Any:
             return _session_factory(async_connection)
 
-        await checkin_sync_service.push_checkin_create(
+        await snipeit_sync_service.push_checkin_create(
             journal_id=555,
             session_factory=factory,
         )
@@ -238,8 +181,8 @@ class TestCheckinSyncIntegration:
     @pytest.mark.asyncio
     async def test_push_checkin_idempotent(
         self,
-        checkin_sync_service: SnipeItSyncService,
-        mock_transport: MockTransport,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
         async_connection: AsyncConnection,
     ) -> None:
         """A pre-existing successful checkin row makes the call a no-op."""
@@ -267,7 +210,7 @@ class TestCheckinSyncIntegration:
         def factory() -> Any:
             return _session_factory(async_connection)
 
-        await checkin_sync_service.push_checkin_create(
+        await snipeit_sync_service.push_checkin_create(
             journal_id=journal_id,
             session_factory=factory,
         )
@@ -277,8 +220,8 @@ class TestCheckinSyncIntegration:
     @pytest.mark.asyncio
     async def test_immediate_checkin_on_create_when_period_past(
         self,
-        checkin_sync_service: SnipeItSyncService,
-        mock_transport: MockTransport,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
         async_connection: AsyncConnection,
     ) -> None:
         """A checkout with a past usage window is checked out then checked in."""
@@ -339,7 +282,7 @@ class TestCheckinSyncIntegration:
         def factory() -> Any:
             return _session_factory(async_connection)
 
-        await checkin_sync_service.push_checkout_create(
+        await snipeit_sync_service.push_checkout_create(
             journal_id=journal_id,
             session_factory=factory,
         )
@@ -382,7 +325,7 @@ class TestCheckinSyncIntegration:
                 RETURNING id
             """)
         )
-        overdue_id = overdue.fetchone().id  # type: ignore[union-attr]
+        overdue_id = _returned_id(overdue)
 
         # Future window → excluded.
         future = await async_connection.execute(
@@ -393,7 +336,7 @@ class TestCheckinSyncIntegration:
                 RETURNING id
             """)
         )
-        future_id = future.fetchone().id  # type: ignore[union-attr]
+        future_id = _returned_id(future)
 
         # Overdue but already checked in → excluded.
         done = await async_connection.execute(
@@ -404,7 +347,7 @@ class TestCheckinSyncIntegration:
                 RETURNING id
             """)
         )
-        done_id = done.fetchone().id  # type: ignore[union-attr]
+        done_id = _returned_id(done)
 
         gear_ids: dict[int, str] = {}
         for jid in (overdue_id, future_id, done_id):
@@ -414,7 +357,7 @@ class TestCheckinSyncIntegration:
                     VALUES ('Item', 'user-123') RETURNING id
                 """)
             )
-            gear_id = str(gear.fetchone().id)  # type: ignore[union-attr]
+            gear_id = str(_returned_id(gear))
             gear_ids[jid] = gear_id
             await async_connection.execute(
                 text("""

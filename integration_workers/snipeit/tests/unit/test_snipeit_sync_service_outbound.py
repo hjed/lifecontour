@@ -1,13 +1,44 @@
 # ruff: noqa: E402
 """Tests for Snipe-IT sync service outbound maintenance methods."""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from snipeit_api_client import SnipeItAPIClient, SnipeItAPIError
-from snipeit_sync_service import SnipeItSyncService
+from snipeit_sync_service import SnipeItSyncService, _usage_period_has_ended
+
+
+class TestUsagePeriodHasEnded:
+    """The check-in trigger predicate compares full timestamps (not date-only)."""
+
+    def test_none_is_not_past(self) -> None:
+        assert _usage_period_has_ended(None) is False
+
+    def test_datetime_earlier_today_is_past(self) -> None:
+        """A timestamp earlier *today* counts as past (the date-only bug)."""
+        now = datetime(2026, 6, 30, 10, 0, tzinfo=UTC)
+        earlier_today = datetime(2026, 6, 30, 2, 0, tzinfo=UTC)
+        assert _usage_period_has_ended(earlier_today, now=now) is True
+
+    def test_datetime_later_today_is_not_past(self) -> None:
+        now = datetime(2026, 6, 30, 10, 0, tzinfo=UTC)
+        later_today = datetime(2026, 6, 30, 18, 0, tzinfo=UTC)
+        assert _usage_period_has_ended(later_today, now=now) is False
+
+    def test_naive_datetime_is_treated_as_utc(self) -> None:
+        now = datetime(2026, 6, 30, 10, 0, tzinfo=UTC)
+        naive_past = datetime(2026, 6, 30, 2, 0)
+        assert _usage_period_has_ended(naive_past, now=now) is True
+
+    def test_past_date_is_past(self) -> None:
+        now = datetime(2026, 6, 30, 10, 0, tzinfo=UTC)
+        assert _usage_period_has_ended(date(2026, 6, 29), now=now) is True
+
+    def test_future_datetime_is_not_past(self) -> None:
+        now = datetime(2026, 6, 30, 10, 0, tzinfo=UTC)
+        assert _usage_period_has_ended(now + timedelta(days=1), now=now) is False
 
 
 def _mock_api_client() -> AsyncMock:
@@ -903,10 +934,11 @@ class TestPushCheckinCreate:
             api_client=api_client, user_id="user-1", snipeit_user_id="5"
         )
 
-        await service.push_checkin_create(
+        result = await service.push_checkin_create(
             journal_id=100, session_factory=session_factory, note="Returned from trip"
         )
 
+        assert result is True  # an actual check-in was performed
         api_client.checkin_asset.assert_called_once()
         call_args = api_client.checkin_asset.call_args
         assert call_args.kwargs["asset_id"] == 42
@@ -922,10 +954,11 @@ class TestPushCheckinCreate:
             api_client=api_client, user_id="user-1", snipeit_user_id="5"
         )
 
-        await service.push_checkin_create(
+        result = await service.push_checkin_create(
             journal_id=100, session_factory=session_factory
         )
 
+        assert result is False  # no-op
         api_client.checkin_asset.assert_not_called()
 
     @pytest.mark.asyncio
@@ -974,8 +1007,8 @@ class TestPushCheckinCreate:
         api_client.checkin_asset.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_handles_api_404(self) -> None:
-        """404 from Snipe-IT during checkin unlocks and returns (doesn't raise)."""
+    async def test_handles_api_404_terminal(self) -> None:
+        """404 is terminal: finalized (not retried) and returns False, no raise."""
         api_client = _mock_api_client()
         api_client.checkin_asset.side_effect = SnipeItAPIError(
             "Not found", status_code=404
@@ -989,20 +1022,23 @@ class TestPushCheckinCreate:
                 MagicMock(fetchone=MagicMock(return_value=(1,))),
             ]
         )
-        unlock_ctx = _begin_session_ctx([MagicMock()])
+        # Third session is the terminal _finalize_checkin (success), not a retryable unlock.
+        finalize_ctx = _begin_session_ctx([MagicMock()])
 
         session_factory = MagicMock(
-            side_effect=[_checkin_resolve_ctx(checkout_row), lock_ctx, unlock_ctx]
+            side_effect=[_checkin_resolve_ctx(checkout_row), lock_ctx, finalize_ctx]
         )
 
         service = SnipeItSyncService(
             api_client=api_client, user_id="user-1", snipeit_user_id="5"
         )
 
-        # Should not raise.
-        await service.push_checkin_create(
+        # Should not raise; 404 is a terminal no-op.
+        result = await service.push_checkin_create(
             journal_id=100, session_factory=session_factory
         )
+
+        assert result is False
 
     @pytest.mark.asyncio
     async def test_immediate_checkin_when_checkout_period_already_past(self) -> None:

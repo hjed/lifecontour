@@ -8,79 +8,15 @@ POST to the Snipe-IT API and persist correct sync_metadata.
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
 
-import httpx
 import pytest
-import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
-from snipeit_api_client import SnipeItAPIClient
-from snipeit_sync_service import SnipeItSyncService
-
-
-class MockTransport(httpx.AsyncBaseTransport):
-    def __init__(self) -> None:
-        self.responses: list[tuple[str, int, object, dict[str, str]]] = []
-        self.requests: list[httpx.Request] = []
-
-    def add_response(
-        self,
-        url_pattern: str,
-        status_code: int = 200,
-        json_data: object = None,
-        headers: dict[str, str] | None = None,
-    ) -> None:
-        self.responses.append((url_pattern, status_code, json_data, headers or {}))
-
-    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        self.requests.append(request)
-        url = str(request.url)
-        for i, (pattern, status, data, hdrs) in enumerate(self.responses):
-            if pattern in url:
-                self.responses.pop(i)
-                content = json.dumps(data).encode() if data is not None else b""
-                return httpx.Response(
-                    status_code=status,
-                    content=content,
-                    headers={**hdrs, "content-type": "application/json"},
-                    request=request,
-                )
-        raise ValueError(f"No mock response configured for {url}")
-
-
-@pytest.fixture
-def mock_transport() -> MockTransport:
-    return MockTransport()
-
-
-@pytest_asyncio.fixture
-async def integration_client(
-    mock_transport: MockTransport,
-) -> AsyncGenerator[SnipeItAPIClient, None]:
-    client = SnipeItAPIClient.create(
-        base_url="https://snipeit.example.com/api/v1/",
-        api_key="test-api-key",
-    )
-    client._client = httpx.AsyncClient(
-        transport=mock_transport,
-        base_url="https://snipeit.example.com/api/v1/",
-        headers={"Authorization": "Bearer test-api-key"},
-    )
-    yield client
-    await client._client.aclose()
-
-
-@pytest.fixture
-def checkout_sync_service(integration_client: SnipeItAPIClient) -> SnipeItSyncService:
-    return SnipeItSyncService(
-        api_client=integration_client,
-        user_id="user-123",
-        snipeit_user_id="5",
-    )
+# ``MockTransport``, ``mock_transport``, ``integration_client`` and
+# ``snipeit_sync_service`` are shared fixtures defined in ``conftest.py``.
 
 
 class TestCheckoutSyncIntegration:
@@ -89,8 +25,8 @@ class TestCheckoutSyncIntegration:
     @pytest.mark.asyncio
     async def test_push_checkout_create_posts_to_snipeit(
         self,
-        checkout_sync_service: SnipeItSyncService,
-        mock_transport: MockTransport,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
         async_connection: AsyncConnection,
     ) -> None:
         """Verify push_checkout_create POSTs checkout and saves sync_metadata.
@@ -174,7 +110,7 @@ class TestCheckoutSyncIntegration:
             ) as session:
                 yield session
 
-        await checkout_sync_service.push_checkout_create(
+        await snipeit_sync_service.push_checkout_create(
             journal_id=journal_id,
             session_factory=mock_session_factory,
         )
@@ -212,8 +148,8 @@ class TestCheckoutSyncIntegration:
     @pytest.mark.asyncio
     async def test_push_checkout_create_idempotent(
         self,
-        checkout_sync_service: SnipeItSyncService,
-        mock_transport: MockTransport,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
         async_connection: AsyncConnection,
     ) -> None:
         """Verify push_checkout_create skips when checkout is already synced.
@@ -301,7 +237,7 @@ class TestCheckoutSyncIntegration:
             ) as session:
                 yield session
 
-        await checkout_sync_service.push_checkout_create(
+        await snipeit_sync_service.push_checkout_create(
             journal_id=journal_id,
             session_factory=mock_session_factory,
         )
@@ -312,8 +248,8 @@ class TestCheckoutSyncIntegration:
     @pytest.mark.asyncio
     async def test_push_checkout_falls_back_to_journal_dates(
         self,
-        checkout_sync_service: SnipeItSyncService,
-        mock_transport: MockTransport,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
         async_connection: AsyncConnection,
     ) -> None:
         """Verify checkout uses journal date range when buffer dates are null.
@@ -392,7 +328,7 @@ class TestCheckoutSyncIntegration:
             ) as session:
                 yield session
 
-        await checkout_sync_service.push_checkout_create(
+        await snipeit_sync_service.push_checkout_create(
             journal_id=journal_id,
             session_factory=mock_session_factory,
         )

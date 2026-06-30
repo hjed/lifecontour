@@ -443,12 +443,13 @@ async def periodic_checkin_all_snipeit_accounts(
                     f"to {_format_date_for_snipeit(overdue.checkin_date)}"
                 )
                 try:
-                    await sync_service.push_checkin_create(
+                    did_checkin = await sync_service.push_checkin_create(
                         journal_id=overdue.journal_id,
                         session_factory=session_factory,
                         note=note,
                     )
-                    checked_in += 1
+                    if did_checkin:
+                        checked_in += 1
                 except SnipeItAPIError as exc:
                     if exc.status_code in (403, 404):
                         logger.debug(
