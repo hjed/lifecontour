@@ -23,6 +23,7 @@ if "DATABASE_URL" not in os.environ:
 os.environ["ENCRYPTION_KEY"] = "testkey"
 
 import pytest
+from core_shared.testing import make_arq_ctx
 
 from worker import (
     sync_snipeit_asset_batch,
@@ -208,10 +209,9 @@ class MockRedis:
 
 @pytest.fixture
 def mock_ctx():
-    return {
-        "redis": MockRedis(),
-        "session_factory": MagicMock(),
-    }
+    # Custom MockRedis (records enqueued jobs) and a bare MagicMock session
+    # factory configured per-test, layered onto the shared ARQ ctx scaffolding.
+    return make_arq_ctx(redis=MockRedis(), session_factory=MagicMock())
 
 
 @pytest.mark.asyncio

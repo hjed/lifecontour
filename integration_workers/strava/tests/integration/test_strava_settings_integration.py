@@ -23,9 +23,8 @@ import os
 from pathlib import Path
 
 import pytest
+from core_shared.testing.integration import get_async_database_url
 from core_shared.worker_settings import redis_settings_from_url
-
-from .conftest import get_async_database_url
 
 # Seed the required worker env so importing the real worker module succeeds.
 os.environ.setdefault("STRAVA_CLIENT_ID", "test_strava_client_id")

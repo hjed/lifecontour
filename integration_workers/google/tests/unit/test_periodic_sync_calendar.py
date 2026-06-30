@@ -9,6 +9,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from core_shared.testing import make_arq_ctx
 
 sys.path.insert(0, "/core_shared")
 
@@ -30,19 +31,10 @@ class TestPeriodicSyncCalendar:
         return factory
 
     @pytest.fixture
-    def mock_redis(self) -> AsyncMock:
-        redis = AsyncMock()
-        redis.enqueue_job = AsyncMock()
-        return redis
-
-    @pytest.fixture
     def mock_ctx(
         self, mock_session_factory: MagicMock, mock_redis: AsyncMock
     ) -> dict[str, Any]:
-        return {
-            "session_factory": mock_session_factory,
-            "redis": mock_redis,
-        }
+        return make_arq_ctx(session_factory=mock_session_factory, redis=mock_redis)
 
     @pytest.mark.asyncio
     async def test_enqueues_both_contacts_and_calendar_sync(

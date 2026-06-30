@@ -14,6 +14,7 @@ are observed rather than the conftest values.
 from __future__ import annotations
 
 import pytest
+from core_shared.testing import make_worker_settings
 from core_shared.worker_settings import BaseWorkerSettings
 from pydantic import SecretStr, ValidationError
 
@@ -61,10 +62,11 @@ def _make_settings(**overrides: object) -> GoogleSettings:
         "google_client_id": "google-client-id",
         "google_client_secret": SecretStr(_CLIENT_SECRET),
         "encryption_key": SecretStr(_ENCRYPTION_KEY),
-        "_env_file": None,
     }
     kwargs.update(overrides)
-    return GoogleSettings(**kwargs)  # type: ignore[arg-type]
+    # settings_cls is passed positionally: the keyword form resolves to the
+    # bare ``**overrides`` overload and infers ``BaseWorkerSettings``.
+    return make_worker_settings(GoogleSettings, **kwargs)
 
 
 def test_subclasses_base_worker_settings() -> None:

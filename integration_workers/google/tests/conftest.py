@@ -47,6 +47,11 @@ from typing import Any
 
 import pytest
 
+# Register the shared worker unit-test fixtures (mock_redis, worker_settings,
+# session_factory_mock, arq_ctx). pytest_plugins is only honoured in the
+# top-level conftest, which is why it lives here.
+pytest_plugins = ["core_shared.testing"]
+
 
 @pytest.fixture
 def valid_person_data() -> dict[str, Any]:

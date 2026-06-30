@@ -26,6 +26,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from core_shared.testing import make_session_factory_mock
 
 
 def _make_ctx(session_factory: Any = None) -> dict[str, Any]:
@@ -43,14 +44,8 @@ def _mock_session_factory() -> tuple[MagicMock, AsyncMock]:
     style lookup and no remote client), so a single session that supports
     ``commit`` is sufficient when the per-collision unlink helper is patched.
     """
-    mock_session = AsyncMock()
-    mock_session.commit = AsyncMock()
-
-    mock_factory = MagicMock()
-    mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-    mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
-
-    return mock_factory, mock_session
+    factory = make_session_factory_mock()
+    return factory, factory.session
 
 
 _IMMICH_COLLISION = {

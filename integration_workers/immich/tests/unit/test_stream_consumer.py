@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from core_shared.stream_client import StreamEvent
+from core_shared.testing import make_session_factory_mock
 
 from stream_consumer_tasks import ImmichWorkerStreamConsumer
 
@@ -20,15 +21,15 @@ def mock_stream_client() -> MagicMock:
 
 
 @pytest.fixture
-def mock_session_factory() -> AsyncMock:
+def mock_session_factory() -> MagicMock:
     """Return a mock session factory."""
-    return AsyncMock()
+    return make_session_factory_mock()
 
 
 @pytest.fixture
 def consumer(
     mock_stream_client: MagicMock,
-    mock_session_factory: AsyncMock,
+    mock_session_factory: MagicMock,
 ) -> ImmichWorkerStreamConsumer:
     """Return a configured ImmichWorkerStreamConsumer."""
     return ImmichWorkerStreamConsumer(
@@ -71,7 +72,7 @@ class TestImmichWorkerStreamConsumer:
     def test_custom_stream_name(
         self,
         mock_stream_client: MagicMock,
-        mock_session_factory: AsyncMock,
+        mock_session_factory: MagicMock,
     ) -> None:
         """Consumer can be configured with a custom stream name."""
         consumer = ImmichWorkerStreamConsumer(
@@ -84,7 +85,7 @@ class TestImmichWorkerStreamConsumer:
     def test_custom_consumer_name(
         self,
         mock_stream_client: MagicMock,
-        mock_session_factory: AsyncMock,
+        mock_session_factory: MagicMock,
     ) -> None:
         """Consumer can be configured with a custom consumer name."""
         consumer = ImmichWorkerStreamConsumer(

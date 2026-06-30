@@ -9,6 +9,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from core_shared.testing import make_arq_ctx, make_mock_redis
 
 sys.path.insert(0, "/core_shared")
 
@@ -125,10 +126,9 @@ class TestSetupCalendarWebhook:
 
     @pytest.fixture
     def mock_ctx(self, mock_session_factory: MagicMock) -> dict[str, Any]:
-        return {
-            "session_factory": mock_session_factory,
-            "redis": AsyncMock(),
-        }
+        return make_arq_ctx(
+            session_factory=mock_session_factory, redis=make_mock_redis()
+        )
 
     @pytest.mark.asyncio
     async def test_skips_when_no_webhook_base_url(self, mock_ctx: dict) -> None:
