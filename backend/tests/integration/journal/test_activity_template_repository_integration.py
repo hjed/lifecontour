@@ -123,6 +123,41 @@ class TestActivityTemplateRepositorySave:
         assert saved.grade == 22
         assert saved.length == 25
 
+    async def test_save_creates_abseiling_template(
+        self,
+        template_repository: SqlActivityTemplateRepository,
+    ):
+        """Test creating an abseiling template (common fields only).
+
+        Exercises the new ck_activity_templates_type CHECK constraint that
+        accepts 'abseiling' (ITER16-001).
+        """
+        pitches = [
+            TemplatePitch(
+                template_id="00000000-0000-0000-0000-000000000000",
+                pitch_number=1,
+                height=30,
+                anchor_type="chains",
+                did_setup=True,
+            ),
+        ]
+        template = ActivityTemplate(
+            name="Empress Falls Abseil",
+            template_type="abseiling",
+            user_id=TEST_USER_ID,
+            region="Blue Mountains",
+            description="Multi-pitch abseil",
+            pitches=pitches,
+        )
+
+        saved = await template_repository.save(template)
+
+        assert saved.id is not None
+        assert saved.template_type == "abseiling"
+        assert saved.region == "Blue Mountains"
+        assert len(saved.pitches) == 1
+        assert saved.pitches[0].height == 30
+
     async def test_save_creates_minimal_template(
         self,
         template_repository: SqlActivityTemplateRepository,

@@ -79,6 +79,13 @@ _TYPE_DATA_MODELS: dict[JournalType, type | None] = {
 # Content fields that exist on a model but are intentionally NOT tracked, each
 # with the reason. Keeping the reason here is the "coverage decision" record.
 _EXCLUDED_FIELDS: dict[JournalType, dict[str, str]] = {
+    # The consolidated template reference (ITER16-001 Phase 1) exists at the data
+    # layer (column + repository) but the journal write-service does not yet read
+    # or write it via the abseiling path — that wiring (and its history tracking)
+    # lands in ITER16-001 Phase 2.
+    JournalType.ABSEILING_TRIP: {
+        "template_id": "data-layer only in Phase 1; write-service wiring in Phase 2",
+    },
     JournalType.EVENT: {
         "event_start_date": (
             "denormalised from the base journal event_date_range, which is "
