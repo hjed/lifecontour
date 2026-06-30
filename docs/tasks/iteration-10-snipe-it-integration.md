@@ -226,6 +226,25 @@ Sync the usage event to Snipe-IT.
 - [x] **Unit:** Stream consumer routes GEAR_USAGE events to checkout sync (2 tests).
 - [x] **Integration:** Consumed event results in a checkout API call (3 tests).
 
+#### Phase 4: Snipe-IT Check-in (Asset Return)
+**PR Size:** ~8-10 files
+Return assets to Snipe-IT when the usage period ends. Snipe-IT does not auto-check-in
+at `expected_checkin`, so without this an asset stays checked out forever.
+**Acceptance Criteria:**
+- [x] `SnipeItAPIClient.checkin_asset` posts to `POST /hardware/{id}/checkin`.
+- [x] `SnipeItSyncService.push_checkin_create` returns the asset, resolving it from the
+  recorded `snipeit_checkout` sync metadata so it still works after the journal is deleted.
+- [x] Check-in is idempotent via a `snipeit_checkin` `SyncMetadata` row.
+- [x] Migration adds `snipeit_checkin` to the `integration_source` check constraint.
+- [x] Triggers: journal deletion (`JournalDeleted`), journal update reconcile, immediate
+  check-in on create when the period is already past, and a periodic sweep cron.
+**Required Test Coverage:**
+- [x] **Unit:** API client `checkin_asset` method (4 tests).
+- [x] **Unit:** Sync service `push_checkin_create` + immediate-on-create (6 tests).
+- [x] **Unit:** Stream consumer routes JournalDeleted/JournalUpdated to check-in (3 tests).
+- [x] **Integration:** Check-in lifecycle, post-deletion resolution, immediate-on-create,
+  idempotency, and the periodic sweep query (6 tests).
+
 ### ITER10-006: External Links and MCP Parity
 **Objective:** Surface Snipe-IT external links in the UI and ensure all capabilities are accessible via MCP.
 

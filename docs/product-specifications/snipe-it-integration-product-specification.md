@@ -69,8 +69,14 @@ A new journal type `GEAR_USAGE` will be introduced. This type can be added to tr
 
 ### Sync Rules
 
-- **Outbound Only**: `GEAR_USAGE` journals sync **to** Snipe-IT as a "Checkout" to the mapped user.
-- **Return Behavior**: We do not sync "Checkin" data back from Snipe-IT. The personal management system assumes items return to their **default location** in Snipe-IT when the usage period ends.
+- **Outbound Only**: `GEAR_USAGE` journals sync **to** Snipe-IT as a "Checkout" to the mapped user. We do not sync inbound "Checkin" data **from** Snipe-IT.
+- **Return Behavior**: The personal management system actively **checks the asset back in** to Snipe-IT when the usage period ends — Snipe-IT does not auto-return assets at `expected_checkin`, so the asset would otherwise stay checked out indefinitely. A check-in is triggered when any of the following occur:
+  - The usage period ends — a periodic sweep checks in assets whose resolved check-in date has passed.
+  - The `GEAR_USAGE` journal is deleted (the asset is returned).
+  - The `GEAR_USAGE` journal is updated such that the usage period is now in the past.
+  - On creation, if the check-in date is already in the past, the checkout and check-in are recorded immediately.
+
+  Check-ins are idempotent (tracked via `SyncMetadata`), so an already-returned asset is never checked in twice.
 - **Buffer Dates**:
   - Users can specify a separate start and end date for the gear checkout to allow for buffer (e.g., packing the day before).
   - **Default**: The buffer dates explicitly default to the journal's event dates if not modified by the user.

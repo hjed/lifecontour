@@ -59,6 +59,7 @@ class TestSnipeItWorkerRouteTable:
             "GearItemUpdated",
             "JournalCreated",
             "JournalUpdated",
+            "JournalDeleted",
         }
 
     @pytest.mark.asyncio
@@ -68,6 +69,7 @@ class TestSnipeItWorkerRouteTable:
             ("GearItemUpdated", "_handle_gear_item_updated"),
             ("JournalCreated", "_handle_journal_maintenance_event"),
             ("JournalUpdated", "_handle_journal_maintenance_event"),
+            ("JournalDeleted", "_handle_journal_deleted"),
             ("snipeit.webhook_received", "_handle_webhook_received"),
         ],
     )
@@ -81,6 +83,7 @@ class TestSnipeItWorkerRouteTable:
         handler_names = [
             "_handle_gear_item_updated",
             "_handle_journal_maintenance_event",
+            "_handle_journal_deleted",
             "_handle_webhook_received",
         ]
         mocks = {name: AsyncMock() for name in handler_names}

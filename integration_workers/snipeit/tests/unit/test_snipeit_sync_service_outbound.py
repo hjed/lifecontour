@@ -1,13 +1,44 @@
 # ruff: noqa: E402
 """Tests for Snipe-IT sync service outbound maintenance methods."""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from snipeit_api_client import SnipeItAPIClient, SnipeItAPIError
-from snipeit_sync_service import SnipeItSyncService
+from snipeit_sync_service import SnipeItSyncService, _usage_period_has_ended
+
+
+class TestUsagePeriodHasEnded:
+    """The check-in trigger predicate compares full timestamps (not date-only)."""
+
+    def test_none_is_not_past(self) -> None:
+        assert _usage_period_has_ended(None) is False
+
+    def test_datetime_earlier_today_is_past(self) -> None:
+        """A timestamp earlier *today* counts as past (the date-only bug)."""
+        now = datetime(2026, 6, 30, 10, 0, tzinfo=UTC)
+        earlier_today = datetime(2026, 6, 30, 2, 0, tzinfo=UTC)
+        assert _usage_period_has_ended(earlier_today, now=now) is True
+
+    def test_datetime_later_today_is_not_past(self) -> None:
+        now = datetime(2026, 6, 30, 10, 0, tzinfo=UTC)
+        later_today = datetime(2026, 6, 30, 18, 0, tzinfo=UTC)
+        assert _usage_period_has_ended(later_today, now=now) is False
+
+    def test_naive_datetime_is_treated_as_utc(self) -> None:
+        now = datetime(2026, 6, 30, 10, 0, tzinfo=UTC)
+        naive_past = datetime(2026, 6, 30, 2, 0)
+        assert _usage_period_has_ended(naive_past, now=now) is True
+
+    def test_past_date_is_past(self) -> None:
+        now = datetime(2026, 6, 30, 10, 0, tzinfo=UTC)
+        assert _usage_period_has_ended(date(2026, 6, 29), now=now) is True
+
+    def test_future_datetime_is_not_past(self) -> None:
+        now = datetime(2026, 6, 30, 10, 0, tzinfo=UTC)
+        assert _usage_period_has_ended(now + timedelta(days=1), now=now) is False
 
 
 def _mock_api_client() -> AsyncMock:
@@ -506,16 +537,18 @@ class TestPushCheckoutCreate:
             "messages": "Asset checked out successfully.",
         }
 
+        # Future dates keep this focused on the checkout path (a past checkin
+        # date would additionally trigger an immediate check-in).
         journal_row = MagicMock(
             title="Rope usage at crag",
             content="Used climbing rope",
-            event_date_range_start=datetime(2024, 6, 1, tzinfo=UTC),
-            event_date_range_end=datetime(2024, 6, 2, 14, 30, tzinfo=UTC),
+            event_date_range_start=datetime(2099, 6, 1, tzinfo=UTC),
+            event_date_range_end=datetime(2099, 6, 2, 14, 30, tzinfo=UTC),
         )
         usage_data_row = MagicMock(
             gear_item_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
-            checkout_date=datetime(2024, 6, 1, 8, 0, tzinfo=UTC),
-            checkin_date=datetime(2024, 6, 2, 18, 0, tzinfo=UTC),
+            checkout_date=datetime(2099, 6, 1, 8, 0, tzinfo=UTC),
+            checkin_date=datetime(2099, 6, 2, 18, 0, tzinfo=UTC),
         )
         asset_sync_meta_row = MagicMock(external_id="42")
 
@@ -582,8 +615,8 @@ class TestPushCheckoutCreate:
         payload = call_args.kwargs["payload"]
         assert payload["assigned_user"] == "5"
         assert payload["checkout_to_type"] == "user"
-        assert payload["checkout_at"] == "2024-06-01"
-        assert payload["expected_checkin"] == "2024-06-02"
+        assert payload["checkout_at"] == "2099-06-01"
+        assert payload["expected_checkin"] == "2099-06-02"
         assert payload["note"] == "Rope usage at crag"
 
     @pytest.mark.asyncio
@@ -703,8 +736,8 @@ class TestPushCheckoutCreate:
         journal_row = MagicMock(
             title="Usage log",
             content="",
-            event_date_range_start=datetime(2024, 7, 10, tzinfo=UTC),
-            event_date_range_end=datetime(2024, 7, 12, tzinfo=UTC),
+            event_date_range_start=datetime(2099, 7, 10, tzinfo=UTC),
+            event_date_range_end=datetime(2099, 7, 12, tzinfo=UTC),
         )
         usage_data_row = MagicMock(
             gear_item_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
@@ -767,8 +800,8 @@ class TestPushCheckoutCreate:
 
         call_args = api_client.checkout_asset.call_args
         payload = call_args.kwargs["payload"]
-        assert payload["checkout_at"] == "2024-07-10"
-        assert payload["expected_checkin"] == "2024-07-12"
+        assert payload["checkout_at"] == "2099-07-10"
+        assert payload["expected_checkin"] == "2099-07-12"
 
     @pytest.mark.asyncio
     async def test_handles_api_404(self) -> None:
@@ -842,3 +875,245 @@ class TestPushCheckoutCreate:
             journal_id=100,
             session_factory=session_factory,
         )
+
+
+def _checkin_resolve_ctx(checkout_row: MagicMock | None) -> MagicMock:
+    """Session context for the checkout-metadata resolution query (no begin)."""
+    session = AsyncMock()
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(return_value=session)
+    ctx.__aexit__ = AsyncMock(return_value=False)
+    session.execute = AsyncMock(
+        side_effect=[MagicMock(fetchone=MagicMock(return_value=checkout_row))]
+    )
+    return ctx
+
+
+def _begin_session_ctx(execute_results: list[MagicMock]) -> MagicMock:
+    """Session context that uses ``session.begin()`` and the given execute results."""
+    session = AsyncMock()
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(return_value=session)
+    ctx.__aexit__ = AsyncMock(return_value=False)
+    begin = MagicMock()
+    begin.__aenter__ = AsyncMock(return_value=None)
+    begin.__aexit__ = AsyncMock(return_value=False)
+    session.begin = MagicMock(return_value=begin)
+    session.execute = AsyncMock(side_effect=execute_results)
+    return ctx
+
+
+class TestPushCheckinCreate:
+    """Tests for push_checkin_create method."""
+
+    @pytest.mark.asyncio
+    async def test_creates_checkin_when_checkout_successful(self) -> None:
+        """Happy path: resolves the asset from checkout metadata and checks it in."""
+        api_client = _mock_api_client()
+        api_client.checkin_asset.return_value = {"status": "success"}
+
+        checkout_row = MagicMock(
+            external_id="snipeit_checkout:42:100", sync_status="success"
+        )
+
+        # 1: resolve checkout metadata; 2: lock checkin (no existing → insert);
+        # 3: mark success.
+        lock_ctx = _begin_session_ctx(
+            [
+                MagicMock(fetchone=MagicMock(return_value=None)),
+                MagicMock(fetchone=MagicMock(return_value=(1,))),
+            ]
+        )
+        success_ctx = _begin_session_ctx([MagicMock()])
+
+        session_factory = MagicMock(
+            side_effect=[_checkin_resolve_ctx(checkout_row), lock_ctx, success_ctx]
+        )
+
+        service = SnipeItSyncService(
+            api_client=api_client, user_id="user-1", snipeit_user_id="5"
+        )
+
+        result = await service.push_checkin_create(
+            journal_id=100, session_factory=session_factory, note="Returned from trip"
+        )
+
+        assert result is True  # an actual check-in was performed
+        api_client.checkin_asset.assert_called_once()
+        call_args = api_client.checkin_asset.call_args
+        assert call_args.kwargs["asset_id"] == 42
+        assert call_args.kwargs["payload"]["note"] == "Returned from trip"
+
+    @pytest.mark.asyncio
+    async def test_skips_when_no_checkout_metadata(self) -> None:
+        """No recorded checkout means there is nothing to check in."""
+        api_client = _mock_api_client()
+        session_factory = MagicMock(return_value=_checkin_resolve_ctx(None))
+
+        service = SnipeItSyncService(
+            api_client=api_client, user_id="user-1", snipeit_user_id="5"
+        )
+
+        result = await service.push_checkin_create(
+            journal_id=100, session_factory=session_factory
+        )
+
+        assert result is False  # no-op
+        api_client.checkin_asset.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_skips_when_checkout_not_successful(self) -> None:
+        """A non-success checkout (e.g. failed) is not checked in."""
+        api_client = _mock_api_client()
+        checkout_row = MagicMock(
+            external_id="snipeit_checkout:42:100", sync_status="failed"
+        )
+        session_factory = MagicMock(return_value=_checkin_resolve_ctx(checkout_row))
+
+        service = SnipeItSyncService(
+            api_client=api_client, user_id="user-1", snipeit_user_id="5"
+        )
+
+        await service.push_checkin_create(
+            journal_id=100, session_factory=session_factory
+        )
+
+        api_client.checkin_asset.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_skips_when_already_checked_in(self) -> None:
+        """An existing successful checkin row makes the call idempotent."""
+        api_client = _mock_api_client()
+        checkout_row = MagicMock(
+            external_id="snipeit_checkout:42:100", sync_status="success"
+        )
+        existing_checkin = MagicMock(sync_status="success", age_seconds=10.0)
+        lock_ctx = _begin_session_ctx(
+            [MagicMock(fetchone=MagicMock(return_value=existing_checkin))]
+        )
+
+        session_factory = MagicMock(
+            side_effect=[_checkin_resolve_ctx(checkout_row), lock_ctx]
+        )
+
+        service = SnipeItSyncService(
+            api_client=api_client, user_id="user-1", snipeit_user_id="5"
+        )
+
+        await service.push_checkin_create(
+            journal_id=100, session_factory=session_factory
+        )
+
+        api_client.checkin_asset.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_handles_api_404_terminal(self) -> None:
+        """404 is terminal: finalized (not retried) and returns False, no raise."""
+        api_client = _mock_api_client()
+        api_client.checkin_asset.side_effect = SnipeItAPIError(
+            "Not found", status_code=404
+        )
+        checkout_row = MagicMock(
+            external_id="snipeit_checkout:42:100", sync_status="success"
+        )
+        lock_ctx = _begin_session_ctx(
+            [
+                MagicMock(fetchone=MagicMock(return_value=None)),
+                MagicMock(fetchone=MagicMock(return_value=(1,))),
+            ]
+        )
+        # Third session is the terminal _finalize_checkin (success), not a retryable unlock.
+        finalize_ctx = _begin_session_ctx([MagicMock()])
+
+        session_factory = MagicMock(
+            side_effect=[_checkin_resolve_ctx(checkout_row), lock_ctx, finalize_ctx]
+        )
+
+        service = SnipeItSyncService(
+            api_client=api_client, user_id="user-1", snipeit_user_id="5"
+        )
+
+        # Should not raise; 404 is a terminal no-op.
+        result = await service.push_checkin_create(
+            journal_id=100, session_factory=session_factory
+        )
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_immediate_checkin_when_checkout_period_already_past(self) -> None:
+        """A checkout whose checkin date is already past is immediately checked in."""
+        api_client = _mock_api_client()
+        api_client.checkout_asset.return_value = {"status": "success"}
+        api_client.checkin_asset.return_value = {"status": "success"}
+
+        # Unmistakably far-past checkin date (time-independent) → push_checkout_create
+        # should chain a check-in.
+        journal_row = MagicMock(
+            title="Past trip",
+            content="",
+            event_date_range_start=datetime(2000, 1, 1, tzinfo=UTC),
+            event_date_range_end=datetime(2000, 1, 2, tzinfo=UTC),
+        )
+        usage_data_row = MagicMock(
+            gear_item_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            checkout_date=datetime(2000, 1, 1, tzinfo=UTC),
+            checkin_date=datetime(2000, 1, 2, tzinfo=UTC),
+        )
+        asset_sync_meta_row = MagicMock(external_id="42")
+
+        # Checkout: fetch (3 queries) → lock (begin) → mark success (begin).
+        fetch_session = AsyncMock()
+        fetch_ctx = MagicMock()
+        fetch_ctx.__aenter__ = AsyncMock(return_value=fetch_session)
+        fetch_ctx.__aexit__ = AsyncMock(return_value=False)
+        fetch_session.execute = AsyncMock(
+            side_effect=[
+                MagicMock(fetchone=MagicMock(return_value=journal_row)),
+                MagicMock(fetchone=MagicMock(return_value=usage_data_row)),
+                MagicMock(fetchone=MagicMock(return_value=asset_sync_meta_row)),
+            ]
+        )
+        checkout_lock_ctx = _begin_session_ctx(
+            [
+                MagicMock(fetchone=MagicMock(return_value=None)),
+                MagicMock(fetchone=MagicMock(return_value=(1,))),
+            ]
+        )
+        checkout_success_ctx = _begin_session_ctx([MagicMock()])
+
+        # Immediate check-in: resolve checkout meta → lock → mark success.
+        checkout_meta = MagicMock(
+            external_id="snipeit_checkout:42:100", sync_status="success"
+        )
+        checkin_resolve_ctx = _checkin_resolve_ctx(checkout_meta)
+        checkin_lock_ctx = _begin_session_ctx(
+            [
+                MagicMock(fetchone=MagicMock(return_value=None)),
+                MagicMock(fetchone=MagicMock(return_value=(1,))),
+            ]
+        )
+        checkin_success_ctx = _begin_session_ctx([MagicMock()])
+
+        session_factory = MagicMock(
+            side_effect=[
+                fetch_ctx,
+                checkout_lock_ctx,
+                checkout_success_ctx,
+                checkin_resolve_ctx,
+                checkin_lock_ctx,
+                checkin_success_ctx,
+            ]
+        )
+
+        service = SnipeItSyncService(
+            api_client=api_client, user_id="user-1", snipeit_user_id="5"
+        )
+
+        await service.push_checkout_create(
+            journal_id=100, session_factory=session_factory
+        )
+
+        api_client.checkout_asset.assert_called_once()
+        api_client.checkin_asset.assert_called_once()
+        assert api_client.checkin_asset.call_args.kwargs["asset_id"] == 42

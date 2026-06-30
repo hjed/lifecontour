@@ -254,6 +254,41 @@ class SnipeItAPIClient:
 
         return data
 
+    async def checkin_asset(
+        self, asset_id: int, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Check in (return) an asset in Snipe-IT.
+
+        Sends ``POST /hardware/{asset_id}/checkin`` with the given payload.
+        The checkin response is returned as a raw dict because it differs
+        from the standard asset response structure.
+
+        Note: Snipe-IT records the check-in at server time and does not accept
+        a historical return date; pass the actual usage window in ``note``.
+
+        Args:
+            asset_id: Snipe-IT asset numeric ID.
+            payload: Checkin fields (e.g. note, location_id, status_id).
+
+        Returns:
+            Raw response dict from Snipe-IT.
+
+        Raises:
+            SnipeItAPIError: If the response ``status`` is not ``"success"``.
+        """
+        data: dict[str, Any] = await self._post(
+            f"hardware/{asset_id}/checkin", json_data=payload
+        )
+
+        if data.get("status") != "success":
+            messages = data.get("messages", "Unknown error")
+            raise SnipeItAPIError(
+                f"Snipe-IT POST /hardware/{asset_id}/checkin failed: {messages}",
+                status_code=200,
+            )
+
+        return data
+
     async def create_maintenance(
         self, asset_id: int, payload: dict[str, Any]
     ) -> SnipeItMaintenanceWriteResponse:
