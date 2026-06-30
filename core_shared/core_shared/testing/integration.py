@@ -34,6 +34,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, cast
 
@@ -58,10 +59,22 @@ def get_workspace_env() -> dict[str, str]:
     """
     script = get_repo_root() / "scripts" / "workspace_env.py"
     try:
+        # Use the current interpreter (sys.executable) rather than a bare
+        # "python3" so the helper always runs under the same toolchain as the
+        # tests/uv environment invoking it.
         result = subprocess.run(
-            ["python3", str(script), "json"], check=True, capture_output=True, text=True
+            [sys.executable, str(script), "json"],
+            check=True,
+            capture_output=True,
+            text=True,
         )
         return cast(dict[str, str], json.loads(result.stdout))
+    except subprocess.CalledProcessError as e:
+        # Surface stdout/stderr so a failing workspace_env.py is diagnosable in CI.
+        raise RuntimeError(
+            f"Failed to load workspace environment from {script} "
+            f"(exit {e.returncode}).\nstdout: {e.stdout}\nstderr: {e.stderr}"
+        ) from e
     except Exception as e:
         raise RuntimeError(
             f"Failed to load workspace environment from {script}: {e}"
