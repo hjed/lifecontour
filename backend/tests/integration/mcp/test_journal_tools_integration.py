@@ -166,6 +166,7 @@ class TestJournalToolsIntegration:
                 "get_contact_journals",
                 "merge_journals",
                 "get_merge_candidates",
+                "get_journal_template",
             ]
 
             for expected_tool in expected_tools:

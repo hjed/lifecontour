@@ -13,6 +13,7 @@ from uuid import uuid4
 
 import pytest
 from core_shared.models.journals import (
+    AbseilingData,
     ClimbingData,
     JournalType,
     JournalValidationError,
@@ -204,3 +205,79 @@ class TestUpdateGearUsageTypeData:
         saved = repo.save.await_args.args[0]
         assert saved.gear_item_id == existing.gear_item_id
         assert saved.checkin_date == datetime(2024, 1, 2, 18, 0, tzinfo=UTC)
+
+
+class TestUpdateAbseilingTypeData:
+    """The consolidated ``template_id`` is read/written at the abseiling level
+    (ITER16-001 Phase 2). It is co-located with the pitch data and must survive a
+    pitch-only edit so the logbook keeps a durable template reference.
+    """
+
+    @pytest.mark.asyncio
+    async def test_sets_template_id_on_existing_row(self) -> None:
+        repo = AsyncMock()
+        repo.find_by_journal_id.return_value = AbseilingData(journal_id=5)
+        pitch_repo = AsyncMock()
+        template_id = uuid4()
+
+        await helpers.update_abseiling_type_data(
+            5, "ABSEILING_TRIP", {"template_id": str(template_id)}, repo, pitch_repo
+        )
+
+        repo.save.assert_awaited_once()
+        saved = repo.save.await_args.args[0]
+        assert isinstance(saved, AbseilingData)
+        assert saved.template_id == template_id
+
+    @pytest.mark.asyncio
+    async def test_pitch_only_edit_preserves_template_id(self) -> None:
+        repo = AsyncMock()
+        template_id = uuid4()
+        repo.find_by_journal_id.return_value = AbseilingData(
+            journal_id=5, template_id=template_id
+        )
+        pitch_repo = AsyncMock()
+
+        await helpers.update_abseiling_type_data(
+            5,
+            "ABSEILING_TRIP",
+            {
+                "pitches": [
+                    {"pitch_number": 1, "height": 20, "anchor_type": "double bolt"}
+                ]
+            },
+            repo,
+            pitch_repo,
+        )
+
+        repo.save.assert_awaited_once()
+        saved = repo.save.await_args.args[0]
+        assert saved.template_id == template_id
+
+    @pytest.mark.asyncio
+    async def test_template_id_can_be_cleared_explicitly(self) -> None:
+        repo = AsyncMock()
+        repo.find_by_journal_id.return_value = AbseilingData(
+            journal_id=5, template_id=uuid4()
+        )
+        pitch_repo = AsyncMock()
+
+        await helpers.update_abseiling_type_data(
+            5, "ABSEILING_TRIP", {"template_id": None}, repo, pitch_repo
+        )
+
+        saved = repo.save.await_args.args[0]
+        assert saved.template_id is None
+
+    @pytest.mark.asyncio
+    async def test_invalid_template_id_raises(self) -> None:
+        repo = AsyncMock()
+        repo.find_by_journal_id.return_value = AbseilingData(journal_id=5)
+        pitch_repo = AsyncMock()
+
+        with pytest.raises(JournalValidationError):
+            await helpers.update_abseiling_type_data(
+                5, "ABSEILING_TRIP", {"template_id": "not-a-uuid"}, repo, pitch_repo
+            )
+
+        repo.save.assert_not_awaited()

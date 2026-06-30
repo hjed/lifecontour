@@ -289,6 +289,13 @@ class AbseilPitchSchema(BaseModel):
 class AbseilingDataSchema(BaseModel):
     """Abseiling data for ABSEILING_TRIP type journals."""
 
+    template_id: str | None = Field(
+        default=None,
+        description=(
+            "ID of the activity template this abseiling-derived journal was created "
+            "from (consolidated reference, preserved when pitches are edited)"
+        ),
+    )
     number_of_abseils: int | None = Field(
         default=None,
         description="Number of abseils (non-negative)",
