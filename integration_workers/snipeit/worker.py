@@ -17,6 +17,7 @@ from arq.typing import StartupShutdown, WorkerSettingsBase
 from core_shared import (
     SharedARQWorkerSettings,
     build_worker_lifecycle,
+    generate_cron_jobs,
     redis_settings_from_url,
 )
 from core_shared.integration_constants import SNIPEIT_ARQ_QUEUE_NAME
@@ -357,6 +358,130 @@ async def sync_snipeit_maintenance_batch(
         await sync_service._api_client.close()
 
 
+@trace_arq_job
+async def periodic_checkin_all_snipeit_accounts(
+    ctx: dict,  # type: ignore[type-arg]
+) -> dict[str, int]:
+    """Periodic safety-net that checks in assets whose usage period has ended.
+
+    For every user with Snipe-IT configured, finds successful checkouts that
+    have no successful check-in yet and whose resolved check-in date has passed,
+    then returns those assets in Snipe-IT. Complements the event-driven triggers
+    (journal deletion / update / immediate-on-create) by catching usage windows
+    that only become past with the passage of time.
+    """
+    session_factory = ctx["session_factory"]
+    worker_settings: SnipeItWorkerSettings = settings
+
+    from sqlalchemy import text
+
+    from snipeit_api_client import SnipeItAPIError
+    from snipeit_sync_service import _format_date_for_snipeit
+
+    async with session_factory() as session:
+        result = await session.execute(
+            text("""
+                SELECT user_id, base_url, snipeit_user_id
+                FROM snipeit_settings
+                ORDER BY user_id
+            """)
+        )
+        settings_rows = result.fetchall()
+
+    accounts_found = len(settings_rows)
+    checked_in = 0
+
+    for row in settings_rows:
+        user_id = row.user_id
+        base_url = row.base_url
+        snipeit_user_id = row.snipeit_user_id
+
+        auth_data = await _get_auth_data(session_factory, user_id)
+        if not auth_data:
+            continue
+
+        # Active checkouts (no successful checkin) whose period has ended.
+        async with session_factory() as session:
+            overdue_result = await session.execute(
+                text("""
+                    SELECT j.id AS journal_id,
+                           COALESCE(u.checkin_date, j.event_date_range_end) AS checkin_date,
+                           COALESCE(u.checkout_date, j.event_date_range_start) AS checkout_date
+                    FROM sync_metadata co
+                    JOIN journals j ON j.id = co.internal_uuid::integer
+                    JOIN journal_gear_usage_data u ON u.journal_id = j.id
+                    LEFT JOIN sync_metadata ci
+                        ON ci.integration_source = 'snipeit_checkin'
+                        AND ci.internal_uuid = co.internal_uuid
+                        AND ci.sync_status = 'success'
+                    WHERE co.integration_source = 'snipeit_checkout'
+                      AND co.sync_status = 'success'
+                      AND j.user_id = :user_id
+                      AND ci.id IS NULL
+                      AND COALESCE(u.checkin_date, j.event_date_range_end) < now()
+                """),
+                {"user_id": user_id},
+            )
+            overdue_rows = overdue_result.fetchall()
+
+        if not overdue_rows:
+            continue
+
+        sync_service = _create_sync_service(
+            user_id=user_id,
+            auth_data=auth_data,
+            base_url=base_url,
+            snipeit_user_id=snipeit_user_id,
+            worker_settings=worker_settings,
+            session_factory=session_factory,
+        )
+
+        try:
+            for overdue in overdue_rows:
+                note = (
+                    f"Usage period {_format_date_for_snipeit(overdue.checkout_date)} "
+                    f"to {_format_date_for_snipeit(overdue.checkin_date)}"
+                )
+                try:
+                    await sync_service.push_checkin_create(
+                        journal_id=overdue.journal_id,
+                        session_factory=session_factory,
+                        note=note,
+                    )
+                    checked_in += 1
+                except SnipeItAPIError as exc:
+                    if exc.status_code in (403, 404):
+                        logger.debug(
+                            "Skipped periodic checkin (not found/forbidden)",
+                            journal_id=overdue.journal_id,
+                            user_id=user_id,
+                            status_code=exc.status_code,
+                        )
+                    else:
+                        logger.warning(
+                            "Periodic checkin failed",
+                            journal_id=overdue.journal_id,
+                            user_id=user_id,
+                            exc_info=True,
+                        )
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "Periodic checkin failed",
+                        journal_id=overdue.journal_id,
+                        user_id=user_id,
+                        exc_info=True,
+                    )
+        finally:
+            await sync_service._api_client.close()
+
+    logger.info(
+        "Completed periodic Snipe-IT check-in sweep",
+        accounts_found=accounts_found,
+        checked_in=checked_in,
+    )
+    return {"accounts_found": accounts_found, "checked_in": checked_in}
+
+
 async def _run_stream_consumer(session_factory: Any, worker_settings: Any) -> None:
     """Adapt the Snipe-IT stream consumer to the shared lifecycle factory's shape.
 
@@ -390,9 +515,10 @@ class WorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
 
     Operational defaults (``job_timeout``, ``keep_result``, retry backoff) come from
     :class:`core_shared.SharedARQWorkerSettings` and equal arq's own constructor
-    defaults, so they apply unchanged. Snipe-IT has no periodic sync, so it declares
-    no cron jobs. Only the functions list, consumer wiring, and documented overrides
-    live here.
+    defaults, so they apply unchanged. The only periodic job is the check-in sweep
+    (``periodic_checkin_all_snipeit_accounts``), which returns assets whose usage
+    period has ended. Only the functions list, consumer wiring, cron schedule, and
+    documented overrides live here.
     """
 
     queue_name = SNIPEIT_ARQ_QUEUE_NAME
@@ -403,7 +529,16 @@ class WorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
         sync_snipeit_asset_batch,
         sync_snipeit_maintenances,
         sync_snipeit_maintenance_batch,
+        periodic_checkin_all_snipeit_accounts,
     ]
+
+    # Cron schedule: the periodic check-in sweep (shared helper; empty when
+    # periodic sync is disabled).
+    cron_jobs = generate_cron_jobs(
+        periodic_checkin_all_snipeit_accounts,
+        enable_periodic_sync=settings.enable_periodic_sync,
+        sync_interval_hours=settings.sync_interval_hours,
+    )
 
     # Worker lifecycle (shared factory). Cast to arq's StartupShutdown Protocol:
     # the hooks accept ``ctx`` but the shared LifecycleHook alias is a plain

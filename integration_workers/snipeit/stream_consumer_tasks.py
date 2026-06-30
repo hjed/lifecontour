@@ -54,6 +54,7 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
             EventRoute("GearItemUpdated", self._handle_gear_item_updated),
             EventRoute("JournalCreated", self._handle_journal_maintenance_event),
             EventRoute("JournalUpdated", self._handle_journal_maintenance_event),
+            EventRoute("JournalDeleted", self._handle_journal_deleted),
             EventRoute("snipeit.webhook_received", self._handle_webhook_received),
         ]
 
@@ -401,14 +402,6 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
                 )
                 return
 
-            if journal_type == "GEAR_USAGE" and event.event_type == "JournalUpdated":
-                logger.debug(
-                    "Skipping journal gear usage event: unhandled event type",
-                    journal_id=journal_id,
-                    event_type=event.event_type,
-                )
-                return
-
         auth_data = await _get_auth_data(self._session_factory, settings_row.user_id)
         if not auth_data:
             logger.debug(
@@ -428,12 +421,20 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
 
         try:
             if journal_type == "GEAR_USAGE":
-                await sync_service.push_checkout_create(
-                    journal_id=journal_id,
-                    session_factory=self._session_factory,
-                )
+                if event.event_type == "JournalCreated":
+                    await sync_service.push_checkout_create(
+                        journal_id=journal_id,
+                        session_factory=self._session_factory,
+                    )
+                else:
+                    # JournalUpdated: reconcile the desired checkout/checkin state
+                    # (e.g. check the asset in if the usage period has ended).
+                    await sync_service.reconcile_gear_usage(
+                        journal_id=journal_id,
+                        session_factory=self._session_factory,
+                    )
                 logger.info(
-                    "Successfully processed journal gear usage checkout",
+                    "Successfully processed journal gear usage event",
                     journal_id=journal_id,
                     event_type=event.event_type,
                 )
@@ -457,6 +458,102 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
             if exc.status_code in (403, 404):
                 logger.debug(
                     "Skipping journal export (not found/forbidden)",
+                    journal_id=journal_id,
+                    status_code=exc.status_code,
+                )
+            else:
+                raise
+        finally:
+            await sync_service._api_client.close()
+
+    async def _handle_journal_deleted(self, event: StreamEvent) -> None:
+        """Process JournalDeleted events: check in any asset the journal held.
+
+        The journal and its cascade-deleted gear-usage data are already gone, so
+        the asset is resolved from the recorded ``snipeit_checkout`` sync metadata
+        inside ``push_checkin_create``. This is a no-op unless the journal had an
+        active Snipe-IT checkout.
+        """
+        self._log_processed(event)
+        journal_id = event.event_data.get("journal_id")
+        user_id = event.event_data.get("user_id")
+        if not journal_id or not user_id:
+            logger.debug("Skipping JournalDeleted: missing journal_id or user_id")
+            return
+
+        from sqlalchemy import text
+
+        from snipeit_api_client import SnipeItAPIError
+        from snipeit_settings import SnipeItWorkerSettings
+        from worker import _create_sync_service, _get_auth_data
+
+        # Fast path: only proceed if this journal recorded a Snipe-IT checkout.
+        async with self._session_factory() as session:
+            checkout_result = await session.execute(
+                text("""
+                    SELECT 1
+                    FROM sync_metadata
+                    WHERE integration_source = 'snipeit_checkout'
+                      AND internal_uuid = :journal_id
+                """),
+                {"journal_id": str(journal_id)},
+            )
+            if not checkout_result.fetchone():
+                logger.debug(
+                    "Skipping JournalDeleted: no Snipe-IT checkout for journal",
+                    journal_id=journal_id,
+                )
+                return
+
+            settings_result = await session.execute(
+                text("""
+                    SELECT user_id, base_url, snipeit_user_id
+                    FROM snipeit_settings
+                    WHERE user_id = :user_id
+                """),
+                {"user_id": user_id},
+            )
+            settings_row = settings_result.fetchone()
+
+        if not settings_row:
+            logger.debug(
+                "Skipping JournalDeleted: no Snipe-IT settings for journal owner",
+                journal_id=journal_id,
+            )
+            return
+
+        worker_settings = SnipeItWorkerSettings()
+        auth_data = await _get_auth_data(self._session_factory, settings_row.user_id)
+        if not auth_data:
+            logger.debug(
+                "Skipping JournalDeleted: missing auth data",
+                journal_id=journal_id,
+            )
+            return
+
+        sync_service = _create_sync_service(
+            user_id=settings_row.user_id,
+            auth_data=auth_data,
+            base_url=settings_row.base_url,
+            snipeit_user_id=settings_row.snipeit_user_id,
+            worker_settings=worker_settings,
+            session_factory=self._session_factory,
+        )
+
+        try:
+            await sync_service.push_checkin_create(
+                journal_id=journal_id,
+                session_factory=self._session_factory,
+                note="Gear usage journal deleted",
+            )
+            logger.info(
+                "Successfully processed journal deletion checkin",
+                journal_id=journal_id,
+            )
+        except SnipeItAPIError as exc:
+            if exc.status_code in (403, 404):
+                logger.debug(
+                    "Skipping journal deletion checkin (not found/forbidden)",
                     journal_id=journal_id,
                     status_code=exc.status_code,
                 )

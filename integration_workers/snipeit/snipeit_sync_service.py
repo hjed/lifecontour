@@ -12,7 +12,7 @@ import asyncio
 import hashlib
 import json
 from collections.abc import AsyncIterator
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 import httpx
@@ -44,6 +44,23 @@ def _format_date_for_snipeit(value: date | datetime | str | None) -> str | None:
         return value.isoformat()
     # Already a string — extract just the date portion
     return str(value)[:10]
+
+
+def _date_is_in_past(
+    value: date | datetime | str | None, *, today: date | None = None
+) -> bool:
+    """Return ``True`` if ``value``'s date is strictly before today.
+
+    Normalises ``value`` to a ``YYYY-MM-DD`` string (via
+    :func:`_format_date_for_snipeit`) and compares it lexicographically against
+    today, which is equivalent to a date comparison for that format. Returns
+    ``False`` for falsy/unparseable inputs.
+    """
+    formatted = _format_date_for_snipeit(value)
+    if not formatted:
+        return False
+    today_str = (today or datetime.now(tz=UTC).date()).isoformat()
+    return formatted < today_str
 
 
 # Internal signalling exceptions
@@ -1273,6 +1290,15 @@ class SnipeItSyncService:
             snipeit_asset_id=snipeit_asset_id,
         )
 
+        # If the usage period is already over (e.g. logging a past trip), the
+        # asset must not stay checked out — immediately record the check-in.
+        if _date_is_in_past(checkin_date):
+            await self.push_checkin_create(
+                journal_id=journal_id,
+                session_factory=session_factory,
+                note=f"Usage period {checkout_at} to {expected_checkin}",
+            )
+
     async def _unlock_pending_checkout(
         self,
         journal_id: int,
@@ -1305,4 +1331,279 @@ class SnipeItSyncService:
                 "Failed to unlock pending checkout",
                 journal_id=journal_id,
                 error=str(exc),
+            )
+
+    # -- Outbound Checkin Sync Methods --------------------------------------
+
+    async def push_checkin_create(
+        self,
+        journal_id: int,
+        session_factory: Any,
+        note: str | None = None,
+    ) -> None:
+        """Return (check in) the asset previously checked out for a GEAR_USAGE journal.
+
+        The asset is resolved from the existing ``snipeit_checkout`` sync metadata
+        row for ``journal_id`` rather than the journal/gear-usage tables, so this
+        still works after the journal (and its cascade-deleted usage data) is gone
+        — e.g. when triggered by ``JournalDeleted``. A no-op when no successful
+        checkout was recorded. Idempotency is enforced via a ``snipeit_checkin``
+        sync metadata row, mirroring :meth:`push_checkout_create`.
+
+        Args:
+            journal_id: Internal journal ID whose checkout should be reversed.
+            session_factory: Async session factory for DB queries.
+            note: Optional note recorded on the Snipe-IT check-in (Snipe-IT does
+                not accept a backdated return date, so the usage window is carried
+                here when known).
+        """
+        # 1. Resolve the asset and confirm a successful checkout exists.
+        async with session_factory() as session:
+            checkout_result = await session.execute(
+                text("""
+                    SELECT external_id, sync_status
+                    FROM sync_metadata
+                    WHERE integration_source = 'snipeit_checkout'
+                      AND internal_uuid = :journal_id
+                """),
+                {"journal_id": str(journal_id)},
+            )
+            checkout_row = checkout_result.fetchone()
+
+        if not checkout_row or checkout_row.sync_status != "success":
+            logger.debug(
+                "Skipping checkin: no successful checkout recorded for journal",
+                journal_id=journal_id,
+            )
+            return
+
+        # external_id format: 'snipeit_checkout:{asset_id}:{journal_id}'
+        try:
+            snipeit_asset_id = int(str(checkout_row.external_id).split(":")[1])
+        except (ValueError, IndexError, AttributeError):
+            logger.warning(
+                "Invalid checkout sync metadata external_id; cannot derive asset",
+                external_id=checkout_row.external_id,
+                journal_id=journal_id,
+            )
+            return
+
+        external_id = f"snipeit_checkin:{snipeit_asset_id}:{journal_id}"
+
+        # 2. Acquire a distributed lock by marking the checkin as pending.
+        async with session_factory() as session:
+            async with session.begin():
+                checkin_meta_result = await session.execute(
+                    text("""
+                        SELECT sync_status, extract(epoch from (now() - updated_at)) as age_seconds
+                        FROM sync_metadata
+                        WHERE integration_source = 'snipeit_checkin'
+                          AND internal_uuid = :journal_id
+                        FOR UPDATE SKIP LOCKED
+                    """),
+                    {"journal_id": str(journal_id)},
+                )
+                row = checkin_meta_result.fetchone()
+                if row:
+                    if row.sync_status == "success":
+                        logger.debug(
+                            "Skipping checkin: already checked in",
+                            journal_id=journal_id,
+                        )
+                        return
+                    if (
+                        row.sync_status == "pending"
+                        and row.age_seconds is not None
+                        and row.age_seconds < 300
+                    ):
+                        logger.debug(
+                            "Skipping checkin: currently processing in another worker",
+                            journal_id=journal_id,
+                        )
+                        return
+
+                    await session.execute(
+                        text("""
+                            UPDATE sync_metadata
+                            SET sync_status = 'pending', updated_at = now()
+                            WHERE integration_source = 'snipeit_checkin' AND internal_uuid = :journal_id
+                        """),
+                        {"journal_id": str(journal_id)},
+                    )
+                else:
+                    insert_result = await session.execute(
+                        text("""
+                            INSERT INTO sync_metadata
+                                (internal_uuid, integration_source, external_id,
+                                 last_synced_at, version_hash, sync_status,
+                                 error_message, retry_count, created_at, updated_at)
+                            VALUES
+                                (:internal_uuid, 'snipeit_checkin', :external_id,
+                                 now(), 'PENDING', 'pending', NULL, 0, now(), now())
+                            ON CONFLICT (integration_source, external_id) DO NOTHING
+                            RETURNING id
+                        """),
+                        {
+                            "internal_uuid": str(journal_id),
+                            "external_id": external_id,
+                        },
+                    )
+                    if not insert_result.fetchone():
+                        logger.debug(
+                            "Skipping checkin: locked by another process",
+                            journal_id=journal_id,
+                        )
+                        return
+
+        # 3. Build the checkin payload and POST to Snipe-IT.
+        payload: dict[str, Any] = {}
+        if note:
+            payload["note"] = note
+
+        try:
+            await self._api_client.checkin_asset(
+                asset_id=snipeit_asset_id,
+                payload=payload,
+            )
+        except SnipeItAPIError as exc:
+            # 403/404 (asset gone or already checked in): nothing to retry.
+            if exc.status_code in (403, 404):
+                logger.warning(
+                    "Snipe-IT checkin failed (not found/forbidden)",
+                    journal_id=journal_id,
+                    snipeit_asset_id=snipeit_asset_id,
+                    status_code=exc.status_code,
+                )
+                await self._unlock_pending_checkin(
+                    journal_id,
+                    external_id,
+                    session_factory,
+                    f"API Error {exc.status_code}",
+                )
+                return
+
+            await self._unlock_pending_checkin(
+                journal_id, external_id, session_factory, str(exc)[:255]
+            )
+            raise
+        except Exception as exc:
+            await self._unlock_pending_checkin(
+                journal_id, external_id, session_factory, str(exc)[:255]
+            )
+            raise
+
+        # 4. Record the checkin as successful.
+        async with session_factory() as session:
+            async with session.begin():
+                await session.execute(
+                    text("""
+                        UPDATE sync_metadata
+                        SET version_hash = 'CHECKED_IN',
+                            last_synced_at = now(),
+                            sync_status = 'success',
+                            error_message = NULL,
+                            updated_at = now()
+                        WHERE integration_source = 'snipeit_checkin'
+                          AND internal_uuid = :internal_uuid
+                          AND external_id = :external_id
+                    """),
+                    {
+                        "internal_uuid": str(journal_id),
+                        "external_id": external_id,
+                    },
+                )
+
+        logger.info(
+            "Successfully checked in asset to Snipe-IT",
+            journal_id=journal_id,
+            snipeit_asset_id=snipeit_asset_id,
+        )
+
+    async def _unlock_pending_checkin(
+        self,
+        journal_id: int,
+        external_id: str,
+        session_factory: Any,
+        error_message: str,
+    ) -> None:
+        """Mark a pending checkin sync as failed to release the lock for future retries."""
+        try:
+            async with session_factory() as session:
+                async with session.begin():
+                    await session.execute(
+                        text("""
+                            UPDATE sync_metadata
+                            SET sync_status = 'failed',
+                                updated_at = now(),
+                                error_message = :error_message
+                            WHERE integration_source = 'snipeit_checkin'
+                              AND internal_uuid = :internal_uuid
+                              AND external_id = :external_id
+                        """),
+                        {
+                            "internal_uuid": str(journal_id),
+                            "external_id": external_id,
+                            "error_message": error_message,
+                        },
+                    )
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "Failed to unlock pending checkin",
+                journal_id=journal_id,
+                error=str(exc),
+            )
+
+    async def reconcile_gear_usage(
+        self,
+        journal_id: int,
+        session_factory: Any,
+    ) -> None:
+        """Reconcile a GEAR_USAGE journal's Snipe-IT state after an update.
+
+        Desired state: if the usage period has ended (resolved ``checkin_date``
+        is in the past) the asset should be checked in; otherwise it should be
+        checked out. A missing checkout is created first (which itself performs
+        an immediate check-in when the period is already past).
+        """
+        async with session_factory() as session:
+            checkout_result = await session.execute(
+                text("""
+                    SELECT sync_status
+                    FROM sync_metadata
+                    WHERE integration_source = 'snipeit_checkout'
+                      AND internal_uuid = :journal_id
+                """),
+                {"journal_id": str(journal_id)},
+            )
+            checkout_row = checkout_result.fetchone()
+
+        if not checkout_row or checkout_row.sync_status != "success":
+            # No successful checkout yet — create it (handles immediate checkin).
+            await self.push_checkout_create(
+                journal_id=journal_id,
+                session_factory=session_factory,
+            )
+            return
+
+        # Checkout exists; check in if the usage period is now over.
+        data = await self._fetch_journal_and_gear_usage_data(
+            journal_id, session_factory
+        )
+        if not data:
+            return
+
+        journal_row, usage_data_row, _ = data
+        checkin_date = usage_data_row.checkin_date or journal_row.event_date_range_end
+        if _date_is_in_past(checkin_date):
+            checkout_date = (
+                usage_data_row.checkout_date or journal_row.event_date_range_start
+            )
+            note = (
+                f"Usage period {_format_date_for_snipeit(checkout_date)} "
+                f"to {_format_date_for_snipeit(checkin_date)}"
+            )
+            await self.push_checkin_create(
+                journal_id=journal_id,
+                session_factory=session_factory,
+                note=note,
             )

@@ -97,6 +97,7 @@ class TestSnipeItWorkerSettings:
             "sync_snipeit_asset_batch",
             "sync_snipeit_maintenances",
             "sync_snipeit_maintenance_batch",
+            "periodic_checkin_all_snipeit_accounts",
         }
 
     def test_queue_name(self) -> None:
@@ -131,17 +132,20 @@ class TestSnipeItWorkerSettings:
         assert arq_worker.max_tries == 5
         assert arq_worker.job_timeout_s == 300
 
-    def test_schedules_nothing(self) -> None:
-        """Snipe-IT has no periodic sync, so it schedules no cron jobs even when
-        periodic-sync env vars are set (it declares no ``cron_jobs``; arq's default
-        of ``None`` means nothing is scheduled)."""
-        from arq.worker import get_kwargs
-
+    def test_schedules_checkin_sweep_when_periodic_sync_enabled(self) -> None:
+        """When periodic sync is enabled, the worker schedules the check-in sweep."""
         worker = _reload_worker(ENABLE_PERIODIC_SYNC="true", SYNC_INTERVAL_HOURS="6")
-        # The leaf class does not declare cron_jobs at all.
-        assert "cron_jobs" not in worker.WorkerSettings.__dict__
-        # And arq resolves no cron jobs for this worker.
-        assert not get_kwargs(worker.WorkerSettings).get("cron_jobs")
+        cron_jobs = worker.WorkerSettings.cron_jobs
+        assert len(cron_jobs) == 1
+        assert (
+            cron_jobs[0].coroutine.__name__ == "periodic_checkin_all_snipeit_accounts"
+        )
+        assert cron_jobs[0].hour == {0, 6, 12, 18}
+
+    def test_schedules_nothing_when_periodic_sync_disabled(self) -> None:
+        """With periodic sync disabled (the default), no cron jobs are scheduled."""
+        worker = _reload_worker(ENABLE_PERIODIC_SYNC="false")
+        assert not worker.WorkerSettings.cron_jobs
 
     def test_no_residual_local_helpers(self) -> None:
         """The duplicated Redis helper and per-worker lifecycle functions are gone."""

@@ -135,7 +135,7 @@ class TestCheckoutSyncIntegration:
                 INSERT INTO journals (title, content, user_id,
                     event_date_range_start, event_date_range_end)
                 VALUES ('Rope usage at crag', 'Used climbing rope', 'user-123',
-                    '2024-06-01', '2024-06-02')
+                    '2099-06-01', '2099-06-02')
                 RETURNING id
             """)
         )
@@ -143,13 +143,13 @@ class TestCheckoutSyncIntegration:
         assert journal_row is not None
         journal_id = journal_row.id
 
-        # Journal gear usage data with buffer dates
+        # Journal gear usage data with buffer dates (future, so no immediate checkin)
         await async_connection.execute(
             text("""
                 INSERT INTO journal_gear_usage_data
                     (journal_id, gear_item_id, checkout_date, checkin_date)
                 VALUES (:journal_id, :gear_item_id,
-                    '2024-06-01 08:00:00+00', '2024-06-02 18:00:00+00')
+                    '2099-06-01 08:00:00+00', '2099-06-02 18:00:00+00')
             """),
             {"journal_id": journal_id, "gear_item_id": gear_item_id},
         )
@@ -189,8 +189,8 @@ class TestCheckoutSyncIntegration:
         request_body = json.loads(checkout_request.content)
         assert request_body["assigned_user"] == "5"
         assert request_body["checkout_to_type"] == "user"
-        assert request_body["checkout_at"] == "2024-06-01"
-        assert request_body["expected_checkin"] == "2024-06-02"
+        assert request_body["checkout_at"] == "2099-06-01"
+        assert request_body["expected_checkin"] == "2099-06-02"
         assert request_body["note"] == "Rope usage at crag"
 
         # Step 5: Verify sync_metadata was created
@@ -356,7 +356,7 @@ class TestCheckoutSyncIntegration:
                 INSERT INTO journals (title, content, user_id,
                     event_date_range_start, event_date_range_end)
                 VALUES ('Ice Axe usage', '', 'user-123',
-                    '2024-07-10', '2024-07-12')
+                    '2099-07-10', '2099-07-12')
                 RETURNING id
             """)
         )
@@ -402,5 +402,5 @@ class TestCheckoutSyncIntegration:
             r for r in mock_transport.requests if "checkout" in str(r.url)
         )
         request_body = json.loads(checkout_request.content)
-        assert request_body["checkout_at"] == "2024-07-10"
-        assert request_body["expected_checkin"] == "2024-07-12"
+        assert request_body["checkout_at"] == "2099-07-10"
+        assert request_body["expected_checkin"] == "2099-07-12"

@@ -513,11 +513,11 @@ async def test_handle_event_skips_journal_created_no_maintenance_no_usage(
 
 
 @pytest.mark.asyncio
-async def test_handle_event_skips_journal_updated_gear_usage(
+async def test_handle_event_journal_updated_gear_usage_reconciles(
     mock_stream_client: AsyncMock,
     mock_session_factory: MagicMock,
 ) -> None:
-    """Verify that JournalUpdated events for GEAR_USAGE are skipped (no checkin sync)."""
+    """JournalUpdated events for GEAR_USAGE reconcile checkout/checkin state."""
     consumer = SnipeItWorkerStreamConsumer(
         stream_client=mock_stream_client,
         session_factory=mock_session_factory,
@@ -543,14 +543,107 @@ async def test_handle_event_skips_journal_updated_gear_usage(
     settings_result.fetchone.return_value = MagicMock(
         user_id="user1", base_url="http://snipeit", snipeit_user_id="s1"
     )
+    maintenance_check = MagicMock()
+    maintenance_check.fetchone.return_value = None  # not a maintenance journal
+    usage_check = MagicMock()
+    usage_check.fetchone.return_value = MagicMock()  # has gear usage data
 
-    mock_session.execute = AsyncMock(return_value=settings_result)
+    mock_session.execute = AsyncMock(
+        side_effect=[settings_result, maintenance_check, usage_check]
+    )
 
-    with patch("worker._create_sync_service") as mock_create_sync:
-        mock_sync_service = AsyncMock()
-        mock_create_sync.return_value = mock_sync_service
+    mock_sync_service = AsyncMock()
+    mock_sync_service._api_client = AsyncMock()
 
-        with patch("worker._get_auth_data", return_value={"token": "t"}):
-            await consumer._handle_event(event)
+    with (
+        patch("worker._get_auth_data", return_value={"mock": "auth"}),
+        patch("worker._create_sync_service", return_value=mock_sync_service),
+    ):
+        await consumer._handle_event(event)
 
-        mock_sync_service.push_checkout_create.assert_not_called()
+    mock_sync_service.reconcile_gear_usage.assert_called_once_with(
+        journal_id=100,
+        session_factory=mock_session_factory,
+    )
+    mock_sync_service.push_checkout_create.assert_not_called()
+    mock_sync_service._api_client.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_handle_journal_deleted_checks_in_asset(
+    mock_stream_client: AsyncMock,
+    mock_session_factory: MagicMock,
+) -> None:
+    """JournalDeleted for a journal with a checkout triggers a check-in."""
+    consumer = SnipeItWorkerStreamConsumer(
+        stream_client=mock_stream_client,
+        session_factory=mock_session_factory,
+    )
+    event = StreamEvent(
+        message_id="123",
+        event_id="abc",
+        event_type="JournalDeleted",
+        aggregate_id=100,
+        event_data={"journal_id": 100, "user_id": "user1"},
+        occurred_at="2024-01-01T00:00:00Z",
+    )
+
+    mock_session = AsyncMock()
+    mock_session_factory.return_value.__aenter__.return_value = mock_session
+
+    checkout_check = MagicMock()
+    checkout_check.fetchone.return_value = (1,)  # checkout exists
+    settings_result = MagicMock()
+    settings_result.fetchone.return_value = MagicMock(
+        user_id="user1", base_url="http://snipeit", snipeit_user_id="s1"
+    )
+    mock_session.execute = AsyncMock(side_effect=[checkout_check, settings_result])
+
+    mock_sync_service = AsyncMock()
+    mock_sync_service._api_client = AsyncMock()
+
+    with (
+        patch("worker._get_auth_data", return_value={"mock": "auth"}),
+        patch("worker._create_sync_service", return_value=mock_sync_service),
+    ):
+        await consumer._handle_event(event)
+
+    mock_sync_service.push_checkin_create.assert_called_once()
+    assert mock_sync_service.push_checkin_create.call_args.kwargs["journal_id"] == 100
+    mock_sync_service._api_client.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_handle_journal_deleted_skips_without_checkout(
+    mock_stream_client: AsyncMock,
+    mock_session_factory: MagicMock,
+) -> None:
+    """JournalDeleted for a journal with no recorded checkout is a no-op."""
+    consumer = SnipeItWorkerStreamConsumer(
+        stream_client=mock_stream_client,
+        session_factory=mock_session_factory,
+    )
+    event = StreamEvent(
+        message_id="123",
+        event_id="abc",
+        event_type="JournalDeleted",
+        aggregate_id=100,
+        event_data={"journal_id": 100, "user_id": "user1"},
+        occurred_at="2024-01-01T00:00:00Z",
+    )
+
+    mock_session = AsyncMock()
+    mock_session_factory.return_value.__aenter__.return_value = mock_session
+
+    checkout_check = MagicMock()
+    checkout_check.fetchone.return_value = None  # no checkout recorded
+    mock_session.execute = AsyncMock(side_effect=[checkout_check])
+
+    with (
+        patch("worker._get_auth_data") as mock_get_auth,
+        patch("worker._create_sync_service") as mock_create,
+    ):
+        await consumer._handle_event(event)
+
+        mock_get_auth.assert_not_called()
+        mock_create.assert_not_called()

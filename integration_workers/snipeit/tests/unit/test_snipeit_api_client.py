@@ -692,3 +692,82 @@ class TestSnipeItAPIClientCheckoutAsset:
         assert json_body["assigned_user"] == 5
         assert json_body["checkout_to_type"] == "user"
         assert json_body["note"] == "Test checkout"
+
+
+class TestSnipeItAPIClientCheckinAsset:
+    """Tests for checkin_asset method."""
+
+    @pytest.mark.asyncio
+    async def test_successful_checkin(
+        self, client_no_refresh: SnipeItAPIClient
+    ) -> None:
+        """Successful POST checkin returns parsed response dict."""
+        post_response = {
+            "status": "success",
+            "messages": "Asset checked in successfully.",
+            "payload": {"id": 42, "name": "Climbing Rope"},
+        }
+        resp = _ok_response(post_response)
+        with patch.object(client_no_refresh._client, "post", return_value=resp):
+            result = await client_no_refresh.checkin_asset(
+                asset_id=42,
+                payload={"note": "Returned after trip"},
+            )
+
+        assert result["status"] == "success"
+
+    @pytest.mark.asyncio
+    async def test_validation_error_raises(
+        self, client_no_refresh: SnipeItAPIClient
+    ) -> None:
+        """POST checkin returning status=error raises SnipeItAPIError."""
+        error_response = {
+            "status": "error",
+            "messages": "That asset is not checked out.",
+        }
+        resp = _ok_response(error_response)
+        with patch.object(client_no_refresh._client, "post", return_value=resp):
+            with pytest.raises(SnipeItAPIError, match="failed"):
+                await client_no_refresh.checkin_asset(asset_id=42, payload={})
+
+    @pytest.mark.asyncio
+    async def test_checkin_asset_path(
+        self, client_no_refresh: SnipeItAPIClient
+    ) -> None:
+        """checkin_asset POSTs to the correct relative path."""
+        post_response = {
+            "status": "success",
+            "messages": "OK",
+            "payload": {"id": 42, "name": "Test"},
+        }
+        resp = _ok_response(post_response)
+        with patch.object(
+            client_no_refresh._client, "post", return_value=resp
+        ) as mock_post:
+            await client_no_refresh.checkin_asset(asset_id=42, payload={})
+
+        path = mock_post.call_args.args[0]
+        assert path == "hardware/42/checkin"
+
+    @pytest.mark.asyncio
+    async def test_checkin_asset_forwards_payload(
+        self, client_no_refresh: SnipeItAPIClient
+    ) -> None:
+        """checkin_asset forwards the payload as JSON body."""
+        post_response = {
+            "status": "success",
+            "messages": "OK",
+            "payload": {"id": 42, "name": "Test"},
+        }
+        resp = _ok_response(post_response)
+        with patch.object(
+            client_no_refresh._client, "post", return_value=resp
+        ) as mock_post:
+            await client_no_refresh.checkin_asset(
+                asset_id=42,
+                payload={"note": "Usage 2024-06-01 to 2024-06-05"},
+            )
+
+        call_kwargs = mock_post.call_args.kwargs
+        json_body = call_kwargs.get("json", {})
+        assert json_body["note"] == "Usage 2024-06-01 to 2024-06-05"
