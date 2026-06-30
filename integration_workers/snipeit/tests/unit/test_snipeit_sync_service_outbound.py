@@ -1047,17 +1047,18 @@ class TestPushCheckinCreate:
         api_client.checkout_asset.return_value = {"status": "success"}
         api_client.checkin_asset.return_value = {"status": "success"}
 
-        # Past checkin date → push_checkout_create should chain a check-in.
+        # Unmistakably far-past checkin date (time-independent) → push_checkout_create
+        # should chain a check-in.
         journal_row = MagicMock(
             title="Past trip",
             content="",
-            event_date_range_start=datetime(2024, 6, 1, tzinfo=UTC),
-            event_date_range_end=datetime(2024, 6, 2, tzinfo=UTC),
+            event_date_range_start=datetime(2000, 1, 1, tzinfo=UTC),
+            event_date_range_end=datetime(2000, 1, 2, tzinfo=UTC),
         )
         usage_data_row = MagicMock(
             gear_item_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
-            checkout_date=datetime(2024, 6, 1, tzinfo=UTC),
-            checkin_date=datetime(2024, 6, 2, tzinfo=UTC),
+            checkout_date=datetime(2000, 1, 1, tzinfo=UTC),
+            checkin_date=datetime(2000, 1, 2, tzinfo=UTC),
         )
         asset_sync_meta_row = MagicMock(external_id="42")
 

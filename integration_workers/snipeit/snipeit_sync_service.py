@@ -67,11 +67,13 @@ def _usage_period_has_ended(
         return value < now
     if isinstance(value, date):
         return value < now.date()
-    # String fallback: compare by date prefix.
-    formatted = _format_date_for_snipeit(value)
-    if not formatted:
+    # String fallback: only a valid ISO date prefix is comparable; anything
+    # else is treated as not-past rather than risking a lexicographic mishit.
+    try:
+        parsed = date.fromisoformat(str(value)[:10])
+    except ValueError:
         return False
-    return formatted < now.date().isoformat()
+    return parsed < now.date()
 
 
 # Internal signalling exceptions
@@ -1409,15 +1411,17 @@ class SnipeItSyncService:
         # 2. Acquire a distributed lock by marking the checkin as pending.
         async with session_factory() as session:
             async with session.begin():
+                # Key on (integration_source, external_id) — the table's unique
+                # key — so the lock and finalize always target exactly this row.
                 checkin_meta_result = await session.execute(
                     text("""
                         SELECT sync_status, extract(epoch from (now() - updated_at)) as age_seconds
                         FROM sync_metadata
                         WHERE integration_source = 'snipeit_checkin'
-                          AND internal_uuid = :journal_id
+                          AND external_id = :external_id
                         FOR UPDATE SKIP LOCKED
                     """),
-                    {"journal_id": str(journal_id)},
+                    {"external_id": external_id},
                 )
                 row = checkin_meta_result.fetchone()
                 if row:
@@ -1442,9 +1446,9 @@ class SnipeItSyncService:
                         text("""
                             UPDATE sync_metadata
                             SET sync_status = 'pending', updated_at = now()
-                            WHERE integration_source = 'snipeit_checkin' AND internal_uuid = :journal_id
+                            WHERE integration_source = 'snipeit_checkin' AND external_id = :external_id
                         """),
-                        {"journal_id": str(journal_id)},
+                        {"external_id": external_id},
                     )
                 else:
                     insert_result = await session.execute(
