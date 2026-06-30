@@ -185,6 +185,16 @@ class TestActivityTemplateTypeValidation:
         )
         assert template.template_type == template_type
 
+    def test_abseiling_is_a_valid_template_type(self):
+        """The consolidated abseiling template type round-trips (ITER16-001)."""
+        assert "abseiling" in VALID_TEMPLATE_TYPES
+
+        template = ActivityTemplate(
+            name="Empress Falls", template_type="abseiling", user_id="user-123"
+        )
+
+        assert template.template_type == "abseiling"
+
     def test_invalid_template_type_raises_error(self):
         """Test that an invalid template type raises validation error."""
         with pytest.raises(ActivityTemplateValidationError) as exc_info:

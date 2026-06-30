@@ -245,8 +245,16 @@ See [Journal System Specification](../journal-system-specification.md) for compl
   - Activity types: `journal_fitness_data`, `journal_outdoor_activity_data`, `journal_bushwalking_data`, `journal_abseiling_data`, `journal_canyoning_data`, `journal_climbing_data`, `journal_kayaking_data`, `journal_skiing_data`, `journal_jogging_data`
 - Supporting tables: `routes`, `journal_tags`, `journal_contacts`, `journal_events`
 - Proper foreign key constraints and indexes for search/filtering
-- Template system: `activity_templates` (UUID pk, user-owned, type-specific columns for canyoning/caving/climbing), `template_pitches` (FK to activity_templates, cascade delete, unique template_id+pitch_number)
+- Template system: `activity_templates` (UUID pk, user-owned, `template_type` ∈ {`abseiling`, `canyoning`, `caving`, `climbing`} enforced by `ck_activity_templates_type`, type-specific columns for canyoning/caving/climbing; an `abseiling` template uses only the common fields — name, region, description, standard pitches), `template_pitches` (FK to activity_templates, cascade delete, unique template_id+pitch_number)
 - Gear item tracking: `gear_items` (UUID pk, user-owned, name required, model/serial_number/purchase_date/manufacturer optional, timestamps, indexed by user_id and name)
+
+#### Consolidated abseiling template reference (ITER16-001)
+
+Abseiling-derived activities (CANYONING, CLIMBING, CAVING, and plain ABSEILING_TRIP) carry a durable reference to the template they were based on. Because all three subtypes depend on ABSEILING_TRIP, every abseiling-derived journal already has a `journal_abseiling_data` row, so the reference is consolidated there:
+
+- `journal_abseiling_data.template_id` — nullable UUID FK → `activity_templates.id`, `ON DELETE SET NULL`. Single source of truth for the "based on: \<template\>" reference (preserved across pitch edits).
+- **Phase 1 (additive, migration `0094`)**: the column is added and **backfilled** from the existing per-subtype `template_id` columns on `journal_canyoning_data` / `journal_climbing_data` / `journal_caving_data`. Those columns are **left in place** for now (both coexist). The abseiling repository reads/writes the new column; the journal write-service is wired in Phase 2.
+- **Phase 5 (cleanup)**: once all reads/writes move to `journal_abseiling_data.template_id`, the now-unused per-subtype `template_id` columns are dropped.
 
 ### Photo Integration (Iteration 4)
 ```sql

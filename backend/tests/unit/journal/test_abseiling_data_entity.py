@@ -1,5 +1,7 @@
 """Unit tests for AbseilingData entity (ABSEILING_TRIP type)."""
 
+from uuid import UUID
+
 import pytest
 from core_shared.models.journals import AbseilingData, AbseilingDataValidationError
 
@@ -132,3 +134,42 @@ class TestAbseilingData:
         data = AbseilingData(journal_id=1, number_of_rescues=0)
 
         assert data.number_of_rescues == 0
+
+
+@pytest.mark.unit
+class TestAbseilingDataTemplateId:
+    """Test AbseilingData consolidated template_id field (ITER16-001)."""
+
+    def test_template_id_defaults_to_none(self):
+        """Test that template_id is None when not provided."""
+        data = AbseilingData(journal_id=1)
+
+        assert data.template_id is None
+
+    def test_template_id_none_is_valid(self):
+        """Test that None template_id is valid (field is optional)."""
+        data = AbseilingData(journal_id=1, template_id=None)
+
+        assert data.template_id is None
+
+    def test_template_id_uuid_object_is_valid(self):
+        """Test that a UUID object is accepted as template_id."""
+        uuid_val = UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+        data = AbseilingData(journal_id=1, template_id=uuid_val)
+
+        assert data.template_id == uuid_val
+
+    def test_template_id_string_uuid_is_coerced(self):
+        """Test that a string UUID is accepted and coerced to a UUID."""
+        uuid_str = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        data = AbseilingData(journal_id=1, template_id=uuid_str)
+
+        assert isinstance(data.template_id, UUID)
+        assert str(data.template_id) == uuid_str
+
+    def test_invalid_template_id_raises(self):
+        """Test that a non-UUID string template_id raises validation error."""
+        with pytest.raises(AbseilingDataValidationError) as exc_info:
+            AbseilingData(journal_id=1, template_id="not-a-uuid")
+
+        assert "template_id" in str(exc_info.value)

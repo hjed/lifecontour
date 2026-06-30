@@ -13,6 +13,7 @@ entity tracks the aggregate/trip-level data (total count, combined length).
 
 from dataclasses import dataclass
 from datetime import datetime
+from uuid import UUID
 
 from .exceptions import AbseilingDataValidationError
 
@@ -33,6 +34,9 @@ class AbseilingData:
 
     Attributes:
         journal_id: Foreign key to the journal (primary key in DB)
+        template_id: Consolidated foreign key to the activity template this
+            abseiling-derived activity was based on (nullable). Single source of
+            truth for canyoning/climbing/caving/abseiling templates.
         number_of_abseils: Total number of individual abseil pitches (nullable, non-negative)
         total_length: Combined length of all abseils in metres (nullable, non-negative)
         number_of_setups: Number of pitches the user set up (nullable, non-negative)
@@ -42,6 +46,7 @@ class AbseilingData:
     """
 
     journal_id: int
+    template_id: UUID | str | None = None
     number_of_abseils: int | None = None
     total_length: int | None = None
     number_of_setups: int | None = None
@@ -52,10 +57,26 @@ class AbseilingData:
     def __post_init__(self) -> None:
         """Validate abseiling data properties."""
         self._validate_journal_id()
+        self._validate_template_id()
         self._validate_number_of_abseils()
         self._validate_total_length()
         self._validate_number_of_setups()
         self._validate_number_of_rescues()
+
+    def _validate_template_id(self) -> None:
+        """Validate template_id is a valid UUID if provided."""
+        if self.template_id is not None:
+            if isinstance(self.template_id, str):
+                try:
+                    self.template_id = UUID(self.template_id)
+                except ValueError as err:
+                    raise AbseilingDataValidationError(
+                        "template_id", "Template ID must be a valid UUID"
+                    ) from err
+            elif not isinstance(self.template_id, UUID):
+                raise AbseilingDataValidationError(
+                    "template_id", "Template ID must be a valid UUID"
+                )
 
     def _validate_journal_id(self) -> None:
         """Validate journal_id is positive."""

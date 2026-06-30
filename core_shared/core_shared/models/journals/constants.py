@@ -96,6 +96,7 @@ VALID_ANCHOR_TYPES: list[str] = [
 
 # ActivityTemplate constants (activity_templates table)
 VALID_TEMPLATE_TYPES: list[str] = [
+    "abseiling",
     "canyoning",
     "caving",
     "climbing",

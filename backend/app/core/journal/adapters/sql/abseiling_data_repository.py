@@ -1,6 +1,7 @@
 """SQL implementation of AbseilingDataRepository."""
 
 from typing import Any
+from uuid import UUID
 
 from core_shared.models.journals import AbseilingData
 from sqlalchemy import text
@@ -18,8 +19,12 @@ class SqlAbseilingDataRepository(AbseilingDataRepository):
 
     def _row_to_entity(self, row: Any) -> AbseilingData:
         """Convert a database row to an AbseilingData entity."""
+        template_id = row.template_id
+        if template_id is not None and not isinstance(template_id, (str, UUID)):
+            template_id = str(template_id)
         return AbseilingData(
             journal_id=row.journal_id,
+            template_id=template_id,
             number_of_abseils=row.number_of_abseils,
             total_length=row.total_length,
             number_of_setups=row.number_of_setups,
@@ -32,7 +37,7 @@ class SqlAbseilingDataRepository(AbseilingDataRepository):
         """Find abseiling data by journal ID."""
         query = text(
             """
-            SELECT journal_id, number_of_abseils, total_length,
+            SELECT journal_id, template_id, number_of_abseils, total_length,
                    number_of_setups, number_of_rescues,
                    created_at, updated_at
             FROM journal_abseiling_data
@@ -60,20 +65,21 @@ class SqlAbseilingDataRepository(AbseilingDataRepository):
         query = text(
             """
             INSERT INTO journal_abseiling_data (
-                journal_id, number_of_abseils, total_length,
+                journal_id, template_id, number_of_abseils, total_length,
                 number_of_setups, number_of_rescues
             )
             VALUES (
-                :journal_id, :number_of_abseils, :total_length,
+                :journal_id, :template_id, :number_of_abseils, :total_length,
                 :number_of_setups, :number_of_rescues
             )
             ON CONFLICT (journal_id) DO UPDATE SET
+                template_id = EXCLUDED.template_id,
                 number_of_abseils = EXCLUDED.number_of_abseils,
                 total_length = EXCLUDED.total_length,
                 number_of_setups = EXCLUDED.number_of_setups,
                 number_of_rescues = EXCLUDED.number_of_rescues,
                 updated_at = now()
-            RETURNING journal_id, number_of_abseils, total_length,
+            RETURNING journal_id, template_id, number_of_abseils, total_length,
                       number_of_setups, number_of_rescues,
                       created_at, updated_at
             """
@@ -82,6 +88,7 @@ class SqlAbseilingDataRepository(AbseilingDataRepository):
             query,
             {
                 "journal_id": data.journal_id,
+                "template_id": str(data.template_id) if data.template_id else None,
                 "number_of_abseils": data.number_of_abseils,
                 "total_length": data.total_length,
                 "number_of_setups": data.number_of_setups,
