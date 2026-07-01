@@ -9,17 +9,9 @@ import type { ReactNode } from 'react';
 // Base integration types
 export type SyncType = 'smart' | 'full';
 export type SyncStatus =
-  | 'queued'
-  | 'running'
-  | 'in_progress'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
+  'queued' | 'running' | 'in_progress' | 'completed' | 'failed' | 'cancelled';
 export type IntegrationStatus =
-  | 'connected'
-  | 'disconnected'
-  | 'error'
-  | 'token_expired';
+  'connected' | 'disconnected' | 'error' | 'token_expired';
 export type HealthStatus = 'healthy' | 'degraded' | 'unhealthy';
 
 export interface IntegrationSyncSummaryAttributes {

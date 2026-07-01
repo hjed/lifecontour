@@ -719,8 +719,7 @@ export function JournalCreateForm({
       // Extract pending routes to upload them separately since backend doesn't accept them in JournalCreateData
       let pendingRoutes: { name: string; gpx_data: string }[] = [];
       const fitnessData = submittedTypeData[JournalType.FITNESS] as
-        | FitnessData
-        | undefined;
+        FitnessData | undefined;
       if (fitnessData?.pending_routes) {
         pendingRoutes = [...fitnessData.pending_routes];
         // Remove pending_routes before submitting to prevent validation errors
