@@ -5,6 +5,7 @@
  */
 
 import { screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { JournalDetailView } from '../JournalDetailView';
 import {
   createMockJournalWithMetadata,
@@ -28,6 +29,8 @@ const mockRemoveContact = jest.fn();
 const mockAddTag = jest.fn();
 const mockRemoveTag = jest.fn();
 const mockUpdateField = jest.fn();
+const mockAddType = jest.fn();
+const mockRemoveType = jest.fn();
 
 jest.mock('@/lib/api/journals', () => ({
   useUpdateJournal: () => ({
@@ -73,11 +76,11 @@ jest.mock('@/lib/api/journals', () => ({
     isPending: false,
   }),
   useAddJournalType: () => ({
-    mutateAsync: jest.fn(),
+    mutateAsync: mockAddType,
     isPending: false,
   }),
   useRemoveJournalType: () => ({
-    mutateAsync: jest.fn(),
+    mutateAsync: mockRemoveType,
     isPending: false,
   }),
   useCalendars: () => ({
@@ -127,15 +130,49 @@ jest.mock('../ActivityFeed', () => ({
 }));
 
 jest.mock('../JournalTypeSection', () => ({
-  JournalTypeSection: ({ type }: { type?: string }) => (
-    <div data-testid={`type-section-${type}`}>Type Section: {type}</div>
+  JournalTypeSection: ({
+    type,
+    onSave,
+  }: {
+    type?: string;
+    onSave?: (type: string, data: Record<string, unknown>) => Promise<void>;
+  }) => (
+    <div data-testid={`type-section-${type}`}>
+      Type Section: {type}
+      <button
+        data-testid={`type-section-save-${type}`}
+        onClick={() => onSave?.(type as string, { gear_item_id: 'gear-1' })}
+      >
+        save
+      </button>
+    </div>
   ),
 }));
 
 jest.mock('../JournalTypeManager', () => ({
-  JournalTypeManager: ({ currentTypes = [] }: { currentTypes?: string[] }) => (
+  JournalTypeManager: ({
+    currentTypes = [],
+    onTypeAdd,
+    onTypeRemove,
+  }: {
+    currentTypes?: string[];
+    onTypeAdd?: (type: string) => Promise<void>;
+    onTypeRemove?: (type: string) => Promise<void>;
+  }) => (
     <div data-testid='type-manager'>
       Type Manager: {currentTypes.join(', ')}
+      <button
+        data-testid='add-gear-usage'
+        onClick={() => onTypeAdd?.('gear_usage')}
+      >
+        add gear usage
+      </button>
+      <button
+        data-testid='remove-gear-usage'
+        onClick={() => onTypeRemove?.('gear_usage')}
+      >
+        remove gear usage
+      </button>
     </div>
   ),
 }));
@@ -285,6 +322,53 @@ describe('JournalDetailView', () => {
       renderWithQueryClient(<JournalDetailView journal={mockJournal} />);
 
       expect(screen.getByTestId('children-list')).toBeInTheDocument();
+    });
+  });
+
+  describe('Pending types requiring initial data (gear usage)', () => {
+    it('adds gear usage to a local pending editor without persisting immediately', async () => {
+      const user = userEvent.setup();
+      renderWithQueryClient(<JournalDetailView journal={mockJournal} />);
+
+      // Not present before adding.
+      expect(
+        screen.queryByTestId('type-section-gear_usage')
+      ).not.toBeInTheDocument();
+
+      await user.click(screen.getByTestId('add-gear-usage'));
+
+      // A pending editor renders, but nothing is persisted to the backend yet.
+      expect(screen.getByTestId('type-section-gear_usage')).toBeInTheDocument();
+      expect(mockAddType).not.toHaveBeenCalled();
+    });
+
+    it('persists gear usage with its initial data when the pending editor is saved', async () => {
+      const user = userEvent.setup();
+      renderWithQueryClient(<JournalDetailView journal={mockJournal} />);
+
+      await user.click(screen.getByTestId('add-gear-usage'));
+      await user.click(screen.getByTestId('type-section-save-gear_usage'));
+
+      expect(mockAddType).toHaveBeenCalledWith({
+        journalId: '1',
+        journalType: JournalType.GEAR_USAGE,
+        typeData: { gear_item_id: 'gear-1' },
+      });
+    });
+
+    it('removes a pending gear usage editor locally without a backend call', async () => {
+      const user = userEvent.setup();
+      renderWithQueryClient(<JournalDetailView journal={mockJournal} />);
+
+      await user.click(screen.getByTestId('add-gear-usage'));
+      expect(screen.getByTestId('type-section-gear_usage')).toBeInTheDocument();
+
+      await user.click(screen.getByTestId('remove-gear-usage'));
+
+      expect(
+        screen.queryByTestId('type-section-gear_usage')
+      ).not.toBeInTheDocument();
+      expect(mockRemoveType).not.toHaveBeenCalled();
     });
   });
 
