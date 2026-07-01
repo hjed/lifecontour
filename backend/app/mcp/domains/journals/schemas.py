@@ -553,6 +553,25 @@ class ActivityTemplateListMCPResponse(BaseModel):
     summary: str = Field(description="AI-friendly summary")
 
 
+class JournalTemplateMCPResponse(BaseModel):
+    """The activity template an abseiling-derived journal was created from.
+
+    The reference is durable: ``template`` carries the template's own standard
+    pitches, which are independent of (and may differ from) the journal's edited
+    pitches.
+    """
+
+    journal_id: int = Field(description="Journal id")
+    has_template: bool = Field(
+        description="Whether the journal references an activity template"
+    )
+    template: ActivityTemplateMCPResponse | None = Field(
+        default=None,
+        description="The referenced template incl. its standard pitches, or null",
+    )
+    summary: str = Field(description="AI-friendly summary")
+
+
 class GearItemMCPResponse(BaseModel):
     """AI-friendly gear item response."""
 

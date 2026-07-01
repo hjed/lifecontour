@@ -136,3 +136,107 @@ async def test_update_abseiling_journal_with_pitches(
     pitches = type_data["pitches"]
     assert len(pitches) == 1
     assert pitches[0]["height"] == 10
+
+
+async def _create_template(
+    client: AsyncClient, template_type: str = "canyoning"
+) -> str:
+    """Create an activity template via the REST API and return its id."""
+    response = await client.post(
+        "/api/templates",
+        json={
+            "data": {
+                "type": "activity-templates",
+                "attributes": {
+                    "name": "Claustral Canyon",
+                    "template_type": template_type,
+                    "region": "Blue Mountains",
+                    "pitches": [
+                        {
+                            "pitch_number": 1,
+                            "height": 30,
+                            "anchor_location": "TR",
+                            "anchor_type": "double bolt",
+                        }
+                    ],
+                },
+            }
+        },
+    )
+    assert response.status_code == 201, response.json()
+    return str(response.json()["data"]["id"])
+
+
+async def test_create_canyoning_journal_persists_consolidated_template_id(
+    authenticated_client: AsyncClient,
+    base_journal_payload: dict[str, Any],
+):
+    """A canyoning journal stores template_id on the consolidated abseiling block."""
+    template_id = await _create_template(authenticated_client)
+
+    payload = base_journal_payload.copy()
+    payload["data"]["attributes"]["title"] = "Claustral trip"
+    payload["data"]["attributes"]["types"] = [JournalType.CANYONING.value]
+    payload["data"]["attributes"]["type_data"] = {
+        JournalType.CANYONING.value: {"french_grade": "v4a3IV"},
+        JournalType.ABSEILING_TRIP.value: {
+            "template_id": template_id,
+            "pitches": [{"pitch_number": 1, "height": 20, "did_setup": True}],
+        },
+    }
+
+    create_resp = await authenticated_client.post("/api/journals", json=payload)
+    assert create_resp.status_code == 201, create_resp.json()
+    journal_id = create_resp.json()["data"]["id"]
+
+    get_resp = await authenticated_client.get(f"/api/journals/{journal_id}")
+    assert get_resp.status_code == 200
+    abseiling = get_resp.json()["data"]["attributes"]["type_data"][
+        JournalType.ABSEILING_TRIP.value
+    ]
+    assert abseiling["template_id"] == template_id
+
+
+async def test_pitch_edit_preserves_consolidated_template_id(
+    authenticated_client: AsyncClient,
+    base_journal_payload: dict[str, Any],
+):
+    """Editing pitches must not clear the durable template reference."""
+    template_id = await _create_template(authenticated_client)
+
+    payload = base_journal_payload.copy()
+    payload["data"]["attributes"]["title"] = "Durable reference"
+    payload["data"]["attributes"]["type_data"] = {
+        JournalType.ABSEILING_TRIP.value: {
+            "template_id": template_id,
+            "pitches": [{"pitch_number": 1, "height": 20}],
+        }
+    }
+    create_resp = await authenticated_client.post("/api/journals", json=payload)
+    assert create_resp.status_code == 201, create_resp.json()
+    journal_id = create_resp.json()["data"]["id"]
+
+    # Edit only the pitches (no template_id in the payload).
+    update_payload = {
+        "data": {
+            "type": "journal-type-data",
+            "attributes": {
+                "pitches": [
+                    {"pitch_number": 1, "height": 45, "did_setup": True},
+                    {"pitch_number": 2, "height": 12, "did_rescue": True},
+                ]
+            },
+        }
+    }
+    update_resp = await authenticated_client.put(
+        f"/api/journals/{journal_id}/types/{JournalType.ABSEILING_TRIP.value}/data",
+        json=update_payload,
+    )
+    assert update_resp.status_code == 200
+
+    get_resp = await authenticated_client.get(f"/api/journals/{journal_id}")
+    abseiling = get_resp.json()["data"]["attributes"]["type_data"][
+        JournalType.ABSEILING_TRIP.value
+    ]
+    assert abseiling["template_id"] == template_id
+    assert len(abseiling["pitches"]) == 2

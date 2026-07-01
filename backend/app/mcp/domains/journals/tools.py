@@ -150,6 +150,7 @@ from app.mcp.domains.journals.schemas import (
     JournalHistoryResponse,
     JournalSearchResponse,
     JournalSearchResult,
+    JournalTemplateMCPResponse,
     JournalUpdateRequest,
     MergeCandidateResult,
     MergeCandidatesResponse,
@@ -1205,6 +1206,9 @@ def _build_jogging_data(jogging_data: Any) -> dict[str, Any]:
 def _build_abseiling_data(abseiling_data: Any) -> dict[str, Any]:
     """Build abseiling data dictionary."""
     return {
+        "template_id": str(abseiling_data.template_id)
+        if abseiling_data.template_id
+        else None,
         "number_of_abseils": abseiling_data.number_of_abseils,
         "total_length": abseiling_data.total_length,
         "number_of_setups": abseiling_data.number_of_setups,
@@ -1681,6 +1685,8 @@ async def _update_abseiling_data(
     existing_abseiling = await abseiling_data_repo.find_by_journal_id(journal_id)
     if existing_abseiling:
         abs_updates: dict[str, Any] = {}
+        if "template_id" in type_data_dict:
+            abs_updates["template_id"] = type_data_dict["template_id"]
         if "number_of_abseils" in type_data_dict:
             abs_updates["number_of_abseils"] = type_data_dict["number_of_abseils"]
         if "total_length" in type_data_dict:
@@ -2244,6 +2250,7 @@ _JOURNAL_TYPE_DATA_FIELDS: dict[str, dict[str, str]] = {
         "pace": "string e.g. '5:30/km' (optional)",
     },
     "ABSEILING_TRIP": {
+        "template_id": "UUID of the activity template this abseiling-derived journal was created from (optional; consolidated reference, preserved when pitches are edited)",
         "number_of_abseils": "int (optional)",
         "total_length": "float in m (optional)",
         "number_of_setups": "int (optional)",
@@ -4495,6 +4502,57 @@ async def get_template(
         )
 
 
+@mcp_unified_error_handler("get_journal_template", "journal")
+async def get_journal_template(
+    journal_id: Annotated[int, Field(description="Journal id")],
+    user_id: str = mcp_depends(get_current_user_id),
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+) -> str:
+    """
+    Retrieve the activity template an abseiling-derived journal was created from.
+
+    Returns the referenced template (including its own standard pitches) for any
+    abseiling-derived journal (ABSEILING_TRIP / CANYONING / CLIMBING / CAVING),
+    reading the consolidated ``abseiling_data.template_id``. The template's
+    standard pitches are returned even when the journal's own pitches have been
+    edited. ``has_template`` is false when the journal has no template reference
+    (or is not abseiling-derived).
+    """
+    repos = _create_journal_tool_repositories(db_connection)
+
+    journal = await repos.journal_repo.find_by_id(journal_id)
+    if not journal or journal.user_id != user_id:
+        return MCPResponseBuilder.not_found_error_response("Journal", journal_id)
+
+    abseiling_data = await repos.abseiling_data_repo.find_by_journal_id(journal_id)
+    template = None
+    if abseiling_data is not None and abseiling_data.template_id is not None:
+        candidate = await repos.activity_template_repo.find_by_id(
+            str(abseiling_data.template_id)
+        )
+        if candidate is not None and candidate.user_id == user_id:
+            template = candidate
+
+    if template is None:
+        return MCPResponseBuilder.success_response(
+            JournalTemplateMCPResponse(
+                journal_id=journal_id,
+                has_template=False,
+                template=None,
+                summary=f"Journal {journal_id} has no template reference.",
+            )
+        )
+
+    return MCPResponseBuilder.success_response(
+        JournalTemplateMCPResponse(
+            journal_id=journal_id,
+            has_template=True,
+            template=ActivityTemplateMCPConverter.to_mcp_response(template),
+            summary=f"Journal {journal_id} based on template: {template.name}.",
+        )
+    )
+
+
 @mcp_unified_error_handler("search_templates", "journal")
 async def search_templates(
     template_type: Annotated[
@@ -4843,6 +4901,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
     mcp.add_tool(get_daily_summary)
     mcp.add_tool(create_template)
     mcp.add_tool(get_template)
+    mcp.add_tool(get_journal_template)
     mcp.add_tool(search_templates)
     mcp.add_tool(update_template)
     mcp.add_tool(create_gear_item)

@@ -493,6 +493,7 @@ class TypeDataConverter:
             ]
 
         return AbseilingDataSchema(
+            template_id=str(data.template_id) if data.template_id else None,
             number_of_abseils=data.number_of_abseils,
             total_length=data.total_length,
             number_of_setups=data.number_of_setups,

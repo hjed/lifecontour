@@ -195,6 +195,9 @@ _TYPE_DATA_TRACKED_FIELDS: dict[JournalType, tuple[str, ...]] = {
     # Abseiling tracks its trip-level scalars; per-pitch (AbseilPitch) history is
     # a nested collection deferred to Phase 4.
     JournalType.ABSEILING_TRIP: (
+        # Consolidated template reference for all abseiling-derived journals
+        # (ITER16-001); tracked here since it is co-located with the pitch data.
+        "template_id",
         "number_of_abseils",
         "total_length",
         "number_of_setups",

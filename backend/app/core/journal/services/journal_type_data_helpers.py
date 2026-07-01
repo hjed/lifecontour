@@ -736,6 +736,13 @@ async def update_abseiling_type_data(
     # Build update kwargs and use dataclasses.replace() to trigger __post_init__ validation.
     # Validate types eagerly so mismatches return 400 rather than an unhandled TypeError.
     updates: dict[str, Any] = {}
+    # The consolidated template reference (ITER16-001) lives here for every
+    # abseiling-derived journal. Only touched when supplied, so a pitch-only edit
+    # preserves it (read-modify-write via dataclasses.replace below).
+    if "template_id" in attrs:
+        updates["template_id"] = parse_optional_uuid(
+            attrs["template_id"], "template_id"
+        )
     if "number_of_abseils" in attrs:
         updates["number_of_abseils"] = parse_optional_integer(
             attrs["number_of_abseils"], "number_of_abseils"
