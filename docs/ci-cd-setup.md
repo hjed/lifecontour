@@ -21,6 +21,12 @@ The CI/CD pipeline is implemented using GitHub Actions and includes:
 **Jobs:**
 - `backend-lint`: Runs Ruff, Black, and MyPy on Python code
 - `backend-test`: Runs pytest with PostgreSQL service
+- `core-shared-unit-test`: Runs the `core_shared` unit suite (includes the worker
+  tooling-standardisation governance test); runs on every PR
+- `worker-lint`: Per-worker matrix — `ruff check`, `ruff format --check`, and
+  `mypy --config-file ../../mypy.ini .` against the shared tooling config
+- `worker-unit-test` / `worker-integration-test`: Per-worker matrix running
+  `pytest -c ../../pytest.ini --rootdir . tests/unit|integration/`
 - `frontend-lint`: Runs ESLint, TypeScript check, and Prettier
 - `frontend-test`: Runs Jest tests with coverage
 - `build-test`: Tests Docker builds for both components
@@ -30,6 +36,16 @@ The CI/CD pipeline is implemented using GitHub Actions and includes:
 - Dependency caching for improved performance
 - Coverage reporting to Codecov
 - PostgreSQL service for integration tests
+- **Shared worker tooling:** worker `ruff`/`mypy`/`pytest` config lives once at the repo
+  root (`ruff.toml`, `mypy.ini`, `pytest.ini`) and every worker inherits it, so the
+  quality gates behave identically across workers. The worker `paths-filter` blocks include
+  these shared files so a change to them re-runs the dependent worker jobs. See
+  [Code Quality Standards → Shared Worker Tooling Configuration](code-quality-standards.md#shared-worker-tooling-configuration).
+- **Canonical worker Dockerfile:** all workers build from the same template
+  (`FROM pms-python-base`, copy `pyproject.toml` then source, `uv pip install --system
+  --no-cache-dir --no-sources .`, Redis-ping `HEALTHCHECK` via `os.environ['REDIS_URL']`,
+  `USER appuser`, `CMD ["python", "worker.py"]`). See
+  [Integration Architecture → Canonical Worker Dockerfile](architecture/integration-architecture.md#canonical-worker-dockerfile).
 
 ### 2. Security Scanning (`.github/workflows/security.yml`)
 

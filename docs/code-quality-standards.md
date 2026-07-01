@@ -40,6 +40,25 @@ uv run ruff format --check . # Formatting verification
 uv run mypy .                # Type checking
 ```
 
+### Integration Workers (Python)
+
+Every worker (`integration_workers/{google,immich,strava,snipeit}`) shares one
+tooling configuration defined at the repo root, so `ruff`, `mypy`, and `pytest`
+behave identically across workers. Run the checks from the worker directory,
+pointing `mypy`/`pytest` at the shared config files:
+
+```bash
+cd integration_workers/<worker>
+uv run ruff check .                                          # inherits ../../ruff.toml (via [tool.ruff] extend)
+uv run ruff format --check .
+uv run mypy --config-file ../../mypy.ini .                   # shared strict mypy config
+uv run pytest -c ../../pytest.ini --rootdir . tests/unit/    # shared pytest config
+uv run pytest -c ../../pytest.ini --rootdir . tests/integration/
+```
+
+See [Shared Worker Tooling Configuration](#shared-worker-tooling-configuration)
+for how this is wired.
+
 ### Frontend (TypeScript/React)
 
 ```bash
@@ -56,6 +75,45 @@ pnpm format:check     # Prettier formatting verification
 - Validate YAML/JSON/TOML syntax
 - Check for merge conflict markers
 - Prevent large files (>1MB) from being committed
+
+## Shared Worker Tooling Configuration
+
+The four integration workers previously each repeated the same `ruff`, `mypy`,
+`pytest`, and `coverage` configuration in their own `pyproject.toml`, which drifts
+over time. That configuration is now **defined once at the repo root and inherited
+by every worker**, so linting, type-checking, and test settings change in one place.
+
+| Tool | Shared source (repo root) | How a worker consumes it |
+| --- | --- | --- |
+| ruff | `ruff.toml` | `[tool.ruff]` in the worker `pyproject.toml` sets `extend = "../../ruff.toml"` (ruff's native inheritance). |
+| mypy | `mypy.ini` | Invoked with `mypy --config-file ../../mypy.ini .` — mypy has no config inheritance and does not walk up directories, so the flag is **mandatory**. |
+| pytest | `pytest.ini` | Invoked with `pytest -c ../../pytest.ini --rootdir . …` — `-c` selects the shared config; `--rootdir .` pins rootdir back to the worker so node IDs stay worker-relative. |
+
+Notes:
+
+- **`mypy.ini`** carries the strict flag set plus `explicit_package_bases = true`
+  (which makes the worker's current directory an automatic package base — no
+  per-worker `mypy_path` needed). It also holds the third-party `ignore_missing_imports`
+  overrides (`google.*`, `googleapiclient.*`, `redis.*`); these are inert for workers
+  that don't import those modules, so one shared file is safe.
+- **Worker `pyproject.toml`** keeps only what is genuinely worker-specific: `[project]`
+  dependencies, `[tool.uv.sources]`/`[tool.uv]`, `[dependency-groups]`, `[build-system]`,
+  and a `[tool.ruff]` block (`extend` + `target-version`) with a small
+  `[tool.ruff.lint.extend-per-file-ignores]` (ruff anchors per-file-ignore globs to the
+  config file's directory, so the root patterns cannot reach the worker's `tests/`).
+- **Dev tooling versions** — the `[dependency-groups] dev` set
+  (`pytest`, `pytest-asyncio`, `ruff`, `mypy`) is intentionally kept identical in each
+  worker: `uv` cannot share dependency groups across projects without a workspace, and a
+  workspace would neither share `[tool.*]` config nor play well with the workers'
+  standalone `uv pip install --no-sources .` Docker builds. This is the canonical dev set.
+- **Coverage** config was removed from the workers — CI never runs `--cov` for a worker,
+  so it was dead configuration (coverage.py does not read `pytest.ini`; add a root
+  `.coveragerc` only if worker coverage is ever needed).
+
+A governance test (`core_shared/tests/unit/test_worker_tooling_standardisation.py`) runs on
+every PR and asserts the workers keep this shape (no inline `mypy`/`pytest`/`coverage`
+config, `ruff` extends the shared file, `requires-python == ">=3.14"`, and the canonical
+`Dockerfile` pattern), so the duplication cannot silently return.
 
 ## Python Language Rules
 

@@ -570,6 +570,53 @@ Strava uses a push subscription model for real-time event delivery. The system i
 - PostgreSQL for data storage
 - Docker Compose orchestration
 
+### Canonical Worker Dockerfile
+
+Every integration worker builds from the **same canonical Dockerfile template** so a new
+worker copies a known-good pattern rather than an arbitrary existing one. All four workers
+(`google`, `immich`, `strava`, `snipeit`) conform to it:
+
+```dockerfile
+# <Worker> Integration Worker
+# Extends the shared python-base image which provides:
+#   - Python 3.14, system deps, uv, core_shared, and the appuser account
+
+FROM pms-python-base
+
+# Copy worker pyproject.toml for dependency caching
+COPY ./integration_workers/<worker>/pyproject.toml .
+
+# Copy worker source code before install so the package is complete
+COPY ./integration_workers/<worker>/ .
+RUN uv pip install --system --no-cache-dir --no-sources .
+
+# Health check — uses shell form so $REDIS_URL is expanded at runtime
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import redis, os; r=redis.Redis.from_url(os.environ['REDIS_URL']); r.ping()" || exit 1
+
+# Switch to non-root user
+USER appuser
+
+# Run the ARQ worker
+CMD ["python", "worker.py"]
+```
+
+Key invariants (enforced by
+`core_shared/tests/unit/test_worker_tooling_standardisation.py`):
+
+- **`FROM pms-python-base`** — the shared base image supplies Python 3.14, system deps, `uv`,
+  the `core_shared` package, and the non-root `appuser` account.
+- **Copy `pyproject.toml`, then the source, then `uv pip install … --no-sources .`** — the
+  source must be present before install so the worker package is actually installed (rather
+  than an empty wheel).
+- **Redis-ping `HEALTHCHECK`** via `os.environ['REDIS_URL']` (not a bare `${REDIS_URL}`).
+- **`USER appuser`** — run as non-root.
+- **`CMD ["python", "worker.py"]`** — start the ARQ consumer.
+
+The tooling configuration these images build against
+(`ruff.toml`/`mypy.ini`/`pytest.ini`) is shared at the repo root — see
+[Code Quality Standards → Shared Worker Tooling Configuration](../code-quality-standards.md#shared-worker-tooling-configuration).
+
 ### Docker Compose Structure
 
 ```yaml

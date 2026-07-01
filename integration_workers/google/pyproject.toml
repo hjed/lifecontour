@@ -62,85 +62,18 @@ packages = ["."]
 extend = "../../ruff.toml"
 target-version = "py312"
 
+# ruff per-file-ignores globs are anchored to this config file's directory, so
+# the worker restates its test-dir ignores (the root ruff.toml patterns are
+# anchored to the repo root and do not match the worker's tests/).
 [tool.ruff.lint.extend-per-file-ignores]
 "tests/**/*" = ["B011", "DTZ"]
 "tests/**/conftest.py" = ["E402"]
 "tests/conftest.py" = ["E402"]
 
-[tool.mypy]
-python_version = "3.14"
-plugins = [
-    "pydantic.mypy"
-]
-check_untyped_defs = true
-disallow_any_generics = true
-disallow_incomplete_defs = true
-disallow_untyped_defs = true
-no_implicit_optional = true
-warn_redundant_casts = true
-warn_unused_ignores = true
-warn_return_any = true
-strict_equality = true
-
-[tool.pydantic-mypy]
-init_forbid_extra = true
-init_typed = true
-warn_required_dynamic_aliases = true
-
-
-[[tool.mypy.overrides]]
-module = [
-    "google.*",
-    "googleapiclient.*",
-    "redis.*",
-]
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = "tests.*"
-disallow_untyped_defs = false
-check_untyped_defs = false
-ignore_errors = true
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = ["test_*.py", "*_test.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
-addopts = [
-    "--strict-markers",
-    "--strict-config",
-    "--verbose",
-]
-markers = [
-    "unit: marks tests as unit tests",
-    "integration: marks tests as integration tests",
-    "asyncio: marks tests as async tests",
-]
-
-[tool.coverage.run]
-source = ["."]
-omit = [
-    "*/tests/*",
-    "*/__init__.py",
-]
-
-[tool.coverage.report]
-exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "raise AssertionError",
-    "raise NotImplementedError",
-    "if 0:",
-    "if __name__ == .__main__.:",
-    "class .*\\bProtocol\\):",
-    "@(abc\\.)?abstractmethod",
-]
-
-
-
-
-
+# Tooling config (mypy, pytest, coverage) is shared once at the repo root:
+#   ruff.toml (via extend above), mypy.ini, pytest.ini.
+# Workers consume mypy.ini/pytest.ini via explicit CLI flags — see
+# docs/code-quality-standards.md.
 
 [tool.uv]
 override-dependencies = ["redis>=8.0.0"]

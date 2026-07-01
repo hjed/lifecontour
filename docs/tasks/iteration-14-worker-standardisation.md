@@ -600,15 +600,28 @@ Migrate each worker's `tests/conftest.py` / `tests/integration/conftest.py` to i
 - **Local quality gates green:** `core_shared` — ruff format/check, mypy (84 files), 340 pytest. Each worker — ruff format/check, mypy, and full suites: google 337 unit / 59 (+1 skip) integration; immich 208 / 46; strava 204 / 30; snipeit 182 / 21. Unit counts unchanged from baseline (only the 4 smoke tests added per the integration dir).
 
 #### Phase 3: Shared tooling config + canonical Dockerfile
+**Status:** ✅ Complete (branch `iter14-005-3-shared-tooling`)
+
 **PR Size:** ~300 lines (shared config ~120, per-worker pyproject trims ~120, docs ~60)
 
 **Acceptance Criteria:**
-- [ ] A shared base tooling configuration (ruff, mypy, pytest, dev dependency set, Python `>=3.14`) is defined once and inherited by all four workers; per-worker `pyproject.toml` no longer repeats it.
-- [ ] `pnpm`/`uv` quality checks (`ruff`, `mypy`, `pytest`) behave identically across workers.
-- [ ] The canonical worker Dockerfile pattern (`FROM pms-python-base`, uv install, Redis-ping `HEALTHCHECK`, `appuser`, `CMD ["python", "worker.py"]`) is documented and all four workers conform.
+- [x] A shared base tooling configuration (ruff, mypy, pytest, dev dependency set, Python `>=3.14`) is defined once and inherited by all four workers; per-worker `pyproject.toml` no longer repeats it. — `ruff.toml` (via `extend`), new root `mypy.ini` + `pytest.ini`; workers trimmed to `[project]`/deps/`[tool.uv]`/`[tool.ruff]` only. Dev-dep set kept identical per worker (uv cannot share dependency groups without a workspace; documented as canonical).
+- [x] `pnpm`/`uv` quality checks (`ruff`, `mypy`, `pytest`) behave identically across workers. — CI + local invoke `mypy --config-file ../../mypy.ini .` and `pytest -c ../../pytest.ini --rootdir . …`; behaviour unchanged.
+- [x] The canonical worker Dockerfile pattern (`FROM pms-python-base`, uv install, Redis-ping `HEALTHCHECK`, `appuser`, `CMD ["python", "worker.py"]`) is documented and all four workers conform. — `google` Dockerfile normalised (HEALTHCHECK `os.environ['REDIS_URL']`, copy-source-before-install); pattern documented in integration-architecture.md.
 
 **Required Test Coverage:**
 - **Integration:** each worker's suite and quality gates run green against the shared tooling config.
+
+**Implementation note (shared-file mechanism):** mypy and pytest have no config inheritance in
+`pyproject.toml` (unlike ruff's `extend`), and the repo is not a uv workspace, so the shared
+config lives in standalone root files (`mypy.ini`, `pytest.ini`) consumed via explicit CLI flags.
+A governance unit test (`core_shared/tests/unit/test_worker_tooling_standardisation.py`, runs on
+every PR) enforces that workers stay trimmed and Dockerfiles stay canonical.
+
+- **Local quality gates green:** conformance test — 44 passed. Each worker — ruff check/format,
+  `mypy --config-file ../../mypy.ini .`, and full suites: google 337 unit / 59 (+1 skip)
+  integration; immich 208 / 46; strava 204 / 30; snipeit 202 / 27. core_shared — ruff/mypy/format
+  clean, 384 unit passed.
 
 **Required Documentation Updates:**
 - `docs/code-quality-standards.md` — document the shared tooling configuration and how workers inherit it.
