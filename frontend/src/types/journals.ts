@@ -213,6 +213,7 @@ export enum ActivityTemplateType {
   CANYONING = 'canyoning',
   CAVING = 'caving',
   CLIMBING = 'climbing',
+  ABSEILING = 'abseiling',
 }
 
 export interface TemplatePitch {
@@ -283,6 +284,10 @@ export interface ActivityTemplateUpdateRequest {
 }
 
 export interface AbseilingData {
+  // Consolidated durable reference to the template this activity was based on.
+  // Preserved across pitch edits; the single source of truth for all
+  // abseiling-derived journals (see ITER16-001).
+  template_id?: string | null;
   number_of_abseils?: number | null;
   total_length?: number | null; // total length in metres
   number_of_setups?: number | null;
@@ -291,7 +296,6 @@ export interface AbseilingData {
 }
 
 export interface CanyoningData {
-  template_id?: string | null;
   french_grade?: string | null; // French canyoning grade
   water_guage_name?: string | null; // Name of the water gauge
   water_guage_level?: number | null; // Water gauge reading
@@ -301,7 +305,6 @@ export interface CanyoningData {
 }
 
 export interface CavingData {
-  template_id?: string | null;
   is_vertical?: boolean | null;
   is_horizontal?: boolean | null;
 }
@@ -311,7 +314,6 @@ export interface CanoeingData {
 }
 
 export interface ClimbingData {
-  template_id?: string | null;
   climbing_type?: string | null; // e.g. sport, trad, bouldering, top_rope
   grade?: number | null;
   length?: number | null; // length in metres

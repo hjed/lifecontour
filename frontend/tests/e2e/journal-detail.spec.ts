@@ -1441,3 +1441,98 @@ test.describe('Journal Detail Page', () => {
     });
   });
 });
+
+test.describe('Journal Detail Page - Template Reference', () => {
+  test('shows the template reference and keeps it after editing a pitch height and reloading', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+    const dataManager = new TestDataManager(page);
+
+    // 1. Create a template (with standard pitches) to reference.
+    const templateName = `E2E Abseil Template ${Date.now()}`;
+    const templateRes = await page.request.post('/api/templates', {
+      data: {
+        data: {
+          type: 'activity-templates',
+          attributes: {
+            name: templateName,
+            template_type: 'canyoning',
+            region: 'Blue Mountains',
+            pitches: [
+              { pitch_number: 1, height: 25 },
+              { pitch_number: 2, height: 40 },
+            ],
+          },
+        },
+      },
+    });
+    expect(templateRes.ok()).toBeTruthy();
+    const template = await templateRes.json();
+    const templateId = template.data.id as string;
+
+    // 2. Create an abseiling-derived journal that references the template on the
+    //    consolidated abseiling block (as the create-from-template flow does).
+    const journal = await dataManager.createJournal({
+      title: 'Abseil From Template',
+      content: 'Abseiling trip based on a template',
+      event_date_range: {
+        start: '2026-02-01T00:00:00Z',
+        end: '2026-02-01T00:00:00Z',
+      },
+      types: [JournalType.ABSEILING_TRIP],
+      type_data: {
+        [JournalType.ABSEILING_TRIP]: {
+          template_id: templateId,
+          number_of_abseils: 2,
+          total_length: 65,
+          pitches: [
+            { pitch_number: 1, height: 25 },
+            { pitch_number: 2, height: 40 },
+          ],
+        },
+      },
+    });
+
+    // 3. The detail view shows "Based on: <template>" linking to the settings
+    //    templates section.
+    await page.goto(`/journals/${journal.id}`);
+    await expect(page.getByTestId('journal-title-field')).toBeVisible();
+
+    const reference = page.getByRole('link', { name: /based on/i });
+    await expect(reference).toBeVisible();
+    await expect(reference).toContainText(templateName);
+    await expect(reference).toHaveAttribute('href', '/settings#templates');
+
+    // 4. Edit a pitch height through the UI.
+    await page.getByTestId('type-section-trigger-abseiling_trip').click();
+    const section = page.getByTestId('type-section-abseiling_trip');
+    await section.getByTestId('edit-button').click();
+
+    const pitchHeight = section.getByLabel('Height for pitch 1');
+    await expect(pitchHeight).toBeVisible();
+    await pitchHeight.fill('99');
+
+    await Promise.all([
+      page.waitForResponse(
+        resp =>
+          resp.url().includes(`/api/journals/${journal.id}`) &&
+          ['PUT', 'PATCH'].includes(resp.request().method()) &&
+          resp.ok()
+      ),
+      section.getByTestId('save-button').click(),
+    ]);
+
+    // 5. After a reload the durable template reference is still shown.
+    await page.reload();
+    await expect(page.getByTestId('journal-title-field')).toBeVisible();
+
+    const referenceAfterReload = page.getByRole('link', { name: /based on/i });
+    await expect(referenceAfterReload).toBeVisible();
+    await expect(referenceAfterReload).toContainText(templateName);
+    await expect(referenceAfterReload).toHaveAttribute(
+      'href',
+      '/settings#templates'
+    );
+  });
+});

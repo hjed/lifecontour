@@ -606,6 +606,9 @@ export function JournalCreateForm({
           ...prev,
           [JournalType.ABSEILING_TRIP]: {
             ...(prev[JournalType.ABSEILING_TRIP] || {}),
+            // Durable template reference lives on the consolidated abseiling
+            // block for all abseiling-derived journals (ITER16-001).
+            template_id: template.id,
             pitches,
             number_of_abseils,
             total_length,
@@ -1036,6 +1039,7 @@ export function JournalCreateForm({
                         createMode
                         data={typeData[JournalType.ABSEILING_TRIP]}
                         onChange={handleAbseilingTripChange}
+                        onTemplateSelect={handleTemplateSelect}
                       />
                     )}
                     {type === JournalType.CANYONING && (

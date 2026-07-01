@@ -77,6 +77,44 @@ jest.mock('next/navigation', () => ({
   }),
 }));
 
+// Mock the template selector so the consolidated-write test can select a
+// template deterministically without exercising the templates query/combobox.
+jest.mock('@/components/journals/type-editors/TemplateSelector', () => ({
+  TemplateSelector: ({
+    onSelect,
+    templateType,
+  }: {
+    onSelect: (template: {
+      id: string;
+      type: string;
+      attributes: Record<string, unknown>;
+    }) => void;
+    templateType: string;
+  }) => (
+    <button
+      type='button'
+      data-testid={`mock-template-selector-${templateType}`}
+      onClick={() =>
+        onSelect({
+          id: 'tpl-consolidated-1',
+          type: 'activity-templates',
+          attributes: {
+            name: 'Test Canyon Template',
+            template_type: templateType,
+            french_grade: 'v4a3IV',
+            pitches: [
+              { pitch_number: 1, height: 30 },
+              { pitch_number: 2, height: 15 },
+            ],
+          },
+        })
+      }
+    >
+      Select Template
+    </button>
+  ),
+}));
+
 // Ensure tests don't timeout during full test suite runs, as this component
 // renders many child components and can be slow in JSDOM.
 jest.setTimeout(15000);
@@ -629,6 +667,45 @@ describe('JournalCreateForm', () => {
           })
         );
       });
+    });
+
+    it('persists template_id onto the consolidated abseiling block when a template is selected for CANYONING', async () => {
+      const user = userEvent.setup();
+      mockMutateAsync.mockResolvedValueOnce({
+        data: { id: '9', type: 'journals', attributes: {} },
+      });
+
+      renderWithClient(<JournalCreateForm />);
+
+      await user.type(screen.getByLabelText(/title/i), 'Templated Canyon');
+      await user.click(screen.getByLabelText(/^canyoning$/i));
+
+      await user.click(screen.getByTestId('mock-template-selector-canyoning'));
+
+      await user.click(screen.getByRole('button', { name: /create journal/i }));
+
+      await waitFor(() => {
+        expect(mockMutateAsync).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type_data: expect.objectContaining({
+              [JournalType.ABSEILING_TRIP]: expect.objectContaining({
+                template_id: 'tpl-consolidated-1',
+                number_of_abseils: 2,
+                total_length: 45,
+              }),
+            }),
+          })
+        );
+      });
+
+      // The consolidated abseiling block is the sole home for template_id; the
+      // canyoning block must not carry its own template_id.
+      const submitted = mockMutateAsync.mock.calls[0][0] as {
+        type_data: Record<string, Record<string, unknown>>;
+      };
+      expect(
+        submitted.type_data[JournalType.CANYONING]?.template_id
+      ).toBeUndefined();
     });
 
     it('includes abseiling data in type_data when ABSEILING_TRIP is selected', async () => {

@@ -111,11 +111,12 @@ export function CavingTypeEditor({
   };
 
   const handleTemplateSelection = (template: ActivityTemplateResource) => {
-    // Update local caving data fields that the template provides
+    // Update local caving data fields that the template provides. The durable
+    // template reference itself is stored only on the consolidated abseiling
+    // block (via onTemplateSelect), never on the caving block.
     setEditData(prev => {
       const next = {
         ...prev,
-        template_id: template.id,
       };
       if (template.attributes.is_vertical != null) {
         next.is_vertical = template.attributes.is_vertical;

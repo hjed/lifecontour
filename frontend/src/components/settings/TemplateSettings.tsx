@@ -96,7 +96,7 @@ export function TemplateSettings() {
 
   return (
     <>
-      <Card>
+      <Card id='templates' className='scroll-mt-20'>
         <CardHeader className='flex flex-row items-center justify-between'>
           <div>
             <CardTitle className='flex items-center gap-2'>

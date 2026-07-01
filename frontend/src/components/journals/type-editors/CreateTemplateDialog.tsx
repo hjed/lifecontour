@@ -198,6 +198,9 @@ function CreateTemplateDialogContent({
                     <SelectItem value={ActivityTemplateType.CLIMBING}>
                       Climbing
                     </SelectItem>
+                    <SelectItem value={ActivityTemplateType.ABSEILING}>
+                      Abseiling
+                    </SelectItem>
                   </SelectContent>
                 </Select>
                 <FormMessage />

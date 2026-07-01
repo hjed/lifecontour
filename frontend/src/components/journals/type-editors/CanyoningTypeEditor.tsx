@@ -202,11 +202,12 @@ export function CanyoningTypeEditor({
   };
 
   const handleTemplateSelection = (template: ActivityTemplateResource) => {
-    // Update local canyoning data fields that the template provides
+    // Update local canyoning data fields that the template provides. The
+    // durable template reference itself is stored only on the consolidated
+    // abseiling block (via onTemplateSelect), never on the canyoning block.
     setEditData(prev => {
       const next = {
         ...prev,
-        template_id: template.id,
       };
       if (template.attributes.french_grade) {
         next.french_grade = template.attributes.french_grade;

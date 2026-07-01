@@ -87,6 +87,30 @@ describe('ClimbingTypeEditor', () => {
     );
   });
 
+  it('does not write template_id onto the climbing block when a template is selected', async () => {
+    const user = userEvent.setup();
+    const onChange = jest.fn();
+
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <ClimbingTypeEditor createMode={true} onChange={onChange} />
+      </QueryClientProvider>
+    );
+
+    await user.click(screen.getByTestId('mock-template-selector'));
+
+    await waitFor(() => {
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({ climbing_type: 'sport', grade: 21 })
+      );
+    });
+    // template_id is now stored only on the consolidated abseiling block, never
+    // on the per-subtype climbing block.
+    expect(onChange).not.toHaveBeenCalledWith(
+      expect.objectContaining({ template_id: expect.anything() })
+    );
+  });
+
   it('reports indoor via onChange when the indoor toggle is switched on in create mode', async () => {
     const user = userEvent.setup();
     const onChange = jest.fn();

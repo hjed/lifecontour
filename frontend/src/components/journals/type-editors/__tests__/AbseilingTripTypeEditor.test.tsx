@@ -1,5 +1,47 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { AbseilingTripTypeEditor } from '../AbseilingTripTypeEditor';
+import {
+  ActivityTemplateType,
+  type ActivityTemplateResource,
+} from '@/types/journals';
+
+// The template selector is exercised through its own tests; mock it here so the
+// abseiling editor tests do not depend on the templates query.
+jest.mock('../TemplateSelector', () => ({
+  TemplateSelector: ({
+    onSelect,
+    templateType,
+  }: {
+    onSelect: (template: ActivityTemplateResource) => void;
+    templateType: ActivityTemplateType;
+  }) => (
+    <button
+      data-testid='mock-template-selector'
+      data-template-type={templateType}
+      onClick={() =>
+        onSelect({
+          id: 'template-abseil-1',
+          type: 'activity-templates',
+          attributes: {
+            name: 'Claustral Canyon',
+            template_type: templateType,
+            pitches: [
+              { pitch_number: 1, height: 20 },
+              { pitch_number: 2, height: 30 },
+            ],
+          },
+        })
+      }
+    >
+      Select Template
+    </button>
+  ),
+}));
+
+jest.mock('../CreateTemplateDialog', () => ({
+  CreateTemplateDialog: () => <div data-testid='mock-create-template-dialog' />,
+}));
 
 describe('AbseilingTripTypeEditor', () => {
   it('renders abseil count and total length inputs in create mode', () => {
@@ -44,5 +86,37 @@ describe('AbseilingTripTypeEditor', () => {
       number_of_abseils: 4,
       total_length: 120,
     });
+  });
+
+  it('renders an abseiling template selector in create mode', () => {
+    render(<AbseilingTripTypeEditor createMode={true} />);
+
+    const selector = screen.getByTestId('mock-template-selector');
+    expect(selector).toBeInTheDocument();
+    expect(selector).toHaveAttribute(
+      'data-template-type',
+      ActivityTemplateType.ABSEILING
+    );
+  });
+
+  it('calls onTemplateSelect with the selected template', async () => {
+    const user = userEvent.setup();
+    const onTemplateSelect = jest.fn();
+
+    render(
+      <AbseilingTripTypeEditor
+        createMode={true}
+        onTemplateSelect={onTemplateSelect}
+      />
+    );
+
+    await user.click(screen.getByTestId('mock-template-selector'));
+
+    expect(onTemplateSelect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'template-abseil-1',
+        attributes: expect.objectContaining({ name: 'Claustral Canyon' }),
+      })
+    );
   });
 });

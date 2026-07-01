@@ -95,10 +95,11 @@ export function ClimbingTypeEditor({
   };
 
   const handleTemplateSelection = (template: ActivityTemplateResource) => {
+    // The durable template reference is stored only on the consolidated
+    // abseiling block (via onTemplateSelect), never on the climbing block.
     setEditData(prev => {
       const next = {
         ...prev,
-        template_id: template.id,
       };
       if (template.attributes.climbing_type) {
         next.climbing_type = template.attributes.climbing_type;

@@ -1,6 +1,48 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { CanyoningTypeEditor } from '../CanyoningTypeEditor';
+import {
+  ActivityTemplateType,
+  type ActivityTemplateResource,
+} from '@/types/journals';
+
+jest.mock('../TemplateSelector', () => ({
+  TemplateSelector: ({
+    onSelect,
+    templateType,
+  }: {
+    onSelect: (template: ActivityTemplateResource) => void;
+    templateType: ActivityTemplateType;
+  }) => (
+    <button
+      data-testid='mock-template-selector'
+      onClick={() =>
+        onSelect({
+          id: 'template-canyon-1',
+          type: 'activity-templates',
+          attributes: {
+            name: 'Empress Canyon',
+            template_type: templateType,
+            french_grade: 'v4a3IV',
+          },
+        })
+      }
+    >
+      Select Template
+    </button>
+  ),
+}));
+
+jest.mock('../CreateTemplateDialog', () => ({
+  CreateTemplateDialog: () => <div data-testid='mock-create-template-dialog' />,
+}));
 
 const createTestQueryClient = () =>
   new QueryClient({
@@ -138,6 +180,39 @@ describe('CanyoningTypeEditor', () => {
     expect(
       screen.queryByText(/use format v3a2iv\*\*/i)
     ).not.toBeInTheDocument();
+  });
+
+  it('populates fields and calls onTemplateSelect but does not write template_id onto the canyoning block', async () => {
+    const user = userEvent.setup();
+    const handleChange = jest.fn();
+    const onTemplateSelect = jest.fn();
+    const queryClient = createTestQueryClient();
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <CanyoningTypeEditor
+          createMode={true}
+          onChange={handleChange}
+          onTemplateSelect={onTemplateSelect}
+        />
+      </QueryClientProvider>
+    );
+
+    await user.click(screen.getByTestId('mock-template-selector'));
+
+    await waitFor(() => {
+      expect(handleChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({ french_grade: 'v4a3IV' })
+      );
+    });
+
+    expect(onTemplateSelect).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'template-canyon-1' })
+    );
+    // template_id now lives only on the consolidated abseiling block.
+    expect(handleChange).not.toHaveBeenCalledWith(
+      expect.objectContaining({ template_id: expect.anything() })
+    );
   });
 
   it('renders view mode with canyoning summary values', () => {
