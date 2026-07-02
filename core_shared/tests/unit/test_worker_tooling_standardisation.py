@@ -113,11 +113,16 @@ class TestWorkerDockerfileCanonical:
 
     def test_copy_before_install(self, worker: str) -> None:
         content = _read_dockerfile(worker)
-        pyproject_copy = content.index(
+        # Use find() (not index()) so a missing marker fails as a readable
+        # assertion rather than a raised ValueError.
+        pyproject_copy = content.find(
             f"COPY ./integration_workers/{worker}/pyproject.toml"
         )
-        source_copy = content.index(f"COPY ./integration_workers/{worker}/ .")
-        install = content.index("uv pip install --system --no-cache-dir --no-sources .")
+        source_copy = content.find(f"COPY ./integration_workers/{worker}/ .")
+        install = content.find("uv pip install --system --no-cache-dir --no-sources .")
+        assert pyproject_copy != -1, f"{worker}: missing COPY of pyproject.toml"
+        assert source_copy != -1, f"{worker}: missing COPY of worker source"
+        assert install != -1, f"{worker}: missing 'uv pip install … --no-sources .'"
         assert pyproject_copy < source_copy < install, (
             f"{worker}: must COPY pyproject, then source, then install"
         )

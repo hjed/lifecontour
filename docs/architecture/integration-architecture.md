@@ -590,7 +590,7 @@ COPY ./integration_workers/<worker>/pyproject.toml .
 COPY ./integration_workers/<worker>/ .
 RUN uv pip install --system --no-cache-dir --no-sources .
 
-# Health check — uses shell form so $REDIS_URL is expanded at runtime
+# Health check — Python reads REDIS_URL from the environment at runtime
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import redis, os; r=redis.Redis.from_url(os.environ['REDIS_URL']); r.ping()" || exit 1
 

@@ -86,7 +86,7 @@ by every worker**, so linting, type-checking, and test settings change in one pl
 | Tool | Shared source (repo root) | How a worker consumes it |
 | --- | --- | --- |
 | ruff | `ruff.toml` | `[tool.ruff]` in the worker `pyproject.toml` sets `extend = "../../ruff.toml"` (ruff's native inheritance). |
-| mypy | `mypy.ini` | Invoked with `mypy --config-file ../../mypy.ini .` — mypy has no config inheritance and does not walk up directories, so the flag is **mandatory**. |
+| mypy | `mypy.ini` | Invoked with `mypy --config-file ../../mypy.ini .` — the flag is passed for **deterministic** resolution. (mypy would also find this file by searching parent directories, since the worker's `pyproject.toml` no longer has a `[tool.mypy]` table, but the explicit flag keeps resolution independent of CWD and any intervening config.) |
 | pytest | `pytest.ini` | Invoked with `pytest -c ../../pytest.ini --rootdir . …` — `-c` selects the shared config; `--rootdir .` pins rootdir back to the worker so node IDs stay worker-relative. |
 
 Notes:
