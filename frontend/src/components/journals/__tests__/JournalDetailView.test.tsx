@@ -6,9 +6,11 @@
 
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { JournalDetailView } from '../JournalDetailView';
 import {
   createMockJournalWithMetadata,
+  createTestQueryClient,
   renderWithQueryClient,
 } from '../test-helpers';
 import { JournalType } from '@/types/journals';
@@ -354,6 +356,47 @@ describe('JournalDetailView', () => {
         journalType: JournalType.GEAR_USAGE,
         typeData: { gear_item_id: 'gear-1' },
       });
+    });
+
+    it('keeps the section visible after save until the refetch persists it', async () => {
+      const user = userEvent.setup();
+      // Simulate a successful-but-not-yet-refetched add: the mutation resolves
+      // but journal.types has not updated yet.
+      mockAddType.mockResolvedValueOnce(undefined);
+      renderWithQueryClient(<JournalDetailView journal={mockJournal} />);
+
+      await user.click(screen.getByTestId('add-gear-usage'));
+      await user.click(screen.getByTestId('type-section-save-gear_usage'));
+
+      // The pending section must not disappear during the invalidate → refetch
+      // window, otherwise it looks like the save failed.
+      expect(screen.getByTestId('type-section-gear_usage')).toBeInTheDocument();
+    });
+
+    it('does not duplicate the section once the journal reports it persisted', async () => {
+      const user = userEvent.setup();
+      const { rerender } = renderWithQueryClient(
+        <JournalDetailView journal={mockJournal} />
+      );
+
+      await user.click(screen.getByTestId('add-gear-usage'));
+      await user.click(screen.getByTestId('type-section-save-gear_usage'));
+
+      // The refetch lands: the journal now carries the persisted gear usage type.
+      const persistedJournal = {
+        ...mockJournal,
+        types: [JournalType.NOTE, JournalType.GEAR_USAGE],
+        type_data: { gear_usage: { gear_item_id: 'gear-1' } },
+      };
+      rerender(
+        <QueryClientProvider client={createTestQueryClient()}>
+          <JournalDetailView journal={persistedJournal} />
+        </QueryClientProvider>
+      );
+
+      // Exactly one gear usage section — displayedTypes dedupes the still-present
+      // pending entry against the now-persisted type.
+      expect(screen.getAllByTestId('type-section-gear_usage')).toHaveLength(1);
     });
 
     it('removes a pending gear usage editor locally without a backend call', async () => {

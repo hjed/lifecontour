@@ -285,10 +285,15 @@ export function JournalDetailView({
   };
 
   const handleTypeRemove = async (type: JournalType) => {
-    // A pending type only exists locally, so removing it just drops it from
-    // the pending list — there is nothing to delete on the backend yet.
-    if (pendingTypes.includes(type) && !persistedTypes.includes(type)) {
-      setPendingTypes(prev => prev.filter(t => t !== type));
+    // Always drop any local pending entry for this type. This both handles the
+    // still-pending case (nothing persisted to delete) and clears a stale
+    // pending entry left over from a save, so the type can't resurface after
+    // its persisted row is removed.
+    const isStillPending =
+      pendingTypes.includes(type) && !persistedTypes.includes(type);
+    setPendingTypes(prev => prev.filter(t => t !== type));
+
+    if (isStillPending) {
       return;
     }
 
@@ -299,8 +304,12 @@ export function JournalDetailView({
   };
 
   // Save handler for pending types: creates the type on the backend with its
-  // initial data, then drops it from the pending list (the refetched journal
-  // then carries the persisted type and data).
+  // initial data. We deliberately do NOT remove the entry from pendingTypes
+  // here: useAddJournalType only invalidates the detail query, so journal.types
+  // won't carry the type until the async refetch lands. displayedTypes dedupes
+  // a pending entry against persistedTypes, so once persisted the section keeps
+  // rendering (from persisted data) with no flicker; keeping the stale pending
+  // entry around is harmless and it is dropped on type removal.
   const handlePendingTypeSave = useCallback(
     async (type: JournalType, data: JournalTypeSaveData) => {
       await addType.mutateAsync({
@@ -308,7 +317,6 @@ export function JournalDetailView({
         journalType: type,
         typeData: data as Record<string, unknown>,
       });
-      setPendingTypes(prev => prev.filter(t => t !== type));
     },
     [journal.id, addType]
   );
