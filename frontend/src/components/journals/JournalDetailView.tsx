@@ -8,7 +8,7 @@
 
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -37,6 +37,7 @@ import type {
   OutdoorPlanningData,
   OutdoorTrainingData,
   GearMaintenanceData,
+  GearUsageData,
   JournalTypeData,
   ActivityTemplateResource,
 } from '@/types/journals';
@@ -90,6 +91,37 @@ interface JournalDetailViewProps {
 }
 
 /**
+ * Journal types whose backend row has a required field with no default (e.g. a
+ * mandatory gear_item_id) and therefore cannot be persisted by an empty "add".
+ * These are added to a local pending list first so their inline editor renders;
+ * the type is only created on the backend once the user saves the initial data.
+ */
+const TYPES_REQUIRING_INITIAL_DATA: ReadonlySet<JournalType> = new Set([
+  JournalType.GEAR_USAGE,
+]);
+
+/** Union of type-specific data shapes a type editor can emit on save. */
+type JournalTypeSaveData =
+  | CalendarInfoData
+  | MoodData
+  | PhotoAlbumData
+  | PlanData
+  | TravelData
+  | AbseilingData
+  | CanyoningData
+  | ClimbingData
+  | KayakingData
+  | CrossCountrySkiingData
+  | FitnessData
+  | OutdoorActivityData
+  | BushwalkingData
+  | JoggingData
+  | OutdoorPlanningData
+  | OutdoorTrainingData
+  | GearMaintenanceData
+  | GearUsageData;
+
+/**
  * Full journal detail view component.
  * Displays all journal information with inline editing capabilities.
  */
@@ -111,6 +143,17 @@ export function JournalDetailView({
   const removeTag = useRemoveJournalTag();
   const addType = useAddJournalType();
   const removeType = useRemoveJournalType();
+
+  // Types the user has added locally but not yet persisted because they require
+  // initial data (see TYPES_REQUIRING_INITIAL_DATA). Their inline editor renders
+  // so the user can supply the data; saving creates the type on the backend.
+  const [pendingTypes, setPendingTypes] = useState<JournalType[]>([]);
+
+  const persistedTypes = journal.types || [];
+  const displayedTypes = [
+    ...persistedTypes,
+    ...pendingTypes.filter(type => !persistedTypes.includes(type)),
+  ];
 
   // Data fetching
   const { data: tagsResponse } = useJournalTags();
@@ -228,6 +271,13 @@ export function JournalDetailView({
   };
 
   const handleTypeAdd = async (type: JournalType) => {
+    if (TYPES_REQUIRING_INITIAL_DATA.has(type)) {
+      // Defer backend creation until the user supplies the required initial
+      // data via the inline editor (handlePendingTypeSave).
+      setPendingTypes(prev => (prev.includes(type) ? prev : [...prev, type]));
+      return;
+    }
+
     await addType.mutateAsync({
       journalId: journal.id,
       journalType: type,
@@ -235,35 +285,45 @@ export function JournalDetailView({
   };
 
   const handleTypeRemove = async (type: JournalType) => {
+    // Always drop any local pending entry for this type. This both handles the
+    // still-pending case (nothing persisted to delete) and clears a stale
+    // pending entry left over from a save, so the type can't resurface after
+    // its persisted row is removed.
+    const isStillPending =
+      pendingTypes.includes(type) && !persistedTypes.includes(type);
+    setPendingTypes(prev => prev.filter(t => t !== type));
+
+    if (isStillPending) {
+      return;
+    }
+
     await removeType.mutateAsync({
       journalId: journal.id,
       journalType: type,
     });
   };
 
+  // Save handler for pending types: creates the type on the backend with its
+  // initial data. We deliberately do NOT remove the entry from pendingTypes
+  // here: useAddJournalType only invalidates the detail query, so journal.types
+  // won't carry the type until the async refetch lands. displayedTypes dedupes
+  // a pending entry against persistedTypes, so once persisted the section keeps
+  // rendering (from persisted data) with no flicker; keeping the stale pending
+  // entry around is harmless and it is dropped on type removal.
+  const handlePendingTypeSave = useCallback(
+    async (type: JournalType, data: JournalTypeSaveData) => {
+      await addType.mutateAsync({
+        journalId: journal.id,
+        journalType: type,
+        typeData: data as Record<string, unknown>,
+      });
+    },
+    [journal.id, addType]
+  );
+
   // Handle type-specific data update
   const handleTypeDataSave = useCallback(
-    async (
-      type: JournalType,
-      data:
-        | CalendarInfoData
-        | MoodData
-        | PhotoAlbumData
-        | PlanData
-        | TravelData
-        | AbseilingData
-        | CanyoningData
-        | ClimbingData
-        | KayakingData
-        | CrossCountrySkiingData
-        | FitnessData
-        | OutdoorActivityData
-        | BushwalkingData
-        | JoggingData
-        | OutdoorPlanningData
-        | OutdoorTrainingData
-        | GearMaintenanceData
-    ) => {
+    async (type: JournalType, data: JournalTypeSaveData) => {
       await updateTypeData.mutateAsync({
         journalId: journal.id,
         journalType: type,
@@ -460,7 +520,7 @@ export function JournalDetailView({
             <div className='space-y-2'>
               <div className='text-sm font-medium'>Types</div>
               <JournalTypeManager
-                currentTypes={journal.types || []}
+                currentTypes={displayedTypes}
                 onTypeAdd={handleTypeAdd}
                 onTypeRemove={handleTypeRemove}
               />
@@ -532,19 +592,29 @@ export function JournalDetailView({
           </div>
 
           {/* Type-Specific Data Sections */}
-          {journal.types && journal.types.length > 0 && (
+          {displayedTypes.length > 0 && (
             <div className='space-y-4'>
-              {journal.types.map(type => (
-                <JournalTypeSection
-                  key={type}
-                  journalId={journal.id}
-                  type={type}
-                  typeData={journal.type_data?.[type] as JournalTypeData}
-                  onSave={handleTypeDataSave}
-                  onTemplateSelect={handleTemplateSelect}
-                  defaultOpen={false}
-                />
-              ))}
+              {displayedTypes.map(type => {
+                const isPending =
+                  pendingTypes.includes(type) && !persistedTypes.includes(type);
+                return (
+                  <JournalTypeSection
+                    key={type}
+                    journalId={journal.id}
+                    type={type}
+                    typeData={
+                      isPending
+                        ? undefined
+                        : (journal.type_data?.[type] as JournalTypeData)
+                    }
+                    onSave={
+                      isPending ? handlePendingTypeSave : handleTypeDataSave
+                    }
+                    onTemplateSelect={handleTemplateSelect}
+                    defaultOpen={isPending}
+                  />
+                );
+              })}
             </div>
           )}
         </CardContent>

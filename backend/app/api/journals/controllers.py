@@ -90,6 +90,7 @@ from app.core.journal.models.repositories import (
     DownhillSkiingDataRepository,
     FitnessDataRepository,
     GearMaintenanceDataRepository,
+    GearUsageDataRepository,
     JoggingDataRepository,
     JournalContactRelationshipRepository,
     JournalRepository,
@@ -322,6 +323,7 @@ async def _enrich_journal_data(
     outdoor_planning_data_repo: OutdoorPlanningDataRepository,
     outdoor_training_data_repo: OutdoorTrainingDataRepository,
     gear_maintenance_data_repo: GearMaintenanceDataRepository,
+    gear_usage_data_repo: GearUsageDataRepository,
     include_routes: bool = False,
 ) -> tuple[
     list[str],
@@ -514,6 +516,13 @@ async def _enrich_journal_data(
         types.append(JournalType.GEAR_MAINTENANCE.value)
         type_data[JournalType.GEAR_MAINTENANCE.value] = (
             TypeDataConverter.gear_maintenance_data_to_schema(gear_maintenance_data)
+        )
+
+    gear_usage_data = await gear_usage_data_repo.find_by_journal_id(journal_id)
+    if gear_usage_data:
+        types.append(JournalType.GEAR_USAGE.value)
+        type_data[JournalType.GEAR_USAGE.value] = (
+            TypeDataConverter.gear_usage_data_to_schema(gear_usage_data)
         )
 
     # If no types found, it's a NOTE
@@ -750,6 +759,7 @@ async def _fetch_children_types(
     outdoor_planning_data_repo: OutdoorPlanningDataRepository,
     outdoor_training_data_repo: OutdoorTrainingDataRepository,
     gear_maintenance_data_repo: GearMaintenanceDataRepository,
+    gear_usage_data_repo: GearUsageDataRepository,
 ) -> dict[int, list[str]]:
     """Fetch only the type names for each child journal (lightweight).
 
@@ -812,6 +822,8 @@ async def _fetch_children_types(
             types.append(JournalType.OUTDOOR_TRAINING.value)
         if await gear_maintenance_data_repo.find_by_journal_id(journal_id):
             types.append(JournalType.GEAR_MAINTENANCE.value)
+        if await gear_usage_data_repo.find_by_journal_id(journal_id):
+            types.append(JournalType.GEAR_USAGE.value)
 
         result[journal_id] = types
 
@@ -848,6 +860,7 @@ async def _build_journal_list_resources(
     outdoor_planning_data_repo: OutdoorPlanningDataRepository,
     outdoor_training_data_repo: OutdoorTrainingDataRepository,
     gear_maintenance_data_repo: GearMaintenanceDataRepository,
+    gear_usage_data_repo: GearUsageDataRepository,
     contact_relationship_repo: JournalContactRelationshipRepository,
     tag_repo: JournalTagRepository,
     route_repo: RouteRepository,
@@ -923,6 +936,7 @@ async def _build_journal_list_resources(
             outdoor_planning_data_repo,
             outdoor_training_data_repo,
             gear_maintenance_data_repo,
+            gear_usage_data_repo,
             include_routes=False,
         )
         parent = parent_by_id.get(journal.parent_id) if journal.parent_id else None
@@ -988,6 +1002,7 @@ async def list_journals(
     outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
     outdoor_training_data_repo: FromDishka[OutdoorTrainingDataRepository],
     gear_maintenance_data_repo: FromDishka[GearMaintenanceDataRepository],
+    gear_usage_data_repo: FromDishka[GearUsageDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
@@ -1084,6 +1099,7 @@ async def list_journals(
         outdoor_planning_data_repo=outdoor_planning_data_repo,
         outdoor_training_data_repo=outdoor_training_data_repo,
         gear_maintenance_data_repo=gear_maintenance_data_repo,
+        gear_usage_data_repo=gear_usage_data_repo,
         contact_relationship_repo=contact_relationship_repo,
         tag_repo=tag_repo,
         route_repo=route_repo,
@@ -1552,6 +1568,7 @@ async def get_journal(
     outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
     outdoor_training_data_repo: FromDishka[OutdoorTrainingDataRepository],
     gear_maintenance_data_repo: FromDishka[GearMaintenanceDataRepository],
+    gear_usage_data_repo: FromDishka[GearUsageDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
@@ -1600,6 +1617,7 @@ async def get_journal(
         outdoor_planning_data_repo,
         outdoor_training_data_repo,
         gear_maintenance_data_repo,
+        gear_usage_data_repo,
     )
 
     parent, children, children_count = await _fetch_parent_and_children(
@@ -1630,6 +1648,7 @@ async def get_journal(
         outdoor_planning_data_repo,
         outdoor_training_data_repo,
         gear_maintenance_data_repo,
+        gear_usage_data_repo,
     )
 
     # Compute depth for the journal
@@ -1716,6 +1735,7 @@ async def create_journal(
     outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
     outdoor_training_data_repo: FromDishka[OutdoorTrainingDataRepository],
     gear_maintenance_data_repo: FromDishka[GearMaintenanceDataRepository],
+    gear_usage_data_repo: FromDishka[GearUsageDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
@@ -1786,6 +1806,7 @@ async def create_journal(
         outdoor_planning_data_repo,
         outdoor_training_data_repo,
         gear_maintenance_data_repo,
+        gear_usage_data_repo,
         include_routes=True,
     )
 
@@ -1847,6 +1868,7 @@ async def update_journal(
     outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
     outdoor_training_data_repo: FromDishka[OutdoorTrainingDataRepository],
     gear_maintenance_data_repo: FromDishka[GearMaintenanceDataRepository],
+    gear_usage_data_repo: FromDishka[GearUsageDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
@@ -1906,6 +1928,7 @@ async def update_journal(
         outdoor_planning_data_repo,
         outdoor_training_data_repo,
         gear_maintenance_data_repo,
+        gear_usage_data_repo,
         include_routes=True,
     )
 
@@ -1937,6 +1960,7 @@ async def update_journal(
         outdoor_planning_data_repo,
         outdoor_training_data_repo,
         gear_maintenance_data_repo,
+        gear_usage_data_repo,
     )
 
     # Compute depth for the journal
@@ -1996,6 +2020,7 @@ async def partial_update_journal(
     outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
     outdoor_training_data_repo: FromDishka[OutdoorTrainingDataRepository],
     gear_maintenance_data_repo: FromDishka[GearMaintenanceDataRepository],
+    gear_usage_data_repo: FromDishka[GearUsageDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
@@ -2100,6 +2125,7 @@ async def partial_update_journal(
         outdoor_planning_data_repo,
         outdoor_training_data_repo,
         gear_maintenance_data_repo,
+        gear_usage_data_repo,
         include_routes=True,
     )
 
@@ -2131,6 +2157,7 @@ async def partial_update_journal(
         outdoor_planning_data_repo,
         outdoor_training_data_repo,
         gear_maintenance_data_repo,
+        gear_usage_data_repo,
     )
 
     # Compute depth for the journal
@@ -2214,6 +2241,7 @@ async def merge_journal(
     outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
     outdoor_training_data_repo: FromDishka[OutdoorTrainingDataRepository],
     gear_maintenance_data_repo: FromDishka[GearMaintenanceDataRepository],
+    gear_usage_data_repo: FromDishka[GearUsageDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
@@ -2310,6 +2338,7 @@ async def merge_journal(
         outdoor_planning_data_repo,
         outdoor_training_data_repo,
         gear_maintenance_data_repo,
+        gear_usage_data_repo,
         include_routes=False,
     )
 
@@ -2359,6 +2388,7 @@ async def add_type_to_journal(
     outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
     outdoor_training_data_repo: FromDishka[OutdoorTrainingDataRepository],
     gear_maintenance_data_repo: FromDishka[GearMaintenanceDataRepository],
+    gear_usage_data_repo: FromDishka[GearUsageDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
@@ -2399,6 +2429,18 @@ async def add_type_to_journal(
         raise JournalValidationError(
             "type_data",
             "GEAR_MAINTENANCE type requires initial type data (gear_item_id) to be created.",
+        )
+
+    # GEAR_USAGE requires initial type data (gear_item_id) to be added successfully
+    if (
+        journal_type == JournalType.GEAR_USAGE
+        and not type_request.data.attributes.type_data
+    ):
+        from core_shared.models.journals.exceptions import JournalValidationError
+
+        raise JournalValidationError(
+            "type_data",
+            "GEAR_USAGE type requires initial type data (gear_item_id) to be created.",
         )
 
     # Add the type (with dependency resolution), create its default rows, and
@@ -2447,6 +2489,7 @@ async def add_type_to_journal(
         outdoor_planning_data_repo,
         outdoor_training_data_repo,
         gear_maintenance_data_repo,
+        gear_usage_data_repo,
         include_routes=True,
     )
 
@@ -2489,6 +2532,7 @@ async def remove_type_from_journal(
     outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
     outdoor_training_data_repo: FromDishka[OutdoorTrainingDataRepository],
     gear_maintenance_data_repo: FromDishka[GearMaintenanceDataRepository],
+    gear_usage_data_repo: FromDishka[GearUsageDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
@@ -2570,6 +2614,7 @@ async def remove_type_from_journal(
         outdoor_planning_data_repo,
         outdoor_training_data_repo,
         gear_maintenance_data_repo,
+        gear_usage_data_repo,
         include_routes=True,
     )
 
@@ -2613,6 +2658,7 @@ async def update_type_data(
     outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
     outdoor_training_data_repo: FromDishka[OutdoorTrainingDataRepository],
     gear_maintenance_data_repo: FromDishka[GearMaintenanceDataRepository],
+    gear_usage_data_repo: FromDishka[GearUsageDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
@@ -2690,6 +2736,7 @@ async def update_type_data(
         outdoor_planning_data_repo,
         outdoor_training_data_repo,
         gear_maintenance_data_repo,
+        gear_usage_data_repo,
         include_routes=True,
     )
 
@@ -2732,6 +2779,7 @@ async def add_contact_to_journal(
     outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
     outdoor_training_data_repo: FromDishka[OutdoorTrainingDataRepository],
     gear_maintenance_data_repo: FromDishka[GearMaintenanceDataRepository],
+    gear_usage_data_repo: FromDishka[GearUsageDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
@@ -2841,6 +2889,7 @@ async def add_contact_to_journal(
         outdoor_planning_data_repo,
         outdoor_training_data_repo,
         gear_maintenance_data_repo,
+        gear_usage_data_repo,
         include_routes=True,
     )
 
@@ -2884,6 +2933,7 @@ async def update_journal_contact_relationship(
     outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
     outdoor_training_data_repo: FromDishka[OutdoorTrainingDataRepository],
     gear_maintenance_data_repo: FromDishka[GearMaintenanceDataRepository],
+    gear_usage_data_repo: FromDishka[GearUsageDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
@@ -3005,6 +3055,7 @@ async def update_journal_contact_relationship(
         outdoor_planning_data_repo,
         outdoor_training_data_repo,
         gear_maintenance_data_repo,
+        gear_usage_data_repo,
         include_routes=True,
     )
 
@@ -3047,6 +3098,7 @@ async def remove_contact_from_journal(
     outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
     outdoor_training_data_repo: FromDishka[OutdoorTrainingDataRepository],
     gear_maintenance_data_repo: FromDishka[GearMaintenanceDataRepository],
+    gear_usage_data_repo: FromDishka[GearUsageDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
@@ -3126,6 +3178,7 @@ async def remove_contact_from_journal(
         outdoor_planning_data_repo,
         outdoor_training_data_repo,
         gear_maintenance_data_repo,
+        gear_usage_data_repo,
         include_routes=True,
     )
 
@@ -3168,6 +3221,7 @@ async def add_tag_to_journal(
     outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
     outdoor_training_data_repo: FromDishka[OutdoorTrainingDataRepository],
     gear_maintenance_data_repo: FromDishka[GearMaintenanceDataRepository],
+    gear_usage_data_repo: FromDishka[GearUsageDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
@@ -3238,6 +3292,7 @@ async def add_tag_to_journal(
         outdoor_planning_data_repo,
         outdoor_training_data_repo,
         gear_maintenance_data_repo,
+        gear_usage_data_repo,
         include_routes=True,
     )
 
@@ -3280,6 +3335,7 @@ async def remove_tag_from_journal(
     outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
     outdoor_training_data_repo: FromDishka[OutdoorTrainingDataRepository],
     gear_maintenance_data_repo: FromDishka[GearMaintenanceDataRepository],
+    gear_usage_data_repo: FromDishka[GearUsageDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
@@ -3345,6 +3401,7 @@ async def remove_tag_from_journal(
         outdoor_planning_data_repo,
         outdoor_training_data_repo,
         gear_maintenance_data_repo,
+        gear_usage_data_repo,
         include_routes=True,
     )
 

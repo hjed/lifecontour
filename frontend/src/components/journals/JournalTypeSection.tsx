@@ -86,7 +86,8 @@ type TypeSectionData =
   | CrossCountrySkiingData
   | OutdoorPlanningData
   | OutdoorTrainingData
-  | GearMaintenanceData;
+  | GearMaintenanceData
+  | GearUsageData;
 
 /** Callback invoked when the user saves type-specific data. */
 type OnSaveFn = (type: JournalType, data: TypeSectionData) => Promise<void>;
