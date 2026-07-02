@@ -168,17 +168,17 @@ docker compose logs -f strava-worker
 
 ```bash
 # Run unit tests
-uv run pytest tests/unit/ -v
+uv run pytest -c ../../pytest.ini --rootdir . tests/unit/ -v
 
 # Run integration tests (requires Redis and PostgreSQL)
-uv run pytest tests/integration/ -v
+uv run pytest -c ../../pytest.ini --rootdir . tests/integration/ -v
 
 # Linting / formatting
 uv run ruff check .
 uv run ruff format --check .
 
 # Type checking
-uv run mypy .
+uv run mypy --config-file ../../mypy.ini .
 ```
 
 ### Shared test fixtures

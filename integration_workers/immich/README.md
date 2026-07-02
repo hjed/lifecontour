@@ -160,15 +160,15 @@ removed.
 
 ```bash
 # Unit tests
-uv run pytest tests/unit/ -v
+uv run pytest -c ../../pytest.ini --rootdir . tests/unit/ -v
 
 # Integration tests (requires Redis and PostgreSQL)
-uv run pytest tests/integration/ -v
+uv run pytest -c ../../pytest.ini --rootdir . tests/integration/ -v
 
 # Linting and type checking
 uv run ruff check .
 uv run ruff format --check .
-uv run mypy .
+uv run mypy --config-file ../../mypy.ini .
 ```
 
 ### Shared test fixtures

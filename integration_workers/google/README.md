@@ -252,21 +252,18 @@ The worker uses structured logging (JSON format) for easy parsing and monitoring
 ## Testing
 
 ```bash
-# Run unit tests
-pytest tests/unit/ -v
+# Run unit tests (shared pytest config at the repo root)
+pytest -c ../../pytest.ini --rootdir . tests/unit/ -v
 
 # Run integration tests (requires Redis and PostgreSQL)
-pytest tests/integration/ -v
-
-# Run with coverage
-pytest tests/ --cov=. --cov-report=html
+pytest -c ../../pytest.ini --rootdir . tests/integration/ -v
 
 # Linting
 ruff check .
 ruff format .
 
-# Type checking
-mypy .
+# Type checking (shared mypy config at the repo root)
+mypy --config-file ../../mypy.ini .
 ```
 
 ### Shared test fixtures

@@ -108,7 +108,7 @@ repos:
         pass_filenames: false
       - id: mypy-google-worker
         name: mypy (google-worker)
-        entry: uv run --directory integration_workers/google mypy .
+        entry: uv run --directory integration_workers/google mypy --config-file ../../mypy.ini .
         language: system
         files: ^integration_workers/google/.*\.py$
         pass_filenames: false
@@ -130,7 +130,7 @@ repos:
         pass_filenames: false
       - id: mypy-strava-worker
         name: mypy (strava-worker)
-        entry: uv run --directory integration_workers/strava mypy .
+        entry: uv run --directory integration_workers/strava mypy --config-file ../../mypy.ini .
         language: system
         files: ^integration_workers/strava/.*\.py$
         pass_filenames: false
@@ -152,7 +152,7 @@ repos:
         pass_filenames: false
       - id: mypy-snipeit-worker
         name: mypy (snipeit-worker)
-        entry: uv run --directory integration_workers/snipeit mypy .
+        entry: uv run --directory integration_workers/snipeit mypy --config-file ../../mypy.ini .
         language: system
         files: ^integration_workers/snipeit/.*\.py$
         pass_filenames: false
@@ -174,7 +174,7 @@ repos:
         pass_filenames: false
       - id: mypy-immich-worker
         name: mypy (immich-worker)
-        entry: uv run --directory integration_workers/immich mypy .
+        entry: uv run --directory integration_workers/immich mypy --config-file ../../mypy.ini .
         language: system
         files: ^integration_workers/immich/.*\.py$
         pass_filenames: false

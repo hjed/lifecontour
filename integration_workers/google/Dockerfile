@@ -4,19 +4,19 @@
 
 FROM pms-python-base
 
-# Copy worker pyproject.toml and install dependencies
+# Copy worker pyproject.toml for dependency caching
 COPY ./integration_workers/google/pyproject.toml .
+
+# Copy worker source code before install so the package is complete
+COPY ./integration_workers/google/ .
 RUN uv pip install --system --no-cache-dir --no-sources .
 
-# Copy worker code
-COPY ./integration_workers/google/ .
-
-# Health check
+# Health check — Python reads REDIS_URL from the environment at runtime
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import redis; r=redis.Redis.from_url('${REDIS_URL}'); r.ping()" || exit 1
+    CMD python -c "import redis, os; r=redis.Redis.from_url(os.environ['REDIS_URL']); r.ping()" || exit 1
 
 # Switch to non-root user
 USER appuser
 
-# Run the worker
+# Run the ARQ worker
 CMD ["python", "worker.py"]
