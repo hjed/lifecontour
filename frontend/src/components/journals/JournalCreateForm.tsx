@@ -596,22 +596,27 @@ export function JournalCreateForm({
     (template: ActivityTemplateResource) => {
       setTypeData(prev => {
         const pitches = (template.attributes.pitches || []) as AbseilPitch[];
-        const number_of_abseils = pitches.length > 0 ? pitches.length : null;
-        const total_length =
-          pitches.length > 0
-            ? pitches.reduce((sum, p) => sum + (p.height || 0), 0)
-            : null;
+        const hasPitches = pitches.length > 0;
 
         return {
           ...prev,
           [JournalType.ABSEILING_TRIP]: {
             ...(prev[JournalType.ABSEILING_TRIP] || {}),
             // Durable template reference lives on the consolidated abseiling
-            // block for all abseiling-derived journals (ITER16-001).
+            // block for all abseiling-derived journals (ITER16-001). Only import
+            // the template's standard pitches when it has some — linking a
+            // pitch-less template must not clear user-entered abseil data.
             template_id: template.id,
-            pitches,
-            number_of_abseils,
-            total_length,
+            ...(hasPitches
+              ? {
+                  pitches,
+                  number_of_abseils: pitches.length,
+                  total_length: pitches.reduce(
+                    (sum, p) => sum + (p.height || 0),
+                    0
+                  ),
+                }
+              : {}),
           },
         };
       });

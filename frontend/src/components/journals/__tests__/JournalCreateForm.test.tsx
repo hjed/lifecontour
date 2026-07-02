@@ -91,27 +91,45 @@ jest.mock('@/components/journals/type-editors/TemplateSelector', () => ({
     }) => void;
     templateType: string;
   }) => (
-    <button
-      type='button'
-      data-testid={`mock-template-selector-${templateType}`}
-      onClick={() =>
-        onSelect({
-          id: 'tpl-consolidated-1',
-          type: 'activity-templates',
-          attributes: {
-            name: 'Test Canyon Template',
-            template_type: templateType,
-            french_grade: 'v4a3IV',
-            pitches: [
-              { pitch_number: 1, height: 30 },
-              { pitch_number: 2, height: 15 },
-            ],
-          },
-        })
-      }
-    >
-      Select Template
-    </button>
+    <>
+      <button
+        type='button'
+        data-testid={`mock-template-selector-${templateType}`}
+        onClick={() =>
+          onSelect({
+            id: 'tpl-consolidated-1',
+            type: 'activity-templates',
+            attributes: {
+              name: 'Test Canyon Template',
+              template_type: templateType,
+              french_grade: 'v4a3IV',
+              pitches: [
+                { pitch_number: 1, height: 30 },
+                { pitch_number: 2, height: 15 },
+              ],
+            },
+          })
+        }
+      >
+        Select Template
+      </button>
+      <button
+        type='button'
+        data-testid={`mock-template-selector-nopitch-${templateType}`}
+        onClick={() =>
+          onSelect({
+            id: 'tpl-nopitch-1',
+            type: 'activity-templates',
+            attributes: {
+              name: 'Pitchless Template',
+              template_type: templateType,
+            },
+          })
+        }
+      >
+        Select Pitchless Template
+      </button>
+    </>
   ),
 }));
 
@@ -706,6 +724,44 @@ describe('JournalCreateForm', () => {
       expect(
         submitted.type_data[JournalType.CANYONING]?.template_id
       ).toBeUndefined();
+    });
+
+    it('links a pitch-less template without clearing user-entered abseil data', async () => {
+      const user = userEvent.setup();
+      mockMutateAsync.mockResolvedValueOnce({
+        data: { id: '10', type: 'journals', attributes: {} },
+      });
+
+      renderWithClient(<JournalCreateForm />);
+
+      await user.type(screen.getByLabelText(/title/i), 'Manual Abseil');
+      await user.click(screen.getByLabelText(/^abseiling trip$/i));
+
+      // User enters their own abseil counts first.
+      await user.type(screen.getByTestId('number-of-abseils-input'), '5');
+      await user.type(screen.getByTestId('total-length-input'), '200');
+
+      // Selecting a template that has no standard pitches should only link the
+      // reference, not wipe the manually-entered data.
+      await user.click(
+        screen.getByTestId('mock-template-selector-nopitch-abseiling')
+      );
+
+      await user.click(screen.getByRole('button', { name: /create journal/i }));
+
+      await waitFor(() => {
+        expect(mockMutateAsync).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type_data: expect.objectContaining({
+              [JournalType.ABSEILING_TRIP]: expect.objectContaining({
+                template_id: 'tpl-nopitch-1',
+                number_of_abseils: 5,
+                total_length: 200,
+              }),
+            }),
+          })
+        );
+      });
     });
 
     it('includes abseiling data in type_data when ABSEILING_TRIP is selected', async () => {
