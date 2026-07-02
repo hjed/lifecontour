@@ -596,19 +596,27 @@ export function JournalCreateForm({
     (template: ActivityTemplateResource) => {
       setTypeData(prev => {
         const pitches = (template.attributes.pitches || []) as AbseilPitch[];
-        const number_of_abseils = pitches.length > 0 ? pitches.length : null;
-        const total_length =
-          pitches.length > 0
-            ? pitches.reduce((sum, p) => sum + (p.height || 0), 0)
-            : null;
+        const hasPitches = pitches.length > 0;
 
         return {
           ...prev,
           [JournalType.ABSEILING_TRIP]: {
             ...(prev[JournalType.ABSEILING_TRIP] || {}),
-            pitches,
-            number_of_abseils,
-            total_length,
+            // Durable template reference lives on the consolidated abseiling
+            // block for all abseiling-derived journals (ITER16-001). Only import
+            // the template's standard pitches when it has some — linking a
+            // pitch-less template must not clear user-entered abseil data.
+            template_id: template.id,
+            ...(hasPitches
+              ? {
+                  pitches,
+                  number_of_abseils: pitches.length,
+                  total_length: pitches.reduce(
+                    (sum, p) => sum + (p.height || 0),
+                    0
+                  ),
+                }
+              : {}),
           },
         };
       });
@@ -719,8 +727,7 @@ export function JournalCreateForm({
       // Extract pending routes to upload them separately since backend doesn't accept them in JournalCreateData
       let pendingRoutes: { name: string; gpx_data: string }[] = [];
       const fitnessData = submittedTypeData[JournalType.FITNESS] as
-        | FitnessData
-        | undefined;
+        FitnessData | undefined;
       if (fitnessData?.pending_routes) {
         pendingRoutes = [...fitnessData.pending_routes];
         // Remove pending_routes before submitting to prevent validation errors
@@ -1037,6 +1044,7 @@ export function JournalCreateForm({
                         createMode
                         data={typeData[JournalType.ABSEILING_TRIP]}
                         onChange={handleAbseilingTripChange}
+                        onTemplateSelect={handleTemplateSelect}
                       />
                     )}
                     {type === JournalType.CANYONING && (

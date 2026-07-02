@@ -55,6 +55,7 @@ import { JournalTagBadge } from './JournalTagBadge';
 import { JournalChildrenList } from './JournalChildrenList';
 import { JournalParentSelector } from './JournalParentSelector';
 import { JournalTypeSection } from './JournalTypeSection';
+import { TemplateReference } from './TemplateReference';
 import { JournalTypeManager } from './JournalTypeManager';
 import { ActivityFeed as JournalActivityFeed } from './ActivityFeed';
 import { CreateAlbumButton } from './CreateAlbumButton';
@@ -372,35 +373,49 @@ export function JournalDetailView({
     [journal.id, updateJournal]
   );
 
-  // Handle template select for canyoning
+  // Durable template reference lives on the consolidated abseiling block for
+  // all abseiling-derived journals (ITER16-001).
+  const abseilingTemplateId =
+    (
+      journal.type_data?.[JournalType.ABSEILING_TRIP] as
+        AbseilingData | undefined
+    )?.template_id ?? null;
+
+  // Handle template select for abseiling-derived journals. Persists the durable
+  // template reference onto the consolidated abseiling block and imports the
+  // template's standard pitches as editable defaults.
   const handleTemplateSelect = useCallback(
     async (template: ActivityTemplateResource) => {
-      if (
-        template.attributes.pitches &&
-        template.attributes.pitches.length > 0
-      ) {
-        const currentAbseil = journal.type_data?.[
-          JournalType.ABSEILING_TRIP
-        ] as AbseilingData | undefined;
+      const currentAbseil = journal.type_data?.[JournalType.ABSEILING_TRIP] as
+        AbseilingData | undefined;
 
-        const pitches = template.attributes.pitches;
-        const totalLength = pitches.reduce(
-          (sum, p) => sum + (p.height || 0),
-          0
-        );
+      const pitches = template.attributes.pitches ?? [];
+      const hasPitches = pitches.length > 0;
 
-        await updateTypeData.mutateAsync({
-          journalId: journal.id,
-          journalType: JournalType.ABSEILING_TRIP,
-          typeData: {
-            ...(currentAbseil as Record<string, unknown>),
-            pitches: pitches,
-            number_of_abseils: pitches.length,
-            total_length: totalLength,
-          },
-        });
-        toast.success('Pitches imported from template');
-      }
+      await updateTypeData.mutateAsync({
+        journalId: journal.id,
+        journalType: JournalType.ABSEILING_TRIP,
+        typeData: {
+          ...(currentAbseil as Record<string, unknown>),
+          template_id: template.id,
+          ...(hasPitches
+            ? {
+                pitches,
+                number_of_abseils: pitches.length,
+                total_length: pitches.reduce(
+                  (sum, p) => sum + (p.height || 0),
+                  0
+                ),
+              }
+            : {}),
+        },
+      });
+
+      toast.success(
+        hasPitches
+          ? 'Pitches imported from template'
+          : 'Template linked to journal'
+      );
     },
     [journal.id, journal.type_data, updateTypeData]
   );
@@ -590,6 +605,11 @@ export function JournalDetailView({
               data-testid='journal-content'
             />
           </div>
+
+          {/* Durable template reference for abseiling-derived journals */}
+          {abseilingTemplateId && (
+            <TemplateReference templateId={abseilingTemplateId} />
+          )}
 
           {/* Type-Specific Data Sections */}
           {displayedTypes.length > 0 && (

@@ -35,11 +35,7 @@ interface MergeContactResolutionDialogProps {
  * A subset of the override contract — see {@link CONFLICT_FIELDS}.
  */
 type SurfacedField =
-  | 'first_name'
-  | 'last_name'
-  | 'middle_name'
-  | 'nick_name'
-  | 'photo_url';
+  'first_name' | 'last_name' | 'middle_name' | 'nick_name' | 'photo_url';
 
 interface Conflict {
   fieldId: SurfacedField;

@@ -320,6 +320,7 @@ function TypeSpecificContent({
           journalId={journalId}
           data={typeData as AbseilingData | undefined}
           onSave={makeEditorSave<AbseilingData>(onSave, type)}
+          onTemplateSelect={onTemplateSelect}
         />
       );
     case JournalType.CANYONING:

@@ -4,7 +4,7 @@
  * Tests the comprehensive detail view that integrates all relationship components.
  */
 
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { JournalDetailView } from '../JournalDetailView';
@@ -13,7 +13,14 @@ import {
   createTestQueryClient,
   renderWithQueryClient,
 } from '../test-helpers';
-import { JournalType } from '@/types/journals';
+import { ActivityTemplateType, JournalType } from '@/types/journals';
+import { getTemplate } from '@/lib/api/templates';
+
+jest.mock('@/lib/api/templates', () => ({
+  getTemplate: jest.fn(),
+}));
+
+const mockGetTemplate = jest.mocked(getTemplate);
 
 // Mock next/navigation
 const mockPush = jest.fn();
@@ -421,6 +428,60 @@ describe('JournalDetailView', () => {
 
       // Check that type sections are rendered for each type
       expect(screen.getByTestId('type-section-note')).toBeInTheDocument();
+    });
+  });
+
+  describe('Template Reference', () => {
+    it('renders a "Based on" link to the settings templates section when the abseiling block has a template_id', async () => {
+      mockGetTemplate.mockResolvedValue({
+        data: {
+          id: 'tpl-1',
+          type: 'activity-templates',
+          attributes: {
+            name: 'Claustral Canyon',
+            template_type: ActivityTemplateType.CANYONING,
+          },
+        },
+      });
+
+      const journalWithTemplate = {
+        ...mockJournal,
+        types: [JournalType.ABSEILING_TRIP],
+        type_data: {
+          [JournalType.ABSEILING_TRIP]: { template_id: 'tpl-1' },
+        },
+      };
+
+      renderWithQueryClient(
+        <JournalDetailView journal={journalWithTemplate} />
+      );
+
+      const link = await screen.findByRole('link', { name: /based on/i });
+      expect(link).toHaveTextContent(/Claustral Canyon/i);
+      expect(link).toHaveAttribute('href', '/settings#templates');
+      expect(mockGetTemplate).toHaveBeenCalledWith('tpl-1');
+    });
+
+    it('omits the "Based on" link when no template_id is present', async () => {
+      const journalWithoutTemplate = {
+        ...mockJournal,
+        types: [JournalType.ABSEILING_TRIP],
+        type_data: {
+          [JournalType.ABSEILING_TRIP]: { number_of_abseils: 3 },
+        },
+      };
+
+      renderWithQueryClient(
+        <JournalDetailView journal={journalWithoutTemplate} />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('journal-detail-view')).toBeInTheDocument();
+      });
+      expect(
+        screen.queryByRole('link', { name: /based on/i })
+      ).not.toBeInTheDocument();
+      expect(mockGetTemplate).not.toHaveBeenCalled();
     });
   });
 
