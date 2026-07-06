@@ -507,7 +507,6 @@ class TypeDataConverter:
     def canyoning_data_to_schema(data: CanyoningData) -> dict[str, Any]:
         """Convert CanyoningData domain entity to API schema."""
         return CanyoningDataSchema(
-            template_id=str(data.template_id) if data.template_id else None,
             french_grade=data.french_grade,
             water_guage_name=data.water_guage_name,
             water_guage_level=data.water_guage_level,
@@ -520,7 +519,6 @@ class TypeDataConverter:
     def caving_data_to_schema(data: CavingData) -> dict[str, Any]:
         """Convert CavingData domain entity to API schema."""
         return CavingDataSchema(
-            template_id=str(data.template_id) if data.template_id else None,
             is_vertical=data.is_vertical,
             is_horizontal=data.is_horizontal,
         ).model_dump(exclude_none=True)
@@ -551,7 +549,6 @@ class TypeDataConverter:
     def climbing_data_to_schema(data: ClimbingData) -> dict[str, Any]:
         """Convert ClimbingData domain entity to API schema."""
         return ClimbingDataSchema(
-            template_id=str(data.template_id) if data.template_id else None,
             climbing_type=data.climbing_type,
             grade=data.grade,
             length=data.length,

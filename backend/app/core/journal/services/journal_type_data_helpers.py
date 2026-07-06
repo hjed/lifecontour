@@ -819,10 +819,6 @@ async def update_canyoning_type_data(
     updates: dict[str, Any] = {}
     if "route_id" in attrs:
         updates["route_id"] = parse_optional_uuid(attrs["route_id"], "route_id")
-    if "template_id" in attrs:
-        updates["template_id"] = parse_optional_uuid(
-            attrs["template_id"], "template_id"
-        )
     if "french_grade" in attrs:
         if not isinstance(attrs["french_grade"], str):
             raise JournalValidationError("french_grade", "Must be a string")
@@ -1073,10 +1069,6 @@ async def update_caving_type_data(
 
     # Build update kwargs and use dataclasses.replace() to trigger __post_init__ validation.
     updates: dict[str, Any] = {}
-    if "template_id" in attrs:
-        updates["template_id"] = parse_optional_uuid(
-            attrs["template_id"], "template_id"
-        )
     if "is_vertical" in attrs:
         raw_is_vertical = attrs["is_vertical"]
         if raw_is_vertical is not None and not isinstance(raw_is_vertical, bool):
@@ -1132,10 +1124,6 @@ async def update_climbing_type_data(
 
     # Build update kwargs and use dataclasses.replace() to trigger __post_init__ validation.
     updates: dict[str, Any] = {}
-    if "template_id" in attrs:
-        updates["template_id"] = parse_optional_uuid(
-            attrs["template_id"], "template_id"
-        )
     if "climbing_type" in attrs:
         if not isinstance(attrs["climbing_type"], str):
             raise JournalValidationError("climbing_type", "Must be a string")

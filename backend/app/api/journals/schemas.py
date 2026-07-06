@@ -324,10 +324,6 @@ class AbseilingDataSchema(BaseModel):
 class CanyoningDataSchema(BaseModel):
     """Canyoning data for CANYONING type journals."""
 
-    template_id: str | None = Field(
-        default=None,
-        description="ID of the activity template",
-    )
     french_grade: str | None = Field(
         default=None,
         description="French canyoning grade (e.g. v3a2IV**)",
@@ -357,10 +353,6 @@ class CanyoningDataSchema(BaseModel):
 class CavingDataSchema(BaseModel):
     """Caving data for CAVING type journals."""
 
-    template_id: str | None = Field(
-        default=None,
-        description="ID of the activity template",
-    )
     is_vertical: bool | None = Field(
         default=None,
         description="Whether the cave is primarily vertical (requires ropes)",
@@ -401,10 +393,6 @@ class DownhillSkiingDataSchema(BaseModel):
 class ClimbingDataSchema(BaseModel):
     """Climbing data for CLIMBING type journals."""
 
-    template_id: str | None = Field(
-        default=None,
-        description="ID of the activity template",
-    )
     climbing_type: str | None = Field(
         default=None,
         description="Type of climbing (sport, trad, bouldering, top_rope)",

@@ -1221,9 +1221,6 @@ def _build_caving_data(caving_data: Any) -> dict[str, Any]:
     return {
         "is_vertical": caving_data.is_vertical,
         "is_horizontal": caving_data.is_horizontal,
-        "template_id": str(caving_data.template_id)
-        if caving_data.template_id
-        else None,
     }
 
 
@@ -1242,9 +1239,6 @@ def _build_canyoning_data(canyoning_data: Any) -> dict[str, Any]:
 def _build_climbing_data(climbing_data: Any) -> dict[str, Any]:
     """Build climbing data dictionary."""
     return {
-        "template_id": str(climbing_data.template_id)
-        if climbing_data.template_id
-        else None,
         "climbing_type": climbing_data.climbing_type,
         "grade": climbing_data.grade,
         "length": climbing_data.length,
@@ -1710,7 +1704,6 @@ async def _update_caving_data(
         for field in [
             "is_vertical",
             "is_horizontal",
-            "template_id",
         ]:
             if field in type_data_dict:
                 cav_updates[field] = type_data_dict[field]
@@ -1748,7 +1741,7 @@ async def _update_climbing_data(
     existing_climbing = await climbing_data_repo.find_by_journal_id(journal_id)
     if existing_climbing:
         clb_updates: dict[str, Any] = {}
-        for field in ["template_id", "climbing_type", "grade", "length", "indoor"]:
+        for field in ["climbing_type", "grade", "length", "indoor"]:
             if field in type_data_dict:
                 clb_updates[field] = type_data_dict[field]
         validated_climbing = dataclasses.replace(existing_climbing, **clb_updates)

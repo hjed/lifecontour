@@ -10,12 +10,10 @@ class TestCavingData:
         """Test creating CavingData with all fields provided."""
         data = CavingData(
             journal_id=1,
-            template_id="123e4567-e89b-12d3-a456-426614174000",
             is_vertical=True,
             is_horizontal=False,
         )
         assert data.journal_id == 1
-        assert data.template_id == "123e4567-e89b-12d3-a456-426614174000"
         assert data.is_vertical is True
         assert data.is_horizontal is False
 
@@ -23,7 +21,6 @@ class TestCavingData:
         """Test creating CavingData with only required fields."""
         data = CavingData(journal_id=1)
         assert data.journal_id == 1
-        assert data.template_id is None
         assert data.is_vertical is None
         assert data.is_horizontal is None
 

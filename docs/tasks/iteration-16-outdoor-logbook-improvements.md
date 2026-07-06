@@ -122,10 +122,10 @@ Each sub-iteration defines its objective, the specification section it realises,
 - The PDF entry renders the template-reference name when present for abseiling-derived types — small and additive, independent of the ITER16-004 rework.
 - **Tests:** unit — renderer shows/omits the `Based on: <template>` line by presence of `template_name` (`test_logbook_pdf_renderer.py`); integration — repository resolves `template_name` from the consolidated `abseiling_data.template_id` for a plain abseiling trip and leaves it `None` when unset (`test_logbook_export_repository.py`), and the export endpoint includes/omits the name in the generated PDF (`test_logbook_export_api.py`).
 
-**Phase 5 — Retire the per-subtype `template_id` columns (cleanup migration).** PR ~200 lines.
+**Phase 5 — Retire the per-subtype `template_id` columns (cleanup migration).** PR ~200 lines. ✅ DONE — migration `0097` drops the now-unused `template_id` columns (and their FKs) from `journal_canyoning_data` / `journal_climbing_data` / `journal_caving_data` (its downgrade re-adds them and re-backfills from the consolidated `abseiling_data.template_id`, so the round-trip is reversible). Every remaining backend/`core_shared` reference to the dropped columns was removed to finish Phase 3's partial write-path retirement (canyoning was clean; climbing/caving repos, MCP builders/updaters, the three subtype dataclasses, the write-service changed-fields map, the `update_*_type_data` helpers, and the API schemas/converters). `journal_abseiling_data.template_id` is the sole template reference across all abseiling-derived types; the abseiling read/write paths are untouched.
 - Once Phases 2–3 have moved all reads/writes to `abseiling_data.template_id`, drop the now-unused `template_id` columns (and their FKs) from `canyoning_data`, `climbing_data`, and `caving_data`. Separate phase so the read/write switch deploys and is verified before the columns are removed (additive-first, then drop).
-- **Tests:** integration — migration up/down; no code path references the dropped columns (grep/asserted); existing abseiling-derived journal suites stay green.
-- **Docs:** `database-design.md` — mark the old columns retired.
+- **Tests:** integration — migration up/down (`test_drop_per_subtype_template_id_migration.py`); a grep/assert guard that no code path references the dropped columns (`tests/unit/journal/test_no_subtype_template_id_references.py` — checks the subtype dataclasses declare no `template_id`, the subtype repo SQL is clean, and the MCP tools carry no subtype `template_id`); updated subtype entity/repo suites; existing abseiling-derived journal suites stay green.
+- **Docs:** `database-design.md` — old columns marked retired.
 
 ---
 

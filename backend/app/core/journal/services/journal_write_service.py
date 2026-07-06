@@ -204,7 +204,6 @@ _TYPE_DATA_TRACKED_FIELDS: dict[JournalType, tuple[str, ...]] = {
         "number_of_rescues",
     ),
     JournalType.CANYONING: (
-        "template_id",
         "french_grade",
         "water_guage_name",
         "water_guage_level",
@@ -212,10 +211,9 @@ _TYPE_DATA_TRACKED_FIELDS: dict[JournalType, tuple[str, ...]] = {
         "is_night_canyon",
         "is_white_water",
     ),
-    JournalType.CAVING: ("template_id", "is_vertical", "is_horizontal"),
+    JournalType.CAVING: ("is_vertical", "is_horizontal"),
     JournalType.CANOEING: ("water_type",),
     JournalType.CLIMBING: (
-        "template_id",
         "climbing_type",
         "grade",
         "length",
