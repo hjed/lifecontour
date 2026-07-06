@@ -647,24 +647,38 @@ every PR) enforces that workers stay trimmed and Dockerfiles stay canonical.
 
 Single phase — the skill is documentation, validated by following it to scaffold a throwaway sample worker.
 
+**Status:** ✅ Complete.
+
 **Acceptance Criteria:**
-- [ ] `.claude/skills/creating-a-new-worker/SKILL.md` exists, following the established skill format (YAML frontmatter `name` + `description`, then numbered actionable steps — see `.claude/skills/creating-migrations/SKILL.md`).
-- [ ] The skill covers, as an ordered checklist:
-  - [ ] **(a)** Tests created first (`tests/unit/` + `tests/integration/`, using `core_shared/testing/` fixtures).
-  - [ ] **(b)** uv project setup depending on `core_shared` as an editable source and inheriting the shared tooling config.
-  - [ ] **(c)** Canonical Dockerfile (`FROM pms-python-base`, uv install, Redis-ping `HEALTHCHECK`, `appuser`, `CMD ["python", "worker.py"]`).
-  - [ ] **(d)** CI updates — path-filter + matrix entry in `.github/workflows/ci.yml` (unit + integration jobs) and build component + Dockerfile mapping in `.github/workflows/release.yml`.
-  - [ ] **(e)** Worker setup using `BaseWorkerSettings` and the shared ARQ factory/lifecycle (functions list + consumer routes only).
-  - [ ] **(f)** No SQL in `worker.py` — all data access via repositories.
-  - [ ] **(g)** Backend communication via events only (outbox → Redis Streams); never write journals or contacts directly.
-- [ ] The skill references the canonical examples and the relevant `core_shared` surfaces by path.
+- [x] `.claude/skills/creating-a-new-worker/SKILL.md` exists, following the established skill format (YAML frontmatter `name` + `description`, then numbered actionable steps — see `.claude/skills/creating-migrations/SKILL.md`).
+- [x] The skill covers, as an ordered checklist:
+  - [x] **(a)** Tests created first (`tests/unit/` + `tests/integration/`, using `core_shared/testing/` fixtures).
+  - [x] **(b)** uv project setup depending on `core_shared` as an editable source and inheriting the shared tooling config.
+  - [x] **(c)** Canonical Dockerfile (`FROM pms-python-base`, uv install, Redis-ping `HEALTHCHECK`, `appuser`, `CMD ["python", "worker.py"]`).
+  - [x] **(d)** CI updates — path-filter + matrix entry in `.github/workflows/ci.yml` (unit + integration jobs) and build component + Dockerfile mapping in `.github/workflows/release.yml`.
+  - [x] **(e)** Worker setup using `BaseWorkerSettings` and the shared ARQ factory/lifecycle (functions list + consumer routes only).
+  - [x] **(f)** No SQL in `worker.py` — all data access via repositories.
+  - [x] **(g)** Backend communication via events only (outbox → Redis Streams); never write journals or contacts directly.
+- [x] The skill references the canonical examples and the relevant `core_shared` surfaces by path.
 
 **Required Test Coverage:**
 - **Validation (manual):** follow the skill end-to-end to scaffold a throwaway sample worker and confirm each step is accurate (tests run, image builds, CI entries valid, worker boots). Fix any gaps found.
 
+**Validation performed:** A throwaway `integration_workers/sample/` worker was scaffolded by
+following the skill verbatim (then deleted). All checks green: `uv sync` resolved `core_shared`
+editable; unit tests (3) and integration tests (2, against real Docker Postgres via the shared
+`core_shared.testing.integration` fixtures — confirming migrations run and the `outbox_events`
+table is present) passed; `ruff check`, `ruff format --check`, and `mypy --config-file
+../../mypy.ini .` were clean; the worker booted (`import worker; WorkerSettings` — `functions`
+populated, inherited `job_timeout=300`, `health_check_interval=30`, `redis_settings` built,
+consumer routes returned `EventRoute`s); the documented `ci.yml`/`release.yml` edits were applied
+to scratchpad copies and parsed as valid YAML (all anchors matched); and the Dockerfile is
+instruction-identical to `snipeit`'s (full `docker build` skipped — requires `pms-python-base`
+built locally). No skill inaccuracies were found. No production code was added or changed.
+
 **Required Documentation Updates:**
-- `docs/architecture/integration-architecture.md` — link the `creating-a-new-worker` skill as the canonical path for adding a worker.
-- `CLAUDE.md` / skills index — ensure the new skill is discoverable per the project's skill registration convention.
+- [x] `docs/architecture/integration-architecture.md` — link the `creating-a-new-worker` skill as the canonical path for adding a worker.
+- [x] `CLAUDE.md` / skills index — the project has **no central skills registry**; local skills under `.claude/skills/` are auto-discovered by directory presence (only `skills-lock.json` tracks *external* skills, e.g. `playwright-skill`, `shadcn`). So no registry edit is required; discoverability is provided by the directory + the integration-architecture link above.
 
 ---
 
