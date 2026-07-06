@@ -127,6 +127,16 @@ class TestSummaryPromptBuilder:
         assert "Jane Smith" in prompt
         assert "Bob Wilson" in prompt
 
+    def test_prompt_relationships_disambiguate_from_user(self):
+        """Relationships section clarifies contact-to-contact links are not the user's."""
+        builder = SummaryPromptBuilder()
+        prompt = builder.build(_make_input())
+
+        assert "## Relationships" in prompt
+        assert "not a relationship" in prompt.lower()
+        assert "to the user" in prompt.lower()
+        assert "distinct from you, the ai assistant" in prompt.lower()
+
     def test_prompt_includes_important_dates(self):
         """Test prompt includes important dates."""
         builder = SummaryPromptBuilder()

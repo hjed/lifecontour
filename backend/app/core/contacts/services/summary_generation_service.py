@@ -45,6 +45,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _relationship_label(rel_type: Any) -> str:
+    """Return a human-readable label for a relationship type enum or value."""
+    return str(rel_type.value) if hasattr(rel_type, "value") else str(rel_type)
+
+
 # Re-export for backward compat
 __all__ = [
     "ActivityStatsBucket",
@@ -110,20 +115,35 @@ class SummaryInputAssembler:
         notes = getattr(contact, "notes", None) or []
         recent_notes = [n.content for n in notes[: self.MAX_NOTES]]
 
-        # Relationships
+        # Relationships. Each is rendered with an explicit subject, target, and a
+        # disclaimer so the model never confuses a relationship between two
+        # contacts with a relationship to the user. Phrasing stays strictly
+        # third-person ("the user", the CRM owner) rather than "you"/"your",
+        # since in this prompt "you" is the AI assistant, not the user.
+        # Relationships are loaded for both directions, so pick the *other*
+        # party (and invert the type) when this contact is the target side.
         rels = getattr(contact, "relationships", None) or []
         relationships = []
         for r in rels:
-            target = getattr(r, "to_contact_name", None) or "Unknown"
-            rel_type = (
-                str(r.relationship_type.value)
-                if hasattr(r.relationship_type, "value")
-                else str(r.relationship_type)
-            )
             if getattr(r, "to_user", False):
-                relationships.append(f"{rel_type} (to user)")
+                label = _relationship_label(r.relationship_type)
+                relationships.append(
+                    f"{contact_name} is the {label} of the user "
+                    "(a relationship to the user, the CRM owner)"
+                )
+                continue
+
+            if r.from_contact_id == contact_id:
+                other = getattr(r, "to_contact_name", None) or "another contact"
+                label = _relationship_label(r.relationship_type)
             else:
-                relationships.append(f"{rel_type}: {target}")
+                other = getattr(r, "from_contact_name", None) or "another contact"
+                label = _relationship_label(r.get_inverse_type())
+
+            relationships.append(
+                f"{contact_name} is the {label} of {other} "
+                "(another contact, not the user)"
+            )
 
         # Important dates
         dates = getattr(contact, "important_dates", None) or []
