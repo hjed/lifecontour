@@ -8,8 +8,10 @@ description: How to scaffold a new integration worker on the standardised core_s
 Integration workers live under `integration_workers/<name>/` and run as ARQ worker
 processes. Iteration 14 moved every piece of shared scaffolding into `core_shared`, so a
 new worker declares only its intent (settings fields, task functions, event routes) and
-inherits the rest. Follow these steps **in order** — the order enforces the project's
-test-first rule.
+inherits the rest. Work through the sections **top to bottom** — that order is the intended
+workflow and enforces the project's test-first rule. The parenthesised letters `(a)`–`(g)`
+are the spec's checklist labels (from the worker-standardisation product spec), so they are
+**not** in alphabetical order here; follow the section order on the page, not the letters.
 
 The **canonical reference worker** is `integration_workers/snipeit/` (the smallest). Open
 it alongside these steps; every snippet below is copied from it or from `core_shared`. Use
@@ -398,6 +400,11 @@ dedicated data-access/service module (see `integration_workers/snipeit/snipeit_s
 rather than embedding queries in the task functions. Task functions receive
 `ctx["session_factory"]` and delegate the actual reads/writes to that module. This keeps
 the entry point thin and the data access testable in isolation.
+
+> **Note:** the reference `integration_workers/snipeit/worker.py` still has a few inline
+> read-only `sqlalchemy.text(...)` auth/config lookups from before this convention. Treat
+> them as legacy, **not** a pattern to copy — a new worker should route all data access
+> through a data-access/service module.
 
 ---
 
