@@ -184,7 +184,13 @@ class SummaryPromptBuilder:
         return "\n".join(lines)
 
     def _relationships_section(self, rels: list[str]) -> str:
-        lines = ["## Relationships"]
+        lines = [
+            "## Relationships",
+            "These describe the contact's relationships with other people. A "
+            "relationship to another named contact is between those two people "
+            "and is NOT a relationship to you (the user). Only entries that say "
+            '"your" or "you, the user" describe a relationship to you.',
+        ]
         for r in rels:
             lines.append(f"- {r}")
         return "\n".join(lines)

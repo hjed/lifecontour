@@ -187,22 +187,78 @@ class TestSummaryInputAssembler:
 
     @pytest.mark.asyncio
     async def test_includes_relationships(self):
-        """Test that relationships are included in assembled input."""
+        """Contact-to-contact relationships name both parties and disclaim the user."""
         rels = [
             ContactRelationship(
                 from_contact_id=1,
                 to_contact_id=2,
                 relationship_type=RelationshipType.FRIEND,
+                from_contact_name="John Doe",
                 to_contact_name="Jane Smith",
             ),
         ]
-        contact = Contact(first_name="John", id=1, relationships=rels)
+        contact = Contact(first_name="John", last_name="Doe", id=1, relationships=rels)
         assembler = _make_assembler(contact=contact)
         result = await assembler.assemble(contact_id=1)
 
         assert result is not None
         assert len(result.relationships) == 1
-        assert "friend" in result.relationships[0].lower()
+        rel = result.relationships[0]
+        # Names both the contact and the other party, and clarifies it is NOT the user.
+        assert "John Doe" in rel
+        assert "Jane Smith" in rel
+        assert "friend" in rel.lower()
+        assert "not you" in rel.lower()
+
+    @pytest.mark.asyncio
+    async def test_relationship_to_user_marked_as_user(self):
+        """A to_user relationship is explicitly rendered as a relationship to the user."""
+        rels = [
+            ContactRelationship(
+                from_contact_id=1,
+                to_contact_id=None,
+                relationship_type=RelationshipType.PARENT,
+                from_contact_name="John Doe",
+                to_user=True,
+            ),
+        ]
+        contact = Contact(first_name="John", last_name="Doe", id=1, relationships=rels)
+        assembler = _make_assembler(contact=contact)
+        result = await assembler.assemble(contact_id=1)
+
+        assert result is not None
+        assert len(result.relationships) == 1
+        rel = result.relationships[0].lower()
+        assert "your parent" in rel
+        assert "you, the user" in rel
+        assert "not you" not in rel
+
+    @pytest.mark.asyncio
+    async def test_relationship_where_contact_is_target_is_inverted(self):
+        """When the contact is the target side, use the other party and invert direction."""
+        # Row: Mary (id=2) is the PARENT of John (id=1). Summarising John, the
+        # rendered relationship must read that John is Mary's CHILD, not that John
+        # is his own parent.
+        rels = [
+            ContactRelationship(
+                from_contact_id=2,
+                to_contact_id=1,
+                relationship_type=RelationshipType.PARENT,
+                from_contact_name="Mary Doe",
+                to_contact_name="John Doe",
+            ),
+        ]
+        contact = Contact(first_name="John", last_name="Doe", id=1, relationships=rels)
+        assembler = _make_assembler(contact=contact)
+        result = await assembler.assemble(contact_id=1)
+
+        assert result is not None
+        assert len(result.relationships) == 1
+        rel = result.relationships[0]
+        assert "Mary Doe" in rel
+        assert "child" in rel.lower()
+        assert "parent" not in rel.lower()
+        assert "not you" in rel.lower()
 
     @pytest.mark.asyncio
     async def test_includes_field_history(self):
