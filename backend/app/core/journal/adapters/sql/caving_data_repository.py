@@ -18,12 +18,8 @@ class SqlCavingDataRepository(CavingDataRepository):
 
     def _row_to_entity(self, row: Any) -> CavingData:
         """Convert a database row to a CavingData entity."""
-        # Convert UUID to string if it's present
-        template_id = str(row.template_id) if row.template_id else None
-
         return CavingData(
             journal_id=row.journal_id,
-            template_id=template_id,
             is_vertical=row.is_vertical,
             is_horizontal=row.is_horizontal,
             created_at=row.created_at,
@@ -34,7 +30,7 @@ class SqlCavingDataRepository(CavingDataRepository):
         """Find caving data by journal ID."""
         query = text(
             """
-            SELECT journal_id, template_id, is_vertical, is_horizontal,
+            SELECT journal_id, is_vertical, is_horizontal,
                    created_at, updated_at
             FROM journal_caving_data
             WHERE journal_id = :journal_id
@@ -53,24 +49,22 @@ class SqlCavingDataRepository(CavingDataRepository):
         query = text(
             """
             INSERT INTO journal_caving_data (
-                journal_id, template_id, is_vertical, is_horizontal
+                journal_id, is_vertical, is_horizontal
             )
             VALUES (
-                :journal_id, :template_id, :is_vertical, :is_horizontal
+                :journal_id, :is_vertical, :is_horizontal
             )
             ON CONFLICT (journal_id) DO UPDATE SET
-                template_id = EXCLUDED.template_id,
                 is_vertical = EXCLUDED.is_vertical,
                 is_horizontal = EXCLUDED.is_horizontal,
                 updated_at = now()
-            RETURNING journal_id, template_id, is_vertical, is_horizontal, created_at, updated_at
+            RETURNING journal_id, is_vertical, is_horizontal, created_at, updated_at
             """
         )
         result = await self.conn.execute(
             query,
             {
                 "journal_id": data.journal_id,
-                "template_id": data.template_id,
                 "is_vertical": data.is_vertical,
                 "is_horizontal": data.is_horizontal,
             },

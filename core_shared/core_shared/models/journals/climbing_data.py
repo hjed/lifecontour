@@ -4,14 +4,13 @@ ClimbingData represents the CLIMBING journal type data. A journal has the CLIMBI
 type if a row exists in the journal_climbing_data table.
 
 This entity stores climbing-specific data including climbing type,
-grade, route length, and optional activity template reference.
+grade, and route length.
 
 CLIMBING requires ABSEILING_TRIP, OUTDOOR_ACTIVITY, and FITNESS types.
 """
 
 from dataclasses import dataclass
 from datetime import datetime
-from uuid import UUID
 
 from .constants import VALID_CLIMBING_TYPES
 from .exceptions import ClimbingDataValidationError
@@ -33,7 +32,6 @@ class ClimbingData:
 
     Attributes:
         journal_id: Foreign key to the journal (primary key in DB)
-        template_id: Foreign key to the activity template (nullable)
         climbing_type: Type of climbing (sport, trad, bouldering, top_rope) (nullable)
         grade: Numeric climbing grade (nullable, non-negative)
         length: Route length in metres (nullable, non-negative)
@@ -44,7 +42,6 @@ class ClimbingData:
     """
 
     journal_id: int
-    template_id: UUID | str | None = None
     climbing_type: str | None = None
     grade: int | None = None
     length: int | None = None
@@ -55,26 +52,10 @@ class ClimbingData:
     def __post_init__(self) -> None:
         """Validate climbing data properties."""
         self._validate_journal_id()
-        self._validate_template_id()
         self._validate_climbing_type()
         self._validate_grade()
         self._validate_length()
         self._validate_indoor()
-
-    def _validate_template_id(self) -> None:
-        """Validate template_id is a valid UUID if provided."""
-        if self.template_id is not None:
-            if isinstance(self.template_id, str):
-                try:
-                    self.template_id = UUID(self.template_id)
-                except ValueError as err:
-                    raise ClimbingDataValidationError(
-                        "template_id", "Template ID must be a valid UUID"
-                    ) from err
-            elif not isinstance(self.template_id, UUID):
-                raise ClimbingDataValidationError(
-                    "template_id", "Template ID must be a valid UUID"
-                )
 
     def _validate_journal_id(self) -> None:
         """Validate journal_id is positive."""

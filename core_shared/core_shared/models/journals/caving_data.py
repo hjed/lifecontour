@@ -11,7 +11,6 @@ CAVING requires ABSEILING_TRIP, OUTDOOR_ACTIVITY, and FITNESS types.
 
 from dataclasses import dataclass
 from datetime import datetime
-from uuid import UUID
 
 from .exceptions import CavingDataValidationError
 
@@ -32,7 +31,6 @@ class CavingData:
 
     Attributes:
         journal_id: Foreign key to the journal (primary key in DB)
-        template_id: Foreign key to the activity template (nullable)
         is_vertical: Whether the cave is primarily vertical (nullable)
         is_horizontal: Whether the cave is primarily horizontal (nullable)
         created_at: Creation timestamp
@@ -40,7 +38,6 @@ class CavingData:
     """
 
     journal_id: int
-    template_id: UUID | str | None = None
     is_vertical: bool | None = None
     is_horizontal: bool | None = None
     created_at: datetime | None = None

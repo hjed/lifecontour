@@ -20,7 +20,6 @@ French Canyon Grading System:
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from uuid import UUID
 
 from .constants import FRENCH_CANYON_GRADE_PATTERN
 from .exceptions import CanyoningDataValidationError
@@ -42,7 +41,6 @@ class CanyoningData:
 
     Attributes:
         journal_id: Foreign key to the journal (primary key in DB)
-        template_id: Foreign key to the activity template (nullable)
         french_grade: French canyoning grade (e.g., v3a2IV**) (nullable)
         water_guage_name: Name of the water gauge used for flow measurement (nullable)
         water_guage_level: Water gauge reading at time of trip (nullable)
@@ -54,7 +52,6 @@ class CanyoningData:
     """
 
     journal_id: int
-    template_id: UUID | str | None = None
     french_grade: str | None = None
     water_guage_name: str | None = None
     water_guage_level: int | None = None
