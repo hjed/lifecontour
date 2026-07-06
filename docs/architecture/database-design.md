@@ -254,6 +254,7 @@ Abseiling-derived activities (CANYONING, CLIMBING, CAVING, and plain ABSEILING_T
 
 - `journal_abseiling_data.template_id` — nullable UUID FK → `activity_templates.id`, `ON DELETE SET NULL`. Single source of truth for the "based on: \<template\>" reference (preserved across pitch edits).
 - **Phase 1 (additive, migration `0094`)**: the column is added and **backfilled** from the existing per-subtype `template_id` columns on `journal_canyoning_data` / `journal_climbing_data` / `journal_caving_data`. Those columns are **left in place** for now (both coexist). The abseiling repository reads/writes the new column; the journal write-service is wired in Phase 2.
+- **Phase 4 (PDF)**: the logbook PDF export resolves the template name from `journal_abseiling_data.template_id` (rendered as "based on: \<template\>"), so it appears for every abseiling-derived type — including plain ABSEILING_TRIP — and is unaffected by the Phase 5 column drop.
 - **Phase 5 (cleanup)**: once all reads/writes move to `journal_abseiling_data.template_id`, the now-unused per-subtype `template_id` columns are dropped.
 
 ### Photo Integration (Iteration 4)

@@ -4,12 +4,16 @@ from datetime import UTC, datetime
 
 import pytest
 from core_shared.models.journals import (
+    ActivityTemplate,
     EventDateRange,
     Journal,
 )
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.journal.adapters.sql.activity_template_repository import (
+    SqlActivityTemplateRepository,
+)
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.adapters.sql.logbook_export_repository import (
     SqlLogbookExportRepository,
@@ -31,6 +35,14 @@ def journal_repo(async_connection: AsyncConnection) -> SqlJournalRepository:
     from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 
     return SqlJournalRepository(async_connection)
+
+
+@pytest.fixture
+def template_repo(
+    async_connection: AsyncConnection,
+) -> SqlActivityTemplateRepository:
+    """Provide an activity template repository."""
+    return SqlActivityTemplateRepository(async_connection)
 
 
 @pytest.mark.asyncio
@@ -226,6 +238,137 @@ async def test_get_logbook_entries_date_and_type_filters(
 
     assert len(entries) == 1
     assert entries[0].id == journal1.id
+
+
+@pytest.mark.asyncio
+async def test_template_name_resolved_from_consolidated_abseiling_template_id(
+    repo: SqlLogbookExportRepository,
+    journal_repo: JournalRepository,
+    template_repo: SqlActivityTemplateRepository,
+    async_connection: AsyncConnection,
+) -> None:
+    """A plain ABSEILING_TRIP resolves its template name from abseiling_data.template_id.
+
+    This is the consolidated single source of truth (ITER16-001): the export must
+    read ``journal_abseiling_data.template_id`` rather than the per-subtype columns,
+    so plain abseiling trips surface the name and it survives the Phase 5 column drop.
+    """
+    user_id = "user_abseiling_template_name"
+    now = datetime.now(UTC)
+
+    template = await template_repo.save(
+        ActivityTemplate(
+            name="Empress Falls",
+            template_type="abseiling",
+            user_id=user_id,
+        )
+    )
+
+    journal = Journal(
+        user_id=user_id,
+        title="Abseil From Template",
+        content="",
+        event_date_range=EventDateRange(start=now, end=now),
+    )
+    journal = await journal_repo.save(journal)
+    assert journal.id is not None
+    await async_connection.execute(
+        text(
+            "INSERT INTO journal_abseiling_data (journal_id, template_id) "
+            "VALUES (:id, :template_id)"
+        ),
+        {"id": journal.id, "template_id": template.id},
+    )
+
+    entries = await repo.get_logbook_entries(user_id=user_id)
+
+    assert len(entries) == 1
+    assert "ABSEILING_TRIP" in entries[0].journal_types
+    assert entries[0].template_name == "Empress Falls"
+
+
+@pytest.mark.asyncio
+async def test_template_name_none_when_abseiling_has_no_template(
+    repo: SqlLogbookExportRepository,
+    journal_repo: JournalRepository,
+    async_connection: AsyncConnection,
+) -> None:
+    """An abseiling journal without a template_id leaves template_name None."""
+    user_id = "user_abseiling_no_template"
+    now = datetime.now(UTC)
+
+    journal = Journal(
+        user_id=user_id,
+        title="Abseil Without Template",
+        content="",
+        event_date_range=EventDateRange(start=now, end=now),
+    )
+    journal = await journal_repo.save(journal)
+    assert journal.id is not None
+    await async_connection.execute(
+        text("INSERT INTO journal_abseiling_data (journal_id) VALUES (:id)"),
+        {"id": journal.id},
+    )
+
+    entries = await repo.get_logbook_entries(user_id=user_id)
+
+    assert len(entries) == 1
+    assert "ABSEILING_TRIP" in entries[0].journal_types
+    assert entries[0].template_name is None
+
+
+@pytest.mark.asyncio
+async def test_template_name_resolved_for_canyoning_from_consolidated_column(
+    repo: SqlLogbookExportRepository,
+    journal_repo: JournalRepository,
+    template_repo: SqlActivityTemplateRepository,
+    async_connection: AsyncConnection,
+) -> None:
+    """A CANYONING journal resolves its template name from the consolidated column.
+
+    CANYONING/CLIMBING/CAVING all depend on ABSEILING_TRIP, so their template
+    reference lives on ``journal_abseiling_data.template_id`` (ITER16-001) — this
+    proves the export renders the name for a derived type, not just plain
+    ABSEILING_TRIP, and no longer relies on the per-subtype ``template_id`` column.
+    """
+    user_id = "user_canyoning_template_name"
+    now = datetime.now(UTC)
+
+    template = await template_repo.save(
+        ActivityTemplate(
+            name="Claustral Canyon",
+            template_type="canyoning",
+            user_id=user_id,
+        )
+    )
+
+    journal = Journal(
+        user_id=user_id,
+        title="Claustral",
+        content="",
+        event_date_range=EventDateRange(start=now, end=now),
+    )
+    journal = await journal_repo.save(journal)
+    assert journal.id is not None
+    # A canyoning journal carries both its subtype row and the ABSEILING_TRIP row;
+    # the template reference is consolidated onto the abseiling row.
+    await async_connection.execute(
+        text("INSERT INTO journal_canyoning_data (journal_id) VALUES (:id)"),
+        {"id": journal.id},
+    )
+    await async_connection.execute(
+        text(
+            "INSERT INTO journal_abseiling_data (journal_id, template_id) "
+            "VALUES (:id, :template_id)"
+        ),
+        {"id": journal.id, "template_id": template.id},
+    )
+
+    entries = await repo.get_logbook_entries(user_id=user_id)
+
+    assert len(entries) == 1
+    assert "CANYONING" in entries[0].journal_types
+    assert entries[0].template_name == "Claustral Canyon"
 
 
 async def _link_immich_album(
