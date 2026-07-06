@@ -16,6 +16,15 @@ skip unchanged assets as before.
 
 Only the 'snipeit' gear source is touched; 'snipeit_maintenance',
 'snipeit_checkout' and 'snipeit_checkin' are separate sources and left as-is.
+
+Operational note: the outbound export path (``push_asset_update`` in
+``snipeit_sync_service.py``) uses version_hash for conflict detection and
+skips exports while the stored hash does not match the freshly-computed
+remote hash. Between this migration and the next inbound sync, a local gear
+edit's export is therefore skipped (the local change persists and re-exports
+on the next edit). To keep that window small, run an inbound Snipe-IT sync
+immediately after deploying this migration -- which is required anyway for the
+backfill to take effect.
 """
 
 from alembic import op
