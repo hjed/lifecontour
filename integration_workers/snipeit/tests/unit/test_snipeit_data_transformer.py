@@ -89,9 +89,27 @@ class TestTransformerMissingOptionalFields:
         result = SnipeItDataTransformer.transform(asset, user_id="u")
         assert result.gear_item.purchase_date is None
 
-    def test_no_name_uses_asset_tag(self) -> None:
-        """Asset with no name falls back to asset_tag."""
+    def test_no_name_falls_back_to_model(self) -> None:
+        """Asset with no name falls back to the model name."""
         asset = _make_asset(name=None)
+        result = SnipeItDataTransformer.transform(asset, user_id="u")
+        assert result.gear_item.name == "Dynamic Rope 60m"
+
+    def test_blank_name_falls_back_to_model(self) -> None:
+        """Asset with a whitespace-only name falls back to the model name."""
+        asset = _make_asset(name="   ")
+        result = SnipeItDataTransformer.transform(asset, user_id="u")
+        assert result.gear_item.name == "Dynamic Rope 60m"
+
+    def test_no_name_no_model_falls_back_to_asset_tag(self) -> None:
+        """Asset with no name and no model falls back to asset_tag."""
+        asset = _make_asset(name=None, model=None)
+        result = SnipeItDataTransformer.transform(asset, user_id="u")
+        assert result.gear_item.name == "GEAR-001"
+
+    def test_no_name_null_model_name_falls_back_to_asset_tag(self) -> None:
+        """Asset with no name and a model whose name is null falls back to asset_tag."""
+        asset = _make_asset(name=None, model=SnipeItNestedObject(id=10, name=None))
         result = SnipeItDataTransformer.transform(asset, user_id="u")
         assert result.gear_item.name == "GEAR-001"
 

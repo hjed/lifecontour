@@ -6,7 +6,7 @@ from ``core_shared``.  This is pure transformation logic with no I/O
 or database access.
 
 Field mapping (Snipe-IT → GearItem):
-- ``name`` → ``name`` (fallback to ``asset_tag``)
+- ``name`` → ``name`` (fallback to ``model.name``, then ``asset_tag``)
 - ``serial`` → ``serial_number``
 - ``model.name`` → ``model``
 - ``manufacturer.name`` → ``manufacturer``
@@ -67,10 +67,11 @@ class SnipeItDataTransformer:
         Returns:
             ``TransformResult`` containing the ``GearItem`` and sync metadata.
         """
-        # Name: use asset name, fall back to asset_tag (asset_tag is required)
-        raw_name = (
-            asset.name.strip() if asset.name and asset.name.strip() else asset.asset_tag
-        )
+        # Name: use asset name, fall back to the model name, then asset_tag.
+        # Snipe-IT assets often have no name and only a model, so the model
+        # name is a more useful label than the opaque asset_tag. asset_tag is
+        # required, so it is the final guaranteed fallback.
+        raw_name = _first_non_blank(asset.name, asset.model_name) or asset.asset_tag
         name = raw_name[:MAX_GEAR_ITEM_NAME_LENGTH]
 
         # Serial number
@@ -104,6 +105,14 @@ class SnipeItDataTransformer:
             snipeit_asset_id=asset.id,
             version_hash=version_hash,
         )
+
+
+def _first_non_blank(*values: str | None) -> str | None:
+    """Return the first value that is non-None and non-blank (stripped)."""
+    for value in values:
+        if value and value.strip():
+            return value.strip()
+    return None
 
 
 def _truncate(value: str | None, max_length: int) -> str | None:
