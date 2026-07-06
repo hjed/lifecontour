@@ -284,7 +284,7 @@ class LogbookPdfRenderer:
         # Template / Gear item names
         if entry.template_name:
             story.append(
-                Paragraph(f"Template: {_safe_str(entry.template_name)}", label_style)
+                Paragraph(f"Based on: {_safe_str(entry.template_name)}", label_style)
             )
         if entry.gear_item_name:
             story.append(

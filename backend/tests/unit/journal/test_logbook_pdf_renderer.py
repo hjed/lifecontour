@@ -159,6 +159,17 @@ def _make_entry_with_template_and_gear(entry_id: int) -> LogbookEntryData:
     return entry
 
 
+def _make_entry_with_template_reference(
+    entry_id: int, template_name: str = "Empress Falls"
+) -> LogbookEntryData:
+    """Create an abseiling-derived entry that references a template."""
+    entry = _make_entry(
+        entry_id, title="Abseil From Template", types=["ABSEILING_TRIP"]
+    )
+    entry.template_name = template_name
+    return entry
+
+
 def _make_hierarchical_data() -> LogbookExportData:
     """Create data with parent-child hierarchy."""
     parent = _make_entry(1, title="Blue Mountains Weekend", types=["NOTE"])
@@ -464,8 +475,33 @@ class TestLogbookPdfRenderer:
         )
         result = self._renderer().render(data)
         text = _extract_pdf_text(result)
+        assert "Based on:" in text
         assert "Claustral Canyon" in text
         assert "10mm Static Rope" in text
+
+    def test_template_reference_rendered_for_abseiling_entry(self) -> None:
+        """The 'Based on: <template>' reference renders for abseiling-derived types."""
+        entry = _make_entry_with_template_reference(1, template_name="Empress Falls")
+        data = LogbookExportData(
+            entries=[entry], yearly_summaries=[], participant_index=[]
+        )
+        result = self._renderer().render(data)
+        text = _extract_pdf_text(result)
+        assert "Based on:" in text
+        assert "Empress Falls" in text
+
+    def test_template_reference_omitted_when_absent(self) -> None:
+        """No 'Based on:' line is rendered when the entry has no template name."""
+        entry = _make_entry(
+            1, title="Abseil Without Template", types=["ABSEILING_TRIP"]
+        )
+        assert entry.template_name is None
+        data = LogbookExportData(
+            entries=[entry], yearly_summaries=[], participant_index=[]
+        )
+        result = self._renderer().render(data)
+        text = _extract_pdf_text(result)
+        assert "Based on:" not in text
 
     # ── Immich photo album shared link ─────────────────────────
 

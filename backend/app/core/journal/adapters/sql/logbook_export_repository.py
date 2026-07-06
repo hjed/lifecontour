@@ -333,15 +333,14 @@ class SqlLogbookExportRepository(LogbookExportRepository):
         outdoor_train_data = await fetch_type_data("journal_outdoor_training_data")
         gear_maint_data = await fetch_type_data("journal_gear_maintenance_data")
 
-        # Resolve names for activity templates and gear items
+        # Resolve names for activity templates and gear items.
+        # The template reference is consolidated onto ``journal_abseiling_data``
+        # (ITER16-001): every abseiling-derived journal (ABSEILING_TRIP / CANYONING
+        # / CLIMBING / CAVING) has an ``abseiling_data`` row, so this single source
+        # covers them all — including plain abseiling trips — and stays correct once
+        # the per-subtype ``template_id`` columns are dropped.
         template_ids = [
-            d["template_id"] for d in canyoning_data.values() if d.get("template_id")
-        ]
-        template_ids += [
-            d["template_id"] for d in caving_data.values() if d.get("template_id")
-        ]
-        template_ids += [
-            d["template_id"] for d in climbing_data.values() if d.get("template_id")
+            d["template_id"] for d in abseiling_data.values() if d.get("template_id")
         ]
         template_names = {}
         if template_ids:
@@ -503,18 +502,12 @@ class SqlLogbookExportRepository(LogbookExportRepository):
                 ),
             )
 
-            # Additional logic for names
-            canyon = canyoning_data.get(row.id)
-            if canyon and canyon.get("template_id"):
-                entry.template_name = template_names.get(canyon["template_id"])
-
-            cave = caving_data.get(row.id)
-            if cave and cave.get("template_id"):
-                entry.template_name = template_names.get(cave["template_id"])
-
-            climb = climbing_data.get(row.id)
-            if climb and climb.get("template_id"):
-                entry.template_name = template_names.get(climb["template_id"])
+            # Resolve the durable template reference from the consolidated
+            # abseiling_data.template_id (ITER16-001) so it renders for every
+            # abseiling-derived type, including plain abseiling trips.
+            abseiling = abseiling_data.get(row.id)
+            if abseiling and abseiling.get("template_id"):
+                entry.template_name = template_names.get(abseiling["template_id"])
 
             gear = gear_maint_data.get(row.id)
             if gear and gear.get("gear_item_id"):

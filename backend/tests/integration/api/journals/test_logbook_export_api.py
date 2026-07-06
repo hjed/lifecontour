@@ -276,6 +276,102 @@ class TestLogbookExportEndpoint:
         assert "Photo Album:" in text_content
         assert "https://immich.example.com/share/xyz" in text_content
 
+    async def test_export_includes_template_name_for_abseiling_trip(
+        self,
+        authenticated_client,
+        async_connection: AsyncConnection,
+        journal_repo: SqlJournalRepository,
+    ) -> None:
+        """Exported PDF shows 'Based on: <template>' for a plain abseiling trip.
+
+        Proves the export resolves the template name from the consolidated
+        ``journal_abseiling_data.template_id`` (ITER16-001 Phase 4).
+        """
+        from core_shared.models.journals import (
+            ActivityTemplate,
+            EventDateRange,
+            Journal,
+        )
+
+        from app.core.journal.adapters.sql.activity_template_repository import (
+            SqlActivityTemplateRepository,
+        )
+
+        template = await SqlActivityTemplateRepository(async_connection).save(
+            ActivityTemplate(
+                name="Empress Falls",
+                template_type="abseiling",
+                user_id="test-user-123",
+            )
+        )
+
+        journal = Journal(
+            user_id="test-user-123",
+            title="Abseil From Template",
+            content="Multi-pitch abseil",
+            event_date_range=EventDateRange(
+                start=datetime(2024, 4, 12, tzinfo=UTC),
+                end=datetime(2024, 4, 12, tzinfo=UTC),
+            ),
+        )
+        journal = await journal_repo.save(journal)
+        assert journal.id is not None
+        await async_connection.execute(
+            text(
+                "INSERT INTO journal_abseiling_data (journal_id, template_id) "
+                "VALUES (:id, :template_id)"
+            ),
+            {"id": journal.id, "template_id": template.id},
+        )
+
+        response = await authenticated_client.post(
+            "/api/journals/export/outdoor-logbook",
+            json={},
+        )
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/pdf"
+
+        text_content = _extract_pdf_text(response.content)
+        assert "Abseil From Template" in text_content
+        assert "Based on:" in text_content
+        assert "Empress Falls" in text_content
+
+    async def test_export_omits_template_name_when_absent(
+        self,
+        authenticated_client,
+        async_connection: AsyncConnection,
+        journal_repo: SqlJournalRepository,
+    ) -> None:
+        """Exported PDF omits the 'Based on:' line for an abseiling trip with no template."""
+        from core_shared.models.journals import EventDateRange, Journal
+
+        journal = Journal(
+            user_id="test-user-123",
+            title="Abseil Without Template",
+            content="No template linked",
+            event_date_range=EventDateRange(
+                start=datetime(2024, 5, 3, tzinfo=UTC),
+                end=datetime(2024, 5, 3, tzinfo=UTC),
+            ),
+        )
+        journal = await journal_repo.save(journal)
+        assert journal.id is not None
+        await async_connection.execute(
+            text("INSERT INTO journal_abseiling_data (journal_id) VALUES (:id)"),
+            {"id": journal.id},
+        )
+
+        response = await authenticated_client.post(
+            "/api/journals/export/outdoor-logbook",
+            json={},
+        )
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/pdf"
+
+        text_content = _extract_pdf_text(response.content)
+        assert "Abseil Without Template" in text_content
+        assert "Based on:" not in text_content
+
     async def test_export_empty_result(
         self,
         authenticated_client,
