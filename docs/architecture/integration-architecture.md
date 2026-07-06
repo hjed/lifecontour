@@ -1868,6 +1868,17 @@ The same data is exposed via the MCP `list_integrations` tool in `app/mcp/domain
 
 Currently registered providers: `GoogleIntegrationProvider`, `StravaIntegrationProvider`, `SnipeItIntegrationProvider`.
 
+### Adding a New Integration Worker
+
+The steps above register a provider on the backend (REST/MCP surface). To scaffold the
+**worker process** itself — its uv project, settings, ARQ lifecycle, stream consumer, tests,
+Dockerfile, and CI/release entries on the standardised `core_shared` platform — follow the
+[`creating-a-new-worker`](../../.claude/skills/creating-a-new-worker/SKILL.md) skill. It is the
+canonical, end-to-end path for adding a worker and keeps a new worker consistent with the shared
+surfaces introduced in iteration 14 (`BaseWorkerSettings`, the shared ARQ factory/lifecycle,
+stream-consumer registration, `core_shared/testing/` fixtures, the shared tooling config, and the
+canonical Dockerfile). `integration_workers/snipeit/` is the reference worker.
+
 ## Future Considerations
 
 ### Advanced Scalability Patterns
