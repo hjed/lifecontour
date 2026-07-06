@@ -208,7 +208,9 @@ class TestSummaryInputAssembler:
         assert "John Doe" in rel
         assert "Jane Smith" in rel
         assert "friend" in rel.lower()
-        assert "not you" in rel.lower()
+        assert "not the user" in rel.lower()
+        # Third-person only — "you"/"your" would refer to the AI assistant.
+        assert "you" not in rel.lower()
 
     @pytest.mark.asyncio
     async def test_relationship_to_user_marked_as_user(self):
@@ -229,9 +231,10 @@ class TestSummaryInputAssembler:
         assert result is not None
         assert len(result.relationships) == 1
         rel = result.relationships[0].lower()
-        assert "your parent" in rel
-        assert "you, the user" in rel
-        assert "not you" not in rel
+        assert "is the parent of the user" in rel
+        assert "not the user" not in rel
+        # Third-person only — never "you"/"your" (that is the AI assistant).
+        assert "you" not in rel
 
     @pytest.mark.asyncio
     async def test_relationship_where_contact_is_target_is_inverted(self):
@@ -258,7 +261,7 @@ class TestSummaryInputAssembler:
         assert "Mary Doe" in rel
         assert "child" in rel.lower()
         assert "parent" not in rel.lower()
-        assert "not you" in rel.lower()
+        assert "not the user" in rel.lower()
 
     @pytest.mark.asyncio
     async def test_includes_field_history(self):

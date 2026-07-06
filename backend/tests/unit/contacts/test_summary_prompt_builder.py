@@ -133,7 +133,9 @@ class TestSummaryPromptBuilder:
         prompt = builder.build(_make_input())
 
         assert "## Relationships" in prompt
-        assert "not a relationship to you" in prompt.lower()
+        assert "not a relationship" in prompt.lower()
+        assert "to the user" in prompt.lower()
+        assert "distinct from you, the ai assistant" in prompt.lower()
 
     def test_prompt_includes_important_dates(self):
         """Test prompt includes important dates."""

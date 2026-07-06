@@ -186,10 +186,12 @@ class SummaryPromptBuilder:
     def _relationships_section(self, rels: list[str]) -> str:
         lines = [
             "## Relationships",
-            "These describe the contact's relationships with other people. A "
-            "relationship to another named contact is between those two people "
-            "and is NOT a relationship to you (the user). Only entries that say "
-            '"your" or "you, the user" describe a relationship to you.',
+            "These describe the contact's relationships with other people. The "
+            '"user" is the CRM owner (the person these notes belong to), who is '
+            "distinct from you, the AI assistant. A relationship to another "
+            "named contact is between those two people and is NOT a relationship "
+            'to the user. Only entries that explicitly say "the user" describe a '
+            "relationship to the user.",
         ]
         for r in rels:
             lines.append(f"- {r}")

@@ -117,16 +117,19 @@ class SummaryInputAssembler:
 
         # Relationships. Each is rendered with an explicit subject, target, and a
         # disclaimer so the model never confuses a relationship between two
-        # contacts with a relationship to the user. Relationships are loaded for
-        # both directions, so pick the *other* party (and invert the type) when
-        # this contact is the target side of the row.
+        # contacts with a relationship to the user. Phrasing stays strictly
+        # third-person ("the user", the CRM owner) rather than "you"/"your",
+        # since in this prompt "you" is the AI assistant, not the user.
+        # Relationships are loaded for both directions, so pick the *other*
+        # party (and invert the type) when this contact is the target side.
         rels = getattr(contact, "relationships", None) or []
         relationships = []
         for r in rels:
             if getattr(r, "to_user", False):
                 label = _relationship_label(r.relationship_type)
                 relationships.append(
-                    f"{contact_name} is your {label} (a relationship to you, the user)"
+                    f"{contact_name} is the {label} of the user "
+                    "(a relationship to the user, the CRM owner)"
                 )
                 continue
 
@@ -138,7 +141,8 @@ class SummaryInputAssembler:
                 label = _relationship_label(r.get_inverse_type())
 
             relationships.append(
-                f"{contact_name} is the {label} of {other} (another contact, not you)"
+                f"{contact_name} is the {label} of {other} "
+                "(another contact, not the user)"
             )
 
         # Important dates
