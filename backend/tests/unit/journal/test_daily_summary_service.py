@@ -537,3 +537,83 @@ class TestSanitizeSchema:
         # Should not raise any exceptions
         sanitize_schema("not a dict")  # type: ignore
         sanitize_schema(None)  # type: ignore
+
+
+class TestDailySummaryGeminiToolContext:
+    """The Gemini call must expose the request DI container to read-only tools.
+
+    Gemini may invoke the read-only MCP tools via automatic function calling.
+    Those tools resolve ``SessionUser`` / ``AsyncConnection`` from the
+    ``mcp_background_container`` contextvar. If it is not set (e.g. the REST
+    controller path, which has neither a background container nor a FastMCP
+    HTTP request), every tool call errors, the model returns no final text,
+    and ``_parse_response("")`` fails with "Expecting value: line 1 column 1".
+    """
+
+    @pytest.mark.asyncio
+    async def test_call_gemini_sets_and_resets_background_container(
+        self,
+        mock_input_assembler: AsyncMock,
+        mock_eligibility_checker: MagicMock,
+        mock_prompt_builder: MagicMock,
+        mock_summary_repo: AsyncMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from contextlib import asynccontextmanager
+
+        from app.mcp.shared import dependencies as mcp_deps
+
+        sentinel_container = cast(Any, object())
+
+        service = DailySummaryService(
+            input_assembler=mock_input_assembler,
+            eligibility_checker=mock_eligibility_checker,
+            prompt_builder=mock_prompt_builder,
+            summary_repo=mock_summary_repo,
+            gemini_api_key="test-key",
+            gemini_model="gemini-2.5-flash",
+            container=sentinel_container,
+        )
+
+        # Capture what the tools would see at generate_content time.
+        seen: dict[str, Any] = {}
+
+        async def fake_generate_content(**_kwargs: Any) -> Any:
+            seen["container"] = mcp_deps.mcp_background_container.get()
+            resp = MagicMock()
+            resp.text = json.dumps({"summary_text": "Generated."})
+            return resp
+
+        fake_client = MagicMock()
+        fake_client.aio.models.generate_content = AsyncMock(
+            side_effect=fake_generate_content
+        )
+
+        @asynccontextmanager
+        async def fake_mcp_client(_server: Any) -> Any:
+            session = MagicMock()
+            holder = MagicMock()
+            holder.session = session
+            yield holder
+
+        monkeypatch.setattr(
+            "app.mcp.shared.read_only_tools.create_read_only_mcp_server",
+            AsyncMock(return_value=MagicMock()),
+        )
+        monkeypatch.setattr(
+            "app.mcp.shared.read_only_tools.build_gemini_session_config",
+            lambda _session: {"tools": [_session]},
+        )
+        monkeypatch.setattr("fastmcp.Client", fake_mcp_client)
+        monkeypatch.setattr("google.genai.Client", lambda **_kw: fake_client)
+
+        # Precondition: nothing set before the call.
+        assert mcp_deps.mcp_background_container.get() is None
+
+        result = await service._call_gemini("prompt")
+
+        assert json.loads(result)["summary_text"] == "Generated."
+        # The tools saw the service's request container during generation.
+        assert seen["container"] is sentinel_container
+        # ...and it is reset afterward so nothing leaks to the next request.
+        assert mcp_deps.mcp_background_container.get() is None

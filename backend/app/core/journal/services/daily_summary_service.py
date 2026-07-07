@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, date, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from core_shared.models.contacts.entities import SummaryStatus
 from core_shared.models.journals.daily_summary import JournalDailySummary
@@ -32,6 +32,9 @@ from app.core.settings.models import UserSettingsRepository
 from app.core.settings.timezone_utils import DEFAULT_TIMEZONE
 from app.infrastructure.unit_of_work import transactional
 
+if TYPE_CHECKING:
+    from dishka import AsyncContainer
+
 logger = logging.getLogger(__name__)
 
 
@@ -47,6 +50,7 @@ class DailySummaryService:
         gemini_api_key: str,
         gemini_model: str,
         user_settings_repo: UserSettingsRepository | None = None,
+        container: AsyncContainer | None = None,
         _gemini_response_override: str | None = None,
     ) -> None:
         self._input_assembler = input_assembler
@@ -56,6 +60,7 @@ class DailySummaryService:
         self._gemini_api_key = gemini_api_key
         self._gemini_model = gemini_model
         self._user_settings_repo = user_settings_repo
+        self._container = container
         self._gemini_response_override = _gemini_response_override
 
     async def _resolve_timezone(self, user_id: str) -> str:
@@ -304,6 +309,7 @@ class DailySummaryService:
         from fastmcp import Client
         from google import genai
 
+        from app.mcp.shared.dependencies import mcp_background_container
         from app.mcp.shared.read_only_tools import (
             build_gemini_session_config,
             create_read_only_mcp_server,
@@ -318,30 +324,45 @@ class DailySummaryService:
         max_attempts = 3
         base_delay = 1.0
 
-        async with Client(read_only_mcp) as mcp_client:
-            config = build_gemini_session_config(mcp_client.session)
-            for attempt in range(max_attempts):
-                try:
-                    response = await client.aio.models.generate_content(
-                        model=self._gemini_model,
-                        contents=prompt,
-                        config=config,
-                    )
-                    return response.text or ""
-                except Exception as e:
-                    if attempt == max_attempts - 1:
-                        raise
-                    delay = base_delay * (2**attempt)
-                    logger.warning(
-                        "Gemini API error (attempt %d/%d), retrying in %.1fs: %s",
-                        attempt + 1,
-                        max_attempts,
-                        delay,
-                        e,
-                    )
-                    await asyncio.sleep(delay)
+        # Expose the request-scoped DI container to the read-only MCP tools that
+        # Gemini may invoke via automatic function calling. Those tools resolve
+        # SessionUser / AsyncConnection from this contextvar; without it (the
+        # REST controller path has neither a background container nor a FastMCP
+        # HTTP request) every tool call errors, the model returns no final text,
+        # and _parse_response("") fails. Mirrors SummaryConsumer's setup.
+        token = (
+            mcp_background_container.set(self._container)
+            if self._container is not None
+            else None
+        )
+        try:
+            async with Client(read_only_mcp) as mcp_client:
+                config = build_gemini_session_config(mcp_client.session)
+                for attempt in range(max_attempts):
+                    try:
+                        response = await client.aio.models.generate_content(
+                            model=self._gemini_model,
+                            contents=prompt,
+                            config=config,
+                        )
+                        return response.text or ""
+                    except Exception as e:
+                        if attempt == max_attempts - 1:
+                            raise
+                        delay = base_delay * (2**attempt)
+                        logger.warning(
+                            "Gemini API error (attempt %d/%d), retrying in %.1fs: %s",
+                            attempt + 1,
+                            max_attempts,
+                            delay,
+                            e,
+                        )
+                        await asyncio.sleep(delay)
 
-            raise RuntimeError("Unreachable")
+                raise RuntimeError("Unreachable")
+        finally:
+            if token is not None:
+                mcp_background_container.reset(token)
 
     @staticmethod
     def _parse_response(raw: str) -> dict[str, Any]:
