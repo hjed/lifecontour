@@ -67,6 +67,9 @@ from app.core.journal.adapters.sql.gear_maintenance_data_repository import (
 from app.core.journal.adapters.sql.gear_usage_data_repository import (
     SqlGearUsageDataRepository,
 )
+from app.core.journal.adapters.sql.incomplete_outdoor_activity_repository import (
+    SqlIncompleteOutdoorActivityRepository,
+)
 from app.core.journal.adapters.sql.jogging_data_repository import (
     SqlJoggingDataRepository,
 )
@@ -121,6 +124,7 @@ from app.core.journal.models.repositories import (
     GearItemRepository,
     GearMaintenanceDataRepository,
     GearUsageDataRepository,
+    IncompleteOutdoorActivityRepository,
     JoggingDataRepository,
     JournalContactRelationshipRepository,
     JournalRepository,
@@ -154,6 +158,9 @@ from app.core.journal.services.daily_summary_repository import (
 )
 from app.core.journal.services.daily_summary_service import DailySummaryService
 from app.core.journal.services.gear_item_service import GearItemService
+from app.core.journal.services.incomplete_outdoor_activity_service import (
+    IncompleteOutdoorActivityService,
+)
 from app.core.journal.services.journal_contact_service import JournalContactService
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_service import JournalService
@@ -378,6 +385,13 @@ class JournalProvider(Provider):
         return SqlOutdoorActivityDismissalRepository(connection)
 
     @provide(scope=Scope.REQUEST)
+    def incomplete_outdoor_activity_repository(
+        self, connection: AsyncConnection
+    ) -> IncompleteOutdoorActivityRepository:
+        """Provide an IncompleteOutdoorActivityRepository instance."""
+        return SqlIncompleteOutdoorActivityRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
     def activity_template_repository(
         self, connection: AsyncConnection
     ) -> ActivityTemplateRepository:
@@ -508,6 +522,17 @@ class JournalProvider(Provider):
     ) -> OutdoorActivityDismissalService:
         """Provide an OutdoorActivityDismissalService instance."""
         return OutdoorActivityDismissalService(dismissal_repo=dismissal_repo)
+
+    @provide(scope=Scope.REQUEST)
+    def incomplete_outdoor_activity_service(
+        self,
+        facts_repo: IncompleteOutdoorActivityRepository,
+        dismissal_repo: OutdoorActivityDismissalRepository,
+    ) -> IncompleteOutdoorActivityService:
+        """Provide an IncompleteOutdoorActivityService instance."""
+        return IncompleteOutdoorActivityService(
+            facts_repo=facts_repo, dismissal_repo=dismissal_repo
+        )
 
     @provide(scope=Scope.REQUEST)
     def journal_write_service(

@@ -41,6 +41,7 @@ from core_shared.models.journals import (
     MoodData,
     OutdoorActivityData,
     OutdoorActivityDismissal,
+    OutdoorActivityFacts,
     OutdoorPlanningData,
     OutdoorTrainingData,
     PlanData,
@@ -2433,4 +2434,21 @@ class OutdoorActivityDismissalRepository(ABC):
     @abstractmethod
     async def list_dismissed_journal_ids(self, user_id: str) -> set[int]:
         """Return the set of journal ids the user has dismissed."""
+        pass
+
+
+class IncompleteOutdoorActivityRepository(ABC):
+    """Read repository for the incomplete outdoor activities projection.
+
+    Returns per-journal :class:`OutdoorActivityFacts` for a user's outdoor
+    journals (those with a ``journal_outdoor_activity_data`` row). Rule
+    evaluation deliberately lives in ``evaluate_incompleteness`` (core_shared),
+    not in SQL, so the rules stay pure and unit-testable.
+    """
+
+    @abstractmethod
+    async def list_outdoor_activity_facts(
+        self, user_id: str
+    ) -> list[OutdoorActivityFacts]:
+        """Fetch the facts for every outdoor journal owned by ``user_id``."""
         pass
