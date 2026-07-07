@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 if TYPE_CHECKING:
+    from core_shared.models.history import Provenance
     from core_shared.models.journals.attendee_status import AttendeeStatus
     from core_shared.models.journals.contact_event_role import ContactEventRole
     from core_shared.models.journals.review_item import ReviewItem
@@ -39,6 +40,7 @@ from core_shared.models.journals import (
     LogbookEntryData,
     MoodData,
     OutdoorActivityData,
+    OutdoorActivityDismissal,
     OutdoorPlanningData,
     OutdoorTrainingData,
     PlanData,
@@ -2397,4 +2399,38 @@ class LogbookExportRepository(ABC):
         Returns a flat list of `LogbookEntryData` objects that the
         LogbookDataService will assemble into a hierarchical tree.
         """
+        pass
+
+
+class OutdoorActivityDismissalRepository(ABC):
+    """Repository interface for outdoor-activity review dismissals.
+
+    A dismissal is journal-scoped and reversible, and is stored separately from
+    the merge ``journal_review_items`` queue. A row's presence means the journal
+    has been dismissed from the incomplete-activities review for that user.
+    """
+
+    @abstractmethod
+    async def dismiss(
+        self, journal_id: int, user_id: str, provenance: Provenance
+    ) -> OutdoorActivityDismissal:
+        """Dismiss a journal for a user (idempotent upsert).
+
+        Re-dismissing an already-dismissed journal keeps a single row and
+        refreshes its provenance/``updated_at`` rather than raising.
+        """
+        pass
+
+    @abstractmethod
+    async def undismiss(self, journal_id: int, user_id: str) -> bool:
+        """Un-dismiss a journal for a user (idempotent delete).
+
+        Returns ``True`` if a dismissal was removed, ``False`` if the journal was
+        not dismissed (a harmless no-op).
+        """
+        pass
+
+    @abstractmethod
+    async def list_dismissed_journal_ids(self, user_id: str) -> set[int]:
+        """Return the set of journal ids the user has dismissed."""
         pass

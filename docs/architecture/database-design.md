@@ -257,6 +257,25 @@ Abseiling-derived activities (CANYONING, CLIMBING, CAVING, and plain ABSEILING_T
 - **Phase 4 (PDF)**: the logbook PDF export resolves the template name from `journal_abseiling_data.template_id` (rendered as "based on: \<template\>"), so it appears for every abseiling-derived type — including plain ABSEILING_TRIP — and is unaffected by the Phase 5 column drop.
 - **Phase 5 (cleanup, migration `0097`)**: **done** — with all reads/writes on `journal_abseiling_data.template_id`, the now-retired per-subtype `template_id` columns (and their FKs) were **dropped** from `journal_canyoning_data` / `journal_climbing_data` / `journal_caving_data`. `journal_abseiling_data.template_id` is now the sole template reference across all abseiling-derived types. (The migration's downgrade re-adds the columns and re-backfills them from the consolidated column, so the round-trip is reversible.)
 
+#### Outdoor activity review dismissals (ITER16-002)
+
+The Incomplete Outdoor Activities Review lets a user dismiss a whole outdoor activity journal from the
+review (e.g. a genuine solo trip with no participants). Dismissals are stored in their own
+journal-scoped table, **separate from the merge `journal_review_items` queue** (which holds pairwise
+merge candidates — a different concept):
+
+- `outdoor_activity_dismissals` — `id` (serial pk), `journal_id` (int, FK → `journals.id`,
+  `ON DELETE CASCADE`), `user_id` (varchar), `provenance` (varchar; where the dismiss came from — `ui`,
+  `mcp`, … per the shared activity-history `Provenance`), `created_at` / `updated_at`. A
+  `UNIQUE(user_id, journal_id)` constraint means one dismissal per user per journal; its leftmost
+  `user_id` prefix also serves per-user lookups (`list_dismissed_journal_ids`), so no separate index
+  is needed.
+- **Presence = dismissed.** A row's existence means the journal is excluded from the review regardless
+  of which incompleteness rules it matches. Dismiss is an idempotent upsert (`ON CONFLICT (user_id,
+  journal_id) DO UPDATE` refreshes provenance/`updated_at`); un-dismiss is an idempotent hard delete.
+- Introduced additively by migration `0098` (create/drop round-trip); not yet consumed by the review
+  projection at this phase.
+
 ### Photo Integration (Iteration 4)
 ```sql
 -- To be implemented when Immich integration is added

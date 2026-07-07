@@ -126,6 +126,7 @@ from .logbook_export import (
 )
 from .mood_data import MoodData
 from .outdoor_activity_data import OutdoorActivityData
+from .outdoor_activity_dismissal import OutdoorActivityDismissal
 from .outdoor_activity_subtypes import OutdoorActivitySubtype
 from .outdoor_planning_data import OutdoorPlanningData
 from .outdoor_training_data import OutdoorTrainingData
@@ -197,6 +198,7 @@ __all__ = [
     "TravelTransportation",
     "JournalContactRelationship",
     "OutdoorActivityData",
+    "OutdoorActivityDismissal",
     "OutdoorActivitySubtype",
     "OutdoorPlanningData",
     "OutdoorTrainingData",

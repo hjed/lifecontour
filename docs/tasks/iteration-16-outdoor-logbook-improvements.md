@@ -155,9 +155,9 @@ Each sub-iteration defines its objective, the specification section it realises,
 
 **Phase Breakdown:**
 
-**Phase 1 — Journal-scoped dismissal store (additive).** PR ~380 lines.
+**Phase 1 — Journal-scoped dismissal store (additive).** PR ~380 lines. ✅ DONE — new `outdoor_activity_dismissals` table + Alembic migration `0098` (create/drop round-trip), an `OutdoorActivityDismissal` core_shared model, an `OutdoorActivityDismissalRepository` port + `SqlOutdoorActivityDismissalRepository` adapter (idempotent `dismiss` upsert, idempotent `undismiss` delete, `list_dismissed_journal_ids`), and a `@transactional` `OutdoorActivityDismissalService` recording `provenance` (UI/MCP per Activity History). Registered in `JournalProvider`. Deliberately named for outdoor activities and kept distinct from the merge `journal_review_items` queue; not yet consumed, so it merges green.
 - New dismissal table + model + Alembic migration; repository (dismiss, un-dismiss, list dismissed journal ids for a user); a `@transactional` service recording provenance (per Activity History). Distinct from the merge `journal_review_items` queue. Not yet consumed, so it merges green.
-- **Tests:** unit — service dismiss/un-dismiss; integration — migration up/down, repo, idempotent re-dismiss/un-dismiss.
+- **Tests:** unit — service dismiss/un-dismiss (`test_outdoor_activity_dismissal_service.py`); integration — migration up/down (`test_outdoor_activity_dismissals_migration.py`), repo + idempotent re-dismiss/un-dismiss + user-scoping (`test_outdoor_activity_dismissal_repository.py`).
 - **Docs:** `database-design.md` (new table); `domain-architecture.md` (distinct from merge review items).
 
 **Phase 2 — Incompleteness detection projection.** PR ~450 lines.
