@@ -76,6 +76,45 @@ class TestMCPFastAPIIntegration:
             404,  # Not Found (docs disabled)
         ]
 
+    def test_mcp_accepts_trusted_public_host_behind_proxy(self, db_config):
+        """MCP endpoint must accept a trusted production Host, not 421 it.
+
+        fastmcp's HostOriginGuardMiddleware (DNS-rebinding protection) rejects
+        any Host it doesn't recognise with 421 Misdirected Request. Behind a
+        reverse proxy the ASGI bind host (e.g. 0.0.0.0) never matches the public
+        Host header (e.g. journal.hjed.net), so the mounted MCP app must inherit
+        the app's ``allowed_hosts``. Regression test for the production MCP
+        outage where every request 421'd before reaching the backend.
+        """
+        settings = Settings(
+            database_url=db_config.get_async_url().replace(
+                "postgresql+asyncpg://", "postgresql://"
+            ),
+            mcp_enabled=True,
+            mcp_mount_path="/mcp-server",
+            allowed_hosts=["testserver", "journal.hjed.net"],
+        )
+        # The context manager runs the app lifespan so the MCP session
+        # manager's task group is initialised before the request is handled.
+        with TestClient(create_app(settings)) as client:
+            # Host header differs from the TestClient ASGI server host
+            # ("testserver"), reproducing a request arriving through a reverse
+            # proxy.
+            response = client.post(
+                "/mcp-server/mcp",
+                headers={
+                    "host": "journal.hjed.net",
+                    "Accept": "application/json, text/event-stream",
+                    "Content-Type": "application/json",
+                },
+                json={"jsonrpc": "2.0", "method": "initialize", "id": 1},
+            )
+
+        assert response.status_code != 421, (
+            "MCP rejected a trusted public Host with 421 Misdirected Request — "
+            "allowed_hosts was not propagated to the mounted MCP app"
+        )
+
     def test_mcp_mount_path_configurable(self, db_config):
         """Test that MCP mount path is configurable."""
         # Test with different mount path

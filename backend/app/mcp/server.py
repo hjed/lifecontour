@@ -152,6 +152,7 @@ def create_mcp_server(auth: AuthProvider | None = None) -> FastMCP[None]:
 def create_mcp_app(
     container: AsyncContainer,
     auth_provider: AuthProvider | None = None,
+    allowed_hosts: list[str] | None = None,
 ) -> object:
     """
     Create FastMCP ASGI app with Dishka integration and optional OAuth auth.
@@ -160,6 +161,13 @@ def create_mcp_app(
         container: Dishka container for dependency injection
         auth_provider: Optional OAuth provider for MCP authentication.
                        None means no authentication (dev mode).
+        allowed_hosts: Hostnames permitted in the Host header. FastMCP's
+                       HostOriginGuardMiddleware (DNS-rebinding protection)
+                       otherwise only trusts loopback + the ASGI bind host and
+                       returns 421 Misdirected Request for anything else. Behind
+                       a reverse proxy the public host (e.g. journal.hjed.net)
+                       must be passed here or every request is rejected before
+                       reaching the app.
 
     Returns:
         ASGI application ready for mounting in FastAPI
@@ -167,13 +175,16 @@ def create_mcp_app(
     logger.info(
         "MCP: Creating FastMCP ASGI application",
         auth_enabled=auth_provider is not None,
+        allowed_hosts=allowed_hosts,
     )
 
     # Create MCP server with auth
     mcp = create_mcp_server(auth=auth_provider)
 
-    # Create HTTP app — FastMCP handles auth internally via the provider
-    app = mcp.http_app(path="/mcp")
+    # Create HTTP app — FastMCP handles auth internally via the provider.
+    # Propagate the app's trusted hosts so requests arriving through the
+    # reverse proxy under the public hostname aren't 421'd by the host guard.
+    app = mcp.http_app(path="/mcp", allowed_hosts=allowed_hosts)
 
     # Set up Dishka integration with the Starlette app
     setup_dishka(container, app)
