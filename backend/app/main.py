@@ -198,7 +198,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         from app.mcp.auth.providers import create_mcp_auth_provider
 
         auth_provider = create_mcp_auth_provider(settings)
-        mcp_app = create_mcp_app(container, auth_provider=auth_provider)
+        mcp_app = create_mcp_app(
+            container,
+            auth_provider=auth_provider,
+            allowed_hosts=(
+                [settings.allowed_hosts]
+                if isinstance(settings.allowed_hosts, str)
+                else settings.allowed_hosts
+            ),
+        )
     else:
         auth_provider = None
 
