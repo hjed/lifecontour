@@ -4,7 +4,7 @@ from core_shared.models.journals import (
     LogbookSummaryCalculator,
     ParticipantIndexCalculator,
 )
-from dishka import Provider, Scope, provide
+from dishka import AsyncContainer, Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.history.adapters.sql.field_history_repository import (
@@ -615,8 +615,14 @@ class JournalProvider(Provider):
         summary_repo: JournalDailySummaryRepository,
         user_settings_repo: UserSettingsRepository,
         settings: Settings,
+        container: AsyncContainer,
     ) -> DailySummaryService:
-        """Provide a DailySummaryService instance."""
+        """Provide a DailySummaryService instance.
+
+        ``container`` is the request-scoped Dishka container, passed through so
+        the service can expose it to the read-only MCP tools Gemini may call
+        during summary generation (via ``mcp_background_container``).
+        """
         return DailySummaryService(
             input_assembler=input_assembler,
             eligibility_checker=eligibility_checker,
@@ -625,6 +631,7 @@ class JournalProvider(Provider):
             gemini_api_key=settings.gemini_api_key,
             gemini_model=settings.gemini_summary_model,
             user_settings_repo=user_settings_repo,
+            container=container,
         )
 
     @provide(scope=Scope.REQUEST)
