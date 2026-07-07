@@ -85,6 +85,9 @@ from app.core.journal.adapters.sql.mood_data_repository import SqlMoodDataReposi
 from app.core.journal.adapters.sql.outdoor_activity_data_repository import (
     SqlOutdoorActivityDataRepository,
 )
+from app.core.journal.adapters.sql.outdoor_activity_dismissal_repository import (
+    SqlOutdoorActivityDismissalRepository,
+)
 from app.core.journal.adapters.sql.outdoor_planning_data_repository import (
     SqlOutdoorPlanningDataRepository,
 )
@@ -126,6 +129,7 @@ from app.core.journal.models.repositories import (
     LogbookExportRepository,
     MoodDataRepository,
     OutdoorActivityDataRepository,
+    OutdoorActivityDismissalRepository,
     OutdoorPlanningDataRepository,
     OutdoorTrainingDataRepository,
     PlanDataRepository,
@@ -157,6 +161,9 @@ from app.core.journal.services.journal_tag_service import JournalTagService
 from app.core.journal.services.journal_write_service import JournalWriteService
 from app.core.journal.services.logbook_data_service import LogbookDataService
 from app.core.journal.services.logbook_pdf_renderer import LogbookPdfRenderer
+from app.core.journal.services.outdoor_activity_dismissal_service import (
+    OutdoorActivityDismissalService,
+)
 from app.core.journal.services.review_item_service import ReviewItemService
 from app.core.journal.services.route_service import RouteService
 from app.core.settings.models import UserSettingsRepository
@@ -364,6 +371,13 @@ class JournalProvider(Provider):
         return SqlReviewItemRepository(connection)
 
     @provide(scope=Scope.REQUEST)
+    def outdoor_activity_dismissal_repository(
+        self, connection: AsyncConnection
+    ) -> OutdoorActivityDismissalRepository:
+        """Provide an OutdoorActivityDismissalRepository instance."""
+        return SqlOutdoorActivityDismissalRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
     def activity_template_repository(
         self, connection: AsyncConnection
     ) -> ActivityTemplateRepository:
@@ -486,6 +500,14 @@ class JournalProvider(Provider):
             journal_service=journal_service,
             journal_merge_service=journal_merge_service,
         )
+
+    @provide(scope=Scope.REQUEST)
+    def outdoor_activity_dismissal_service(
+        self,
+        dismissal_repo: OutdoorActivityDismissalRepository,
+    ) -> OutdoorActivityDismissalService:
+        """Provide an OutdoorActivityDismissalService instance."""
+        return OutdoorActivityDismissalService(dismissal_repo=dismissal_repo)
 
     @provide(scope=Scope.REQUEST)
     def journal_write_service(

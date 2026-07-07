@@ -322,6 +322,21 @@ All integration logic, patterns, and implementation details are defined in the d
 - Avoid logging sensitive information
 - Use consistent log message formats
 
+### Journal Review Stores (two distinct concepts)
+
+The journal domain has **two separate review stores** that must not be conflated:
+
+- **Merge review queue** (`journal_review_items` + `ReviewItemService`): pairwise *merge candidates* —
+  suggestions that two journals may be duplicates, awaiting user resolve/dismiss/auto-merge.
+- **Outdoor-activity review dismissals** (`outdoor_activity_dismissals` +
+  `OutdoorActivityDismissalService`): whole-entry, journal-scoped dismissals for the Incomplete
+  Outdoor Activities Review (ITER16-002). A dismissal excludes an outdoor activity journal from the
+  incomplete list regardless of which rules it matches; it is reversible and records `provenance`
+  (UI/MCP) per the activity-history convention. The dismissal service owns its commit via
+  `@transactional`, following the standard service-layer transaction pattern. This store is
+  deliberately **not** the merge queue — dismissing an incomplete-review entry has nothing to do with
+  merge candidates.
+
 ## Key Architectural Principles
 
 1. **Domain Isolation**: Each domain is self-contained with its own entities, services, and adapters
