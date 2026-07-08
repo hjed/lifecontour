@@ -299,10 +299,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allowed_hosts=settings.allowed_hosts,
     )
 
-    # CORS middleware
+    # CORS middleware. Use cors_allow_origins (not the raw cors_origins) so the
+    # app's own public origin is always trusted — the frontend calls the MCP
+    # server and OAuth discovery routes cross-origin (they bypass the same-origin
+    # Next.js /api proxy).
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origins,
+        allow_origins=settings.cors_allow_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
         allow_headers=["*"],

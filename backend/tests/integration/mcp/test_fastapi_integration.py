@@ -115,6 +115,44 @@ class TestMCPFastAPIIntegration:
             "allowed_hosts was not propagated to the mounted MCP app"
         )
 
+    def test_cors_allows_own_public_origin(self, db_config):
+        """The app's own public origin must be CORS-allowed for MCP endpoints.
+
+        MCP and OAuth discovery endpoints sit outside the same-origin Next.js
+        ``/api`` proxy, so the deployed frontend calls them cross-origin. The
+        backend must echo Access-Control-Allow-Origin for its own public origin
+        even when ``CORS_ORIGINS`` wasn't explicitly updated to include it.
+        Regression for the production MCP OAuth CORS failure where requests from
+        origin https://journal.hjed.net were blocked. ``CORS_ORIGINS`` is left
+        at its localhost default here to prove the public origin is trusted via
+        ``frontend_url`` / ``webhook_base_url``.
+        """
+        public_origin = "https://journal.hjed.net"
+        settings = Settings(
+            database_url=db_config.get_async_url().replace(
+                "postgresql+asyncpg://", "postgresql://"
+            ),
+            mcp_enabled=True,
+            mcp_mount_path="/mcp-server",
+            frontend_url=public_origin,
+            webhook_base_url=public_origin,
+            allowed_hosts=["*"],
+        )
+        client = TestClient(create_app(settings))
+
+        response = client.options(
+            "/mcp-server/mcp",
+            headers={
+                "Origin": public_origin,
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+
+        assert response.headers.get("access-control-allow-origin") == public_origin, (
+            "backend did not allow CORS from its own public origin — "
+            "frontend_url/webhook_base_url origin not included in CORS allow-list"
+        )
+
     def test_mcp_mount_path_configurable(self, db_config):
         """Test that MCP mount path is configurable."""
         # Test with different mount path

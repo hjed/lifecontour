@@ -6,9 +6,24 @@ application settings including database, security, and external services.
 """
 
 from functools import lru_cache
+from urllib.parse import urlsplit
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _origin_from_url(url: str) -> str:
+    """Return the bare ``scheme://host[:port]`` origin of a URL, or "".
+
+    Used to derive trusted browser origins from configured app URLs. Any URL
+    missing a scheme or host (including the empty string) yields "".
+    """
+    if not url:
+        return ""
+    parts = urlsplit(url.strip())
+    if not parts.scheme or not parts.netloc:
+        return ""
+    return f"{parts.scheme}://{parts.netloc}"
 
 
 class Settings(BaseSettings):
@@ -279,6 +294,30 @@ class Settings(BaseSettings):
         if v.upper() not in valid_levels:
             raise ValueError(f"Log level must be one of: {valid_levels}")
         return v.upper()
+
+    @property
+    def cors_allow_origins(self) -> list[str]:
+        """Browser origins trusted for cross-origin requests.
+
+        Combines the explicitly configured ``cors_origins`` with the app's own
+        public origins derived from ``frontend_url`` and ``webhook_base_url``.
+
+        The deployed frontend calls the MCP server and OAuth ``.well-known``
+        discovery routes cross-origin because those endpoints sit outside the
+        same-origin Next.js ``/api`` proxy. Deriving the origin here guarantees
+        the site is always permitted even if ``CORS_ORIGINS`` wasn't updated to
+        include it, so the MCP OAuth flow works behind the reverse proxy.
+        """
+        origins = (
+            list(self.cors_origins)
+            if isinstance(self.cors_origins, list)
+            else [self.cors_origins]
+        )
+        for url in (self.frontend_url, self.webhook_base_url):
+            origin = _origin_from_url(url)
+            if origin and origin not in origins:
+                origins.append(origin)
+        return origins
 
     @field_validator("cors_origins")
     @classmethod
