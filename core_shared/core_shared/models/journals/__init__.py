@@ -108,6 +108,14 @@ from .fitness_data import FitnessData
 from .gear_item import GearItem
 from .gear_maintenance_data import GearMaintenanceData
 from .gear_usage_data import GearUsageData
+from .incomplete_outdoor_activity import (
+    SUBTYPE_FACTS_FIELDS,
+    IncompletenessReason,
+    IncompleteOutdoorActivity,
+    OutdoorActivityFacts,
+    evaluate_incompleteness,
+    fillable_fields,
+)
 from .jogging_data import JoggingData
 from .journal_contact_relationship import JournalContactRelationship
 from .journal_relationship_types import JournalContactRelationshipType
@@ -228,6 +236,12 @@ __all__ = [
     "LogbookExportData",
     "LogbookYearlySummary",
     "ParticipantIndexEntry",
+    "SUBTYPE_FACTS_FIELDS",
+    "IncompleteOutdoorActivity",
+    "IncompletenessReason",
+    "OutdoorActivityFacts",
+    "evaluate_incompleteness",
+    "fillable_fields",
     # Enums
     "AttendeeStatus",
     "ContactEventRole",

@@ -337,6 +337,31 @@ The journal domain has **two separate review stores** that must not be conflated
   deliberately **not** the merge queue — dismissing an incomplete-review entry has nothing to do with
   merge candidates.
 
+### Incomplete Outdoor Activities Review (read projection)
+
+The incomplete review is a **pure read projection** over existing tables — no new journal state, no
+"incomplete" column. It is composed of three parts:
+
+- **Facts repository** (`IncompleteOutdoorActivityRepository` port +
+  `SqlIncompleteOutdoorActivityRepository` adapter): one user-scoped query anchored on
+  `journal_outdoor_activity_data`, LEFT JOINing each outdoor subtype table (1:1 on `journal_id`, so no
+  fan-out) plus PARTICIPANT and abseil-pitch counts, returning per-journal `OutdoorActivityFacts`.
+- **Pure rule evaluator** (`evaluate_incompleteness` in
+  `core_shared/core_shared/models/journals/incomplete_outdoor_activity.py`): applies the three product
+  rules — *no attributes set* (a present subtype row whose own fillable fields are all unset; fields
+  are derived from the subtype dataclasses via `fillable_fields`, so fieldless subtypes are exempt by
+  construction and a subtype gaining a column self-maintains), *missing template*
+  (`abseiling_data.template_id IS NULL`), and *no participants* (non-bushwalking-only journals with
+  zero PARTICIPANT contacts). Rules live in Python, not SQL, so they are unit-testable without a
+  database.
+- **Read service** (`IncompleteOutdoorActivityService`): fetches facts, filters out journals in the
+  dismissal store above (`list_dismissed_journal_ids`), evaluates the rules, and returns entries
+  newest-first. Read-only — no `@transactional`, controllers/MCP consume it directly (exposure ships
+  in the ITER16-002 REST/MCP phase).
+
+A guard test (`backend/tests/unit/journal/test_incomplete_projection_registry.py`) keeps the
+registry, the facts dataclass, and the generated SQL SELECT list aligned with the subtype models.
+
 ## Key Architectural Principles
 
 1. **Domain Isolation**: Each domain is self-contained with its own entities, services, and adapters
