@@ -167,7 +167,7 @@ Each sub-iteration defines its objective, the specification section it realises,
 **Phase 3 — REST endpoint + MCP tools.** PR ~400 lines. ✅ DONE — the projection and dismissal store are exposed on both surfaces. REST (JSON API, on the journals router): `GET /api/journals/incomplete-outdoor-activities` (unpaginated advisory list; per-entry reasons/subtypes/date-range, resource id = journal id) plus `POST .../{journal_id}/dismiss` and `POST .../{journal_id}/undismiss` action endpoints mirroring the review-items dismiss precedent, recording `ui` provenance. MCP: `list_incomplete_outdoor_activities`, `dismiss_incomplete_outdoor_activity`, `undismiss_incomplete_outdoor_activity`, recording `mcp` provenance. Both surfaces validate journal existence + ownership before writing (404/not-found instead of an FK 500) and treat undismiss-when-never-dismissed as an idempotent success (`was_dismissed: false`); controllers/tools open no transactions (the `@transactional` dismissal service owns commits). The Phase 2 test `Seeder` was extracted to a shared `tests/integration/journal/outdoor_activity_seeding.py` for reuse by both new suites. Actual diff exceeds the ~400 estimate (integration-test volume; kept as a single PR by product-owner decision, matching Phase 2).
 - REST: list incomplete + dismiss/un-dismiss (for the UI). MCP: list incomplete (reasons, respecting dismissals) + dismiss/un-dismiss.
 - **Tests:** integration via `authenticated_client` (REST list/dismiss/un-dismiss); MCP list/dismiss/un-dismiss end-to-end.
-- **Docs:** `api-design.md`; `mcp-setup.md`.
+- **Docs:** `api-design.md`. MCP tools are documented in code (tool docstrings), not in `mcp-setup.md` — duplicating them there goes stale (product owner, PR #1108).
 
 **Phase 4 — Overview page shell + incomplete list UI.** PR ~450 lines.
 - Dedicated route `frontend/src/app/journals/outdoor-logbook/page.tsx` + sidebar entry under Journals (the shared overview page shell). The incomplete list renders title, date, type icon(s), reason badge(s), a link to the journal, and a dismiss/un-dismiss control.
@@ -214,7 +214,7 @@ Each sub-iteration defines its objective, the specification section it realises,
 **Phase 3 — REST endpoint + MCP dashboard tool.** PR ~350 lines.
 - A REST dashboard endpoint and a single MCP dashboard-data tool returning all four sections (aggregating Phases 1–2).
 - **Tests:** integration via `authenticated_client` (REST) + MCP end-to-end.
-- **Docs:** `api-design.md`; `mcp-setup.md`.
+- **Docs:** `api-design.md`. MCP tool documentation lives in the tool docstrings, not `mcp-setup.md` (per PR #1108).
 
 **Phase 4 — Frontend: upcoming + totals widgets.** PR ~350 lines.
 - Render the upcoming-activities and totals widgets on the overview page (shadcn/ui, RSC-first where possible), items linking to their journals; empty states. Reuses the ITER16-002 page shell, or introduces it here if ITER16-003 ships before ITER16-002.

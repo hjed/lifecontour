@@ -94,67 +94,6 @@ AI-friendly JSON containing:
 }
 ```
 
-### Journal Domain Tools
-
-#### `list_incomplete_outdoor_activities`
-
-Lists the user's incomplete outdoor activity journals with the reason(s) each
-is flagged, mirroring the outdoor logbook's incomplete review. Dismissed
-journals are excluded; entries are newest first.
-
-**Parameters:** none (user scoping is implicit).
-
-**Returns:**
-AI-friendly JSON containing:
-- `total_count`: number of incomplete activities
-- `activities`: entries with `journal_id`, `title`, `event_date_range`,
-  `subtypes`, and `reasons` — each reason is one of `no_attributes` (the
-  subtype's own type-specific fields are all empty), `missing_template`
-  (abseiling-derived activity with no template reference), `no_participants`
-  (non-bushwalking outdoor activity with no PARTICIPANT contacts)
-- `summary`: AI-friendly contextual summary
-
-**Example Response:**
-```json
-{
-  "total_count": 1,
-  "activities": [
-    {
-      "journal_id": 42,
-      "title": "Empty canyon",
-      "event_date_range": {"start": "2026-07-01T09:00:00Z", "end": "2026-07-01T15:00:00Z"},
-      "subtypes": ["bushwalking", "abseiling_trip", "canyoning"],
-      "reasons": ["no_attributes", "missing_template", "no_participants"]
-    }
-  ],
-  "summary": "Found 1 incomplete outdoor activity."
-}
-```
-
-#### `dismiss_incomplete_outdoor_activity`
-
-Dismisses a journal from the incomplete review; it no longer appears
-regardless of matched rules. Idempotent (re-dismissing refreshes the recorded
-provenance, stored as `mcp`). Returns a not-found error for a journal that
-does not exist or belongs to another user.
-
-**Parameters:**
-- `journal_id` (int): the journal to dismiss
-
-**Returns:** `journal_id`, `dismissed: true`, `provenance: "mcp"`, `summary`.
-
-#### `undismiss_incomplete_outdoor_activity`
-
-Reverses a dismissal, restoring the journal to the incomplete review when it
-still matches a rule. Idempotent: un-dismissing a journal that was never
-dismissed succeeds with `was_dismissed: false`. Returns a not-found error for
-a journal that does not exist or belongs to another user.
-
-**Parameters:**
-- `journal_id` (int): the journal to un-dismiss
-
-**Returns:** `journal_id`, `dismissed: false`, `was_dismissed`, `summary`.
-
 ## Authentication
 
 The MCP server uses FastMCP's built-in OAuth proxy authentication, providing full OAuth 2.1 compliance with `.well-known` discovery endpoints. This enables MCP clients (Claude Desktop, etc.) to authenticate using the same OAuth providers configured for the web UI.
@@ -214,7 +153,9 @@ Set `DISABLE_AUTH=true` to disable OAuth for local development. MCP endpoints wi
 1. **Create Tool Function**: Add to appropriate domain tools file
 2. **Register Tool**: Use `@mcp.tool` decorator
 3. **Add Tests**: Unit tests for tool logic
-4. **Update Documentation**: Document tool parameters and responses
+4. **Document in Code**: Tools are documented by their docstrings and
+   parameter/response schema descriptions — do not duplicate tool docs here,
+   as they go stale
 
 Example:
 ```python
