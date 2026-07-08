@@ -125,6 +125,33 @@ This document provides comprehensive API design patterns for both REST and MCP i
 - Use consistent parameter names across endpoints
 - Validate page and limit parameters
 
+## Incomplete Outdoor Activities Review Endpoints
+
+The incomplete outdoor activities review (outdoor logbook) is exposed as a
+journal sub-resource projection keyed by journal id:
+
+| Verb + path | Purpose | Status |
+|---|---|---|
+| `GET /api/journals/incomplete-outdoor-activities` | List flagged journals with per-entry `reasons` (`no_attributes`, `missing_template`, `no_participants`), `subtypes`, and `event_date_range` | 200 |
+| `POST /api/journals/incomplete-outdoor-activities/{journal_id}/dismiss` | Dismiss a journal from the review (provenance recorded as `ui`) | 200; 404 unknown/not-owned |
+| `POST /api/journals/incomplete-outdoor-activities/{journal_id}/undismiss` | Restore a journal to the review | 200 (idempotent no-op with `was_dismissed: false` when never dismissed); 404 unknown/not-owned |
+
+Conventions this surface pins down:
+
+- **Action-verb POSTs** mirror the existing `POST /review-items/{id}/dismiss`
+  precedent rather than introducing a second style (e.g. `DELETE .../dismissal`).
+- **Idempotent undismiss:** 404 is reserved for "journal doesn't exist or isn't
+  yours" (checked before the write, so unknown ids never surface as FK errors);
+  un-dismissing a never-dismissed journal is a 200 no-op, observable via the
+  `was_dismissed` attribute.
+- **Unpaginated by design:** the review is a bounded advisory list computed by
+  rule evaluation over a single facts query; repo-level limit/offset does not
+  apply. The Pagination Guidelines above apply to stored collections, not this
+  projection.
+- **Transactions:** the controllers pass the request-scoped `AsyncConnection`
+  into the `@transactional` dismissal service, which owns the commit —
+  controllers never open transactions.
+
 ## Authentication Guidelines
 
 ### Session-Based Authentication

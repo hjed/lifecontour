@@ -23,8 +23,14 @@ from app.core.journal.services.activity_template_service import (
 from app.core.journal.services.calendar_service import CalendarService
 from app.core.journal.services.daily_summary_service import DailySummaryService
 from app.core.journal.services.gear_item_service import GearItemService
+from app.core.journal.services.incomplete_outdoor_activity_service import (
+    IncompleteOutdoorActivityService,
+)
 from app.core.journal.services.journal_contact_service import JournalContactService
 from app.core.journal.services.journal_write_service import JournalWriteService
+from app.core.journal.services.outdoor_activity_dismissal_service import (
+    OutdoorActivityDismissalService,
+)
 from app.core.journal.services.review_item_service import ReviewItemService
 from app.infrastructure.auth.immich_token_service import ImmichTokenService
 from app.infrastructure.auth.models import SessionUser
@@ -195,6 +201,22 @@ async def get_calendar_service() -> CalendarService:
 async def get_review_item_service() -> ReviewItemService:
     """Resolve the review item service for the current MCP request."""
     return cast(ReviewItemService, await _resolve_dependency(ReviewItemService))
+
+
+async def get_incomplete_outdoor_activity_service() -> IncompleteOutdoorActivityService:
+    """Resolve the incomplete outdoor activity service for the current MCP request."""
+    return cast(
+        IncompleteOutdoorActivityService,
+        await _resolve_dependency(IncompleteOutdoorActivityService),
+    )
+
+
+async def get_outdoor_activity_dismissal_service() -> OutdoorActivityDismissalService:
+    """Resolve the outdoor activity dismissal service for the current MCP request."""
+    return cast(
+        OutdoorActivityDismissalService,
+        await _resolve_dependency(OutdoorActivityDismissalService),
+    )
 
 
 async def get_journal_contact_service() -> JournalContactService:

@@ -6,7 +6,7 @@ against Docker PostgreSQL. Each test seeds its own journals via the
 repositories, so outcomes are deterministic.
 """
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -20,10 +20,7 @@ from core_shared.models.journals import (
     EventDateRange,
     IncompletenessReason,
     Journal,
-    JournalContactRelationship,
-    JournalContactRelationshipType,
     KayakingData,
-    OutdoorActivityData,
     SnorkellingData,
 )
 from sqlalchemy import text
@@ -44,15 +41,8 @@ from app.core.journal.adapters.sql.canyoning_data_repository import (
 from app.core.journal.adapters.sql.incomplete_outdoor_activity_repository import (
     SqlIncompleteOutdoorActivityRepository,
 )
-from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
-    SqlJournalContactRelationshipRepository,
-)
-from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.adapters.sql.kayaking_data_repository import (
     SqlKayakingDataRepository,
-)
-from app.core.journal.adapters.sql.outdoor_activity_data_repository import (
-    SqlOutdoorActivityDataRepository,
 )
 from app.core.journal.adapters.sql.outdoor_activity_dismissal_repository import (
     SqlOutdoorActivityDismissalRepository,
@@ -63,9 +53,11 @@ from app.core.journal.adapters.sql.snorkelling_data_repository import (
 from app.core.journal.services.incomplete_outdoor_activity_service import (
     IncompleteOutdoorActivityService,
 )
-
-USER_ID = "test-user-123"
-OTHER_USER_ID = "test-user-456"
+from tests.integration.journal.outdoor_activity_seeding import (
+    OTHER_USER_ID,
+    USER_ID,
+    Seeder,
+)
 
 
 @pytest_asyncio.fixture
@@ -90,52 +82,6 @@ async def service(
     return IncompleteOutdoorActivityService(
         facts_repo=facts_repository, dismissal_repo=dismissal_repository
     )
-
-
-class Seeder:
-    """Seeds journals with outdoor subtype data through the real repositories."""
-
-    def __init__(self, connection: AsyncConnection) -> None:
-        self.connection = connection
-        self.journal_repo = SqlJournalRepository(connection)
-        self.outdoor_activity_repo = SqlOutdoorActivityDataRepository(connection)
-        self.relationship_repo = SqlJournalContactRelationshipRepository(connection)
-
-    async def create_outdoor_journal(
-        self, *, title: str = "Outdoor trip", user_id: str = USER_ID
-    ) -> int:
-        """An outdoor journal (journals row + outdoor_activity_data row)."""
-        now = datetime.now(UTC)
-        journal = await self.journal_repo.save(
-            Journal(
-                user_id=user_id,
-                title=title,
-                content="content",
-                event_date_range=EventDateRange(
-                    start=now, end=now + timedelta(hours=1)
-                ),
-            )
-        )
-        assert journal.id is not None
-        await self.outdoor_activity_repo.save(
-            OutdoorActivityData(journal_id=journal.id)
-        )
-        return journal.id
-
-    async def add_participant(self, journal_id: int) -> None:
-        contact_result = await self.connection.execute(
-            text("INSERT INTO contacts (first_name) VALUES (:name) RETURNING id"),
-            {"name": "Participant"},
-        )
-        contact_id = contact_result.scalar()
-        assert contact_id is not None
-        await self.relationship_repo.create(
-            JournalContactRelationship(
-                journal_id=journal_id,
-                contact_id=contact_id,
-                relationship_type=JournalContactRelationshipType.PARTICIPANT,
-            )
-        )
 
 
 @pytest_asyncio.fixture

@@ -8,6 +8,7 @@ the JSON API specification.
 from datetime import date, datetime, time
 from typing import Any
 
+from core_shared.models.journals import IncompletenessReason, OutdoorActivitySubtype
 from pydantic import BaseModel, Field, StrictStr, model_validator
 
 from app.api.common.schemas import (
@@ -982,6 +983,86 @@ class ReviewItemListResponse(JsonApiCollectionResponse[ReviewItemResource]):
 
 class ReviewItemResponse(JsonApiResponse[ReviewItemResource]):
     """Response model for a single review item."""
+
+    pass
+
+
+class IncompleteOutdoorActivityAttributes(BaseModel):
+    """Attributes of an entry in the incomplete outdoor activities review."""
+
+    title: str = Field(..., description=JOURNAL_TITLE_DESC)
+    event_date_range: EventDateRangeSchema = Field(
+        ..., description="Journal event date range"
+    )
+    subtypes: list[OutdoorActivitySubtype] = Field(
+        ..., description="Outdoor activity subtypes present on the journal"
+    )
+    reasons: list[IncompletenessReason] = Field(
+        ...,
+        description=(
+            "Why the journal is flagged "
+            "(no_attributes, missing_template, no_participants)"
+        ),
+    )
+
+
+class IncompleteOutdoorActivityResource(BaseModel):
+    """Incomplete outdoor activity resource following JSON API specification.
+
+    The resource id is the flagged journal's id — the review is a projection
+    over journals, not a stored entity.
+    """
+
+    type: str = Field(
+        default="incomplete-outdoor-activities", description=RESOURCE_TYPE_DESC
+    )
+    id: str = Field(..., description="Flagged journal ID")
+    attributes: IncompleteOutdoorActivityAttributes = Field(
+        ..., description="Incomplete outdoor activity attributes"
+    )
+    links: JsonApiLinks | None = Field(default=None, description=RESOURCE_LINKS_DESC)
+
+
+class IncompleteOutdoorActivityListResponse(
+    JsonApiCollectionResponse[IncompleteOutdoorActivityResource]
+):
+    """Response model for the incomplete outdoor activities list."""
+
+    pass
+
+
+class OutdoorActivityDismissalAttributes(BaseModel):
+    """Attributes describing a journal's incomplete-review dismissal state."""
+
+    journal_id: int = Field(..., description="Journal ID")
+    dismissed: bool = Field(
+        ..., description="Whether the journal is dismissed from the review"
+    )
+    provenance: str | None = Field(
+        default=None, description="Source that recorded the dismissal (e.g. ui, mcp)"
+    )
+    was_dismissed: bool | None = Field(
+        default=None,
+        description="On undismiss: whether the journal was dismissed beforehand",
+    )
+
+
+class OutdoorActivityDismissalResource(BaseModel):
+    """Outdoor activity dismissal resource following JSON API specification."""
+
+    type: str = Field(
+        default="outdoor-activity-dismissals", description=RESOURCE_TYPE_DESC
+    )
+    id: str = Field(..., description="Journal ID the dismissal applies to")
+    attributes: OutdoorActivityDismissalAttributes = Field(
+        ..., description="Dismissal state attributes"
+    )
+
+
+class OutdoorActivityDismissalResponse(
+    JsonApiResponse[OutdoorActivityDismissalResource]
+):
+    """Response model for dismiss/undismiss actions."""
 
     pass
 

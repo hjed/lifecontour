@@ -591,3 +591,48 @@ class GearItemListMCPResponse(BaseModel):
 
     gear_items: list[GearItemMCPResponse] = Field(description="List of gear items")
     summary: str = Field(description="AI-friendly summary")
+
+
+class IncompleteOutdoorActivityMCPEntry(BaseModel):
+    """An outdoor journal flagged by the incomplete review, with its reasons."""
+
+    journal_id: int = Field(description=JOURNAL_ID_DESC)
+    title: str = Field(description=JOURNAL_TITLE_DESC)
+    event_date_range: EventDateRangeSchema = Field(description=EVENT_DATE_RANGE_DESC)
+    subtypes: list[str] = Field(
+        description="Outdoor activity subtypes present on the journal"
+    )
+    reasons: list[str] = Field(
+        description=(
+            "Why the journal is flagged: no_attributes (subtype fields all "
+            "empty), missing_template (abseiling activity without a template), "
+            "no_participants (non-bushwalking activity with no participants)"
+        )
+    )
+
+
+class IncompleteOutdoorActivitiesMCPResponse(BaseModel):
+    """AI-friendly incomplete outdoor activities list response."""
+
+    total_count: int = Field(description="Number of incomplete activities")
+    activities: list[IncompleteOutdoorActivityMCPEntry] = Field(
+        description="Incomplete outdoor activities, newest first"
+    )
+    summary: str = Field(description="AI-friendly summary")
+
+
+class OutdoorActivityDismissalMCPResponse(BaseModel):
+    """AI-friendly dismissal state after a dismiss/undismiss action."""
+
+    journal_id: int = Field(description=JOURNAL_ID_DESC)
+    dismissed: bool = Field(
+        description="Whether the journal is now dismissed from the incomplete review"
+    )
+    provenance: str | None = Field(
+        default=None, description="Source recorded for the dismissal (e.g. mcp)"
+    )
+    was_dismissed: bool | None = Field(
+        default=None,
+        description="On undismiss: whether the journal was dismissed beforehand",
+    )
+    summary: str = Field(description="AI-friendly summary")
