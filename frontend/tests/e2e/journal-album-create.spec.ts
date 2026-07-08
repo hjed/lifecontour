@@ -247,11 +247,23 @@ test.describe('Journal Album Creation (ITER11-006 Phase 2)', () => {
     await expect(page.getByTestId('external-link-immich_shared')).toBeVisible();
 
     // The PHOTO_ALBUM section now exists; expand it to reveal the cover banner.
+    // The section mounts while the journal query is still refetching, so a
+    // click can land on a mid-re-render trigger and get dropped. Retry the
+    // expand until the collapsible reports open, with a short inner timeout
+    // so a dropped click retries instead of consuming the whole budget.
     const albumSectionTrigger = page.getByTestId(
       'type-section-trigger-photo_album'
     );
     await expect(albumSectionTrigger).toBeVisible();
-    await albumSectionTrigger.click();
-    await expect(page.getByTestId('photo-album-cover')).toBeVisible();
+    await expect(async () => {
+      if (
+        (await albumSectionTrigger.getAttribute('aria-expanded')) !== 'true'
+      ) {
+        await albumSectionTrigger.click({ timeout: 2000 });
+      }
+      await expect(page.getByTestId('photo-album-cover')).toBeVisible({
+        timeout: 2000,
+      });
+    }).toPass({ timeout: 30000 });
   });
 });

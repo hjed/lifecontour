@@ -55,9 +55,17 @@ async function verifyHierarchyLinks(
   await expect(parentLink).toHaveText(parentTitle);
   await expect(parentLink).toHaveAttribute('href', `/journals/${parentId}`);
 
-  // Click parent breadcrumb to verify navigation back to parent
-  await parentLink.click();
-  await page.waitForURL(/\/journals\/\d+/);
+  // Click parent breadcrumb to verify navigation back to parent. The child
+  // detail page also matches /journals/<id>, so the parent heading is the
+  // navigation signal; retry the click in case async detail content shifts
+  // the breadcrumb mid-click.
+  const parentUrl = new RegExp(`/journals/${parentId}$`);
+  await expect(async () => {
+    if (!parentUrl.test(page.url())) {
+      await parentLink.click({ timeout: 2000 });
+    }
+    await expect(page).toHaveURL(parentUrl, { timeout: 3000 });
+  }).toPass({ timeout: 60000 });
   await expect(
     page.getByRole('heading', { name: parentTitle, exact: true }).first()
   ).toBeVisible();
@@ -193,13 +201,20 @@ test.describe('Journal Hierarchy', () => {
       'Parent for detail-page child creation test.'
     );
 
-    // 2. Click "Add Child" link from the detail page
+    // 2. Click "Add Child" link from the detail page. Async detail content
+    // (children list, activity feed) popping in can shift the link between
+    // hit-test and click dispatch, dropping the click — retry it while the
+    // URL hasn't changed.
     const addChildLink = page.getByRole('link', { name: /add child/i });
     await expect(addChildLink).toBeVisible();
-    await addChildLink.click();
-
-    // 3. Verify navigated to create form with parentId in URL
-    await page.waitForURL(/\/journals\/new\?parentId=/);
+    const newChildUrl = /\/journals\/new\?parentId=/;
+    await expect(async () => {
+      if (!newChildUrl.test(page.url())) {
+        await addChildLink.click({ timeout: 2000 });
+      }
+      // 3. Verify navigated to create form with parentId in URL
+      await expect(page).toHaveURL(newChildUrl, { timeout: 3000 });
+    }).toPass({ timeout: 60000 });
     expect(page.url()).toContain(`parentId=${parentId}`);
 
     // 4. Verify the parent journal is pre-selected

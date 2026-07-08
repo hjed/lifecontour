@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { DayGroupedJournalList } from '../DayGroupedJournalList';
 import { DisplayJournal } from '@/hooks/useDisplayJournals';
 import { JournalType } from '@/types/journals';
@@ -89,5 +89,226 @@ describe('DayGroupedJournalList', () => {
     expect(
       screen.queryByTestId('mock-daily-summary-2026-04-30')
     ).not.toBeInTheDocument();
+  });
+
+  describe('sentinel-driven fetching', () => {
+    // Captures the observer callback so tests can simulate sentinels
+    // entering/leaving the viewport.
+    let observerCallback: IntersectionObserverCallback;
+
+    beforeEach(() => {
+      window.IntersectionObserver = jest.fn(
+        (callback: IntersectionObserverCallback) => {
+          observerCallback = callback;
+          return {
+            observe: jest.fn(),
+            unobserve: jest.fn(),
+            disconnect: jest.fn(),
+          };
+        }
+      ) as unknown as typeof IntersectionObserver;
+    });
+
+    const journals = [createMockJournal('1', '2026-04-29T10:00:00Z')];
+
+    function intersect(testId: string, isIntersecting: boolean) {
+      const target = screen.getByTestId(testId);
+      act(() => {
+        observerCallback(
+          [{ target, isIntersecting } as unknown as IntersectionObserverEntry],
+          {} as IntersectionObserver
+        );
+      });
+    }
+
+    it('fetches the previous page when the top sentinel intersects while idle', () => {
+      const fetchPreviousPage = jest.fn();
+      render(
+        <DayGroupedJournalList
+          journals={journals}
+          collapseEmptyDays={false}
+          hasPreviousPage
+          fetchPreviousPage={fetchPreviousPage}
+        />
+      );
+
+      intersect('journal-top-sentinel', true);
+
+      expect(fetchPreviousPage).toHaveBeenCalled();
+    });
+
+    it('fetches the next page when the bottom sentinel intersects while idle', () => {
+      const fetchNextPage = jest.fn();
+      render(
+        <DayGroupedJournalList
+          journals={journals}
+          collapseEmptyDays={false}
+          hasNextPage
+          fetchNextPage={fetchNextPage}
+        />
+      );
+
+      intersect('journal-bottom-sentinel', true);
+
+      expect(fetchNextPage).toHaveBeenCalled();
+    });
+
+    it('does not fetch while a fetch is already in flight', () => {
+      const fetchPreviousPage = jest.fn();
+      const { rerender } = render(
+        <DayGroupedJournalList
+          journals={journals}
+          collapseEmptyDays={false}
+          hasPreviousPage
+          fetchPreviousPage={fetchPreviousPage}
+        />
+      );
+      rerender(
+        <DayGroupedJournalList
+          journals={journals}
+          collapseEmptyDays={false}
+          hasPreviousPage
+          fetchPreviousPage={fetchPreviousPage}
+          isLoadingNext
+        />
+      );
+
+      intersect('journal-top-sentinel', true);
+
+      expect(fetchPreviousPage).not.toHaveBeenCalled();
+    });
+
+    it('fetches once the in-flight fetch settles while the sentinel is still intersecting', () => {
+      // Regression: the observer only fires on intersection *changes*, so a
+      // sentinel that comes into view during a fetch must still trigger its
+      // own fetch once loading settles — otherwise pagination stalls until
+      // the user scrolls away and back.
+      const fetchPreviousPage = jest.fn();
+      const { rerender } = render(
+        <DayGroupedJournalList
+          journals={journals}
+          collapseEmptyDays={false}
+          hasPreviousPage
+          fetchPreviousPage={fetchPreviousPage}
+        />
+      );
+      rerender(
+        <DayGroupedJournalList
+          journals={journals}
+          collapseEmptyDays={false}
+          hasPreviousPage
+          fetchPreviousPage={fetchPreviousPage}
+          isLoadingNext
+        />
+      );
+
+      intersect('journal-top-sentinel', true);
+      expect(fetchPreviousPage).not.toHaveBeenCalled();
+
+      // The in-flight fetch settles; the sentinel never left the viewport.
+      rerender(
+        <DayGroupedJournalList
+          journals={journals}
+          collapseEmptyDays={false}
+          hasPreviousPage
+          fetchPreviousPage={fetchPreviousPage}
+        />
+      );
+
+      expect(fetchPreviousPage).toHaveBeenCalled();
+    });
+
+    it('fetches only once per sentinel visit, not on every idle settle', () => {
+      // Regression: on lists too short to push the sentinel out of view
+      // (empty or heavily filtered lists), re-fetching every time loading
+      // settles would loop forever — date-chunk pagination never runs out of
+      // pages. One fetch per continuous intersection is the correct bound.
+      const fetchPreviousPage = jest.fn();
+      const { rerender } = render(
+        <DayGroupedJournalList
+          journals={journals}
+          collapseEmptyDays={false}
+          hasPreviousPage
+          fetchPreviousPage={fetchPreviousPage}
+        />
+      );
+
+      intersect('journal-top-sentinel', true);
+      expect(fetchPreviousPage).toHaveBeenCalledTimes(1);
+
+      // The fetch runs and settles while the sentinel never left the viewport.
+      rerender(
+        <DayGroupedJournalList
+          journals={journals}
+          collapseEmptyDays={false}
+          hasPreviousPage
+          fetchPreviousPage={fetchPreviousPage}
+          isLoadingPrevious
+        />
+      );
+      rerender(
+        <DayGroupedJournalList
+          journals={journals}
+          collapseEmptyDays={false}
+          hasPreviousPage
+          fetchPreviousPage={fetchPreviousPage}
+        />
+      );
+
+      expect(fetchPreviousPage).toHaveBeenCalledTimes(1);
+    });
+
+    it('fetches again after the sentinel leaves and re-enters the viewport', () => {
+      const fetchPreviousPage = jest.fn();
+      render(
+        <DayGroupedJournalList
+          journals={journals}
+          collapseEmptyDays={false}
+          hasPreviousPage
+          fetchPreviousPage={fetchPreviousPage}
+        />
+      );
+
+      intersect('journal-top-sentinel', true);
+      intersect('journal-top-sentinel', false);
+      intersect('journal-top-sentinel', true);
+
+      expect(fetchPreviousPage).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not fetch after the sentinel leaves the viewport', () => {
+      const fetchPreviousPage = jest.fn();
+      const { rerender } = render(
+        <DayGroupedJournalList
+          journals={journals}
+          collapseEmptyDays={false}
+          hasPreviousPage
+          fetchPreviousPage={fetchPreviousPage}
+        />
+      );
+      rerender(
+        <DayGroupedJournalList
+          journals={journals}
+          collapseEmptyDays={false}
+          hasPreviousPage
+          fetchPreviousPage={fetchPreviousPage}
+          isLoadingNext
+        />
+      );
+
+      intersect('journal-top-sentinel', true);
+      intersect('journal-top-sentinel', false);
+
+      rerender(
+        <DayGroupedJournalList
+          journals={journals}
+          collapseEmptyDays={false}
+          hasPreviousPage
+          fetchPreviousPage={fetchPreviousPage}
+        />
+      );
+
+      expect(fetchPreviousPage).not.toHaveBeenCalled();
+    });
   });
 });

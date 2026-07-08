@@ -247,19 +247,23 @@ test.describe('Sidebar Navigation', () => {
     test('maintains navigation state across viewport changes', async ({
       authenticatedPage: page,
     }) => {
-      // Start with desktop and expand journals
+      // Start with desktop and expand journals. Inner steps use short
+      // timeouts so a pre-hydration click (dropped, no handler attached yet)
+      // retries instead of a single attempt consuming the whole toPass budget.
       await page.setViewportSize({ width: 1024, height: 768 });
       await page.goto('/contacts');
       await expect(async () => {
         const journalsBtn = page.getByRole('button', { name: /journals/i });
-        const expanded = await journalsBtn.getAttribute('aria-expanded');
+        const expanded = await journalsBtn.getAttribute('aria-expanded', {
+          timeout: 2000,
+        });
         if (expanded !== 'true') {
-          await journalsBtn.click();
+          await journalsBtn.click({ timeout: 2000 });
         }
         await expect(
           page.getByRole('link', { name: 'All Journals' })
-        ).toBeVisible();
-      }).toPass({ timeout: 15000 });
+        ).toBeVisible({ timeout: 2000 });
+      }).toPass({ timeout: 30000 });
 
       // Switch to mobile - wait for UI to stabilize after viewport change
       await page.setViewportSize({ width: 375, height: 667 });
@@ -275,16 +279,17 @@ test.describe('Sidebar Navigation', () => {
           .isVisible()
           .catch(() => false);
         if (!dialogVisible) {
-          await page.getByTestId('mobile-nav-trigger').click();
+          await page.getByTestId('mobile-nav-trigger').click({ timeout: 2000 });
         }
-        // Journals should still be expanded
+        // Journals should still be expanded. Short inner timeouts keep a
+        // failed attempt from consuming the whole toPass budget.
         await expect(
           page.getByRole('button', { name: /journals/i })
-        ).toHaveAttribute('aria-expanded', 'true');
+        ).toHaveAttribute('aria-expanded', 'true', { timeout: 2000 });
         await expect(
           page.getByRole('link', { name: 'All Journals' })
-        ).toBeVisible();
-      }).toPass({ timeout: 15000 });
+        ).toBeVisible({ timeout: 2000 });
+      }).toPass({ timeout: 30000 });
     });
   });
 

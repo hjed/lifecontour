@@ -528,12 +528,10 @@ test.describe('Strava Integration Panel (mocked API)', () => {
 
     // A different integration's sync can still be triggered while Strava is
     // in progress — the fan-out does not hold a shared worker slot.
-    let googleSyncTriggered = false;
     await authenticatedPage.route(
       '**/api/integrations/google/contacts/sync',
       (route: Route) => {
         if (route.request().method() !== 'POST') return route.fallback();
-        googleSyncTriggered = true;
         return route.fulfill(
           json({
             data: {
@@ -581,17 +579,18 @@ test.describe('Strava Integration Panel (mocked API)', () => {
     await authenticatedPage.keyboard.press('Escape');
     await expect(authenticatedPage.getByRole('dialog')).toBeHidden();
 
-    // Other integrations are not blocked while Strava is in progress.
-    const googleSyncReq = authenticatedPage.waitForRequest(
-      request =>
-        request.url().includes('/api/integrations/google/contacts/sync') &&
-        request.method() === 'POST'
+    // Other integrations are not blocked while Strava is in progress. Wait
+    // for the *response* (not the request) so the route handler has
+    // demonstrably fulfilled the sync before asserting.
+    const googleSyncResp = authenticatedPage.waitForResponse(
+      response =>
+        response.url().includes('/api/integrations/google/contacts/sync') &&
+        response.request().method() === 'POST'
     );
     await authenticatedPage.click(
       '[data-testid="trigger-google-contacts-sync"]'
     );
-    await googleSyncReq;
-    expect(googleSyncTriggered).toBe(true);
+    expect((await googleSyncResp).ok()).toBe(true);
 
     // The fan-out resolves: with the parent now completed, the same surface
     // renders the terminal state (reload clears the 30s-cached history query).

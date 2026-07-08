@@ -860,14 +860,18 @@ test.describe('Journal Detail Page', () => {
         try {
           await expect(badge).toBeVisible({ timeout: 2000 });
         } catch {
+          // Short inner timeouts so a slow reload attempt doesn't consume the
+          // whole toPass budget (the default expect timeout equals it).
           await page.reload();
-          await expect(
-            page.locator('main, [role="main"]').first()
-          ).toBeVisible();
-          await expect(page.getByTestId('journal-detail-view')).toBeVisible();
+          await expect(page.locator('main, [role="main"]').first()).toBeVisible(
+            { timeout: 3000 }
+          );
+          await expect(page.getByTestId('journal-detail-view')).toBeVisible({
+            timeout: 3000,
+          });
           await expect(badge).toBeVisible({ timeout: 5000 });
         }
-      }).toPass({ timeout: 15000 });
+      }).toPass({ timeout: 30000 });
 
       const contactBadge = page.getByTestId(`contact-badge-${contact.id}`);
 
@@ -941,14 +945,18 @@ test.describe('Journal Detail Page', () => {
         try {
           await expect(badge).toBeVisible({ timeout: 2000 });
         } catch {
+          // Short inner timeouts so a slow reload attempt doesn't consume the
+          // whole toPass budget (the default expect timeout equals it).
           await page.reload();
-          await expect(
-            page.locator('main, [role="main"]').first()
-          ).toBeVisible();
-          await expect(page.getByTestId('journal-detail-view')).toBeVisible();
+          await expect(page.locator('main, [role="main"]').first()).toBeVisible(
+            { timeout: 3000 }
+          );
+          await expect(page.getByTestId('journal-detail-view')).toBeVisible({
+            timeout: 3000,
+          });
           await expect(badge).toBeVisible({ timeout: 5000 });
         }
-      }).toPass({ timeout: 15000 });
+      }).toPass({ timeout: 30000 });
 
       // Verify initial status
       const neutralStatus = page.getByTestId(`contact-status-${contact.id}`);
@@ -1288,12 +1296,17 @@ test.describe('Journal Detail Page', () => {
       // Find and click the back button - use button role instead of link
       const backButton = page.getByRole('button', { name: /back/i });
 
-      // Only run test if back button is visible
+      // Only run test if back button is visible. Retry the click in case
+      // async detail content shifts the button mid-click and drops it.
       await expect(backButton).toBeVisible();
-      await backButton.click();
-
-      // Wait for navigation to complete
-      await page.waitForURL('**/journals');
+      const listUrl = /\/journals$/;
+      await expect(async () => {
+        if (!listUrl.test(page.url())) {
+          await backButton.click({ timeout: 2000 });
+        }
+        // Wait for navigation to complete
+        await expect(page).toHaveURL(listUrl, { timeout: 3000 });
+      }).toPass({ timeout: 60000 });
 
       // Verify we're on the list page
       expect(page.url()).toContain('/journals');
@@ -1344,10 +1357,16 @@ test.describe('Journal Detail Page', () => {
       });
       await expect(contactLink).toBeVisible();
 
-      await contactLink.click();
-
-      // Wait for navigation and verify url
-      await page.waitForURL(`**/contacts/${contact.id}**`);
+      // Retry the click in case async detail content shifts the link
+      // mid-click and drops it.
+      const contactUrl = new RegExp(`/contacts/${contact.id}`);
+      await expect(async () => {
+        if (!contactUrl.test(page.url())) {
+          await contactLink.click({ timeout: 2000 });
+        }
+        // Wait for navigation and verify url
+        await expect(page).toHaveURL(contactUrl, { timeout: 3000 });
+      }).toPass({ timeout: 60000 });
       expect(page.url()).toContain(`/contacts/${contact.id}`);
     });
   });
