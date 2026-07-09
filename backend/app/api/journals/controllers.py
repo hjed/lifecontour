@@ -1408,17 +1408,22 @@ async def list_incomplete_outdoor_activities(
     request: Request,
     incomplete_service: FromDishka[IncompleteOutdoorActivityService],
     user: FromDishka[SessionUser],
+    include_dismissed: bool = False,
 ) -> IncompleteOutdoorActivityListResponse:
     """
     List the user's incomplete outdoor activity journals with their reasons.
 
     An advisory, unpaginated projection over the user's outdoor journals:
     each entry names the rule(s) it matches (no_attributes, missing_template,
-    no_participants). Dismissed journals are excluded.
+    no_participants). Dismissed journals are excluded unless
+    ``include_dismissed`` is set, in which case they are returned flagged
+    ``dismissed: true`` (so the UI can offer un-dismiss).
     """
     base_url = get_request_base_url(request)
 
-    entries = await incomplete_service.list_incomplete(user.id)
+    entries = await incomplete_service.list_incomplete(
+        user.id, include_dismissed=include_dismissed
+    )
 
     resources = [
         _build_incomplete_outdoor_activity_resource(entry, base_url)
@@ -1521,6 +1526,7 @@ def _build_incomplete_outdoor_activity_resource(
             ),
             subtypes=entry.subtypes,
             reasons=entry.reasons,
+            dismissed=entry.dismissed,
         ),
         links=JsonApiLinks(
             self=f"{base_url}/api/journals/{entry.journal_id}",

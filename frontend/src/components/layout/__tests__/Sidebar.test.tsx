@@ -139,6 +139,9 @@ describe('Sidebar Components', () => {
       await waitFor(() => {
         expect(journalsButton).toHaveAttribute('aria-expanded', 'true');
         expect(screen.getByText('All Journals')).toBeInTheDocument();
+        expect(
+          screen.getByRole('link', { name: 'Outdoor Logbook' })
+        ).toHaveAttribute('href', '/journals/outdoor-logbook');
       });
 
       // Click to collapse

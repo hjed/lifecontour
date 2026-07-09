@@ -1,6 +1,6 @@
 # Iteration 16: Outdoor Logbook Improvements
 
-**Status:** 🟡 IN PROGRESS — ITER16-001 complete; ITER16-002 Phases 1–3 complete.
+**Status:** 🟡 IN PROGRESS — ITER16-001 and ITER16-002 complete.
 **Dependencies:** Iteration 9 (Outdoor Logbook — activity subtypes, abseil pitches, activity templates, gear items, PDF export), Iteration 10 (SnipeIT integration — gear checkout state), Iteration 11 (Immich integration — album links), Iteration 12 (Activity History — provenance, used for dismissal/auditing). Assumes the outdoor logbook and SnipeIT gear-checkout sync are delivered.
 **Goal:** Add the **review, surfacing, and reporting** layer on top of the existing outdoor logbook: find activities missing important detail, make every abseiling activity carry a durable template reference, add an outdoor logbook overview/dashboard page, and produce a polished, navigable PDF logbook — all with full UI and MCP parity.
 
@@ -169,7 +169,7 @@ Each sub-iteration defines its objective, the specification section it realises,
 - **Tests:** integration via `authenticated_client` (REST list/dismiss/un-dismiss); MCP list/dismiss/un-dismiss end-to-end.
 - **Docs:** `api-design.md`. MCP tools are documented in code (tool docstrings), not in `mcp-setup.md` — duplicating them there goes stale (product owner, PR #1108).
 
-**Phase 4 — Overview page shell + incomplete list UI.** PR ~450 lines.
+**Phase 4 — Overview page shell + incomplete list UI.** PR ~450 lines. ✅ DONE — the Outdoor Logbook overview page ships at `frontend/src/app/journals/outdoor-logbook/page.tsx` with its own sidebar entry under Journals (the shared shell ITER16-003's widgets slot into). The incomplete list (`IncompleteOutdoorActivitiesList` + the `incomplete-outdoor-activities` API adapter) renders title (linking to the journal), date range, type icon badges (reusing `JournalTypeBadges`), one reason badge per matched rule, and dismiss/un-dismiss controls. Includes a small additive backend extension approved by the product owner (2026-07-09): an `include_dismissed` query param on the Phase 3 REST list endpoint and MCP list tool (entries gain a `dismissed` flag), because the Phase 3 list excludes dismissed journals entirely — the UI's "Show dismissed" toggle uses it to surface dismissed entries muted with an Un-dismiss button (durable un-dismiss), and the dismiss toast offers an immediate Undo action. Kept as a single PR even though >500 lines (product-owner decision, matching Phases 2–3).
 - Dedicated route `frontend/src/app/journals/outdoor-logbook/page.tsx` + sidebar entry under Journals (the shared overview page shell). The incomplete list renders title, date, type icon(s), reason badge(s), a link to the journal, and a dismiss/un-dismiss control.
 - **Tests:** RTL — renders reasons + dismiss removes the row (deterministic seed, no conditional/multi-outcome assertions per CLAUDE.md); e2e — seed an incomplete activity → flagged with reason → dismiss → gone → un-dismiss → returns.
 - **Docs:** `frontend-design.md` — overview route + incomplete-review component.

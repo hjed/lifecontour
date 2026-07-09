@@ -84,13 +84,18 @@ class OutdoorActivityFacts:
 
 @dataclass
 class IncompleteOutdoorActivity:
-    """An outdoor journal flagged by the incomplete review, with its reasons."""
+    """An outdoor journal flagged by the incomplete review, with its reasons.
+
+    ``dismissed`` is review state, not a rule outcome: evaluation always leaves
+    it ``False`` and the service marks it when listing dismissed entries.
+    """
 
     journal_id: int
     title: str
     event_date_range: EventDateRange
     subtypes: list[OutdoorActivitySubtype]
     reasons: list[IncompletenessReason]
+    dismissed: bool = False
 
 
 # Maps each rule-1-relevant outdoor subtype to its facts attribute and data

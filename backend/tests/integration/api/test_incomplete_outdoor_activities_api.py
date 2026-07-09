@@ -94,6 +94,51 @@ async def test_list_orders_newest_first(
     assert listed_ids == [str(newer_id), str(older_id)]
 
 
+async def test_list_marks_entries_not_dismissed_by_default(
+    authenticated_client,
+    seeder: Seeder,
+) -> None:
+    await seeder.create_incomplete_canyoning_journal()
+
+    response = await authenticated_client.get(LIST_URL)
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert len(data) == 1
+    assert data[0]["attributes"]["dismissed"] is False
+
+
+async def test_list_include_dismissed_returns_dismissed_entries_flagged(
+    authenticated_client,
+    seeder: Seeder,
+) -> None:
+    dismissed_id = await seeder.create_incomplete_canyoning_journal(
+        title="Dismissed canyon", start=datetime(2026, 6, 1, 9, tzinfo=UTC)
+    )
+    live_id = await seeder.create_incomplete_canyoning_journal(
+        title="Live canyon", start=datetime(2026, 3, 1, 9, tzinfo=UTC)
+    )
+    dismiss_response = await authenticated_client.post(
+        f"{LIST_URL}/{dismissed_id}/dismiss"
+    )
+    assert dismiss_response.status_code == 200
+
+    # Default list still excludes the dismissed journal.
+    default_response = await authenticated_client.get(LIST_URL)
+    assert default_response.status_code == 200
+    assert [entry["id"] for entry in default_response.json()["data"]] == [str(live_id)]
+
+    response = await authenticated_client.get(
+        LIST_URL, params={"include_dismissed": "true"}
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert [entry["id"] for entry in data] == [str(dismissed_id), str(live_id)]
+    assert data[0]["attributes"]["dismissed"] is True
+    assert data[1]["attributes"]["dismissed"] is False
+
+
 async def test_dismiss_removes_entry_and_records_ui_provenance(
     authenticated_client,
     seeder: Seeder,

@@ -171,6 +171,33 @@ This document provides comprehensive frontend design patterns and component guid
 - Support metric units and measurements
 - Provide Australian-specific help text and examples
 
+## Outdoor Logbook Overview Page
+
+The Outdoor Logbook overview page (`src/app/journals/outdoor-logbook/page.tsx`)
+is a dedicated route under the journals experience with its own sidebar entry
+under Journals (not a calendar/list view-mode toggle). It is the shared shell
+for outdoor logbook review and reporting: it hosts the incomplete outdoor
+activities review, and the dashboard widgets (upcoming activities, checked-out
+gear, recent totals, templates done) slot in alongside it (ITER16-003).
+
+### Incomplete Outdoor Activities Review
+
+- **Component**: `src/components/journals/IncompleteOutdoorActivitiesList.tsx`
+  — a card listing each flagged journal with its title (linking to the journal
+  detail), date range, type icon badges (reusing `JournalTypeBadges`), one
+  reason badge per matched rule, and a dismiss/un-dismiss control.
+- **API adapter**: `src/lib/api/incomplete-outdoor-activities.ts` — TanStack
+  Query hooks over `GET /api/journals/incomplete-outdoor-activities` and the
+  dismiss/undismiss action POSTs. Dismissing optimistically removes the entry
+  from the default list and offers an Undo toast action.
+- **Show dismissed**: a labelled switch refetches with
+  `include_dismissed=true`; dismissed rows render muted with an Un-dismiss
+  button, giving a durable un-dismiss affordance (dismissed entries are
+  otherwise excluded from the review).
+- **Accessibility**: semantic `ul`/`li` list, per-row `aria-label`s on the
+  dismiss/un-dismiss buttons (including the journal title), a `Label`-linked
+  switch, and semantic colour tokens throughout.
+
 ## Related Documents
 
 - [Architecture Overview](../architecture.md) - High-level system architecture and frontend principles

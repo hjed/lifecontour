@@ -1004,6 +1004,13 @@ class IncompleteOutdoorActivityAttributes(BaseModel):
             "(no_attributes, missing_template, no_participants)"
         ),
     )
+    dismissed: bool = Field(
+        ...,
+        description=(
+            "Whether the journal is dismissed from the review "
+            "(only true when listed with include_dismissed)"
+        ),
+    )
 
 
 class IncompleteOutdoorActivityResource(BaseModel):

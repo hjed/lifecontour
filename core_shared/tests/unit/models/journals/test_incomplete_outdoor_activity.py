@@ -305,6 +305,13 @@ class TestCombined:
             OutdoorActivitySubtype.CANYONING,
         ]
 
+    def test_evaluation_result_defaults_to_not_dismissed(self) -> None:
+        """Dismissal state is the service's concern; evaluation never sets it."""
+        result = evaluate_incompleteness(make_facts(participant_count=0))
+
+        assert result is not None
+        assert result.dismissed is False
+
 
 class TestRegistry:
     def test_registry_covers_every_outdoor_subtype_except_training(self) -> None:

@@ -4339,6 +4339,15 @@ async def dismiss_review_item(
 
 @mcp_unified_error_handler("list_incomplete_outdoor_activities", "journal")
 async def list_incomplete_outdoor_activities(
+    include_dismissed: Annotated[
+        bool,
+        Field(
+            description=(
+                "Also return dismissed journals, flagged dismissed=true "
+                "(default false: dismissed journals are excluded)"
+            ),
+        ),
+    ] = False,
     user_id: str = mcp_depends(get_current_user_id),
     incomplete_service: IncompleteOutdoorActivityService = mcp_depends(
         get_incomplete_outdoor_activity_service
@@ -4351,9 +4360,13 @@ async def list_incomplete_outdoor_activities(
     type-specific fields are all empty), ``missing_template`` (an
     abseiling-derived activity with no template reference), and
     ``no_participants`` (a non-bushwalking outdoor activity with no PARTICIPANT
-    contacts). Dismissed journals are excluded; entries are newest first.
+    contacts). Dismissed journals are excluded unless ``include_dismissed`` is
+    set (they then carry ``dismissed=true``, so they can be un-dismissed);
+    entries are newest first.
     """
-    entries = await incomplete_service.list_incomplete(user_id)
+    entries = await incomplete_service.list_incomplete(
+        user_id, include_dismissed=include_dismissed
+    )
 
     activities = [
         IncompleteOutdoorActivityMCPEntry(
@@ -4365,6 +4378,7 @@ async def list_incomplete_outdoor_activities(
             ),
             subtypes=[subtype.value for subtype in entry.subtypes],
             reasons=[reason.value for reason in entry.reasons],
+            dismissed=entry.dismissed,
         )
         for entry in entries
     ]
