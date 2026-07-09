@@ -910,3 +910,43 @@ class TestInboundHierarchySplitting:
         contact = transformer_with_reserved.transform_person(person)
 
         assert len(contact.tags) == 0  # type: ignore[arg-type]
+
+    def test_case_variant_group_names_dedupe_to_single_tag(self) -> None:
+        """Groups whose names differ only in case produce one tag.
+
+        Tag identity is case-insensitive in the backend, so case-variant
+        Google groups (e.g. "Scouts" and "scouts") must collapse to a single
+        tag instead of resolving to the same DB tag twice downstream.
+        """
+        translator = GoogleGroupNameTranslator(
+            reserved_group_ids=[],
+            group_mapping={
+                "contactGroups/upper": "Scouts",
+                "contactGroups/lower": "scouts",
+            },
+        )
+        transformer_with_groups = GoogleContactTransformer(translator=translator)
+
+        person = GooglePerson(
+            resourceName="people/c123",
+            names=[GoogleName(givenName="Test", familyName="Person")],
+            memberships=[
+                GoogleMembership(
+                    contactGroupMembership=GoogleContactGroupMembership(
+                        contactGroupId="upper",
+                        contactGroupResourceName="contactGroups/upper",
+                    )
+                ),
+                GoogleMembership(
+                    contactGroupMembership=GoogleContactGroupMembership(
+                        contactGroupId="lower",
+                        contactGroupResourceName="contactGroups/lower",
+                    )
+                ),
+            ],
+        )
+
+        contact = transformer_with_groups.transform_person(person)
+
+        assert len(contact.tags) == 1  # type: ignore[arg-type]
+        assert contact.tags[0].name.value == "Scouts"  # type: ignore[index]

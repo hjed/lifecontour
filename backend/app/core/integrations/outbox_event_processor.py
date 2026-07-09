@@ -408,6 +408,11 @@ class OutboxEventProcessor:
 
         Also resolves parent→child hierarchy from inbound `parent_name` metadata
         (set by the transformer when splitting hierarchical group names).
+
+        Tag identity is case-insensitive (``uq_tags_name_lower``), so every
+        name comparison here is casefolded; otherwise case-variant inbound
+        names resolve to the same DB tag more than once, producing a phantom
+        tag change (and summary regeneration) on every sync cycle.
         """
 
         incoming_tags = contact_data.get("tags")
@@ -419,16 +424,17 @@ class OutboxEventProcessor:
         for tag in incoming_tags:
             parent_name = tag.get("parent_name")
             if parent_name:
-                parent_name_map[tag["name"]] = parent_name
+                parent_name_map[tag["name"].casefold()] = parent_name.casefold()
 
-        # Preserve incoming order while deduplicating
-        incoming_tag_names_ordered = []
+        # Preserve incoming order while deduplicating case-insensitively
+        # (first-seen casing wins)
+        incoming_tag_names_ordered: list[str] = []
+        incoming_folded: set[str] = set()
         for tag in incoming_tags:
             tag_name = tag["name"]
-            if tag_name not in incoming_tag_names_ordered:
+            if tag_name.casefold() not in incoming_folded:
+                incoming_folded.add(tag_name.casefold())
                 incoming_tag_names_ordered.append(tag_name)
-
-        incoming_tag_names_set = set(incoming_tag_names_ordered)
 
         existing_contact_tags = existing_contact_tags or []
         existing_tag_names = {str(tag.name) for tag in existing_contact_tags}
@@ -437,14 +443,21 @@ class OutboxEventProcessor:
         previously_synced_tags = self._extract_previously_synced_tags(
             existing_reference_data, existing_reference_id
         )
+        previously_synced_folded = {n.casefold() for n in previously_synced_tags}
 
         # Tags that are purely local (never synced before)
-        local_only_tags = existing_tag_names - previously_synced_tags
+        local_only_tags = {
+            name
+            for name in existing_tag_names
+            if name.casefold() not in previously_synced_folded
+        }
 
         # Stable order: inbound tags first, then local only
         final_tag_names_ordered = list(incoming_tag_names_ordered)
+        final_folded = set(incoming_folded)
         for tag_name in sorted(local_only_tags):
-            if tag_name not in incoming_tag_names_set:
+            if tag_name.casefold() not in final_folded:
+                final_folded.add(tag_name.casefold())
                 final_tag_names_ordered.append(tag_name)
 
         if not final_tag_names_ordered:
@@ -458,28 +471,33 @@ class OutboxEventProcessor:
         # - Tags are reusable, shared entities (not contact-specific)
         # - Tag creation is idempotent (find_by_names will find them on retry)
         # - Orphan tag rows (if contact update later fails) are harmless
-        resolved_tags = []
+        resolved_tags: list[Tag] = []
+        seen_tag_ids: set[int] = set()
         resolved_by_name: dict[str, Tag] = {}
         for tag_name in final_tag_names_ordered:
             if tag_name in found_tags_dict:
                 tag = found_tags_dict[tag_name]
-                resolved_tags.append(tag)
-                resolved_by_name[tag_name] = tag
             else:
                 from core_shared.models.contacts.value_objects import TagName
 
                 new_tag = Tag(name=TagName(tag_name))
                 try:
                     async with self.connection.begin_nested():
-                        saved_tag = await self.tag_repo.save(new_tag)
+                        tag = await self.tag_repo.save(new_tag)
                 except DuplicateTagNameError:
                     # Race condition: another worker created the same tag
                     found_tag = await self.tag_repo.find_by_name(tag_name)
                     if found_tag is None:
                         raise
-                    saved_tag = found_tag
-                resolved_tags.append(saved_tag)
-                resolved_by_name[tag_name] = saved_tag
+                    tag = found_tag
+            # Safety net: never attach the same tag row twice, even if two
+            # requested names resolved to it (case-insensitive lookup).
+            if tag.id is not None:
+                if tag.id in seen_tag_ids:
+                    continue
+                seen_tag_ids.add(tag.id)
+            resolved_tags.append(tag)
+            resolved_by_name[tag_name.casefold()] = tag
 
         # Resolve hierarchy: set parent_id on child tags based on parent_name
         for child_name, parent_name in parent_name_map.items():

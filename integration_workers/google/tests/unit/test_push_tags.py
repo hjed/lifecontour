@@ -190,6 +190,23 @@ class TestTransformTagsToMemberships:
             == "contactGroups/abc123"
         )
 
+    def test_matches_group_names_case_insensitively(self):
+        """A tag resolves to its Google group even when only the case differs."""
+        from worker import _transform_tags_to_memberships
+
+        result = _transform_tags_to_memberships(
+            tag_names=["Scouts"],
+            group_name_to_resource={"scouts": "contactGroups/abc123"},
+        )
+
+        assert result == [
+            {
+                "contactGroupMembership": {
+                    "contactGroupResourceName": "contactGroups/abc123"
+                }
+            }
+        ]
+
     def test_empty_tags_returns_empty_list(self):
         """Test that empty tag list produces empty memberships."""
         from worker import _transform_tags_to_memberships
@@ -361,6 +378,29 @@ class TestEnsureGoogleGroupsExist:
         )
 
         assert result == {}
+        mock_client.create_contact_group.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_case_variant_group_is_not_recreated(self):
+        """A Google group matching a tag name except for case is reused.
+
+        Tag identity is case-insensitive locally, so creating a second group
+        that differs only in case would seed duplicate case-variant groups in
+        Google (and duplicate tags on the next pull).
+        """
+        from worker import _ensure_google_groups_exist
+
+        mock_client = AsyncMock()
+
+        existing_groups = {"scouts": "contactGroups/abc123"}
+
+        result = await _ensure_google_groups_exist(
+            client=mock_client,
+            tag_names=["Scouts"],
+            existing_groups=existing_groups,
+        )
+
+        assert result == existing_groups
         mock_client.create_contact_group.assert_not_called()
 
 
