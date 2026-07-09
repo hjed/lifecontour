@@ -609,6 +609,12 @@ class IncompleteOutdoorActivityMCPEntry(BaseModel):
             "no_participants (non-bushwalking activity with no participants)"
         )
     )
+    dismissed: bool = Field(
+        description=(
+            "Whether the journal is dismissed from the review "
+            "(only true when listed with include_dismissed)"
+        )
+    )
 
 
 class IncompleteOutdoorActivitiesMCPResponse(BaseModel):

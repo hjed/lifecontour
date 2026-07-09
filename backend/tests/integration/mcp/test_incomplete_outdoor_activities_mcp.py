@@ -107,6 +107,44 @@ async def test_list_incomplete_via_mcp(
     ]
     assert "canyoning" in entry["subtypes"]
     assert entry["event_date_range"]["start"] is not None
+    assert entry["dismissed"] is False
+
+
+async def test_list_incomplete_include_dismissed_via_mcp(
+    authenticated_lifespan_client,
+    seeder: Seeder,
+) -> None:
+    journal_id = await seeder.create_incomplete_canyoning_journal()
+
+    async with authenticated_lifespan_client() as client:
+        session_id = await initialize_mcp_session(client)
+
+        dismissed = await _call_tool(
+            client,
+            session_id,
+            "dismiss_incomplete_outdoor_activity",
+            {"journal_id": journal_id},
+        )
+        assert dismissed["dismissed"] is True
+
+        default_listing = await _call_tool(
+            client, session_id, "list_incomplete_outdoor_activities", {}, req_id=2
+        )
+        assert default_listing["total_count"] == 0
+
+        listing = await _call_tool(
+            client,
+            session_id,
+            "list_incomplete_outdoor_activities",
+            {"include_dismissed": True},
+            req_id=3,
+        )
+
+    assert "error" not in listing, listing
+    assert listing["total_count"] == 1
+    entry = listing["activities"][0]
+    assert entry["journal_id"] == journal_id
+    assert entry["dismissed"] is True
 
 
 async def test_dismiss_via_mcp_records_mcp_provenance_and_removes_entry(

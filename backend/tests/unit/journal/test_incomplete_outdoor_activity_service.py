@@ -139,6 +139,74 @@ class TestListIncomplete:
         assert [entry.journal_id for entry in result] == [11, 10]
 
     @pytest.mark.asyncio
+    async def test_default_list_marks_entries_not_dismissed(
+        self,
+        service: IncompleteOutdoorActivityService,
+        mock_facts_repo: AsyncMock,
+    ) -> None:
+        mock_facts_repo.list_outdoor_activity_facts.return_value = [make_facts(10)]
+
+        result = await service.list_incomplete(USER_ID)
+
+        assert result[0].dismissed is False
+
+    @pytest.mark.asyncio
+    async def test_include_dismissed_returns_dismissed_entries_flagged(
+        self,
+        service: IncompleteOutdoorActivityService,
+        mock_facts_repo: AsyncMock,
+        mock_dismissal_repo: AsyncMock,
+    ) -> None:
+        mock_facts_repo.list_outdoor_activity_facts.return_value = [
+            make_facts(10),
+            make_facts(11),
+        ]
+        mock_dismissal_repo.list_dismissed_journal_ids.return_value = {10}
+
+        result = await service.list_incomplete(USER_ID, include_dismissed=True)
+
+        assert {entry.journal_id: entry.dismissed for entry in result} == {
+            10: True,
+            11: False,
+        }
+
+    @pytest.mark.asyncio
+    async def test_include_dismissed_keeps_newest_first_ordering(
+        self,
+        service: IncompleteOutdoorActivityService,
+        mock_facts_repo: AsyncMock,
+        mock_dismissal_repo: AsyncMock,
+    ) -> None:
+        january = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
+        march = datetime.datetime(2026, 3, 1, tzinfo=datetime.UTC)
+        mock_facts_repo.list_outdoor_activity_facts.return_value = [
+            make_facts(10, start=january),
+            make_facts(11, start=march),
+        ]
+        mock_dismissal_repo.list_dismissed_journal_ids.return_value = {11}
+
+        result = await service.list_incomplete(USER_ID, include_dismissed=True)
+
+        assert [entry.journal_id for entry in result] == [11, 10]
+
+    @pytest.mark.asyncio
+    async def test_include_dismissed_still_excludes_complete_journals(
+        self,
+        service: IncompleteOutdoorActivityService,
+        mock_facts_repo: AsyncMock,
+        mock_dismissal_repo: AsyncMock,
+    ) -> None:
+        mock_facts_repo.list_outdoor_activity_facts.return_value = [
+            make_facts(10, incomplete=False),
+            make_facts(11),
+        ]
+        mock_dismissal_repo.list_dismissed_journal_ids.return_value = {10, 11}
+
+        result = await service.list_incomplete(USER_ID, include_dismissed=True)
+
+        assert [entry.journal_id for entry in result] == [11]
+
+    @pytest.mark.asyncio
     async def test_multi_reason_entry_carries_all_reasons(
         self,
         service: IncompleteOutdoorActivityService,

@@ -24,6 +24,12 @@ export const API_ENDPOINTS = {
     BY_ID: (id: string) => `/api/journals/${id}`,
     SEARCH: '/api/journals/search',
     EXPORT_OUTDOOR_LOGBOOK: '/api/journals/export/outdoor-logbook',
+    INCOMPLETE_OUTDOOR_ACTIVITIES:
+      '/api/journals/incomplete-outdoor-activities',
+    INCOMPLETE_OUTDOOR_ACTIVITY_DISMISS: (journalId: string) =>
+      `/api/journals/incomplete-outdoor-activities/${journalId}/dismiss`,
+    INCOMPLETE_OUTDOOR_ACTIVITY_UNDISMISS: (journalId: string) =>
+      `/api/journals/incomplete-outdoor-activities/${journalId}/undismiss`,
   },
   TEMPLATES: {
     BASE: '/api/templates',
