@@ -1408,7 +1408,15 @@ async def list_incomplete_outdoor_activities(
     request: Request,
     incomplete_service: FromDishka[IncompleteOutdoorActivityService],
     user: FromDishka[SessionUser],
-    include_dismissed: bool = False,
+    include_dismissed: Annotated[
+        bool,
+        Query(
+            description=(
+                "Also return dismissed journals, flagged dismissed=true "
+                "(default false: dismissed journals are excluded)"
+            )
+        ),
+    ] = False,
 ) -> IncompleteOutdoorActivityListResponse:
     """
     List the user's incomplete outdoor activity journals with their reasons.

@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { IncompleteOutdoorActivitiesList } from '../IncompleteOutdoorActivitiesList';
 import { JournalType } from '@/types/journals';
@@ -97,17 +97,20 @@ describe('IncompleteOutdoorActivitiesList', () => {
     expect(titleLink).toHaveAttribute('href', '/journals/42');
 
     expect(item).toHaveTextContent('1 Jun 2026');
-    expect(screen.getByTestId('type-badge-canyoning')).toBeInTheDocument();
 
-    expect(screen.getByTestId('reason-badge-no_attributes')).toHaveTextContent(
+    // Badge testids repeat across rows, so queries are scoped to the row
+    const row = within(item);
+    expect(row.getByTestId('type-badge-canyoning')).toBeInTheDocument();
+
+    expect(row.getByTestId('reason-badge-no_attributes')).toHaveTextContent(
       'No attributes set'
     );
-    expect(
-      screen.getByTestId('reason-badge-missing_template')
-    ).toHaveTextContent('Missing template');
-    expect(
-      screen.getByTestId('reason-badge-no_participants')
-    ).toHaveTextContent('No participants');
+    expect(row.getByTestId('reason-badge-missing_template')).toHaveTextContent(
+      'Missing template'
+    );
+    expect(row.getByTestId('reason-badge-no_participants')).toHaveTextContent(
+      'No participants'
+    );
   });
 
   it('only renders badges for the matched reasons', () => {
@@ -119,14 +122,13 @@ describe('IncompleteOutdoorActivitiesList', () => {
 
     render(<IncompleteOutdoorActivitiesList />, { wrapper: createWrapper() });
 
+    const row = within(screen.getByTestId('incomplete-activity-item-42'));
+    expect(row.getByTestId('reason-badge-no_participants')).toBeInTheDocument();
     expect(
-      screen.getByTestId('reason-badge-no_participants')
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByTestId('reason-badge-no_attributes')
+      row.queryByTestId('reason-badge-no_attributes')
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByTestId('reason-badge-missing_template')
+      row.queryByTestId('reason-badge-missing_template')
     ).not.toBeInTheDocument();
   });
 

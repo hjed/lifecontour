@@ -127,7 +127,7 @@ test.describe('Outdoor Logbook — incomplete activities review', () => {
           resp.request().method() === 'GET' &&
           resp.ok()
       ),
-      dismissBtn.dispatchEvent('click'),
+      dismissBtn.click(),
     ]);
 
     await expect(
@@ -147,7 +147,7 @@ test.describe('Outdoor Logbook — incomplete activities review', () => {
           resp.request().method() === 'GET' &&
           resp.ok()
       ),
-      showDismissedSwitch.dispatchEvent('click'),
+      showDismissedSwitch.click(),
     ]);
 
     await expect(item).toBeVisible({ timeout: 15000 });
@@ -180,7 +180,7 @@ test.describe('Outdoor Logbook — incomplete activities review', () => {
           resp.request().method() === 'GET' &&
           resp.ok()
       ),
-      undismissBtn.dispatchEvent('click'),
+      undismissBtn.click(),
     ]);
 
     await expect(
@@ -197,7 +197,7 @@ test.describe('Outdoor Logbook — incomplete activities review', () => {
           resp.request().method() === 'GET' &&
           resp.ok()
       ),
-      showDismissedSwitch.dispatchEvent('click'),
+      showDismissedSwitch.click(),
     ]);
 
     await expect(item).toBeVisible({ timeout: 15000 });
