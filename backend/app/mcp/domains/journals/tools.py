@@ -121,10 +121,16 @@ from app.core.journal.services.calendar_service import CalendarService
 from app.core.journal.services.daily_summary_service import DailySummaryService
 from app.core.journal.services.gear_item_service import GearItemService
 from app.core.journal.services.hierarchy_service import HierarchyNode, HierarchyService
+from app.core.journal.services.incomplete_outdoor_activity_service import (
+    IncompleteOutdoorActivityService,
+)
 from app.core.journal.services.journal_contact_service import JournalContactService
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_service import JournalService
 from app.core.journal.services.journal_write_service import JournalWriteService
+from app.core.journal.services.outdoor_activity_dismissal_service import (
+    OutdoorActivityDismissalService,
+)
 from app.core.journal.services.review_item_service import ReviewItemService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.mcp.domains.journals.converters import (
@@ -142,6 +148,8 @@ from app.mcp.domains.journals.schemas import (
     ContactRelationshipSummary,
     DailySummaryMCPResponse,
     EventDateRangeSchema,
+    IncompleteOutdoorActivitiesMCPResponse,
+    IncompleteOutdoorActivityMCPEntry,
     JournalCreateRequest,
     JournalDateWindowResponse,
     JournalHierarchyNode,
@@ -155,6 +163,7 @@ from app.mcp.domains.journals.schemas import (
     MergeCandidateResult,
     MergeCandidatesResponse,
     MergeJournalMCPRequest,
+    OutdoorActivityDismissalMCPResponse,
     RouteHistoryEntry,
     RouteHistoryResponse,
     RouteSummary,
@@ -167,9 +176,11 @@ from app.mcp.shared.dependencies import (
     get_current_user_id,
     get_daily_summary_service,
     get_gear_item_service,
+    get_incomplete_outdoor_activity_service,
     get_journal_contact_service,
     get_journal_write_service,
     get_outbox_event_publisher,
+    get_outdoor_activity_dismissal_service,
     get_review_item_service,
     mcp_depends,
 )
@@ -4326,6 +4337,128 @@ async def dismiss_review_item(
     )
 
 
+@mcp_unified_error_handler("list_incomplete_outdoor_activities", "journal")
+async def list_incomplete_outdoor_activities(
+    user_id: str = mcp_depends(get_current_user_id),
+    incomplete_service: IncompleteOutdoorActivityService = mcp_depends(
+        get_incomplete_outdoor_activity_service
+    ),
+) -> str:
+    """
+    List the user's incomplete outdoor activity journals with their reasons.
+
+    Each entry names the rule(s) it matches: ``no_attributes`` (a subtype's own
+    type-specific fields are all empty), ``missing_template`` (an
+    abseiling-derived activity with no template reference), and
+    ``no_participants`` (a non-bushwalking outdoor activity with no PARTICIPANT
+    contacts). Dismissed journals are excluded; entries are newest first.
+    """
+    entries = await incomplete_service.list_incomplete(user_id)
+
+    activities = [
+        IncompleteOutdoorActivityMCPEntry(
+            journal_id=entry.journal_id,
+            title=entry.title,
+            event_date_range=EventDateRangeSchema(
+                start=entry.event_date_range.start,
+                end=entry.event_date_range.end,
+            ),
+            subtypes=[subtype.value for subtype in entry.subtypes],
+            reasons=[reason.value for reason in entry.reasons],
+        )
+        for entry in entries
+    ]
+
+    return MCPResponseBuilder.success_response(
+        IncompleteOutdoorActivitiesMCPResponse(
+            total_count=len(activities),
+            activities=activities,
+            summary=(
+                f"Found {len(activities)} incomplete outdoor activit"
+                f"{'y' if len(activities) == 1 else 'ies'}."
+            ),
+        )
+    )
+
+
+async def _journal_owned_by_user(
+    db_connection: AsyncConnection, user_id: str, journal_id: int
+) -> bool:
+    """Whether the journal exists and belongs to the user."""
+    repos = _create_journal_tool_repositories(db_connection)
+    journal = await repos.journal_repo.find_by_id(journal_id)
+    return journal is not None and journal.user_id == user_id
+
+
+@mcp_unified_error_handler("dismiss_incomplete_outdoor_activity", "journal")
+async def dismiss_incomplete_outdoor_activity(
+    journal_id: Annotated[int, Field(description="Journal id to dismiss")],
+    user_id: str = mcp_depends(get_current_user_id),
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    dismissal_service: OutdoorActivityDismissalService = mcp_depends(
+        get_outdoor_activity_dismissal_service
+    ),
+) -> str:
+    """
+    Dismiss a journal from the incomplete outdoor activities review.
+
+    A dismissed journal no longer appears in the incomplete review regardless
+    of matched rules. Idempotent: re-dismissing refreshes the recorded
+    provenance. Reversible via ``undismiss_incomplete_outdoor_activity``.
+    """
+    if not await _journal_owned_by_user(db_connection, user_id, journal_id):
+        return MCPResponseBuilder.not_found_error_response("Journal", journal_id)
+
+    dismissal = await dismissal_service.dismiss(
+        journal_id, user_id, Provenance.MCP, db_connection
+    )
+
+    return MCPResponseBuilder.success_response(
+        OutdoorActivityDismissalMCPResponse(
+            journal_id=journal_id,
+            dismissed=True,
+            provenance=dismissal.provenance.value,
+            summary=f"Dismissed journal {journal_id} from the incomplete review.",
+        )
+    )
+
+
+@mcp_unified_error_handler("undismiss_incomplete_outdoor_activity", "journal")
+async def undismiss_incomplete_outdoor_activity(
+    journal_id: Annotated[int, Field(description="Journal id to un-dismiss")],
+    user_id: str = mcp_depends(get_current_user_id),
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    dismissal_service: OutdoorActivityDismissalService = mcp_depends(
+        get_outdoor_activity_dismissal_service
+    ),
+) -> str:
+    """
+    Un-dismiss a journal, restoring it to the incomplete review when flagged.
+
+    Idempotent: un-dismissing a journal that was never dismissed succeeds with
+    ``was_dismissed`` false.
+    """
+    if not await _journal_owned_by_user(db_connection, user_id, journal_id):
+        return MCPResponseBuilder.not_found_error_response("Journal", journal_id)
+
+    was_dismissed = await dismissal_service.undismiss(
+        journal_id, user_id, db_connection
+    )
+
+    return MCPResponseBuilder.success_response(
+        OutdoorActivityDismissalMCPResponse(
+            journal_id=journal_id,
+            dismissed=False,
+            was_dismissed=was_dismissed,
+            summary=(
+                f"Un-dismissed journal {journal_id}."
+                if was_dismissed
+                else f"Journal {journal_id} was not dismissed; nothing to undo."
+            ),
+        )
+    )
+
+
 @mcp_unified_error_handler("get_daily_summary", "journal")
 async def get_daily_summary(
     summary_date: str,
@@ -4891,6 +5024,9 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
     mcp.add_tool(browse_journals_by_date_window)
     mcp.add_tool(list_review_items)
     mcp.add_tool(dismiss_review_item)
+    mcp.add_tool(list_incomplete_outdoor_activities)
+    mcp.add_tool(dismiss_incomplete_outdoor_activity)
+    mcp.add_tool(undismiss_incomplete_outdoor_activity)
     mcp.add_tool(get_daily_summary)
     mcp.add_tool(create_template)
     mcp.add_tool(get_template)

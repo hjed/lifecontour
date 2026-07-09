@@ -1,6 +1,6 @@
 # Iteration 16: Outdoor Logbook Improvements
 
-**Status:** 🟡 IN PROGRESS — ITER16-001 complete; ITER16-002 Phases 1–2 complete.
+**Status:** 🟡 IN PROGRESS — ITER16-001 complete; ITER16-002 Phases 1–3 complete.
 **Dependencies:** Iteration 9 (Outdoor Logbook — activity subtypes, abseil pitches, activity templates, gear items, PDF export), Iteration 10 (SnipeIT integration — gear checkout state), Iteration 11 (Immich integration — album links), Iteration 12 (Activity History — provenance, used for dismissal/auditing). Assumes the outdoor logbook and SnipeIT gear-checkout sync are delivered.
 **Goal:** Add the **review, surfacing, and reporting** layer on top of the existing outdoor logbook: find activities missing important detail, make every abseiling activity carry a durable template reference, add an outdoor logbook overview/dashboard page, and produce a polished, navigable PDF logbook — all with full UI and MCP parity.
 
@@ -164,10 +164,10 @@ Each sub-iteration defines its objective, the specification section it realises,
 - **Tests:** unit — each rule isolated + combined (multi-reason), rule-1 fieldless exemption + derivation, rule-3 bushwalking exemption + dependency-row counter-case, dismissal filtering, ordering (`core_shared/tests/unit/models/journals/test_incomplete_outdoor_activity.py`, `backend/tests/unit/journal/test_incomplete_outdoor_activity_service.py`); guard — registry/facts/SQL alignment (`test_incomplete_projection_registry.py`); integration — seed per rule against `clean_database`, assert list + reasons, dismissal round-trip, user/non-outdoor scoping, fill a gap → entry drops out (`backend/tests/integration/journal/test_incomplete_outdoor_activity_repository.py`).
 - **Docs:** `domain-architecture.md` — the incomplete-review projection.
 
-**Phase 3 — REST endpoint + MCP tools.** PR ~400 lines.
+**Phase 3 — REST endpoint + MCP tools.** PR ~400 lines. ✅ DONE — the projection and dismissal store are exposed on both surfaces. REST (JSON API, on the journals router): `GET /api/journals/incomplete-outdoor-activities` (unpaginated advisory list; per-entry reasons/subtypes/date-range, resource id = journal id) plus `POST .../{journal_id}/dismiss` and `POST .../{journal_id}/undismiss` action endpoints mirroring the review-items dismiss precedent, recording `ui` provenance. MCP: `list_incomplete_outdoor_activities`, `dismiss_incomplete_outdoor_activity`, `undismiss_incomplete_outdoor_activity`, recording `mcp` provenance. Both surfaces validate journal existence + ownership before writing (404/not-found instead of an FK 500) and treat undismiss-when-never-dismissed as an idempotent success (`was_dismissed: false`); controllers/tools open no transactions (the `@transactional` dismissal service owns commits). The Phase 2 test `Seeder` was extracted to a shared `tests/integration/journal/outdoor_activity_seeding.py` for reuse by both new suites. Actual diff exceeds the ~400 estimate (integration-test volume; kept as a single PR by product-owner decision, matching Phase 2).
 - REST: list incomplete + dismiss/un-dismiss (for the UI). MCP: list incomplete (reasons, respecting dismissals) + dismiss/un-dismiss.
 - **Tests:** integration via `authenticated_client` (REST list/dismiss/un-dismiss); MCP list/dismiss/un-dismiss end-to-end.
-- **Docs:** `api-design.md`; `mcp-setup.md`.
+- **Docs:** `api-design.md`. MCP tools are documented in code (tool docstrings), not in `mcp-setup.md` — duplicating them there goes stale (product owner, PR #1108).
 
 **Phase 4 — Overview page shell + incomplete list UI.** PR ~450 lines.
 - Dedicated route `frontend/src/app/journals/outdoor-logbook/page.tsx` + sidebar entry under Journals (the shared overview page shell). The incomplete list renders title, date, type icon(s), reason badge(s), a link to the journal, and a dismiss/un-dismiss control.
@@ -214,7 +214,7 @@ Each sub-iteration defines its objective, the specification section it realises,
 **Phase 3 — REST endpoint + MCP dashboard tool.** PR ~350 lines.
 - A REST dashboard endpoint and a single MCP dashboard-data tool returning all four sections (aggregating Phases 1–2).
 - **Tests:** integration via `authenticated_client` (REST) + MCP end-to-end.
-- **Docs:** `api-design.md`; `mcp-setup.md`.
+- **Docs:** `api-design.md`. MCP tool documentation lives in the tool docstrings, not `mcp-setup.md` (per PR #1108).
 
 **Phase 4 — Frontend: upcoming + totals widgets.** PR ~350 lines.
 - Render the upcoming-activities and totals widgets on the overview page (shadcn/ui, RSC-first where possible), items linking to their journals; empty states. Reuses the ITER16-002 page shell, or introduces it here if ITER16-003 ships before ITER16-002.

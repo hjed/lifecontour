@@ -153,7 +153,9 @@ Set `DISABLE_AUTH=true` to disable OAuth for local development. MCP endpoints wi
 1. **Create Tool Function**: Add to appropriate domain tools file
 2. **Register Tool**: Use `@mcp.tool` decorator
 3. **Add Tests**: Unit tests for tool logic
-4. **Update Documentation**: Document tool parameters and responses
+4. **Document in Code**: Tools are documented by their docstrings and
+   parameter/response schema descriptions — do not duplicate tool docs here,
+   as they go stale
 
 Example:
 ```python

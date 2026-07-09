@@ -11,6 +11,7 @@ from typing import Annotated, Any
 import structlog
 from core_shared.models.history import Provenance
 from core_shared.models.journals import (
+    IncompleteOutdoorActivity,
     Journal,
     JournalContactRelationship,
     JournalContactRelationshipType,
@@ -42,6 +43,9 @@ from app.api.journals.converters import (
 )
 from app.api.journals.schemas import (
     EventDateRangeSchema,
+    IncompleteOutdoorActivityAttributes,
+    IncompleteOutdoorActivityListResponse,
+    IncompleteOutdoorActivityResource,
     JournalAttributes,
     JournalContactAddRequest,
     JournalContactRelationshipUpdateRequest,
@@ -58,6 +62,9 @@ from app.api.journals.schemas import (
     JournalTypeDataUpdateRequest,
     JournalUpdateRequest,
     MergeJournalRequest,
+    OutdoorActivityDismissalAttributes,
+    OutdoorActivityDismissalResource,
+    OutdoorActivityDismissalResponse,
     ReviewItemAttributes,
     ReviewItemCreateRequest,
     ReviewItemJournalSummary,
@@ -107,12 +114,18 @@ from app.core.journal.models.repositories import (
     TravelDataRepository,
 )
 from app.core.journal.services.hierarchy_service import HierarchyService
+from app.core.journal.services.incomplete_outdoor_activity_service import (
+    IncompleteOutdoorActivityService,
+)
 from app.core.journal.services.journal_contact_service import JournalContactService
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_service import JournalService
 from app.core.journal.services.journal_tag_service import JournalTagService
 from app.core.journal.services.journal_type_data_helpers import parse_journal_type
 from app.core.journal.services.journal_write_service import JournalWriteService
+from app.core.journal.services.outdoor_activity_dismissal_service import (
+    OutdoorActivityDismissalService,
+)
 from app.core.journal.services.review_item_service import ReviewItemService
 from app.core.search.exceptions import SearchServiceUnavailableError
 from app.infrastructure.auth.immich_token_service import ImmichTokenService
@@ -1385,6 +1398,132 @@ def _build_review_item_resource(
         ),
         links=JsonApiLinks(
             self=f"{base_url}/api/journals/review-items/{item.id}",
+        ),
+    )
+
+
+@router.get("/incomplete-outdoor-activities")
+@inject
+async def list_incomplete_outdoor_activities(
+    request: Request,
+    incomplete_service: FromDishka[IncompleteOutdoorActivityService],
+    user: FromDishka[SessionUser],
+) -> IncompleteOutdoorActivityListResponse:
+    """
+    List the user's incomplete outdoor activity journals with their reasons.
+
+    An advisory, unpaginated projection over the user's outdoor journals:
+    each entry names the rule(s) it matches (no_attributes, missing_template,
+    no_participants). Dismissed journals are excluded.
+    """
+    base_url = get_request_base_url(request)
+
+    entries = await incomplete_service.list_incomplete(user.id)
+
+    resources = [
+        _build_incomplete_outdoor_activity_resource(entry, base_url)
+        for entry in entries
+    ]
+    return IncompleteOutdoorActivityListResponse(data=resources)
+
+
+@router.post(
+    "/incomplete-outdoor-activities/{journal_id}/dismiss",
+    status_code=status.HTTP_200_OK,
+)
+@inject
+async def dismiss_incomplete_outdoor_activity(
+    journal_id: int,
+    dismissal_service: FromDishka[OutdoorActivityDismissalService],
+    journal_service: FromDishka[JournalService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],
+) -> OutdoorActivityDismissalResponse:
+    """
+    Dismiss a journal from the incomplete outdoor activities review.
+
+    Idempotent: re-dismissing refreshes the recorded provenance. The dismissed
+    journal no longer appears in the review regardless of matched rules.
+    """
+    await _ensure_journal_owned(journal_service, user.id, journal_id)
+
+    dismissal = await dismissal_service.dismiss(
+        journal_id, user.id, Provenance.UI, connection
+    )
+
+    return OutdoorActivityDismissalResponse(
+        data=OutdoorActivityDismissalResource(
+            id=str(journal_id),
+            attributes=OutdoorActivityDismissalAttributes(
+                journal_id=journal_id,
+                dismissed=True,
+                provenance=dismissal.provenance.value,
+            ),
+        )
+    )
+
+
+@router.post(
+    "/incomplete-outdoor-activities/{journal_id}/undismiss",
+    status_code=status.HTTP_200_OK,
+)
+@inject
+async def undismiss_incomplete_outdoor_activity(
+    journal_id: int,
+    dismissal_service: FromDishka[OutdoorActivityDismissalService],
+    journal_service: FromDishka[JournalService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],
+) -> OutdoorActivityDismissalResponse:
+    """
+    Un-dismiss a journal, restoring it to the incomplete review when flagged.
+
+    Idempotent: un-dismissing a journal that was never dismissed is a no-op
+    (``was_dismissed`` is false).
+    """
+    await _ensure_journal_owned(journal_service, user.id, journal_id)
+
+    was_dismissed = await dismissal_service.undismiss(journal_id, user.id, connection)
+
+    return OutdoorActivityDismissalResponse(
+        data=OutdoorActivityDismissalResource(
+            id=str(journal_id),
+            attributes=OutdoorActivityDismissalAttributes(
+                journal_id=journal_id,
+                dismissed=False,
+                was_dismissed=was_dismissed,
+            ),
+        )
+    )
+
+
+async def _ensure_journal_owned(
+    journal_service: JournalService, user_id: str, journal_id: int
+) -> None:
+    """Raise ``JournalNotFoundError`` unless the journal exists and is the user's."""
+    journals = await journal_service.find_journals_by_ids_for_user(
+        user_id=user_id, journal_ids=[journal_id]
+    )
+    if not journals:
+        raise JournalNotFoundError(journal_id)
+
+
+def _build_incomplete_outdoor_activity_resource(
+    entry: IncompleteOutdoorActivity, base_url: str
+) -> IncompleteOutdoorActivityResource:
+    return IncompleteOutdoorActivityResource(
+        id=str(entry.journal_id),
+        attributes=IncompleteOutdoorActivityAttributes(
+            title=entry.title,
+            event_date_range=EventDateRangeSchema(
+                start=entry.event_date_range.start,
+                end=entry.event_date_range.end,
+            ),
+            subtypes=entry.subtypes,
+            reasons=entry.reasons,
+        ),
+        links=JsonApiLinks(
+            self=f"{base_url}/api/journals/{entry.journal_id}",
         ),
     )
 
