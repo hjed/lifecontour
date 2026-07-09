@@ -665,15 +665,23 @@ test.describe('Journal Creation UI Flow', () => {
       .getByPlaceholder('Select a climbing template...')
       .fill('E2E Climbing');
 
-    // Wait for the option to appear and click it
+    // Wait for the option to appear and click it. Firefox can swallow the
+    // click while the combobox list is still settling (the option calls
+    // preventDefault on mousedown to keep the dropdown open) — retry the
+    // click until the template's values land in the form.
     const option = page.getByRole('option', {
       name: new RegExp(templateName, 'i'),
     });
     await expect(option).toBeVisible();
-    await option.click();
-
-    // Verify Climbing fields are populated
-    await expect(page.getByTestId('climbing-grade-input')).toHaveValue('21');
+    await expect(async () => {
+      if (await option.isVisible()) {
+        await option.click({ timeout: 2000 });
+      }
+      // Verify Climbing fields are populated
+      await expect(page.getByTestId('climbing-grade-input')).toHaveValue('21', {
+        timeout: 2000,
+      });
+    }).toPass({ timeout: 20000 });
     await expect(page.getByTestId('climbing-length-input')).toHaveValue('30');
     // climbing type combobox
     const climbingTypeCombobox = page
@@ -940,15 +948,24 @@ test.describe('Journal Creation UI Flow', () => {
       .getByPlaceholder('Select a canyoning template...')
       .fill('E2E Hydration');
 
-    // Wait for the option to appear and click it
+    // Wait for the option to appear and click it. Firefox can swallow the
+    // click while the combobox list is still settling (the option calls
+    // preventDefault on mousedown to keep the dropdown open) — retry the
+    // click until the template's values land in the form.
     const option = page.getByRole('option', {
       name: new RegExp(templateName, 'i'),
     });
     await expect(option).toBeVisible();
-    await option.click();
-
-    // Verify Canyoning fields are populated
-    await expect(page.getByTestId('french-grade-input')).toHaveValue('v4a3V*');
+    await expect(async () => {
+      if (await option.isVisible()) {
+        await option.click({ timeout: 2000 });
+      }
+      // Verify Canyoning fields are populated
+      await expect(page.getByTestId('french-grade-input')).toHaveValue(
+        'v4a3V*',
+        { timeout: 2000 }
+      );
+    }).toPass({ timeout: 20000 });
 
     // Verify Abseiling Trip editor is visible and pitches are populated
     await expect(page.getByTestId('abseiling-trip-type-editor')).toBeVisible();
@@ -976,8 +993,10 @@ test.describe('Journal Creation UI Flow', () => {
     // toPass() because Firefox can be slower to render the type editor
     // after checking the checkbox.
     await expect(async () => {
-      await page.getByLabel(/^canyoning$/i).check();
-      await expect(page.getByTestId('canyoning-type-editor')).toBeVisible();
+      await page.getByLabel(/^canyoning$/i).check({ timeout: 2000 });
+      await expect(page.getByTestId('canyoning-type-editor')).toBeVisible({
+        timeout: 2000,
+      });
     }).toPass({ timeout: 15000 });
 
     // Open template selector by typing — wrap in toPass() because
@@ -987,11 +1006,11 @@ test.describe('Journal Creation UI Flow', () => {
       'Select a canyoning template...'
     );
     await expect(async () => {
-      await templateInput.click();
-      await templateInput.fill('new template');
+      await templateInput.click({ timeout: 2000 });
+      await templateInput.fill('new template', { timeout: 2000 });
       await expect(
         page.getByRole('option', { name: /\+ Create new template/i })
-      ).toBeVisible();
+      ).toBeVisible({ timeout: 2000 });
     }).toPass({ timeout: 15000 });
 
     // Click "+ Create new template" and confirm the dialog opens. Wrap in
@@ -1003,7 +1022,7 @@ test.describe('Journal Creation UI Flow', () => {
     await expect(async () => {
       await page
         .getByRole('option', { name: /\+ Create new template/i })
-        .click();
+        .click({ timeout: 2000 });
       // Short inner timeout so a swallowed click fails fast and toPass loops to
       // re-click — the global expect timeout (15s) would otherwise block any
       // retry on the first iteration.

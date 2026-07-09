@@ -20,8 +20,26 @@ test.describe('Journal Infinite Scroll', () => {
     // Clear existing data
     await dataManager.clearAllJournals();
 
+    // Filler journals inside the initial chunk window (anchor ±3 days) make
+    // the first page taller than any project's viewport plus the sentinels'
+    // 200px observation margin. Without them the top sentinel starts in view
+    // on tall viewports (Mobile Chrome) and the list correctly fills the
+    // viewport by loading the past chunk immediately — which would make the
+    // "hidden before scrolling" assertion below viewport-dependent.
+    const fillerJournals = [-3, -2, -1].flatMap(dayOffset =>
+      [1, 2].map(n => ({
+        title: `Filler Journal ${dayOffset}/${n}`,
+        content: 'Padding content so the initial chunk overflows the viewport',
+        event_date_range: {
+          start: relativeDate(dayOffset),
+          end: relativeDate(dayOffset),
+        },
+      }))
+    );
+
     // Create 3 journals spaced apart > chunk size (7 days)
     await dataManager.createJournals([
+      ...fillerJournals,
       {
         title: 'Present Journal',
         content: 'This happened today',

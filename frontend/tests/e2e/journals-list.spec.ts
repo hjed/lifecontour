@@ -1402,15 +1402,21 @@ test.describe('Journal List Page', () => {
       await page.goto('/journals');
       await expect(page.getByTestId('journals-list-ready')).toBeVisible();
 
-      // Click on the first journal link
+      // Click on the first journal link and wait for the detail page. Async
+      // content (daily summaries) popping in can shift the link between
+      // Playwright's hit-test and the click dispatch, silently dropping the
+      // click — so retry the click while the URL hasn't changed, with short
+      // inner timeouts so a dropped click retries promptly.
       const firstJournal = journals[0];
-      await page.getByRole('link', { name: firstJournal.title }).click();
-
-      // Wait for navigation to complete
-      await page.waitForURL(`**/journals/${firstJournal.id}`);
-
-      // Verify we're on the detail page
-      expect(page.url()).toContain(`/journals/${firstJournal.id}`);
+      const detailUrl = new RegExp(`/journals/${firstJournal.id}$`);
+      await expect(async () => {
+        if (!detailUrl.test(page.url())) {
+          await page
+            .getByRole('link', { name: firstJournal.title })
+            .click({ timeout: 2000 });
+        }
+        await expect(page).toHaveURL(detailUrl, { timeout: 3000 });
+      }).toPass({ timeout: 60000 });
     });
   });
 

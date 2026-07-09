@@ -44,16 +44,15 @@ export function DayGroupedJournalList({
   const topSentinelRef = useRef<HTMLDivElement>(null);
   const bottomSentinelRef = useRef<HTMLDivElement>(null);
 
-  const fetchStateRef = useRef({
-    hasNextPage,
-    hasPreviousPage,
-    isLoadingNext,
-    isLoadingPrevious,
-    fetchNextPage,
-    fetchPreviousPage,
-  });
-
   const [hasScrolled, setHasScrolled] = useState(false);
+  const [topInView, setTopInView] = useState(false);
+  const [bottomInView, setBottomInView] = useState(false);
+  // One fetch per continuous sentinel intersection: cleared when the sentinel
+  // leaves the viewport. Without this bound, short lists (empty or filtered)
+  // whose sentinels never leave view would fetch chunk after chunk forever —
+  // date-chunk pagination never runs out of pages.
+  const topFetchedThisVisitRef = useRef(false);
+  const bottomFetchedThisVisitRef = useRef(false);
   const [expandedEmptyGroups, setExpandedEmptyGroups] = useState<Set<string>>(
     new Set()
   );
@@ -88,52 +87,22 @@ export function DayGroupedJournalList({
     };
   }, [journals, isLoadingNext, isLoadingPrevious, hasScrolled]);
 
-  useEffect(() => {
-    fetchStateRef.current = {
-      hasNextPage,
-      hasPreviousPage,
-      isLoadingNext,
-      isLoadingPrevious,
-      fetchNextPage,
-      fetchPreviousPage,
-    };
-  }, [
-    hasNextPage,
-    hasPreviousPage,
-    isLoadingNext,
-    isLoadingPrevious,
-    fetchNextPage,
-    fetchPreviousPage,
-  ]);
-
-  // Set up intersection observers for bi-directional scroll fetching
+  // Track sentinel visibility for bi-directional scroll fetching. The
+  // observer only records visibility; the fetch effects below react to it.
   useEffect(() => {
     if (!hasScrolled) return;
 
     const observer = new IntersectionObserver(
       entries => {
         entries.forEach(entry => {
-          if (!entry.isIntersecting) return;
-          const state = fetchStateRef.current;
-
           if (entry.target === topSentinelRef.current) {
-            // Scrolling up -> fetch previous (PAST items)
-            if (
-              state.hasPreviousPage &&
-              !state.isLoadingPrevious &&
-              state.fetchPreviousPage
-            ) {
-              state.fetchPreviousPage();
-            }
+            if (!entry.isIntersecting) topFetchedThisVisitRef.current = false;
+            setTopInView(entry.isIntersecting);
           } else if (entry.target === bottomSentinelRef.current) {
-            // Scrolling down -> fetch next (FUTURE items)
-            if (
-              state.hasNextPage &&
-              !state.isLoadingNext &&
-              state.fetchNextPage
-            ) {
-              state.fetchNextPage();
+            if (!entry.isIntersecting) {
+              bottomFetchedThisVisitRef.current = false;
             }
+            setBottomInView(entry.isIntersecting);
           }
         });
       },
@@ -148,6 +117,44 @@ export function DayGroupedJournalList({
 
     return () => observer.disconnect();
   }, [hasScrolled]);
+
+  // Fetch when a sentinel is in view. IntersectionObserver only fires on
+  // intersection *changes*, so a sentinel that entered the viewport during an
+  // in-flight fetch would otherwise never trigger its own fetch — pagination
+  // would stall until the user scrolled away and back. Re-evaluating whenever
+  // the loading flags settle closes that gap, bounded to one fetch per
+  // sentinel visit (see topFetchedThisVisitRef). Both directions wait for
+  // both flags: infinite queries run one fetch at a time, and firing the
+  // other direction mid-fetch would cancel the in-flight request.
+  useEffect(() => {
+    if (!topInView || isLoadingPrevious || isLoadingNext) return;
+    if (topFetchedThisVisitRef.current) return;
+    if (hasPreviousPage && fetchPreviousPage) {
+      topFetchedThisVisitRef.current = true;
+      fetchPreviousPage();
+    }
+  }, [
+    topInView,
+    hasPreviousPage,
+    isLoadingPrevious,
+    isLoadingNext,
+    fetchPreviousPage,
+  ]);
+
+  useEffect(() => {
+    if (!bottomInView || isLoadingPrevious || isLoadingNext) return;
+    if (bottomFetchedThisVisitRef.current) return;
+    if (hasNextPage && fetchNextPage) {
+      bottomFetchedThisVisitRef.current = true;
+      fetchNextPage();
+    }
+  }, [
+    bottomInView,
+    hasNextPage,
+    isLoadingPrevious,
+    isLoadingNext,
+    fetchNextPage,
+  ]);
 
   // Derive date bounds
   let effectiveStartDate = dateBounds?.start;
