@@ -618,9 +618,19 @@ def _transform_tags_to_memberships(
     Returns:
         List of membership dictionaries in Google format
     """
+    # Tag identity is case-insensitive locally (LOWER(name) unique index), so
+    # match group names case-insensitively too. An exact-case match wins;
+    # otherwise the first case-variant in sorted-name order wins, so the pick
+    # is stable across Google API listing order when duplicate case-variant
+    # groups exist.
+    lower_name_to_resource: dict[str, str] = {}
+    for name in sorted(group_name_to_resource):
+        lower_name_to_resource.setdefault(name.lower(), group_name_to_resource[name])
     memberships = []
     for tag_name in tag_names:
-        resource_name = group_name_to_resource.get(tag_name)
+        resource_name = group_name_to_resource.get(
+            tag_name
+        ) or lower_name_to_resource.get(tag_name.lower())
         if resource_name:
             memberships.append(
                 {"contactGroupMembership": {"contactGroupResourceName": resource_name}}
@@ -742,9 +752,13 @@ async def _ensure_google_groups_exist(
         Updated tag name → group resource name mapping
     """
     updated_mapping = dict(existing_groups)
+    # Group names are matched case-insensitively (lower(), matching the DB's
+    # LOWER(name) tag identity): creating a case-variant duplicate group in
+    # Google would produce duplicate case-variant tags on the next pull.
+    existing_lower_names = {name.lower() for name in updated_mapping}
 
     for tag_name in tag_names:
-        if tag_name in updated_mapping:
+        if tag_name.lower() in existing_lower_names:
             continue
 
         try:
@@ -752,6 +766,7 @@ async def _ensure_google_groups_exist(
             resource_name = result.get("resourceName")
             if resource_name:
                 updated_mapping[tag_name] = resource_name
+                existing_lower_names.add(tag_name.lower())
                 logger.info(
                     "Created Google Contact Group for local tag",
                     tag_name=tag_name,

@@ -190,6 +190,59 @@ class TestTransformTagsToMemberships:
             == "contactGroups/abc123"
         )
 
+    def test_matches_group_names_case_insensitively(self):
+        """A tag resolves to its Google group even when only the case differs."""
+        from worker import _transform_tags_to_memberships
+
+        result = _transform_tags_to_memberships(
+            tag_names=["Scouts"],
+            group_name_to_resource={"scouts": "contactGroups/abc123"},
+        )
+
+        assert result == [
+            {
+                "contactGroupMembership": {
+                    "contactGroupResourceName": "contactGroups/abc123"
+                }
+            }
+        ]
+
+    def test_case_variant_duplicate_groups_resolve_deterministically(self):
+        """With case-variant duplicate groups, the pick is order-independent.
+
+        Exact-case match wins; without one, the winner is stable regardless of
+        the API listing order, so membership pushes don't churn between
+        duplicate groups on accounts that still have them.
+        """
+        from worker import _transform_tags_to_memberships
+
+        mapping_upper_first = {
+            "Scouts": "contactGroups/upper",
+            "scouts": "contactGroups/lower",
+        }
+        mapping_lower_first = {
+            "scouts": "contactGroups/lower",
+            "Scouts": "contactGroups/upper",
+        }
+
+        for mapping in (mapping_upper_first, mapping_lower_first):
+            # Exact-case match wins
+            assert _transform_tags_to_memberships(["scouts"], mapping) == [
+                {
+                    "contactGroupMembership": {
+                        "contactGroupResourceName": "contactGroups/lower"
+                    }
+                }
+            ]
+            # No exact match: deterministic winner independent of dict order
+            assert _transform_tags_to_memberships(["SCOUTS"], mapping) == [
+                {
+                    "contactGroupMembership": {
+                        "contactGroupResourceName": "contactGroups/upper"
+                    }
+                }
+            ]
+
     def test_empty_tags_returns_empty_list(self):
         """Test that empty tag list produces empty memberships."""
         from worker import _transform_tags_to_memberships
@@ -361,6 +414,29 @@ class TestEnsureGoogleGroupsExist:
         )
 
         assert result == {}
+        mock_client.create_contact_group.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_case_variant_group_is_not_recreated(self):
+        """A Google group matching a tag name except for case is reused.
+
+        Tag identity is case-insensitive locally, so creating a second group
+        that differs only in case would seed duplicate case-variant groups in
+        Google (and duplicate tags on the next pull).
+        """
+        from worker import _ensure_google_groups_exist
+
+        mock_client = AsyncMock()
+
+        existing_groups = {"scouts": "contactGroups/abc123"}
+
+        result = await _ensure_google_groups_exist(
+            client=mock_client,
+            tag_names=["Scouts"],
+            existing_groups=existing_groups,
+        )
+
+        assert result == existing_groups
         mock_client.create_contact_group.assert_not_called()
 
 

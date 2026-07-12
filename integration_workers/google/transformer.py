@@ -344,7 +344,9 @@ class GoogleContactTransformer:
         """Transform Google contact group memberships to Tag entities.
 
         Handles hierarchical group names containing '/' by splitting them
-        into parent→child tag chains. Deduplicates tags by name.
+        into parent→child tag chains. Deduplicates tags by name,
+        case-insensitively (lower(), matching the backend's LOWER(name) tag
+        identity) — case-variant group names must collapse to a single tag.
         """
         tags: list[Tag] = []
         seen_names: set[str] = set()
@@ -352,8 +354,9 @@ class GoogleContactTransformer:
         for membership in memberships:
             chain = self._create_tags_from_membership(membership)
             for tag in chain:
-                if tag.name.value not in seen_names:
-                    seen_names.add(tag.name.value)
+                lower_name = tag.name.value.lower()
+                if lower_name not in seen_names:
+                    seen_names.add(lower_name)
                     tags.append(tag)
 
         return tags

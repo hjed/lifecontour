@@ -911,8 +911,11 @@ class TestOutboxEventProcessor:
         """Tags not found in repository are saved to DB before being assigned."""
         mock_tag_repo.find_by_names.return_value = {}  # Empty DB
 
+        # Distinct ids per save, like the real DB's serial primary key
+        next_id = iter([99, 100])
+
         def mock_save(tag: Tag) -> Tag:
-            return Tag(id=99, name=tag.name)
+            return Tag(id=next(next_id), name=tag.name)
 
         mock_tag_repo.save.side_effect = mock_save
 
@@ -926,7 +929,7 @@ class TestOutboxEventProcessor:
         assert len(result) == 2
         assert result[0].id == 99
         assert str(result[0].name) == "missing1"
-        assert result[1].id == 99
+        assert result[1].id == 100
         assert str(result[1].name) == "missing2"
         assert mock_tag_repo.save.call_count == 2
 
@@ -985,6 +988,73 @@ class TestOutboxEventProcessor:
         assert result is not None
         assert len(result) == 1
         assert str(result[0].name) == "local_tag1"
+
+    @pytest.mark.asyncio
+    async def test_resolve_contact_tags_dedupes_case_variant_incoming_tags(
+        self, processor: OutboxEventProcessor, mock_tag_repo: AsyncMock
+    ):
+        """Case-variant inbound names resolve to the same tag exactly once.
+
+        Tag identity is case-insensitive in the DB (uq_tags_name_lower), so two
+        Google groups whose names differ only in case must not produce the same
+        Tag twice on the contact — that phantom diff re-triggers history entries
+        and summary regeneration on every sync cycle.
+        """
+        scouts = Tag(id=1, name=TagName("Scouts"))
+
+        def _case_insensitive_find(names: list[str]) -> dict[str, Tag]:
+            return {n: scouts for n in names if n.lower() == "scouts"}
+
+        mock_tag_repo.find_by_names.side_effect = _case_insensitive_find
+
+        result = await processor._resolve_contact_tags(
+            contact_data={"tags": [{"name": "Scouts"}, {"name": "scouts"}]},
+            existing_reference_data=None,
+            existing_contact_tags=[],
+        )
+
+        assert result is not None
+        assert len(result) == 1
+        assert result[0].id == 1
+
+    @pytest.mark.asyncio
+    async def test_resolve_contact_tags_no_duplicate_when_local_casing_differs(
+        self, processor: OutboxEventProcessor, mock_tag_repo: AsyncMock
+    ):
+        """An existing tag whose casing differs from the inbound/synced name is
+        the same tag, not a preserved local-only tag to append again."""
+        scouts = Tag(id=1, name=TagName("Scouts"))
+
+        def _case_insensitive_find(names: list[str]) -> dict[str, Tag]:
+            return {n: scouts for n in names if n.lower() == "scouts"}
+
+        mock_tag_repo.find_by_names.side_effect = _case_insensitive_find
+
+        result = await processor._resolve_contact_tags(
+            contact_data={"tags": [{"name": "scouts"}]},
+            existing_reference_data='{"synced_tags": ["scouts"]}',
+            existing_contact_tags=[scouts],
+        )
+
+        assert result is not None
+        assert len(result) == 1
+        assert result[0].id == 1
+
+    @pytest.mark.asyncio
+    async def test_resolve_contact_tags_removes_synced_tag_despite_case_variant(
+        self, processor: OutboxEventProcessor, mock_tag_repo: AsyncMock
+    ):
+        """A previously synced tag removed remotely is removed locally even when
+        synced_tags recorded a different casing than the DB tag name."""
+        mock_tag_repo.find_by_names.return_value = {}
+
+        result = await processor._resolve_contact_tags(
+            contact_data={"tags": []},
+            existing_reference_data='{"synced_tags": ["scouts"]}',
+            existing_contact_tags=[Tag(id=1, name=TagName("Scouts"))],
+        )
+
+        assert result == []
 
     @pytest.mark.asyncio
     async def test_process_contact_created_passes_google_sync_provenance(
