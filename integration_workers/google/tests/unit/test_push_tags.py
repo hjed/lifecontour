@@ -207,6 +207,42 @@ class TestTransformTagsToMemberships:
             }
         ]
 
+    def test_case_variant_duplicate_groups_resolve_deterministically(self):
+        """With case-variant duplicate groups, the pick is order-independent.
+
+        Exact-case match wins; without one, the winner is stable regardless of
+        the API listing order, so membership pushes don't churn between
+        duplicate groups on accounts that still have them.
+        """
+        from worker import _transform_tags_to_memberships
+
+        mapping_upper_first = {
+            "Scouts": "contactGroups/upper",
+            "scouts": "contactGroups/lower",
+        }
+        mapping_lower_first = {
+            "scouts": "contactGroups/lower",
+            "Scouts": "contactGroups/upper",
+        }
+
+        for mapping in (mapping_upper_first, mapping_lower_first):
+            # Exact-case match wins
+            assert _transform_tags_to_memberships(["scouts"], mapping) == [
+                {
+                    "contactGroupMembership": {
+                        "contactGroupResourceName": "contactGroups/lower"
+                    }
+                }
+            ]
+            # No exact match: deterministic winner independent of dict order
+            assert _transform_tags_to_memberships(["SCOUTS"], mapping) == [
+                {
+                    "contactGroupMembership": {
+                        "contactGroupResourceName": "contactGroups/upper"
+                    }
+                }
+            ]
+
     def test_empty_tags_returns_empty_list(self):
         """Test that empty tag list produces empty memberships."""
         from worker import _transform_tags_to_memberships

@@ -345,8 +345,8 @@ class GoogleContactTransformer:
 
         Handles hierarchical group names containing '/' by splitting them
         into parent→child tag chains. Deduplicates tags by name,
-        case-insensitively — tag identity in the backend is case-insensitive,
-        so case-variant group names must collapse to a single tag.
+        case-insensitively (lower(), matching the backend's LOWER(name) tag
+        identity) — case-variant group names must collapse to a single tag.
         """
         tags: list[Tag] = []
         seen_names: set[str] = set()
@@ -354,9 +354,9 @@ class GoogleContactTransformer:
         for membership in memberships:
             chain = self._create_tags_from_membership(membership)
             for tag in chain:
-                folded_name = tag.name.value.casefold()
-                if folded_name not in seen_names:
-                    seen_names.add(folded_name)
+                lower_name = tag.name.value.lower()
+                if lower_name not in seen_names:
+                    seen_names.add(lower_name)
                     tags.append(tag)
 
         return tags
