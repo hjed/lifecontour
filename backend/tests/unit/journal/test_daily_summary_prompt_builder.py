@@ -41,6 +41,31 @@ class TestDailySummaryPromptBuilder:
         assert "Output Format" in prompt
         assert "summary_text" in prompt
 
+    def test_system_instructions_direct_tool_use(self) -> None:
+        """The prompt tells the model to research contact context via the tools."""
+        builder = DailySummaryPromptBuilder()
+        prompt = builder.build(_make_input())
+
+        assert "get_contact_journals" in prompt
+        assert "recent meetings" in prompt
+        assert "remember or action" in prompt
+
+    def test_grounding_rule_allows_tool_results(self) -> None:
+        """Tool results count as valid sources alongside the journals."""
+        builder = DailySummaryPromptBuilder()
+        prompt = builder.build(_make_input())
+
+        assert "not present in the journals or tool results" in prompt
+
+    def test_output_format_requests_two_paragraphs(self) -> None:
+        """The output format asks for two paragraphs, not 1-3 sentences."""
+        builder = DailySummaryPromptBuilder()
+        prompt = builder.build(_make_input())
+
+        assert "two paragraphs" in prompt
+        assert "blank line" in prompt
+        assert "1-3 sentences" not in prompt
+
     def test_day_overview_includes_date(self) -> None:
         """The overview section contains the ISO date."""
         builder = DailySummaryPromptBuilder()

@@ -154,7 +154,7 @@ export function DailySummaryView({ date }: DailySummaryViewProps) {
         </div>
 
         <p
-          className='text-sm leading-relaxed'
+          className='text-sm leading-relaxed whitespace-pre-line'
           data-testid={`summary-text-${date}`}
         >
           {isGenerating
