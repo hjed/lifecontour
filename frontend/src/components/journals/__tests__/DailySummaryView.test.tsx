@@ -146,6 +146,35 @@ describe('DailySummaryView', () => {
     expect(screen.getByText('8.5/10')).toBeInTheDocument(); // mood average
   });
 
+  it('preserves paragraph breaks in a two-paragraph summary', () => {
+    const twoParagraphSummary =
+      'A productive day with two meetings.\n\nRemember to follow up with Alice about the Q2 goals.';
+    (useDailySummary as jest.Mock).mockReturnValue({
+      data: {
+        data: {
+          attributes: {
+            summary_date: mockDate,
+            summary_text: twoParagraphSummary,
+            journal_count: 2,
+            event_count: 1,
+            contact_count: 1,
+            status: DailySummaryStatus.GENERATED,
+          },
+        },
+      },
+      isLoading: false,
+      isError: false,
+      refetch: mockRefetch,
+    });
+
+    render(<DailySummaryView date={mockDate} />);
+
+    const summaryText = screen.getByTestId(`summary-text-${mockDate}`);
+    // The blank line between paragraphs must survive rendering
+    expect(summaryText.textContent).toContain('\n\n');
+    expect(summaryText).toHaveClass('whitespace-pre-line');
+  });
+
   it('shows generating badge if status is GENERATING', () => {
     (useDailySummary as jest.Mock).mockReturnValue({
       data: {

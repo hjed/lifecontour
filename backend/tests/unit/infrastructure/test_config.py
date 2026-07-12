@@ -3,6 +3,15 @@
 from app.infrastructure.config import Settings
 
 
+class TestGeminiModels:
+    """AI summary generation defaults to the latest stable Flash model."""
+
+    def test_summary_model_defaults_to_latest_flash(self):
+        settings = Settings(_env_file=None)  # pyright: ignore[reportCallIssue]
+
+        assert settings.gemini_summary_model == "gemini-3.5-flash"
+
+
 class TestCorsAllowOrigins:
     """The effective CORS allow-list must include the app's own public origin.
 

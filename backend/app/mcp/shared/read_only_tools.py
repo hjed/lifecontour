@@ -21,9 +21,10 @@ READ_ONLY_TOOL_NAMES: list[str] = [
     "get_contact",
     "search_contacts",
     "list_contacts",
+    "get_contact_journals",
     "get_journal",
     "search_journals",
-    "list_journals",
+    "browse_journals_by_date_window",
     "global_search",
 ]
 

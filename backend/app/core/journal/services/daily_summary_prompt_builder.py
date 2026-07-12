@@ -73,8 +73,12 @@ class DailySummaryPromptBuilder:
             f"Current System Time: {current_time}\n"
             "All times and dates are shown in the user's local timezone.\n"
             "Use this time context to differentiate between past events, today's events, and upcoming future events.\n"
-            "Be short, practical, and descriptive rather than speculative.\n"
-            "Do not invent information not present in the journals.\n"
+            "Before writing the summary, use the available tools to gather context:\n"
+            "- Use get_contact_journals to review recent meetings and interactions with each contact involved in the day's entries.\n"
+            "- Use search_journals, get_contact, or global_search for any other context you need.\n"
+            "Look for open follow-ups, commitments, or upcoming events the user should remember or action today.\n"
+            "Be practical and descriptive rather than speculative.\n"
+            "Do not invent information not present in the journals or tool results.\n"
             "Do not rewrite the journal record — just summarise.\n"
             "If mood data is present, mention the general mood direction."
         )
@@ -137,6 +141,9 @@ class DailySummaryPromptBuilder:
         return (
             "## Output Format\n"
             "Respond with a JSON object containing a single field:\n"
-            '{"summary_text": "Your concise summary of the day here."}\n'
-            "The summary_text should be 1-3 sentences."
+            '{"summary_text": "Your summary of the day here."}\n'
+            "The summary_text must be exactly two paragraphs separated by a blank line:\n"
+            "1. A concise summary of the day (mention the general mood direction if mood data is present).\n"
+            "2. Things the user should remember or action today, drawing on recent meetings and interactions "
+            "with the day's contacts. If there is genuinely nothing to remember or action, say so briefly."
         )

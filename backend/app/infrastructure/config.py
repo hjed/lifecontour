@@ -257,8 +257,8 @@ class Settings(BaseSettings):
         description="Gemini model to use for similarity assessment",
     )
     gemini_summary_model: str = Field(
-        default="gemini-2.5-pro",
-        description="Gemini model for contact summary generation (more capable)",
+        default="gemini-3.5-flash",
+        description="Gemini model for AI summary generation (daily + contact summaries)",
     )
 
     # Observability
