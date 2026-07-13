@@ -42,6 +42,7 @@ from core_shared.models.journals import (
     OutdoorActivityData,
     OutdoorActivityDismissal,
     OutdoorActivityFacts,
+    OutdoorActivityTypeFacts,
     OutdoorPlanningData,
     OutdoorTrainingData,
     PlanData,
@@ -51,6 +52,7 @@ from core_shared.models.journals import (
     TravelData,
     TravelFlight,
     TravelTransportation,
+    UpcomingOutdoorActivity,
 )
 from core_shared.models.route import Route
 
@@ -2451,4 +2453,28 @@ class IncompleteOutdoorActivityRepository(ABC):
         self, user_id: str
     ) -> list[OutdoorActivityFacts]:
         """Fetch the facts for every outdoor journal owned by ``user_id``."""
+        pass
+
+
+class OutdoorDashboardRepository(ABC):
+    """Read repository for the outdoor logbook dashboard projections.
+
+    Both queries are windowed over ``journals.event_date_range_start/end``
+    with an overlap predicate (a multi-day trip already underway still
+    matches). Window arithmetic, ordering, capping and type grouping live in
+    ``OutdoorDashboardService`` so they stay pure and unit-testable.
+    """
+
+    @abstractmethod
+    async def list_upcoming_journals(
+        self, user_id: str, *, window_start: datetime, window_end: datetime
+    ) -> list[UpcomingOutdoorActivity]:
+        """Outdoor and OUTDOOR_PLANNING journals overlapping the window."""
+        pass
+
+    @abstractmethod
+    async def list_outdoor_type_facts(
+        self, user_id: str, *, window_start: datetime, window_end: datetime
+    ) -> list[OutdoorActivityTypeFacts]:
+        """Per-journal subtype facts for outdoor journals in the window."""
         pass

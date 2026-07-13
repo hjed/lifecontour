@@ -136,6 +136,12 @@ from .mood_data import MoodData
 from .outdoor_activity_data import OutdoorActivityData
 from .outdoor_activity_dismissal import OutdoorActivityDismissal
 from .outdoor_activity_subtypes import OutdoorActivitySubtype
+from .outdoor_dashboard import (
+    OutdoorActivityTotals,
+    OutdoorActivityTypeFacts,
+    UpcomingOutdoorActivity,
+    effective_outdoor_journal_types,
+)
 from .outdoor_planning_data import OutdoorPlanningData
 from .outdoor_training_data import OutdoorTrainingData
 from .plan_data import PlanData, PlanDocument
@@ -242,6 +248,10 @@ __all__ = [
     "OutdoorActivityFacts",
     "evaluate_incompleteness",
     "fillable_fields",
+    "OutdoorActivityTotals",
+    "OutdoorActivityTypeFacts",
+    "UpcomingOutdoorActivity",
+    "effective_outdoor_journal_types",
     # Enums
     "AttendeeStatus",
     "ContactEventRole",
