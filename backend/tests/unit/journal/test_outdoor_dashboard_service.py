@@ -128,7 +128,9 @@ class TestListUpcomingActivities:
         mock_dashboard_repo.list_upcoming_journals.assert_awaited_once_with(
             USER_ID,
             window_start=datetime.datetime(2026, 7, 1, tzinfo=datetime.UTC),
-            window_end=datetime.datetime(2026, 7, 31, 23, 59, 59, tzinfo=datetime.UTC),
+            window_end=datetime.datetime(
+                2026, 7, 31, 23, 59, 59, 999999, tzinfo=datetime.UTC
+            ),
         )
 
     @pytest.mark.asyncio
@@ -147,7 +149,7 @@ class TestListUpcomingActivities:
         mock_dashboard_repo: AsyncMock,
         mock_settings_repo: AsyncMock,
     ) -> None:
-        """Windows run midnight→23:59:59 in the user's timezone, not UTC's."""
+        """Windows run midnight→end-of-day in the user's timezone, not UTC's."""
         mock_settings_repo.get_timezone.return_value = "Australia/Sydney"
         sydney = ZoneInfo("Australia/Sydney")
 
@@ -157,7 +159,9 @@ class TestListUpcomingActivities:
         mock_dashboard_repo.list_upcoming_journals.assert_awaited_once_with(
             USER_ID,
             window_start=datetime.datetime(2026, 7, 1, tzinfo=sydney),
-            window_end=datetime.datetime(2026, 7, 31, 23, 59, 59, tzinfo=sydney),
+            window_end=datetime.datetime(
+                2026, 7, 31, 23, 59, 59, 999999, tzinfo=sydney
+            ),
         )
 
     @pytest.mark.asyncio
@@ -174,7 +178,9 @@ class TestListUpcomingActivities:
         mock_dashboard_repo.list_upcoming_journals.assert_awaited_once_with(
             USER_ID,
             window_start=datetime.datetime(2026, 7, 1, tzinfo=datetime.UTC),
-            window_end=datetime.datetime(2026, 7, 31, 23, 59, 59, tzinfo=datetime.UTC),
+            window_end=datetime.datetime(
+                2026, 7, 31, 23, 59, 59, 999999, tzinfo=datetime.UTC
+            ),
         )
 
 
@@ -188,7 +194,9 @@ class TestActivityTotals:
         mock_dashboard_repo.list_outdoor_type_facts.assert_awaited_once_with(
             USER_ID,
             window_start=datetime.datetime(2025, 7, 1, tzinfo=datetime.UTC),
-            window_end=datetime.datetime(2026, 7, 1, 23, 59, 59, tzinfo=datetime.UTC),
+            window_end=datetime.datetime(
+                2026, 7, 1, 23, 59, 59, 999999, tzinfo=datetime.UTC
+            ),
         )
 
     @pytest.mark.asyncio
@@ -285,5 +293,5 @@ class TestActivityTotals:
         mock_dashboard_repo.list_outdoor_type_facts.assert_awaited_once_with(
             USER_ID,
             window_start=datetime.datetime(2025, 7, 1, tzinfo=sydney),
-            window_end=datetime.datetime(2026, 7, 1, 23, 59, 59, tzinfo=sydney),
+            window_end=datetime.datetime(2026, 7, 1, 23, 59, 59, 999999, tzinfo=sydney),
         )

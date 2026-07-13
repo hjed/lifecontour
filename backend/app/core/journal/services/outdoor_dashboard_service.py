@@ -3,7 +3,7 @@
 Computes the upcoming-activities and activity-totals widgets from the
 dashboard repository's windowed rows. Window arithmetic mirrors the journal
 date-window browsing semantics — windows run from midnight on their first day
-to ``23:59:59`` on their last, compared with an overlap predicate so
+to end-of-day (``time.max``) on their last, compared with an overlap predicate so
 multi-day trips straddling a boundary still count — but the boundaries (and
 the default "today" anchor) are computed in the **user's configured
 timezone** (``UserSettingsRepository.get_timezone``, UTC fallback), matching
@@ -41,10 +41,15 @@ TOTALS_WINDOW_DAYS = (30, 365)
 def _window(
     start_day: datetime.date, end_day: datetime.date, tz: ZoneInfo
 ) -> EventDateRange:
-    """An inclusive window from midnight on ``start_day`` to 23:59:59 on ``end_day``, in ``tz``."""
+    """An inclusive window from midnight on ``start_day`` to end-of-day on ``end_day``, in ``tz``.
+
+    ``time.max`` (23:59:59.999999) covers the final fractional second, like
+    ``compute_search_window``'s full-day bounds — timestamps have microsecond
+    precision, so nothing on ``end_day`` can fall past it.
+    """
     return EventDateRange(
         start=datetime.datetime.combine(start_day, datetime.time.min, tz),
-        end=datetime.datetime.combine(end_day, datetime.time(23, 59, 59), tz),
+        end=datetime.datetime.combine(end_day, datetime.time.max, tz),
     )
 
 

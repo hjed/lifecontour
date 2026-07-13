@@ -30,20 +30,20 @@ from tests.integration.journal.outdoor_activity_seeding import (
 
 
 def _upcoming_window(anchor_day: datetime) -> tuple[datetime, datetime]:
-    """The service's upcoming window: [anchor 00:00, anchor+30d 23:59:59]."""
+    """The service's upcoming window: [anchor 00:00, anchor+30d end-of-day]."""
     start_day = anchor_day.date()
     return (
         datetime.combine(start_day, time.min, UTC),
-        datetime.combine(start_day + timedelta(days=30), time(23, 59, 59), UTC),
+        datetime.combine(start_day + timedelta(days=30), time.max, UTC),
     )
 
 
 def _totals_window(anchor_day: datetime) -> tuple[datetime, datetime]:
-    """The service's totals window: [anchor-365d 00:00, anchor 23:59:59]."""
+    """The service's totals window: [anchor-365d 00:00, anchor end-of-day]."""
     end_day = anchor_day.date()
     return (
         datetime.combine(end_day - timedelta(days=365), time.min, UTC),
-        datetime.combine(end_day, time(23, 59, 59), UTC),
+        datetime.combine(end_day, time.max, UTC),
     )
 
 
@@ -124,6 +124,13 @@ class TestUpcomingJournals:
             title="Final day",
             start=datetime.combine(now.date() + timedelta(days=30), time(23, 0), UTC),
         )
+        # Final fractional second of the window's last day: still included.
+        final_fraction_id = await seeder.create_outdoor_journal(
+            title="Final fraction",
+            start=datetime.combine(
+                now.date() + timedelta(days=30), time(23, 59, 59, 500000), UTC
+            ),
+        )
         # Started yesterday but still running tomorrow: included (overlap).
         in_progress_id = await seeder.create_outdoor_journal(
             title="In progress",
@@ -145,6 +152,7 @@ class TestUpcomingJournals:
 
         assert {entry.journal_id for entry in result} == {
             final_day_id,
+            final_fraction_id,
             in_progress_id,
         }
 
