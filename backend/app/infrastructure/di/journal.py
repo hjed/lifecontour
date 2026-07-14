@@ -91,6 +91,9 @@ from app.core.journal.adapters.sql.outdoor_activity_data_repository import (
 from app.core.journal.adapters.sql.outdoor_activity_dismissal_repository import (
     SqlOutdoorActivityDismissalRepository,
 )
+from app.core.journal.adapters.sql.outdoor_dashboard_repository import (
+    SqlOutdoorDashboardRepository,
+)
 from app.core.journal.adapters.sql.outdoor_planning_data_repository import (
     SqlOutdoorPlanningDataRepository,
 )
@@ -134,6 +137,7 @@ from app.core.journal.models.repositories import (
     MoodDataRepository,
     OutdoorActivityDataRepository,
     OutdoorActivityDismissalRepository,
+    OutdoorDashboardRepository,
     OutdoorPlanningDataRepository,
     OutdoorTrainingDataRepository,
     PlanDataRepository,
@@ -170,6 +174,9 @@ from app.core.journal.services.logbook_data_service import LogbookDataService
 from app.core.journal.services.logbook_pdf_renderer import LogbookPdfRenderer
 from app.core.journal.services.outdoor_activity_dismissal_service import (
     OutdoorActivityDismissalService,
+)
+from app.core.journal.services.outdoor_dashboard_service import (
+    OutdoorDashboardService,
 )
 from app.core.journal.services.review_item_service import ReviewItemService
 from app.core.journal.services.route_service import RouteService
@@ -392,6 +399,13 @@ class JournalProvider(Provider):
         return SqlIncompleteOutdoorActivityRepository(connection)
 
     @provide(scope=Scope.REQUEST)
+    def outdoor_dashboard_repository(
+        self, connection: AsyncConnection
+    ) -> OutdoorDashboardRepository:
+        """Provide an OutdoorDashboardRepository instance."""
+        return SqlOutdoorDashboardRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
     def activity_template_repository(
         self, connection: AsyncConnection
     ) -> ActivityTemplateRepository:
@@ -532,6 +546,17 @@ class JournalProvider(Provider):
         """Provide an IncompleteOutdoorActivityService instance."""
         return IncompleteOutdoorActivityService(
             facts_repo=facts_repo, dismissal_repo=dismissal_repo
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def outdoor_dashboard_service(
+        self,
+        dashboard_repo: OutdoorDashboardRepository,
+        user_settings_repo: UserSettingsRepository,
+    ) -> OutdoorDashboardService:
+        """Provide an OutdoorDashboardService instance."""
+        return OutdoorDashboardService(
+            dashboard_repo=dashboard_repo, user_settings_repo=user_settings_repo
         )
 
     @provide(scope=Scope.REQUEST)

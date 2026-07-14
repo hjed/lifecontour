@@ -30,7 +30,8 @@ from app.core.journal.models.repositories import IncompleteOutdoorActivityReposi
 # Facts attribute → table, for every registry subtype. Kept next to the
 # generated SQL because table names are not uniformly derivable from the
 # attribute (CROSS_COUNTRY_SKIING persists to ``journal_skiing_data``).
-_SUBTYPE_TABLES: dict[str, str] = {
+# Public: the outdoor dashboard projection builds its presence flags from it.
+SUBTYPE_TABLES: dict[str, str] = {
     "bushwalking_data": "journal_bushwalking_data",
     "abseiling_data": "journal_abseiling_data",
     "canyoning_data": "journal_canyoning_data",
@@ -70,7 +71,7 @@ _SUBTYPE_SELECT_SQL = ",\n    ".join(
 )
 
 _SUBTYPE_JOIN_SQL = "\n".join(
-    f"LEFT JOIN {_SUBTYPE_TABLES[facts_attr]} {facts_attr}"
+    f"LEFT JOIN {SUBTYPE_TABLES[facts_attr]} {facts_attr}"
     f" ON {facts_attr}.journal_id = j.id"
     for facts_attr, _model in SUBTYPE_FACTS_FIELDS.values()
 )
