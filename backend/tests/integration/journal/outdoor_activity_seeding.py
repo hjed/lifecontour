@@ -6,12 +6,16 @@ MCP test session user, so seeded rows are visible to the app under test.
 """
 
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 from core_shared.models.journals import (
     AbseilingData,
+    ActivityTemplate,
     BushwalkingData,
     CanyoningData,
     EventDateRange,
+    GearItem,
+    GearUsageData,
     JoggingData,
     Journal,
     JournalContactRelationship,
@@ -25,11 +29,20 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.journal.adapters.sql.abseiling_data_repository import (
     SqlAbseilingDataRepository,
 )
+from app.core.journal.adapters.sql.activity_template_repository import (
+    SqlActivityTemplateRepository,
+)
 from app.core.journal.adapters.sql.bushwalking_data_repository import (
     SqlBushwalkingDataRepository,
 )
 from app.core.journal.adapters.sql.canyoning_data_repository import (
     SqlCanyoningDataRepository,
+)
+from app.core.journal.adapters.sql.gear_item_repository import (
+    SqlGearItemRepository,
+)
+from app.core.journal.adapters.sql.gear_usage_data_repository import (
+    SqlGearUsageDataRepository,
 )
 from app.core.journal.adapters.sql.jogging_data_repository import (
     SqlJoggingDataRepository,
@@ -154,6 +167,99 @@ class Seeder:
         )
         await SqlCanyoningDataRepository(self.connection).save(
             CanyoningData(journal_id=journal_id)
+        )
+        return journal_id
+
+    async def create_gear_item(
+        self, *, name: str = "Test Rope", user_id: str = USER_ID
+    ) -> str:
+        """A user-owned gear item; returns its UUID string."""
+        gear_item = await SqlGearItemRepository(self.connection).save(
+            GearItem(name=name, user_id=user_id)
+        )
+        assert gear_item.id is not None
+        return gear_item.id
+
+    async def create_gear_usage_journal(
+        self,
+        gear_item_id: str,
+        *,
+        title: str = "Gear usage",
+        user_id: str = USER_ID,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        checkout_date: datetime | None = None,
+        checkin_date: datetime | None = None,
+    ) -> int:
+        """A GEAR_USAGE journal referencing ``gear_item_id``.
+
+        ``checkout_date``/``checkin_date`` are the optional buffer overrides;
+        when unset the checkout window resolves to the journal's event range.
+        """
+        journal_id = await self.create_journal(
+            title=title, user_id=user_id, start=start, end=end
+        )
+        await SqlGearUsageDataRepository(self.connection).save(
+            GearUsageData(
+                journal_id=journal_id,
+                gear_item_id=UUID(gear_item_id),
+                checkout_date=checkout_date,
+                checkin_date=checkin_date,
+            )
+        )
+        return journal_id
+
+    async def insert_snipeit_checkin(
+        self, journal_id: int, *, sync_status: str = "success"
+    ) -> None:
+        """A ``snipeit_checkin`` sync row, as the worker records a return."""
+        await self.connection.execute(
+            text(
+                """
+                INSERT INTO sync_metadata
+                    (internal_uuid, integration_source, external_id,
+                     last_synced_at, version_hash, sync_status, retry_count,
+                     created_at, updated_at)
+                VALUES
+                    (:journal_id, 'snipeit_checkin', :external_id, now(),
+                     'CHECKED_IN', :sync_status, 0, now(), now())
+                """
+            ),
+            {
+                "journal_id": str(journal_id),
+                "external_id": f"snipeit_checkin:{journal_id}",
+                "sync_status": sync_status,
+            },
+        )
+
+    async def create_template(
+        self,
+        *,
+        name: str = "Empress Falls",
+        template_type: str = "canyoning",
+        user_id: str = USER_ID,
+    ) -> str:
+        """A user-owned activity template; returns its UUID string."""
+        template = await SqlActivityTemplateRepository(self.connection).save(
+            ActivityTemplate(name=name, template_type=template_type, user_id=user_id)
+        )
+        assert template.id is not None
+        return template.id
+
+    async def create_abseiling_journal(
+        self,
+        *,
+        title: str = "Abseil day",
+        user_id: str = USER_ID,
+        start: datetime | None = None,
+        template_id: str | None = None,
+    ) -> int:
+        """An abseiling outdoor journal, optionally referencing a template."""
+        journal_id = await self.create_outdoor_journal(
+            title=title, user_id=user_id, start=start
+        )
+        await SqlAbseilingDataRepository(self.connection).save(
+            AbseilingData(journal_id=journal_id, template_id=template_id)
         )
         return journal_id
 

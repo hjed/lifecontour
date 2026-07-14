@@ -10,6 +10,12 @@ timezone** (``UserSettingsRepository.get_timezone``, UTC fallback), matching
 ``DailySummaryInputAssembler``: an AEST user's dashboard day starts at their
 midnight, not UTC's. Read-only — no unit of work, matching
 ``IncompleteOutdoorActivityService``.
+
+Also computes the checked-out-gear and templates-done widgets. Both compare
+instants (the resolved checkout window is timestamped), so unlike the
+windowed widgets they need no timezone anchoring; the determination and
+grouping rules live in core_shared (``is_currently_checked_out`` /
+``checked_out_gear`` / ``templates_done_by_type``) so they stay pure.
 """
 
 from __future__ import annotations
@@ -20,7 +26,9 @@ from typing import TYPE_CHECKING
 from core_shared.models.journals import (
     EventDateRange,
     OutdoorActivityTotals,
+    checked_out_gear,
     effective_outdoor_journal_types,
+    templates_done_by_type,
 )
 
 from app.core.settings.timezone_utils import resolve_timezone
@@ -28,7 +36,11 @@ from app.core.settings.timezone_utils import resolve_timezone
 if TYPE_CHECKING:
     from zoneinfo import ZoneInfo
 
-    from core_shared.models.journals import UpcomingOutdoorActivity
+    from core_shared.models.journals import (
+        CheckedOutGearItem,
+        TemplateDone,
+        UpcomingOutdoorActivity,
+    )
 
     from app.core.journal.models.repositories import OutdoorDashboardRepository
     from app.core.settings.models import UserSettingsRepository
@@ -126,3 +138,24 @@ class OutdoorDashboardService:
             last_30_days=dict(sorted(counts[30].items())),
             last_365_days=dict(sorted(counts[365].items())),
         )
+
+    async def list_checked_out_gear(
+        self, user_id: str, now: datetime.datetime | None = None
+    ) -> list[CheckedOutGearItem]:
+        """The gear items currently checked out, longest-out first.
+
+        Checked out ⇔ the resolved checkout window (buffer overrides falling
+        back to the journal's event range) contains ``now`` and Snipe-IT
+        hasn't already recorded the return. ``now`` is an instant, so no
+        timezone anchoring is needed.
+        """
+        now = now or datetime.datetime.now(datetime.UTC)
+        facts = await self.dashboard_repo.list_gear_checkout_facts(
+            user_id, ending_after=now
+        )
+        return checked_out_gear(facts, now)
+
+    async def templates_done(self, user_id: str) -> dict[str, list[TemplateDone]]:
+        """Unique templates done with per-template counts, grouped by type."""
+        references = await self.dashboard_repo.list_template_references(user_id)
+        return templates_done_by_type(references)

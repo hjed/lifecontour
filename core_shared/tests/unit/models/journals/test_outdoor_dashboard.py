@@ -5,15 +5,65 @@ a journal's types are detected purely by subtype-row presence, so
 dependency-implied rows (e.g. the bushwalking row on a canyoning journal) must
 not count as their own journal type, while genuinely independent subtypes each
 count once.
+
+Also pins the checked-out-gear determination (resolved checkout ≤ now <
+resolved check-in, and not already checked in on the SnipeIT side) and the
+templates-done aggregation (per-template done-counts grouped by template
+type) used by the gear and templates-done widgets.
 """
+
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from core_shared.models.journals import (
+    CheckedOutGearItem,
+    GearCheckoutFacts,
     JournalType,
     OutdoorActivitySubtype,
+    TemplateDone,
+    TemplateReferenceFacts,
+    checked_out_gear,
     effective_outdoor_journal_types,
+    is_currently_checked_out,
+    templates_done_by_type,
 )
+
+NOW = datetime(2026, 7, 14, 12, 0, tzinfo=UTC)
+
+
+def make_checkout_facts(
+    *,
+    journal_id: int = 1,
+    gear_item_id: str = "11111111-1111-1111-1111-111111111111",
+    gear_name: str = "Rope",
+    checkout_date: datetime | None = None,
+    checkin_date: datetime | None = None,
+    snipeit_checked_in: bool = False,
+) -> GearCheckoutFacts:
+    return GearCheckoutFacts(
+        journal_id=journal_id,
+        gear_item_id=gear_item_id,
+        gear_name=gear_name,
+        checkout_date=checkout_date or NOW - timedelta(days=1),
+        checkin_date=checkin_date or NOW + timedelta(days=1),
+        snipeit_checked_in=snipeit_checked_in,
+    )
+
+
+def make_reference(
+    *,
+    journal_id: int = 1,
+    template_id: str = "22222222-2222-2222-2222-222222222222",
+    template_name: str = "Empress Falls",
+    template_type: str = "canyoning",
+) -> TemplateReferenceFacts:
+    return TemplateReferenceFacts(
+        journal_id=journal_id,
+        template_id=template_id,
+        template_name=template_name,
+        template_type=template_type,
+    )
 
 
 class TestEffectiveOutdoorJournalTypes:
@@ -61,3 +111,167 @@ class TestEffectiveOutdoorJournalTypes:
         assert effective_outdoor_journal_types(subtypes) == [
             JournalType.OUTDOOR_TRAINING
         ]
+
+
+class TestIsCurrentlyCheckedOut:
+    def test_inside_window_is_checked_out(self) -> None:
+        facts = make_checkout_facts(
+            checkout_date=NOW - timedelta(days=2),
+            checkin_date=NOW + timedelta(days=2),
+        )
+
+        assert is_currently_checked_out(facts, NOW) is True
+
+    def test_checkout_boundary_is_inclusive(self) -> None:
+        facts = make_checkout_facts(
+            checkout_date=NOW, checkin_date=NOW + timedelta(days=1)
+        )
+
+        assert is_currently_checked_out(facts, NOW) is True
+
+    def test_checkin_boundary_is_exclusive(self) -> None:
+        facts = make_checkout_facts(
+            checkout_date=NOW - timedelta(days=1), checkin_date=NOW
+        )
+
+        assert is_currently_checked_out(facts, NOW) is False
+
+    def test_future_checkout_is_not_yet_checked_out(self) -> None:
+        facts = make_checkout_facts(
+            checkout_date=NOW + timedelta(days=1),
+            checkin_date=NOW + timedelta(days=2),
+        )
+
+        assert is_currently_checked_out(facts, NOW) is False
+
+    def test_ended_window_is_no_longer_checked_out(self) -> None:
+        facts = make_checkout_facts(
+            checkout_date=NOW - timedelta(days=2),
+            checkin_date=NOW - timedelta(days=1),
+        )
+
+        assert is_currently_checked_out(facts, NOW) is False
+
+    def test_snipeit_checkin_overrides_an_open_window(self) -> None:
+        facts = make_checkout_facts(snipeit_checked_in=True)
+
+        assert is_currently_checked_out(facts, NOW) is False
+
+
+class TestCheckedOutGear:
+    def test_filters_out_inactive_checkouts(self) -> None:
+        active = make_checkout_facts(journal_id=1)
+        ended = make_checkout_facts(
+            journal_id=2,
+            gear_item_id="33333333-3333-3333-3333-333333333333",
+            checkout_date=NOW - timedelta(days=3),
+            checkin_date=NOW - timedelta(days=2),
+        )
+        returned = make_checkout_facts(
+            journal_id=3,
+            gear_item_id="44444444-4444-4444-4444-444444444444",
+            snipeit_checked_in=True,
+        )
+
+        result = checked_out_gear([active, ended, returned], NOW)
+
+        assert [item.journal_id for item in result] == [1]
+
+    def test_dedupes_gear_item_keeping_earliest_active_checkout(self) -> None:
+        earlier = make_checkout_facts(
+            journal_id=1, checkout_date=NOW - timedelta(days=5)
+        )
+        later = make_checkout_facts(journal_id=2, checkout_date=NOW - timedelta(days=1))
+
+        result = checked_out_gear([later, earlier], NOW)
+
+        assert len(result) == 1
+        assert result[0].journal_id == 1
+        assert result[0].checked_out_since == NOW - timedelta(days=5)
+
+    def test_orders_longest_out_first(self) -> None:
+        recent = make_checkout_facts(
+            journal_id=1,
+            gear_item_id="33333333-3333-3333-3333-333333333333",
+            gear_name="Harness",
+            checkout_date=NOW - timedelta(days=1),
+        )
+        oldest = make_checkout_facts(
+            journal_id=2, checkout_date=NOW - timedelta(days=9)
+        )
+
+        result = checked_out_gear([recent, oldest], NOW)
+
+        assert [item.journal_id for item in result] == [2, 1]
+
+    def test_maps_facts_to_checked_out_items(self) -> None:
+        facts = make_checkout_facts(checkout_date=NOW - timedelta(days=1))
+
+        result = checked_out_gear([facts], NOW)
+
+        assert result == [
+            CheckedOutGearItem(
+                gear_item_id=facts.gear_item_id,
+                name="Rope",
+                checked_out_since=NOW - timedelta(days=1),
+                journal_id=facts.journal_id,
+            )
+        ]
+
+    def test_empty_facts_yield_empty_list(self) -> None:
+        assert checked_out_gear([], NOW) == []
+
+
+class TestTemplatesDoneByType:
+    def test_counts_repeat_references_per_template(self) -> None:
+        result = templates_done_by_type(
+            [make_reference(journal_id=1), make_reference(journal_id=2)]
+        )
+
+        assert result == {
+            "canyoning": [
+                TemplateDone(
+                    template_id="22222222-2222-2222-2222-222222222222",
+                    name="Empress Falls",
+                    template_type="canyoning",
+                    done_count=2,
+                )
+            ]
+        }
+
+    def test_groups_templates_under_their_type(self) -> None:
+        canyon = make_reference(journal_id=1)
+        climb = make_reference(
+            journal_id=2,
+            template_id="55555555-5555-5555-5555-555555555555",
+            template_name="Sweet Dreams",
+            template_type="climbing",
+        )
+
+        result = templates_done_by_type([canyon, climb])
+
+        assert set(result) == {"canyoning", "climbing"}
+        assert [entry.name for entry in result["canyoning"]] == ["Empress Falls"]
+        assert [entry.name for entry in result["climbing"]] == ["Sweet Dreams"]
+
+    def test_orders_templates_by_name_within_a_type(self) -> None:
+        zig = make_reference(
+            journal_id=1,
+            template_id="55555555-5555-5555-5555-555555555555",
+            template_name="Zig Zag",
+        )
+        arethusa = make_reference(
+            journal_id=2,
+            template_id="66666666-6666-6666-6666-666666666666",
+            template_name="Arethusa",
+        )
+
+        result = templates_done_by_type([zig, arethusa])
+
+        assert [entry.name for entry in result["canyoning"]] == [
+            "Arethusa",
+            "Zig Zag",
+        ]
+
+    def test_empty_references_yield_empty_mapping(self) -> None:
+        assert templates_done_by_type([]) == {}

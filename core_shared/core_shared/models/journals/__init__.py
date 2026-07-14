@@ -137,10 +137,17 @@ from .outdoor_activity_data import OutdoorActivityData
 from .outdoor_activity_dismissal import OutdoorActivityDismissal
 from .outdoor_activity_subtypes import OutdoorActivitySubtype
 from .outdoor_dashboard import (
+    CheckedOutGearItem,
+    GearCheckoutFacts,
     OutdoorActivityTotals,
     OutdoorActivityTypeFacts,
+    TemplateDone,
+    TemplateReferenceFacts,
     UpcomingOutdoorActivity,
+    checked_out_gear,
     effective_outdoor_journal_types,
+    is_currently_checked_out,
+    templates_done_by_type,
 )
 from .outdoor_planning_data import OutdoorPlanningData
 from .outdoor_training_data import OutdoorTrainingData
@@ -248,10 +255,17 @@ __all__ = [
     "OutdoorActivityFacts",
     "evaluate_incompleteness",
     "fillable_fields",
+    "CheckedOutGearItem",
+    "GearCheckoutFacts",
     "OutdoorActivityTotals",
     "OutdoorActivityTypeFacts",
+    "TemplateDone",
+    "TemplateReferenceFacts",
     "UpcomingOutdoorActivity",
+    "checked_out_gear",
     "effective_outdoor_journal_types",
+    "is_currently_checked_out",
+    "templates_done_by_type",
     # Enums
     "AttendeeStatus",
     "ContactEventRole",

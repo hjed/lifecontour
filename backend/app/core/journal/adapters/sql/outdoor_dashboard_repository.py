@@ -12,6 +12,17 @@ The subtype presence flags are generated from the shared ``SUBTYPE_TABLES``
 registry (plus OUTDOOR_TRAINING, which carries only a presence flag), so a new
 subtype flows into both dashboard queries with no SQL edits. Every joined
 table is keyed 1:1 on ``journal_id``, so the LEFT JOINs cannot fan out.
+
+Two per-row facts queries feed the remaining widgets:
+
+- **Gear checkout facts** — GEAR_USAGE rows with the checkout window
+  *resolved* (buffer overrides falling back to the journal's event range,
+  the same ``COALESCE`` the Snipe-IT check-in sweep uses) and a flag for an
+  already-recorded ``snipeit_checkin``; ``is_currently_checked_out``
+  (core_shared) applies the actual determination.
+- **Template references** — one row per abseiling-derived journal whose
+  consolidated ``abseiling_data.template_id`` is set; the service aggregates
+  the per-template done-counts.
 """
 
 from __future__ import annotations
@@ -21,8 +32,10 @@ from typing import TYPE_CHECKING
 from core_shared.models.journals import (
     SUBTYPE_FACTS_FIELDS,
     EventDateRange,
+    GearCheckoutFacts,
     OutdoorActivitySubtype,
     OutdoorActivityTypeFacts,
+    TemplateReferenceFacts,
     UpcomingOutdoorActivity,
 )
 from sqlalchemy import text
@@ -83,6 +96,46 @@ _UPCOMING_QUERY = text(
             outdoor_activity.journal_id IS NOT NULL
             OR outdoor_planning.journal_id IS NOT NULL
         )
+    """
+)
+
+# Resolved checkout window: buffer overrides fall back to the journal's event
+# range, mirroring the Snipe-IT worker's check-in sweep. ``ending_after``
+# excludes already-ended windows as a cheap bound; the checked-out
+# determination itself lives in ``is_currently_checked_out`` (core_shared).
+_GEAR_CHECKOUT_QUERY = text(
+    """
+    SELECT
+        j.id AS journal_id,
+        g.id AS gear_item_id,
+        g.name AS gear_name,
+        COALESCE(u.checkout_date, j.event_date_range_start) AS checkout_date,
+        COALESCE(u.checkin_date, j.event_date_range_end) AS checkin_date,
+        (ci.id IS NOT NULL) AS snipeit_checked_in
+    FROM journal_gear_usage_data u
+    JOIN journals j ON j.id = u.journal_id
+    JOIN gear_items g ON g.id = u.gear_item_id AND g.user_id = :user_id
+    LEFT JOIN sync_metadata ci
+        ON ci.integration_source = 'snipeit_checkin'
+        AND ci.internal_uuid = CAST(j.id AS TEXT)
+        AND ci.sync_status = 'success'
+    WHERE j.user_id = :user_id
+        AND COALESCE(u.checkin_date, j.event_date_range_end) > :ending_after
+    """
+)
+
+_TEMPLATE_REFERENCES_QUERY = text(
+    """
+    SELECT
+        j.id AS journal_id,
+        t.id AS template_id,
+        t.name AS template_name,
+        t.template_type AS template_type
+    FROM journal_abseiling_data abseiling
+    JOIN journals j ON j.id = abseiling.journal_id
+    JOIN activity_templates t ON t.id = abseiling.template_id
+    WHERE j.user_id = :user_id
+        AND t.user_id = :user_id
     """
 )
 
@@ -163,6 +216,43 @@ class SqlOutdoorDashboardRepository(OutdoorDashboardRepository):
                     start=row["event_start"], end=row["event_end"]
                 ),
                 subtypes=_row_subtypes(row),
+            )
+            for row in result.mappings()
+        ]
+
+    async def list_gear_checkout_facts(
+        self, user_id: str, *, ending_after: datetime
+    ) -> list[GearCheckoutFacts]:
+        """Gear-usage rows whose resolved check-in falls after ``ending_after``."""
+        result = await self.connection.execute(
+            _GEAR_CHECKOUT_QUERY,
+            {"user_id": user_id, "ending_after": ending_after},
+        )
+        return [
+            GearCheckoutFacts(
+                journal_id=int(row["journal_id"]),
+                gear_item_id=str(row["gear_item_id"]),
+                gear_name=str(row["gear_name"]),
+                checkout_date=row["checkout_date"],
+                checkin_date=row["checkin_date"],
+                snipeit_checked_in=bool(row["snipeit_checked_in"]),
+            )
+            for row in result.mappings()
+        ]
+
+    async def list_template_references(
+        self, user_id: str
+    ) -> list[TemplateReferenceFacts]:
+        """One row per abseiling-derived journal referencing a template."""
+        result = await self.connection.execute(
+            _TEMPLATE_REFERENCES_QUERY, {"user_id": user_id}
+        )
+        return [
+            TemplateReferenceFacts(
+                journal_id=int(row["journal_id"]),
+                template_id=str(row["template_id"]),
+                template_name=str(row["template_name"]),
+                template_type=str(row["template_type"]),
             )
             for row in result.mappings()
         ]
