@@ -2,8 +2,9 @@
 
 Pins the dashboard read rules: the upcoming widget's 30-day window, cap of 10
 and soonest-first ordering, the totals widget's rolling 30/365-day window
-bucketing grouped by effective journal type, and the user-timezone window
-anchoring (boundaries at the user's local midnight, not UTC's).
+bucketing grouped by effective journal type, the user-timezone window
+anchoring (boundaries at the user's local midnight, not UTC's), the
+checked-out-gear filtering, and the templates-done grouping.
 """
 
 import datetime
@@ -13,8 +14,11 @@ from zoneinfo import ZoneInfo
 import pytest
 from core_shared.models.journals import (
     EventDateRange,
+    GearCheckoutFacts,
     OutdoorActivitySubtype,
     OutdoorActivityTypeFacts,
+    TemplateDone,
+    TemplateReferenceFacts,
     UpcomingOutdoorActivity,
 )
 
@@ -25,6 +29,7 @@ from app.core.journal.services.outdoor_dashboard_service import (
 
 USER_ID = "test-user-123"
 ANCHOR = datetime.date(2026, 7, 1)
+NOW = datetime.datetime(2026, 7, 14, 12, 0, tzinfo=datetime.UTC)
 
 
 def _range(
@@ -63,11 +68,32 @@ def make_type_facts(
     )
 
 
+def make_checkout_facts(
+    *,
+    journal_id: int = 1,
+    gear_item_id: str = "11111111-1111-1111-1111-111111111111",
+    gear_name: str = "Rope",
+    checkout_date: datetime.datetime | None = None,
+    checkin_date: datetime.datetime | None = None,
+    snipeit_checked_in: bool = False,
+) -> GearCheckoutFacts:
+    return GearCheckoutFacts(
+        journal_id=journal_id,
+        gear_item_id=gear_item_id,
+        gear_name=gear_name,
+        checkout_date=checkout_date or NOW - datetime.timedelta(days=1),
+        checkin_date=checkin_date or NOW + datetime.timedelta(days=1),
+        snipeit_checked_in=snipeit_checked_in,
+    )
+
+
 @pytest.fixture
 def mock_dashboard_repo() -> AsyncMock:
     repo = AsyncMock()
     repo.list_upcoming_journals.return_value = []
     repo.list_outdoor_type_facts.return_value = []
+    repo.list_gear_checkout_facts.return_value = []
+    repo.list_template_references.return_value = []
     return repo
 
 
@@ -295,3 +321,125 @@ class TestActivityTotals:
             window_start=datetime.datetime(2025, 7, 1, tzinfo=sydney),
             window_end=datetime.datetime(2026, 7, 1, 23, 59, 59, 999999, tzinfo=sydney),
         )
+
+
+class TestListCheckedOutGear:
+    @pytest.mark.asyncio
+    async def test_passes_now_as_ending_after_bound(
+        self, service: OutdoorDashboardService, mock_dashboard_repo: AsyncMock
+    ) -> None:
+        await service.list_checked_out_gear(USER_ID, now=NOW)
+
+        mock_dashboard_repo.list_gear_checkout_facts.assert_awaited_once_with(
+            USER_ID, ending_after=NOW
+        )
+
+    @pytest.mark.asyncio
+    async def test_defaults_now_to_current_utc_time(
+        self, service: OutdoorDashboardService, mock_dashboard_repo: AsyncMock
+    ) -> None:
+        before = datetime.datetime.now(datetime.UTC)
+        await service.list_checked_out_gear(USER_ID)
+        after = datetime.datetime.now(datetime.UTC)
+
+        call = mock_dashboard_repo.list_gear_checkout_facts.await_args
+        assert before <= call.kwargs["ending_after"] <= after
+
+    @pytest.mark.asyncio
+    async def test_filters_and_maps_open_checkouts(
+        self, service: OutdoorDashboardService, mock_dashboard_repo: AsyncMock
+    ) -> None:
+        mock_dashboard_repo.list_gear_checkout_facts.return_value = [
+            make_checkout_facts(journal_id=1, gear_name="Rope"),
+            # Not yet checked out: window starts tomorrow.
+            make_checkout_facts(
+                journal_id=2,
+                gear_item_id="33333333-3333-3333-3333-333333333333",
+                checkout_date=NOW + datetime.timedelta(days=1),
+                checkin_date=NOW + datetime.timedelta(days=2),
+            ),
+            # Already returned in Snipe-IT.
+            make_checkout_facts(
+                journal_id=3,
+                gear_item_id="44444444-4444-4444-4444-444444444444",
+                snipeit_checked_in=True,
+            ),
+        ]
+
+        result = await service.list_checked_out_gear(USER_ID, now=NOW)
+
+        assert [item.journal_id for item in result] == [1]
+        assert result[0].name == "Rope"
+        assert result[0].checked_out_since == NOW - datetime.timedelta(days=1)
+
+    @pytest.mark.asyncio
+    async def test_no_open_checkouts_yield_empty_list(
+        self, service: OutdoorDashboardService, mock_dashboard_repo: AsyncMock
+    ) -> None:
+        assert await service.list_checked_out_gear(USER_ID, now=NOW) == []
+
+
+class TestTemplatesDone:
+    @pytest.mark.asyncio
+    async def test_scopes_repo_call_to_user(
+        self, service: OutdoorDashboardService, mock_dashboard_repo: AsyncMock
+    ) -> None:
+        await service.templates_done("other-user")
+
+        mock_dashboard_repo.list_template_references.assert_awaited_once_with(
+            "other-user"
+        )
+
+    @pytest.mark.asyncio
+    async def test_groups_references_by_template_type_with_counts(
+        self, service: OutdoorDashboardService, mock_dashboard_repo: AsyncMock
+    ) -> None:
+        canyon_template = "22222222-2222-2222-2222-222222222222"
+        climb_template = "55555555-5555-5555-5555-555555555555"
+        mock_dashboard_repo.list_template_references.return_value = [
+            TemplateReferenceFacts(
+                journal_id=1,
+                template_id=canyon_template,
+                template_name="Empress Falls",
+                template_type="canyoning",
+            ),
+            TemplateReferenceFacts(
+                journal_id=2,
+                template_id=canyon_template,
+                template_name="Empress Falls",
+                template_type="canyoning",
+            ),
+            TemplateReferenceFacts(
+                journal_id=3,
+                template_id=climb_template,
+                template_name="Sweet Dreams",
+                template_type="climbing",
+            ),
+        ]
+
+        result = await service.templates_done(USER_ID)
+
+        assert result == {
+            "canyoning": [
+                TemplateDone(
+                    template_id=canyon_template,
+                    name="Empress Falls",
+                    template_type="canyoning",
+                    done_count=2,
+                )
+            ],
+            "climbing": [
+                TemplateDone(
+                    template_id=climb_template,
+                    name="Sweet Dreams",
+                    template_type="climbing",
+                    done_count=1,
+                )
+            ],
+        }
+
+    @pytest.mark.asyncio
+    async def test_no_references_yield_empty_mapping(
+        self, service: OutdoorDashboardService, mock_dashboard_repo: AsyncMock
+    ) -> None:
+        assert await service.templates_done(USER_ID) == {}
