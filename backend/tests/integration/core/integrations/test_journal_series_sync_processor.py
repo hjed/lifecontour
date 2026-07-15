@@ -9,6 +9,7 @@ synced before the recurring id was recorded.
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from core_shared.models.outbox import OutboxEvent
@@ -481,3 +482,56 @@ class TestSeriesCancelledNullableLinkFields:
         )
         assert link_status.scalar() == "cancelled"
         assert await _event_state(async_connection, journal_id) == "cancelled"
+
+
+@pytest.mark.integration
+class TestSeriesCancelledPerItemSavepoints:
+    async def test_failed_delete_rolls_back_link_removal_for_that_item_only(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """If delete_journal fails after the item's links were removed, the
+        SAVEPOINT restores them; other items still process."""
+        calendar_id = await _create_calendar(async_connection)
+        processor = _processor(async_connection)
+
+        journals: dict[str, int] = {}
+        for key in ("fails", "succeeds"):
+            created = await processor.process_event(
+                _sync_event(
+                    "journal_event.created",
+                    calendar_id=calendar_id,
+                    external_event_id=f"{MASTER_ID}_{key}",
+                    recurring_event_id=MASTER_ID,
+                )
+            )
+            journals[key] = created["journal_id"]
+
+        original_delete = processor.journal_service.delete_journal
+
+        async def failing_delete(journal_id: int, *args: Any, **kwargs: Any) -> None:
+            if journal_id == journals["fails"]:
+                raise RuntimeError("simulated delete failure")
+            return await original_delete(journal_id, *args, **kwargs)
+
+        with patch.object(
+            processor.journal_service,
+            "delete_journal",
+            new=failing_delete,
+        ):
+            result = await processor.process_event(_series_cancelled_event(calendar_id))
+
+        assert result["errors"] == 1
+        assert result["deleted"] == 1
+        # The failed journal survives WITH its link row (the savepoint rolled
+        # back the link deletion that ran before the failure).
+        assert await _journal_exists(async_connection, journals["fails"])
+        link_count = await async_connection.execute(
+            text(
+                "SELECT COUNT(*) FROM journal_external_event_links"
+                " WHERE journal_id = :journal_id"
+            ),
+            {"journal_id": journals["fails"]},
+        )
+        assert link_count.scalar() == 1
+        # The other journal was still deleted.
+        assert not await _journal_exists(async_connection, journals["succeeds"])

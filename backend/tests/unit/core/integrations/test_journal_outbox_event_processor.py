@@ -34,6 +34,18 @@ def _mock(obj: object) -> AsyncMock:
     return cast(AsyncMock, obj)
 
 
+def _make_mock_connection() -> AsyncMock:
+    """AsyncConnection mock whose begin_nested() is awaitable.
+
+    On the real class begin_nested is a sync method returning an awaitable
+    AsyncTransaction, so the spec turns it into a plain MagicMock; the
+    savepoint() helper needs `await connection.begin_nested()` to work.
+    """
+    conn = AsyncMock(spec=AsyncConnection)
+    conn.begin_nested = AsyncMock()
+    return conn
+
+
 DEFAULT_DATE_RANGE = EventDateRange(
     start=datetime(2026, 3, 20, 10, 0, tzinfo=UTC),
     end=datetime(2026, 3, 20, 11, 0, tzinfo=UTC),
@@ -910,7 +922,7 @@ class TestJournalOutboxEventProcessorCancelled:
 
     @pytest.fixture
     def mock_connection(self) -> AsyncMock:
-        return AsyncMock(spec=AsyncConnection)
+        return _make_mock_connection()
 
     @pytest.fixture
     def mock_journal_service(self) -> AsyncMock:
@@ -2051,7 +2063,7 @@ class TestRecurringCancellationDeletesFutureInstances:
 
     @pytest.fixture
     def mock_connection(self) -> AsyncMock:
-        return AsyncMock(spec=AsyncConnection)
+        return _make_mock_connection()
 
     @pytest.fixture
     def mock_journal_service(self) -> AsyncMock:
@@ -2256,7 +2268,7 @@ class TestSeriesCancelledFanOut:
 
     @pytest.fixture
     def mock_connection(self) -> AsyncMock:
-        return AsyncMock(spec=AsyncConnection)
+        return _make_mock_connection()
 
     @pytest.fixture
     def mock_journal_service(self) -> AsyncMock:
@@ -2370,7 +2382,7 @@ class TestSeriesMembershipOnCreateAndUpdate:
 
     @pytest.fixture
     def mock_connection(self) -> AsyncMock:
-        return AsyncMock(spec=AsyncConnection)
+        return _make_mock_connection()
 
     @pytest.fixture
     def mock_journal_service(self) -> AsyncMock:
@@ -2522,7 +2534,7 @@ class TestSeriesCancelledFanOutRobustness:
 
     @pytest.fixture
     def mock_connection(self) -> AsyncMock:
-        return AsyncMock(spec=AsyncConnection)
+        return _make_mock_connection()
 
     @pytest.fixture
     def mock_journal_service(self) -> AsyncMock:
@@ -2589,3 +2601,59 @@ class TestSeriesCancelledFanOutRobustness:
         assert result["cancelled"] == 0
         mock_journal_service.delete_journal.assert_not_called()
         mock_connection.execute.assert_not_called()
+
+
+class TestSeriesCancelledFanOutSavepoints:
+    """PR-review hardening: each fan-out item runs in a SAVEPOINT so a
+    failed item rolls back cleanly (per the batch-loop rule)."""
+
+    @pytest.fixture
+    def mock_connection(self) -> AsyncMock:
+        return _make_mock_connection()
+
+    @pytest.fixture
+    def mock_journal_service(self) -> AsyncMock:
+        return AsyncMock()
+
+    @pytest.fixture
+    def processor(
+        self, mock_journal_service: AsyncMock, mock_connection: AsyncMock
+    ) -> JournalOutboxEventProcessor:
+        proc = JournalOutboxEventProcessor(
+            journal_service=mock_journal_service,
+            connection=mock_connection,
+            contact_repository=MagicMock(),
+            strava_athlete_mapping_repository=MagicMock(),
+        )
+        proc.link_repo = AsyncMock()
+        proc.series_repo = AsyncMock()
+        _mock(
+            proc.link_repo
+        ).get_deletion_protection_facts.return_value = _UNPROTECTED_FACTS
+        return proc
+
+    @pytest.mark.asyncio
+    async def test_failed_item_rolls_back_its_savepoint(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """A failing delete rolls back its item's savepoint (undoing the
+        already-executed link deletion) while the next item commits."""
+        _mock(processor.link_repo).find_journals_for_series.return_value = [
+            _make_linked_journal(journal_id=1, days_until_start=10),
+            _make_linked_journal(journal_id=2, days_until_start=0.5),
+        ]
+        mock_journal_service.delete_journal.side_effect = RuntimeError("boom")
+
+        result = await processor.process_event(_make_series_cancelled_event())
+
+        assert result["errors"] == 1
+        assert result["cancelled"] == 1
+        # One savepoint per item: the failed delete rolled back, the
+        # successful mark-cancelled committed.
+        savepoint = mock_connection.begin_nested.return_value
+        assert mock_connection.begin_nested.await_count == 2
+        savepoint.rollback.assert_awaited_once()
+        savepoint.commit.assert_awaited_once()

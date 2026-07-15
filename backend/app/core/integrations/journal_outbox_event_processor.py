@@ -59,6 +59,7 @@ from app.core.journal.adapters.sql.journal_series_repository import (
 )
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 from app.core.journal.services.journal_service import JournalService
+from app.infrastructure.unit_of_work import savepoint
 
 logger = structlog.get_logger()
 
@@ -749,17 +750,21 @@ class JournalOutboxEventProcessor:
                 if range_end is not None and range_end < now - _SERIES_DELETION_BUFFER:
                     skipped_past += 1
                     continue
-                if await self._should_delete_cancelled_instance(linked):
-                    await self._delete_cancelled_instance(
-                        linked, integration_source=payload.integration_source
-                    )
-                    deleted += 1
-                else:
-                    await self._mark_journal_cancelled(
-                        journal_id=linked.journal_id,
-                        calendar_id=calendar_id,
-                    )
-                    cancelled += 1
+                # SAVEPOINT per item so a failure mid-item (e.g. after the
+                # link deletion but before the journal delete) rolls back
+                # cleanly and the loop continues with the rest.
+                async with savepoint(self.connection):
+                    if await self._should_delete_cancelled_instance(linked):
+                        await self._delete_cancelled_instance(
+                            linked, integration_source=payload.integration_source
+                        )
+                        deleted += 1
+                    else:
+                        await self._mark_journal_cancelled(
+                            journal_id=linked.journal_id,
+                            calendar_id=calendar_id,
+                        )
+                        cancelled += 1
             except Exception:
                 errors += 1
                 logger.exception(

@@ -538,3 +538,38 @@ class TestSummaryInputSeries:
 
         assert result is not None
         assert result.recent_journals[0]["series"] == []
+
+
+@pytest.mark.unit
+class TestSummaryInputSeriesLookupScope:
+    """PR-review hardening: series are looked up only for retained journals."""
+
+    @pytest.mark.asyncio
+    async def test_series_lookup_only_covers_retained_journals(self):
+        """Journals dropped by the recent-window filter don't feed the
+        series bulk lookup."""
+        now = datetime.now(tz=UTC)
+        retained_journal = _make_journal(1, start=now - timedelta(days=1))
+        retained_journal.user_id = "user123"
+        retained_rel = _make_journal_relationship(journal_id=1)
+
+        dropped_journal = _make_journal(2, start=now - timedelta(days=200))
+        dropped_journal.user_id = "user123"
+        dropped_rel = _make_journal_relationship(journal_id=2)
+        dropped_rel.created_at = now - timedelta(days=200)  # outside window
+
+        series_repo = AsyncMock()
+        series_repo.get_series_names_for_journal_ids = AsyncMock(return_value={})
+        assembler = _make_assembler(
+            journal_relationships=[retained_rel, dropped_rel],
+            journals=[retained_journal, dropped_journal],
+            series_repo=series_repo,
+        )
+
+        result = await assembler.assemble(contact_id=1)
+
+        assert result is not None
+        assert len(result.recent_journals) == 1
+        series_repo.get_series_names_for_journal_ids.assert_awaited_once_with(
+            [1], "user123"
+        )

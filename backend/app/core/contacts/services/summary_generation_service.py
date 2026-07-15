@@ -251,13 +251,12 @@ class SummaryInputAssembler:
                 "journal_types": journal_types,
                 "series": [],
             }
-            journal_dicts_by_id.append(
-                (jr.journal_id, getattr(journal, "user_id", None), journal_dict)
-            )
 
+            retained = False
             if is_future:
                 if len(future_journals) < self.MAX_FUTURE_JOURNALS:
                     future_journals.append(journal_dict)
+                    retained = True
             else:
                 # Only include past events if they are in the recent window,
                 # or if we want to fill up the recent_journals?
@@ -267,6 +266,14 @@ class SummaryInputAssembler:
                 if created and created >= window_start:
                     if len(recent_journals) < self.MAX_JOURNALS:
                         recent_journals.append(journal_dict)
+                        retained = True
+
+            # Series are only looked up for journals that made it into the
+            # prompt input; dropped dicts would waste the bulk lookup.
+            if retained:
+                journal_dicts_by_id.append(
+                    (jr.journal_id, getattr(journal, "user_id", None), journal_dict)
+                )
 
         # Attach series membership (one bulk lookup across included journals)
         if self._series_repo is not None and journal_dicts_by_id:
