@@ -14,6 +14,7 @@ import pytest
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.outbox_events import (
     ImmichAlbumSyncEventData,
+    JournalSeriesCancelledEventData,
     parse_outbox_event_data,
 )
 
@@ -100,3 +101,67 @@ class TestCreateImmichAlbumSyncEvent:
         assert parsed.external_id == "album-uuid-3"
         assert parsed.version_hash == "hash-3"
         assert parsed.album_metadata["asset_count"] == 12
+
+
+class TestCreateJournalSeriesCancelledEvent:
+    """Tests for ``OutboxEvent.create_journal_series_cancelled_event``."""
+
+    def test_event_shape(self) -> None:
+        """The event carries the series key and the right event type."""
+        event = OutboxEvent.create_journal_series_cancelled_event(
+            integration_source="google",
+            calendar_id="00000000-0000-0000-0000-000000000001",
+            recurring_event_id="master123",
+        )
+
+        assert event.event_type == "journal_event.series_cancelled"
+        # Series cancellations target many journals; no single aggregate.
+        assert event.aggregate_id == 0
+        assert event.event_data["integration_source"] == "google"
+        assert event.event_data["recurring_event_id"] == "master123"
+        assert "sync_timestamp" in event.event_data
+
+    def test_event_data_round_trips_through_payload_model(self) -> None:
+        """The serialized payload validates against the payload model."""
+        event = OutboxEvent.create_journal_series_cancelled_event(
+            integration_source="google",
+            calendar_id="00000000-0000-0000-0000-000000000001",
+            recurring_event_id="master123",
+        )
+
+        parsed = parse_outbox_event_data(
+            cast(str, event.event_type), cast("dict[str, Any]", event.event_data)
+        )
+        assert isinstance(parsed, JournalSeriesCancelledEventData)
+        assert parsed.recurring_event_id == "master123"
+
+
+class TestCreateJournalSyncEventRecurring:
+    """recurring_event_id passthrough on ``create_journal_sync_event``."""
+
+    def test_recurring_event_id_in_payload(self) -> None:
+        """The factory forwards recurring_event_id into the payload."""
+        event = OutboxEvent.create_journal_sync_event(
+            journal_data={},
+            calendar_info_data={},
+            integration_source="google",
+            external_event_id="evt-1_20260801T000000Z",
+            calendar_id="00000000-0000-0000-0000-000000000001",
+            sync_action="cancelled",
+            recurring_event_id="evt-1",
+        )
+
+        assert event.event_data["recurring_event_id"] == "evt-1"
+
+    def test_recurring_event_id_defaults_to_none(self) -> None:
+        """Omitting recurring_event_id keeps the old payload shape working."""
+        event = OutboxEvent.create_journal_sync_event(
+            journal_data={},
+            calendar_info_data={},
+            integration_source="google",
+            external_event_id="evt-2",
+            calendar_id="00000000-0000-0000-0000-000000000001",
+            sync_action="cancelled",
+        )
+
+        assert event.event_data["recurring_event_id"] is None

@@ -21,6 +21,7 @@ import {
   JournalType,
   JournalContactRelationshipType,
   JournalTag,
+  JournalSeries,
   JournalCalendar,
   MergeOverrides,
   ReviewItemsListResponse,
@@ -64,6 +65,13 @@ export interface ContactJournalsFilters {
 export const journalTagKeys = {
   all: ['journal-tags'] as const,
   lists: () => [...journalTagKeys.all, 'list'] as const,
+};
+
+export const journalSeriesKeys = {
+  all: ['journal-series'] as const,
+  lists: () => [...journalSeriesKeys.all, 'list'] as const,
+  details: () => [...journalSeriesKeys.all, 'detail'] as const,
+  detail: (id: string) => [...journalSeriesKeys.details(), id] as const,
 };
 
 export const calendarKeys = {
@@ -1332,6 +1340,262 @@ export function useRemoveJournalTag() {
       });
       queryClient.invalidateQueries({ queryKey: journalKeys.lists() });
       toast.success('Tag removed successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+// ── Journal Series ────────────────────────────────────────────────────
+
+export interface JournalSeriesMemberJournal {
+  id: number;
+  title: string;
+  event_date_range_start?: string | null;
+}
+
+export interface JournalSeriesDetail extends JournalSeries {
+  member_journals: JournalSeriesMemberJournal[];
+}
+
+interface JournalSeriesResourceJson {
+  id: string;
+  type: string;
+  attributes: {
+    name: string;
+    description?: string | null;
+    auto_created?: boolean;
+    member_journals?: JournalSeriesMemberJournal[];
+  };
+}
+
+function toJournalSeries(resource: JournalSeriesResourceJson): JournalSeries {
+  return {
+    id: resource.id,
+    name: resource.attributes.name,
+    description: resource.attributes.description,
+    auto_created: resource.attributes.auto_created,
+  };
+}
+
+async function fetchJournalSeriesList(): Promise<{ data: JournalSeries[] }> {
+  const response = await fetch('/api/journals/series', {
+    credentials: 'include',
+  });
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.FETCH_FAILED
+    );
+  }
+
+  const jsonApiResponse: { data: JournalSeriesResourceJson[] } =
+    await response.json();
+  return { data: jsonApiResponse.data.map(toJournalSeries) };
+}
+
+async function fetchJournalSeriesDetail(
+  seriesId: string
+): Promise<JournalSeriesDetail> {
+  const response = await fetch(`/api/journals/series/${seriesId}`, {
+    credentials: 'include',
+  });
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.FETCH_FAILED
+    );
+  }
+
+  const jsonApiResponse: { data: JournalSeriesResourceJson } =
+    await response.json();
+  return {
+    ...toJournalSeries(jsonApiResponse.data),
+    member_journals: jsonApiResponse.data.attributes.member_journals ?? [],
+  };
+}
+
+async function createJournalSeries(data: {
+  name: string;
+  description?: string | null;
+}): Promise<JournalSeries> {
+  const response = await fetch('/api/journals/series', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      data: {
+        type: 'journal-series',
+        attributes: { name: data.name, description: data.description ?? null },
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.CREATE_FAILED
+    );
+  }
+
+  const jsonApiResponse: { data: JournalSeriesResourceJson } =
+    await response.json();
+  return toJournalSeries(jsonApiResponse.data);
+}
+
+async function deleteJournalSeries(seriesId: string): Promise<void> {
+  const response = await fetch(`/api/journals/series/${seriesId}`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.DELETE_FAILED
+    );
+  }
+}
+
+async function addJournalToSeries(
+  journalId: string,
+  seriesId: string
+): Promise<void> {
+  const response = await fetch(
+    `/api/journals/${journalId}/relationships/series`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        data: { type: 'journal-series', id: seriesId },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.UPDATE_FAILED
+    );
+  }
+}
+
+async function removeJournalFromSeries(
+  journalId: string,
+  seriesId: string
+): Promise<void> {
+  const response = await fetch(
+    `/api/journals/${journalId}/relationships/series/${seriesId}`,
+    {
+      method: 'DELETE',
+      credentials: 'include',
+    }
+  );
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.UPDATE_FAILED
+    );
+  }
+}
+
+export function useJournalSeries() {
+  return useQuery({
+    queryKey: journalSeriesKeys.lists(),
+    queryFn: fetchJournalSeriesList,
+    staleTime: 10 * 60 * 1000, // 10 minutes
+  });
+}
+
+export function useJournalSeriesDetail(seriesId: string) {
+  return useQuery({
+    queryKey: journalSeriesKeys.detail(seriesId),
+    queryFn: () => fetchJournalSeriesDetail(seriesId),
+    enabled: !!seriesId,
+  });
+}
+
+export function useCreateJournalSeries() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: createJournalSeries,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: journalSeriesKeys.lists() });
+      toast.success('Series created successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+export function useDeleteJournalSeries() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: deleteJournalSeries,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: journalSeriesKeys.all });
+      queryClient.invalidateQueries({ queryKey: journalKeys.details() });
+      toast.success('Series deleted successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+export function useAddJournalToSeries() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      journalId,
+      seriesId,
+    }: {
+      journalId: string;
+      seriesId: string;
+    }) => addJournalToSeries(journalId, seriesId),
+    onSuccess: (_, { journalId, seriesId }) => {
+      queryClient.invalidateQueries({
+        queryKey: journalKeys.detail(journalId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: journalSeriesKeys.detail(seriesId),
+      });
+      toast.success('Added to series');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+export function useRemoveJournalFromSeries() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      journalId,
+      seriesId,
+    }: {
+      journalId: string;
+      seriesId: string;
+    }) => removeJournalFromSeries(journalId, seriesId),
+    onSuccess: (_, { journalId, seriesId }) => {
+      queryClient.invalidateQueries({
+        queryKey: journalKeys.detail(journalId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: journalSeriesKeys.detail(seriesId),
+      });
+      toast.success('Removed from series');
     },
     onError: (error: Error) => {
       toast.error(error.message);

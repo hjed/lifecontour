@@ -40,6 +40,9 @@ const mockRemoveTag = jest.fn();
 const mockUpdateField = jest.fn();
 const mockAddType = jest.fn();
 const mockRemoveType = jest.fn();
+const mockAddToSeries = jest.fn();
+const mockRemoveFromSeries = jest.fn();
+const mockCreateSeries = jest.fn();
 
 jest.mock('@/lib/api/journals', () => ({
   useUpdateJournal: () => ({
@@ -95,6 +98,18 @@ jest.mock('@/lib/api/journals', () => ({
   useCalendars: () => ({
     data: { data: [] },
   }),
+  useJournalSeries: () => ({
+    data: { data: [] },
+  }),
+  useAddJournalToSeries: () => ({
+    mutateAsync: mockAddToSeries,
+  }),
+  useRemoveJournalFromSeries: () => ({
+    mutateAsync: mockRemoveFromSeries,
+  }),
+  useCreateJournalSeries: () => ({
+    mutateAsync: mockCreateSeries,
+  }),
 }));
 
 jest.mock('@/lib/api/contacts', () => ({
@@ -124,6 +139,30 @@ jest.mock('../JournalContactBadge', () => ({
 
 jest.mock('../JournalTagBadge', () => ({
   JournalTagBadge: () => <div data-testid='tag-badge'>Tags</div>,
+}));
+
+jest.mock('../JournalSeriesBadge', () => ({
+  JournalSeriesBadge: ({
+    onSeriesAdd,
+    onSeriesRemove,
+    onSeriesCreate,
+  }: {
+    onSeriesAdd?: (seriesId: string) => Promise<void>;
+    onSeriesRemove?: (seriesId: string) => Promise<void>;
+    onSeriesCreate?: (name: string) => Promise<void>;
+  }) => (
+    <div data-testid='series-badge'>
+      <button type='button' onClick={() => onSeriesAdd?.('series-1')}>
+        mock-add-series
+      </button>
+      <button type='button' onClick={() => onSeriesRemove?.('series-1')}>
+        mock-remove-series
+      </button>
+      <button type='button' onClick={() => onSeriesCreate?.('New Series')}>
+        mock-create-series
+      </button>
+    </div>
+  ),
 }));
 
 jest.mock('../JournalChildrenList', () => ({
@@ -521,6 +560,58 @@ describe('JournalDetailView', () => {
       expect(
         screen.queryByTestId('journal-date-range-field')
       ).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Series Section', () => {
+    it('renders the series section', () => {
+      renderWithQueryClient(<JournalDetailView journal={mockJournal} />);
+
+      expect(screen.getByText('Series')).toBeInTheDocument();
+      expect(screen.getByTestId('series-badge')).toBeInTheDocument();
+    });
+
+    it('wires the add handler to the add-to-series mutation', async () => {
+      const user = userEvent.setup();
+      renderWithQueryClient(<JournalDetailView journal={mockJournal} />);
+
+      await user.click(screen.getByText('mock-add-series'));
+
+      expect(mockAddToSeries).toHaveBeenCalledWith({
+        journalId: '1',
+        seriesId: 'series-1',
+      });
+    });
+
+    it('wires the remove handler to the remove-from-series mutation', async () => {
+      const user = userEvent.setup();
+      renderWithQueryClient(<JournalDetailView journal={mockJournal} />);
+
+      await user.click(screen.getByText('mock-remove-series'));
+
+      expect(mockRemoveFromSeries).toHaveBeenCalledWith({
+        journalId: '1',
+        seriesId: 'series-1',
+      });
+    });
+
+    it('creates a series then adds the journal to it', async () => {
+      const user = userEvent.setup();
+      mockCreateSeries.mockResolvedValue({
+        id: 'series-new',
+        name: 'New Series',
+      });
+      renderWithQueryClient(<JournalDetailView journal={mockJournal} />);
+
+      await user.click(screen.getByText('mock-create-series'));
+
+      expect(mockCreateSeries).toHaveBeenCalledWith({ name: 'New Series' });
+      await waitFor(() => {
+        expect(mockAddToSeries).toHaveBeenCalledWith({
+          journalId: '1',
+          seriesId: 'series-new',
+        });
+      });
     });
   });
 });

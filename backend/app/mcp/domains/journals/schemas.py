@@ -127,6 +127,15 @@ class JournalResponse(BaseModel):
         default_factory=list, description="List of tag names assigned to journal"
     )
 
+    series: list[dict[str, str]] = Field(
+        default_factory=list,
+        description=(
+            "Series memberships as {id, name} refs — recurring/related groups "
+            "this journal belongs to (e.g. a recurring calendar event or a "
+            "manually grouped series of appointments)"
+        ),
+    )
+
     calendar: CalendarSchema | None = Field(
         default=None, description="Calendar information (if EVENT type)"
     )

@@ -58,6 +58,7 @@ class JournalExternalEventLink(Base):
     )
     external_event_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     external_version: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    recurring_event_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     sync_capability: Mapped[str] = mapped_column(String(32), nullable=False)
     sync_status: Mapped[str] = mapped_column(String(32), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -77,6 +78,12 @@ class JournalExternalEventLink(Base):
             "ix_journal_external_event_links_calendar_lookup",
             "calendar_id",
             "journal_id",
+        ),
+        Index(
+            "ix_journal_external_event_links_recurring",
+            "calendar_id",
+            "recurring_event_id",
+            postgresql_where=text("recurring_event_id IS NOT NULL"),
         ),
         CheckConstraint(
             "sync_capability IN ('outbound', 'bidirectional')",

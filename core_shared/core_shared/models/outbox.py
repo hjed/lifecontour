@@ -18,6 +18,7 @@ from .base import Base
 from .outbox_events import (
     ContactSyncEventData,
     ImmichAlbumSyncEventData,
+    JournalSeriesCancelledEventData,
     JournalSyncEventData,
     MatchDetectionEventData,
     SyncCompletedEventData,
@@ -179,6 +180,7 @@ class OutboxEvent(Base):
         etag: str | None = None,
         existing_journal_id: int | None = None,
         contact_relationships: list[dict[str, str]] | None = None,
+        recurring_event_id: str | None = None,
     ) -> OutboxEvent:
         """
         Create an outbox event for journal calendar event synchronization.
@@ -195,6 +197,8 @@ class OutboxEvent(Base):
             contact_relationships: List of contact relationship dicts with
                 'email' and 'relationship_type' keys. Generic format supports
                 INVITEE, PARTICIPANT, ABOUT, etc. for future integrations.
+            recurring_event_id: Recurring master event id when the event is an
+                instance of a recurring series (drives series auto-linking)
 
         Returns:
             OutboxEvent instance ready to be saved
@@ -213,11 +217,49 @@ class OutboxEvent(Base):
             etag=etag,
             existing_journal_id=existing_journal_id,
             contact_relationships=contact_relationships or [],
+            recurring_event_id=recurring_event_id,
         )
         return cls(
             event_type=f"journal_event.{sync_action}",
             event_data=payload.model_dump(),
             aggregate_id=existing_journal_id or 0,
+        )
+
+    @classmethod
+    def create_journal_series_cancelled_event(
+        cls,
+        integration_source: str,
+        calendar_id: str,
+        recurring_event_id: str,
+    ) -> OutboxEvent:
+        """
+        Create an outbox event for a cancelled/deleted recurring series.
+
+        Emitted when the upstream calendar reports the recurring master event
+        as cancelled (whole-series deletion). The backend fans out over all
+        journals linked to the series.
+
+        Args:
+            integration_source: Source integration (e.g., 'google')
+            calendar_id: Internal calendar ID
+            recurring_event_id: The recurring master event id of the series
+
+        Returns:
+            OutboxEvent instance ready to be saved
+
+        Raises:
+            pydantic.ValidationError: If the payload is invalid
+        """
+        payload = JournalSeriesCancelledEventData(
+            integration_source=integration_source,
+            calendar_id=calendar_id,
+            recurring_event_id=recurring_event_id,
+            sync_timestamp=datetime.now(UTC).isoformat(),
+        )
+        return cls(
+            event_type="journal_event.series_cancelled",
+            event_data=payload.model_dump(),
+            aggregate_id=0,
         )
 
     @classmethod

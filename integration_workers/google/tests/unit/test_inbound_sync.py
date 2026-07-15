@@ -272,3 +272,56 @@ def _make_link(external_version: str, sync_capability: str) -> _FakeExternalEven
         external_version=external_version,
         sync_capability=sync_capability,
     )
+
+
+class TestInboundSyncClassifierSeriesCancellation:
+    """Cancelled master events (whole-series deletion) classification."""
+
+    @pytest.fixture
+    def classifier(self) -> InboundSyncClassifier:
+        return InboundSyncClassifier()
+
+    @pytest.fixture
+    def cancelled_event(self) -> GoogleEvent:
+        return GoogleEvent(  # type: ignore[call-arg]
+            id="recurring-master-1",
+            status="cancelled",
+            etag='"etag-cancelled"',
+        )
+
+    def test_cancelled_no_link_with_series_links_returns_cancel_series(
+        self, classifier: InboundSyncClassifier, cancelled_event: GoogleEvent
+    ) -> None:
+        """A cancelled master id with linked instances fans out as CANCEL_SERIES."""
+        result = classifier.classify_inbound_event(
+            google_event=cancelled_event,
+            existing_link=None,
+            has_series_links=True,
+        )
+        assert result == InboundSyncAction.CANCEL_SERIES
+
+    def test_cancelled_no_link_without_series_links_returns_skip_cancelled(
+        self, classifier: InboundSyncClassifier, cancelled_event: GoogleEvent
+    ) -> None:
+        """A cancelled unknown event with no series links stays skipped."""
+        result = classifier.classify_inbound_event(
+            google_event=cancelled_event,
+            existing_link=None,
+            has_series_links=False,
+        )
+        assert result == InboundSyncAction.SKIP_CANCELLED
+
+    def test_cancelled_with_link_still_returns_cancel_journal(
+        self, classifier: InboundSyncClassifier, cancelled_event: GoogleEvent
+    ) -> None:
+        """A directly-linked cancelled event cancels that journal, not a series."""
+        existing_link = _make_link(
+            external_version='"etag-old"',
+            sync_capability="bidirectional",
+        )
+        result = classifier.classify_inbound_event(
+            google_event=cancelled_event,
+            existing_link=existing_link,
+            has_series_links=True,
+        )
+        assert result == InboundSyncAction.CANCEL_JOURNAL

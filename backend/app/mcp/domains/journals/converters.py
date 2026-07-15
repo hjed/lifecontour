@@ -45,6 +45,7 @@ class JournalConverter:
         children: list[Journal] | None = None,
         additional_context: str = "",
         external_links: list[ExternalLinkInfo] | None = None,
+        series: list[dict[str, str]] | None = None,
     ) -> JournalResponse:
         """
         Convert a Journal entity to an AI-friendly JournalResponse.
@@ -140,6 +141,7 @@ class JournalConverter:
             type_data=type_data,
             contacts=contact_relationships,
             tags=tag_names,
+            series=series or [],
             calendar=calendar_schema,
             parent=parent_summary,
             children=children_summaries,

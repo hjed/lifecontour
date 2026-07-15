@@ -169,6 +169,10 @@ class SummaryPromptBuilder:
             if types:
                 meta_parts.append(f"types: {', '.join(types)}")
 
+            series = j.get("series", [])
+            if series:
+                meta_parts.append(f"series: {', '.join(series)}")
+
             rel = j.get("relationship_type")
             if rel:
                 rel_str = f"role of contact: {rel}"

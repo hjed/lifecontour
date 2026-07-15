@@ -261,3 +261,31 @@ class TestSummaryPromptBuilder:
         # Explicit timezone label and offset, not a bare UTC timestamp
         assert "AEST" in prompt
         assert "+10:00" in prompt
+
+
+@pytest.mark.unit
+class TestSummaryPromptSeriesMeta:
+    """Series membership appears in the journal meta line when present."""
+
+    def test_journal_meta_includes_series(self):
+        builder = SummaryPromptBuilder()
+        prompt = builder.build(
+            _make_input(
+                recent_journals=[
+                    {
+                        "title": "Physio session",
+                        "content": "Knee exercises",
+                        "date": "2026-04-01",
+                        "series": ["Physio appointments"],
+                    }
+                ]
+            )
+        )
+
+        assert "series: Physio appointments" in prompt
+
+    def test_journal_without_series_omits_meta(self):
+        builder = SummaryPromptBuilder()
+        prompt = builder.build(_make_input())
+
+        assert "series:" not in prompt

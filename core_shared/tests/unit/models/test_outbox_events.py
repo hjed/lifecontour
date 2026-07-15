@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from core_shared.models.outbox_events import (
     ContactSyncEventData,
     ImmichAlbumSyncEventData,
+    JournalSeriesCancelledEventData,
     JournalStatusEventData,
     JournalSyncEventData,
     MatchDetectionEventData,
@@ -575,3 +576,97 @@ class TestOutboxEventDataTypeAlias:
         """MatchDetectionEventData is a valid OutboxEventData type."""
         model = MatchDetectionEventData.model_validate(match_detection_data)
         _: OutboxEventData = model  # noqa: F841 — type check only
+
+
+# ── Journal series payload Tests ──────────────────────────────────────
+
+
+@pytest.fixture
+def series_cancelled_data() -> dict[str, Any]:
+    """Minimal valid JournalSeriesCancelledEventData payload."""
+    return {
+        "integration_source": "google",
+        "calendar_id": "00000000-0000-0000-0000-000000000001",
+        "recurring_event_id": "master123",
+        "sync_timestamp": datetime.now(UTC).isoformat(),
+    }
+
+
+class TestJournalSyncEventDataRecurringEventId:
+    """recurring_event_id on the full sync payload (series support)."""
+
+    def test_defaults_to_none_for_old_payloads(
+        self, journal_sync_data: dict[str, Any]
+    ) -> None:
+        """Payloads emitted before the series feature still validate."""
+        model = JournalSyncEventData.model_validate(journal_sync_data)
+        assert model.recurring_event_id is None
+
+    def test_accepts_recurring_event_id(
+        self, journal_sync_data: dict[str, Any]
+    ) -> None:
+        """The recurring master event id round-trips."""
+        journal_sync_data["recurring_event_id"] = "master123"
+        model = JournalSyncEventData.model_validate(journal_sync_data)
+        assert model.recurring_event_id == "master123"
+        assert model.model_dump()["recurring_event_id"] == "master123"
+
+
+class TestJournalStatusEventDataSeriesFields:
+    """New optional fields on the lightweight status payload."""
+
+    def test_new_fields_default_none_for_old_payloads(
+        self, journal_status_data: dict[str, Any]
+    ) -> None:
+        """Payloads emitted before the series feature still validate."""
+        model = JournalStatusEventData.model_validate(journal_status_data)
+        assert model.recurring_event_id is None
+        assert model.integration_source is None
+
+    def test_accepts_recurring_event_id_and_source(
+        self, journal_status_data: dict[str, Any]
+    ) -> None:
+        """recurring_event_id and integration_source are parsed when present."""
+        journal_status_data["recurring_event_id"] = "master123"
+        journal_status_data["integration_source"] = "google"
+        model = JournalStatusEventData.model_validate(journal_status_data)
+        assert model.recurring_event_id == "master123"
+        assert model.integration_source == "google"
+
+
+class TestJournalSeriesCancelledEventData:
+    """Tests for journal_event.series_cancelled payload."""
+
+    def test_valid_payload_parses(self, series_cancelled_data: dict[str, Any]) -> None:
+        """Valid dict is accepted and all fields are accessible."""
+        model = JournalSeriesCancelledEventData.model_validate(series_cancelled_data)
+        assert model.integration_source == "google"
+        assert model.calendar_id == "00000000-0000-0000-0000-000000000001"
+        assert model.recurring_event_id == "master123"
+
+    def test_missing_recurring_event_id_rejected(
+        self, series_cancelled_data: dict[str, Any]
+    ) -> None:
+        """Missing required field raises ValidationError."""
+        del series_cancelled_data["recurring_event_id"]
+        with pytest.raises(ValidationError) as exc_info:
+            JournalSeriesCancelledEventData.model_validate(series_cancelled_data)
+        assert "recurring_event_id" in str(exc_info.value)
+
+    def test_missing_calendar_id_rejected(
+        self, series_cancelled_data: dict[str, Any]
+    ) -> None:
+        """Missing required field raises ValidationError."""
+        del series_cancelled_data["calendar_id"]
+        with pytest.raises(ValidationError) as exc_info:
+            JournalSeriesCancelledEventData.model_validate(series_cancelled_data)
+        assert "calendar_id" in str(exc_info.value)
+
+    def test_series_cancelled_dispatches_to_model(
+        self, series_cancelled_data: dict[str, Any]
+    ) -> None:
+        """journal_event.series_cancelled dispatches to the new payload model."""
+        parsed = parse_outbox_event_data(
+            "journal_event.series_cancelled", series_cancelled_data
+        )
+        assert isinstance(parsed, JournalSeriesCancelledEventData)

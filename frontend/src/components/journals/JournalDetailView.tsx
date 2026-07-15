@@ -51,6 +51,7 @@ import { toast } from 'sonner';
 import { JournalBreadcrumb } from './JournalBreadcrumb';
 import { JournalCalendarBadge } from './JournalCalendarBadge';
 import { JournalContactBadge } from './JournalContactBadge';
+import { JournalSeriesBadge } from './JournalSeriesBadge';
 import { JournalTagBadge } from './JournalTagBadge';
 import { JournalChildrenList } from './JournalChildrenList';
 import { JournalParentSelector } from './JournalParentSelector';
@@ -76,6 +77,10 @@ import {
   useAddJournalTag,
   useRemoveJournalTag,
   useJournalTags,
+  useJournalSeries,
+  useAddJournalToSeries,
+  useRemoveJournalFromSeries,
+  useCreateJournalSeries,
   useCalendars,
   useUpdateTypeData,
   useAddJournalType,
@@ -142,6 +147,9 @@ export function JournalDetailView({
   const updateContact = useUpdateContactRelationship();
   const addTag = useAddJournalTag();
   const removeTag = useRemoveJournalTag();
+  const addToSeries = useAddJournalToSeries();
+  const removeFromSeries = useRemoveJournalFromSeries();
+  const createSeries = useCreateJournalSeries();
   const addType = useAddJournalType();
   const removeType = useRemoveJournalType();
 
@@ -158,10 +166,12 @@ export function JournalDetailView({
 
   // Data fetching
   const { data: tagsResponse } = useJournalTags();
+  const { data: seriesResponse } = useJournalSeries();
   const { data: calendarsData } = useCalendars();
   const { data: externalLinksData } = useJournalExternalLinks(journal.id);
 
   const availableTags = tagsResponse?.data || [];
+  const availableSeries = seriesResponse?.data || [];
   const availableCalendars: JournalCalendar[] =
     calendarsData?.data.map(c => ({
       id: c.id,
@@ -261,6 +271,28 @@ export function JournalDetailView({
     await removeTag.mutateAsync({
       journalId: journal.id,
       tagId: tagId,
+    });
+  };
+
+  const handleSeriesAdd = async (seriesId: string) => {
+    await addToSeries.mutateAsync({
+      journalId: journal.id,
+      seriesId: seriesId,
+    });
+  };
+
+  const handleSeriesRemove = async (seriesId: string) => {
+    await removeFromSeries.mutateAsync({
+      journalId: journal.id,
+      seriesId: seriesId,
+    });
+  };
+
+  const handleSeriesCreate = async (name: string) => {
+    const created = await createSeries.mutateAsync({ name });
+    await addToSeries.mutateAsync({
+      journalId: journal.id,
+      seriesId: created.id,
     });
   };
 
@@ -573,6 +605,18 @@ export function JournalDetailView({
                 onTagAdd={handleTagAdd}
                 onTagRemove={handleTagRemove}
                 availableTags={availableTags}
+              />
+            </div>
+
+            {/* Series */}
+            <div className='space-y-2'>
+              <div className='text-sm font-medium'>Series</div>
+              <JournalSeriesBadge
+                series={journal.series ?? []}
+                onSeriesAdd={handleSeriesAdd}
+                onSeriesRemove={handleSeriesRemove}
+                onSeriesCreate={handleSeriesCreate}
+                availableSeries={availableSeries}
               />
             </div>
 

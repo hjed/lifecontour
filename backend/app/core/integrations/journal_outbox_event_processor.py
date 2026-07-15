@@ -6,7 +6,7 @@ journal_event.conflicted, and journal_event.cancelled outbox events
 from integration workers to create/update journals in the core system.
 """
 
-from datetime import UTC, datetime, time
+from datetime import UTC, datetime, time, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -29,6 +29,7 @@ from core_shared.models.journals.journal_relationship_types import (
 from core_shared.models.journals.journal_types import JournalType
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.outbox_events import (
+    JournalSeriesCancelledEventData,
     JournalStatusEventData,
     JournalSyncEventData,
 )
@@ -39,6 +40,10 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
+from app.core.integrations.adapters.sql.journal_event_link_repository import (
+    SeriesLinkedJournal,
+    SqlJournalEventLinkRepository,
+)
 from app.core.integrations.adapters.sql.strava_athlete_mapping_repository import (
     SqlStravaAthleteMappingRepository,
 )
@@ -48,6 +53,9 @@ from app.core.integrations.adapters.sql.sync_metadata_repository import (
 from app.core.journal.adapters.sql import SqlFitnessDataRepository
 from app.core.journal.adapters.sql.gear_maintenance_data_repository import (
     SqlGearMaintenanceDataRepository,
+)
+from app.core.journal.adapters.sql.journal_series_repository import (
+    SqlJournalSeriesRepository,
 )
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 from app.core.journal.services.journal_service import JournalService
@@ -59,7 +67,12 @@ EVENT_TYPE_JOURNAL_EVENT_CREATED = "journal_event.created"
 EVENT_TYPE_JOURNAL_EVENT_UPDATED = "journal_event.updated"
 EVENT_TYPE_JOURNAL_EVENT_CONFLICTED = "journal_event.conflicted"
 EVENT_TYPE_JOURNAL_EVENT_CANCELLED = "journal_event.cancelled"
+EVENT_TYPE_JOURNAL_EVENT_SERIES_CANCELLED = "journal_event.series_cancelled"
 EVENT_TYPE_JOURNAL_REVIEW_DETECT_MATCHES = "journal_review.detect_matches"
+
+# Buffer around "now" for recurring-cancellation decisions, mirroring the
+# worker's past-event skip buffer (all-day events are midnight-normalised).
+_SERIES_DELETION_BUFFER = timedelta(days=1)
 
 # Maps an inbound sync event's integration_source to the history Provenance
 # recorded for the journal changes it produces.
@@ -220,6 +233,8 @@ class JournalOutboxEventProcessor:
         self.strava_athlete_mapping_repository = strava_athlete_mapping_repository
         self.contact_resolver = ContactResolver(connection)
         self.match_candidate_detector = match_candidate_detector
+        self.link_repo = SqlJournalEventLinkRepository(connection)
+        self.series_repo = SqlJournalSeriesRepository(connection)
 
     async def process_event(self, event: OutboxEvent) -> dict[str, Any]:
         """
@@ -248,6 +263,8 @@ class JournalOutboxEventProcessor:
             return await self._process_journal_conflicted(event)
         if event.event_type == EVENT_TYPE_JOURNAL_EVENT_CANCELLED:
             return await self._process_journal_cancelled(event)
+        if event.event_type == EVENT_TYPE_JOURNAL_EVENT_SERIES_CANCELLED:
+            return await self._process_journal_series_cancelled(event)
 
         raise JournalOutboxEventProcessingError(
             f"Unknown journal event type: {event.event_type}"
@@ -315,6 +332,16 @@ class JournalOutboxEventProcessor:
             calendar_id=UUID(calendar_id),
             external_event_id=external_event_id,
             etag=etag,
+            recurring_event_id=payload.recurring_event_id,
+        )
+
+        # Auto-link recurring instances into a journal series
+        await self._ensure_series_membership(
+            journal_id=created_journal.id,
+            user_id=created_journal.user_id,
+            calendar_id=UUID(calendar_id),
+            recurring_event_id=payload.recurring_event_id,
+            series_name=created_journal.title,
         )
 
         # Sync contact relationships (e.g. invitees)
@@ -445,6 +472,7 @@ class JournalOutboxEventProcessor:
                 calendar_id=UUID(calendar_id),
                 external_event_id=external_event_id,
                 etag=etag,
+                recurring_event_id=payload.recurring_event_id,
             )
             # Refetch the link so merge logic sees the correct updated_at
             existing_link = await self._find_external_event_link(
@@ -522,11 +550,21 @@ class JournalOutboxEventProcessor:
         if saved_journal.id is not None:
             await self._save_calendar_info(saved_journal.id, calendar_info_data)
 
-        # Update external event link ETag
+        # Update external event link ETag (and backfill the recurring id)
         await self._update_external_event_link_etag(
             calendar_id=UUID(calendar_id),
             external_event_id=external_event_id,
             etag=etag,
+            recurring_event_id=payload.recurring_event_id,
+        )
+
+        # Auto-link recurring instances into a journal series (backfill path)
+        await self._ensure_series_membership(
+            journal_id=existing_journal_id,
+            user_id=existing_journal.user_id,
+            calendar_id=UUID(calendar_id),
+            recurring_event_id=payload.recurring_event_id,
+            series_name=saved_journal.title,
         )
 
         # Sync contact relationships (e.g. invitees)
@@ -608,9 +646,11 @@ class JournalOutboxEventProcessor:
         """
         Process a journal_event.cancelled event.
 
-        Marks the external event link as cancelled and sets the journal's
-        event_state to 'cancelled'. Does NOT delete the journal (cancellation-first
-        approach per AC2).
+        Far-future instances of a recurring series are deleted outright when
+        untouched locally (unbounded series shouldn't leave stale journals
+        behind). Everything else keeps the cancellation-first approach per AC2:
+        the link is marked cancelled and the journal's event_state set to
+        'cancelled' without deleting the journal.
         """
         event_data: dict[str, Any] = event.event_data  # type: ignore
         payload = JournalStatusEventData.model_validate(event_data)
@@ -629,34 +669,36 @@ class JournalOutboxEventProcessor:
                 "reason": "no_existing_journal_id",
             }
 
-        # Mark link as cancelled
-        await self.connection.execute(
-            text("""
-                UPDATE journal_external_event_links
-                SET sync_status = 'cancelled',
-                    updated_at = :now
-                WHERE calendar_id = :calendar_id
-                  AND external_event_id = :external_event_id
-            """),
-            {
-                "calendar_id": UUID(calendar_id),
-                "external_event_id": external_event_id,
-                "now": datetime.now(UTC),
-            },
+        # Recurring-instance deletion path: the payload's recurring id (new
+        # worker) or the backfilled link column (old payloads) marks the
+        # instance as part of a series.
+        linked = await self.link_repo.find_by_external_event(
+            calendar_id=UUID(calendar_id),
+            external_event_id=external_event_id,
         )
-
-        # Set journal event_state to cancelled
-        await self.connection.execute(
-            text("""
-                UPDATE journal_calendar_info
-                SET event_state = 'cancelled',
-                    updated_at = :now
-                WHERE journal_id = :journal_id
-            """),
-            {
+        recurring_event_id = payload.recurring_event_id or (
+            linked.recurring_event_id if linked else None
+        )
+        if (
+            linked is not None
+            and recurring_event_id
+            and await self._should_delete_cancelled_instance(linked)
+        ):
+            await self._delete_cancelled_instance(
+                linked, integration_source=payload.integration_source
+            )
+            return {
+                "status": "success",
+                "event_type": EVENT_TYPE_JOURNAL_EVENT_CANCELLED,
                 "journal_id": existing_journal_id,
-                "now": datetime.now(UTC),
-            },
+                "external_event_id": external_event_id,
+                "action": "deleted",
+            }
+
+        await self._mark_journal_cancelled(
+            journal_id=existing_journal_id,
+            calendar_id=UUID(calendar_id),
+            external_event_id=external_event_id,
         )
 
         logger.info(
@@ -672,6 +714,190 @@ class JournalOutboxEventProcessor:
             "journal_id": existing_journal_id,
             "external_event_id": external_event_id,
         }
+
+    async def _process_journal_series_cancelled(
+        self, event: OutboxEvent
+    ) -> dict[str, Any]:
+        """
+        Process a journal_event.series_cancelled event.
+
+        Emitted when a whole recurring series is deleted upstream (Google
+        reports a single cancelled event carrying the master id). Fans out
+        over every journal linked to the series: far-future untouched
+        instances are deleted, near/current ones are marked cancelled, and
+        already-finished ones are left alone. One failing journal doesn't
+        poison the rest.
+        """
+        event_data: dict[str, Any] = event.event_data  # type: ignore
+        payload = JournalSeriesCancelledEventData.model_validate(event_data)
+        calendar_id = UUID(payload.calendar_id)
+        now = datetime.now(UTC)
+
+        linked_journals = await self.link_repo.find_journals_for_series(
+            calendar_id=calendar_id,
+            recurring_event_id=payload.recurring_event_id,
+        )
+
+        deleted = 0
+        cancelled = 0
+        skipped_past = 0
+        errors = 0
+        for linked in linked_journals:
+            try:
+                if (
+                    linked.event_date_range_end is not None
+                    and linked.event_date_range_end < now - _SERIES_DELETION_BUFFER
+                ):
+                    # Already happened — mirrors the worker's past-event skip.
+                    skipped_past += 1
+                    continue
+                if await self._should_delete_cancelled_instance(linked):
+                    await self._delete_cancelled_instance(
+                        linked, integration_source=payload.integration_source
+                    )
+                    deleted += 1
+                else:
+                    await self._mark_journal_cancelled(
+                        journal_id=linked.journal_id,
+                        calendar_id=calendar_id,
+                        external_event_id=linked.external_event_id,
+                    )
+                    cancelled += 1
+            except Exception:
+                errors += 1
+                logger.exception(
+                    "Failed to process series-cancelled journal, continuing",
+                    journal_id=linked.journal_id,
+                    recurring_event_id=payload.recurring_event_id,
+                )
+
+        logger.info(
+            "Processed series cancellation",
+            calendar_id=payload.calendar_id,
+            recurring_event_id=payload.recurring_event_id,
+            deleted=deleted,
+            cancelled=cancelled,
+            skipped_past=skipped_past,
+            errors=errors,
+        )
+
+        return {
+            "status": "success",
+            "event_type": EVENT_TYPE_JOURNAL_EVENT_SERIES_CANCELLED,
+            "deleted": deleted,
+            "cancelled": cancelled,
+            "skipped_past": skipped_past,
+            "errors": errors,
+        }
+
+    async def _should_delete_cancelled_instance(
+        self, linked: SeriesLinkedJournal
+    ) -> bool:
+        """Whether a cancelled recurring instance should be deleted outright.
+
+        Only instances starting more than a day ahead qualify, and any local
+        additions (edits after the last sync, children, tags, or non-invitee
+        contact links) protect the journal — it falls back to mark-cancelled.
+        """
+        if linked.event_date_range_start is None:
+            return False
+        if linked.event_date_range_start <= datetime.now(UTC) + _SERIES_DELETION_BUFFER:
+            return False
+        if linked.link_updated_at is None or linked.journal_updated_at is None:
+            return False
+        if linked.journal_updated_at > linked.link_updated_at:
+            return False
+        facts = await self.link_repo.get_deletion_protection_facts(linked.journal_id)
+        return not (
+            facts.has_children
+            or facts.has_tags
+            or facts.has_manual_contact_relationships
+        )
+
+    async def _delete_cancelled_instance(
+        self,
+        linked: SeriesLinkedJournal,
+        integration_source: str | None,
+    ) -> None:
+        """Delete a far-future recurring instance whose series was cancelled.
+
+        The external event links are removed first so the JournalDeleted event
+        carries no external identifiers — the upstream event is already gone,
+        and an outbound deletion attempt would only fail.
+        """
+        await self.link_repo.delete_links_for_journal(linked.journal_id)
+        await self.journal_service.delete_journal(
+            linked.journal_id,
+            self.connection,
+            changed_by=integration_source or "system",
+            source=_provenance_for_source(integration_source),
+        )
+        logger.info(
+            "Deleted far-future recurring instance from cancelled series",
+            journal_id=linked.journal_id,
+            external_event_id=linked.external_event_id,
+        )
+
+    async def _mark_journal_cancelled(
+        self,
+        journal_id: int,
+        calendar_id: UUID,
+        external_event_id: str | None,
+    ) -> None:
+        """Mark a journal's link and calendar info as cancelled (no deletion)."""
+        await self.connection.execute(
+            text("""
+                UPDATE journal_external_event_links
+                SET sync_status = 'cancelled',
+                    updated_at = :now
+                WHERE calendar_id = :calendar_id
+                  AND external_event_id = :external_event_id
+            """),
+            {
+                "calendar_id": calendar_id,
+                "external_event_id": external_event_id,
+                "now": datetime.now(UTC),
+            },
+        )
+
+        await self.connection.execute(
+            text("""
+                UPDATE journal_calendar_info
+                SET event_state = 'cancelled',
+                    updated_at = :now
+                WHERE journal_id = :journal_id
+            """),
+            {
+                "journal_id": journal_id,
+                "now": datetime.now(UTC),
+            },
+        )
+
+    async def _ensure_series_membership(
+        self,
+        journal_id: int,
+        user_id: str,
+        calendar_id: UUID,
+        recurring_event_id: str | None,
+        series_name: str,
+    ) -> None:
+        """Link a synced recurring instance into its journal series.
+
+        Get-or-creates the series keyed by (calendar_id, recurring_event_id) —
+        named after the event on first creation, never renamed by sync — and
+        adds the journal as a member (idempotent). No-op for non-recurring
+        events.
+        """
+        if not recurring_event_id:
+            return
+        series = await self.series_repo.get_or_create_by_recurrence(
+            user_id=user_id,
+            calendar_id=calendar_id,
+            recurring_event_id=recurring_event_id,
+            name=series_name,
+        )
+        if series.id is not None:
+            await self.series_repo.add_member(series.id, journal_id)
 
     # ── Helper methods ──────────────────────────────────────────────────
 
@@ -1182,28 +1408,35 @@ class JournalOutboxEventProcessor:
         calendar_id: UUID,
         external_event_id: str,
         etag: str | None,
+        recurring_event_id: str | None = None,
     ) -> None:
         """Create an external event link for tracking sync state.
 
         Uses ON CONFLICT DO UPDATE so retries of journal_event.created
         don't fail on the composite PK (journal_id, calendar_id).
+        COALESCE keeps an already-stored recurring id when a payload
+        omits it.
         """
         now = datetime.now(UTC)
         await self.connection.execute(
             text("""
                 INSERT INTO journal_external_event_links
                     (journal_id, calendar_id, external_event_id,
-                     external_version,
+                     external_version, recurring_event_id,
                      sync_capability, sync_status,
                      created_at, updated_at)
                 VALUES
                     (:journal_id, :calendar_id, :external_event_id,
-                     :etag,
+                     :etag, :recurring_event_id,
                      'bidirectional', 'synced',
                      :now, :now)
                 ON CONFLICT (journal_id, calendar_id) DO UPDATE SET
                     external_event_id = :external_event_id,
                     external_version = :etag,
+                    recurring_event_id = COALESCE(
+                        :recurring_event_id,
+                        journal_external_event_links.recurring_event_id
+                    ),
                     sync_status = 'synced',
                     updated_at = :now
             """),
@@ -1212,6 +1445,7 @@ class JournalOutboxEventProcessor:
                 "calendar_id": calendar_id,
                 "external_event_id": external_event_id,
                 "etag": etag,
+                "recurring_event_id": recurring_event_id,
                 "now": now,
             },
         )
@@ -1289,13 +1523,21 @@ class JournalOutboxEventProcessor:
         calendar_id: UUID,
         external_event_id: str,
         etag: str | None,
+        recurring_event_id: str | None = None,
     ) -> None:
-        """Update the ETag on an external event link after successful sync."""
+        """Update the ETag on an external event link after successful sync.
+
+        Also backfills the recurring id; COALESCE keeps a stored value when
+        the inbound payload omits it.
+        """
         await self.connection.execute(
             text("""
                 UPDATE journal_external_event_links
                 SET external_version = :etag,
                     updated_at = :now,
+                    recurring_event_id = COALESCE(
+                        :recurring_event_id, recurring_event_id
+                    ),
                     sync_status = 'synced'
                 WHERE calendar_id = :calendar_id
                   AND external_event_id = :external_event_id
@@ -1304,6 +1546,7 @@ class JournalOutboxEventProcessor:
                 "etag": etag,
                 "calendar_id": calendar_id,
                 "external_event_id": external_event_id,
+                "recurring_event_id": recurring_event_id,
                 "now": datetime.now(UTC),
             },
         )

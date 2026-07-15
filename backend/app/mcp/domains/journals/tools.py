@@ -2735,6 +2735,18 @@ async def get_journal(
     # Fetch tags
     journal_tags = await repos.tag_repo.get_tags_for_journal(journal_id)
 
+    # Fetch series memberships
+    from app.core.journal.adapters.sql.journal_series_repository import (
+        SqlJournalSeriesRepository,
+    )
+
+    journal_series = await SqlJournalSeriesRepository(
+        db_connection
+    ).get_series_for_journal(journal_id, user_id)
+    series = [
+        {"id": str(s.id), "name": s.name} for s in journal_series if s.id is not None
+    ]
+
     # Fetch external links (Strava and Google Calendar)
     user_id = await get_current_user_id()
     external_links = await _fetch_journal_external_links(
@@ -2750,6 +2762,7 @@ async def get_journal(
         tags=journal_tags,
         children=children,
         external_links=external_links,
+        series=series,
     )
 
     return MCPResponseBuilder.success_response(response)

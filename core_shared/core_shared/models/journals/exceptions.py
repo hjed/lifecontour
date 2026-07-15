@@ -72,6 +72,14 @@ class JournalNotFoundError(JournalDomainError):
         self.journal_id = journal_id
 
 
+class JournalSeriesNotFoundError(JournalDomainError):
+    """Exception raised when a journal series is not found."""
+
+    def __init__(self, series_id: str):
+        super().__init__(f"Journal series with ID {series_id} not found", 404)
+        self.series_id = series_id
+
+
 class JournalHierarchyError(JournalDomainError):
     """Exception raised when journal hierarchy constraints are violated."""
 

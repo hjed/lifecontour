@@ -81,6 +81,7 @@ def _make_assembler(
     journals: list[MagicMock] | None = None,
     summary: ContactSummary | None = None,
     all_journal_relationships: list[MagicMock] | None = None,
+    series_repo: AsyncMock | None = None,
 ) -> SummaryInputAssembler:
     """Create a SummaryInputAssembler with mock repositories."""
     contact_repo = AsyncMock()
@@ -125,6 +126,7 @@ def _make_assembler(
         journal_relationship_repo=journal_relationship_repo,
         journal_repo=journal_repo,
         summary_repo=summary_repo,
+        series_repo=series_repo,
     )
 
 
@@ -492,3 +494,47 @@ class TestLongTermActivityStatistics:
         assert isinstance(bucket.period_label, str)
         assert isinstance(bucket.event_count, int)
         assert bucket.event_count > 0
+
+
+@pytest.mark.unit
+class TestSummaryInputSeries:
+    """Series membership is attached to assembled journal dicts."""
+
+    @pytest.mark.asyncio
+    async def test_assemble_populates_series_for_journals(self):
+        """Journal dicts carry series names from one bulk lookup."""
+        now = datetime.now(tz=UTC)
+        journal = _make_journal(
+            1, title="Physio session", start=now - timedelta(days=1)
+        )
+        journal.user_id = "user123"
+        rel = _make_journal_relationship(journal_id=1)
+
+        series_repo = AsyncMock()
+        series_repo.get_series_names_for_journal_ids = AsyncMock(
+            return_value={1: ["Physio appointments"]}
+        )
+        assembler = _make_assembler(
+            journal_relationships=[rel],
+            journals=[journal],
+            series_repo=series_repo,
+        )
+
+        result = await assembler.assemble(contact_id=1)
+
+        assert result is not None
+        assert result.recent_journals[0]["series"] == ["Physio appointments"]
+        series_repo.get_series_names_for_journal_ids.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_assemble_without_series_repo_defaults_to_empty(self):
+        """Without a series repo, journal dicts carry no series names."""
+        now = datetime.now(tz=UTC)
+        journal = _make_journal(1, start=now - timedelta(days=1))
+        rel = _make_journal_relationship(journal_id=1)
+        assembler = _make_assembler(journal_relationships=[rel], journals=[journal])
+
+        result = await assembler.assemble(contact_id=1)
+
+        assert result is not None
+        assert result.recent_journals[0]["series"] == []

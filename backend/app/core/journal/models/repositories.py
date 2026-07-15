@@ -56,6 +56,7 @@ from core_shared.models.journals import (
 )
 from core_shared.models.route import Route
 
+from .journal_series import JournalSeries
 from .journal_tag import JournalTag
 
 
@@ -1022,6 +1023,80 @@ class JournalTagRepository(ABC):
             journal_id: The journal ID
             tag_id: The tag UUID to remove
         """
+        pass
+
+
+class JournalSeriesRepository(ABC):
+    """
+    Repository interface for journal series operations.
+
+    A series groups related journals. Series are either auto-created from a
+    recurring calendar event (keyed by calendar_id + recurring_event_id) or
+    created manually. All queries are scoped to the owning user.
+    """
+
+    @abstractmethod
+    async def find_by_id(self, series_id: UUID, user_id: str) -> JournalSeries | None:
+        """Find a series by ID, scoped to the owning user."""
+        pass
+
+    @abstractmethod
+    async def find_all(self, user_id: str) -> list[JournalSeries]:
+        """Get all series for a user, ordered by name."""
+        pass
+
+    @abstractmethod
+    async def save(self, series: JournalSeries) -> JournalSeries:
+        """Save a series (insert when id is None, update otherwise)."""
+        pass
+
+    @abstractmethod
+    async def delete(self, series_id: UUID, user_id: str) -> None:
+        """Delete a series; memberships cascade, member journals are untouched."""
+        pass
+
+    @abstractmethod
+    async def get_or_create_by_recurrence(
+        self,
+        user_id: str,
+        calendar_id: UUID,
+        recurring_event_id: str,
+        name: str,
+    ) -> JournalSeries:
+        """Get or atomically create the series for a recurring calendar event.
+
+        Keyed by (calendar_id, recurring_event_id); ``name`` is only used when
+        the series doesn't exist yet — an existing series is never renamed.
+        """
+        pass
+
+    @abstractmethod
+    async def add_member(self, series_id: UUID, journal_id: int) -> None:
+        """Add a journal to a series (no-op if already a member)."""
+        pass
+
+    @abstractmethod
+    async def remove_member(self, series_id: UUID, journal_id: int) -> None:
+        """Remove a journal from a series (no-op if not a member)."""
+        pass
+
+    @abstractmethod
+    async def get_member_journal_ids(self, series_id: UUID) -> list[int]:
+        """Get the journal IDs belonging to a series."""
+        pass
+
+    @abstractmethod
+    async def get_series_for_journal(
+        self, journal_id: int, user_id: str
+    ) -> list[JournalSeries]:
+        """Get all series a journal belongs to, scoped to the owning user."""
+        pass
+
+    @abstractmethod
+    async def get_series_names_for_journal_ids(
+        self, journal_ids: list[int], user_id: str
+    ) -> dict[int, list[str]]:
+        """Bulk-fetch series names per journal (journals without series omitted)."""
         pass
 
 

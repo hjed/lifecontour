@@ -228,3 +228,45 @@ class TestDailySummaryPromptBuilder:
         )
         # In Sydney it is the 7th, so summarising the 7th is "Today".
         assert "(Today)" in prompt
+
+
+class TestPromptSeriesLine:
+    """Series membership is rendered per entry when present."""
+
+    def test_entry_section_includes_series_line(self) -> None:
+        builder = DailySummaryPromptBuilder()
+        summary_input = DailySummaryInput(
+            user_id="user123",
+            summary_date=date(2026, 4, 27),
+            journals=[
+                DailySummaryJournalEntry(
+                    title="Physio session",
+                    content="Knee exercises",
+                    types=["EVENT"],
+                    series_names=["Physio appointments"],
+                )
+            ],
+            journal_count=1,
+        )
+
+        prompt = builder.build(summary_input)
+
+        assert "Series: Physio appointments" in prompt
+
+    def test_entry_without_series_omits_line(self) -> None:
+        builder = DailySummaryPromptBuilder()
+        summary_input = DailySummaryInput(
+            user_id="user123",
+            summary_date=date(2026, 4, 27),
+            journals=[
+                DailySummaryJournalEntry(
+                    title="One-off note",
+                    content="Nothing recurring",
+                )
+            ],
+            journal_count=1,
+        )
+
+        prompt = builder.build(summary_input)
+
+        assert "Series:" not in prompt
