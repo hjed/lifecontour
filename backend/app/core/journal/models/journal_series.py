@@ -41,14 +41,28 @@ class JournalSeries:
 
     def __post_init__(self) -> None:
         """Validate series properties."""
-        if not self.name or not self.name.strip():
+        self._validate_name(self.name)
+        if not self.user_id or not self.user_id.strip():
+            raise ValueError("Series user_id is required")
+
+    @staticmethod
+    def _validate_name(name: str) -> None:
+        if not name or not name.strip():
             raise ValueError("Series name cannot be empty")
-        if len(self.name) > MAX_SERIES_NAME_LENGTH:
+        if len(name) > MAX_SERIES_NAME_LENGTH:
             raise ValueError(
                 f"Series name cannot exceed {MAX_SERIES_NAME_LENGTH} characters"
             )
-        if not self.user_id or not self.user_id.strip():
-            raise ValueError("Series user_id is required")
+
+    def rename(self, name: str, description: str | None) -> None:
+        """Update name/description with the same validation as construction.
+
+        Dataclass field assignment doesn't re-run ``__post_init__``, so
+        renames must go through here to keep the entity invariants.
+        """
+        self._validate_name(name)
+        self.name = name
+        self.description = description
 
     @property
     def auto_created(self) -> bool:

@@ -11,6 +11,7 @@ from core_shared.models.journals import (
     Journal,
     JournalNotFoundError,
     JournalSeriesNotFoundError,
+    JournalValidationError,
 )
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -281,3 +282,39 @@ class TestRemoveJournalFromSeries:
                 user_id=USER_ID,
                 transaction=NO_TRANSACTION,
             )
+
+
+class TestUpdateSeriesValidation:
+    """PR-review hardening: renames re-run entity validation."""
+
+    async def test_update_series_rejects_blank_name(
+        self, service: JournalSeriesService, series_repo: AsyncMock
+    ) -> None:
+        existing = _make_series()
+        series_repo.find_by_id.return_value = existing
+
+        with pytest.raises(JournalValidationError):
+            await service.update_series(
+                series_id=_series_uuid(existing),
+                user_id=USER_ID,
+                name="   ",
+                description=None,
+                transaction=NO_TRANSACTION,
+            )
+        series_repo.save.assert_not_called()
+
+    async def test_update_series_rejects_name_over_500_chars(
+        self, service: JournalSeriesService, series_repo: AsyncMock
+    ) -> None:
+        existing = _make_series()
+        series_repo.find_by_id.return_value = existing
+
+        with pytest.raises(JournalValidationError):
+            await service.update_series(
+                series_id=_series_uuid(existing),
+                user_id=USER_ID,
+                name="x" * 501,
+                description=None,
+                transaction=NO_TRANSACTION,
+            )
+        series_repo.save.assert_not_called()

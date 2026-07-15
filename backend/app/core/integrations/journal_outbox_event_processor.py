@@ -698,7 +698,6 @@ class JournalOutboxEventProcessor:
         await self._mark_journal_cancelled(
             journal_id=existing_journal_id,
             calendar_id=UUID(calendar_id),
-            external_event_id=external_event_id,
         )
 
         logger.info(
@@ -744,11 +743,10 @@ class JournalOutboxEventProcessor:
         errors = 0
         for linked in linked_journals:
             try:
-                if (
-                    linked.event_date_range_end is not None
-                    and linked.event_date_range_end < now - _SERIES_DELETION_BUFFER
-                ):
-                    # Already happened — mirrors the worker's past-event skip.
+                # Already happened — mirrors the worker's past-event skip.
+                # Falls back to the start when the end date is missing.
+                range_end = linked.event_date_range_end or linked.event_date_range_start
+                if range_end is not None and range_end < now - _SERIES_DELETION_BUFFER:
                     skipped_past += 1
                     continue
                 if await self._should_delete_cancelled_instance(linked):
@@ -760,7 +758,6 @@ class JournalOutboxEventProcessor:
                     await self._mark_journal_cancelled(
                         journal_id=linked.journal_id,
                         calendar_id=calendar_id,
-                        external_event_id=linked.external_event_id,
                     )
                     cancelled += 1
             except Exception:
@@ -842,20 +839,24 @@ class JournalOutboxEventProcessor:
         self,
         journal_id: int,
         calendar_id: UUID,
-        external_event_id: str | None,
     ) -> None:
-        """Mark a journal's link and calendar info as cancelled (no deletion)."""
+        """Mark a journal's link and calendar info as cancelled (no deletion).
+
+        The link UPDATE keys on the composite PK (journal_id, calendar_id) —
+        never on external_event_id, which is nullable (NULL = NULL is false
+        in SQL and would silently leave the link 'synced').
+        """
         await self.connection.execute(
             text("""
                 UPDATE journal_external_event_links
                 SET sync_status = 'cancelled',
                     updated_at = :now
-                WHERE calendar_id = :calendar_id
-                  AND external_event_id = :external_event_id
+                WHERE journal_id = :journal_id
+                  AND calendar_id = :calendar_id
             """),
             {
+                "journal_id": journal_id,
                 "calendar_id": calendar_id,
-                "external_event_id": external_event_id,
                 "now": datetime.now(UTC),
             },
         )

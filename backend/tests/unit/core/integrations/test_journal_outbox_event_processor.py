@@ -1983,16 +1983,17 @@ def _make_linked_journal(
     *,
     journal_id: int = 42,
     user_id: str = "1",
-    external_event_id: str = "google-event-abc",
+    external_event_id: str | None = "google-event-abc",
     recurring_event_id: str | None = "master-1",
     days_until_start: float = 10.0,
-    duration_hours: float = 1.0,
+    duration_hours: float | None = 1.0,
     edited: bool = False,
 ) -> SeriesLinkedJournal:
     """Build a SeriesLinkedJournal row relative to the current time.
 
     ``edited=True`` makes the journal's updated_at newer than the link's,
     which marks it as locally modified (protected from deletion).
+    ``duration_hours=None`` leaves the event without an end date.
     """
     now = datetime.now(UTC)
     start = now + timedelta(days=days_until_start)
@@ -2010,7 +2011,11 @@ def _make_linked_journal(
         link_updated_at=link_updated_at,
         journal_updated_at=journal_updated_at,
         event_date_range_start=start,
-        event_date_range_end=start + timedelta(hours=duration_hours),
+        event_date_range_end=(
+            start + timedelta(hours=duration_hours)
+            if duration_hours is not None
+            else None
+        ),
     )
 
 
@@ -2510,3 +2515,77 @@ class TestSeriesMembershipOnCreateAndUpdate:
         assert "recurring_event_id" in sql_text
         assert "COALESCE" in sql_text
         assert etag_update_call[0][1]["recurring_event_id"] == "master-1"
+
+
+class TestSeriesCancelledFanOutRobustness:
+    """PR-review hardening: nullable link/date fields in the fan-out."""
+
+    @pytest.fixture
+    def mock_connection(self) -> AsyncMock:
+        return AsyncMock(spec=AsyncConnection)
+
+    @pytest.fixture
+    def mock_journal_service(self) -> AsyncMock:
+        return AsyncMock()
+
+    @pytest.fixture
+    def processor(
+        self, mock_journal_service: AsyncMock, mock_connection: AsyncMock
+    ) -> JournalOutboxEventProcessor:
+        proc = JournalOutboxEventProcessor(
+            journal_service=mock_journal_service,
+            connection=mock_connection,
+            contact_repository=MagicMock(),
+            strava_athlete_mapping_repository=MagicMock(),
+        )
+        proc.link_repo = AsyncMock()
+        proc.series_repo = AsyncMock()
+        _mock(
+            proc.link_repo
+        ).get_deletion_protection_facts.return_value = _UNPROTECTED_FACTS
+        return proc
+
+    @pytest.mark.asyncio
+    async def test_link_without_external_id_still_marked_cancelled(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """The link UPDATE keys on (journal_id, calendar_id), not the
+        nullable external_event_id (NULL = NULL is false in SQL)."""
+        _mock(processor.link_repo).find_journals_for_series.return_value = [
+            _make_linked_journal(
+                journal_id=7, days_until_start=0.5, external_event_id=None
+            ),
+        ]
+
+        result = await processor.process_event(_make_series_cancelled_event())
+
+        assert result["cancelled"] == 1
+        link_update_call = mock_connection.execute.call_args_list[0]
+        sql_text = str(link_update_call[0][0].text)
+        assert "journal_id = :journal_id" in sql_text
+        assert "external_event_id" not in sql_text
+        assert link_update_call[0][1]["journal_id"] == 7
+
+    @pytest.mark.asyncio
+    async def test_past_instance_without_end_date_is_skipped(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """With no end date, the past-event skip falls back to the start."""
+        _mock(processor.link_repo).find_journals_for_series.return_value = [
+            _make_linked_journal(
+                journal_id=8, days_until_start=-10, duration_hours=None
+            ),
+        ]
+
+        result = await processor.process_event(_make_series_cancelled_event())
+
+        assert result["skipped_past"] == 1
+        assert result["deleted"] == 0
+        assert result["cancelled"] == 0
+        mock_journal_service.delete_journal.assert_not_called()
+        mock_connection.execute.assert_not_called()

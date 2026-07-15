@@ -235,3 +235,26 @@ class TestJournalSeriesToolsIntegration:
             assert payload["series"] == [
                 {"id": series_id, "name": "Physio appointments"}
             ]
+
+    @pytest.mark.asyncio
+    async def test_update_series_rejects_blank_name(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ) -> None:
+        series_id = await _seed_series(clean_database, name="Keep this name")
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+
+            payload = await _call_tool(
+                client,
+                session_id,
+                "update_series",
+                {"series_id": series_id, "name": "   "},
+            )
+
+            assert "error" in payload
+
+        repo = SqlJournalSeriesRepository(clean_database)
+        db_series = await repo.find_by_id(UUID(series_id), USER_ID)
+        assert db_series is not None
+        assert db_series.name == "Keep this name"

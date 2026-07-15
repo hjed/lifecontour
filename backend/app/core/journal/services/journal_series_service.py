@@ -10,6 +10,7 @@ from uuid import UUID
 from core_shared.models.journals import (
     JournalNotFoundError,
     JournalSeriesNotFoundError,
+    JournalValidationError,
 )
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -84,10 +85,13 @@ class JournalSeriesService:
 
         Raises:
             JournalSeriesNotFoundError: If the series doesn't exist for the user.
+            JournalValidationError: If the new name is blank or too long.
         """
         series = await self.get_series(series_id, user_id)
-        series.name = name
-        series.description = description
+        try:
+            series.rename(name=name, description=description)
+        except ValueError as e:
+            raise JournalValidationError("name", str(e)) from e
         return await self.series_repo.save(series)
 
     @transactional

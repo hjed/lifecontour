@@ -439,3 +439,45 @@ class TestRecurringInstanceCancellation:
         assert result.get("action") != "deleted"
         assert await _journal_exists(async_connection, journal_id)
         assert await _event_state(async_connection, journal_id) == "cancelled"
+
+
+@pytest.mark.integration
+class TestSeriesCancelledNullableLinkFields:
+    async def test_link_without_external_event_id_is_marked_cancelled(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """Links with a NULL external_event_id still get sync_status updated
+        (the UPDATE keys on the link PK, not the nullable external id)."""
+        calendar_id = await _create_calendar(async_connection)
+        processor = _processor(async_connection)
+
+        created = await processor.process_event(
+            _sync_event(
+                "journal_event.created",
+                calendar_id=calendar_id,
+                external_event_id=f"{MASTER_ID}_nullid",
+                start=datetime.now(UTC) + timedelta(hours=6),
+                recurring_event_id=MASTER_ID,
+            )
+        )
+        journal_id = created["journal_id"]
+        await async_connection.execute(
+            text(
+                "UPDATE journal_external_event_links SET external_event_id = NULL"
+                " WHERE journal_id = :journal_id"
+            ),
+            {"journal_id": journal_id},
+        )
+
+        result = await processor.process_event(_series_cancelled_event(calendar_id))
+
+        assert result["cancelled"] == 1
+        link_status = await async_connection.execute(
+            text(
+                "SELECT sync_status FROM journal_external_event_links"
+                " WHERE journal_id = :journal_id"
+            ),
+            {"journal_id": journal_id},
+        )
+        assert link_status.scalar() == "cancelled"
+        assert await _event_state(async_connection, journal_id) == "cancelled"
