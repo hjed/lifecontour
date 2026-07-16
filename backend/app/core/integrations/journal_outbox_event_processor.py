@@ -448,6 +448,29 @@ class JournalOutboxEventProcessor:
             and existing_link is not None
             and existing_link.external_version == etag
         ):
+            # Backfill promotion: the worker re-sends unchanged events whose
+            # link predates the series feature, carrying the SAME etag. The
+            # recurring id and series membership must persist before the skip
+            # or the worker re-promotes the instance on every sync, forever.
+            if payload.recurring_event_id and existing_link.recurring_event_id is None:
+                await self._update_external_event_link_etag(
+                    calendar_id=UUID(calendar_id),
+                    external_event_id=external_event_id,
+                    etag=etag,
+                    recurring_event_id=payload.recurring_event_id,
+                )
+                await self._ensure_series_membership(
+                    journal_id=existing_journal_id,
+                    user_id=existing_journal.user_id,
+                    calendar_id=UUID(calendar_id),
+                    recurring_event_id=payload.recurring_event_id,
+                    series_name=existing_journal.title,
+                )
+                logger.info(
+                    "Backfilled recurring id on unchanged event",
+                    journal_id=existing_journal_id,
+                    recurring_event_id=payload.recurring_event_id,
+                )
             logger.info(
                 "Journal update skipped - ETag unchanged",
                 journal_id=existing_journal_id,
@@ -783,6 +806,17 @@ class JournalOutboxEventProcessor:
             errors=errors,
         )
 
+        # Every item was attempted (failed ones rolled back to their
+        # savepoints); fail the event so the consumer retries it — the whole
+        # fan-out is idempotent, and a success ack would silently drop the
+        # journals that errored.
+        if errors:
+            raise JournalOutboxEventProcessingError(
+                f"Series cancellation for {payload.recurring_event_id}: "
+                f"{errors} of {len(linked_journals)} journals failed; "
+                "failing the event for retry"
+            )
+
         return {
             "status": "success",
             "event_type": EVENT_TYPE_JOURNAL_EVENT_SERIES_CANCELLED,
@@ -810,11 +844,7 @@ class JournalOutboxEventProcessor:
         if linked.journal_updated_at > linked.link_updated_at:
             return False
         facts = await self.link_repo.get_deletion_protection_facts(linked.journal_id)
-        return not (
-            facts.has_children
-            or facts.has_tags
-            or facts.has_manual_contact_relationships
-        )
+        return not facts.is_protected
 
     async def _delete_cancelled_instance(
         self,
@@ -1512,7 +1542,7 @@ class JournalOutboxEventProcessor:
         result = await self.connection.execute(
             text("""
                 SELECT external_version, journal_id, sync_capability,
-                       sync_status, updated_at
+                       sync_status, updated_at, recurring_event_id
                 FROM journal_external_event_links
                 WHERE calendar_id = :calendar_id
                   AND external_event_id = :external_event_id

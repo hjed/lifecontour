@@ -17,6 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.integrations.journal_outbox_event_processor import (
+    JournalOutboxEventProcessingError,
     JournalOutboxEventProcessor,
 )
 from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
@@ -513,15 +514,16 @@ class TestSeriesCancelledPerItemSavepoints:
                 raise RuntimeError("simulated delete failure")
             return await original_delete(journal_id, *args, **kwargs)
 
-        with patch.object(
-            processor.journal_service,
-            "delete_journal",
-            new=failing_delete,
+        with (
+            patch.object(
+                processor.journal_service,
+                "delete_journal",
+                new=failing_delete,
+            ),
+            pytest.raises(JournalOutboxEventProcessingError, match="1 of 2"),
         ):
-            result = await processor.process_event(_series_cancelled_event(calendar_id))
+            await processor.process_event(_series_cancelled_event(calendar_id))
 
-        assert result["errors"] == 1
-        assert result["deleted"] == 1
         # The failed journal survives WITH its link row (the savepoint rolled
         # back the link deletion that ran before the failure).
         assert await _journal_exists(async_connection, journals["fails"])
@@ -535,3 +537,155 @@ class TestSeriesCancelledPerItemSavepoints:
         assert link_count.scalar() == 1
         # The other journal was still deleted.
         assert not await _journal_exists(async_connection, journals["succeeds"])
+
+
+@pytest.mark.integration
+class TestUnchangedEtagBackfillIntegration:
+    async def test_unchanged_etag_update_backfills_link_and_series(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """The worker's backfill promotion re-sends the SAME etag; the
+        recurring id and series membership must persist anyway (otherwise the
+        promotion loops forever)."""
+        calendar_id = await _create_calendar(async_connection)
+        processor = _processor(async_connection)
+        external_event_id = f"{MASTER_ID}_20260801T090000Z"
+
+        created = await processor.process_event(
+            _sync_event(
+                "journal_event.created",
+                calendar_id=calendar_id,
+                external_event_id=external_event_id,
+            )
+        )
+        journal_id = created["journal_id"]
+        assert await _link_recurring_id(async_connection, journal_id) is None
+
+        result = await processor.process_event(
+            _sync_event(
+                "journal_event.updated",
+                calendar_id=calendar_id,
+                external_event_id=external_event_id,
+                existing_journal_id=journal_id,
+                etag='"etag-1"',  # unchanged — same as the create
+                recurring_event_id=MASTER_ID,
+            )
+        )
+
+        assert result["status"] == "skipped"
+        assert await _link_recurring_id(async_connection, journal_id) == MASTER_ID
+        series_repo = SqlJournalSeriesRepository(async_connection)
+        series = await series_repo.get_series_for_journal(journal_id, USER_ID)
+        assert len(series) == 1
+        assert series[0].recurring_event_id == MASTER_ID
+
+
+@pytest.mark.integration
+class TestPrefixFallbackScoping:
+    async def test_prefix_fallback_skips_successor_and_backfilled_links(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """The prefix fallback only matches unbackfilled links whose suffix is
+        a single instance timestamp — successor-series ids (extra underscore
+        segment) and links backfilled to another master are untouched."""
+        calendar_id = await _create_calendar(async_connection)
+        processor = _processor(async_connection)
+
+        legacy = await processor.process_event(
+            _sync_event(
+                "journal_event.created",
+                calendar_id=calendar_id,
+                external_event_id=f"{MASTER_ID}_20260801T090000Z",
+            )
+        )
+        successor_form = await processor.process_event(
+            _sync_event(
+                "journal_event.created",
+                calendar_id=calendar_id,
+                external_event_id=f"{MASTER_ID}_R20260901T090000_20260908T090000Z",
+            )
+        )
+        backfilled_other = await processor.process_event(
+            _sync_event(
+                "journal_event.created",
+                calendar_id=calendar_id,
+                external_event_id=f"{MASTER_ID}_20261001T090000Z",
+                recurring_event_id=f"{MASTER_ID}_R20260901T090000",
+            )
+        )
+
+        result = await processor.process_event(_series_cancelled_event(calendar_id))
+
+        assert result["deleted"] == 1
+        assert not await _journal_exists(async_connection, legacy["journal_id"])
+        assert await _journal_exists(async_connection, successor_form["journal_id"])
+        assert (
+            await _event_state(async_connection, successor_form["journal_id"])
+            != "cancelled"
+        )
+        assert await _journal_exists(async_connection, backfilled_other["journal_id"])
+
+
+@pytest.mark.integration
+class TestDeletionGuardUserData:
+    async def test_instance_with_route_falls_back_to_cancel(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """A user-attached GPS route protects a far-future instance."""
+        calendar_id = await _create_calendar(async_connection)
+        processor = _processor(async_connection)
+
+        created = await processor.process_event(
+            _sync_event(
+                "journal_event.created",
+                calendar_id=calendar_id,
+                external_event_id=f"{MASTER_ID}_routed",
+                recurring_event_id=MASTER_ID,
+            )
+        )
+        journal_id = created["journal_id"]
+        await async_connection.execute(
+            text(
+                "INSERT INTO routes (journal_id, name)"
+                " VALUES (:journal_id, 'Planned track')"
+            ),
+            {"journal_id": journal_id},
+        )
+
+        result = await processor.process_event(_series_cancelled_event(calendar_id))
+
+        assert result["deleted"] == 0
+        assert result["cancelled"] == 1
+        assert await _journal_exists(async_connection, journal_id)
+        assert await _event_state(async_connection, journal_id) == "cancelled"
+
+    async def test_instance_with_type_data_falls_back_to_cancel(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """User-added type data (e.g. mood) protects a far-future instance."""
+        calendar_id = await _create_calendar(async_connection)
+        processor = _processor(async_connection)
+
+        created = await processor.process_event(
+            _sync_event(
+                "journal_event.created",
+                calendar_id=calendar_id,
+                external_event_id=f"{MASTER_ID}_mooded",
+                recurring_event_id=MASTER_ID,
+            )
+        )
+        journal_id = created["journal_id"]
+        await async_connection.execute(
+            text(
+                "INSERT INTO journal_mood_data (journal_id, mood_value)"
+                " VALUES (:journal_id, 4)"
+            ),
+            {"journal_id": journal_id},
+        )
+
+        result = await processor.process_event(_series_cancelled_event(calendar_id))
+
+        assert result["deleted"] == 0
+        assert result["cancelled"] == 1
+        assert await _journal_exists(async_connection, journal_id)
+        assert await _event_state(async_connection, journal_id) == "cancelled"

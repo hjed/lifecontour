@@ -204,3 +204,28 @@ class TestRecurringSeriesSyncIntegration:
             )
         )
         assert outbox.scalar() == 0
+
+    async def test_series_deletion_detected_via_legacy_link_prefix(
+        self, db_session
+    ) -> None:
+        """A legacy link (no backfilled recurring id) still gates the
+        series_cancelled emission via the instance-id prefix fallback."""
+        await _seed_calendar_with_recurring_instance(
+            db_session, link_recurring_event_id=None
+        )
+
+        result = await _run_sync(
+            db_session,
+            [{"id": MASTER_ID, "status": "cancelled", "etag": '"etag-cancelled"'}],
+        )
+
+        assert result["status"] == "success"
+        assert result.get("series_cancellations") == 1
+
+        outbox = await db_session.execute(
+            text("""
+                SELECT count(*) FROM outbox_events
+                WHERE event_type = 'journal_event.series_cancelled'
+            """)
+        )
+        assert outbox.scalar() == 1

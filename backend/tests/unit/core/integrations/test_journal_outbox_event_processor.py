@@ -149,6 +149,7 @@ def _make_link_row(
     *,
     external_version: str | None = '"etag-old"',
     updated_at: datetime | None = None,
+    recurring_event_id: str | None = None,
 ) -> MagicMock:
     """Create a mock external event link row."""
     row = MagicMock()
@@ -157,6 +158,7 @@ def _make_link_row(
     row.sync_capability = "bidirectional"
     row.sync_status = "synced"
     row.updated_at = updated_at or datetime(2026, 3, 16, tzinfo=UTC)
+    row.recurring_event_id = recurring_event_id
     return row
 
 
@@ -2182,8 +2184,26 @@ class TestRecurringCancellationDeletesFutureInstances:
                 has_tags=False,
                 has_manual_contact_relationships=True,
             ),
+            DeletionProtectionFacts(
+                has_children=False,
+                has_tags=False,
+                has_manual_contact_relationships=False,
+                has_type_data=True,
+            ),
+            DeletionProtectionFacts(
+                has_children=False,
+                has_tags=False,
+                has_manual_contact_relationships=False,
+                has_routes=True,
+            ),
         ],
-        ids=["children", "tags", "manual-contact-relationship"],
+        ids=[
+            "children",
+            "tags",
+            "manual-contact-relationship",
+            "type-data",
+            "route",
+        ],
     )
     async def test_protected_instance_falls_back_to_cancel(
         self,
@@ -2354,26 +2374,25 @@ class TestSeriesCancelledFanOut:
         mock_connection.execute.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_error_on_one_journal_continues_with_rest(
+    async def test_error_on_one_journal_processes_rest_then_fails_event(
         self,
         processor: JournalOutboxEventProcessor,
         mock_journal_service: AsyncMock,
         mock_connection: AsyncMock,
     ) -> None:
-        """One failing journal must not poison the rest of the fan-out."""
+        """A failing journal must not poison the rest of the fan-out, but the
+        event must fail afterwards so the (idempotent) retry can pick up the
+        journals that errored — a success ack would drop them forever."""
         _mock(processor.link_repo).find_journals_for_series.return_value = [
             _make_linked_journal(journal_id=1, days_until_start=10),
             _make_linked_journal(journal_id=2, days_until_start=0.5),
         ]
         mock_journal_service.delete_journal.side_effect = RuntimeError("boom")
 
-        result = await processor.process_event(_make_series_cancelled_event())
+        with pytest.raises(JournalOutboxEventProcessingError, match="1 of 2"):
+            await processor.process_event(_make_series_cancelled_event())
 
-        assert result["status"] == "success"
-        assert result["deleted"] == 0
-        assert result["errors"] == 1
-        # Journal 2 was still marked cancelled despite journal 1 failing.
-        assert result["cancelled"] == 1
+        # Journal 2 was still attempted (marked cancelled) before the raise.
         assert mock_connection.execute.call_count == 2
 
 
@@ -2647,13 +2666,109 @@ class TestSeriesCancelledFanOutSavepoints:
         ]
         mock_journal_service.delete_journal.side_effect = RuntimeError("boom")
 
-        result = await processor.process_event(_make_series_cancelled_event())
+        with pytest.raises(JournalOutboxEventProcessingError):
+            await processor.process_event(_make_series_cancelled_event())
 
-        assert result["errors"] == 1
-        assert result["cancelled"] == 1
         # One savepoint per item: the failed delete rolled back, the
         # successful mark-cancelled committed.
         savepoint = mock_connection.begin_nested.return_value
         assert mock_connection.begin_nested.await_count == 2
         savepoint.rollback.assert_awaited_once()
         savepoint.commit.assert_awaited_once()
+
+
+class TestUnchangedEtagBackfill:
+    """Audit fix: the backfill must persist even when the ETag is unchanged.
+
+    The worker's backfill promotion re-sends unchanged events with the SAME
+    etag; if the etag-unchanged skip runs first, the recurring id is never
+    stored and the worker re-promotes forever."""
+
+    @pytest.fixture
+    def mock_connection(self) -> AsyncMock:
+        return _make_mock_connection()
+
+    @pytest.fixture
+    def mock_journal_service(self) -> AsyncMock:
+        return AsyncMock()
+
+    @pytest.fixture
+    def processor(
+        self, mock_journal_service: AsyncMock, mock_connection: AsyncMock
+    ) -> JournalOutboxEventProcessor:
+        proc = JournalOutboxEventProcessor(
+            journal_service=mock_journal_service,
+            connection=mock_connection,
+            contact_repository=MagicMock(),
+            strava_athlete_mapping_repository=MagicMock(),
+        )
+        proc.link_repo = AsyncMock()
+        proc.series_repo = AsyncMock()
+        series = MagicMock()
+        series.id = SERIES_ID
+        _mock(proc.series_repo).get_or_create_by_recurrence.return_value = series
+        return proc
+
+    @pytest.mark.asyncio
+    async def test_unchanged_etag_update_still_backfills_recurring_id_and_series(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """An etag-unchanged UPDATE with a new recurring id persists the link
+        backfill and series membership before skipping."""
+        event = _make_outbox_event(
+            event_type="journal_event.updated",
+            sync_action="updated",
+            existing_journal_id=42,
+            etag='"etag-old"',  # matches the stored link version
+            recurring_event_id="master-1",
+        )
+        mock_connection.execute.side_effect = [
+            MagicMock(),  # _ensure_calendar_exists
+            _mock_fetchone(_make_journal_row()),  # _find_journal_by_id
+            _mock_fetchone(
+                _make_link_row(recurring_event_id=None)
+            ),  # _find_external_event_link (same etag, unbackfilled)
+            _mock_empty_result(),  # _update_external_event_link_etag (backfill)
+        ]
+
+        result = await processor.process_event(event)
+
+        assert result["status"] == "skipped"
+        assert result["reason"] == "etag_unchanged"
+        backfill_call = mock_connection.execute.call_args_list[3]
+        sql_text = str(backfill_call[0][0].text)
+        assert "recurring_event_id" in sql_text
+        assert backfill_call[0][1]["recurring_event_id"] == "master-1"
+        _mock(processor.series_repo).get_or_create_by_recurrence.assert_awaited_once()
+        _mock(processor.series_repo).add_member.assert_awaited_once_with(SERIES_ID, 42)
+
+    @pytest.mark.asyncio
+    async def test_unchanged_etag_update_with_stored_recurring_id_pure_skip(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Once backfilled, an etag-unchanged UPDATE does no writes at all."""
+        event = _make_outbox_event(
+            event_type="journal_event.updated",
+            sync_action="updated",
+            existing_journal_id=42,
+            etag='"etag-old"',
+            recurring_event_id="master-1",
+        )
+        mock_connection.execute.side_effect = [
+            MagicMock(),  # _ensure_calendar_exists
+            _mock_fetchone(_make_journal_row()),  # _find_journal_by_id
+            _mock_fetchone(
+                _make_link_row(recurring_event_id="master-1")
+            ),  # _find_external_event_link (same etag, already backfilled)
+        ]
+
+        result = await processor.process_event(event)
+
+        assert result["status"] == "skipped"
+        assert mock_connection.execute.call_count == 3
+        _mock(processor.series_repo).get_or_create_by_recurrence.assert_not_called()
+        _mock(processor.series_repo).add_member.assert_not_called()

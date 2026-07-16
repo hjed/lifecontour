@@ -3471,11 +3471,26 @@ async def sync_calendar_events(
                         # Instances point at it via recurring_event_id.
                         has_series_links = False
                         if google_event.status == "cancelled" and existing_link is None:
+                            # Match the backfilled recurring id, plus a prefix
+                            # fallback for legacy links synced before the id
+                            # was recorded (instance ids are <master>_<time>;
+                            # the extra-underscore guard excludes successor
+                            # series created by "this and following" edits).
+                            escaped_master = (
+                                google_event.id.replace("\\", "\\\\")
+                                .replace("%", "\\%")
+                                .replace("_", "\\_")
+                            )
                             series_links_stmt = text("""
                                 SELECT 1
                                 FROM journal_external_event_links
                                 WHERE calendar_id = :calendar_id
-                                  AND recurring_event_id = :recurring_event_id
+                                  AND (recurring_event_id = :recurring_event_id
+                                       OR (recurring_event_id IS NULL
+                                           AND external_event_id
+                                               LIKE :instance_prefix ESCAPE '\\'
+                                           AND external_event_id
+                                               NOT LIKE :deeper_prefix ESCAPE '\\'))
                                 LIMIT 1
                             """)
                             series_links_result = await session.execute(
@@ -3483,6 +3498,8 @@ async def sync_calendar_events(
                                 {
                                     "calendar_id": calendar_id,
                                     "recurring_event_id": google_event.id,
+                                    "instance_prefix": f"{escaped_master}\\_%",
+                                    "deeper_prefix": f"{escaped_master}\\_%\\_%",
                                 },
                             )
                             has_series_links = series_links_result.scalar() is not None

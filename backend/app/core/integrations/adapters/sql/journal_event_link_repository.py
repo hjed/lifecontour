@@ -36,6 +36,53 @@ class DeletionProtectionFacts:
     has_children: bool
     has_tags: bool
     has_manual_contact_relationships: bool
+    has_type_data: bool = False
+    has_routes: bool = False
+
+    @property
+    def is_protected(self) -> bool:
+        """Whether any local addition protects the journal from deletion."""
+        return (
+            self.has_children
+            or self.has_tags
+            or self.has_manual_contact_relationships
+            or self.has_type_data
+            or self.has_routes
+        )
+
+
+# Type-data tables whose presence marks user-authored content on a journal.
+# journal_calendar_info (EVENT) is sync-managed and deliberately excluded;
+# everything else is only ever written by the user (calendar sync never
+# creates these rows on an EVENT journal).
+_USER_TYPE_DATA_TABLES: tuple[str, ...] = (
+    "journal_mood_data",
+    "journal_plan_data",
+    "journal_travel_data",
+    "journal_fitness_data",
+    "journal_outdoor_activity_data",
+    "journal_bushwalking_data",
+    "journal_jogging_data",
+    "journal_abseiling_data",
+    "journal_canyoning_data",
+    "journal_climbing_data",
+    "journal_kayaking_data",
+    "journal_skiing_data",
+    "journal_caving_data",
+    "journal_canoeing_data",
+    "journal_snorkelling_data",
+    "journal_diving_data",
+    "journal_downhill_skiing_data",
+    "journal_outdoor_planning_data",
+    "journal_outdoor_training_data",
+    "journal_gear_maintenance_data",
+    "journal_gear_usage_data",
+)
+
+_TYPE_DATA_EXISTS_SQL = " OR ".join(
+    f"EXISTS (SELECT 1 FROM {table} WHERE journal_id = :journal_id)"
+    for table in _USER_TYPE_DATA_TABLES
+)
 
 
 _LINKED_JOURNAL_SELECT = """
@@ -105,12 +152,21 @@ class SqlJournalEventLinkRepository:
             .replace("%", "\\%")
             .replace("_", "\\_")
         )
+        # The prefix fallback only applies to unbackfilled links (a stored
+        # recurring id is authoritative) and only to single-segment suffixes:
+        # Google "this and following" splits create a SUCCESSOR master named
+        # <oldId>_R<time>, whose instance ids also start with <oldId>_ but
+        # carry an extra underscore segment — those belong to a different,
+        # still-active series and must not match.
         query = text(
             f"""
             {_LINKED_JOURNAL_SELECT}
             WHERE l.calendar_id = :calendar_id
               AND (l.recurring_event_id = :recurring_event_id
-                   OR l.external_event_id LIKE :instance_prefix ESCAPE '\\')
+                   OR (l.recurring_event_id IS NULL
+                       AND l.external_event_id LIKE :instance_prefix ESCAPE '\\'
+                       AND l.external_event_id
+                           NOT LIKE :deeper_prefix ESCAPE '\\'))
             """
         )
         result = await self.conn.execute(
@@ -119,6 +175,7 @@ class SqlJournalEventLinkRepository:
                 "calendar_id": calendar_id,
                 "recurring_event_id": recurring_event_id,
                 "instance_prefix": f"{escaped}\\_%",
+                "deeper_prefix": f"{escaped}\\_%\\_%",
             },
         )
         return [_row_to_linked_journal(row) for row in result.fetchall()]
@@ -130,9 +187,11 @@ class SqlJournalEventLinkRepository:
 
         INVITEE contact relationships are sync-managed (created from event
         attendees), so only other relationship types count as manual additions.
+        Type data (mood, plan, activity data, ...) and GPS routes never bump
+        journals.updated_at, so they are checked explicitly here.
         """
         query = text(
-            """
+            f"""
             SELECT
                 EXISTS (
                     SELECT 1 FROM journals WHERE parent_id = :journal_id
@@ -145,7 +204,11 @@ class SqlJournalEventLinkRepository:
                     SELECT 1 FROM journal_contact_relationships
                     WHERE journal_id = :journal_id
                       AND relationship_type != 'INVITEE'
-                ) AS has_manual_contact_relationships
+                ) AS has_manual_contact_relationships,
+                ({_TYPE_DATA_EXISTS_SQL}) AS has_type_data,
+                EXISTS (
+                    SELECT 1 FROM routes WHERE journal_id = :journal_id
+                ) AS has_routes
             """
         )
         result = await self.conn.execute(query, {"journal_id": journal_id})
@@ -155,11 +218,15 @@ class SqlJournalEventLinkRepository:
                 has_children=True,
                 has_tags=True,
                 has_manual_contact_relationships=True,
+                has_type_data=True,
+                has_routes=True,
             )
         return DeletionProtectionFacts(
             has_children=row.has_children,
             has_tags=row.has_tags,
             has_manual_contact_relationships=row.has_manual_contact_relationships,
+            has_type_data=row.has_type_data,
+            has_routes=row.has_routes,
         )
 
     async def delete_links_for_journal(self, journal_id: int) -> None:

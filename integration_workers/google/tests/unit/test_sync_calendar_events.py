@@ -954,3 +954,79 @@ class TestSyncRecurringSeries:
         assert result["status"] == "success"
         mock_session.add.assert_not_called()
         assert result["events_skipped"] >= 1
+
+
+class TestMasterCancellationLegacyLinks:
+    """Audit fix: legacy links (no backfilled recurring id) must still gate
+    CANCEL_SERIES via an external_event_id prefix fallback."""
+
+    @pytest.fixture(autouse=True)
+    def mock_metrics_collector(self):
+        from core_shared.metrics import MetricsCollector
+
+        with patch("worker.metrics_collector", spec_set=MetricsCollector) as mock_mc:
+            yield mock_mc
+
+    @pytest.fixture
+    def mock_session(self) -> AsyncMock:
+        session = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=None)
+        return session
+
+    @pytest.fixture
+    def mock_session_factory(self, mock_session: AsyncMock) -> MagicMock:
+        factory = MagicMock()
+        factory.return_value = mock_session
+        return factory
+
+    @pytest.fixture
+    def mock_ctx(self, mock_session_factory: MagicMock) -> dict[str, Any]:
+        return make_arq_ctx(
+            session_factory=mock_session_factory, redis=make_mock_redis()
+        )
+
+    @pytest.mark.asyncio
+    async def test_series_links_check_includes_prefix_fallback(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        """The EXISTS gate matches unbackfilled links by instance-id prefix so
+        deleting a legacy series still emits journal_event.series_cancelled."""
+        from worker import sync_calendar_events
+
+        cal_result = MagicMock()
+        cal_result.fetchall.return_value = [_make_calendar_row()]
+        token_result = MagicMock()
+        token_result.scalar.return_value = None
+        link_result = MagicMock()
+        link_result.fetchone.return_value = None
+        series_links_result = MagicMock()
+        series_links_result.scalar.return_value = 1
+
+        mock_session.execute.side_effect = [
+            cal_result,  # calendar query
+            token_result,  # sync token query
+            link_result,  # existing link lookup
+            series_links_result,  # series links EXISTS check
+            MagicMock(),  # sync token save
+        ]
+
+        google_events = {
+            "items": [{"id": "master-1", "status": "cancelled", "etag": '"etag-c"'}],
+            "nextSyncToken": "new-sync-token",
+        }
+        mock_client = MagicMock()
+        mock_client.list_events = AsyncMock(return_value=google_events)
+
+        with patch("worker._create_google_client", return_value=mock_client):
+            result = await sync_calendar_events(
+                mock_ctx, "test@example.com", "user-1", "full"
+            )
+
+        assert result["status"] == "success"
+        series_check_call = mock_session.execute.call_args_list[3]
+        sql_text = str(series_check_call[0][0].text)
+        assert "recurring_event_id = :recurring_event_id" in sql_text
+        assert "recurring_event_id IS NULL" in sql_text
+        assert "LIKE :instance_prefix" in sql_text
+        assert series_check_call[0][1]["instance_prefix"] == "master-1\\_%"
