@@ -78,6 +78,49 @@ test.describe('Journal Markdown Editor', () => {
     await expect(content).not.toContainText('# Big heading');
   });
 
+  test('applies typography styling to the rendered markdown', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const page = authenticatedPage;
+    const content = await openJournalWithContent(
+      page,
+      testCleanup,
+      '# Big heading\n\n- first\n- second'
+    );
+
+    // The typography plugin must actually style the semantic elements —
+    // without it preflight leaves headings at inherited weight and lists
+    // without bullets, so markdown looks like plain text.
+    const heading = content.getByRole('heading', { level: 1 });
+    await expect(heading).toHaveCSS('font-weight', '800');
+    await expect(content.locator('ul')).toHaveCSS('list-style-type', 'disc');
+  });
+
+  test('prose text follows the class-based dark theme', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const page = authenticatedPage;
+    const content = await openJournalWithContent(
+      page,
+      testCleanup,
+      '# Big heading\n\nBody text.'
+    );
+
+    // Prose colors come from the app's theme tokens, so toggling the `.dark`
+    // class must restyle the rendered markdown (media-query-based
+    // `prose-invert` would ignore the in-app toggle).
+    const heading = content.getByRole('heading', { level: 1 });
+    const lightColor = await heading.evaluate(el => getComputedStyle(el).color);
+    await page.getByTestId('theme-toggle').click();
+    // Guard that the click actually engaged the class-based toggle — if the
+    // header ever swaps to the dropdown ThemeToggle (first click only opens a
+    // menu), this fails loudly instead of timing out on the color assertion.
+    await expect(page.locator('html')).toHaveClass(/dark/);
+    await expect(heading).not.toHaveCSS('color', lightColor);
+  });
+
   test('does not execute embedded scripts (XSS)', async ({
     authenticatedPage,
     testCleanup,

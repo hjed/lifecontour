@@ -49,7 +49,7 @@ export function MarkdownRenderer({
 }: MarkdownRendererProps) {
   return (
     <div
-      className={cn('prose prose-sm dark:prose-invert max-w-none', className)}
+      className={cn('prose prose-sm max-w-none', className)}
       data-testid={testId}
     >
       <ReactMarkdown
