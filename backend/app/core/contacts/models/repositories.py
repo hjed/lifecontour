@@ -2,7 +2,6 @@
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from datetime import datetime
 from typing import Any, Protocol
 
 from core_shared.models.contacts.entities import (
@@ -591,13 +590,15 @@ class ContactSummaryRepository(ABC):
 
     @abstractmethod
     async def claim_due_refreshes(
-        self, cutoff: datetime, limit: int
+        self, buffer_seconds: int, limit: int
     ) -> list[tuple[int, bool]]:
         """Atomically claim contacts whose buffered refresh is due.
 
-        Clears the marker on rows with ``refresh_requested_at <= cutoff`` and
-        returns ``(contact_id, is_disabled)`` tuples, oldest marker first.
-        Disabled rows are claimed too (so stale markers don't accumulate) but
-        callers must not dispatch generation for them.
+        Clears the marker on rows whose ``refresh_requested_at`` is at least
+        ``buffer_seconds`` old — measured on the database clock, the same
+        source that stamps the marker — and returns ``(contact_id,
+        is_disabled)`` tuples, oldest marker first. Disabled rows are claimed
+        too (so stale markers don't accumulate) but callers must not dispatch
+        generation for them.
         """
         pass

@@ -12,7 +12,6 @@ lifecycle pattern (see run_outbox_relay_loop).
 """
 
 import asyncio
-from datetime import UTC, datetime, timedelta
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -68,8 +67,11 @@ class SummaryRefreshSweeper:
         repository = SqlContactSummaryRepository(connection)
         publisher = OutboxEventPublisher(connection)
 
-        cutoff = datetime.now(UTC) - timedelta(seconds=self._buffer_seconds)
-        claimed = await repository.claim_due_refreshes(cutoff, self._batch_size)
+        # The buffer window is evaluated on the database clock (NOW() in the
+        # claim query), matching the clock that stamps the marker.
+        claimed = await repository.claim_due_refreshes(
+            self._buffer_seconds, self._batch_size
+        )
 
         if not claimed:
             return 0

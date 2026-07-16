@@ -5,7 +5,6 @@ Tests the sweeper that claims due buffered summary-refresh markers and
 publishes ContactSummaryRefreshDue events to the outbox.
 """
 
-from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -100,20 +99,14 @@ class TestSummaryRefreshSweeper:
         mock_publisher.publish.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_cutoff_is_buffer_seconds_before_now(
+    async def test_claim_receives_buffer_window_and_batch_limit(
         self, mock_repo: MagicMock, mock_publisher: MagicMock
     ) -> None:
-        """The claim cutoff trails now by the configured buffer window."""
-        before = datetime.now(UTC)
+        """The buffer window is passed through so the cutoff is computed on
+        the database clock, matching the NOW() used to stamp the marker."""
         await self._sweep(mock_repo, mock_publisher)
-        after = datetime.now(UTC)
 
-        cutoff = mock_repo.claim_due_refreshes.await_args.args[0]
-        assert before - timedelta(seconds=300) <= cutoff
-        assert cutoff <= after - timedelta(seconds=300)
-
-        limit = mock_repo.claim_due_refreshes.await_args.args[1]
-        assert limit == 50
+        mock_repo.claim_due_refreshes.assert_awaited_once_with(300, 50)
 
     @pytest.mark.asyncio
     async def test_publish_failure_propagates_for_rollback(

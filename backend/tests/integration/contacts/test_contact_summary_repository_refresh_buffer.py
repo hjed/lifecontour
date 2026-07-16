@@ -162,8 +162,7 @@ class TestSummaryRefreshBufferRepository:
         await summary_repo.mark_refresh_requested(test_contact.id)
         await self._backdate_marker(clean_database, test_contact.id, seconds_ago=600)
 
-        cutoff = datetime.now(UTC) - timedelta(seconds=300)
-        claimed = await summary_repo.claim_due_refreshes(cutoff, limit=10)
+        claimed = await summary_repo.claim_due_refreshes(buffer_seconds=300, limit=10)
 
         assert claimed == [(test_contact.id, False)]
         marker = await self._get_marker(clean_database, test_contact.id)
@@ -176,8 +175,7 @@ class TestSummaryRefreshBufferRepository:
         """Rows whose marker is newer than the cutoff are not claimed."""
         await summary_repo.mark_refresh_requested(test_contact.id)
 
-        cutoff = datetime.now(UTC) - timedelta(seconds=300)
-        claimed = await summary_repo.claim_due_refreshes(cutoff, limit=10)
+        claimed = await summary_repo.claim_due_refreshes(buffer_seconds=300, limit=10)
 
         assert claimed == []
         marker = await self._get_marker(clean_database, test_contact.id)
@@ -202,8 +200,7 @@ class TestSummaryRefreshBufferRepository:
             {"contact_id": test_contact.id},
         )
 
-        cutoff = datetime.now(UTC) - timedelta(seconds=300)
-        claimed = await summary_repo.claim_due_refreshes(cutoff, limit=10)
+        claimed = await summary_repo.claim_due_refreshes(buffer_seconds=300, limit=10)
 
         assert claimed == [(test_contact.id, True)]
         marker = await self._get_marker(clean_database, test_contact.id)
@@ -227,8 +224,7 @@ class TestSummaryRefreshBufferRepository:
         await self._backdate_marker(clean_database, contacts[1].id, seconds_ago=700)
         await self._backdate_marker(clean_database, contacts[2].id, seconds_ago=500)
 
-        cutoff = datetime.now(UTC) - timedelta(seconds=300)
-        claimed = await summary_repo.claim_due_refreshes(cutoff, limit=2)
+        claimed = await summary_repo.claim_due_refreshes(buffer_seconds=300, limit=2)
 
         claimed_ids = [contact_id for contact_id, _ in claimed]
         assert claimed_ids == [contacts[0].id, contacts[1].id]

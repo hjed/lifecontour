@@ -1,7 +1,6 @@
 """SQL implementation of ContactSummaryRepository."""
 
 import json
-from datetime import datetime
 from typing import Any
 
 from core_shared.models.contacts.entities import ContactSummary, SummaryStatus
@@ -156,14 +155,17 @@ class SqlContactSummaryRepository(ContactSummaryRepository):
         await self.conn.execute(query, {"contact_id": contact_id})
 
     async def claim_due_refreshes(
-        self, cutoff: datetime, limit: int
+        self, buffer_seconds: int, limit: int
     ) -> list[tuple[int, bool]]:
         """Atomically claim contacts whose buffered refresh is due.
 
-        Clears markers older than the cutoff and returns the affected
-        ``(contact_id, is_disabled)`` pairs, oldest first. ``FOR UPDATE SKIP
-        LOCKED`` makes concurrent sweeps safe: a row claimed by one sweep is
-        invisible to the next, so a refresh is dispatched exactly once.
+        Clears markers older than the buffer window and returns the affected
+        ``(contact_id, is_disabled)`` pairs, oldest first. The cutoff is
+        computed with the database's NOW() — the same clock that stamps the
+        marker in mark_refresh_requested — so app/DB clock drift cannot
+        stretch or shrink the debounce window. ``FOR UPDATE SKIP LOCKED``
+        makes concurrent sweeps safe: a row claimed by one sweep is invisible
+        to the next, so a refresh is dispatched exactly once.
         """
         query = text(
             """
@@ -171,7 +173,8 @@ class SqlContactSummaryRepository(ContactSummaryRepository):
                 SELECT contact_id, refresh_requested_at
                 FROM contact_summaries
                 WHERE refresh_requested_at IS NOT NULL
-                  AND refresh_requested_at <= :cutoff
+                  AND refresh_requested_at
+                      <= NOW() - make_interval(secs => :buffer_seconds)
                 ORDER BY refresh_requested_at
                 LIMIT :limit
                 FOR UPDATE SKIP LOCKED
@@ -183,6 +186,8 @@ class SqlContactSummaryRepository(ContactSummaryRepository):
             RETURNING cs.contact_id, cs.is_disabled, due.refresh_requested_at
         """
         )
-        result = await self.conn.execute(query, {"cutoff": cutoff, "limit": limit})
+        result = await self.conn.execute(
+            query, {"buffer_seconds": buffer_seconds, "limit": limit}
+        )
         rows = sorted(result.fetchall(), key=lambda row: row.refresh_requested_at)
         return [(row.contact_id, row.is_disabled) for row in rows]
