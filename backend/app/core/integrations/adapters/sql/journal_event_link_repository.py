@@ -23,6 +23,7 @@ class SeriesLinkedJournal:
     user_id: str
     external_event_id: str | None
     recurring_event_id: str | None
+    link_sync_status: str | None
     link_updated_at: datetime | None
     journal_updated_at: datetime | None
     event_date_range_start: datetime | None
@@ -90,6 +91,7 @@ _LINKED_JOURNAL_SELECT = """
            j.user_id,
            l.external_event_id,
            l.recurring_event_id,
+           l.sync_status AS link_sync_status,
            l.updated_at AS link_updated_at,
            j.updated_at AS journal_updated_at,
            j.event_date_range_start,
@@ -105,6 +107,7 @@ def _row_to_linked_journal(row: Any) -> SeriesLinkedJournal:
         user_id=row.user_id,
         external_event_id=row.external_event_id,
         recurring_event_id=row.recurring_event_id,
+        link_sync_status=row.link_sync_status,
         link_updated_at=row.link_updated_at,
         journal_updated_at=row.journal_updated_at,
         event_date_range_start=row.event_date_range_start,

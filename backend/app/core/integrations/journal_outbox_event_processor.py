@@ -832,9 +832,18 @@ class JournalOutboxEventProcessor:
         """Whether a cancelled recurring instance should be deleted outright.
 
         Only instances starting more than a day ahead qualify, and any local
-        additions (edits after the last sync, children, tags, or non-invitee
-        contact links) protect the journal — it falls back to mark-cancelled.
+        additions (edits after the last sync, children, tags, type data,
+        routes, or non-invitee contact links) protect the journal — it falls
+        back to mark-cancelled.
+
+        A link already marked cancelled keeps its earlier keep decision:
+        _mark_journal_cancelled bumps the link's updated_at, erasing the
+        edit-protection signal, so re-evaluating on event redelivery (or a
+        repeated upstream cancellation) could delete a journal that was
+        protected the first time.
         """
+        if linked.link_sync_status == "cancelled":
+            return False
         if linked.event_date_range_start is None:
             return False
         if linked.event_date_range_start <= datetime.now(UTC) + _SERIES_DELETION_BUFFER:

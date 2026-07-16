@@ -2748,7 +2748,6 @@ async def get_journal(
     ]
 
     # Fetch external links (Strava and Google Calendar)
-    user_id = await get_current_user_id()
     external_links = await _fetch_journal_external_links(
         journal_id, repos.fitness_data_repo, db_connection, user_id
     )

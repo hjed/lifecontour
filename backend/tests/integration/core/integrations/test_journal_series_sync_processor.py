@@ -689,3 +689,47 @@ class TestDeletionGuardUserData:
         assert result["cancelled"] == 1
         assert await _journal_exists(async_connection, journal_id)
         assert await _event_state(async_connection, journal_id) == "cancelled"
+
+
+@pytest.mark.integration
+class TestStickyCancellationOnRedelivery:
+    async def test_edited_journal_survives_repeated_series_cancellation(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """Marking a journal cancelled bumps the link timestamp and erases the
+        edit signal; a redelivered/repeated series_cancelled event must not
+        delete the previously-protected journal."""
+        calendar_id = await _create_calendar(async_connection)
+        processor = _processor(async_connection)
+
+        created = await processor.process_event(
+            _sync_event(
+                "journal_event.created",
+                calendar_id=calendar_id,
+                external_event_id=f"{MASTER_ID}_sticky",
+                recurring_event_id=MASTER_ID,
+            )
+        )
+        journal_id = created["journal_id"]
+
+        # Local edit -> protected on the first pass.
+        await async_connection.execute(
+            text(
+                "UPDATE journals SET content = 'my notes', updated_at = :ts"
+                " WHERE id = :id"
+            ),
+            {"ts": datetime.now(UTC) + timedelta(seconds=30), "id": journal_id},
+        )
+
+        first = await processor.process_event(_series_cancelled_event(calendar_id))
+        assert first["cancelled"] == 1
+        assert first["deleted"] == 0
+
+        # Redelivery / repeated upstream cancellation: the link timestamp was
+        # bumped by the first pass, so the edit signal is gone — the sticky
+        # cancelled status must protect the journal instead.
+        second = await processor.process_event(_series_cancelled_event(calendar_id))
+
+        assert second["deleted"] == 0
+        assert await _journal_exists(async_connection, journal_id)
+        assert await _event_state(async_connection, journal_id) == "cancelled"

@@ -2002,6 +2002,7 @@ def _make_linked_journal(
     days_until_start: float = 10.0,
     duration_hours: float | None = 1.0,
     edited: bool = False,
+    link_sync_status: str = "synced",
 ) -> SeriesLinkedJournal:
     """Build a SeriesLinkedJournal row relative to the current time.
 
@@ -2022,6 +2023,7 @@ def _make_linked_journal(
         user_id=user_id,
         external_event_id=external_event_id,
         recurring_event_id=recurring_event_id,
+        link_sync_status=link_sync_status,
         link_updated_at=link_updated_at,
         journal_updated_at=journal_updated_at,
         event_date_range_start=start,
@@ -2772,3 +2774,85 @@ class TestUnchangedEtagBackfill:
         assert mock_connection.execute.call_count == 3
         _mock(processor.series_repo).get_or_create_by_recurrence.assert_not_called()
         _mock(processor.series_repo).add_member.assert_not_called()
+
+
+class TestStickyCancellationDecision:
+    """PR-review hardening: a link already marked cancelled is never eligible
+    for deletion on a later pass.
+
+    _mark_journal_cancelled bumps the link's updated_at, which erases the
+    journal_updated_at > link_updated_at edit signal — so on event redelivery
+    (or a repeated upstream cancellation) a previously-protected, locally
+    edited journal would otherwise look unedited and be deleted."""
+
+    @pytest.fixture
+    def mock_connection(self) -> AsyncMock:
+        return _make_mock_connection()
+
+    @pytest.fixture
+    def mock_journal_service(self) -> AsyncMock:
+        return AsyncMock()
+
+    @pytest.fixture
+    def processor(
+        self, mock_journal_service: AsyncMock, mock_connection: AsyncMock
+    ) -> JournalOutboxEventProcessor:
+        proc = JournalOutboxEventProcessor(
+            journal_service=mock_journal_service,
+            connection=mock_connection,
+            contact_repository=MagicMock(),
+            strava_athlete_mapping_repository=MagicMock(),
+        )
+        proc.link_repo = AsyncMock()
+        proc.series_repo = AsyncMock()
+        _mock(
+            proc.link_repo
+        ).get_deletion_protection_facts.return_value = _UNPROTECTED_FACTS
+        return proc
+
+    @pytest.mark.asyncio
+    async def test_fan_out_never_deletes_an_already_cancelled_link(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+    ) -> None:
+        """A far-future, seemingly-unedited journal whose link is already
+        cancelled keeps the earlier keep decision on redelivery."""
+        _mock(processor.link_repo).find_journals_for_series.return_value = [
+            _make_linked_journal(
+                journal_id=1, days_until_start=10, link_sync_status="cancelled"
+            ),
+        ]
+
+        result = await processor.process_event(_make_series_cancelled_event())
+
+        mock_journal_service.delete_journal.assert_not_called()
+        assert result["deleted"] == 0
+        assert result["cancelled"] == 1
+
+    @pytest.mark.asyncio
+    async def test_instance_cancellation_never_deletes_an_already_cancelled_link(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """The single-instance delete path applies the same sticky rule."""
+        _mock(
+            processor.link_repo
+        ).find_by_external_event.return_value = _make_linked_journal(
+            link_sync_status="cancelled"
+        )
+        event = _make_outbox_event(
+            event_type="journal_event.cancelled",
+            sync_action="cancelled",
+            existing_journal_id=42,
+            recurring_event_id="master-1",
+        )
+
+        result = await processor.process_event(event)
+
+        assert result["status"] == "success"
+        mock_journal_service.delete_journal.assert_not_called()
+        # Falls through to the (idempotent) mark-cancelled writes.
+        assert mock_connection.execute.call_count == 2
