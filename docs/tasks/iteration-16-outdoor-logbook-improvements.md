@@ -211,9 +211,9 @@ Each sub-iteration defines its objective, the specification section it realises,
 - **Tests:** unit — checked-out determination; templates-done dedup/group/count; integration — seed open+closed checkouts and abseiling journals with refs, assert each.
 - **Docs:** `database-design.md` — the "checked out" definition.
 
-**Phase 3 — REST endpoint + MCP dashboard tool.** PR ~350 lines.
+**Phase 3 — REST endpoint + MCP dashboard tool.** PR ~350 lines. ✅ DONE — the Phase 1–2 `OutdoorDashboardService` is exposed on both surfaces, read-only (no transactions anywhere on either path; the four service reads are awaited sequentially on the request-scoped connection). REST: `GET /api/journals/outdoor-dashboard`, a **singleton** JSON API resource (type `outdoor-dashboards`, id = user id — the daily-summary precedent for user-keyed projections) whose attributes carry all four sections; declared above `GET /{journal_id}` on the journals router so the literal path isn't shadowed. MCP: a single `get_outdoor_dashboard` tool (no arguments) returning the same four sections plus an AI summary line built by a pure `build_dashboard_summary` helper (the one piece of new logic, unit-tested). Neither surface exposes date parameters — windows anchor on "today" in the user's timezone server-side (per the Phase 1 product decision). `templates_done` entries keep `template_id` so the UI/agents can link to the template.
 - A REST dashboard endpoint and a single MCP dashboard-data tool returning all four sections (aggregating Phases 1–2).
-- **Tests:** integration via `authenticated_client` (REST) + MCP end-to-end.
+- **Tests:** integration via `authenticated_client` (REST: empty dashboard, upcoming ordering/exclusions, totals windows, checked-out gear exclusions, templates-done grouping — `test_outdoor_dashboard_api.py`) + MCP end-to-end (registration, all four sections + user scoping, empty — `test_outdoor_dashboard_mcp.py`); unit — summary-line counting/pluralisation (`test_outdoor_dashboard_summary.py`).
 - **Docs:** `api-design.md`. MCP tool documentation lives in the tool docstrings, not `mcp-setup.md` (per PR #1108).
 
 **Phase 4 — Frontend: upcoming + totals widgets.** PR ~350 lines.

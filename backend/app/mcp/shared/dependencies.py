@@ -31,6 +31,9 @@ from app.core.journal.services.journal_write_service import JournalWriteService
 from app.core.journal.services.outdoor_activity_dismissal_service import (
     OutdoorActivityDismissalService,
 )
+from app.core.journal.services.outdoor_dashboard_service import (
+    OutdoorDashboardService,
+)
 from app.core.journal.services.review_item_service import ReviewItemService
 from app.infrastructure.auth.immich_token_service import ImmichTokenService
 from app.infrastructure.auth.models import SessionUser
@@ -216,6 +219,14 @@ async def get_outdoor_activity_dismissal_service() -> OutdoorActivityDismissalSe
     return cast(
         OutdoorActivityDismissalService,
         await _resolve_dependency(OutdoorActivityDismissalService),
+    )
+
+
+async def get_outdoor_dashboard_service() -> OutdoorDashboardService:
+    """Resolve the outdoor dashboard service for the current MCP request."""
+    return cast(
+        OutdoorDashboardService,
+        await _resolve_dependency(OutdoorDashboardService),
     )
 
 

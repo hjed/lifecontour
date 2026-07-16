@@ -152,6 +152,28 @@ Conventions this surface pins down:
   into the `@transactional` dismissal service, which owns the commit —
   controllers never open transactions.
 
+## Outdoor Dashboard Endpoint
+
+The outdoor logbook dashboard is a read-only aggregate over the user's outdoor
+activity journals, exposed as a **singleton JSON:API resource**:
+
+| Verb + path | Purpose | Status |
+|---|---|---|
+| `GET /api/journals/outdoor-dashboard` | The four dashboard sections in one call: `upcoming_activities` (next 30 days, soonest first, capped at 10, outdoor + `OUTDOOR_PLANNING`), `checked_out_gear` (open checkouts, longest out first), `activity_totals` (counts by journal type over rolling 30/365-day windows), and `templates_done` (unique templates referenced by abseiling activities, grouped by template type with per-template done-counts and `template_id` for linking) | 200 |
+
+Conventions this surface pins down:
+
+- **Singleton resource:** resource type `outdoor-dashboards` with the resource
+  id set to the user's id (the daily-summary precedent for aggregates that are
+  projections keyed by user, not stored entities).
+- **Server-side "now":** the endpoint takes no date parameters — the upcoming
+  and totals windows are anchored on "today" in the user's configured timezone
+  (UTC fallback), matching the dashboard service's anchoring rules.
+- **Read-only:** no transaction is opened anywhere on this path; the controller
+  awaits the four service reads sequentially on the request-scoped connection.
+- The matching MCP tool is `get_outdoor_dashboard` (documented in its
+  docstring, per the MCP documentation convention).
+
 ## Authentication Guidelines
 
 ### Session-Based Authentication

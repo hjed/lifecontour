@@ -131,6 +131,9 @@ from app.core.journal.services.journal_write_service import JournalWriteService
 from app.core.journal.services.outdoor_activity_dismissal_service import (
     OutdoorActivityDismissalService,
 )
+from app.core.journal.services.outdoor_dashboard_service import (
+    OutdoorDashboardService,
+)
 from app.core.journal.services.review_item_service import ReviewItemService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.mcp.domains.journals.converters import (
@@ -145,6 +148,7 @@ from app.mcp.domains.journals.schemas import (
     ActivityTrendPeriod,
     ActivityTrendsResponse,
     ActivityTypeStats,
+    CheckedOutGearMCPEntry,
     ContactRelationshipSummary,
     DailySummaryMCPResponse,
     EventDateRangeSchema,
@@ -164,9 +168,13 @@ from app.mcp.domains.journals.schemas import (
     MergeCandidatesResponse,
     MergeJournalMCPRequest,
     OutdoorActivityDismissalMCPResponse,
+    OutdoorDashboardMCPResponse,
     RouteHistoryEntry,
     RouteHistoryResponse,
     RouteSummary,
+    TemplateDoneMCPEntry,
+    UpcomingOutdoorActivityMCPEntry,
+    build_dashboard_summary,
 )
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
@@ -181,6 +189,7 @@ from app.mcp.shared.dependencies import (
     get_journal_write_service,
     get_outbox_event_publisher,
     get_outdoor_activity_dismissal_service,
+    get_outdoor_dashboard_service,
     get_review_item_service,
     mcp_depends,
 )
@@ -4473,6 +4482,88 @@ async def undismiss_incomplete_outdoor_activity(
     )
 
 
+@mcp_unified_error_handler("get_outdoor_dashboard", "journal")
+async def get_outdoor_dashboard(
+    user_id: str = mcp_depends(get_current_user_id),
+    dashboard_service: OutdoorDashboardService = mcp_depends(
+        get_outdoor_dashboard_service
+    ),
+) -> str:
+    """
+    The outdoor logbook dashboard: all four widget sections in one call.
+
+    A read-only projection over the user's outdoor activity journals
+    (general fitness journals such as plain jogging are excluded):
+
+    - ``upcoming_activities`` — outdoor activities and OUTDOOR_PLANNING
+      events overlapping the next 30 days, soonest first, capped at 10.
+    - ``checked_out_gear`` — gear whose resolved checkout window contains
+      now and that Snipe-IT hasn't recorded as returned, longest out first.
+    - ``activity_totals_last_30_days`` / ``activity_totals_last_365_days``
+      — outdoor activity counts by journal type over rolling windows.
+    - ``templates_done`` — the unique templates referenced by the user's
+      abseiling activities, grouped by template type, each with how many
+      activities reference it.
+
+    Windows are anchored on "today" in the user's configured timezone
+    server-side, so the tool takes no arguments.
+    """
+    upcoming = await dashboard_service.list_upcoming_activities(user_id)
+    totals = await dashboard_service.activity_totals(user_id)
+    checked_out = await dashboard_service.list_checked_out_gear(user_id)
+    templates_done = await dashboard_service.templates_done(user_id)
+
+    upcoming_entries = [
+        UpcomingOutdoorActivityMCPEntry(
+            journal_id=entry.journal_id,
+            title=entry.title,
+            event_date_range=EventDateRangeSchema(
+                start=entry.event_date_range.start,
+                end=entry.event_date_range.end,
+            ),
+            subtypes=[subtype.value for subtype in entry.subtypes],
+            is_planning=entry.is_planning,
+        )
+        for entry in upcoming
+    ]
+    gear_entries = [
+        CheckedOutGearMCPEntry(
+            gear_item_id=item.gear_item_id,
+            name=item.name,
+            checked_out_since=item.checked_out_since,
+            journal_id=item.journal_id,
+        )
+        for item in checked_out
+    ]
+    template_entries = {
+        template_type: [
+            TemplateDoneMCPEntry(
+                template_id=template.template_id,
+                name=template.name,
+                done_count=template.done_count,
+            )
+            for template in templates
+        ]
+        for template_type, templates in templates_done.items()
+    }
+
+    return MCPResponseBuilder.success_response(
+        OutdoorDashboardMCPResponse(
+            upcoming_activities=upcoming_entries,
+            checked_out_gear=gear_entries,
+            activity_totals_last_30_days=totals.last_30_days,
+            activity_totals_last_365_days=totals.last_365_days,
+            templates_done=template_entries,
+            summary=build_dashboard_summary(
+                upcoming_activities=upcoming_entries,
+                checked_out_gear=gear_entries,
+                activity_totals_last_30_days=totals.last_30_days,
+                templates_done=template_entries,
+            ),
+        )
+    )
+
+
 @mcp_unified_error_handler("get_daily_summary", "journal")
 async def get_daily_summary(
     summary_date: str,
@@ -5041,6 +5132,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
     mcp.add_tool(list_incomplete_outdoor_activities)
     mcp.add_tool(dismiss_incomplete_outdoor_activity)
     mcp.add_tool(undismiss_incomplete_outdoor_activity)
+    mcp.add_tool(get_outdoor_dashboard)
     mcp.add_tool(get_daily_summary)
     mcp.add_tool(create_template)
     mcp.add_tool(get_template)
