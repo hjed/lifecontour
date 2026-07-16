@@ -110,6 +110,22 @@ class Settings(BaseSettings):
         default=5.0, description="Relay poll interval in seconds"
     )
 
+    # Buffered (debounced) AI summary generation settings
+    summary_refresh_buffer_seconds: int = Field(
+        default=300,
+        description="Rolling-debounce quiet period before a buffered contact "
+        "summary refresh is dispatched to Gemini. Each automated refresh "
+        "request resets the timer, so a burst of contact activity costs a "
+        "single generation.",
+    )
+    summary_refresh_sweep_interval: float = Field(
+        default=30.0, description="Summary refresh sweeper poll interval in seconds"
+    )
+    summary_refresh_sweep_batch_size: int = Field(
+        default=50,
+        description="Maximum buffered summary refreshes to dispatch per sweep",
+    )
+
     # MCP settings
     mcp_enabled: bool = Field(default=True, description="Enable MCP server")
     mcp_mount_path: str = Field(

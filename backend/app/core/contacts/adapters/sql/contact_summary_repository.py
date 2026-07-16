@@ -1,6 +1,7 @@
 """SQL implementation of ContactSummaryRepository."""
 
 import json
+from datetime import datetime
 from typing import Any
 
 from core_shared.models.contacts.entities import ContactSummary, SummaryStatus
@@ -121,3 +122,67 @@ class SqlContactSummaryRepository(ContactSummaryRepository):
         if row is None:
             return None
         return self._row_to_entity(row)
+
+    async def mark_refresh_requested(self, contact_id: int) -> None:
+        """Record a buffered refresh request, resetting the debounce timer.
+
+        Creates the summary row (status takes its server default 'pending')
+        when none exists; overwrites ``refresh_requested_at`` on every call so
+        the sweeper only dispatches after the contact has been quiet for the
+        full buffer window. No-op for disabled summaries.
+        """
+        query = text(
+            """
+            INSERT INTO contact_summaries (contact_id, refresh_requested_at)
+            VALUES (:contact_id, NOW())
+            ON CONFLICT (contact_id) DO UPDATE SET
+                refresh_requested_at = NOW(),
+                updated_at = NOW()
+            WHERE contact_summaries.is_disabled = FALSE
+        """
+        )
+        await self.conn.execute(query, {"contact_id": contact_id})
+
+    async def clear_refresh_request(self, contact_id: int) -> None:
+        """Clear any pending buffered refresh marker for a contact."""
+        query = text(
+            """
+            UPDATE contact_summaries
+            SET refresh_requested_at = NULL, updated_at = NOW()
+            WHERE contact_id = :contact_id
+              AND refresh_requested_at IS NOT NULL
+        """
+        )
+        await self.conn.execute(query, {"contact_id": contact_id})
+
+    async def claim_due_refreshes(
+        self, cutoff: datetime, limit: int
+    ) -> list[tuple[int, bool]]:
+        """Atomically claim contacts whose buffered refresh is due.
+
+        Clears markers older than the cutoff and returns the affected
+        ``(contact_id, is_disabled)`` pairs, oldest first. ``FOR UPDATE SKIP
+        LOCKED`` makes concurrent sweeps safe: a row claimed by one sweep is
+        invisible to the next, so a refresh is dispatched exactly once.
+        """
+        query = text(
+            """
+            WITH due AS (
+                SELECT contact_id, refresh_requested_at
+                FROM contact_summaries
+                WHERE refresh_requested_at IS NOT NULL
+                  AND refresh_requested_at <= :cutoff
+                ORDER BY refresh_requested_at
+                LIMIT :limit
+                FOR UPDATE SKIP LOCKED
+            )
+            UPDATE contact_summaries cs
+            SET refresh_requested_at = NULL, updated_at = NOW()
+            FROM due
+            WHERE cs.contact_id = due.contact_id
+            RETURNING cs.contact_id, cs.is_disabled, due.refresh_requested_at
+        """
+        )
+        result = await self.conn.execute(query, {"cutoff": cutoff, "limit": limit})
+        rows = sorted(result.fetchall(), key=lambda row: row.refresh_requested_at)
+        return [(row.contact_id, row.is_disabled) for row in rows]

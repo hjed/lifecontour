@@ -6,7 +6,7 @@ import pytest
 from core_shared.models.contacts.entities import ContactSummary, SummaryStatus
 from core_shared.models.contacts.exceptions import ContactValidationError
 
-from app.core.contacts.models.events import ContactSummaryRefreshRequested
+from app.core.contacts.models.events import ContactSummaryRefreshDue
 from app.core.contacts.services.contact_summary_service import (
     ContactSummaryService,
     ContactSummaryUpdate,
@@ -50,7 +50,7 @@ class TestRequestRefresh:
     async def test_creates_pending_summary_when_none_exists(
         self, summary_service, mock_summary_repo, mock_event_publisher, mock_transaction
     ):
-        """With no existing summary, a pending one is upserted and an event fires."""
+        """With no existing summary, a pending one is upserted and Due fires."""
         mock_summary_repo.find_by_contact_id.return_value = None
 
         await summary_service.request_refresh(42, transaction=mock_transaction)
@@ -61,9 +61,11 @@ class TestRequestRefresh:
         assert upserted.status == SummaryStatus.PENDING
         mock_summary_repo.update_status.assert_not_awaited()
 
+        # Manual refresh bypasses the debounce buffer: it publishes the
+        # generate-now event directly instead of the buffered Requested one.
         mock_event_publisher.publish.assert_awaited_once()
         event = mock_event_publisher.publish.call_args.args[0]
-        assert isinstance(event, ContactSummaryRefreshRequested)
+        assert isinstance(event, ContactSummaryRefreshDue)
         assert event.aggregate_id == 42
         assert event.event_data == {"contact_id": 42}
 
@@ -83,6 +85,22 @@ class TestRequestRefresh:
         )
         mock_summary_repo.upsert.assert_not_awaited()
         mock_event_publisher.publish.assert_awaited_once()
+        event = mock_event_publisher.publish.call_args.args[0]
+        assert isinstance(event, ContactSummaryRefreshDue)
+
+    @pytest.mark.asyncio
+    async def test_absorbs_pending_buffered_request(
+        self, summary_service, mock_summary_repo, mock_event_publisher, mock_transaction
+    ):
+        """Manual refresh clears any queued buffered request so an edit followed
+        by a manual refresh costs one generation, not two."""
+        mock_summary_repo.find_by_contact_id.return_value = ContactSummary(
+            contact_id=42, status=SummaryStatus.GENERATED
+        )
+
+        await summary_service.request_refresh(42, transaction=mock_transaction)
+
+        mock_summary_repo.clear_refresh_request.assert_awaited_once_with(42)
 
     @pytest.mark.asyncio
     async def test_raises_when_disabled(
@@ -98,6 +116,7 @@ class TestRequestRefresh:
 
         mock_summary_repo.update_status.assert_not_awaited()
         mock_summary_repo.upsert.assert_not_awaited()
+        mock_summary_repo.clear_refresh_request.assert_not_awaited()
         mock_event_publisher.publish.assert_not_awaited()
 
 
