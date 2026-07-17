@@ -30,6 +30,7 @@ export const API_ENDPOINTS = {
       `/api/journals/incomplete-outdoor-activities/${journalId}/dismiss`,
     INCOMPLETE_OUTDOOR_ACTIVITY_UNDISMISS: (journalId: string) =>
       `/api/journals/incomplete-outdoor-activities/${journalId}/undismiss`,
+    OUTDOOR_DASHBOARD: '/api/journals/outdoor-dashboard',
   },
   TEMPLATES: {
     BASE: '/api/templates',

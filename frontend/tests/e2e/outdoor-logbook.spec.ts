@@ -1,7 +1,8 @@
 /**
- * E2E Tests for the Outdoor Logbook overview page (incomplete activities
- * review): flagging with reasons, linking to the journal, dismiss,
- * show-dismissed and un-dismiss flows.
+ * E2E Tests for the Outdoor Logbook overview page: the incomplete activities
+ * review (flagging with reasons, linking to the journal, dismiss,
+ * show-dismissed and un-dismiss flows) and the dashboard widgets (upcoming
+ * activities, recent activity totals).
  */
 
 import { test, expect } from './fixtures';
@@ -9,11 +10,21 @@ import { ContactTestHelpers } from './utils/test-helpers';
 
 const LIST_API = '/api/journals/incomplete-outdoor-activities';
 
-/** Today at noon local time, so entries fall on a stable calendar date. */
-function todayNoon(): string {
+/**
+ * Noon local time offset by `days` from today, so entries fall on stable
+ * calendar dates well clear of the timezone-anchored dashboard window
+ * boundaries.
+ */
+function noonOffsetDays(days: number): string {
   const d = new Date();
+  d.setDate(d.getDate() + days);
   d.setHours(12, 0, 0, 0);
   return d.toISOString();
+}
+
+/** Today at noon local time, so entries fall on a stable calendar date. */
+function todayNoon(): string {
+  return noonOffsetDays(0);
 }
 
 test.describe('Outdoor Logbook — incomplete activities review', () => {
@@ -246,5 +257,138 @@ test.describe('Outdoor Logbook — incomplete activities review', () => {
       page.getByTestId(`incomplete-activity-item-${journal.id}`)
     ).toBeHidden();
     await expect(page.getByTestId('incomplete-empty-state')).toBeVisible();
+  });
+});
+
+test.describe('Outdoor Logbook — dashboard widgets', () => {
+  test('shows upcoming activities and recent activity totals for seeded journals', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const page = authenticatedPage;
+    const dataManager = new (await import('./data-management')).TestDataManager(
+      page
+    );
+    const contactTestHelpers = new ContactTestHelpers(page);
+
+    await dataManager.clearAllJournals();
+
+    // Future journals appear in the upcoming widget only; past journals count
+    // in the totals windows only (−10d in both windows, −100d in 365d only).
+    const futureCanyon = await dataManager.createJournal({
+      title: 'Future Canyon',
+      content: 'An upcoming canyoning trip',
+      event_date_range: { start: noonOffsetDays(7), end: noonOffsetDays(7) },
+      types: ['canyoning'],
+    });
+    const planning = await dataManager.createJournal({
+      title: 'Winter Trip Planning',
+      content: 'Planning session for the winter trip',
+      event_date_range: { start: noonOffsetDays(14), end: noonOffsetDays(14) },
+      types: ['outdoor_planning'],
+    });
+    const recentCanyon = await dataManager.createJournal({
+      title: 'Recent Canyon',
+      content: 'A canyoning trip from last week',
+      event_date_range: {
+        start: noonOffsetDays(-10),
+        end: noonOffsetDays(-10),
+      },
+      types: ['canyoning'],
+    });
+    await dataManager.createJournal({
+      title: 'Autumn Hike',
+      content: 'A bushwalk from a few months back',
+      event_date_range: {
+        start: noonOffsetDays(-100),
+        end: noonOffsetDays(-100),
+      },
+      types: ['bushwalking'],
+    });
+
+    testCleanup(async () => {
+      await dataManager.clearAllJournals();
+    });
+
+    await contactTestHelpers.navigateToAuthenticatedPage(
+      '/journals/outdoor-logbook'
+    );
+
+    // Upcoming widget: both future entries visible, soonest first; the past
+    // journal stays out of the list.
+    const upcoming = page.getByTestId('upcoming-ready');
+    await expect(upcoming).toBeVisible({ timeout: 15000 });
+
+    const futureItem = upcoming.getByTestId(
+      `upcoming-activity-item-${futureCanyon.id}`
+    );
+    await expect(futureItem).toBeVisible();
+    await expect(
+      upcoming.getByTestId(`upcoming-activity-item-${planning.id}`)
+    ).toBeVisible();
+    await expect(
+      upcoming.getByTestId(`upcoming-activity-item-${recentCanyon.id}`)
+    ).toBeHidden();
+
+    // Soonest first: the +7d canyon precedes the +14d planning event
+    // (createJournal suffixes titles for uniqueness, so assert on the
+    // returned title)
+    await expect(
+      upcoming.getByRole('listitem').first().getByRole('link')
+    ).toHaveText(futureCanyon.title);
+
+    // Type badges: presence, not exact sets — canyoning renders its
+    // dependency-added badges too.
+    await expect(futureItem.getByTestId('type-badge-canyoning')).toBeVisible();
+    const planningItem = upcoming.getByTestId(
+      `upcoming-activity-item-${planning.id}`
+    );
+    await expect(
+      planningItem.getByTestId('type-badge-outdoor_planning')
+    ).toBeVisible();
+
+    // Totals widget: −10d canyon in both windows; −100d bushwalk in the
+    // 365-day window only; future journals count in neither.
+    const totals = page.getByTestId('totals-ready');
+    await expect(totals).toBeVisible({ timeout: 15000 });
+    await expect(totals.getByTestId('totals-30d-canyoning')).toHaveText('1');
+    await expect(totals.getByTestId('totals-365d-canyoning')).toHaveText('1');
+    await expect(totals.getByTestId('totals-30d-bushwalking')).toHaveText('0');
+    await expect(totals.getByTestId('totals-365d-bushwalking')).toHaveText('1');
+
+    // The upcoming entry links to the journal detail screen
+    await futureItem.getByRole('link', { name: futureCanyon.title }).click();
+    await expect(page).toHaveURL(new RegExp(`/journals/${futureCanyon.id}$`));
+  });
+
+  test('shows empty states when there is no outdoor activity', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const page = authenticatedPage;
+    const dataManager = new (await import('./data-management')).TestDataManager(
+      page
+    );
+    const contactTestHelpers = new ContactTestHelpers(page);
+
+    await dataManager.clearAllJournals();
+
+    testCleanup(async () => {
+      await dataManager.clearAllJournals();
+    });
+
+    await contactTestHelpers.navigateToAuthenticatedPage(
+      '/journals/outdoor-logbook'
+    );
+
+    await expect(page.getByTestId('upcoming-ready')).toBeVisible({
+      timeout: 15000,
+    });
+    await expect(page.getByTestId('upcoming-empty-state')).toBeVisible();
+
+    await expect(page.getByTestId('totals-ready')).toBeVisible({
+      timeout: 15000,
+    });
+    await expect(page.getByTestId('totals-empty-state')).toBeVisible();
   });
 });
