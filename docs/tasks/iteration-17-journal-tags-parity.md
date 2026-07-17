@@ -62,7 +62,7 @@ These rules apply to every task below:
 
 1. **Tests first:** write the failing tests for the slice before implementation.
 2. **Green main:** do not merge a task unless relevant tests, linting, and type checks are passing.
-3. **Reviewable PRs:** keep each PR to roughly `<= 10` files where practical; split tasks into smaller slices if needed.
+3. **Reviewable PRs:** keep each phase's diff to roughly **≤ 500 changed lines** (including tests). If an estimate exceeds that during implementation, split the phase further rather than raising an oversized PR.
 4. **Behaviour parity is the acceptance bar:** when in doubt, the contact tags implementation is the specification. Divergence (other than the UUID vs Integer PK and separate namespace) must be justified in this document.
 5. **Reuse before rebuild:** prefer extracting shared components/utilities from the contact implementation (e.g. `buildTagTree`, `TAG_COLORS`, editor/dialog structure) over duplicating them. Where extraction would bloat a PR, duplicate first and record the consolidation as follow-up here.
 6. **Transactions:** all new write endpoints commit via `@transactional` service methods or `unit_of_work`; controllers and MCP tools never open transactions.
@@ -81,18 +81,18 @@ Every phase below must meet the same completion bar before merge:
 
 ## Sequencing Strategy
 
-1. **ITER17-001** (backend management operations, REST + MCP delivered together per phase) unblocks the sidebar management UI.
+1. **ITER17-001** (backend management operations, REST + MCP delivered together per phase) unblocks the sidebar management UI phase-by-phase: Phase 2 (update) unblocks ITER17-004 Phase 2; Phases 3–4 (delete/merge) unblock ITER17-004 Phase 3.
 2. **ITER17-002** (filtering parity) is independent of 001 and can run in parallel.
 3. **ITER17-003** (detail-page editor) needs only existing endpoints and can start immediately.
-4. **ITER17-004** (sidebar tree + management dialogs) depends on ITER17-001.
-5. **ITER17-005** (history events) depends on ITER17-001 for update/delete/merge events; assignment events can land first if split.
+4. **ITER17-004** (sidebar tree + management dialogs) — Phase 1 needs only ITER17-002; later phases follow the matching ITER17-001 phases.
+5. **ITER17-005 Phase 1** (assignment/removal events) has no ITER17-001 dependency and can run in parallel; Phase 2 (management events) follows ITER17-001 Phases 2–4.
 
 ## Task Breakdown
 
 ### ITER17-001: Journal Tag Management Backend (update, delete parity, merge, description) with MCP Parity
 
 **Objective:** Give journal tags the same management operations as contact tags — full update (name, colour, description, parent), delete that un-assigns rather than blocks, and merge — exposed through **both REST and MCP in the same phase** as each capability lands.
-**Strategy:** Two phases — schema + update first, then delete/merge behaviour change. Each phase ships its REST endpoint and the matching MCP tooling together.
+**Strategy:** Four phases, one management capability per phase (description/list, update, delete, merge), each shipping its REST surface and the matching MCP tooling together to stay within the 500-line diff standard.
 
 **Relevant documents:**
 - [Database Design — Migration Strategy](../architecture/database-design.md#migration-strategy)
@@ -101,46 +101,71 @@ Every phase below must meet the same completion bar before merge:
 - Memory note: MCP tool documentation lives in docstrings/schemas, not in `mcp-setup.md`.
 - MCP rules: MCP tools are controller-equivalent — they call `@transactional` services and never open transactions.
 
-#### Phase 1: Description Column and Tag Update (REST + MCP)
+#### Phase 1: Description Column and MCP Tag Listing
 
-**PR Size:** ~8-10 files
+**Estimated diff:** ~350 lines
 
 **Acceptance Criteria:**
 - [ ] Alembic migration adds nullable `description TEXT` to `journal_tags` (follow the sequential naming convention in the `creating-migrations` skill).
 - [ ] `JournalTag` domain model and repository read/write `description`.
+- [ ] `GET /api/journals/tags` and `POST /api/journals/tags` include `description` in resources.
+- [ ] **MCP (same phase as the listing surface change):** journal tags are listable via MCP with hierarchy, colour, and description — either by extending the existing `list_tags` tool with a domain parameter or adding a journal-scoped equivalent (match whichever pattern the MCP domain structure prefers; document the choice).
+
+**Required Test Coverage:**
+- **Unit:** model/serialisation with and without description; MCP list tool schema.
+- **Integration:** migration applies cleanly; create/list round-trip with description; MCP list tool test mirroring the contact `list_tags` tests.
+- **E2E:** deferred to ITER17-004 (no UI surface yet); MCP integration tests are the equivalent bar for the tool surface.
+
+#### Phase 2: Tag Update (REST + MCP)
+
+**Estimated diff:** ~500 lines
+
+**Acceptance Criteria:**
 - [ ] `JournalTagService.update_tag(tag_id, transaction, name, color, description, parent_id, set_parent_null)` mirroring the contact `TagService.update_tag` signature and validation:
   - name uniqueness (case-insensitive) with a clear validation error on conflict
   - colour format validation (7-char hex `#RRGGBB`)
   - parent hierarchy cycle prevention (a tag cannot become its own ancestor)
 - [ ] `PATCH /api/journals/tags/{tag_id}` endpoint following the contact `PATCH /api/tags/{tag_id}` request/response shape.
-- [ ] `GET /api/journals/tags` and `POST /api/journals/tags` include `description` in resources.
-- [ ] **MCP (same phase):** journal tags are listable via MCP with hierarchy, colour, and description — either by extending the existing `list_tags` tool with a domain parameter or adding a journal-scoped equivalent (match whichever pattern the MCP domain structure prefers; document the choice) — and tag update is reachable via MCP to the same extent it is for contact tags (verify the contact baseline first and match it exactly).
+- [ ] **MCP (same phase):** tag update is reachable via MCP to the same extent it is for contact tags (verify the contact baseline first and match it exactly).
 - [ ] Write path commits via `@transactional`/`unit_of_work` in the service layer; MCP tools call the same `@transactional` service and do not open transactions.
 
 **Required Test Coverage:**
 - **Unit:** update validation (duplicate name, invalid colour, cycle prevention), set-parent-null semantics, MCP tool schema/serialisation.
-- **Integration:** PATCH endpoint round-trip with real DB; uniqueness constraint behaviour; migration applies cleanly; MCP list/update tool tests mirroring the contact tag MCP tests.
-- **E2E:** deferred to ITER17-004 (no UI surface yet); MCP integration tests are the equivalent bar for the tool surface.
+- **Integration:** PATCH endpoint round-trip with real DB; uniqueness constraint behaviour; MCP update tool test if the contact baseline exposes update.
+- **E2E:** deferred to ITER17-004.
 
-#### Phase 2: Delete Parity and Merge (REST + MCP)
+#### Phase 3: Delete Parity (REST + MCP)
 
-**PR Size:** ~8-10 files
+**Estimated diff:** ~400 lines
 
 **Acceptance Criteria:**
 - [ ] `JournalTagService.delete_tag(tag_id, transaction)`: deleting a tag removes it from all journals (assignments cascade via existing FK) and deletes the tag — matching contact behaviour. The current 409-when-in-use guard in `DELETE /api/journals/tags/{tag_id}` is removed.
 - [ ] Child tags of a deleted tag are re-parented to NULL (existing `ON DELETE SET NULL`), matching contact behaviour.
+- [ ] **MCP (same phase):** tag delete is reachable via MCP to the same extent it is for contact tags.
+- [ ] Journals affected by delete are re-indexed in MeiliSearch (their `tag_ids` change) — verify how contact tag events drive re-indexing and mirror it (may move to ITER17-005 if event-driven; state the choice in the PR).
+
+**Required Test Coverage:**
+- **Unit:** delete semantics (assignments removed, children re-parented to NULL).
+- **Integration:** delete removes assignments from journals with real DB; hierarchy re-parenting; search index state after delete; MCP delete tool test if the contact baseline exposes delete.
+- **E2E:** deferred to ITER17-004.
+
+#### Phase 4: Tag Merge (REST + MCP)
+
+**Estimated diff:** ~500 lines
+
+**Acceptance Criteria:**
 - [ ] `JournalTagService.merge_tag(source_id, target_id, transaction)` mirroring contact merge semantics:
   - all assignments of the source tag are repointed to the target (duplicate `(journal_id, tag_id)` rows resolved via `ON CONFLICT DO NOTHING`)
   - children of the source tag are re-parented to the target
   - the source tag is deleted
   - merging a tag into itself or into a descendant is rejected
 - [ ] `POST /api/journals/tags/{tag_id}/merge` endpoint following the contact merge endpoint shape.
-- [ ] **MCP (same phase):** journal tags can be merged via MCP, mirroring the contact `merge_tags` tool semantics and reusing `JournalTagService.merge_tag`; tag delete is reachable via MCP to the same extent it is for contact tags.
-- [ ] Journals affected by delete/merge are re-indexed in MeiliSearch (their `tag_ids` change) — verify how contact tag events drive re-indexing and mirror it (may move to ITER17-005 if event-driven; state the choice in the PR).
+- [ ] **MCP (same phase):** journal tags can be merged via MCP, mirroring the contact `merge_tags` tool semantics and reusing `JournalTagService.merge_tag`.
+- [ ] Journals affected by merge are re-indexed in MeiliSearch (same mechanism chosen in Phase 3).
 
 **Required Test Coverage:**
-- **Unit:** merge validation (self-merge, descendant-merge rejection), delete semantics, MCP merge tool schema/serialisation.
-- **Integration:** merge with overlapping assignments (no duplicate-key failure), delete removes assignments from journals, hierarchy re-parenting, search index state after delete/merge, MCP merge/delete tool tests against a real DB.
+- **Unit:** merge validation (self-merge, descendant-merge rejection), MCP merge tool schema/serialisation.
+- **Integration:** merge with overlapping assignments (no duplicate-key failure), hierarchy re-parenting, search index state after merge, MCP merge tool test against a real DB.
 - **E2E:** deferred to ITER17-004.
 
 ---
@@ -148,56 +173,83 @@ Every phase below must meet the same completion bar before merge:
 ### ITER17-002: Journal List Tag Filtering Parity
 
 **Objective:** Match contact list tag filtering: multiple tags, hierarchical descendant expansion, and URL deep-linking.
-**Strategy:** Single phase — backend param upgrade plus frontend wiring.
+**Strategy:** Two phases — backend param upgrade first, then frontend wiring — to stay within the 500-line diff standard.
 
 **Relevant documents:**
 - Contact reference: `_expand_tag_ids_with_descendants` in `backend/app/core/contacts/services/contact_service.py`; `useTagFilter` hook.
 
-#### Phase 1: Multi-Tag, Hierarchical, URL-Driven Filtering
+#### Phase 1: Backend Multi-Tag and Hierarchical Filtering
 
-**PR Size:** ~7-9 files
+**Estimated diff:** ~450 lines
 
 **Acceptance Criteria:**
 - [ ] `GET /api/journals` accepts repeated `tag_ids` query params (list), keeping `tag_id` working for backward compatibility (or migrating all callers in the same PR — state the choice).
 - [ ] Tag filtering expands each requested tag to include all descendant tags before querying, matching contact behaviour (a journal tagged only with a child tag appears when filtering by the parent).
 - [ ] Multiple tags combine the same way the contacts list combines them (verify: contacts use a single JOIN over the expanded ID set, i.e. logical OR across tags — replicate exactly).
+
+**Required Test Coverage:**
+- **Unit:** descendant expansion logic.
+- **Integration:** repository/service filter tests — parent tag returns child-tagged journals; multi-tag combinations; combined with type/date filters (existing AND semantics preserved).
+- **E2E:** existing journal list filter specs continue to pass (frontend behaviour unchanged this phase).
+
+#### Phase 2: Frontend Multi-Tag Params and URL Deep Link
+
+**Estimated diff:** ~350 lines
+
+**Prerequisites:** Phase 1 merged.
+
+**Acceptance Criteria:**
 - [ ] `fetchJournals` sends **all** selected tags, not just the first.
 - [ ] `/journals?tag=<id>` deep link filters the list (reuse or generalise `useTagFilter`), and the filter UI reflects the URL state.
 - [ ] `JournalFilters.tsx` checkbox behaviour is unchanged from the user's perspective apart from now actually applying every selected tag.
 
 **Required Test Coverage:**
-- **Unit:** descendant expansion logic; frontend filter param construction.
-- **Integration:** repository/service filter tests — parent tag returns child-tagged journals; multi-tag combinations; combined with type/date filters (existing AND semantics preserved).
-- **E2E:** filter journals by a parent tag and assert a child-tagged journal appears; deep-link `/journals?tag=` renders a filtered list.
+- **Unit:** frontend filter param construction; `useTagFilter` generalisation.
+- **Integration:** n/a beyond RTL (no new backend).
+- **E2E:** filter journals by a parent tag and assert a child-tagged journal appears; deep-link `/journals?tag=` renders a filtered list; multi-tag selection returns the union.
 
 ---
 
 ### ITER17-003: Journal Detail Tag Editor Parity
 
 **Objective:** Replace the select-dropdown tag UI on the journal detail page with an editor matching `ContactTagsEditor` exactly: searchable add popover, inline create-new-tag with colour picker, dismissible colour-coded badges.
-**Strategy:** Single phase. Prefer extracting a shared, domain-agnostic tags editor component parameterised over the tag type and mutation hooks; if extraction proves too large, build `JournalTagsEditor` as a structural copy and record consolidation as follow-up.
+**Strategy:** Two phases — build the component with its unit tests first, then wire it into the detail view with e2e coverage. Prefer extracting a shared, domain-agnostic tags editor component parameterised over the tag type and mutation hooks; if extraction proves too large, build `JournalTagsEditor` as a structural copy and record consolidation as follow-up.
 
 **Relevant documents:**
 - [Frontend Design — Component Architecture](../architecture/frontend-design.md#component-architecture)
 - Contact reference: `frontend/src/components/contacts/ContactTagsEditor.tsx`, `TAG_COLORS` in `frontend/src/lib/constants.ts`
 
-#### Phase 1: Tags Editor Component
+#### Phase 1: Tags Editor Component and Unit Tests
 
-**PR Size:** ~6-9 files
+**Estimated diff:** ~500 lines
 
 **Acceptance Criteria:**
 - [ ] Assigned tags render as dismissible badges with the tag colour (border/dot styling identical to the contact editor).
 - [ ] Adding a tag opens a searchable popover listing unassigned tags filtered by the query (autocomplete), not a plain select.
 - [ ] When the search query matches no existing tag, the user can create a new tag inline with name + colour (from `TAG_COLORS`), which is created via `POST /api/journals/tags` and immediately assigned.
-- [ ] The add affordance is available even when there are no unassigned tags or no tags at all (the create flow is always reachable) — fixing the current dead end.
+- [ ] The add affordance is available even when there are no unassigned tags or no tags at all (the create flow is always reachable).
 - [ ] Duplicate assignment is prevented in the UI; already-assigned tags do not appear in the add list.
-- [ ] Mutations use the existing `useAddJournalTag` / `useRemoveJournalTag` / journal-tag query hooks with cache invalidation, and errors surface to the user (toast), not only `console.error`.
-- [ ] `JournalDetailView.tsx` uses the new editor; the old `JournalTagBadge` select flow is removed (keep the read-only badge rendering if still used elsewhere).
-- [ ] Existing journal-detail tag e2e tests are updated to the new interaction and still cover add + remove.
 - [ ] Accessibility matches the contact editor: labelled controls, keyboard operability, `aria-label` on remove buttons.
+- [ ] The component is exported but not yet mounted in `JournalDetailView` (existing behaviour unchanged this phase — the phase is shippable with no user-visible change).
 
 **Required Test Coverage:**
 - **Unit (RTL):** mirror `ContactTagsEditor.test.tsx` — open/close, search filtering, add existing, create new (name + colour), remove, duplicate prevention, error handling.
+- **Integration:** n/a (no backend change).
+- **E2E:** deferred to Phase 2 (component not yet mounted).
+
+#### Phase 2: Detail View Wiring and E2E
+
+**Estimated diff:** ~300 lines
+
+**Prerequisites:** Phase 1 merged.
+
+**Acceptance Criteria:**
+- [ ] `JournalDetailView.tsx` uses the new editor; the old `JournalTagBadge` select flow is removed (keep the read-only badge rendering if still used elsewhere).
+- [ ] Mutations use the existing `useAddJournalTag` / `useRemoveJournalTag` / journal-tag query hooks with cache invalidation, and errors surface to the user (toast), not only `console.error`.
+- [ ] Existing journal-detail tag e2e tests are updated to the new interaction and still cover add + remove.
+
+**Required Test Coverage:**
+- **Unit (RTL):** detail-view integration test with the editor mounted.
 - **Integration:** mutation hook tests if new hooks are added (mirror `contact-tag-mutations.test.ts`).
 - **E2E:** on a journal detail page — add an existing tag, create a brand-new tag inline and see it assigned with its colour, remove a tag. Use fixture-created data; ProseMirror/typing-delay best practices where applicable.
 
@@ -206,16 +258,16 @@ Every phase below must meet the same completion bar before merge:
 ### ITER17-004: Sidebar Journal Tag Tree and Tag Management UI
 
 **Objective:** Add a hierarchical journal tag tree to the Journals sidebar section with the same management affordances as contacts: expand/collapse, click-to-filter, context menu with edit / delete / merge dialogs, and a create-tag button.
-**Strategy:** Two phases — read-only tree + navigation first, management dialogs second.
+**Strategy:** Three phases — read-only tree + navigation first, then create + edit dialogs, then delete + merge — keeping each within the 500-line diff standard.
 
-**Prerequisites:** ITER17-001 (update/delete/merge endpoints), ITER17-002 (`/journals?tag=` deep link).
+**Prerequisites:** ITER17-002 (`/journals?tag=` deep link) for Phase 1; the matching ITER17-001 phases for Phases 2–3 (see per-phase prerequisites).
 
 **Relevant documents:**
 - Contact reference: `Sidebar.tsx` (TagTreeNavigation, TagTreeItem), `buildTagTree.ts`, `TagContextMenu.tsx`, `TagManagementDialog.tsx`, `CreateTagDialog.tsx`
 
 #### Phase 1: Sidebar Tree and Navigation
 
-**PR Size:** ~5-7 files
+**Estimated diff:** ~450 lines
 
 **Acceptance Criteria:**
 - [ ] The Journals sidebar section renders the journal tag tree (nested by `parent_id`) below the existing links, visually and behaviourally identical to the contacts tag tree (expand/collapse chevrons, truncation, icons).
@@ -228,49 +280,78 @@ Every phase below must meet the same completion bar before merge:
 - **Integration:** n/a beyond RTL (no new backend).
 - **E2E:** create tags (parent + child) via API fixtures, open sidebar, expand parent, click child tag, assert the journals list is filtered.
 
-#### Phase 2: Create, Edit, Delete, Merge Dialogs
+#### Phase 2: Create and Edit Dialogs
 
-**PR Size:** ~6-9 files
+**Estimated diff:** ~450 lines
+
+**Prerequisites:** Phase 1 merged; ITER17-001 Phase 2 (update endpoint).
 
 **Acceptance Criteria:**
 - [ ] A create-tag button in the journals sidebar section opens a create dialog (name, colour, optional parent) matching `CreateTagDialog`.
-- [ ] Right-click/context menu on a journal tag offers Edit and Delete (and Merge inside the management dialog), matching `TagContextMenu`.
-- [ ] The management dialog supports editing name, colour, description, and parent; deleting (with confirmation, warning that the tag is removed from all journals); and merging into another tag — matching `TagManagementDialog` field-for-field.
-- [ ] All operations refresh the tag tree, the journals list, and any open journal detail tag editor via query invalidation.
+- [ ] Right-click/context menu on a journal tag offers Edit, matching `TagContextMenu`.
+- [ ] The management dialog supports editing name, colour, description, and parent — matching the corresponding `TagManagementDialog` fields exactly.
+- [ ] Create/edit operations refresh the tag tree, the journals list, and any open journal detail tag editor via query invalidation.
 - [ ] Reuse the contact dialog components generalised over domain, or structural copies with the consolidation recorded as follow-up — state the choice in the PR.
 
 **Required Test Coverage:**
-- **Unit (RTL):** dialog validation (name required, colour format), delete confirmation flow, merge target selection excluding self/descendants.
+- **Unit (RTL):** dialog validation (name required, colour format), parent selection.
 - **Integration:** covered by ITER17-001 backend tests.
-- **E2E:** rename a tag from the sidebar and see the new name on a tagged journal's detail page; delete a tag and verify it disappears from a journal that had it; merge two tags and verify assignments moved.
+- **E2E:** create a tag from the sidebar and assign it to a journal; rename a tag from the sidebar and see the new name on a tagged journal's detail page.
+
+#### Phase 3: Delete and Merge Dialogs
+
+**Estimated diff:** ~400 lines
+
+**Prerequisites:** Phase 2 merged; ITER17-001 Phases 3–4 (delete/merge endpoints).
+
+**Acceptance Criteria:**
+- [ ] The context menu / management dialog offers Delete with confirmation, warning that the tag is removed from all journals — matching contact behaviour.
+- [ ] The management dialog offers Merge into another tag, with target selection excluding the tag itself and its descendants — matching `TagManagementDialog`.
+- [ ] Delete/merge operations refresh the tag tree, the journals list, and any open journal detail tag editor via query invalidation.
+
+**Required Test Coverage:**
+- **Unit (RTL):** delete confirmation flow, merge target selection excluding self/descendants.
+- **Integration:** covered by ITER17-001 backend tests.
+- **E2E:** delete a tag and verify it disappears from a journal that had it; merge two tags and verify assignments moved.
 
 ---
 
 ### ITER17-005: Journal Tag History Events
 
 **Objective:** Publish tag domain events for journals so tag changes appear in the journal activity feed with provenance, matching contact tag history.
-**Strategy:** Single phase on top of the Iteration 12 unified history foundation.
-
-**Prerequisites:** ITER17-001 (update/delete/merge operations exist to emit events for).
+**Strategy:** Two phases on top of the Iteration 12 unified history foundation — assignment/removal events first (no ITER17-001 dependency), then management-operation events.
 
 **Relevant documents:**
 - [Activity History Product Specification](../product-specifications/activity-history-product-specification.md)
 - Contact reference: `TagAssigned` / `TagRemoved` / `TagUpdated` / `TagDeleted` in `backend/app/core/contacts/models/events.py`; the history projection consumer.
 
-#### Phase 1: Events and History Projection
+#### Phase 1: Assignment and Removal Events
 
-**PR Size:** ~7-9 files
+**Estimated diff:** ~450 lines
 
 **Acceptance Criteria:**
 - [ ] Journal tag assignment/removal (REST relationship endpoints and MCP create/update paths) publish journal-scoped `TagAssigned` / `TagRemoved` events within the same unit of work, carrying `tag_name`, `source`, and `changed_by` like the contact events.
-- [ ] Tag update/delete/merge publish the corresponding events; history entries on affected journals describe the change the same way contact history does.
 - [ ] The history projection consumer maps these events into journal history rows (idempotent, `event_id`-keyed) and they render in the journal activity feed.
-- [ ] Search re-indexing of affected journals on tag delete/merge is driven by these events if ITER17-001 Phase 2 deferred it here.
 
 **Required Test Coverage:**
-- **Unit:** event payload construction for each operation.
-- **Integration:** end-to-end — assign/remove/merge a tag → run projection → assert history rows with correct provenance; idempotent replay.
+- **Unit:** event payload construction for assign and remove.
+- **Integration:** end-to-end — assign/remove a tag → run projection → assert history rows with correct provenance; idempotent replay.
 - **E2E:** add and remove a tag on a journal, assert the activity feed at the bottom of the journal page shows both entries.
+
+#### Phase 2: Management Operation Events
+
+**Estimated diff:** ~400 lines
+
+**Prerequisites:** Phase 1 merged; ITER17-001 Phases 2–4 (update/delete/merge operations exist to emit events for).
+
+**Acceptance Criteria:**
+- [ ] Tag update/delete/merge publish the corresponding events (`TagUpdated` / `TagDeleted` / merge as the contact implementation models it); history entries on affected journals describe the change the same way contact history does.
+- [ ] Search re-indexing of affected journals on tag delete/merge is driven by these events if ITER17-001 Phases 3–4 deferred it here.
+
+**Required Test Coverage:**
+- **Unit:** event payload construction for update, delete, and merge.
+- **Integration:** update/delete/merge a tag → run projection → assert history rows on affected journals; search index consistency if reindexing is event-driven.
+- **E2E:** rename a tag used by a journal, assert the journal's activity feed reflects the change.
 
 ## Data Model Summary
 
