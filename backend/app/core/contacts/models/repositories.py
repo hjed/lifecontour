@@ -572,3 +572,33 @@ class ContactSummaryRepository(ABC):
     ) -> ContactSummary | None:
         """Update the status of a contact summary."""
         pass
+
+    @abstractmethod
+    async def mark_refresh_requested(self, contact_id: int) -> None:
+        """Record a buffered refresh request for a contact (rolling debounce).
+
+        Sets ``refresh_requested_at`` to now, resetting the debounce timer on
+        every call. Creates the summary row if none exists; no-op when the
+        summary is disabled.
+        """
+        pass
+
+    @abstractmethod
+    async def clear_refresh_request(self, contact_id: int) -> None:
+        """Clear any pending buffered refresh marker for a contact."""
+        pass
+
+    @abstractmethod
+    async def claim_due_refreshes(
+        self, buffer_seconds: int, limit: int
+    ) -> list[tuple[int, bool]]:
+        """Atomically claim contacts whose buffered refresh is due.
+
+        Clears the marker on rows whose ``refresh_requested_at`` is at least
+        ``buffer_seconds`` old — measured on the database clock, the same
+        source that stamps the marker — and returns ``(contact_id,
+        is_disabled)`` tuples, oldest marker first. Disabled rows are claimed
+        too (so stale markers don't accumulate) but callers must not dispatch
+        generation for them.
+        """
+        pass

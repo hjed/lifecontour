@@ -180,7 +180,11 @@ class TestContactSummaryRefreshEndpoint:
     async def test_refresh_publishes_outbox_event(
         self, integration_api_client, async_connection
     ):
-        """Test that refresh publishes a ContactSummaryRefreshRequested outbox event."""
+        """Test that refresh publishes a ContactSummaryRefreshDue outbox event.
+
+        Manual refresh bypasses the rolling-debounce buffer, so it publishes
+        the generate-now Due event rather than the buffered Requested one.
+        """
         from sqlalchemy import text
 
         contact_id = await _create_contact(integration_api_client)
@@ -192,14 +196,14 @@ class TestContactSummaryRefreshEndpoint:
             text(
                 "SELECT event_type, event_data "
                 "FROM outbox_events "
-                "WHERE event_type = 'ContactSummaryRefreshRequested' "
+                "WHERE event_type = 'ContactSummaryRefreshDue' "
                 "AND aggregate_id = :contact_id"
             ),
             {"contact_id": int(contact_id)},
         )
         rows = result.fetchall()
         assert len(rows) >= 1
-        assert rows[0].event_type == "ContactSummaryRefreshRequested"
+        assert rows[0].event_type == "ContactSummaryRefreshDue"
 
 
 @pytest.mark.integration

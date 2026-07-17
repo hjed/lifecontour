@@ -165,6 +165,62 @@ class TestSearchIndexer:
         assert doc["last_name"] == "Smith"
         assert doc["full_name"] == "Jane Smith"
 
+    @pytest.mark.asyncio
+    async def test_process_contact_summary_refresh_due_event(
+        self, indexer, mock_meilisearch_client
+    ):
+        """ContactSummaryRefreshDue routes to the contact-updated index path.
+
+        The summary consumer indexes the contact after generating on a Due
+        event so the fresh summary text becomes searchable.
+        """
+        event = OutboxEvent(
+            id=6,
+            event_id="contact_summary_refresh_due_42",
+            event_type="ContactSummaryRefreshDue",
+            aggregate_id=42,
+            event_data={"contact_id": 42},
+            occurred_at=datetime(2024, 1, 1, 15, 0, 0),
+            retry_count=0,
+            created_at=datetime(2024, 1, 1, 15, 0, 0),
+        )
+
+        mock_index = MagicMock()
+        mock_meilisearch_client.index.return_value = mock_index
+        mock_index.get_stats.return_value = {"numberOfDocuments": 1}
+
+        mock_task = MagicMock()
+        mock_task.task_uid = "task-due-1"
+        mock_index.update_documents.return_value = mock_task
+
+        complete_contact_data = {
+            "id": 42,
+            "first_name": "Jane",
+            "last_name": "Smith",
+            "full_name": "Jane Smith",
+            "entity_type": "contact",
+            "summary_text": "Fresh AI summary",
+        }
+
+        with (
+            patch(
+                "app.infrastructure.search.search_indexer.get_index_name",
+                return_value="pms_contacts",
+            ),
+            patch.object(
+                indexer,
+                "_fetch_complete_contact_data",
+                return_value=complete_contact_data,
+            ),
+        ):
+            await indexer.process_event(event)
+
+        mock_index.update_documents.assert_called_once()
+        documents = mock_index.update_documents.call_args[0][0]
+        assert len(documents) == 1
+        assert documents[0]["id"] == 42
+        assert documents[0]["summary_text"] == "Fresh AI summary"
+
     @pytest.fixture
     def contact_merged_event(self):
         """Create a ContactMerged outbox event for testing."""

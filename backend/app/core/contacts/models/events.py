@@ -560,7 +560,9 @@ class ContactRelationshipDeleted(DomainEvent):
 class ContactSummaryRefreshRequested(DomainEvent):
     """Event raised when a contact summary regeneration is requested.
 
-    This event triggers asynchronous AI summary generation via the outbox pattern.
+    Buffered intent: the summary consumer records it as a rolling-debounce
+    marker (and the search indexer reindexes the contact); actual generation
+    is driven by ``ContactSummaryRefreshDue`` once the quiet period elapses.
     """
 
     def __init__(
@@ -573,6 +575,32 @@ class ContactSummaryRefreshRequested(DomainEvent):
             occurred_at=datetime.now(tz=UTC),
             aggregate_id=contact_id,
             event_type="ContactSummaryRefreshRequested",
+            event_data={"contact_id": contact_id},
+            transaction=transaction,
+        )
+
+
+@dataclass(frozen=True)
+class ContactSummaryRefreshDue(DomainEvent):
+    """Event raised when a buffered summary refresh becomes due.
+
+    ``ContactSummaryRefreshRequested`` is buffered intent: the summary consumer
+    records it as a debounce marker instead of generating immediately. This
+    event is the generate-now command, published by the summary refresh sweeper
+    once the contact has been quiet for the buffer window (or directly by the
+    manual refresh endpoint, which bypasses the buffer).
+    """
+
+    def __init__(
+        self,
+        contact_id: int,
+        transaction: AsyncConnection | None = None,
+    ):
+        super().__init__(
+            event_id=f"contact_summary_refresh_due_{contact_id}_{datetime.now(tz=UTC).isoformat()}",
+            occurred_at=datetime.now(tz=UTC),
+            aggregate_id=contact_id,
+            event_type="ContactSummaryRefreshDue",
             event_data={"contact_id": contact_id},
             transaction=transaction,
         )
