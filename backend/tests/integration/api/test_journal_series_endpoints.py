@@ -215,3 +215,24 @@ class TestJournalSeriesMembership:
         )
 
         assert response.status_code == 404
+
+    async def test_patch_series_with_mismatched_body_id_returns_400(
+        self, integration_api_client
+    ) -> None:
+        series_id = await _create_series(integration_api_client)
+
+        response = await integration_api_client.patch(
+            f"/api/journals/series/{series_id}",
+            json={
+                "data": {
+                    "type": "journal-series",
+                    "id": "00000000-0000-0000-0000-000000000042",
+                    "attributes": {"name": "Renamed"},
+                }
+            },
+        )
+
+        assert response.status_code == 400
+        # The series is unchanged.
+        detail = await integration_api_client.get(f"/api/journals/series/{series_id}")
+        assert detail.json()["data"]["attributes"]["name"] == "Physio appointments"

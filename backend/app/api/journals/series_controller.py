@@ -11,7 +11,7 @@ from core_shared.models.journals import (
 )
 from dishka import FromDishka
 from dishka.integrations.fastapi import inject
-from fastapi import APIRouter, Request, status
+from fastapi import APIRouter, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.common.schemas import JsonApiLinks, get_request_base_url
@@ -145,6 +145,12 @@ async def update_journal_series(
     user: FromDishka[SessionUser],
 ) -> JournalSeriesResponse:
     """Rename or re-describe a series."""
+    if series_request.data.id != series_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="URL ID does not match request body ID",
+        )
+
     base_url = get_request_base_url(request)
     attributes = series_request.data.attributes
     updated = await series_service.update_series(
