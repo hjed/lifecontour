@@ -19,9 +19,10 @@ def _make_google_event(
     status: str = "confirmed",
     start_dt: str = "2026-03-20T10:00:00Z",
     end_dt: str = "2026-03-20T11:00:00Z",
+    recurring_event_id: str | None = None,
 ) -> dict[str, Any]:
     """Build a raw Google Calendar event response dict."""
-    return {
+    event: dict[str, Any] = {
         "id": event_id,
         "summary": summary,
         "description": description,
@@ -30,6 +31,9 @@ def _make_google_event(
         "start": {"dateTime": start_dt},
         "end": {"dateTime": end_dt},
     }
+    if recurring_event_id is not None:
+        event["recurringEventId"] = recurring_event_id
+    return event
 
 
 TEST_CALENDAR_UUID = uuid.UUID("12345678-1234-5678-1234-567812345678")
@@ -655,3 +659,374 @@ class TestSyncCalendarEvents:
         assert "sync_token" not in second_call_args
         assert "time_min" in second_call_args
         assert second_call_args["single_events"] is True
+
+
+class TestSyncRecurringSeries:
+    """Recurring-series support: recurring id passthrough, master
+    cancellations, and backfill promotion of unchanged events."""
+
+    @pytest.fixture(autouse=True)
+    def mock_metrics_collector(self):
+        from core_shared.metrics import MetricsCollector
+
+        with patch("worker.metrics_collector", spec_set=MetricsCollector) as mock_mc:
+            yield mock_mc
+
+    @pytest.fixture
+    def mock_session(self) -> AsyncMock:
+        session = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=None)
+        return session
+
+    @pytest.fixture
+    def mock_session_factory(self, mock_session: AsyncMock) -> MagicMock:
+        factory = MagicMock()
+        factory.return_value = mock_session
+        return factory
+
+    @pytest.fixture
+    def mock_ctx(self, mock_session_factory: MagicMock) -> dict[str, Any]:
+        return make_arq_ctx(
+            session_factory=mock_session_factory, redis=make_mock_redis()
+        )
+
+    @staticmethod
+    async def _run_sync_with_events(
+        mock_ctx: dict[str, Any],
+        items: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Run sync_calendar_events with the given raw Google items."""
+        from worker import sync_calendar_events
+
+        google_events = {"items": items, "nextSyncToken": "new-sync-token"}
+        mock_client = MagicMock()
+        mock_client.list_events = AsyncMock(return_value=google_events)
+
+        with patch("worker._create_google_client", return_value=mock_client):
+            return await sync_calendar_events(
+                mock_ctx, "test@example.com", "user-1", "full"
+            )
+
+    @pytest.mark.asyncio
+    async def test_created_outbox_event_includes_recurring_event_id(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        """New recurring instances carry the master id into the outbox payload."""
+        cal_result = MagicMock()
+        cal_result.fetchall.return_value = [_make_calendar_row()]
+        token_result = MagicMock()
+        token_result.scalar.return_value = None
+        link_result = MagicMock()
+        link_result.fetchone.return_value = None
+
+        mock_session.execute.side_effect = [
+            cal_result,  # calendar query
+            token_result,  # sync token query
+            link_result,  # existing link lookup
+            MagicMock(),  # sync token save
+        ]
+
+        result = await self._run_sync_with_events(
+            mock_ctx,
+            [
+                _make_google_event(
+                    event_id="master-1_20260320T100000Z",
+                    recurring_event_id="master-1",
+                )
+            ],
+        )
+
+        assert result["status"] == "success"
+        mock_session.add.assert_called_once()
+        outbox_event = mock_session.add.call_args[0][0]
+        assert outbox_event.event_type == "journal_event.created"
+        assert outbox_event.event_data["recurring_event_id"] == "master-1"
+
+    @pytest.mark.asyncio
+    async def test_cancelled_instance_outbox_event_includes_recurring_event_id(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        """Cancelled recurring instances carry the master id for deletion logic."""
+        from datetime import UTC, datetime, timedelta
+
+        cal_result = MagicMock()
+        cal_result.fetchall.return_value = [_make_calendar_row()]
+        token_result = MagicMock()
+        token_result.scalar.return_value = None
+
+        existing_link = MagicMock()
+        existing_link.external_version = '"etag-old"'
+        existing_link.sync_capability = "bidirectional"
+        existing_link.journal_id = 42
+        existing_link.recurring_event_id = None
+        link_result = MagicMock()
+        link_result.fetchone.return_value = existing_link
+
+        journal_end_result = MagicMock()
+        journal_end_result.scalar.return_value = datetime.now(UTC) + timedelta(days=7)
+
+        mock_session.execute.side_effect = [
+            cal_result,  # calendar query
+            token_result,  # sync token query
+            link_result,  # existing link lookup
+            journal_end_result,  # journal end date lookup
+            MagicMock(),  # sync token save
+        ]
+
+        result = await self._run_sync_with_events(
+            mock_ctx,
+            [
+                {
+                    "id": "master-1_20260320T100000Z",
+                    "status": "cancelled",
+                    "etag": '"etag-cancelled"',
+                    "recurringEventId": "master-1",
+                }
+            ],
+        )
+
+        assert result["status"] == "success"
+        mock_session.add.assert_called_once()
+        outbox_event = mock_session.add.call_args[0][0]
+        assert outbox_event.event_type == "journal_event.cancelled"
+        assert outbox_event.event_data["recurring_event_id"] == "master-1"
+
+    @pytest.mark.asyncio
+    async def test_master_cancellation_emits_series_cancelled_event(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        """A cancelled master id with linked instances emits one series event."""
+        cal_result = MagicMock()
+        cal_result.fetchall.return_value = [_make_calendar_row()]
+        token_result = MagicMock()
+        token_result.scalar.return_value = None
+
+        # No direct link for the master id itself…
+        link_result = MagicMock()
+        link_result.fetchone.return_value = None
+        # …but instances of the series are linked (EXISTS finds a row).
+        series_links_result = MagicMock()
+        series_links_result.scalar.return_value = 1
+
+        mock_session.execute.side_effect = [
+            cal_result,  # calendar query
+            token_result,  # sync token query
+            link_result,  # existing link lookup
+            series_links_result,  # series links EXISTS check
+            MagicMock(),  # sync token save
+        ]
+
+        result = await self._run_sync_with_events(
+            mock_ctx,
+            [
+                {
+                    "id": "master-1",
+                    "status": "cancelled",
+                    "etag": '"etag-cancelled"',
+                }
+            ],
+        )
+
+        assert result["status"] == "success"
+        mock_session.add.assert_called_once()
+        outbox_event = mock_session.add.call_args[0][0]
+        assert outbox_event.event_type == "journal_event.series_cancelled"
+        assert outbox_event.event_data["recurring_event_id"] == "master-1"
+        assert outbox_event.event_data["calendar_id"] == str(TEST_CALENDAR_UUID)
+
+    @pytest.mark.asyncio
+    async def test_master_cancellation_without_series_links_is_skipped(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        """A cancelled unknown id with no linked instances stays skipped."""
+        cal_result = MagicMock()
+        cal_result.fetchall.return_value = [_make_calendar_row()]
+        token_result = MagicMock()
+        token_result.scalar.return_value = None
+        link_result = MagicMock()
+        link_result.fetchone.return_value = None
+        series_links_result = MagicMock()
+        series_links_result.scalar.return_value = None
+
+        mock_session.execute.side_effect = [
+            cal_result,  # calendar query
+            token_result,  # sync token query
+            link_result,  # existing link lookup
+            series_links_result,  # series links EXISTS check
+            MagicMock(),  # sync token save
+        ]
+
+        result = await self._run_sync_with_events(
+            mock_ctx,
+            [
+                {
+                    "id": "unknown-event",
+                    "status": "cancelled",
+                    "etag": '"etag-cancelled"',
+                }
+            ],
+        )
+
+        assert result["status"] == "success"
+        mock_session.add.assert_not_called()
+        assert result["events_skipped"] >= 1
+
+    @pytest.mark.asyncio
+    async def test_unchanged_event_with_new_recurring_id_promoted_to_update(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        """ETag-unchanged events backfill the recurring id via an UPDATE."""
+        cal_result = MagicMock()
+        cal_result.fetchall.return_value = [_make_calendar_row()]
+        token_result = MagicMock()
+        token_result.scalar.return_value = None
+
+        existing_link = MagicMock()
+        existing_link.external_version = '"etag-abc"'  # same as the event
+        existing_link.sync_capability = "bidirectional"
+        existing_link.journal_id = 42
+        existing_link.recurring_event_id = None  # not yet backfilled
+        link_result = MagicMock()
+        link_result.fetchone.return_value = existing_link
+
+        mock_session.execute.side_effect = [
+            cal_result,  # calendar query
+            token_result,  # sync token query
+            link_result,  # existing link lookup
+            MagicMock(),  # sync token save
+        ]
+
+        result = await self._run_sync_with_events(
+            mock_ctx,
+            [
+                _make_google_event(
+                    event_id="master-1_20260320T100000Z",
+                    etag='"etag-abc"',
+                    recurring_event_id="master-1",
+                )
+            ],
+        )
+
+        assert result["status"] == "success"
+        mock_session.add.assert_called_once()
+        outbox_event = mock_session.add.call_args[0][0]
+        assert outbox_event.event_type == "journal_event.updated"
+        assert outbox_event.event_data["recurring_event_id"] == "master-1"
+        assert outbox_event.event_data["existing_journal_id"] == 42
+
+    @pytest.mark.asyncio
+    async def test_unchanged_event_with_stored_recurring_id_stays_skipped(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        """Already-backfilled unchanged events are not re-synced."""
+        cal_result = MagicMock()
+        cal_result.fetchall.return_value = [_make_calendar_row()]
+        token_result = MagicMock()
+        token_result.scalar.return_value = None
+
+        existing_link = MagicMock()
+        existing_link.external_version = '"etag-abc"'  # same as the event
+        existing_link.sync_capability = "bidirectional"
+        existing_link.journal_id = 42
+        existing_link.recurring_event_id = "master-1"  # already backfilled
+        link_result = MagicMock()
+        link_result.fetchone.return_value = existing_link
+
+        mock_session.execute.side_effect = [
+            cal_result,  # calendar query
+            token_result,  # sync token query
+            link_result,  # existing link lookup
+            MagicMock(),  # sync token save
+        ]
+
+        result = await self._run_sync_with_events(
+            mock_ctx,
+            [
+                _make_google_event(
+                    event_id="master-1_20260320T100000Z",
+                    etag='"etag-abc"',
+                    recurring_event_id="master-1",
+                )
+            ],
+        )
+
+        assert result["status"] == "success"
+        mock_session.add.assert_not_called()
+        assert result["events_skipped"] >= 1
+
+
+class TestMasterCancellationLegacyLinks:
+    """Audit fix: legacy links (no backfilled recurring id) must still gate
+    CANCEL_SERIES via an external_event_id prefix fallback."""
+
+    @pytest.fixture(autouse=True)
+    def mock_metrics_collector(self):
+        from core_shared.metrics import MetricsCollector
+
+        with patch("worker.metrics_collector", spec_set=MetricsCollector) as mock_mc:
+            yield mock_mc
+
+    @pytest.fixture
+    def mock_session(self) -> AsyncMock:
+        session = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=None)
+        return session
+
+    @pytest.fixture
+    def mock_session_factory(self, mock_session: AsyncMock) -> MagicMock:
+        factory = MagicMock()
+        factory.return_value = mock_session
+        return factory
+
+    @pytest.fixture
+    def mock_ctx(self, mock_session_factory: MagicMock) -> dict[str, Any]:
+        return make_arq_ctx(
+            session_factory=mock_session_factory, redis=make_mock_redis()
+        )
+
+    @pytest.mark.asyncio
+    async def test_series_links_check_includes_prefix_fallback(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        """The EXISTS gate matches unbackfilled links by instance-id prefix so
+        deleting a legacy series still emits journal_event.series_cancelled."""
+        from worker import sync_calendar_events
+
+        cal_result = MagicMock()
+        cal_result.fetchall.return_value = [_make_calendar_row()]
+        token_result = MagicMock()
+        token_result.scalar.return_value = None
+        link_result = MagicMock()
+        link_result.fetchone.return_value = None
+        series_links_result = MagicMock()
+        series_links_result.scalar.return_value = 1
+
+        mock_session.execute.side_effect = [
+            cal_result,  # calendar query
+            token_result,  # sync token query
+            link_result,  # existing link lookup
+            series_links_result,  # series links EXISTS check
+            MagicMock(),  # sync token save
+        ]
+
+        google_events = {
+            "items": [{"id": "master-1", "status": "cancelled", "etag": '"etag-c"'}],
+            "nextSyncToken": "new-sync-token",
+        }
+        mock_client = MagicMock()
+        mock_client.list_events = AsyncMock(return_value=google_events)
+
+        with patch("worker._create_google_client", return_value=mock_client):
+            result = await sync_calendar_events(
+                mock_ctx, "test@example.com", "user-1", "full"
+            )
+
+        assert result["status"] == "success"
+        series_check_call = mock_session.execute.call_args_list[3]
+        sql_text = str(series_check_call[0][0].text)
+        assert "recurring_event_id = :recurring_event_id" in sql_text
+        assert "recurring_event_id IS NULL" in sql_text
+        assert "LIKE :instance_prefix" in sql_text
+        assert series_check_call[0][1]["instance_prefix"] == "master-1\\_%"

@@ -207,6 +207,9 @@ class SummaryConsumer(DeadLetterConsumerMixin, StreamConsumer):
         from app.core.journal.adapters.sql.journal_repository import (
             SqlJournalRepository,
         )
+        from app.core.journal.adapters.sql.journal_series_repository import (
+            SqlJournalSeriesRepository,
+        )
         from app.core.settings.adapters.sql.user_settings_repository import (
             SqlUserSettingsRepository,
         )
@@ -246,6 +249,7 @@ class SummaryConsumer(DeadLetterConsumerMixin, StreamConsumer):
             journal_relationship_repo=journal_rel_repo,
             journal_repo=journal_repo,
             summary_repo=summary_repo,
+            series_repo=SqlJournalSeriesRepository(connection),
         )
         activity_checker = LowActivityChecker()
         prompt_builder = SummaryPromptBuilder()

@@ -77,6 +77,9 @@ from app.core.journal.adapters.sql.journal_contact_relationship_repository impor
     SqlJournalContactRelationshipRepository,
 )
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+from app.core.journal.adapters.sql.journal_series_repository import (
+    SqlJournalSeriesRepository,
+)
 from app.core.journal.adapters.sql.journal_tag_repository import SqlJournalTagRepository
 from app.core.journal.adapters.sql.kayaking_data_repository import (
     SqlKayakingDataRepository,
@@ -131,6 +134,7 @@ from app.core.journal.models.repositories import (
     JoggingDataRepository,
     JournalContactRelationshipRepository,
     JournalRepository,
+    JournalSeriesRepository,
     JournalTagRepository,
     KayakingDataRepository,
     LogbookExportRepository,
@@ -167,6 +171,7 @@ from app.core.journal.services.incomplete_outdoor_activity_service import (
 )
 from app.core.journal.services.journal_contact_service import JournalContactService
 from app.core.journal.services.journal_merge_service import JournalMergeService
+from app.core.journal.services.journal_series_service import JournalSeriesService
 from app.core.journal.services.journal_service import JournalService
 from app.core.journal.services.journal_tag_service import JournalTagService
 from app.core.journal.services.journal_write_service import JournalWriteService
@@ -259,6 +264,13 @@ class JournalProvider(Provider):
     ) -> JournalTagRepository:
         """Provide a JournalTagRepository instance."""
         return SqlJournalTagRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def journal_series_repository(
+        self, connection: AsyncConnection
+    ) -> JournalSeriesRepository:
+        """Provide a JournalSeriesRepository instance."""
+        return SqlJournalSeriesRepository(connection)
 
     @provide(scope=Scope.REQUEST)
     def journal_contact_relationship_repository(
@@ -516,6 +528,15 @@ class JournalProvider(Provider):
         return JournalTagService(tag_repo=tag_repo)
 
     @provide(scope=Scope.REQUEST)
+    def journal_series_service(
+        self,
+        series_repo: JournalSeriesRepository,
+        journal_repo: JournalRepository,
+    ) -> JournalSeriesService:
+        """Provide a JournalSeriesService instance."""
+        return JournalSeriesService(series_repo=series_repo, journal_repo=journal_repo)
+
+    @provide(scope=Scope.REQUEST)
     def review_item_service(
         self,
         review_item_repo: ReviewItemRepository,
@@ -647,6 +668,7 @@ class JournalProvider(Provider):
         mood_repo: MoodDataRepository,
         contact_relationship_repo: JournalContactRelationshipRepository,
         summary_repo: JournalDailySummaryRepository,
+        series_repo: JournalSeriesRepository,
     ) -> DailySummaryInputAssembler:
         """Provide a DailySummaryInputAssembler instance."""
         return DailySummaryInputAssembler(
@@ -654,6 +676,7 @@ class JournalProvider(Provider):
             mood_repo=mood_repo,
             contact_relationship_repo=contact_relationship_repo,
             summary_repo=summary_repo,
+            series_repo=series_repo,
         )
 
     @provide(scope=Scope.REQUEST)

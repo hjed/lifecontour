@@ -3451,7 +3451,7 @@ async def sync_calendar_events(
                         # Lookup existing link
                         link_stmt = text("""
                             SELECT journal_id, external_event_id, external_version,
-                                   sync_capability, sync_status
+                                   sync_capability, sync_status, recurring_event_id
                             FROM journal_external_event_links
                             WHERE calendar_id = :calendar_id
                             AND external_event_id = :external_event_id
@@ -3465,10 +3465,50 @@ async def sync_calendar_events(
                         )
                         existing_link = link_result.fetchone()
 
+                        # A cancelled, unlinked event id may be a recurring
+                        # MASTER id (Google reports whole-series deletion as a
+                        # single cancelled master under singleEvents=true).
+                        # Instances point at it via recurring_event_id.
+                        has_series_links = False
+                        if google_event.status == "cancelled" and existing_link is None:
+                            # Match the backfilled recurring id, plus a prefix
+                            # fallback for legacy links synced before the id
+                            # was recorded (instance ids are <master>_<time>;
+                            # the extra-underscore guard excludes successor
+                            # series created by "this and following" edits).
+                            escaped_master = (
+                                google_event.id.replace("\\", "\\\\")
+                                .replace("%", "\\%")
+                                .replace("_", "\\_")
+                            )
+                            series_links_stmt = text("""
+                                SELECT 1
+                                FROM journal_external_event_links
+                                WHERE calendar_id = :calendar_id
+                                  AND (recurring_event_id = :recurring_event_id
+                                       OR (recurring_event_id IS NULL
+                                           AND external_event_id
+                                               LIKE :instance_prefix ESCAPE '\\'
+                                           AND external_event_id
+                                               NOT LIKE :deeper_prefix ESCAPE '\\'))
+                                LIMIT 1
+                            """)
+                            series_links_result = await session.execute(
+                                series_links_stmt,
+                                {
+                                    "calendar_id": calendar_id,
+                                    "recurring_event_id": google_event.id,
+                                    "instance_prefix": f"{escaped_master}\\_%",
+                                    "deeper_prefix": f"{escaped_master}\\_%\\_%",
+                                },
+                            )
+                            has_series_links = series_links_result.scalar() is not None
+
                         # Classify the event
                         action = classifier.classify_inbound_event(
                             google_event=google_event,
                             existing_link=existing_link,
+                            has_series_links=has_series_links,
                         )
 
                         if action == InboundSyncAction.SKIP_UNCHANGED:
@@ -3507,12 +3547,42 @@ async def sync_calendar_events(
                                     if check_result.fetchone():
                                         action = InboundSyncAction.UPDATE_JOURNAL
 
+                        # Backfill promotion: an unchanged recurring instance
+                        # whose link predates the series feature (no stored
+                        # recurring id) is re-synced once so the backend can
+                        # record the id and create the series membership.
+                        if (
+                            action == InboundSyncAction.SKIP_UNCHANGED
+                            and google_event.recurring_event_id
+                            and existing_link is not None
+                            and existing_link.recurring_event_id is None
+                        ):
+                            action = InboundSyncAction.UPDATE_JOURNAL
+
                         if action in (
                             InboundSyncAction.SKIP_UNCHANGED,
                             InboundSyncAction.SKIP_ONE_WAY,
                             InboundSyncAction.SKIP_CANCELLED,
                         ):
                             metrics["events_skipped"] += 1
+                            continue
+
+                        # Whole-series deletion: fan out to the backend, which
+                        # deletes far-future untouched instances and cancels
+                        # the rest.
+                        if action == InboundSyncAction.CANCEL_SERIES:
+                            outbox_event = (
+                                OutboxEvent.create_journal_series_cancelled_event(
+                                    integration_source="google",
+                                    calendar_id=str(calendar_id),
+                                    recurring_event_id=google_event.id,
+                                )
+                            )
+                            session.add(outbox_event)
+                            metrics["series_cancellations"] = (
+                                metrics.get("series_cancellations", 0) + 1
+                            )
+                            metrics["events_processed"] += 1
                             continue
 
                         # Handle cancellation: mark linked journal as cancelled
@@ -3564,6 +3634,7 @@ async def sync_calendar_events(
                                 etag=google_event.etag,
                                 existing_journal_id=existing_journal_id,
                                 contact_relationships=[],
+                                recurring_event_id=google_event.recurring_event_id,
                             )
                             session.add(outbox_event)
                             metrics["events_cancelled"] = (
@@ -3641,6 +3712,7 @@ async def sync_calendar_events(
                             etag=google_event.etag,
                             existing_journal_id=existing_journal_id,
                             contact_relationships=contact_relationships,
+                            recurring_event_id=google_event.recurring_event_id,
                         )
                         session.add(outbox_event)
                         metrics["events_processed"] += 1

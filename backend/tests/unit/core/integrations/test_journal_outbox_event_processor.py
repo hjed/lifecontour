@@ -6,22 +6,45 @@ outbox events from integration workers, including invitee sync and
 InboundFieldMerger protected-edit logic.
 """
 
-from datetime import UTC, datetime
-from typing import Any
+from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from core_shared.models.journals import EventDateRange, Journal
 from core_shared.models.outbox import OutboxEvent
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.integrations.adapters.sql.journal_event_link_repository import (
+    DeletionProtectionFacts,
+    SeriesLinkedJournal,
+)
 from app.core.integrations.journal_outbox_event_processor import (
     JournalOutboxEventProcessingError,
     JournalOutboxEventProcessor,
 )
 
 CALENDAR_ID = "12345678-1234-5678-1234-567812345678"
+SERIES_ID = uuid4()
+
+
+def _mock(obj: object) -> AsyncMock:
+    """View a mocked repository attribute as AsyncMock for configuration."""
+    return cast(AsyncMock, obj)
+
+
+def _make_mock_connection() -> AsyncMock:
+    """AsyncConnection mock whose begin_nested() is awaitable.
+
+    On the real class begin_nested is a sync method returning an awaitable
+    AsyncTransaction, so the spec turns it into a plain MagicMock; the
+    savepoint() helper needs `await connection.begin_nested()` to work.
+    """
+    conn = AsyncMock(spec=AsyncConnection)
+    conn.begin_nested = AsyncMock()
+    return conn
+
 
 DEFAULT_DATE_RANGE = EventDateRange(
     start=datetime(2026, 3, 20, 10, 0, tzinfo=UTC),
@@ -40,6 +63,7 @@ def _make_journal_event_data(
     etag: str | None = '"etag-123"',
     existing_journal_id: int | None = None,
     contact_relationships: list[dict[str, str]] | None = None,
+    recurring_event_id: str | None = None,
 ) -> dict[str, Any]:
     """Build a sample journal_event outbox payload."""
     return {
@@ -65,6 +89,7 @@ def _make_journal_event_data(
         "etag": etag,
         "existing_journal_id": existing_journal_id,
         "contact_relationships": contact_relationships or [],
+        "recurring_event_id": recurring_event_id,
     }
 
 
@@ -124,6 +149,7 @@ def _make_link_row(
     *,
     external_version: str | None = '"etag-old"',
     updated_at: datetime | None = None,
+    recurring_event_id: str | None = None,
 ) -> MagicMock:
     """Create a mock external event link row."""
     row = MagicMock()
@@ -132,6 +158,7 @@ def _make_link_row(
     row.sync_capability = "bidirectional"
     row.sync_status = "synced"
     row.updated_at = updated_at or datetime(2026, 3, 16, tzinfo=UTC)
+    row.recurring_event_id = recurring_event_id
     return row
 
 
@@ -897,7 +924,7 @@ class TestJournalOutboxEventProcessorCancelled:
 
     @pytest.fixture
     def mock_connection(self) -> AsyncMock:
-        return AsyncMock(spec=AsyncConnection)
+        return _make_mock_connection()
 
     @pytest.fixture
     def mock_journal_service(self) -> AsyncMock:
@@ -907,12 +934,17 @@ class TestJournalOutboxEventProcessorCancelled:
     def processor(
         self, mock_journal_service: AsyncMock, mock_connection: AsyncMock
     ) -> JournalOutboxEventProcessor:
-        return JournalOutboxEventProcessor(
+        proc = JournalOutboxEventProcessor(
             journal_service=mock_journal_service,
             connection=mock_connection,
             contact_repository=MagicMock(),
             strava_athlete_mapping_repository=MagicMock(),
         )
+        # No link/journal facts: the recurring-deletion path stays inert and
+        # the legacy mark-cancelled behaviour is what's under test here.
+        proc.link_repo = AsyncMock()
+        _mock(proc.link_repo).find_by_external_event.return_value = None
+        return proc
 
     @pytest.mark.asyncio
     async def test_cancelled_event_updates_link_and_calendar_info(
@@ -1956,3 +1988,734 @@ class TestStravaMatchDetectionEmission:
         assert event_payload["journal_content"] == "Easy jog"
         assert "event_date_range_start" in event_payload
         assert "event_date_range_end" in event_payload
+
+
+# ── Journal series / recurring cancellation tests ────────────────────
+
+
+def _make_linked_journal(
+    *,
+    journal_id: int = 42,
+    user_id: str = "1",
+    external_event_id: str | None = "google-event-abc",
+    recurring_event_id: str | None = "master-1",
+    days_until_start: float = 10.0,
+    duration_hours: float | None = 1.0,
+    edited: bool = False,
+    link_sync_status: str = "synced",
+) -> SeriesLinkedJournal:
+    """Build a SeriesLinkedJournal row relative to the current time.
+
+    ``edited=True`` makes the journal's updated_at newer than the link's,
+    which marks it as locally modified (protected from deletion).
+    ``duration_hours=None`` leaves the event without an end date.
+    """
+    now = datetime.now(UTC)
+    start = now + timedelta(days=days_until_start)
+    link_updated_at = now - timedelta(days=5)
+    journal_updated_at = (
+        link_updated_at + timedelta(hours=1)
+        if edited
+        else link_updated_at - timedelta(hours=1)
+    )
+    return SeriesLinkedJournal(
+        journal_id=journal_id,
+        user_id=user_id,
+        external_event_id=external_event_id,
+        recurring_event_id=recurring_event_id,
+        link_sync_status=link_sync_status,
+        link_updated_at=link_updated_at,
+        journal_updated_at=journal_updated_at,
+        event_date_range_start=start,
+        event_date_range_end=(
+            start + timedelta(hours=duration_hours)
+            if duration_hours is not None
+            else None
+        ),
+    )
+
+
+_UNPROTECTED_FACTS = DeletionProtectionFacts(
+    has_children=False,
+    has_tags=False,
+    has_manual_contact_relationships=False,
+)
+
+
+def _make_series_cancelled_event(
+    *,
+    calendar_id: str = CALENDAR_ID,
+    recurring_event_id: str = "master-1",
+) -> OutboxEvent:
+    """Build a journal_event.series_cancelled outbox event."""
+    return OutboxEvent(
+        id=uuid4(),
+        event_type="journal_event.series_cancelled",
+        event_data={
+            "integration_source": "google",
+            "calendar_id": calendar_id,
+            "recurring_event_id": recurring_event_id,
+            "sync_timestamp": datetime.now(UTC).isoformat(),
+        },
+        created_at=datetime.now(UTC),
+        retry_count=0,
+    )
+
+
+class _SeriesProcessorTestBase:
+    """Shared fixtures for the series / recurring-cancellation test classes.
+
+    The processor gets stubbed link/series repositories: deletion-protection
+    facts default to unprotected, find_by_external_event to None, and series
+    get-or-create to a series with SERIES_ID — tests override per scenario.
+    """
+
+    @pytest.fixture
+    def mock_connection(self) -> AsyncMock:
+        return _make_mock_connection()
+
+    @pytest.fixture
+    def mock_journal_service(self) -> AsyncMock:
+        return AsyncMock()
+
+    @pytest.fixture
+    def processor(
+        self, mock_journal_service: AsyncMock, mock_connection: AsyncMock
+    ) -> JournalOutboxEventProcessor:
+        proc = JournalOutboxEventProcessor(
+            journal_service=mock_journal_service,
+            connection=mock_connection,
+            contact_repository=MagicMock(),
+            strava_athlete_mapping_repository=MagicMock(),
+        )
+        proc.link_repo = AsyncMock()
+        proc.series_repo = AsyncMock()
+        _mock(
+            proc.link_repo
+        ).get_deletion_protection_facts.return_value = _UNPROTECTED_FACTS
+        _mock(proc.link_repo).find_by_external_event.return_value = None
+        series = MagicMock()
+        series.id = SERIES_ID
+        _mock(proc.series_repo).get_or_create_by_recurrence.return_value = series
+        return proc
+
+
+class TestRecurringCancellationDeletesFutureInstances(_SeriesProcessorTestBase):
+    """journal_event.cancelled for recurring instances: far-future deletion."""
+
+    @pytest.mark.asyncio
+    async def test_future_unedited_instance_is_deleted(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """A far-future, unedited recurring instance is deleted outright."""
+        _mock(
+            processor.link_repo
+        ).find_by_external_event.return_value = _make_linked_journal()
+        event = _make_outbox_event(
+            event_type="journal_event.cancelled",
+            sync_action="cancelled",
+            existing_journal_id=42,
+            recurring_event_id="master-1",
+        )
+
+        result = await processor.process_event(event)
+
+        assert result["status"] == "success"
+        assert result["action"] == "deleted"
+        mock_journal_service.delete_journal.assert_awaited_once()
+        assert mock_journal_service.delete_journal.call_args[0][0] == 42
+        # Links removed first so JournalDeleted carries no external ids
+        # (the event is already gone upstream — no outbound delete).
+        _mock(processor.link_repo).delete_links_for_journal.assert_awaited_once_with(42)
+        # No mark-cancelled SQL ran.
+        mock_connection.execute.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_recurring_id_from_link_row_when_payload_lacks_it(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+    ) -> None:
+        """Backfilled link column supplies the recurring id for old payloads."""
+        _mock(
+            processor.link_repo
+        ).find_by_external_event.return_value = _make_linked_journal()
+        event = _make_outbox_event(
+            event_type="journal_event.cancelled",
+            sync_action="cancelled",
+            existing_journal_id=42,
+            recurring_event_id=None,
+        )
+
+        result = await processor.process_event(event)
+
+        assert result["action"] == "deleted"
+        mock_journal_service.delete_journal.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_locally_edited_instance_marked_cancelled(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """A locally-edited future instance is preserved and marked cancelled."""
+        _mock(
+            processor.link_repo
+        ).find_by_external_event.return_value = _make_linked_journal(edited=True)
+        event = _make_outbox_event(
+            event_type="journal_event.cancelled",
+            sync_action="cancelled",
+            existing_journal_id=42,
+            recurring_event_id="master-1",
+        )
+
+        result = await processor.process_event(event)
+
+        assert result["status"] == "success"
+        mock_journal_service.delete_journal.assert_not_called()
+        # Falls back to the mark-cancelled writes (link + calendar_info).
+        assert mock_connection.execute.call_count == 2
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "facts",
+        [
+            DeletionProtectionFacts(
+                has_children=True,
+                has_tags=False,
+                has_manual_contact_relationships=False,
+            ),
+            DeletionProtectionFacts(
+                has_children=False,
+                has_tags=True,
+                has_manual_contact_relationships=False,
+            ),
+            DeletionProtectionFacts(
+                has_children=False,
+                has_tags=False,
+                has_manual_contact_relationships=True,
+            ),
+            DeletionProtectionFacts(
+                has_children=False,
+                has_tags=False,
+                has_manual_contact_relationships=False,
+                has_type_data=True,
+            ),
+            DeletionProtectionFacts(
+                has_children=False,
+                has_tags=False,
+                has_manual_contact_relationships=False,
+                has_routes=True,
+            ),
+        ],
+        ids=[
+            "children",
+            "tags",
+            "manual-contact-relationship",
+            "type-data",
+            "route",
+        ],
+    )
+    async def test_protected_instance_falls_back_to_cancel(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+        facts: DeletionProtectionFacts,
+    ) -> None:
+        """Children, tags or manual contact links protect a journal from deletion."""
+        _mock(
+            processor.link_repo
+        ).find_by_external_event.return_value = _make_linked_journal()
+        _mock(processor.link_repo).get_deletion_protection_facts.return_value = facts
+        event = _make_outbox_event(
+            event_type="journal_event.cancelled",
+            sync_action="cancelled",
+            existing_journal_id=42,
+            recurring_event_id="master-1",
+        )
+
+        result = await processor.process_event(event)
+
+        assert result["status"] == "success"
+        mock_journal_service.delete_journal.assert_not_called()
+        assert mock_connection.execute.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_near_future_instance_marked_cancelled(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """An instance starting within a day keeps today's cancel behaviour."""
+        _mock(
+            processor.link_repo
+        ).find_by_external_event.return_value = _make_linked_journal(
+            days_until_start=0.5
+        )
+        event = _make_outbox_event(
+            event_type="journal_event.cancelled",
+            sync_action="cancelled",
+            existing_journal_id=42,
+            recurring_event_id="master-1",
+        )
+
+        result = await processor.process_event(event)
+
+        assert result["status"] == "success"
+        mock_journal_service.delete_journal.assert_not_called()
+        assert mock_connection.execute.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_non_recurring_event_marks_cancelled(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Non-recurring cancellations keep today's behaviour unchanged."""
+        _mock(
+            processor.link_repo
+        ).find_by_external_event.return_value = _make_linked_journal(
+            recurring_event_id=None
+        )
+        event = _make_outbox_event(
+            event_type="journal_event.cancelled",
+            sync_action="cancelled",
+            existing_journal_id=42,
+            recurring_event_id=None,
+        )
+
+        result = await processor.process_event(event)
+
+        assert result["status"] == "success"
+        mock_journal_service.delete_journal.assert_not_called()
+        assert mock_connection.execute.call_count == 2
+
+
+class TestSeriesCancelledFanOut(_SeriesProcessorTestBase):
+    """journal_event.series_cancelled: fan-out over all linked journals."""
+
+    @pytest.mark.asyncio
+    async def test_deletes_future_cancels_near_skips_past(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Far-future instances are deleted, near ones cancelled, past skipped."""
+        _mock(processor.link_repo).find_journals_for_series.return_value = [
+            _make_linked_journal(journal_id=1, days_until_start=10),
+            _make_linked_journal(journal_id=2, days_until_start=0.5),
+            _make_linked_journal(journal_id=3, days_until_start=-10),
+        ]
+
+        result = await processor.process_event(_make_series_cancelled_event())
+
+        assert result["status"] == "success"
+        assert result["deleted"] == 1
+        assert result["cancelled"] == 1
+        assert result["skipped_past"] == 1
+        mock_journal_service.delete_journal.assert_awaited_once()
+        assert mock_journal_service.delete_journal.call_args[0][0] == 1
+        # Journal 2 marked cancelled: link + calendar_info updates.
+        assert mock_connection.execute.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_edited_future_journal_preserved_as_cancelled(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """A locally-edited far-future instance is cancelled, not deleted."""
+        _mock(processor.link_repo).find_journals_for_series.return_value = [
+            _make_linked_journal(journal_id=1, days_until_start=10, edited=True),
+        ]
+
+        result = await processor.process_event(_make_series_cancelled_event())
+
+        assert result["deleted"] == 0
+        assert result["cancelled"] == 1
+        mock_journal_service.delete_journal.assert_not_called()
+        assert mock_connection.execute.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_no_linked_journals_is_noop_success(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """A series with no linked journals succeeds without doing anything."""
+        _mock(processor.link_repo).find_journals_for_series.return_value = []
+
+        result = await processor.process_event(_make_series_cancelled_event())
+
+        assert result["status"] == "success"
+        assert result["deleted"] == 0
+        assert result["cancelled"] == 0
+        mock_journal_service.delete_journal.assert_not_called()
+        mock_connection.execute.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_error_on_one_journal_processes_rest_then_fails_event(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """A failing journal must not poison the rest of the fan-out, but the
+        event must fail afterwards so the (idempotent) retry can pick up the
+        journals that errored — a success ack would drop them forever."""
+        _mock(processor.link_repo).find_journals_for_series.return_value = [
+            _make_linked_journal(journal_id=1, days_until_start=10),
+            _make_linked_journal(journal_id=2, days_until_start=0.5),
+        ]
+        mock_journal_service.delete_journal.side_effect = RuntimeError("boom")
+
+        with pytest.raises(JournalOutboxEventProcessingError, match="1 of 2"):
+            await processor.process_event(_make_series_cancelled_event())
+
+        # Journal 2 was still attempted (marked cancelled) before the raise.
+        assert mock_connection.execute.call_count == 2
+
+
+class TestSeriesMembershipOnCreateAndUpdate(_SeriesProcessorTestBase):
+    """Auto-linking synced recurring instances into a journal series."""
+
+    @pytest.mark.asyncio
+    async def test_created_event_with_recurring_id_ensures_series_membership(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Creating a journal from a recurring instance links it into a series."""
+        event = _make_outbox_event(
+            event_type="journal_event.created",
+            sync_action="created",
+            recurring_event_id="master-1",
+        )
+        mock_journal_service.create_journal.return_value = _make_journal()
+        mock_connection.execute.side_effect = [
+            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _find_external_event_link (idempotency check)
+            _mock_empty_result(),  # _save_calendar_info
+            _mock_empty_result(),  # _create_external_event_link
+        ]
+
+        result = await processor.process_event(event)
+
+        assert result["status"] == "success"
+        _mock(
+            processor.series_repo
+        ).get_or_create_by_recurrence.assert_awaited_once_with(
+            user_id="1",
+            calendar_id=UUID(CALENDAR_ID),
+            recurring_event_id="master-1",
+            name="Team Meeting",
+        )
+        _mock(processor.series_repo).add_member.assert_awaited_once_with(SERIES_ID, 42)
+
+    @pytest.mark.asyncio
+    async def test_created_event_without_recurring_id_skips_series(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Non-recurring events create no series."""
+        event = _make_outbox_event(
+            event_type="journal_event.created",
+            sync_action="created",
+        )
+        mock_journal_service.create_journal.return_value = _make_journal()
+        mock_connection.execute.side_effect = [
+            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _find_external_event_link (idempotency check)
+            _mock_empty_result(),  # _save_calendar_info
+            _mock_empty_result(),  # _create_external_event_link
+        ]
+
+        await processor.process_event(event)
+
+        _mock(processor.series_repo).get_or_create_by_recurrence.assert_not_called()
+        _mock(processor.series_repo).add_member.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_updated_event_with_recurring_id_backfills_series_membership(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """An update carrying a recurring id backfills the link and series."""
+        event = _make_outbox_event(
+            event_type="journal_event.updated",
+            sync_action="updated",
+            existing_journal_id=42,
+            etag='"etag-new"',
+            recurring_event_id="master-1",
+        )
+        mock_journal_service.update_journal.return_value = _make_journal()
+        mock_connection.execute.side_effect = [
+            MagicMock(),  # _ensure_calendar_exists
+            _mock_fetchone(_make_journal_row()),  # _find_journal_by_id
+            _mock_fetchone(_make_link_row()),  # _find_external_event_link
+            _mock_empty_result(),  # _find_calendar_info (private_description)
+            _mock_empty_result(),  # _save_calendar_info
+            _mock_empty_result(),  # _update_external_event_link_etag
+        ]
+
+        result = await processor.process_event(event)
+
+        assert result["status"] == "success"
+        _mock(processor.series_repo).get_or_create_by_recurrence.assert_awaited_once()
+        _mock(processor.series_repo).add_member.assert_awaited_once_with(SERIES_ID, 42)
+
+    @pytest.mark.asyncio
+    async def test_update_link_etag_persists_recurring_event_id(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """The link update SQL persists the recurring id (COALESCE keeps old)."""
+        event = _make_outbox_event(
+            event_type="journal_event.updated",
+            sync_action="updated",
+            existing_journal_id=42,
+            etag='"etag-new"',
+            recurring_event_id="master-1",
+        )
+        mock_journal_service.update_journal.return_value = _make_journal()
+        mock_connection.execute.side_effect = [
+            MagicMock(),  # _ensure_calendar_exists
+            _mock_fetchone(_make_journal_row()),  # _find_journal_by_id
+            _mock_fetchone(_make_link_row()),  # _find_external_event_link
+            _mock_empty_result(),  # _find_calendar_info (private_description)
+            _mock_empty_result(),  # _save_calendar_info
+            _mock_empty_result(),  # _update_external_event_link_etag
+        ]
+
+        await processor.process_event(event)
+
+        etag_update_call = mock_connection.execute.call_args_list[5]
+        sql_text = str(etag_update_call[0][0].text)
+        assert "recurring_event_id" in sql_text
+        assert "COALESCE" in sql_text
+        assert etag_update_call[0][1]["recurring_event_id"] == "master-1"
+
+
+class TestSeriesCancelledFanOutRobustness(_SeriesProcessorTestBase):
+    """PR-review hardening: nullable link/date fields in the fan-out."""
+
+    @pytest.mark.asyncio
+    async def test_link_without_external_id_still_marked_cancelled(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """The link UPDATE keys on (journal_id, calendar_id), not the
+        nullable external_event_id (NULL = NULL is false in SQL)."""
+        _mock(processor.link_repo).find_journals_for_series.return_value = [
+            _make_linked_journal(
+                journal_id=7, days_until_start=0.5, external_event_id=None
+            ),
+        ]
+
+        result = await processor.process_event(_make_series_cancelled_event())
+
+        assert result["cancelled"] == 1
+        link_update_call = mock_connection.execute.call_args_list[0]
+        sql_text = str(link_update_call[0][0].text)
+        assert "journal_id = :journal_id" in sql_text
+        assert "external_event_id" not in sql_text
+        assert link_update_call[0][1]["journal_id"] == 7
+
+    @pytest.mark.asyncio
+    async def test_past_instance_without_end_date_is_skipped(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """With no end date, the past-event skip falls back to the start."""
+        _mock(processor.link_repo).find_journals_for_series.return_value = [
+            _make_linked_journal(
+                journal_id=8, days_until_start=-10, duration_hours=None
+            ),
+        ]
+
+        result = await processor.process_event(_make_series_cancelled_event())
+
+        assert result["skipped_past"] == 1
+        assert result["deleted"] == 0
+        assert result["cancelled"] == 0
+        mock_journal_service.delete_journal.assert_not_called()
+        mock_connection.execute.assert_not_called()
+
+
+class TestSeriesCancelledFanOutSavepoints(_SeriesProcessorTestBase):
+    """PR-review hardening: each fan-out item runs in a SAVEPOINT so a
+    failed item rolls back cleanly (per the batch-loop rule)."""
+
+    @pytest.mark.asyncio
+    async def test_failed_item_rolls_back_its_savepoint(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """A failing delete rolls back its item's savepoint (undoing the
+        already-executed link deletion) while the next item commits."""
+        _mock(processor.link_repo).find_journals_for_series.return_value = [
+            _make_linked_journal(journal_id=1, days_until_start=10),
+            _make_linked_journal(journal_id=2, days_until_start=0.5),
+        ]
+        mock_journal_service.delete_journal.side_effect = RuntimeError("boom")
+
+        with pytest.raises(JournalOutboxEventProcessingError):
+            await processor.process_event(_make_series_cancelled_event())
+
+        # One savepoint per item: the failed delete rolled back, the
+        # successful mark-cancelled committed.
+        savepoint = mock_connection.begin_nested.return_value
+        assert mock_connection.begin_nested.await_count == 2
+        savepoint.rollback.assert_awaited_once()
+        savepoint.commit.assert_awaited_once()
+
+
+class TestUnchangedEtagBackfill(_SeriesProcessorTestBase):
+    """Audit fix: the backfill must persist even when the ETag is unchanged.
+
+    The worker's backfill promotion re-sends unchanged events with the SAME
+    etag; if the etag-unchanged skip runs first, the recurring id is never
+    stored and the worker re-promotes forever."""
+
+    @pytest.mark.asyncio
+    async def test_unchanged_etag_update_still_backfills_recurring_id_and_series(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """An etag-unchanged UPDATE with a new recurring id persists the link
+        backfill and series membership before skipping."""
+        event = _make_outbox_event(
+            event_type="journal_event.updated",
+            sync_action="updated",
+            existing_journal_id=42,
+            etag='"etag-old"',  # matches the stored link version
+            recurring_event_id="master-1",
+        )
+        mock_connection.execute.side_effect = [
+            MagicMock(),  # _ensure_calendar_exists
+            _mock_fetchone(_make_journal_row()),  # _find_journal_by_id
+            _mock_fetchone(
+                _make_link_row(recurring_event_id=None)
+            ),  # _find_external_event_link (same etag, unbackfilled)
+            _mock_empty_result(),  # _update_external_event_link_etag (backfill)
+        ]
+
+        result = await processor.process_event(event)
+
+        assert result["status"] == "skipped"
+        assert result["reason"] == "etag_unchanged"
+        backfill_call = mock_connection.execute.call_args_list[3]
+        sql_text = str(backfill_call[0][0].text)
+        assert "recurring_event_id" in sql_text
+        assert backfill_call[0][1]["recurring_event_id"] == "master-1"
+        _mock(processor.series_repo).get_or_create_by_recurrence.assert_awaited_once()
+        _mock(processor.series_repo).add_member.assert_awaited_once_with(SERIES_ID, 42)
+
+    @pytest.mark.asyncio
+    async def test_unchanged_etag_update_with_stored_recurring_id_pure_skip(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Once backfilled, an etag-unchanged UPDATE does no writes at all."""
+        event = _make_outbox_event(
+            event_type="journal_event.updated",
+            sync_action="updated",
+            existing_journal_id=42,
+            etag='"etag-old"',
+            recurring_event_id="master-1",
+        )
+        mock_connection.execute.side_effect = [
+            MagicMock(),  # _ensure_calendar_exists
+            _mock_fetchone(_make_journal_row()),  # _find_journal_by_id
+            _mock_fetchone(
+                _make_link_row(recurring_event_id="master-1")
+            ),  # _find_external_event_link (same etag, already backfilled)
+        ]
+
+        result = await processor.process_event(event)
+
+        assert result["status"] == "skipped"
+        assert mock_connection.execute.call_count == 3
+        _mock(processor.series_repo).get_or_create_by_recurrence.assert_not_called()
+        _mock(processor.series_repo).add_member.assert_not_called()
+
+
+class TestStickyCancellationDecision(_SeriesProcessorTestBase):
+    """PR-review hardening: a link already marked cancelled is never eligible
+    for deletion on a later pass.
+
+    _mark_journal_cancelled bumps the link's updated_at, which erases the
+    journal_updated_at > link_updated_at edit signal — so on event redelivery
+    (or a repeated upstream cancellation) a previously-protected, locally
+    edited journal would otherwise look unedited and be deleted."""
+
+    @pytest.mark.asyncio
+    async def test_fan_out_never_deletes_an_already_cancelled_link(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+    ) -> None:
+        """A far-future, seemingly-unedited journal whose link is already
+        cancelled keeps the earlier keep decision on redelivery."""
+        _mock(processor.link_repo).find_journals_for_series.return_value = [
+            _make_linked_journal(
+                journal_id=1, days_until_start=10, link_sync_status="cancelled"
+            ),
+        ]
+
+        result = await processor.process_event(_make_series_cancelled_event())
+
+        mock_journal_service.delete_journal.assert_not_called()
+        assert result["deleted"] == 0
+        assert result["cancelled"] == 1
+
+    @pytest.mark.asyncio
+    async def test_instance_cancellation_never_deletes_an_already_cancelled_link(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """The single-instance delete path applies the same sticky rule."""
+        _mock(
+            processor.link_repo
+        ).find_by_external_event.return_value = _make_linked_journal(
+            link_sync_status="cancelled"
+        )
+        event = _make_outbox_event(
+            event_type="journal_event.cancelled",
+            sync_action="cancelled",
+            existing_journal_id=42,
+            recurring_event_id="master-1",
+        )
+
+        result = await processor.process_event(event)
+
+        assert result["status"] == "success"
+        mock_journal_service.delete_journal.assert_not_called()
+        # Falls through to the (idempotent) mark-cancelled writes.
+        assert mock_connection.execute.call_count == 2

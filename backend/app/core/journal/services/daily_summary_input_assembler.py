@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from app.core.journal.models.repositories import (
         JournalContactRelationshipRepository,
         JournalRepository,
+        JournalSeriesRepository,
         MoodDataRepository,
     )
 
@@ -39,11 +40,13 @@ class DailySummaryInputAssembler:
         mood_repo: MoodDataRepository,
         contact_relationship_repo: JournalContactRelationshipRepository,
         summary_repo: JournalDailySummaryRepository,
+        series_repo: JournalSeriesRepository | None = None,
     ) -> None:
         self._journal_repo = journal_repo
         self._mood_repo = mood_repo
         self._contact_relationship_repo = contact_relationship_repo
         self._summary_repo = summary_repo
+        self._series_repo = series_repo
 
     async def assemble(
         self,
@@ -92,6 +95,16 @@ class DailySummaryInputAssembler:
             end_date=end_date,
         )
 
+        # Series membership per journal (one bulk lookup)
+        series_names_by_journal: dict[int, list[str]] = {}
+        journal_ids = [j.id for j in journals if j.id is not None]
+        if self._series_repo is not None and journal_ids:
+            series_names_by_journal = (
+                await self._series_repo.get_series_names_for_journal_ids(
+                    journal_ids, user_id
+                )
+            )
+
         # Assemble per-journal data
         entries: list[DailySummaryJournalEntry] = []
         all_contact_names: list[str] = []
@@ -136,6 +149,11 @@ class DailySummaryInputAssembler:
                     contact_names=entry_contact_names,
                     mood_value=mood_value,
                     energy_level=energy_level,
+                    series_names=(
+                        series_names_by_journal.get(journal.id, [])
+                        if journal.id is not None
+                        else []
+                    ),
                 )
             )
 

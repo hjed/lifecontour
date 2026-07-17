@@ -240,3 +240,51 @@ class TestDailySummaryInputAssembler:
         result = await assembler.assemble("user123", date(2026, 4, 27))
 
         assert result.previous_summary is None
+
+
+class TestDailySummarySeriesNames:
+    """Series membership is included per entry via one bulk lookup."""
+
+    @pytest.mark.asyncio
+    async def test_assemble_includes_series_names_per_entry(
+        self,
+        mock_journal_repo: AsyncMock,
+        mock_mood_repo: AsyncMock,
+        mock_contact_rel_repo: AsyncMock,
+        mock_summary_repo: AsyncMock,
+    ) -> None:
+        """Entries carry their series names; journals without series get []."""
+        j1 = _make_journal(journal_id=1, title="Physio session")
+        j2 = _make_journal(journal_id=2, title="One-off note")
+        mock_journal_repo.get_all.return_value = [j1, j2]
+
+        mock_series_repo = AsyncMock()
+        mock_series_repo.get_series_names_for_journal_ids.return_value = {
+            1: ["Physio appointments"],
+        }
+        assembler = DailySummaryInputAssembler(
+            journal_repo=mock_journal_repo,
+            mood_repo=mock_mood_repo,
+            contact_relationship_repo=mock_contact_rel_repo,
+            summary_repo=mock_summary_repo,
+            series_repo=mock_series_repo,
+        )
+
+        result = await assembler.assemble("user123", date(2026, 4, 27))
+
+        assert result.journals[0].series_names == ["Physio appointments"]
+        assert result.journals[1].series_names == []
+        mock_series_repo.get_series_names_for_journal_ids.assert_awaited_once_with(
+            [1, 2], "user123"
+        )
+
+    @pytest.mark.asyncio
+    async def test_assemble_without_series_repo_defaults_to_empty(
+        self, assembler: DailySummaryInputAssembler, mock_journal_repo: AsyncMock
+    ) -> None:
+        """Without a series repo the entries carry no series names."""
+        mock_journal_repo.get_all.return_value = [_make_journal(journal_id=1)]
+
+        result = await assembler.assemble("user123", date(2026, 4, 27))
+
+        assert result.journals[0].series_names == []

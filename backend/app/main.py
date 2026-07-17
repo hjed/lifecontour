@@ -297,6 +297,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from app.api.journals.logbook_export_controller import (
         router as logbook_export_router,
     )
+    from app.api.journals.series_controller import series_router
     from app.api.routes.controllers import router as routes_router
     from app.api.search.controllers import router as search_router
     from app.api.settings.controllers import router as user_settings_router
@@ -340,6 +341,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(contacts_router, prefix="/api", tags=["contacts"])
     app.include_router(relationships_router, prefix="/api", tags=["relationships"])
     app.include_router(custom_date_types_router, prefix="/api", tags=["contacts"])
+    # Series routes must be registered before the journals router so the
+    # literal /journals/series paths win over /journals/{journal_id}.
+    app.include_router(series_router, prefix="/api", tags=["journals"])
     app.include_router(journals_router, prefix="/api", tags=["journals"])
     app.include_router(activity_template_router, prefix="/api")
     app.include_router(gear_item_router, prefix="/api")

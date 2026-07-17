@@ -31,6 +31,7 @@ from app.core.contacts.services.summary_models import (
 from app.core.journal.models.repositories import (
     JournalContactRelationshipRepository,
     JournalRepository,
+    JournalSeriesRepository,
 )
 from app.core.settings.timezone_utils import DEFAULT_TIMEZONE, isoformat_in_tz
 
@@ -81,12 +82,14 @@ class SummaryInputAssembler:
         journal_relationship_repo: JournalContactRelationshipRepository,
         journal_repo: JournalRepository,
         summary_repo: ContactSummaryRepository,
+        series_repo: JournalSeriesRepository | None = None,
     ) -> None:
         self._contact_repo = contact_repo
         self._history_repo = history_repo
         self._journal_relationship_repo = journal_relationship_repo
         self._journal_repo = journal_repo
         self._summary_repo = summary_repo
+        self._series_repo = series_repo
 
     async def assemble(
         self, contact_id: int, timezone: str = DEFAULT_TIMEZONE
@@ -192,6 +195,7 @@ class SummaryInputAssembler:
         # Fetch recent and future journals (bounded)
         recent_journals: list[dict[str, Any]] = []
         future_journals: list[dict[str, Any]] = []
+        journal_dicts_by_id: list[tuple[int, str | None, dict[str, Any]]] = []
 
         # We check all relationships to find future ones, but prioritize recent ones for past events
         for jr in all_j_rels:
@@ -245,11 +249,14 @@ class SummaryInputAssembler:
                 "relationship_type": rel_type,
                 "status": status,
                 "journal_types": journal_types,
+                "series": [],
             }
 
+            retained = False
             if is_future:
                 if len(future_journals) < self.MAX_FUTURE_JOURNALS:
                     future_journals.append(journal_dict)
+                    retained = True
             else:
                 # Only include past events if they are in the recent window,
                 # or if we want to fill up the recent_journals?
@@ -259,6 +266,29 @@ class SummaryInputAssembler:
                 if created and created >= window_start:
                     if len(recent_journals) < self.MAX_JOURNALS:
                         recent_journals.append(journal_dict)
+                        retained = True
+
+            # Series are only looked up for journals that made it into the
+            # prompt input; dropped dicts would waste the bulk lookup.
+            if retained:
+                journal_dicts_by_id.append(
+                    (jr.journal_id, getattr(journal, "user_id", None), journal_dict)
+                )
+
+        # Attach series membership (one bulk lookup across included journals)
+        if self._series_repo is not None and journal_dicts_by_id:
+            journal_user_id = next(
+                (uid for _, uid, _ in journal_dicts_by_id if uid), None
+            )
+            if journal_user_id is not None:
+                series_names_by_journal = (
+                    await self._series_repo.get_series_names_for_journal_ids(
+                        [jid for jid, _, _ in journal_dicts_by_id],
+                        journal_user_id,
+                    )
+                )
+                for jid, _, journal_dict in journal_dicts_by_id:
+                    journal_dict["series"] = series_names_by_journal.get(jid, [])
 
         # Compute long-term activity statistics
         activity_stats = self._compute_activity_stats(older_j_rels, now)

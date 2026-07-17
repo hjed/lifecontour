@@ -16,6 +16,7 @@ class InboundSyncAction(StrEnum):
     CREATE_JOURNAL = "create_journal"
     UPDATE_JOURNAL = "update_journal"
     CANCEL_JOURNAL = "cancel_journal"
+    CANCEL_SERIES = "cancel_series"
     SKIP_UNCHANGED = "skip_unchanged"
     SKIP_ONE_WAY = "skip_one_way"
     SKIP_CANCELLED = "skip_cancelled"
@@ -54,20 +55,28 @@ class InboundSyncClassifier:
         self,
         google_event: GoogleEventProtocol,
         existing_link: ExternalEventLinkProtocol | None,
+        has_series_links: bool = False,
     ) -> InboundSyncAction:
         """Classify what action to take for an inbound event.
 
         Args:
             google_event: The inbound Google Calendar event
             existing_link: The existing external event link, or None if new
+            has_series_links: Whether the event's id matches stored recurring
+                master ids (a cancelled, unlinked event id that instances point
+                at means the whole series was deleted upstream). Supplied by
+                the caller — the classifier stays DB-free.
 
         Returns:
             The action to take for this event
         """
-        # Cancelled events: cancel linked journal or skip if no link
+        # Cancelled events: cancel linked journal, fan out a series
+        # cancellation when the id is a recurring master, else skip
         if google_event.status == "cancelled":
             if existing_link is not None:
                 return InboundSyncAction.CANCEL_JOURNAL
+            if has_series_links:
+                return InboundSyncAction.CANCEL_SERIES
             return InboundSyncAction.SKIP_CANCELLED
 
         # No existing link → new journal

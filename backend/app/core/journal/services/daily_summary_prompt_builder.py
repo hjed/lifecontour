@@ -118,6 +118,11 @@ class DailySummaryPromptBuilder:
             lines.append(f"\n### Entry {i}: {entry.title}")
             if entry.types:
                 lines.append(f"Types: {', '.join(entry.types)}")
+            if entry.series_names:
+                lines.append(
+                    f"Series: {', '.join(entry.series_names)} "
+                    "(recurring/related series this entry belongs to)"
+                )
             if entry.contact_names:
                 lines.append(f"Contacts: {', '.join(entry.contact_names)}")
             if entry.mood_value is not None:

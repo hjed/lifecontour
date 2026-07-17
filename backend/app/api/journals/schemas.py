@@ -577,6 +577,81 @@ class JournalTagCreateRequest(JsonApiCreateRequest[JournalTagCreateData]):
     pass
 
 
+# Journal Series Schemas
+class JournalSeriesResource(BaseModel):
+    """Journal series resource following JSON API specification."""
+
+    type: str = Field(default="journal-series", description=RESOURCE_TYPE_DESC)
+    id: str = Field(..., description="Series ID")
+    attributes: dict[str, Any] = Field(..., description="Series attributes")
+    links: JsonApiLinks | None = Field(default=None, description=RESOURCE_LINKS_DESC)
+
+
+class JournalSeriesListResponse(JsonApiCollectionResponse[JournalSeriesResource]):
+    """Response model for a list of journal series."""
+
+    pass
+
+
+class JournalSeriesResponse(JsonApiResponse[JournalSeriesResource]):
+    """Response model for a single journal series."""
+
+    pass
+
+
+class JournalSeriesWriteAttributes(BaseModel):
+    """Attributes for creating or updating a journal series."""
+
+    name: str = Field(..., description="Series name", min_length=1, max_length=500)
+    description: str | None = Field(default=None, description="Series description")
+
+
+class JournalSeriesCreateData(BaseModel):
+    """Data for creating a journal series."""
+
+    type: str = Field(default="journal-series", description=RESOURCE_TYPE_DESC)
+    attributes: JournalSeriesWriteAttributes = Field(
+        ..., description="Series attributes"
+    )
+
+
+class JournalSeriesCreateRequest(JsonApiCreateRequest[JournalSeriesCreateData]):
+    """Request model for creating a journal series."""
+
+    pass
+
+
+class JournalSeriesUpdateData(BaseModel):
+    """Data for updating a journal series."""
+
+    type: str = Field(default="journal-series", description=RESOURCE_TYPE_DESC)
+    id: str = Field(..., description="Series ID")
+    attributes: JournalSeriesWriteAttributes = Field(
+        ..., description="Series attributes"
+    )
+
+
+class JournalSeriesUpdateRequest(BaseModel):
+    """Request model for updating a journal series."""
+
+    data: JournalSeriesUpdateData = Field(..., description="Series update data")
+
+
+class JournalSeriesRelationshipData(BaseModel):
+    """Identifier payload linking a journal to a series."""
+
+    type: str = Field(default="journal-series", description=RESOURCE_TYPE_DESC)
+    id: str = Field(..., description="Series ID")
+
+
+class JournalSeriesRelationshipRequest(BaseModel):
+    """Request model for adding a journal to a series."""
+
+    data: JournalSeriesRelationshipData = Field(
+        ..., description="Series relationship identifier"
+    )
+
+
 # Calendar schema
 class CalendarSchema(BaseModel):
     """Calendar schema for journal responses."""
@@ -613,6 +688,10 @@ class JournalAttributes(BaseModel):
     )
     tags: list[JournalTagSchema] = Field(
         default_factory=list, description="Journal tags"
+    )
+    series: list[dict[str, str]] = Field(
+        default_factory=list,
+        description="Series memberships as {id, name} refs",
     )
     calendar: CalendarSchema | None = Field(
         default=None, description="Calendar (for EVENT type)"

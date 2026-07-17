@@ -108,6 +108,7 @@ from app.core.journal.models.repositories import (
     JoggingDataRepository,
     JournalContactRelationshipRepository,
     JournalRepository,
+    JournalSeriesRepository,
     JournalTagRepository,
     KayakingDataRepository,
     MoodDataRepository,
@@ -1801,6 +1802,7 @@ async def get_journal(
     gear_usage_data_repo: FromDishka[GearUsageDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
+    series_repo: FromDishka[JournalSeriesRepository],
     route_repo: FromDishka[RouteRepository],
     contact_repo: FromDishka[ContactRepository],
     review_item_repo: FromDishka[ReviewItemRepository],
@@ -1901,6 +1903,14 @@ async def get_journal(
         depth=depth,
         children_types=children_types,
     )
+
+    # Embed series memberships in the detail response
+    journal_series = await series_repo.get_series_for_journal(journal_id, user.id)
+    journal_resource.attributes.series = [
+        {"id": str(series.id), "name": series.name}
+        for series in journal_series
+        if series.id is not None
+    ]
 
     # Embed pending review items in the detail response
     pending_review_items = await review_item_repo.find_pending_by_journal_id(

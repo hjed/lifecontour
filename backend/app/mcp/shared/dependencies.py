@@ -27,6 +27,7 @@ from app.core.journal.services.incomplete_outdoor_activity_service import (
     IncompleteOutdoorActivityService,
 )
 from app.core.journal.services.journal_contact_service import JournalContactService
+from app.core.journal.services.journal_series_service import JournalSeriesService
 from app.core.journal.services.journal_write_service import JournalWriteService
 from app.core.journal.services.outdoor_activity_dismissal_service import (
     OutdoorActivityDismissalService,
@@ -238,6 +239,11 @@ async def get_journal_contact_service() -> JournalContactService:
 async def get_journal_write_service() -> JournalWriteService:
     """Resolve the composite journal write service for the current MCP request."""
     return cast(JournalWriteService, await _resolve_dependency(JournalWriteService))
+
+
+async def get_journal_series_service() -> JournalSeriesService:
+    """Resolve the journal series service for the current MCP request."""
+    return cast(JournalSeriesService, await _resolve_dependency(JournalSeriesService))
 
 
 async def get_activity_template_service() -> ActivityTemplateService:

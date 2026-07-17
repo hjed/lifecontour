@@ -102,6 +102,13 @@ class JournalSyncEventData(BaseModel):
             "'relationship_type' keys"
         ),
     )
+    recurring_event_id: str | None = Field(
+        default=None,
+        description=(
+            "Recurring master event id when the event is an instance of a "
+            "recurring series (drives journal series auto-linking)"
+        ),
+    )
 
 
 class JournalStatusEventData(BaseModel):
@@ -120,6 +127,36 @@ class JournalStatusEventData(BaseModel):
     existing_journal_id: int | None = Field(
         default=None,
         description="ID of existing journal (required for cancellation)",
+    )
+    recurring_event_id: str | None = Field(
+        default=None,
+        description=(
+            "Recurring master event id when the cancelled instance belongs to a "
+            "recurring series (enables far-future instance deletion)"
+        ),
+    )
+    integration_source: str | None = Field(
+        default=None,
+        description="Source integration (e.g., 'google'); used for provenance",
+    )
+
+
+class JournalSeriesCancelledEventData(BaseModel):
+    """Payload for ``journal_event.series_cancelled``.
+
+    Published by a calendar worker when an entire recurring series is
+    cancelled/deleted upstream (a single cancelled event carrying the recurring
+    master id). The backend fans out over all journals linked to that series:
+    far-future unedited instances are deleted, the rest are marked cancelled.
+    """
+
+    integration_source: str = Field(description="Source integration (e.g., 'google')")
+    calendar_id: str = Field(description="Internal calendar UUID")
+    recurring_event_id: str = Field(
+        description="The recurring master event id of the cancelled series"
+    )
+    sync_timestamp: str = Field(
+        description="ISO-8601 timestamp of when the sync occurred"
     )
 
 
@@ -203,6 +240,7 @@ OutboxEventData = (
     | SyncCompletedEventData
     | JournalSyncEventData
     | JournalStatusEventData
+    | JournalSeriesCancelledEventData
     | ImmichAlbumSyncEventData
     | MatchDetectionEventData
 )
@@ -217,6 +255,7 @@ _EVENT_TYPE_DISPATCH: list[tuple[str, type[BaseModel]]] = [
     ("journal_event.created", JournalSyncEventData),
     ("journal_event.updated", JournalSyncEventData),
     ("journal_event.conflicted", JournalStatusEventData),
+    ("journal_event.series_cancelled", JournalSeriesCancelledEventData),
     ("journal_event.cancelled", JournalStatusEventData),
     ("immich_album.", ImmichAlbumSyncEventData),
     ("journal_review.", MatchDetectionEventData),

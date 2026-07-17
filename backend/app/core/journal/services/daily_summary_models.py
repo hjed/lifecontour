@@ -20,6 +20,7 @@ class DailySummaryJournalEntry:
     contact_names: list[str] = field(default_factory=list)
     mood_value: int | None = None
     energy_level: int | None = None
+    series_names: list[str] = field(default_factory=list)
 
 
 @dataclass

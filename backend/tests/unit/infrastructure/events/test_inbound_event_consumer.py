@@ -68,6 +68,7 @@ class TestInboundEventConsumerEventMatching:
             "journal_event.created",
             "journal_event.updated",
             "journal_event.deleted",
+            "journal_event.series_cancelled",
         ],
     )
     def test_matches_journal_event_sync_events(

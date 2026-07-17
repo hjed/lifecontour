@@ -397,6 +397,20 @@ export interface JournalTag {
   color?: string | null;
 }
 
+// Journal Series (a named group of related journals)
+export interface JournalSeries {
+  id: string; // UUID from backend
+  name: string;
+  description?: string | null;
+  auto_created?: boolean;
+}
+
+// Series reference embedded on a journal detail response
+export interface JournalSeriesRef {
+  id: string;
+  name: string;
+}
+
 // Calendar
 export interface JournalCalendar {
   id: string;
@@ -474,6 +488,7 @@ export interface JournalAttributes {
   // Embedded relationships
   contacts: JournalContactRelationship[];
   tags: JournalTag[];
+  series?: JournalSeriesRef[];
   calendar?: JournalCalendar | null;
   // Hierarchy information
   parent?: ParentJournalSummary | null;

@@ -1,0 +1,336 @@
+"""Integration tests for SqlJournalSeriesRepository."""
+
+import uuid
+from datetime import UTC, datetime
+
+import pytest
+import pytest_asyncio
+from core_shared.models.journals import Calendar, EventDateRange, Journal
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
+
+from app.core.journal.adapters.sql.calendar_repository import SqlCalendarRepository
+from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+from app.core.journal.adapters.sql.journal_series_repository import (
+    SqlJournalSeriesRepository,
+)
+from app.core.journal.models.journal_series import JournalSeries
+
+USER_ID = "series-test-user"
+OTHER_USER_ID = "series-other-user"
+
+
+def _sid(series: JournalSeries) -> uuid.UUID:
+    assert series.id is not None
+    return series.id
+
+
+def _cid(calendar: Calendar) -> uuid.UUID:
+    assert calendar.id is not None
+    return calendar.id
+
+
+@pytest_asyncio.fixture
+async def series_repository(
+    async_connection: AsyncConnection,
+) -> SqlJournalSeriesRepository:
+    return SqlJournalSeriesRepository(async_connection)
+
+
+@pytest_asyncio.fixture
+async def journal_repository(async_connection: AsyncConnection) -> SqlJournalRepository:
+    return SqlJournalRepository(async_connection)
+
+
+@pytest_asyncio.fixture
+async def calendar_repository(
+    async_connection: AsyncConnection,
+) -> SqlCalendarRepository:
+    return SqlCalendarRepository(async_connection)
+
+
+async def _create_journal(
+    journal_repository: SqlJournalRepository,
+    title: str = "Series member journal",
+    user_id: str = USER_ID,
+) -> Journal:
+    journal = Journal(
+        user_id=user_id,
+        title=title,
+        content="",
+        event_date_range=EventDateRange(
+            start=datetime(2026, 7, 20, 9, 0, tzinfo=UTC),
+            end=datetime(2026, 7, 20, 10, 0, tzinfo=UTC),
+        ),
+    )
+    return await journal_repository.save(journal)
+
+
+async def _create_calendar(
+    calendar_repository: SqlCalendarRepository, user_id: str = USER_ID
+) -> Calendar:
+    return await calendar_repository.save(
+        Calendar(user_id=user_id, name=f"Cal {uuid.uuid4().hex[:8]}", color="#336699")
+    )
+
+
+@pytest.mark.integration
+class TestJournalSeriesSave:
+    async def test_save_creates_series_with_generated_id(
+        self, series_repository: SqlJournalSeriesRepository
+    ) -> None:
+        series = JournalSeries(user_id=USER_ID, name="Physio appointments")
+
+        saved = await series_repository.save(series)
+
+        assert saved.id is not None
+        assert saved.created_at is not None
+        assert saved.updated_at is not None
+        assert saved.name == "Physio appointments"
+
+    async def test_save_updates_existing_series(
+        self, series_repository: SqlJournalSeriesRepository
+    ) -> None:
+        saved = await series_repository.save(
+            JournalSeries(user_id=USER_ID, name="Original")
+        )
+        saved.name = "Renamed"
+        saved.description = "with description"
+
+        updated = await series_repository.save(saved)
+
+        fetched = await series_repository.find_by_id(_sid(updated), USER_ID)
+        assert fetched is not None
+        assert fetched.name == "Renamed"
+        assert fetched.description == "with description"
+
+
+@pytest.mark.integration
+class TestJournalSeriesFind:
+    async def test_find_by_id_is_user_scoped(
+        self, series_repository: SqlJournalSeriesRepository
+    ) -> None:
+        saved = await series_repository.save(
+            JournalSeries(user_id=USER_ID, name="Mine")
+        )
+
+        assert await series_repository.find_by_id(_sid(saved), USER_ID) is not None
+        assert await series_repository.find_by_id(_sid(saved), OTHER_USER_ID) is None
+
+    async def test_find_all_returns_only_user_series_ordered_by_name(
+        self, series_repository: SqlJournalSeriesRepository
+    ) -> None:
+        await series_repository.save(JournalSeries(user_id=USER_ID, name="Zebra"))
+        await series_repository.save(JournalSeries(user_id=USER_ID, name="Alpha"))
+        await series_repository.save(
+            JournalSeries(user_id=OTHER_USER_ID, name="Not mine")
+        )
+
+        result = await series_repository.find_all(USER_ID)
+
+        assert [s.name for s in result] == ["Alpha", "Zebra"]
+
+
+@pytest.mark.integration
+class TestGetOrCreateByRecurrence:
+    async def test_creates_then_returns_same_series(
+        self,
+        series_repository: SqlJournalSeriesRepository,
+        calendar_repository: SqlCalendarRepository,
+    ) -> None:
+        calendar = await _create_calendar(calendar_repository)
+
+        first = await series_repository.get_or_create_by_recurrence(
+            user_id=USER_ID,
+            calendar_id=_cid(calendar),
+            recurring_event_id="master123",
+            name="Weekly standup",
+        )
+        second = await series_repository.get_or_create_by_recurrence(
+            user_id=USER_ID,
+            calendar_id=_cid(calendar),
+            recurring_event_id="master123",
+            name="A different name that must not create a new series",
+        )
+
+        assert first.id == second.id
+        assert second.name == "Weekly standup"
+        assert first.auto_created is True
+
+    async def test_keyed_by_calendar_and_master_id(
+        self,
+        series_repository: SqlJournalSeriesRepository,
+        calendar_repository: SqlCalendarRepository,
+    ) -> None:
+        calendar_a = await _create_calendar(calendar_repository)
+        calendar_b = await _create_calendar(calendar_repository)
+
+        same_master_other_calendar = (
+            await series_repository.get_or_create_by_recurrence(
+                user_id=USER_ID,
+                calendar_id=_cid(calendar_a),
+                recurring_event_id="master123",
+                name="Series A",
+            )
+        )
+        other_calendar = await series_repository.get_or_create_by_recurrence(
+            user_id=USER_ID,
+            calendar_id=_cid(calendar_b),
+            recurring_event_id="master123",
+            name="Series B",
+        )
+        other_master = await series_repository.get_or_create_by_recurrence(
+            user_id=USER_ID,
+            calendar_id=_cid(calendar_a),
+            recurring_event_id="master456",
+            name="Series C",
+        )
+
+        ids = {
+            same_master_other_calendar.id,
+            other_calendar.id,
+            other_master.id,
+        }
+        assert len(ids) == 3
+
+
+@pytest.mark.integration
+class TestSeriesMembership:
+    async def test_add_member_is_idempotent(
+        self,
+        series_repository: SqlJournalSeriesRepository,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        series = await series_repository.save(
+            JournalSeries(user_id=USER_ID, name="Series")
+        )
+        journal = await _create_journal(journal_repository)
+        assert journal.id is not None
+
+        await series_repository.add_member(_sid(series), journal.id)
+        await series_repository.add_member(_sid(series), journal.id)
+
+        assert await series_repository.get_member_journal_ids(_sid(series)) == [
+            journal.id
+        ]
+
+    async def test_remove_member_is_idempotent(
+        self,
+        series_repository: SqlJournalSeriesRepository,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        series = await series_repository.save(
+            JournalSeries(user_id=USER_ID, name="Series")
+        )
+        journal = await _create_journal(journal_repository)
+        assert journal.id is not None
+        await series_repository.add_member(_sid(series), journal.id)
+
+        await series_repository.remove_member(_sid(series), journal.id)
+        await series_repository.remove_member(_sid(series), journal.id)
+
+        assert await series_repository.get_member_journal_ids(_sid(series)) == []
+
+    async def test_get_series_for_journal_returns_all_memberships(
+        self,
+        series_repository: SqlJournalSeriesRepository,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        series_a = await series_repository.save(
+            JournalSeries(user_id=USER_ID, name="Auto series")
+        )
+        series_b = await series_repository.save(
+            JournalSeries(user_id=USER_ID, name="Manual series")
+        )
+        journal = await _create_journal(journal_repository)
+        assert journal.id is not None
+        await series_repository.add_member(_sid(series_a), journal.id)
+        await series_repository.add_member(_sid(series_b), journal.id)
+
+        result = await series_repository.get_series_for_journal(journal.id, USER_ID)
+
+        assert {s.name for s in result} == {"Auto series", "Manual series"}
+
+    async def test_get_series_for_journal_is_user_scoped(
+        self,
+        series_repository: SqlJournalSeriesRepository,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        series = await series_repository.save(
+            JournalSeries(user_id=USER_ID, name="Series")
+        )
+        journal = await _create_journal(journal_repository)
+        assert journal.id is not None
+        await series_repository.add_member(_sid(series), journal.id)
+
+        assert (
+            await series_repository.get_series_for_journal(journal.id, OTHER_USER_ID)
+            == []
+        )
+
+    async def test_get_series_names_for_journal_ids_bulk(
+        self,
+        series_repository: SqlJournalSeriesRepository,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        series = await series_repository.save(
+            JournalSeries(user_id=USER_ID, name="Physio")
+        )
+        member = await _create_journal(journal_repository, title="Member")
+        non_member = await _create_journal(journal_repository, title="Non member")
+        assert member.id is not None and non_member.id is not None
+        await series_repository.add_member(_sid(series), member.id)
+
+        result = await series_repository.get_series_names_for_journal_ids(
+            [member.id, non_member.id], USER_ID
+        )
+
+        assert result == {member.id: ["Physio"]}
+
+
+@pytest.mark.integration
+class TestSeriesCascades:
+    async def test_member_rows_cascade_on_journal_delete(
+        self,
+        series_repository: SqlJournalSeriesRepository,
+        journal_repository: SqlJournalRepository,
+        async_connection: AsyncConnection,
+    ) -> None:
+        series = await series_repository.save(
+            JournalSeries(user_id=USER_ID, name="Series")
+        )
+        journal = await _create_journal(journal_repository)
+        assert journal.id is not None
+        await series_repository.add_member(_sid(series), journal.id)
+
+        await journal_repository.delete(journal.id)
+
+        assert await series_repository.get_member_journal_ids(_sid(series)) == []
+        # The series itself survives.
+        assert await series_repository.find_by_id(_sid(series), USER_ID) is not None
+
+    async def test_delete_series_removes_memberships_but_not_journals(
+        self,
+        series_repository: SqlJournalSeriesRepository,
+        journal_repository: SqlJournalRepository,
+        async_connection: AsyncConnection,
+    ) -> None:
+        series = await series_repository.save(
+            JournalSeries(user_id=USER_ID, name="Series")
+        )
+        journal = await _create_journal(journal_repository)
+        assert journal.id is not None
+        await series_repository.add_member(_sid(series), journal.id)
+
+        await series_repository.delete(_sid(series), USER_ID)
+
+        assert await series_repository.find_by_id(_sid(series), USER_ID) is None
+        assert await journal_repository.find_by_id(journal.id) is not None
+        membership_count = await async_connection.execute(
+            text(
+                "SELECT COUNT(*) FROM journal_series_members"
+                " WHERE journal_id = :journal_id"
+            ),
+            {"journal_id": journal.id},
+        )
+        assert membership_count.scalar() == 0
