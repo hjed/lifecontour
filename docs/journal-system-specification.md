@@ -182,6 +182,7 @@ journal_tags table:
 - name (string)
 - parent_id (FK to journal_tags, nullable)
 - color (string, hex color)
+- description (text, nullable)
 - created_at
 - updated_at
 

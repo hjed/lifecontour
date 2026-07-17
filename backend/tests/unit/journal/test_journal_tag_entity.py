@@ -18,6 +18,7 @@ class TestJournalTag:
         assert tag.id is None
         assert tag.parent_id is None
         assert tag.color is None
+        assert tag.description is None
 
     def test_create_tag_with_all_fields(self):
         """Test creating tag with all fields."""
@@ -28,11 +29,13 @@ class TestJournalTag:
             id=tag_id,
             parent_id=parent_id,
             color="#FF0000",
+            description="Entries that need follow-up",
         )
         assert tag.name == "important"
         assert tag.id == tag_id
         assert tag.parent_id == parent_id
         assert tag.color == "#FF0000"
+        assert tag.description == "Entries that need follow-up"
 
     def test_create_tag_empty_name_raises_error(self):
         """Test creating tag with empty name raises error."""
@@ -117,3 +120,15 @@ class TestJournalTag:
         """Test creating tag with None color is valid."""
         tag = JournalTag(name="work", color=None)
         assert tag.color is None
+
+    def test_tag_none_description_valid(self):
+        """Test creating tag with an explicit None description is valid."""
+        tag = JournalTag(name="work", description=None)
+        assert tag.description is None
+
+    def test_tag_description_does_not_affect_equality(self):
+        """Test equality stays ID-based when descriptions differ."""
+        tag_id = uuid4()
+        tag1 = JournalTag(name="work", id=tag_id, description="one")
+        tag2 = JournalTag(name="work", id=tag_id, description="two")
+        assert tag1 == tag2

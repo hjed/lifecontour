@@ -71,6 +71,76 @@ class TestJournalTagRepositoryIntegration:
         assert updated_tag.color == "#00FF00"
         assert updated_tag.updated_at >= saved_tag.created_at
 
+    async def test_save_and_find_tag_with_description(self, tag_repo):
+        """Test description round-trips through insert and find_by_id."""
+        tag = JournalTag(
+            name="work",
+            color="#FF0000",
+            description="Work-related journal entries",
+        )
+        saved_tag = await tag_repo.save(tag)
+
+        assert saved_tag.description == "Work-related journal entries"
+
+        found_tag = await tag_repo.find_by_id(saved_tag.id)
+        assert found_tag is not None
+        assert found_tag.description == "Work-related journal entries"
+
+    async def test_save_tag_without_description_stores_null(self, tag_repo):
+        """Test description is nullable, so tags may omit it."""
+        saved_tag = await tag_repo.save(JournalTag(name="work"))
+
+        found_tag = await tag_repo.find_by_id(saved_tag.id)
+        assert found_tag is not None
+        assert found_tag.description is None
+
+    async def test_update_tag_description(self, tag_repo):
+        """Test the update path persists a changed description."""
+        saved_tag = await tag_repo.save(
+            JournalTag(name="work", description="Original text")
+        )
+
+        saved_tag.description = "Revised text"
+        await tag_repo.save(saved_tag)
+
+        found_tag = await tag_repo.find_by_id(saved_tag.id)
+        assert found_tag is not None
+        assert found_tag.description == "Revised text"
+
+    async def test_find_by_name_returns_description(self, tag_repo):
+        """Test find_by_name selects the description column."""
+        await tag_repo.save(JournalTag(name="work", description="Work entries"))
+
+        found_tag = await tag_repo.find_by_name("work")
+        assert found_tag is not None
+        assert found_tag.description == "Work entries"
+
+    async def test_get_all_returns_description(self, tag_repo):
+        """Test get_all selects the description column."""
+        await tag_repo.save(JournalTag(name="work", description="Work entries"))
+
+        tags = await tag_repo.get_all()
+        assert [t.description for t in tags] == ["Work entries"]
+
+    async def test_get_root_tags_returns_description(self, tag_repo):
+        """Test get_root_tags selects the description column."""
+        await tag_repo.save(JournalTag(name="work", description="Work entries"))
+
+        tags = await tag_repo.get_root_tags()
+        assert [t.description for t in tags] == ["Work entries"]
+
+    async def test_get_children_returns_description(self, tag_repo):
+        """Test get_children selects the description column."""
+        parent = await tag_repo.save(JournalTag(name="work"))
+        await tag_repo.save(
+            JournalTag(
+                name="work-meetings", parent_id=parent.id, description="Standups"
+            )
+        )
+
+        children = await tag_repo.get_children(parent.id)
+        assert [t.description for t in children] == ["Standups"]
+
     async def test_delete_tag(self, tag_repo):
         """Test deleting a tag."""
         tag = JournalTag(name="work")
@@ -203,6 +273,36 @@ class TestJournalTagRepositoryIntegration:
         tag_names = [tag.name for tag in tags]
         assert "work" in tag_names
         assert "personal" in tag_names
+
+    async def test_get_tags_for_journal_returns_description(
+        self, tag_repo, async_connection
+    ):
+        """Test get_tags_for_journal selects the description column."""
+        from core_shared.models.journals import EventDateRange, Journal
+
+        from app.core.journal.adapters.sql.journal_repository import (
+            SqlJournalRepository,
+        )
+
+        journal_repo = SqlJournalRepository(async_connection)
+        saved_journal = await journal_repo.save(
+            Journal(
+                user_id="test-user",
+                title="Test Journal",
+                content="Test content",
+                event_date_range=EventDateRange(
+                    start=datetime.now(UTC), end=datetime.now(UTC)
+                ),
+            )
+        )
+
+        saved_tag = await tag_repo.save(
+            JournalTag(name="work", description="Work entries")
+        )
+        await tag_repo.assign_tag(saved_journal.id, saved_tag.id)
+
+        tags = await tag_repo.get_tags_for_journal(saved_journal.id)
+        assert [t.description for t in tags] == ["Work entries"]
 
     async def test_assign_tag_to_journal(self, tag_repo, async_connection):
         """Test assigning a tag to a journal using the repository method."""

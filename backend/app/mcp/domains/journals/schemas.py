@@ -603,6 +603,37 @@ class GearItemListMCPResponse(BaseModel):
     summary: str = Field(description="AI-friendly summary")
 
 
+class JournalTagInfo(BaseModel):
+    """AI-friendly journal tag information."""
+
+    id: str = Field(description="Journal tag UUID")
+    name: str = Field(description="Tag name (unique across journal tags)")
+    color: str | None = Field(
+        default=None, description="Hex colour code for the tag badge (e.g. #FF0000)"
+    )
+    description: str | None = Field(
+        default=None, description="What the tag is used for, if described"
+    )
+    parent_id: str | None = Field(
+        default=None,
+        description="UUID of the parent tag, or null for a root tag",
+    )
+    created_at: str | None = Field(
+        default=None, description="Creation timestamp (ISO format)"
+    )
+
+
+class JournalTagListMCPResponse(BaseModel):
+    """AI-friendly journal tag list response."""
+
+    tags: list[JournalTagInfo] = Field(description="Journal tags, ordered by name")
+    total_count: int = Field(description="Number of tags returned")
+    summary: str = Field(description="AI-friendly summary of the journal tag system")
+    suggestions: list[str] = Field(
+        default_factory=list, description="Ways to use journal tags"
+    )
+
+
 class IncompleteOutdoorActivityMCPEntry(BaseModel):
     """An outdoor journal flagged by the incomplete review, with its reasons."""
 

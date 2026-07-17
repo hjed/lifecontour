@@ -590,6 +590,7 @@ async def list_journal_tags(
             attributes={
                 "name": tag.name,
                 "color": tag.color,
+                "description": tag.description,
                 "parent_id": str(tag.parent_id) if tag.parent_id else None,
             },
             links=JsonApiLinks(
@@ -636,6 +637,7 @@ async def create_journal_tag(
     tag = JournalTag(
         name=tag_request.data.attributes.name,
         color=tag_request.data.attributes.color,
+        description=tag_request.data.attributes.description,
         parent_id=parent_id,
     )
 
@@ -649,6 +651,7 @@ async def create_journal_tag(
         attributes={
             "name": created_tag.name,
             "color": created_tag.color,
+            "description": created_tag.description,
             "parent_id": str(created_tag.parent_id) if created_tag.parent_id else None,
         },
         links=JsonApiLinks(
