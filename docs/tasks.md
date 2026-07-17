@@ -300,12 +300,11 @@ Read these first when working on the active product-alignment streams:
 **Goal:** Bring journal tag functionality to exact parity with contact tags across the UI, backend management operations, filtering, history, and MCP
 
 **Sub-Iterations:**
-- ITER17-001: Journal tag management backend — `description` column, update endpoint, delete parity (un-assign instead of 409), merge
+- ITER17-001: Journal tag management backend with MCP parity — `description` column, update endpoint, delete parity (un-assign instead of 409), merge; each phase ships its REST endpoint and matching MCP tooling together
 - ITER17-002: Journal list tag filtering parity — multi-tag `tag_ids`, hierarchical descendant expansion, `/journals?tag=` deep link
 - ITER17-003: Journal detail tag editor matching `ContactTagsEditor` (searchable add, inline create with colour, colour-coded badges)
 - ITER17-004: Sidebar journal tag tree with context-menu management (create/edit/delete/merge dialogs)
 - ITER17-005: Journal tag history events feeding the journal activity feed
-- ITER17-006: MCP journal tag parity (list, merge, management operations)
 
 ---
 

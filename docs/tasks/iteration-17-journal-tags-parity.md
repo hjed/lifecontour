@@ -54,7 +54,7 @@ This iteration closes the gap so that journal tags behave **exactly like contact
 | Multi-tag filter param + hierarchical descendant expansion | Singular `tag_id`, first-selected-only, no hierarchy expansion | ITER17-002 |
 | URL deep link (`?tag=`) on the list page | Absent | ITER17-002 |
 | Tag change history in activity feed | No tag domain events | ITER17-005 |
-| MCP tag management (list, merge) | Contact-only tools | ITER17-006 |
+| MCP tag management (list, merge) | Contact-only tools | ITER17-001 (with the matching API changes) |
 
 ## Delivery Rules
 
@@ -81,28 +81,29 @@ Every phase below must meet the same completion bar before merge:
 
 ## Sequencing Strategy
 
-1. **ITER17-001** (backend management operations) unblocks the sidebar management UI and MCP parity.
+1. **ITER17-001** (backend management operations, REST + MCP delivered together per phase) unblocks the sidebar management UI.
 2. **ITER17-002** (filtering parity) is independent of 001 and can run in parallel.
 3. **ITER17-003** (detail-page editor) needs only existing endpoints and can start immediately.
 4. **ITER17-004** (sidebar tree + management dialogs) depends on ITER17-001.
 5. **ITER17-005** (history events) depends on ITER17-001 for update/delete/merge events; assignment events can land first if split.
-6. **ITER17-006** (MCP parity) depends on ITER17-001 service methods.
 
 ## Task Breakdown
 
-### ITER17-001: Journal Tag Management Backend (update, delete parity, merge, description)
+### ITER17-001: Journal Tag Management Backend (update, delete parity, merge, description) with MCP Parity
 
-**Objective:** Give journal tags the same management operations as contact tags: full update (name, colour, description, parent), delete that un-assigns rather than blocks, and merge.
-**Strategy:** Two phases — schema + update first, then delete/merge behaviour change.
+**Objective:** Give journal tags the same management operations as contact tags — full update (name, colour, description, parent), delete that un-assigns rather than blocks, and merge — exposed through **both REST and MCP in the same phase** as each capability lands.
+**Strategy:** Two phases — schema + update first, then delete/merge behaviour change. Each phase ships its REST endpoint and the matching MCP tooling together.
 
 **Relevant documents:**
 - [Database Design — Migration Strategy](../architecture/database-design.md#migration-strategy)
-- [API Design](../architecture/api-design.md)
-- Contact reference: `backend/app/core/contacts/services/tag_service.py`, `backend/app/api/tags/controllers.py`
+- [API Design](../architecture/api-design.md) (REST and FastMCP patterns)
+- Contact reference: `backend/app/core/contacts/services/tag_service.py`, `backend/app/api/tags/controllers.py`, and the MCP tools `list_tags` / `merge_tags` in `backend/app/mcp/domains/contacts/tools.py`
+- Memory note: MCP tool documentation lives in docstrings/schemas, not in `mcp-setup.md`.
+- MCP rules: MCP tools are controller-equivalent — they call `@transactional` services and never open transactions.
 
-#### Phase 1: Description Column and Tag Update
+#### Phase 1: Description Column and Tag Update (REST + MCP)
 
-**PR Size:** ~6-8 files
+**PR Size:** ~8-10 files
 
 **Acceptance Criteria:**
 - [ ] Alembic migration adds nullable `description TEXT` to `journal_tags` (follow the sequential naming convention in the `creating-migrations` skill).
@@ -113,16 +114,17 @@ Every phase below must meet the same completion bar before merge:
   - parent hierarchy cycle prevention (a tag cannot become its own ancestor)
 - [ ] `PATCH /api/journals/tags/{tag_id}` endpoint following the contact `PATCH /api/tags/{tag_id}` request/response shape.
 - [ ] `GET /api/journals/tags` and `POST /api/journals/tags` include `description` in resources.
-- [ ] Write path commits via `@transactional`/`unit_of_work` in the service layer.
+- [ ] **MCP (same phase):** journal tags are listable via MCP with hierarchy, colour, and description — either by extending the existing `list_tags` tool with a domain parameter or adding a journal-scoped equivalent (match whichever pattern the MCP domain structure prefers; document the choice) — and tag update is reachable via MCP to the same extent it is for contact tags (verify the contact baseline first and match it exactly).
+- [ ] Write path commits via `@transactional`/`unit_of_work` in the service layer; MCP tools call the same `@transactional` service and do not open transactions.
 
 **Required Test Coverage:**
-- **Unit:** update validation (duplicate name, invalid colour, cycle prevention), set-parent-null semantics.
-- **Integration:** PATCH endpoint round-trip with real DB; uniqueness constraint behaviour; migration applies cleanly.
-- **E2E:** deferred to ITER17-004 (no UI surface yet).
+- **Unit:** update validation (duplicate name, invalid colour, cycle prevention), set-parent-null semantics, MCP tool schema/serialisation.
+- **Integration:** PATCH endpoint round-trip with real DB; uniqueness constraint behaviour; migration applies cleanly; MCP list/update tool tests mirroring the contact tag MCP tests.
+- **E2E:** deferred to ITER17-004 (no UI surface yet); MCP integration tests are the equivalent bar for the tool surface.
 
-#### Phase 2: Delete Parity and Merge
+#### Phase 2: Delete Parity and Merge (REST + MCP)
 
-**PR Size:** ~6-8 files
+**PR Size:** ~8-10 files
 
 **Acceptance Criteria:**
 - [ ] `JournalTagService.delete_tag(tag_id, transaction)`: deleting a tag removes it from all journals (assignments cascade via existing FK) and deletes the tag — matching contact behaviour. The current 409-when-in-use guard in `DELETE /api/journals/tags/{tag_id}` is removed.
@@ -133,11 +135,12 @@ Every phase below must meet the same completion bar before merge:
   - the source tag is deleted
   - merging a tag into itself or into a descendant is rejected
 - [ ] `POST /api/journals/tags/{tag_id}/merge` endpoint following the contact merge endpoint shape.
+- [ ] **MCP (same phase):** journal tags can be merged via MCP, mirroring the contact `merge_tags` tool semantics and reusing `JournalTagService.merge_tag`; tag delete is reachable via MCP to the same extent it is for contact tags.
 - [ ] Journals affected by delete/merge are re-indexed in MeiliSearch (their `tag_ids` change) — verify how contact tag events drive re-indexing and mirror it (may move to ITER17-005 if event-driven; state the choice in the PR).
 
 **Required Test Coverage:**
-- **Unit:** merge validation (self-merge, descendant-merge rejection), delete semantics.
-- **Integration:** merge with overlapping assignments (no duplicate-key failure), delete removes assignments from journals, hierarchy re-parenting, search index state after delete/merge.
+- **Unit:** merge validation (self-merge, descendant-merge rejection), delete semantics, MCP merge tool schema/serialisation.
+- **Integration:** merge with overlapping assignments (no duplicate-key failure), delete removes assignments from journals, hierarchy re-parenting, search index state after delete/merge, MCP merge/delete tool tests against a real DB.
 - **E2E:** deferred to ITER17-004.
 
 ---
@@ -268,36 +271,6 @@ Every phase below must meet the same completion bar before merge:
 - **Unit:** event payload construction for each operation.
 - **Integration:** end-to-end — assign/remove/merge a tag → run projection → assert history rows with correct provenance; idempotent replay.
 - **E2E:** add and remove a tag on a journal, assert the activity feed at the bottom of the journal page shows both entries.
-
----
-
-### ITER17-006: MCP Journal Tag Parity
-
-**Objective:** Expose journal tag management through MCP to the same degree as contact tags.
-**Strategy:** Single phase.
-
-**Prerequisites:** ITER17-001 (service methods to call).
-
-**Relevant documents:**
-- [API Design — FastMCP patterns](../architecture/api-design.md)
-- Contact reference: `list_tags`, `merge_tags` in `backend/app/mcp/domains/contacts/tools.py`
-- Memory note: MCP tool documentation lives in docstrings/schemas, not in `mcp-setup.md`.
-
-#### Phase 1: MCP Tools
-
-**PR Size:** ~4-6 files
-
-**Acceptance Criteria:**
-- [ ] Journal tags are listable via MCP with hierarchy and colour information — either by extending the existing `list_tags` tool with a domain parameter or adding a journal-scoped equivalent (match whichever pattern the MCP domain structure prefers; document the choice).
-- [ ] Journal tags can be merged via MCP, mirroring the contact `merge_tags` tool semantics and reusing `JournalTagService.merge_tag`.
-- [ ] Tag create/update/delete are reachable via MCP to the same extent they are for contact tags (verify the contact baseline first and match it exactly — no more, no less).
-- [ ] MCP tools call `@transactional` services and do not open transactions.
-- [ ] `update_journal_entry` / `create_journal_entry` tag handling (by name) publishes the same events as the REST path (verified by ITER17-005 tests).
-
-**Required Test Coverage:**
-- **Unit:** tool schema/serialisation.
-- **Integration:** MCP tool tests for list and merge against a real DB, mirroring the contact tag MCP tests.
-- **E2E:** n/a (no browser surface); MCP integration tests are the equivalent bar.
 
 ## Data Model Summary
 
