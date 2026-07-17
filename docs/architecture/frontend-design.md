@@ -198,6 +198,30 @@ gear, recent totals, templates done) slot in alongside it (ITER16-003).
   dismiss/un-dismiss buttons (including the journal title), a `Label`-linked
   switch, and semantic colour tokens throughout.
 
+### Dashboard Widgets
+
+- **API adapter**: `src/lib/api/outdoor-dashboard.ts` — a single TanStack
+  Query hook (`useOutdoorDashboard`) over the singleton
+  `GET /api/journals/outdoor-dashboard` resource. All dashboard widgets call
+  the same hook and share one query key, so concurrent mounts dedupe into one
+  fetch; the adapter types all four dashboard sections (upcoming activities,
+  checked-out gear, activity totals, templates done) even though only the
+  first two render so far (ITER16-003 Phase 5 adds the rest).
+- **Upcoming activities**: `src/components/journals/UpcomingActivitiesList.tsx`
+  — a card listing the next 30 days of outdoor activities and planning events
+  (soonest first, capped at 10 server-side), each with its title (linking to
+  the journal), date range, and type icon badges. Planning entries show the
+  Outdoor Planning badge; activity entries show their raw subtype badges
+  (dependency-added rows included, matching the incomplete review), falling
+  back to the generic Outdoor Activity badge for subtype-less journals.
+- **Recent activity totals**: `src/components/journals/ActivityTotalsTable.tsx`
+  — a card with an accessible table of outdoor activity counts by effective
+  journal type over the rolling last-30-day and last-365-day windows shown
+  together (sr-only caption, `scope='col'`/`scope='row'` headers, missing
+  window counts rendered as an explicit `0`).
+- **States**: both widgets own their loading skeletons, destructive error
+  alerts, and empty states, mirroring the incomplete review.
+
 ## Related Documents
 
 - [Architecture Overview](../architecture.md) - High-level system architecture and frontend principles

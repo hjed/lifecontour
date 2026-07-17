@@ -1,15 +1,18 @@
 /**
  * Outdoor Logbook overview page.
  *
- * The home for outdoor logbook review and reporting: currently the incomplete
- * outdoor activities review, with the dashboard widgets (upcoming activities,
- * checked-out gear, recent totals, templates done) to follow (ITER16-003).
+ * The home for outdoor logbook review and reporting: the incomplete outdoor
+ * activities review and the dashboard widgets — upcoming activities and
+ * recent activity totals now, with checked-out gear and templates done to
+ * follow.
  */
 
 'use client';
 
 import { AuthGuard } from '@/components/auth/AuthGuard';
+import { ActivityTotalsTable } from '@/components/journals/ActivityTotalsTable';
 import { IncompleteOutdoorActivitiesList } from '@/components/journals/IncompleteOutdoorActivitiesList';
+import { UpcomingActivitiesList } from '@/components/journals/UpcomingActivitiesList';
 
 export default function OutdoorLogbookPage() {
   return (
@@ -27,6 +30,20 @@ export default function OutdoorLogbookPage() {
             Incomplete activities
           </h2>
           <IncompleteOutdoorActivitiesList />
+        </section>
+
+        <section aria-labelledby='upcoming-activities-heading'>
+          <h2 id='upcoming-activities-heading' className='sr-only'>
+            Upcoming activities
+          </h2>
+          <UpcomingActivitiesList />
+        </section>
+
+        <section aria-labelledby='activity-totals-heading'>
+          <h2 id='activity-totals-heading' className='sr-only'>
+            Recent activity totals
+          </h2>
+          <ActivityTotalsTable />
         </section>
       </div>
     </AuthGuard>
