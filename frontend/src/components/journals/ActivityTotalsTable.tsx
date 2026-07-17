@@ -43,7 +43,7 @@ function totalTypes(totals: OutdoorActivityTotals): JournalType[] {
     ...Object.keys(totals.last_30_days),
     ...Object.keys(totals.last_365_days),
   ]);
-  return [...keys].sort() as JournalType[];
+  return [...keys].sort((a, b) => a.localeCompare(b)) as JournalType[];
 }
 
 export function ActivityTotalsTable() {
