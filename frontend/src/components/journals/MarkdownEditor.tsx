@@ -150,8 +150,7 @@ export function MarkdownEditor({
         ...(ariaInvalid ? { 'aria-invalid': 'true' } : {}),
         ...(ariaDescribedBy ? { 'aria-describedby': ariaDescribedBy } : {}),
         ...(testId ? { 'data-testid': `${testId}-input` } : {}),
-        class:
-          'prose prose-sm dark:prose-invert max-w-none min-h-[180px] focus:outline-none',
+        class: 'prose prose-sm max-w-none min-h-[180px] focus:outline-none',
       },
     },
     onUpdate: ({ editor: instance }) => {

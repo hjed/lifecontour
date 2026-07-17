@@ -29,6 +29,7 @@ from core_shared.models.journals import (
     DivingData,
     DownhillSkiingData,
     FitnessData,
+    GearCheckoutFacts,
     GearItem,
     GearMaintenanceData,
     GearUsageData,
@@ -48,6 +49,7 @@ from core_shared.models.journals import (
     PlanData,
     PlanDocument,
     SnorkellingData,
+    TemplateReferenceFacts,
     TravelAccommodation,
     TravelData,
     TravelFlight,
@@ -2534,10 +2536,13 @@ class IncompleteOutdoorActivityRepository(ABC):
 class OutdoorDashboardRepository(ABC):
     """Read repository for the outdoor logbook dashboard projections.
 
-    Both queries are windowed over ``journals.event_date_range_start/end``
-    with an overlap predicate (a multi-day trip already underway still
-    matches). Window arithmetic, ordering, capping and type grouping live in
-    ``OutdoorDashboardService`` so they stay pure and unit-testable.
+    The upcoming/totals queries are windowed over
+    ``journals.event_date_range_start/end`` with an overlap predicate (a
+    multi-day trip already underway still matches). The gear/template queries
+    return per-row facts. Window arithmetic, ordering, capping, the
+    checked-out determination and all grouping live in
+    ``OutdoorDashboardService`` (via the core_shared pure rules) so they stay
+    pure and unit-testable.
     """
 
     @abstractmethod
@@ -2552,4 +2557,24 @@ class OutdoorDashboardRepository(ABC):
         self, user_id: str, *, window_start: datetime, window_end: datetime
     ) -> list[OutdoorActivityTypeFacts]:
         """Per-journal subtype facts for outdoor journals in the window."""
+        pass
+
+    @abstractmethod
+    async def list_gear_checkout_facts(
+        self, user_id: str, *, ending_after: datetime
+    ) -> list[GearCheckoutFacts]:
+        """Gear-usage rows whose resolved check-in falls after ``ending_after``.
+
+        Dates come back resolved (buffer overrides falling back to the
+        journal's event range); rows whose window has already ended are
+        excluded as a cheap bound — ``is_currently_checked_out`` remains the
+        single source of the full determination.
+        """
+        pass
+
+    @abstractmethod
+    async def list_template_references(
+        self, user_id: str
+    ) -> list[TemplateReferenceFacts]:
+        """One row per abseiling-derived journal referencing a template."""
         pass

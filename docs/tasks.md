@@ -14,7 +14,7 @@ A comprehensive personal management system with Python FastAPI backend, Next.js 
 
 ## Development Principles
 - **Test-First Development:** Write tests before implementation - no exceptions
-- **Reviewable PRs:** Each task creates PRs with max 10 files changed
+- **Reviewable PRs:** Each task creates PRs of roughly ≤ 500 changed lines (including tests)
 - **Quality Gates:** All tests, linting, and type checking must pass
 - **Architecture Consistency:** Follow established patterns (Dishka DI, ARQ workers, etc.)
 - **AI-Optimized:** Design for AI assistant understanding and integration
@@ -294,6 +294,18 @@ Read these first when working on the active product-alignment streams:
 
 **Reference:** [Outdoor Logbook Improvements Product Specification](./product-specifications/outdoor-logbook-improvements-product-specification.md)
 
+### [Iteration 17: Journal Tags Parity](./tasks/iteration-17-journal-tags-parity.md)
+**Status:** 🔵 PLANNED — PR-sized phases defined; ready to implement
+**Dependencies:** Iteration 4 (journal tag tables and endpoints), Iteration 4.6 (journal tag filtering + detail-view add/remove), Iteration 12 (unified event-driven history), Iteration 2.6 (contact tag management UX — the reference behaviour)
+**Goal:** Bring journal tag functionality to exact parity with contact tags across the UI, backend management operations, filtering, history, and MCP
+
+**Sub-Iterations:**
+- ITER17-001: Journal tag management backend with MCP parity — `description` column, update endpoint, delete parity (un-assign instead of 409), merge; each phase ships its REST endpoint and matching MCP tooling together
+- ITER17-002: Journal list tag filtering parity — multi-tag `tag_ids`, hierarchical descendant expansion, `/journals?tag=` deep link
+- ITER17-003: Journal detail tag editor matching `ContactTagsEditor` (searchable add, inline create with colour, colour-coded badges)
+- ITER17-004: Sidebar journal tag tree with context-menu management (create/edit/delete/merge dialogs)
+- ITER17-005: Journal tag history events feeding the journal activity feed
+
 ---
 
 ## Current Status & Next Steps
@@ -312,7 +324,7 @@ Read these first when working on the active product-alignment streams:
 - Prepare integration points for Strava and Immich
 
 **Development Guidelines:**
-- Each task creates reviewable PRs (~5-10 files changed preferred)
+- Each task creates reviewable PRs (roughly ≤ 500 changed lines including tests; split larger work into smaller phases)
 - All tests, linting, and type checking must pass before completion
 - Follow established architecture patterns (Dishka DI, ARQ workers, FastMCP v2)
 - Maintain comprehensive test coverage across all layers

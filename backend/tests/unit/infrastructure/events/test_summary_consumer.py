@@ -1,8 +1,9 @@
 """
 Unit tests for SummaryConsumer.
 
-Tests event routing, filtering, and the _handle_event integration with
-the summary generation pipeline for the summary-generator consumer group.
+Tests event routing, filtering, and the _handle_event split between
+buffered marking (ContactSummaryRefreshRequested) and generation
+(ContactSummaryRefreshDue) for the summary-generator consumer group.
 """
 
 from collections.abc import AsyncGenerator
@@ -26,8 +27,8 @@ def make_mock_container() -> MagicMock:
     return mock
 
 
-def _make_summary_event(contact_id: int = 42) -> StreamEvent:
-    """Create a ContactSummaryRefreshRequested StreamEvent."""
+def _make_requested_event(contact_id: int = 42) -> StreamEvent:
+    """Create a ContactSummaryRefreshRequested StreamEvent (buffered intent)."""
     return StreamEvent(
         message_id="1234567890-0",
         event_id="evt-summary-123",
@@ -35,6 +36,18 @@ def _make_summary_event(contact_id: int = 42) -> StreamEvent:
         aggregate_id=contact_id,
         event_data={"contact_id": contact_id},
         occurred_at="2024-06-15T10:30:00+00:00",
+    )
+
+
+def _make_due_event(contact_id: int = 42) -> StreamEvent:
+    """Create a ContactSummaryRefreshDue StreamEvent (generate-now command)."""
+    return StreamEvent(
+        message_id="1234567890-1",
+        event_id="evt-summary-due-123",
+        event_type="ContactSummaryRefreshDue",
+        aggregate_id=contact_id,
+        event_data={"contact_id": contact_id},
+        occurred_at="2024-06-15T10:35:00+00:00",
     )
 
 
@@ -60,9 +73,13 @@ class TestSummaryConsumerEventMatching:
             container=make_mock_container(),
         )
 
-    def test_matches_summary_refresh_event(self, consumer: SummaryConsumer) -> None:
+    def test_matches_summary_refresh_requested(self, consumer: SummaryConsumer) -> None:
         """Verify ContactSummaryRefreshRequested is matched."""
         assert consumer._matches_event_type("ContactSummaryRefreshRequested") is True
+
+    def test_matches_summary_refresh_due(self, consumer: SummaryConsumer) -> None:
+        """Verify ContactSummaryRefreshDue is matched."""
+        assert consumer._matches_event_type("ContactSummaryRefreshDue") is True
 
     @pytest.mark.parametrize(
         "event_type",
@@ -87,8 +104,119 @@ class TestSummaryConsumerEventMatching:
         assert consumer._matches_event_type(event_type) is False
 
 
-class TestSummaryConsumerHandleEvent:
-    """Test the _handle_event implementation.
+class TestSummaryConsumerHandleRequestedEvent:
+    """ContactSummaryRefreshRequested must mark the debounce buffer only."""
+
+    @pytest.fixture
+    def consumer(self, mock_stream_client: MagicMock) -> SummaryConsumer:
+        """Create a SummaryConsumer with mocks."""
+        return SummaryConsumer(
+            stream_client=mock_stream_client,
+            stream_name="pms:domain-events",
+            container=make_mock_container(),
+        )
+
+    @pytest.mark.asyncio
+    async def test_requested_event_marks_refresh(
+        self,
+        consumer: SummaryConsumer,
+        mock_db_engine: MagicMock,
+    ) -> None:
+        """A Requested event records the debounce marker for the contact."""
+        event = _make_requested_event(contact_id=42)
+
+        with (
+            patch(
+                "app.infrastructure.events.summary_consumer.get_async_database_engine",
+                return_value=mock_db_engine,
+            ),
+            patch(
+                "app.core.contacts.adapters.sql.contact_summary_repository"
+                ".SqlContactSummaryRepository.mark_refresh_requested",
+                new_callable=AsyncMock,
+            ) as mock_mark,
+        ):
+            await consumer._handle_event(event)
+
+        mock_mark.assert_awaited_once_with(42)
+
+    @pytest.mark.asyncio
+    async def test_requested_event_does_not_generate_or_index(
+        self,
+        consumer: SummaryConsumer,
+        mock_db_engine: MagicMock,
+        mock_search_indexer: MagicMock,
+        _mock_settings: MagicMock,
+    ) -> None:
+        """A Requested event must not call Gemini or the search indexer."""
+        event = _make_requested_event(contact_id=42)
+
+        mock_generator = MagicMock()
+        mock_generator.generate = AsyncMock()
+
+        with (
+            patch(
+                "app.infrastructure.events.summary_consumer.get_async_database_engine",
+                return_value=mock_db_engine,
+            ),
+            patch(
+                "app.infrastructure.events.summary_consumer.get_settings",
+                return_value=_mock_settings,
+            ),
+            patch(
+                "app.core.contacts.services.summary_generation_service.SummaryGenerator",
+                return_value=mock_generator,
+            ),
+            patch(
+                "app.infrastructure.events.summary_consumer.SearchIndexer",
+                return_value=mock_search_indexer,
+            ),
+            patch(
+                "app.core.contacts.adapters.sql.contact_summary_repository"
+                ".SqlContactSummaryRepository.mark_refresh_requested",
+                new_callable=AsyncMock,
+            ),
+        ):
+            await consumer._handle_event(event)
+
+        mock_generator.generate.assert_not_called()
+        mock_search_indexer.process_event.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_requested_event_with_invalid_contact_id_is_skipped(
+        self,
+        consumer: SummaryConsumer,
+        mock_db_engine: MagicMock,
+    ) -> None:
+        """A Requested event without a valid contact_id is dropped gracefully."""
+        event = StreamEvent(
+            message_id="1234567890-0",
+            event_id="evt-invalid-1",
+            event_type="ContactSummaryRefreshRequested",
+            aggregate_id=0,
+            event_data={},  # Missing contact_id
+            occurred_at="2024-06-15T10:30:00+00:00",
+        )
+
+        with (
+            patch(
+                "app.infrastructure.events.summary_consumer.get_async_database_engine",
+                return_value=mock_db_engine,
+            ),
+            patch(
+                "app.core.contacts.adapters.sql.contact_summary_repository"
+                ".SqlContactSummaryRepository.mark_refresh_requested",
+                new_callable=AsyncMock,
+            ) as mock_mark,
+        ):
+            # Should not raise
+            await consumer._handle_event(event)
+
+        mock_mark.assert_not_awaited()
+
+
+class TestSummaryConsumerHandleDueEvent:
+    """ContactSummaryRefreshDue drives the actual generation pipeline.
 
     Uses shared fixtures from conftest.py for mock_db_engine,
     mock_db_connection, mock_stream_client, and mock_search_indexer.
@@ -104,7 +232,7 @@ class TestSummaryConsumerHandleEvent:
         )
 
     @pytest.mark.asyncio
-    async def test_handle_event_generates_summary(
+    async def test_due_event_generates_summary(
         self,
         consumer: SummaryConsumer,
         mock_db_engine: MagicMock,
@@ -112,7 +240,7 @@ class TestSummaryConsumerHandleEvent:
         _mock_settings: MagicMock,
     ) -> None:
         """Verify _handle_event constructs the generation pipeline and calls generate."""
-        event = _make_summary_event(contact_id=42)
+        event = _make_due_event(contact_id=42)
 
         mock_generator = MagicMock()
         mock_generator.generate = AsyncMock(
@@ -147,7 +275,7 @@ class TestSummaryConsumerHandleEvent:
         mock_generator.generate.assert_called_once_with(contact_id=42)
 
     @pytest.mark.asyncio
-    async def test_handle_event_updates_search_index_after_summary(
+    async def test_due_event_updates_search_index_after_summary(
         self,
         consumer: SummaryConsumer,
         mock_db_engine: MagicMock,
@@ -155,7 +283,7 @@ class TestSummaryConsumerHandleEvent:
         _mock_settings: MagicMock,
     ) -> None:
         """Verify SearchIndexer.process_event is called after summary generation."""
-        event = _make_summary_event(contact_id=42)
+        event = _make_due_event(contact_id=42)
 
         mock_generator = MagicMock()
         mock_generator.generate = AsyncMock(
@@ -190,17 +318,17 @@ class TestSummaryConsumerHandleEvent:
         # Search indexer should be called to update the contact index
         mock_search_indexer.process_event.assert_called_once()
         call_args = mock_search_indexer.process_event.call_args[0]
-        assert call_args[0].event_type == "ContactSummaryRefreshRequested"
+        assert call_args[0].event_type == "ContactSummaryRefreshDue"
 
     @pytest.mark.asyncio
-    async def test_handle_event_skips_when_no_gemini_key(
+    async def test_due_event_skips_when_no_gemini_key(
         self,
         consumer: SummaryConsumer,
         mock_db_engine: MagicMock,
         mock_search_indexer: MagicMock,
     ) -> None:
         """Verify graceful skip when Gemini API key is not configured."""
-        event = _make_summary_event(contact_id=42)
+        event = _make_due_event(contact_id=42)
 
         mock_settings = MagicMock()
         mock_settings.gemini_api_key = ""  # Not configured
@@ -226,7 +354,7 @@ class TestSummaryConsumerHandleEvent:
         mock_search_indexer.process_event.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_handle_event_skips_invalid_contact_id(
+    async def test_due_event_skips_invalid_contact_id(
         self,
         consumer: SummaryConsumer,
         mock_db_engine: MagicMock,
@@ -237,7 +365,7 @@ class TestSummaryConsumerHandleEvent:
         event = StreamEvent(
             message_id="1234567890-0",
             event_id="evt-invalid-1",
-            event_type="ContactSummaryRefreshRequested",
+            event_type="ContactSummaryRefreshDue",
             aggregate_id=0,
             event_data={},  # Missing contact_id
             occurred_at="2024-06-15T10:30:00+00:00",

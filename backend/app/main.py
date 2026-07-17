@@ -49,6 +49,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Start background tasks
     attendance_task = None
     relay_task = None
+    sweeper_task = None
     search_consumer_task = None
     summary_consumer_task = None
     inbound_consumer_task = None
@@ -75,6 +76,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         logger.info(
             "Outbox relay background task started",
             stream=settings.stream_name,
+        )
+
+        # Start the buffered summary refresh sweeper (rolling debounce)
+        from app.infrastructure.events.summary_refresh_sweeper import (
+            run_summary_refresh_sweep_loop,
+        )
+
+        sweeper_task = asyncio.create_task(
+            run_summary_refresh_sweep_loop(
+                buffer_seconds=settings.summary_refresh_buffer_seconds,
+                batch_size=settings.summary_refresh_sweep_batch_size,
+                interval_seconds=settings.summary_refresh_sweep_interval,
+            )
+        )
+        logger.info(
+            "Summary refresh sweeper background task started",
+            buffer_seconds=settings.summary_refresh_buffer_seconds,
         )
 
         # Start stream consumers for search indexing and summary generation
@@ -150,6 +168,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             (inbound_consumer_task, "Inbound event consumer"),
             (summary_consumer_task, "Summary generator consumer"),
             (search_consumer_task, "Search indexer consumer"),
+            (sweeper_task, "Summary refresh sweeper"),
             (relay_task, "Outbox relay"),
             (attendance_task, "Attendance transition"),
         ]:

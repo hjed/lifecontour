@@ -42,6 +42,7 @@ from app.api.journals.converters import (
     TypeDataConverter,
 )
 from app.api.journals.schemas import (
+    CheckedOutGearItemSchema,
     EventDateRangeSchema,
     IncompleteOutdoorActivityAttributes,
     IncompleteOutdoorActivityListResponse,
@@ -65,6 +66,10 @@ from app.api.journals.schemas import (
     OutdoorActivityDismissalAttributes,
     OutdoorActivityDismissalResource,
     OutdoorActivityDismissalResponse,
+    OutdoorActivityTotalsSchema,
+    OutdoorDashboardAttributes,
+    OutdoorDashboardResource,
+    OutdoorDashboardResponse,
     ReviewItemAttributes,
     ReviewItemCreateRequest,
     ReviewItemJournalSummary,
@@ -72,6 +77,8 @@ from app.api.journals.schemas import (
     ReviewItemResource,
     ReviewItemResponse,
     ReviewSuggestionSchema,
+    TemplateDoneSchema,
+    UpcomingOutdoorActivitySchema,
 )
 from app.core.contacts.models.repositories import ContactRepository
 from app.core.history.services import JournalHistoryService
@@ -126,6 +133,9 @@ from app.core.journal.services.journal_type_data_helpers import parse_journal_ty
 from app.core.journal.services.journal_write_service import JournalWriteService
 from app.core.journal.services.outdoor_activity_dismissal_service import (
     OutdoorActivityDismissalService,
+)
+from app.core.journal.services.outdoor_dashboard_service import (
+    OutdoorDashboardService,
 )
 from app.core.journal.services.review_item_service import ReviewItemService
 from app.core.search.exceptions import SearchServiceUnavailableError
@@ -1506,6 +1516,73 @@ async def undismiss_incomplete_outdoor_activity(
                 journal_id=journal_id,
                 dismissed=False,
                 was_dismissed=was_dismissed,
+            ),
+        )
+    )
+
+
+@router.get("/outdoor-dashboard")
+@inject
+async def get_outdoor_dashboard(
+    dashboard_service: FromDishka[OutdoorDashboardService],
+    user: FromDishka[SessionUser],
+) -> OutdoorDashboardResponse:
+    """
+    The outdoor logbook dashboard: all four widget sections in one call.
+
+    A read-only singleton projection over the user's outdoor journals —
+    upcoming activities (next 30 days, soonest first, capped at 10), gear
+    currently checked out, activity totals by type over rolling 30/365-day
+    windows and the templates done with per-template counts. Windows are
+    anchored on "today" in the user's configured timezone server-side, so
+    the endpoint takes no date parameters.
+    """
+    upcoming = await dashboard_service.list_upcoming_activities(user.id)
+    totals = await dashboard_service.activity_totals(user.id)
+    checked_out = await dashboard_service.list_checked_out_gear(user.id)
+    templates_done = await dashboard_service.templates_done(user.id)
+
+    return OutdoorDashboardResponse(
+        data=OutdoorDashboardResource(
+            id=user.id,
+            attributes=OutdoorDashboardAttributes(
+                upcoming_activities=[
+                    UpcomingOutdoorActivitySchema(
+                        journal_id=entry.journal_id,
+                        title=entry.title,
+                        event_date_range=EventDateRangeSchema(
+                            start=entry.event_date_range.start,
+                            end=entry.event_date_range.end,
+                        ),
+                        subtypes=entry.subtypes,
+                        is_planning=entry.is_planning,
+                    )
+                    for entry in upcoming
+                ],
+                checked_out_gear=[
+                    CheckedOutGearItemSchema(
+                        gear_item_id=item.gear_item_id,
+                        name=item.name,
+                        checked_out_since=item.checked_out_since,
+                        journal_id=item.journal_id,
+                    )
+                    for item in checked_out
+                ],
+                activity_totals=OutdoorActivityTotalsSchema(
+                    last_30_days=totals.last_30_days,
+                    last_365_days=totals.last_365_days,
+                ),
+                templates_done={
+                    template_type: [
+                        TemplateDoneSchema(
+                            template_id=template.template_id,
+                            name=template.name,
+                            done_count=template.done_count,
+                        )
+                        for template in templates
+                    ]
+                    for template_type, templates in templates_done.items()
+                },
             ),
         )
     )

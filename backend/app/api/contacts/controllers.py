@@ -1151,7 +1151,8 @@ async def refresh_contact_summary(
 
     Creates a pending summary record if none exists, or sets the status
     to 'pending' to trigger regeneration. Publishes a
-    ContactSummaryRefreshRequested event to the outbox for async processing.
+    ContactSummaryRefreshDue event to the outbox for async processing,
+    bypassing the rolling-debounce buffer used by automated triggers.
     Returns 202 Accepted since the actual generation is asynchronous.
     """
     contact = await contact_service.get_contact_by_id(contact_id)

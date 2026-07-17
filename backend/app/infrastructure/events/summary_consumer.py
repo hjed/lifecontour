@@ -1,9 +1,12 @@
 """
 Summary Generator consumer for Redis Streams.
 
-Processes ContactSummaryRefreshRequested events from the pms:domain-events
-stream, generates AI contact summaries, and updates the search index.
-Runs as the 'summary-generator' consumer group.
+Processes contact-summary refresh events from the pms:domain-events stream
+as the 'summary-generator' consumer group. ContactSummaryRefreshRequested
+(buffered intent, published per contact edit / journal link / sync) only
+records a rolling-debounce marker; ContactSummaryRefreshDue (published by the
+summary refresh sweeper after the quiet period, or directly by the manual
+refresh endpoint) generates the AI summary and updates the search index.
 """
 
 import structlog
@@ -24,10 +27,11 @@ logger = structlog.get_logger()
 class SummaryConsumer(DeadLetterConsumerMixin, StreamConsumer):
     """Stream consumer for AI contact summary generation.
 
-    Listens for ``ContactSummaryRefreshRequested`` events on the
-    ``pms:domain-events`` stream using the ``summary-generator``
-    consumer group. Generates summaries via the existing pipeline
-    and updates the search index afterward.
+    Listens for ``ContactSummaryRefreshRequested`` and
+    ``ContactSummaryRefreshDue`` events on the ``pms:domain-events`` stream
+    using the ``summary-generator`` consumer group. Requested events are
+    buffered (debounce marker write only); Due events generate the summary
+    via the existing pipeline and update the search index afterward.
     """
 
     def __init__(
@@ -54,21 +58,34 @@ class SummaryConsumer(DeadLetterConsumerMixin, StreamConsumer):
             stream_name=stream_name,
             group_name="summary-generator",
             consumer_name=consumer_name,
-            event_type_patterns=["ContactSummaryRefreshRequested"],
+            event_type_patterns=[
+                "ContactSummaryRefreshRequested",
+                "ContactSummaryRefreshDue",
+            ],
             batch_size=batch_size,
             block_ms=block_ms,
         )
         self._container = container
 
     async def _handle_event(self, event: StreamEvent) -> None:
-        """Process a ContactSummaryRefreshRequested event.
+        """Process a contact-summary refresh event.
 
-        Generates an AI summary for the contact, then updates the
-        MeiliSearch index so the new summary text is searchable.
+        ``ContactSummaryRefreshRequested`` (buffered intent) only records the
+        rolling-debounce marker — one cheap UPDATE per event, no Gemini call.
+        Contact search reindexing for these events is handled independently by
+        the SearchIndexerConsumer, so nothing else is needed here.
+
+        ``ContactSummaryRefreshDue`` generates the AI summary for the contact,
+        then updates the MeiliSearch index so the new summary text is
+        searchable.
 
         Args:
             event: The stream event to process
         """
+        if event.event_type == "ContactSummaryRefreshRequested":
+            await self._mark_refresh_requested(event)
+            return
+
         outbox_event = stream_event_to_outbox_event(event)
 
         engine = get_async_database_engine()
@@ -94,6 +111,66 @@ class SummaryConsumer(DeadLetterConsumerMixin, StreamConsumer):
             event_id=event.event_id,
             event_type=event.event_type,
         )
+
+    async def _mark_refresh_requested(self, event: StreamEvent) -> None:
+        """Record the rolling-debounce marker for a buffered refresh request.
+
+        Every Requested event overwrites the marker timestamp, so generation
+        only runs once the contact has been quiet for the buffer window (the
+        summary refresh sweeper publishes ContactSummaryRefreshDue then).
+
+        Args:
+            event: The ContactSummaryRefreshRequested stream event
+        """
+        # Lazy import to avoid circular dependencies (see _generate_summary)
+        from app.core.contacts.adapters.sql.contact_summary_repository import (
+            SqlContactSummaryRepository,
+        )
+
+        contact_id = self._extract_contact_id(event)
+        if contact_id is None:
+            return
+
+        engine = get_async_database_engine()
+        async with engine.begin() as conn:
+            await SqlContactSummaryRepository(conn).mark_refresh_requested(contact_id)
+
+        logger.debug(
+            "Buffered summary refresh request",
+            event_id=event.event_id,
+            contact_id=contact_id,
+        )
+
+    def _extract_contact_id(self, event: object) -> int | None:
+        """Validate and return the contact_id from a refresh event, or None."""
+        event_data = event.event_data  # type: ignore[attr-defined]
+        contact_id_raw = event_data.get("contact_id")
+        if not contact_id_raw:
+            logger.error(
+                "Summary refresh event missing contact_id",
+                event_id=event.event_id,  # type: ignore[attr-defined]
+            )
+            return None
+
+        try:
+            contact_id = int(contact_id_raw)
+        except TypeError, ValueError:
+            logger.error(
+                "Summary refresh event has invalid contact_id",
+                event_id=event.event_id,  # type: ignore[attr-defined]
+                contact_id_raw=contact_id_raw,
+            )
+            return None
+
+        if contact_id <= 0:
+            logger.error(
+                "Summary refresh event has non-positive contact_id",
+                event_id=event.event_id,  # type: ignore[attr-defined]
+                contact_id=contact_id,
+            )
+            return None
+
+        return contact_id
 
     async def _generate_summary(
         self, event: object, connection: AsyncConnection
@@ -146,31 +223,8 @@ class SummaryConsumer(DeadLetterConsumerMixin, StreamConsumer):
             )
             return
 
-        event_data = event.event_data  # type: ignore[attr-defined]
-        contact_id_raw = event_data.get("contact_id")
-        if not contact_id_raw:
-            logger.error(
-                "ContactSummaryRefreshRequested event missing contact_id",
-                event_id=event.event_id,  # type: ignore[attr-defined]
-            )
-            return
-
-        try:
-            contact_id = int(contact_id_raw)
-        except TypeError, ValueError:
-            logger.error(
-                "ContactSummaryRefreshRequested event has invalid contact_id",
-                event_id=event.event_id,  # type: ignore[attr-defined]
-                contact_id_raw=contact_id_raw,
-            )
-            return
-
-        if contact_id <= 0:
-            logger.error(
-                "ContactSummaryRefreshRequested event has non-positive contact_id",
-                event_id=event.event_id,  # type: ignore[attr-defined]
-                contact_id=contact_id,
-            )
+        contact_id = self._extract_contact_id(event)
+        if contact_id is None:
             return
 
         # Create repositories

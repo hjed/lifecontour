@@ -1153,6 +1153,113 @@ class OutdoorActivityDismissalResponse(
     pass
 
 
+class UpcomingOutdoorActivitySchema(BaseModel):
+    """An upcoming outdoor activity or planning event on the dashboard."""
+
+    journal_id: int = Field(..., description="Journal ID")
+    title: str = Field(..., description=JOURNAL_TITLE_DESC)
+    event_date_range: EventDateRangeSchema = Field(
+        ..., description="Journal event date range"
+    )
+    subtypes: list[OutdoorActivitySubtype] = Field(
+        ..., description="Outdoor activity subtypes present on the journal"
+    )
+    is_planning: bool = Field(
+        ...,
+        description=(
+            "Whether the entry is an OUTDOOR_PLANNING event "
+            "rather than an outdoor activity"
+        ),
+    )
+
+
+class CheckedOutGearItemSchema(BaseModel):
+    """A gear item currently checked out."""
+
+    gear_item_id: str = Field(..., description="Gear item ID")
+    name: str = Field(..., description="Gear item name")
+    checked_out_since: datetime = Field(
+        ..., description="When the item was checked out (resolved checkout date)"
+    )
+    journal_id: int = Field(
+        ..., description="GEAR_USAGE journal recording the checkout"
+    )
+
+
+class OutdoorActivityTotalsSchema(BaseModel):
+    """Outdoor activity counts by journal type over the rolling windows."""
+
+    last_30_days: dict[str, int] = Field(
+        ..., description="Counts by journal type over the last 30 days"
+    )
+    last_365_days: dict[str, int] = Field(
+        ..., description="Counts by journal type over the last 365 days"
+    )
+
+
+class TemplateDoneSchema(BaseModel):
+    """A template the user has done, with its per-template done-count.
+
+    The template type is the ``templates_done`` mapping key, so it is not
+    repeated here; ``template_id`` links to the template.
+    """
+
+    template_id: str = Field(..., description="Activity template ID")
+    name: str = Field(..., description="Template name")
+    done_count: int = Field(
+        ...,
+        description=(
+            "How many of the user's abseiling activities reference the template"
+        ),
+    )
+
+
+class OutdoorDashboardAttributes(BaseModel):
+    """Attributes of the outdoor dashboard singleton resource."""
+
+    upcoming_activities: list[UpcomingOutdoorActivitySchema] = Field(
+        ...,
+        description=(
+            "Upcoming outdoor activities and planning events "
+            "(next 30 days, soonest first, capped at 10)"
+        ),
+    )
+    checked_out_gear: list[CheckedOutGearItemSchema] = Field(
+        ..., description="Gear currently checked out, longest out first"
+    )
+    activity_totals: OutdoorActivityTotalsSchema = Field(
+        ...,
+        description=("Outdoor activity counts by type over rolling 30/365-day windows"),
+    )
+    templates_done: dict[str, list[TemplateDoneSchema]] = Field(
+        ...,
+        description=(
+            "Unique templates referenced by the user's abseiling activities, "
+            "grouped by template type"
+        ),
+    )
+
+
+class OutdoorDashboardResource(BaseModel):
+    """Outdoor dashboard resource following JSON API specification.
+
+    A singleton projection over the user's outdoor journals — the resource
+    id is the user's id (one dashboard per user, not a stored entity).
+    """
+
+    type: str = Field(default="outdoor-dashboards", description=RESOURCE_TYPE_DESC)
+    id: str = Field(..., description="User ID the dashboard belongs to")
+    attributes: OutdoorDashboardAttributes = Field(
+        ..., description="Outdoor dashboard attributes"
+    )
+
+
+class OutdoorDashboardResponse(JsonApiResponse[OutdoorDashboardResource]):
+    """Response model for the outdoor dashboard."""
+
+    pass
+
+
 class ReviewItemCreateAttributes(BaseModel):
     """Attributes for creating a review item (test-only endpoint)."""
 

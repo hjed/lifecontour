@@ -86,6 +86,7 @@ class SearchIndexer:
             elif event.event_type in [
                 "ContactUpdated",
                 "ContactSummaryRefreshRequested",
+                "ContactSummaryRefreshDue",
                 "ImportantDateAdded",
                 "ImportantDateDeleted",
             ]:

@@ -3,7 +3,9 @@
 Exercises the real ``SqlOutdoorDashboardRepository`` and the
 ``OutdoorDashboardService`` against Docker PostgreSQL. Each test seeds its own
 journals via the repositories (anchored on ``datetime.now(UTC)`` captured once
-per test), so outcomes are deterministic.
+per test), so outcomes are deterministic. Covers the upcoming/totals windows,
+the checked-out-gear resolution (buffer dates over event range, the
+``snipeit_checkin`` exclusion) and the templates-done aggregation.
 """
 
 from datetime import UTC, date, datetime, time, timedelta
@@ -346,3 +348,266 @@ class TestDashboardServiceEndToEnd:
             totals_excluded,
         ]
         assert totals.last_365_days == {"outdoor_activity": 2}
+
+
+@pytest.mark.integration
+class TestGearCheckoutFacts:
+    async def test_open_checkout_resolves_dates_from_event_range(
+        self,
+        seeder: Seeder,
+        dashboard_repository: SqlOutdoorDashboardRepository,
+    ) -> None:
+        now = datetime.now(UTC)
+        gear_id = await seeder.create_gear_item(name="Rope")
+        journal_id = await seeder.create_gear_usage_journal(
+            gear_id, start=now - timedelta(days=1), end=now + timedelta(days=1)
+        )
+
+        result = await dashboard_repository.list_gear_checkout_facts(
+            USER_ID, ending_after=now
+        )
+
+        assert len(result) == 1
+        facts = result[0]
+        assert facts.journal_id == journal_id
+        assert facts.gear_item_id == gear_id
+        assert facts.gear_name == "Rope"
+        assert facts.checkout_date == now - timedelta(days=1)
+        assert facts.checkin_date == now + timedelta(days=1)
+        assert not facts.snipeit_checked_in
+
+    async def test_buffer_dates_take_precedence_over_event_range(
+        self,
+        seeder: Seeder,
+        dashboard_repository: SqlOutdoorDashboardRepository,
+    ) -> None:
+        now = datetime.now(UTC)
+        gear_id = await seeder.create_gear_item(name="Harness")
+        await seeder.create_gear_usage_journal(
+            gear_id,
+            start=now - timedelta(days=1),
+            end=now + timedelta(days=1),
+            # Packed the day before, returning the day after the trip.
+            checkout_date=now - timedelta(days=2),
+            checkin_date=now + timedelta(days=2),
+        )
+
+        result = await dashboard_repository.list_gear_checkout_facts(
+            USER_ID, ending_after=now
+        )
+
+        assert len(result) == 1
+        assert result[0].checkout_date == now - timedelta(days=2)
+        assert result[0].checkin_date == now + timedelta(days=2)
+
+    async def test_ended_checkouts_are_excluded(
+        self,
+        seeder: Seeder,
+        dashboard_repository: SqlOutdoorDashboardRepository,
+    ) -> None:
+        now = datetime.now(UTC)
+        gear_id = await seeder.create_gear_item(name="Rope")
+        open_id = await seeder.create_gear_usage_journal(
+            gear_id,
+            title="Open",
+            start=now - timedelta(days=1),
+            end=now + timedelta(days=1),
+        )
+        # Usage window fully in the past: the gear has been returned.
+        await seeder.create_gear_usage_journal(
+            gear_id,
+            title="Closed",
+            start=now - timedelta(days=10),
+            end=now - timedelta(days=8),
+        )
+
+        result = await dashboard_repository.list_gear_checkout_facts(
+            USER_ID, ending_after=now
+        )
+
+        assert [facts.journal_id for facts in result] == [open_id]
+
+    async def test_snipeit_checkin_row_flags_the_checkout(
+        self,
+        seeder: Seeder,
+        dashboard_repository: SqlOutdoorDashboardRepository,
+    ) -> None:
+        now = datetime.now(UTC)
+        gear_id = await seeder.create_gear_item(name="Rope")
+        returned_id = await seeder.create_gear_usage_journal(
+            gear_id,
+            title="Returned early",
+            start=now - timedelta(days=1),
+            end=now + timedelta(days=1),
+        )
+        await seeder.insert_snipeit_checkin(returned_id)
+
+        result = await dashboard_repository.list_gear_checkout_facts(
+            USER_ID, ending_after=now
+        )
+
+        assert len(result) == 1
+        assert result[0].snipeit_checked_in
+
+    async def test_failed_snipeit_checkin_does_not_flag_the_checkout(
+        self,
+        seeder: Seeder,
+        dashboard_repository: SqlOutdoorDashboardRepository,
+    ) -> None:
+        now = datetime.now(UTC)
+        gear_id = await seeder.create_gear_item(name="Rope")
+        journal_id = await seeder.create_gear_usage_journal(
+            gear_id, start=now - timedelta(days=1), end=now + timedelta(days=1)
+        )
+        await seeder.insert_snipeit_checkin(journal_id, sync_status="failed")
+
+        result = await dashboard_repository.list_gear_checkout_facts(
+            USER_ID, ending_after=now
+        )
+
+        assert len(result) == 1
+        assert not result[0].snipeit_checked_in
+
+    async def test_excludes_other_users_checkouts(
+        self,
+        seeder: Seeder,
+        dashboard_repository: SqlOutdoorDashboardRepository,
+    ) -> None:
+        now = datetime.now(UTC)
+        mine_gear = await seeder.create_gear_item(name="Mine")
+        theirs_gear = await seeder.create_gear_item(
+            name="Theirs", user_id=OTHER_USER_ID
+        )
+        mine_id = await seeder.create_gear_usage_journal(
+            mine_gear, start=now - timedelta(days=1), end=now + timedelta(days=1)
+        )
+        await seeder.create_gear_usage_journal(
+            theirs_gear,
+            user_id=OTHER_USER_ID,
+            start=now - timedelta(days=1),
+            end=now + timedelta(days=1),
+        )
+
+        result = await dashboard_repository.list_gear_checkout_facts(
+            USER_ID, ending_after=now
+        )
+
+        assert [facts.journal_id for facts in result] == [mine_id]
+
+    async def test_service_excludes_future_and_returned_checkouts(
+        self,
+        seeder: Seeder,
+        service: OutdoorDashboardService,
+    ) -> None:
+        now = datetime.now(UTC)
+        rope = await seeder.create_gear_item(name="Rope")
+        harness = await seeder.create_gear_item(name="Harness")
+        helmet = await seeder.create_gear_item(name="Helmet")
+        open_id = await seeder.create_gear_usage_journal(
+            rope,
+            title="Out now",
+            start=now - timedelta(days=2),
+            end=now + timedelta(days=1),
+        )
+        # Next week's trip: not yet checked out.
+        await seeder.create_gear_usage_journal(
+            harness,
+            title="Next week",
+            start=now + timedelta(days=7),
+            end=now + timedelta(days=9),
+        )
+        # Open window but already returned in Snipe-IT.
+        returned_id = await seeder.create_gear_usage_journal(
+            helmet,
+            title="Returned early",
+            start=now - timedelta(days=1),
+            end=now + timedelta(days=1),
+        )
+        await seeder.insert_snipeit_checkin(returned_id)
+
+        result = await service.list_checked_out_gear(USER_ID)
+
+        assert [item.journal_id for item in result] == [open_id]
+        assert result[0].name == "Rope"
+        assert result[0].gear_item_id == rope
+        assert result[0].checked_out_since == now - timedelta(days=2)
+
+    async def test_service_returns_empty_list_when_nothing_checked_out(
+        self,
+        service: OutdoorDashboardService,
+    ) -> None:
+        assert await service.list_checked_out_gear(USER_ID) == []
+
+
+@pytest.mark.integration
+class TestTemplateReferences:
+    async def test_references_join_templates_scoped_to_user(
+        self,
+        seeder: Seeder,
+        dashboard_repository: SqlOutdoorDashboardRepository,
+    ) -> None:
+        now = datetime.now(UTC)
+        template_id = await seeder.create_template(
+            name="Empress Falls", template_type="canyoning"
+        )
+        journal_id = await seeder.create_abseiling_journal(
+            start=now - timedelta(days=5), template_id=template_id
+        )
+        # No template reference: not a "done" template row.
+        await seeder.create_abseiling_journal(start=now - timedelta(days=4))
+        # Another user's journal referencing their own template.
+        other_template = await seeder.create_template(
+            name="Their canyon", user_id=OTHER_USER_ID
+        )
+        await seeder.create_abseiling_journal(
+            user_id=OTHER_USER_ID,
+            start=now - timedelta(days=3),
+            template_id=other_template,
+        )
+
+        result = await dashboard_repository.list_template_references(USER_ID)
+
+        assert len(result) == 1
+        reference = result[0]
+        assert reference.journal_id == journal_id
+        assert reference.template_id == template_id
+        assert reference.template_name == "Empress Falls"
+        assert reference.template_type == "canyoning"
+
+    async def test_service_groups_and_counts_templates_done(
+        self,
+        seeder: Seeder,
+        service: OutdoorDashboardService,
+    ) -> None:
+        now = datetime.now(UTC)
+        canyon = await seeder.create_template(
+            name="Empress Falls", template_type="canyoning"
+        )
+        climb = await seeder.create_template(
+            name="Sweet Dreams", template_type="climbing"
+        )
+        await seeder.create_abseiling_journal(
+            title="First run", start=now - timedelta(days=30), template_id=canyon
+        )
+        await seeder.create_abseiling_journal(
+            title="Second run", start=now - timedelta(days=10), template_id=canyon
+        )
+        await seeder.create_abseiling_journal(
+            title="Climb", start=now - timedelta(days=5), template_id=climb
+        )
+
+        result = await service.templates_done(USER_ID)
+
+        assert set(result) == {"canyoning", "climbing"}
+        assert [(entry.name, entry.done_count) for entry in result["canyoning"]] == [
+            ("Empress Falls", 2)
+        ]
+        assert [(entry.name, entry.done_count) for entry in result["climbing"]] == [
+            ("Sweet Dreams", 1)
+        ]
+
+    async def test_service_returns_empty_mapping_without_references(
+        self,
+        service: OutdoorDashboardService,
+    ) -> None:
+        assert await service.templates_done(USER_ID) == {}

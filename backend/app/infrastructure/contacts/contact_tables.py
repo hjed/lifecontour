@@ -418,6 +418,10 @@ contact_summaries_table = Table(
     Column("is_user_override", Boolean, server_default=text("false"), nullable=False),
     Column("user_override_text", Text, nullable=True),
     Column("generated_at", DateTime(timezone=True), nullable=True),
+    # Rolling-debounce marker for buffered summary refreshes: timestamp of the
+    # most recent automated refresh request, cleared when the sweeper dispatches
+    # generation. NULL means no refresh is pending.
+    Column("refresh_requested_at", DateTime(timezone=True), nullable=True),
     Column(
         "created_at",
         DateTime(timezone=True),

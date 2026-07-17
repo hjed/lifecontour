@@ -15,7 +15,7 @@ from core_shared.models.contacts.entities import ContactSummary, SummaryStatus
 from core_shared.models.contacts.exceptions import ContactValidationError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.contacts.models.events import ContactSummaryRefreshRequested
+from app.core.contacts.models.events import ContactSummaryRefreshDue
 from app.core.contacts.models.repositories import (
     ContactEventPublisher,
     ContactSummaryRepository,
@@ -55,11 +55,14 @@ class ContactSummaryService:
         contact_id: int,
         transaction: AsyncConnection,
     ) -> None:
-        """Request a refresh of the AI-generated summary for a contact.
+        """Request an immediate refresh of the AI-generated summary for a contact.
 
         Creates a pending summary record if none exists, or sets the status to
         'pending' to trigger regeneration, then publishes a
-        ContactSummaryRefreshRequested event to the outbox for async processing.
+        ContactSummaryRefreshDue event to the outbox for async processing.
+        Manual refresh bypasses the rolling-debounce buffer that automated
+        triggers go through, and absorbs any queued buffered request so the
+        user's click costs a single generation.
 
         Raises ContactValidationError if summary generation is disabled for the
         contact. Committed as a single unit before the response is sent.
@@ -81,9 +84,12 @@ class ContactSummaryService:
             )
             await self.summary_repo.upsert(new_summary)
 
-        # Publish outbox event to trigger async generation
+        # Absorb any buffered request queued by automated triggers
+        await self.summary_repo.clear_refresh_request(contact_id)
+
+        # Publish outbox event to trigger async generation immediately
         await self.event_publisher.publish(
-            ContactSummaryRefreshRequested(contact_id=contact_id)
+            ContactSummaryRefreshDue(contact_id=contact_id)
         )
 
     @transactional

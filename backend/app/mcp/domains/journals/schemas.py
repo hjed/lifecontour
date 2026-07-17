@@ -5,6 +5,7 @@ Provides AI-optimized Pydantic schemas for journal MCP responses.
 All schemas include contextual summaries to help AI understand the data.
 """
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -651,3 +652,96 @@ class OutdoorActivityDismissalMCPResponse(BaseModel):
         description="On undismiss: whether the journal was dismissed beforehand",
     )
     summary: str = Field(description="AI-friendly summary")
+
+
+class UpcomingOutdoorActivityMCPEntry(BaseModel):
+    """An upcoming outdoor activity or planning event on the dashboard."""
+
+    journal_id: int = Field(description=JOURNAL_ID_DESC)
+    title: str = Field(description=JOURNAL_TITLE_DESC)
+    event_date_range: EventDateRangeSchema = Field(description=EVENT_DATE_RANGE_DESC)
+    subtypes: list[str] = Field(
+        description="Outdoor activity subtypes present on the journal"
+    )
+    is_planning: bool = Field(
+        description=(
+            "Whether the entry is an OUTDOOR_PLANNING event "
+            "rather than an outdoor activity"
+        )
+    )
+
+
+class CheckedOutGearMCPEntry(BaseModel):
+    """A gear item currently checked out."""
+
+    gear_item_id: str = Field(description="Gear item UUID")
+    name: str = Field(description="Gear item name")
+    checked_out_since: datetime = Field(
+        description="When the item was checked out (resolved checkout date)"
+    )
+    journal_id: int = Field(description="GEAR_USAGE journal recording the checkout")
+
+
+class TemplateDoneMCPEntry(BaseModel):
+    """A template the user has done, with its per-template done-count.
+
+    The template type is the ``templates_done`` mapping key, so it is not
+    repeated here.
+    """
+
+    template_id: str = Field(description="Activity template UUID")
+    name: str = Field(description="Template name")
+    done_count: int = Field(
+        description=(
+            "How many of the user's abseiling activities reference the template"
+        )
+    )
+
+
+class OutdoorDashboardMCPResponse(BaseModel):
+    """AI-friendly outdoor dashboard response with all four widget sections."""
+
+    upcoming_activities: list[UpcomingOutdoorActivityMCPEntry] = Field(
+        description=(
+            "Upcoming outdoor activities and planning events "
+            "(next 30 days, soonest first, capped at 10)"
+        )
+    )
+    checked_out_gear: list[CheckedOutGearMCPEntry] = Field(
+        description="Gear currently checked out, longest out first"
+    )
+    activity_totals_last_30_days: dict[str, int] = Field(
+        description="Outdoor activity counts by journal type over the last 30 days"
+    )
+    activity_totals_last_365_days: dict[str, int] = Field(
+        description="Outdoor activity counts by journal type over the last 365 days"
+    )
+    templates_done: dict[str, list[TemplateDoneMCPEntry]] = Field(
+        description=(
+            "Unique templates referenced by the user's abseiling activities, "
+            "grouped by template type"
+        )
+    )
+    summary: str = Field(description="AI-friendly summary")
+
+
+def build_dashboard_summary(
+    *,
+    upcoming_activities: Sequence[UpcomingOutdoorActivityMCPEntry],
+    checked_out_gear: Sequence[CheckedOutGearMCPEntry],
+    activity_totals_last_30_days: Mapping[str, int],
+    templates_done: Mapping[str, Sequence[TemplateDoneMCPEntry]],
+) -> str:
+    """The dashboard summary line, counting across the four sections."""
+    upcoming_count = len(upcoming_activities)
+    gear_count = len(checked_out_gear)
+    recent_count = sum(activity_totals_last_30_days.values())
+    template_count = sum(len(templates) for templates in templates_done.values())
+    return (
+        f"Dashboard: {upcoming_count} upcoming "
+        f"activit{'y' if upcoming_count == 1 else 'ies'}, "
+        f"{gear_count} gear item{'' if gear_count == 1 else 's'} checked out, "
+        f"{recent_count} outdoor activit{'y' if recent_count == 1 else 'ies'} "
+        f"in the last 30 days, "
+        f"{template_count} unique template{'' if template_count == 1 else 's'} done."
+    )

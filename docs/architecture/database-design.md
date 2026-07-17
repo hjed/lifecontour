@@ -276,6 +276,34 @@ merge candidates — a different concept):
 - Introduced additively by migration `0098` (create/drop round-trip); not yet consumed by the review
   projection at this phase.
 
+#### Gear checkout state — the "checked out" definition (ITER16-003)
+
+The outdoor dashboard's "gear currently checked out" widget derives checkout state from existing
+tables — no new state is stored. A gear item is **currently checked out** when a `GEAR_USAGE`
+journal references it (`journal_gear_usage_data.gear_item_id`) such that:
+
+1. **The resolved checkout window contains now** — `COALESCE(checkout_date,
+   journals.event_date_range_start) <= now() < COALESCE(checkin_date, journals.event_date_range_end)`.
+   The `checkout_date`/`checkin_date` columns are optional *buffer overrides* (pack the day before,
+   return the day after); they are **never written back** by the Snipe-IT worker, so `checkin_date IS
+   NULL` does **not** mean "still out" — the window falls back to the journal's event range. This is
+   the same `COALESCE` resolution the Snipe-IT check-in sweep uses. The checkout bound is inclusive
+   and the check-in bound exclusive (at the resolved check-in instant the sweep returns the asset).
+2. **Snipe-IT hasn't already recorded the return** — no `sync_metadata` row with
+   `integration_source = 'snipeit_checkin'`, `internal_uuid = journal_id::text` and
+   `sync_status = 'success'`. This keeps the dashboard consistent with an early return recorded in
+   Snipe-IT while still working when the Snipe-IT integration isn't connected (rule 1 alone then
+   decides).
+
+Scope: **all** of the user's open gear checkouts count, regardless of what kind of journal the
+`GEAR_USAGE` entry is attached to (gear state is physical — hiding a checkout made for a travel
+journal would misreport what's out). One entry per gear item: when several open usages reference the
+same item, the earliest active checkout wins (that's when it left), ordered longest-out first.
+
+The rule lives in `core_shared.models.journals.outdoor_dashboard.is_currently_checked_out` (pure,
+unit-tested); `SqlOutdoorDashboardRepository.list_gear_checkout_facts` resolves the window bounds in
+SQL and applies only a cheap already-ended bound (`resolved check-in > now`).
+
 ### Photo Integration (Iteration 4)
 ```sql
 -- To be implemented when Immich integration is added
