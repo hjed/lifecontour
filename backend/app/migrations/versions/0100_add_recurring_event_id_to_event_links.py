@@ -1,7 +1,7 @@
 """add recurring_event_id to journal_external_event_links
 
-Revision ID: 0099
-Revises: 0098
+Revision ID: 0100
+Revises: 0099
 Create Date: 2026-07-14 09:00:00.000000
 
 """
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "0099"
-down_revision: str | None = "0098"
+revision: str = "0100"
+down_revision: str | None = "0099"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
