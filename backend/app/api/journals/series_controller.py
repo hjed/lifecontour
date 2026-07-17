@@ -6,10 +6,7 @@ appointments). Registered before the main journals router so the literal
 ``/journals/series`` paths win over ``/journals/{journal_id}``.
 """
 
-from uuid import UUID
-
 from core_shared.models.journals import (
-    JournalSeriesNotFoundError,
     JournalValidationError,
 )
 from dishka import FromDishka
@@ -28,19 +25,13 @@ from app.api.journals.schemas import (
 )
 from app.core.journal.models.journal_series import JournalSeries
 from app.core.journal.models.repositories import JournalRepository
-from app.core.journal.services.journal_series_service import JournalSeriesService
+from app.core.journal.services.journal_series_service import (
+    JournalSeriesService,
+    parse_series_id,
+)
 from app.infrastructure.auth.models import SessionUser
 
 series_router = APIRouter(tags=["journals"])
-
-INVALID_SERIES_ID_MSG = "Invalid series ID format (must be a UUID)"
-
-
-def _parse_series_id(series_id: str) -> UUID:
-    try:
-        return UUID(series_id)
-    except ValueError as e:
-        raise JournalSeriesNotFoundError(series_id) from e
 
 
 def _to_resource(
@@ -118,7 +109,7 @@ async def get_journal_series(
 ) -> JournalSeriesResponse:
     """Get a series with its member journal summaries."""
     base_url = get_request_base_url(request)
-    parsed_id = _parse_series_id(series_id)
+    parsed_id = parse_series_id(series_id)
     series = await series_service.get_series(parsed_id, user.id)
 
     member_ids = await series_service.get_member_journal_ids(parsed_id, user.id)
@@ -157,7 +148,7 @@ async def update_journal_series(
     base_url = get_request_base_url(request)
     attributes = series_request.data.attributes
     updated = await series_service.update_series(
-        series_id=_parse_series_id(series_id),
+        series_id=parse_series_id(series_id),
         user_id=user.id,
         name=attributes.name,
         description=attributes.description,
@@ -177,7 +168,7 @@ async def delete_journal_series(
     user: FromDishka[SessionUser],
 ) -> None:
     """Delete a series. Member journals are untouched."""
-    await series_service.delete_series(_parse_series_id(series_id), user.id, connection)
+    await series_service.delete_series(parse_series_id(series_id), user.id, connection)
 
 
 @series_router.post(
@@ -194,7 +185,7 @@ async def add_journal_to_series(
 ) -> None:
     """Add a journal to a series (idempotent)."""
     await series_service.add_journal_to_series(
-        series_id=_parse_series_id(relationship_request.data.id),
+        series_id=parse_series_id(relationship_request.data.id),
         journal_id=journal_id,
         user_id=user.id,
         transaction=connection,
@@ -215,7 +206,7 @@ async def remove_journal_from_series(
 ) -> None:
     """Remove a journal from a series (idempotent)."""
     await series_service.remove_journal_from_series(
-        series_id=_parse_series_id(series_id),
+        series_id=parse_series_id(series_id),
         journal_id=journal_id,
         user_id=user.id,
         transaction=connection,

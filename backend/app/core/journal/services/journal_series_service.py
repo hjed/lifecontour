@@ -22,6 +22,19 @@ from app.core.journal.models.repositories import (
 from app.infrastructure.unit_of_work import transactional
 
 
+def parse_series_id(series_id: str) -> UUID:
+    """Parse a series id string, mapping malformed input to not-found.
+
+    Shared by the REST controller and MCP tools: a syntactically invalid id
+    can't refer to an existing series, so it surfaces as a 404 rather than a
+    parse error.
+    """
+    try:
+        return UUID(series_id)
+    except ValueError as e:
+        raise JournalSeriesNotFoundError(series_id) from e
+
+
 class JournalSeriesService:
     """Service for persisting journal series as committed units of work."""
 

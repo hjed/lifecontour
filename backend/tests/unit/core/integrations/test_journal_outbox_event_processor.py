@@ -2062,8 +2062,13 @@ def _make_series_cancelled_event(
     )
 
 
-class TestRecurringCancellationDeletesFutureInstances:
-    """journal_event.cancelled for recurring instances: far-future deletion."""
+class _SeriesProcessorTestBase:
+    """Shared fixtures for the series / recurring-cancellation test classes.
+
+    The processor gets stubbed link/series repositories: deletion-protection
+    facts default to unprotected, find_by_external_event to None, and series
+    get-or-create to a series with SERIES_ID — tests override per scenario.
+    """
 
     @pytest.fixture
     def mock_connection(self) -> AsyncMock:
@@ -2088,7 +2093,15 @@ class TestRecurringCancellationDeletesFutureInstances:
         _mock(
             proc.link_repo
         ).get_deletion_protection_facts.return_value = _UNPROTECTED_FACTS
+        _mock(proc.link_repo).find_by_external_event.return_value = None
+        series = MagicMock()
+        series.id = SERIES_ID
+        _mock(proc.series_repo).get_or_create_by_recurrence.return_value = series
         return proc
+
+
+class TestRecurringCancellationDeletesFutureInstances(_SeriesProcessorTestBase):
+    """journal_event.cancelled for recurring instances: far-future deletion."""
 
     @pytest.mark.asyncio
     async def test_future_unedited_instance_is_deleted(
@@ -2285,33 +2298,8 @@ class TestRecurringCancellationDeletesFutureInstances:
         assert mock_connection.execute.call_count == 2
 
 
-class TestSeriesCancelledFanOut:
+class TestSeriesCancelledFanOut(_SeriesProcessorTestBase):
     """journal_event.series_cancelled: fan-out over all linked journals."""
-
-    @pytest.fixture
-    def mock_connection(self) -> AsyncMock:
-        return _make_mock_connection()
-
-    @pytest.fixture
-    def mock_journal_service(self) -> AsyncMock:
-        return AsyncMock()
-
-    @pytest.fixture
-    def processor(
-        self, mock_journal_service: AsyncMock, mock_connection: AsyncMock
-    ) -> JournalOutboxEventProcessor:
-        proc = JournalOutboxEventProcessor(
-            journal_service=mock_journal_service,
-            connection=mock_connection,
-            contact_repository=MagicMock(),
-            strava_athlete_mapping_repository=MagicMock(),
-        )
-        proc.link_repo = AsyncMock()
-        proc.series_repo = AsyncMock()
-        _mock(
-            proc.link_repo
-        ).get_deletion_protection_facts.return_value = _UNPROTECTED_FACTS
-        return proc
 
     @pytest.mark.asyncio
     async def test_deletes_future_cancels_near_skips_past(
@@ -2398,33 +2386,8 @@ class TestSeriesCancelledFanOut:
         assert mock_connection.execute.call_count == 2
 
 
-class TestSeriesMembershipOnCreateAndUpdate:
+class TestSeriesMembershipOnCreateAndUpdate(_SeriesProcessorTestBase):
     """Auto-linking synced recurring instances into a journal series."""
-
-    @pytest.fixture
-    def mock_connection(self) -> AsyncMock:
-        return _make_mock_connection()
-
-    @pytest.fixture
-    def mock_journal_service(self) -> AsyncMock:
-        return AsyncMock()
-
-    @pytest.fixture
-    def processor(
-        self, mock_journal_service: AsyncMock, mock_connection: AsyncMock
-    ) -> JournalOutboxEventProcessor:
-        proc = JournalOutboxEventProcessor(
-            journal_service=mock_journal_service,
-            connection=mock_connection,
-            contact_repository=MagicMock(),
-            strava_athlete_mapping_repository=MagicMock(),
-        )
-        proc.link_repo = AsyncMock()
-        proc.series_repo = AsyncMock()
-        series = MagicMock()
-        series.id = SERIES_ID
-        _mock(proc.series_repo).get_or_create_by_recurrence.return_value = series
-        return proc
 
     @pytest.mark.asyncio
     async def test_created_event_with_recurring_id_ensures_series_membership(
@@ -2550,33 +2513,8 @@ class TestSeriesMembershipOnCreateAndUpdate:
         assert etag_update_call[0][1]["recurring_event_id"] == "master-1"
 
 
-class TestSeriesCancelledFanOutRobustness:
+class TestSeriesCancelledFanOutRobustness(_SeriesProcessorTestBase):
     """PR-review hardening: nullable link/date fields in the fan-out."""
-
-    @pytest.fixture
-    def mock_connection(self) -> AsyncMock:
-        return _make_mock_connection()
-
-    @pytest.fixture
-    def mock_journal_service(self) -> AsyncMock:
-        return AsyncMock()
-
-    @pytest.fixture
-    def processor(
-        self, mock_journal_service: AsyncMock, mock_connection: AsyncMock
-    ) -> JournalOutboxEventProcessor:
-        proc = JournalOutboxEventProcessor(
-            journal_service=mock_journal_service,
-            connection=mock_connection,
-            contact_repository=MagicMock(),
-            strava_athlete_mapping_repository=MagicMock(),
-        )
-        proc.link_repo = AsyncMock()
-        proc.series_repo = AsyncMock()
-        _mock(
-            proc.link_repo
-        ).get_deletion_protection_facts.return_value = _UNPROTECTED_FACTS
-        return proc
 
     @pytest.mark.asyncio
     async def test_link_without_external_id_still_marked_cancelled(
@@ -2624,34 +2562,9 @@ class TestSeriesCancelledFanOutRobustness:
         mock_connection.execute.assert_not_called()
 
 
-class TestSeriesCancelledFanOutSavepoints:
+class TestSeriesCancelledFanOutSavepoints(_SeriesProcessorTestBase):
     """PR-review hardening: each fan-out item runs in a SAVEPOINT so a
     failed item rolls back cleanly (per the batch-loop rule)."""
-
-    @pytest.fixture
-    def mock_connection(self) -> AsyncMock:
-        return _make_mock_connection()
-
-    @pytest.fixture
-    def mock_journal_service(self) -> AsyncMock:
-        return AsyncMock()
-
-    @pytest.fixture
-    def processor(
-        self, mock_journal_service: AsyncMock, mock_connection: AsyncMock
-    ) -> JournalOutboxEventProcessor:
-        proc = JournalOutboxEventProcessor(
-            journal_service=mock_journal_service,
-            connection=mock_connection,
-            contact_repository=MagicMock(),
-            strava_athlete_mapping_repository=MagicMock(),
-        )
-        proc.link_repo = AsyncMock()
-        proc.series_repo = AsyncMock()
-        _mock(
-            proc.link_repo
-        ).get_deletion_protection_facts.return_value = _UNPROTECTED_FACTS
-        return proc
 
     @pytest.mark.asyncio
     async def test_failed_item_rolls_back_its_savepoint(
@@ -2679,37 +2592,12 @@ class TestSeriesCancelledFanOutSavepoints:
         savepoint.commit.assert_awaited_once()
 
 
-class TestUnchangedEtagBackfill:
+class TestUnchangedEtagBackfill(_SeriesProcessorTestBase):
     """Audit fix: the backfill must persist even when the ETag is unchanged.
 
     The worker's backfill promotion re-sends unchanged events with the SAME
     etag; if the etag-unchanged skip runs first, the recurring id is never
     stored and the worker re-promotes forever."""
-
-    @pytest.fixture
-    def mock_connection(self) -> AsyncMock:
-        return _make_mock_connection()
-
-    @pytest.fixture
-    def mock_journal_service(self) -> AsyncMock:
-        return AsyncMock()
-
-    @pytest.fixture
-    def processor(
-        self, mock_journal_service: AsyncMock, mock_connection: AsyncMock
-    ) -> JournalOutboxEventProcessor:
-        proc = JournalOutboxEventProcessor(
-            journal_service=mock_journal_service,
-            connection=mock_connection,
-            contact_repository=MagicMock(),
-            strava_athlete_mapping_repository=MagicMock(),
-        )
-        proc.link_repo = AsyncMock()
-        proc.series_repo = AsyncMock()
-        series = MagicMock()
-        series.id = SERIES_ID
-        _mock(proc.series_repo).get_or_create_by_recurrence.return_value = series
-        return proc
 
     @pytest.mark.asyncio
     async def test_unchanged_etag_update_still_backfills_recurring_id_and_series(
@@ -2776,7 +2664,7 @@ class TestUnchangedEtagBackfill:
         _mock(processor.series_repo).add_member.assert_not_called()
 
 
-class TestStickyCancellationDecision:
+class TestStickyCancellationDecision(_SeriesProcessorTestBase):
     """PR-review hardening: a link already marked cancelled is never eligible
     for deletion on a later pass.
 
@@ -2784,31 +2672,6 @@ class TestStickyCancellationDecision:
     journal_updated_at > link_updated_at edit signal — so on event redelivery
     (or a repeated upstream cancellation) a previously-protected, locally
     edited journal would otherwise look unedited and be deleted."""
-
-    @pytest.fixture
-    def mock_connection(self) -> AsyncMock:
-        return _make_mock_connection()
-
-    @pytest.fixture
-    def mock_journal_service(self) -> AsyncMock:
-        return AsyncMock()
-
-    @pytest.fixture
-    def processor(
-        self, mock_journal_service: AsyncMock, mock_connection: AsyncMock
-    ) -> JournalOutboxEventProcessor:
-        proc = JournalOutboxEventProcessor(
-            journal_service=mock_journal_service,
-            connection=mock_connection,
-            contact_repository=MagicMock(),
-            strava_athlete_mapping_repository=MagicMock(),
-        )
-        proc.link_repo = AsyncMock()
-        proc.series_repo = AsyncMock()
-        _mock(
-            proc.link_repo
-        ).get_deletion_protection_facts.return_value = _UNPROTECTED_FACTS
-        return proc
 
     @pytest.mark.asyncio
     async def test_fan_out_never_deletes_an_already_cancelled_link(

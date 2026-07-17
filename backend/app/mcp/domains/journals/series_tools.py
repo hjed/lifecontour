@@ -8,10 +8,8 @@ members, and inspect them.
 
 import json
 from typing import Any
-from uuid import UUID
 
 from core_shared.models.journals import (
-    JournalSeriesNotFoundError,
     JournalValidationError,
 )
 from fastmcp import FastMCP
@@ -19,7 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.models.journal_series import JournalSeries
-from app.core.journal.services.journal_series_service import JournalSeriesService
+from app.core.journal.services.journal_series_service import (
+    JournalSeriesService,
+    parse_series_id,
+)
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
     get_async_connection,
@@ -27,13 +28,6 @@ from app.mcp.shared.dependencies import (
     get_journal_series_service,
     mcp_depends,
 )
-
-
-def _parse_series_id(series_id: str) -> UUID:
-    try:
-        return UUID(series_id)
-    except ValueError as e:
-        raise JournalSeriesNotFoundError(series_id) from e
 
 
 def _series_to_dict(series: JournalSeries) -> dict[str, Any]:
@@ -108,7 +102,7 @@ async def get_series(
         {id, title, event_date_range_start} ordered by event date.
     """
     user_id = await get_current_user_id()
-    parsed_id = _parse_series_id(series_id)
+    parsed_id = parse_series_id(series_id)
     series = await series_service.get_series(parsed_id, user_id)
 
     member_ids = await series_service.get_member_journal_ids(parsed_id, user_id)
@@ -149,7 +143,7 @@ async def update_series(
     """
     user_id = await get_current_user_id()
     updated = await series_service.update_series(
-        series_id=_parse_series_id(series_id),
+        series_id=parse_series_id(series_id),
         user_id=user_id,
         name=name,
         description=description,
@@ -173,7 +167,7 @@ async def delete_series(
     """
     user_id = await get_current_user_id()
     await series_service.delete_series(
-        _parse_series_id(series_id), user_id, db_connection
+        parse_series_id(series_id), user_id, db_connection
     )
     return json.dumps({"deleted": True, "series_id": series_id}, indent=2)
 
@@ -196,7 +190,7 @@ async def add_journal_to_series(
     """
     user_id = await get_current_user_id()
     await series_service.add_journal_to_series(
-        series_id=_parse_series_id(series_id),
+        series_id=parse_series_id(series_id),
         journal_id=journal_id,
         user_id=user_id,
         transaction=db_connection,
@@ -222,7 +216,7 @@ async def remove_journal_from_series(
     """
     user_id = await get_current_user_id()
     await series_service.remove_journal_from_series(
-        series_id=_parse_series_id(series_id),
+        series_id=parse_series_id(series_id),
         journal_id=journal_id,
         user_id=user_id,
         transaction=db_connection,
