@@ -14,7 +14,7 @@ A comprehensive personal management system with Python FastAPI backend, Next.js 
 
 ## Development Principles
 - **Test-First Development:** Write tests before implementation - no exceptions
-- **Reviewable PRs:** Each task creates PRs with max 10 files changed
+- **Reviewable PRs:** Each task creates PRs of roughly ≤ 500 changed lines (including tests)
 - **Quality Gates:** All tests, linting, and type checking must pass
 - **Architecture Consistency:** Follow established patterns (Dishka DI, ARQ workers, etc.)
 - **AI-Optimized:** Design for AI assistant understanding and integration
@@ -324,7 +324,7 @@ Read these first when working on the active product-alignment streams:
 - Prepare integration points for Strava and Immich
 
 **Development Guidelines:**
-- Each task creates reviewable PRs (~5-10 files changed preferred)
+- Each task creates reviewable PRs (roughly ≤ 500 changed lines including tests; split larger work into smaller phases)
 - All tests, linting, and type checking must pass before completion
 - Follow established architecture patterns (Dishka DI, ARQ workers, FastMCP v2)
 - Maintain comprehensive test coverage across all layers
