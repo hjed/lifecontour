@@ -2,16 +2,17 @@
  * Outdoor Logbook overview page.
  *
  * The home for outdoor logbook review and reporting: the incomplete outdoor
- * activities review and the dashboard widgets — upcoming activities and
- * recent activity totals now, with checked-out gear and templates done to
- * follow.
+ * activities review and the four dashboard widgets — upcoming activities,
+ * recent activity totals, checked-out gear, and the abseil templates done.
  */
 
 'use client';
 
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { ActivityTotalsTable } from '@/components/journals/ActivityTotalsTable';
+import { CheckedOutGearList } from '@/components/journals/CheckedOutGearList';
 import { IncompleteOutdoorActivitiesList } from '@/components/journals/IncompleteOutdoorActivitiesList';
+import { TemplatesDoneList } from '@/components/journals/TemplatesDoneList';
 import { UpcomingActivitiesList } from '@/components/journals/UpcomingActivitiesList';
 
 export default function OutdoorLogbookPage() {
@@ -44,6 +45,20 @@ export default function OutdoorLogbookPage() {
             Recent activity totals
           </h2>
           <ActivityTotalsTable />
+        </section>
+
+        <section aria-labelledby='checked-out-gear-heading'>
+          <h2 id='checked-out-gear-heading' className='sr-only'>
+            Gear currently checked out
+          </h2>
+          <CheckedOutGearList />
+        </section>
+
+        <section aria-labelledby='templates-done-heading'>
+          <h2 id='templates-done-heading' className='sr-only'>
+            Abseil templates done
+          </h2>
+          <TemplatesDoneList />
         </section>
       </div>
     </AuthGuard>
