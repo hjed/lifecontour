@@ -57,6 +57,10 @@ import { JournalChildrenList } from './JournalChildrenList';
 import { JournalParentSelector } from './JournalParentSelector';
 import { JournalTypeSection } from './JournalTypeSection';
 import { countAbseils } from './type-editors/pitchUtils';
+import {
+  templateTypeFieldUpdates,
+  templateTypesForJournalTypes,
+} from './templateUtils';
 import { TemplateReference } from './TemplateReference';
 import { JournalTypeManager } from './JournalTypeManager';
 import { ActivityFeed as JournalActivityFeed } from './ActivityFeed';
@@ -444,13 +448,34 @@ export function JournalDetailView({
         },
       });
 
+      // A canyoning/caving/climbing template also contributes its
+      // type-specific fields to the matching type block when the journal
+      // carries that type.
+      const typeFieldUpdates = templateTypeFieldUpdates(template);
+      if (
+        typeFieldUpdates &&
+        (journal.types ?? []).includes(typeFieldUpdates.journalType)
+      ) {
+        const currentTypeData = journal.type_data?.[
+          typeFieldUpdates.journalType
+        ] as Record<string, unknown> | undefined;
+        await updateTypeData.mutateAsync({
+          journalId: journal.id,
+          journalType: typeFieldUpdates.journalType,
+          typeData: {
+            ...(currentTypeData ?? {}),
+            ...typeFieldUpdates.fields,
+          },
+        });
+      }
+
       toast.success(
         hasPitches
           ? 'Pitches imported from template'
           : 'Template linked to journal'
       );
     },
-    [journal.id, journal.type_data, updateTypeData]
+    [journal.id, journal.type_data, journal.types, updateTypeData]
   );
 
   // Handle adding an existing journal as a child of this journal
@@ -676,6 +701,7 @@ export function JournalDetailView({
                       isPending ? handlePendingTypeSave : handleTypeDataSave
                     }
                     onTemplateSelect={handleTemplateSelect}
+                    templateTypes={templateTypesForJournalTypes(displayedTypes)}
                     defaultOpen={isPending}
                   />
                 );

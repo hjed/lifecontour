@@ -33,9 +33,16 @@ interface AbseilingTripTypeEditorProps {
   readonly onTemplateSelect?: (
     template: ActivityTemplateResource
   ) => void | Promise<void>;
+  /**
+   * Template types offered by the selector. Abseiling-derived journals
+   * (canyoning/caving/climbing) pass their own type as well so those
+   * templates stay reachable from the consolidated abseiling block.
+   */
+  readonly templateTypes?: ActivityTemplateType[];
 }
 
 const DEFAULT_DATA: AbseilingData = {};
+const DEFAULT_TEMPLATE_TYPES = [ActivityTemplateType.ABSEILING];
 
 export function AbseilingTripTypeEditor({
   journalId: _journalId,
@@ -46,6 +53,7 @@ export function AbseilingTripTypeEditor({
   createMode = false,
   onChange,
   onTemplateSelect,
+  templateTypes = DEFAULT_TEMPLATE_TYPES,
 }: AbseilingTripTypeEditorProps) {
   const initialData = useMemo(() => data ?? DEFAULT_DATA, [data]);
   const baseId = useId();
@@ -241,15 +249,15 @@ export function AbseilingTripTypeEditor({
         </Label>
         <TemplateSelector
           inputId={templateSelectorId}
-          templateType={ActivityTemplateType.ABSEILING}
+          templateType={templateTypes}
           onSelect={handleTemplateSelection}
           onCreateTemplate={() => setSelectTemplateCreateOpen(true)}
-          placeholder='Select an abseiling template...'
+          placeholder='Select a template...'
         />
         <CreateTemplateDialog
           open={selectTemplateCreateOpen}
           onOpenChange={setSelectTemplateCreateOpen}
-          defaultTemplateType={ActivityTemplateType.ABSEILING}
+          defaultTemplateType={templateTypes[0]}
           onCreated={handleTemplateSelection}
         />
       </div>

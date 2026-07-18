@@ -94,6 +94,51 @@ describe('TemplateSelector', () => {
     expect(screen.getByRole('combobox')).toHaveValue('');
   });
 
+  it('offers templates of every listed type when given multiple types', async () => {
+    const abseilTemplate = {
+      type: 'activity-templates',
+      id: '3',
+      attributes: {
+        name: 'Plain Abseil Template',
+        template_type: ActivityTemplateType.ABSEILING,
+        pitches: [{ pitch_number: 1 }],
+      },
+    };
+    const cavingTemplate = {
+      type: 'activity-templates',
+      id: '4',
+      attributes: {
+        name: 'Cave Template',
+        template_type: ActivityTemplateType.CAVING,
+        pitches: [],
+      },
+    };
+    (templatesApi.getTemplates as jest.Mock).mockResolvedValue({
+      data: [...mockTemplates, abseilTemplate, cavingTemplate],
+    });
+
+    renderComponent({
+      templateType: [
+        ActivityTemplateType.CANYONING,
+        ActivityTemplateType.ABSEILING,
+      ],
+    });
+
+    const combobox = screen.getByRole('combobox');
+    act(() => {
+      fireEvent.keyDown(combobox, { key: 'ArrowDown' });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Canyoning Template')).toBeInTheDocument();
+      expect(screen.getByText('Plain Abseil Template')).toBeInTheDocument();
+    });
+    // Templates of unlisted types are filtered out.
+    expect(screen.queryByText('Cave Template')).not.toBeInTheDocument();
+    // Multi-type searches fetch unfiltered (the API filter takes one type).
+    expect(templatesApi.getTemplates).toHaveBeenCalledWith(undefined, '');
+  });
+
   it('calls onCreateTemplate when create button is clicked', async () => {
     const handleCreate = jest.fn();
     renderComponent({ onCreateTemplate: handleCreate });

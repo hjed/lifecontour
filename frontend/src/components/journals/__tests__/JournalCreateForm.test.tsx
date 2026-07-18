@@ -79,6 +79,8 @@ jest.mock('next/navigation', () => ({
 
 // Mock the template selector so the consolidated-write test can select a
 // template deterministically without exercising the templates query/combobox.
+// The selector accepts one or several template types; the mock keys its test
+// ids off the primary (first) type.
 jest.mock('@/components/journals/type-editors/TemplateSelector', () => ({
   TemplateSelector: ({
     onSelect,
@@ -89,49 +91,58 @@ jest.mock('@/components/journals/type-editors/TemplateSelector', () => ({
       type: string;
       attributes: Record<string, unknown>;
     }) => void;
-    templateType: string;
-  }) => (
-    <>
-      <button
-        type='button'
-        data-testid={`mock-template-selector-${templateType}`}
-        onClick={() =>
-          onSelect({
-            id: 'tpl-consolidated-1',
-            type: 'activity-templates',
-            attributes: {
-              name: 'Test Canyon Template',
-              template_type: templateType,
-              french_grade: 'v4a3IV',
-              pitches: [
-                { pitch_number: 1, height: 30, notes: 'Wet start, keep left' },
-                { pitch_number: 2, height: 15 },
-                { pitch_number: 3, height: 5, pitch_type: 'jump' },
-              ],
-            },
-          })
-        }
-      >
-        Select Template
-      </button>
-      <button
-        type='button'
-        data-testid={`mock-template-selector-nopitch-${templateType}`}
-        onClick={() =>
-          onSelect({
-            id: 'tpl-nopitch-1',
-            type: 'activity-templates',
-            attributes: {
-              name: 'Pitchless Template',
-              template_type: templateType,
-            },
-          })
-        }
-      >
-        Select Pitchless Template
-      </button>
-    </>
-  ),
+    templateType: string | string[];
+  }) => {
+    const primaryType = Array.isArray(templateType)
+      ? templateType[0]
+      : templateType;
+    return (
+      <>
+        <button
+          type='button'
+          data-testid={`mock-template-selector-${primaryType}`}
+          onClick={() =>
+            onSelect({
+              id: 'tpl-consolidated-1',
+              type: 'activity-templates',
+              attributes: {
+                name: 'Test Canyon Template',
+                template_type: primaryType,
+                french_grade: 'v4a3IV',
+                pitches: [
+                  {
+                    pitch_number: 1,
+                    height: 30,
+                    notes: 'Wet start, keep left',
+                  },
+                  { pitch_number: 2, height: 15 },
+                  { pitch_number: 3, height: 5, pitch_type: 'jump' },
+                ],
+              },
+            })
+          }
+        >
+          Select Template
+        </button>
+        <button
+          type='button'
+          data-testid={`mock-template-selector-nopitch-${primaryType}`}
+          onClick={() =>
+            onSelect({
+              id: 'tpl-nopitch-1',
+              type: 'activity-templates',
+              attributes: {
+                name: 'Pitchless Template',
+                template_type: primaryType,
+              },
+            })
+          }
+        >
+          Select Pitchless Template
+        </button>
+      </>
+    );
+  },
 }));
 
 // Ensure tests don't timeout during full test suite runs, as this component
@@ -730,13 +741,17 @@ describe('JournalCreateForm', () => {
       });
 
       // The consolidated abseiling block is the sole home for template_id; the
-      // canyoning block must not carry its own template_id.
+      // canyoning block must not carry its own template_id but does receive
+      // the template's canyon-specific fields.
       const submitted = mockMutateAsync.mock.calls[0][0] as {
         type_data: Record<string, Record<string, unknown>>;
       };
       expect(
         submitted.type_data[JournalType.CANYONING]?.template_id
       ).toBeUndefined();
+      expect(submitted.type_data[JournalType.CANYONING]?.french_grade).toBe(
+        'v4a3IV'
+      );
     });
 
     it('links a pitch-less template without clearing user-entered abseil data', async () => {

@@ -18,7 +18,8 @@ const BLUR_DELAY_MS = 200;
 interface TemplateSelectorProps {
   readonly onSelect: (template: ActivityTemplateResource) => void;
   readonly onCreateTemplate?: () => void;
-  readonly templateType: ActivityTemplateType;
+  /** One template type, or several to offer templates of multiple types. */
+  readonly templateType: ActivityTemplateType | ActivityTemplateType[];
   readonly placeholder?: string;
   readonly inputId?: string;
   readonly className?: string;
@@ -60,19 +61,31 @@ export function TemplateSelector({
     ? `${inputId}-listbox`
     : `template-results-${uniqueFallbackId}`;
 
-  // Search templates
+  const templateTypes = Array.isArray(templateType)
+    ? templateType
+    : [templateType];
+  const singleType = templateTypes.length === 1 ? templateTypes[0] : undefined;
+
+  // Search templates. The backend filter accepts a single type, so a
+  // multi-type selector fetches unfiltered and filters client-side.
   const {
     data: searchResults,
     isLoading,
     error,
   } = useQuery({
-    queryKey: ['templates', templateType, debouncedQuery],
-    queryFn: () => getTemplates(templateType, debouncedQuery),
+    queryKey: [
+      'templates',
+      singleType ?? templateTypes.join(','),
+      debouncedQuery,
+    ],
+    queryFn: () => getTemplates(singleType, debouncedQuery),
     // We always want to fetch templates of a certain type, even if the search query is empty.
     staleTime: 30000, // 30 seconds
   });
 
-  const templates = searchResults?.data || [];
+  const templates = (searchResults?.data || []).filter(template =>
+    templateTypes.includes(template.attributes.template_type)
+  );
 
   // Cleanup timeout on unmount
   useEffect(() => {

@@ -16,7 +16,11 @@ import {
 } from '@/components/ui/collapsible';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { ActivityTemplateResource, JournalType } from '@/types/journals';
+import {
+  ActivityTemplateResource,
+  ActivityTemplateType,
+  JournalType,
+} from '@/types/journals';
 import type {
   AbseilingData,
   BushwalkingData,
@@ -98,6 +102,8 @@ interface JournalTypeSectionProps {
   readonly typeData?: TypeSectionData;
   readonly onSave?: OnSaveFn;
   readonly onTemplateSelect?: (template: ActivityTemplateResource) => void;
+  /** Template types the consolidated abseiling block's selector offers. */
+  readonly templateTypes?: ActivityTemplateType[];
   readonly defaultOpen?: boolean;
   readonly className?: string;
   readonly 'data-testid'?: string;
@@ -149,6 +155,7 @@ export function JournalTypeSection({
   typeData,
   onSave,
   onTemplateSelect,
+  templateTypes,
   defaultOpen = false,
   className,
   'data-testid': testId,
@@ -192,6 +199,7 @@ export function JournalTypeSection({
               typeData={typeData}
               onSave={onSave}
               onTemplateSelect={onTemplateSelect}
+              templateTypes={templateTypes}
             />
           </CardContent>
         </CollapsibleContent>
@@ -222,12 +230,14 @@ function TypeSpecificContent({
   typeData,
   onSave,
   onTemplateSelect,
+  templateTypes,
 }: {
   readonly journalId: string;
   readonly type: JournalType;
   readonly typeData?: TypeSectionData;
   readonly onSave?: OnSaveFn;
   readonly onTemplateSelect?: (template: ActivityTemplateResource) => void;
+  readonly templateTypes?: ActivityTemplateType[];
 }) {
   // Render type-specific editor based on journal type
   switch (type) {
@@ -321,6 +331,7 @@ function TypeSpecificContent({
           data={typeData as AbseilingData | undefined}
           onSave={makeEditorSave<AbseilingData>(onSave, type)}
           onTemplateSelect={onTemplateSelect}
+          templateTypes={templateTypes}
         />
       );
     case JournalType.CANYONING:
@@ -329,7 +340,6 @@ function TypeSpecificContent({
           journalId={journalId}
           data={typeData as CanyoningData | undefined}
           onSave={makeEditorSave<CanyoningData>(onSave, type)}
-          onTemplateSelect={onTemplateSelect}
         />
       );
     case JournalType.CAVING:
@@ -338,7 +348,6 @@ function TypeSpecificContent({
           journalId={journalId}
           data={typeData as CavingData | undefined}
           onSave={makeEditorSave<CavingData>(onSave, type)}
-          onTemplateSelect={onTemplateSelect}
         />
       );
     case JournalType.CANOEING:
@@ -355,7 +364,6 @@ function TypeSpecificContent({
           journalId={journalId}
           data={typeData as ClimbingData | undefined}
           onSave={makeEditorSave<ClimbingData>(onSave, type)}
-          onTemplateSelect={onTemplateSelect}
         />
       );
     case JournalType.KAYAKING:
