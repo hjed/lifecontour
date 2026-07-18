@@ -1,5 +1,6 @@
 """Integration tests for Abseiling journal API endpoints."""
 
+import copy
 from typing import Any
 
 import pytest
@@ -143,7 +144,7 @@ async def test_pitch_notes_round_trip(
     base_journal_payload: dict[str, Any],
 ):
     """Pitch notes must survive create, read, and update round-trips."""
-    payload = base_journal_payload.copy()
+    payload = copy.deepcopy(base_journal_payload)
     payload["data"]["attributes"]["type_data"] = {
         JournalType.ABSEILING_TRIP.value: {
             "pitches": [
@@ -168,7 +169,7 @@ async def test_pitch_notes_round_trip(
     ]["pitches"]
     assert pitches[0]["notes"] == "Wet start, keep left of the flow"
     # Serialization excludes None fields, so a note-less pitch omits the key.
-    assert pitches[1].get("notes") is None
+    assert "notes" not in pitches[1]
 
     update_payload = {
         "data": {
