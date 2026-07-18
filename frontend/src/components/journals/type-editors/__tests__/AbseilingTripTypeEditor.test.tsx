@@ -119,6 +119,31 @@ describe('AbseilingTripTypeEditor', () => {
     );
   });
 
+  it('keeps a zero abseil count when only jump pitches remain', async () => {
+    const user = userEvent.setup();
+    const handleChange = jest.fn();
+
+    render(
+      <AbseilingTripTypeEditor
+        createMode={true}
+        data={{
+          pitches: [
+            { pitch_number: 1, height: 20 },
+            { pitch_number: 2, height: 5, pitch_type: 'jump' },
+          ],
+        }}
+        onChange={handleChange}
+      />
+    );
+
+    // Removing the only abseil leaves one jump pitch: zero abseils, not null.
+    await user.click(screen.getByTestId('remove-pitch-0'));
+
+    expect(handleChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ number_of_abseils: 0, total_length: 5 })
+    );
+  });
+
   it('calls onTemplateSelect with the selected template', async () => {
     const user = userEvent.setup();
     const onTemplateSelect = jest.fn();

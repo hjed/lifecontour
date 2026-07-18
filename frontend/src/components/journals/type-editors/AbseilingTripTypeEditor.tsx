@@ -204,7 +204,9 @@ export function AbseilingTripTypeEditor({
 
       let nextAbseils = prev.number_of_abseils;
       if (!isManualAbseils || nextAbseils == null) {
-        nextAbseils = newCalcAbseils > 0 ? newCalcAbseils : null;
+        // Key off the pitch count, not the abseil count: a list of only
+        // jump/down-climb pitches is legitimately zero abseils.
+        nextAbseils = newPitches.length > 0 ? newCalcAbseils : null;
       }
 
       let nextLength = prev.total_length;
