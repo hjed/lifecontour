@@ -96,8 +96,10 @@ VALID_ANCHOR_TYPES: list[str] = [
 
 # How a pitch is descended. A null pitch_type is treated as "abseil" for
 # backward compatibility with rows created before the column existed.
+PITCH_TYPE_ABSEIL: str = "abseil"
+
 VALID_PITCH_TYPES: list[str] = [
-    "abseil",
+    PITCH_TYPE_ABSEIL,
     "jump",
     "down_climb",
 ]

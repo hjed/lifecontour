@@ -320,6 +320,7 @@ class TestUpdateAbseilingTypeData:
             pitch_repo,
         )
 
+        pitch_repo.save.assert_awaited_once()
         saved_pitch = pitch_repo.save.await_args.args[0]
         assert saved_pitch.pitch_type == "jump"
 

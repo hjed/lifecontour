@@ -220,7 +220,9 @@ class TestActivityTemplateEndpoints:
                                 "pitch_number": 1,
                                 "height": 15,
                                 "notes": "Rebolted in 2026",
-                            }
+                                "pitch_type": "abseil",
+                            },
+                            {"pitch_number": 2, "height": 25},
                         ]
                     },
                 }
@@ -228,8 +230,12 @@ class TestActivityTemplateEndpoints:
         )
         assert update_response.status_code == 200, update_response.json()
         updated_pitches = update_response.json()["data"]["attributes"]["pitches"]
-        assert len(updated_pitches) == 1
+        assert len(updated_pitches) == 2
         assert updated_pitches[0]["notes"] == "Rebolted in 2026"
+        assert updated_pitches[0]["pitch_type"] == "abseil"
+        # Pitches are replaced wholesale on update: a pitch sent without a
+        # pitch_type ends up with none, even if the previous row had one.
+        assert updated_pitches[1]["pitch_type"] is None
 
     async def test_delete_template(self, authenticated_client):
         """Test deleting a template."""
