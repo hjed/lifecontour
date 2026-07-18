@@ -4665,7 +4665,7 @@ async def create_template(
         list[dict[str, Any]] | None,
         Field(
             default=None,
-            description="List of pitch objects (must contain pitch_number, optionally height, anchor_location, anchor_type, did_rescue, did_setup)",
+            description="List of pitch objects (must contain pitch_number, optionally height, anchor_location, anchor_type, did_rescue, did_setup, notes)",
         ),
     ] = None,
     user_id: str = mcp_depends(get_current_user_id),
@@ -4694,6 +4694,7 @@ async def create_template(
                     anchor_type=p.get("anchor_type"),
                     did_rescue=p.get("did_rescue"),
                     did_setup=p.get("did_setup"),
+                    notes=p.get("notes"),
                 )
             )
 
@@ -4861,7 +4862,10 @@ async def update_template(
     ] = None,
     pitches: Annotated[
         list[dict[str, Any]] | None,
-        Field(default=None, description="List of pitch objects"),
+        Field(
+            default=None,
+            description="List of pitch objects (must contain pitch_number, optionally height, anchor_location, anchor_type, did_rescue, did_setup, notes)",
+        ),
     ] = None,
     user_id: str = mcp_depends(get_current_user_id),
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
@@ -4919,6 +4923,7 @@ async def update_template(
                         anchor_type=p.get("anchor_type"),
                         did_rescue=p.get("did_rescue"),
                         did_setup=p.get("did_setup"),
+                        notes=p.get("notes"),
                     )
                 )
             template.pitches = pitch_entities

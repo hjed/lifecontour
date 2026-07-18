@@ -171,6 +171,62 @@ class TestActivityTemplateEndpoints:
         assert data["data"]["attributes"]["french_grade"] == "v3"
         assert data["data"]["attributes"]["template_type"] == "canyoning"  # Unchanged
 
+    async def test_template_pitch_notes_round_trip(self, authenticated_client):
+        """Pitch notes must survive template create, read, and update."""
+        create_response = await authenticated_client.post(
+            "/api/templates",
+            json={
+                "data": {
+                    "type": "activity-templates",
+                    "attributes": {
+                        "name": "Notes Canyon",
+                        "template_type": "canyoning",
+                        "pitches": [
+                            {
+                                "pitch_number": 1,
+                                "height": 15,
+                                "notes": "Awkward start over the chockstone",
+                            },
+                            {"pitch_number": 2, "height": 25},
+                        ],
+                    },
+                }
+            },
+        )
+        assert create_response.status_code == 201, create_response.json()
+        template_id = create_response.json()["data"]["id"]
+        created_pitches = create_response.json()["data"]["attributes"]["pitches"]
+        assert created_pitches[0]["notes"] == "Awkward start over the chockstone"
+        assert created_pitches[1].get("notes") is None
+
+        get_response = await authenticated_client.get(f"/api/templates/{template_id}")
+        assert get_response.status_code == 200
+        pitches = get_response.json()["data"]["attributes"]["pitches"]
+        assert pitches[0]["notes"] == "Awkward start over the chockstone"
+
+        update_response = await authenticated_client.put(
+            f"/api/templates/{template_id}",
+            json={
+                "data": {
+                    "type": "activity-templates",
+                    "id": template_id,
+                    "attributes": {
+                        "pitches": [
+                            {
+                                "pitch_number": 1,
+                                "height": 15,
+                                "notes": "Rebolted in 2026",
+                            }
+                        ]
+                    },
+                }
+            },
+        )
+        assert update_response.status_code == 200, update_response.json()
+        updated_pitches = update_response.json()["data"]["attributes"]["pitches"]
+        assert len(updated_pitches) == 1
+        assert updated_pitches[0]["notes"] == "Rebolted in 2026"
+
     async def test_delete_template(self, authenticated_client):
         """Test deleting a template."""
         # Create a template

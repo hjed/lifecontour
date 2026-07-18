@@ -90,6 +90,52 @@ describe('CreateTemplateDialog', () => {
     });
   });
 
+  it('includes pitch notes in the create payload', async () => {
+    const mockResponse = { data: { id: '1', attributes: { name: 'Test' } } };
+    (templatesApi.createTemplate as jest.Mock).mockResolvedValue(mockResponse);
+
+    renderComponent({
+      initialPitches: [
+        {
+          pitch_number: 1,
+          height: 30,
+          anchor_location: null,
+          anchor_type: null,
+          did_rescue: null,
+          did_setup: null,
+          notes: 'Awkward start over the chockstone',
+        },
+      ],
+    });
+
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText('Template Name'), {
+        target: { value: 'Notes Template' },
+      });
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Create Template' }));
+    });
+
+    await waitFor(() => {
+      expect(templatesApi.createTemplate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            attributes: expect.objectContaining({
+              pitches: [
+                expect.objectContaining({
+                  pitch_number: 1,
+                  notes: 'Awkward start over the chockstone',
+                }),
+              ],
+            }),
+          }),
+        })
+      );
+    });
+  });
+
   it('shows validation error if name is empty', async () => {
     renderComponent();
 

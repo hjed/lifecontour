@@ -35,6 +35,7 @@ class TemplatePitch:
         anchor_type: Type of anchor used (nullable, constrained to valid values)
         did_rescue: Whether a rescue is typically performed on this pitch (nullable)
         did_setup: Whether the user typically sets up the abseil on this pitch (nullable)
+        notes: Optional short notes for the pitch (nullable)
         created_at: Creation timestamp
         updated_at: Last update timestamp
     """
@@ -47,6 +48,7 @@ class TemplatePitch:
     anchor_type: str | None = None
     did_rescue: bool | None = None
     did_setup: bool | None = None
+    notes: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

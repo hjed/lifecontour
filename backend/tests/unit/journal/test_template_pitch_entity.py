@@ -23,6 +23,7 @@ class TestTemplatePitch:
         assert pitch.anchor_type is None
         assert pitch.did_rescue is None
         assert pitch.did_setup is None
+        assert pitch.notes is None
         assert pitch.created_at is None
         assert pitch.updated_at is None
 
@@ -37,6 +38,7 @@ class TestTemplatePitch:
             anchor_type="double bolt",
             did_rescue=True,
             did_setup=False,
+            notes="Awkward start over the chockstone",
         )
 
         assert pitch.template_id == "12345678-1234-5678-1234-567812345678"
@@ -47,6 +49,7 @@ class TestTemplatePitch:
         assert pitch.anchor_type == "double bolt"
         assert pitch.did_rescue is True
         assert pitch.did_setup is False
+        assert pitch.notes == "Awkward start over the chockstone"
 
     # --- template_id validation ---
 

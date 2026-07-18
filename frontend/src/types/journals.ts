@@ -224,6 +224,7 @@ export interface TemplatePitch {
   anchor_type?: string | null;
   did_rescue?: boolean | null;
   did_setup?: boolean | null;
+  notes?: string | null;
 }
 
 export interface ActivityTemplateAttributes {

@@ -64,6 +64,7 @@ async def create_template(
                         anchor_type=p.anchor_type,
                         did_rescue=p.did_rescue,
                         did_setup=p.did_setup,
+                        notes=p.notes,
                     )
                 )
             template.pitches = pitches
@@ -191,6 +192,7 @@ async def update_template(
                         anchor_type=p.anchor_type,
                         did_rescue=p.did_rescue,
                         did_setup=p.did_setup,
+                        notes=p.notes,
                     )
                 )
             template.pitches = pitches

@@ -242,6 +242,7 @@ class TestActivityTemplateRepositorySave:
                     template_id="11111111-1111-1111-1111-111111111111",
                     pitch_number=1,
                     height=50,
+                    notes="Rebolted in 2026",
                 ),
             ],
         )
@@ -249,6 +250,7 @@ class TestActivityTemplateRepositorySave:
 
         assert len(second_save.pitches) == 1
         assert second_save.pitches[0].height == 50
+        assert second_save.pitches[0].notes == "Rebolted in 2026"
 
         # Verify via find_by_id
         found = await template_repository.find_by_id(first_save.id)  # type: ignore[arg-type]
@@ -563,6 +565,7 @@ class TestActivityTemplateRepositoryPitchOperations:
                     anchor_type="double bolt",
                     did_rescue=True,
                     did_setup=False,
+                    notes="Watch the rub point on the lip",
                 ),
             ],
         )
@@ -577,5 +580,6 @@ class TestActivityTemplateRepositoryPitchOperations:
         assert pitch.anchor_type == "double bolt"
         assert pitch.did_rescue is True
         assert pitch.did_setup is False
+        assert pitch.notes == "Watch the rub point on the lip"
         assert pitch.created_at is not None
         assert pitch.updated_at is not None
