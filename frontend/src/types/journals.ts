@@ -206,6 +206,8 @@ export interface AbseilPitch {
   did_rescue?: boolean | null;
   did_setup?: boolean | null;
   notes?: string | null;
+  // How the pitch is descended: abseil, jump, or down_climb (null = abseil).
+  pitch_type?: string | null;
 }
 
 // Activity Templates
@@ -225,6 +227,8 @@ export interface TemplatePitch {
   did_rescue?: boolean | null;
   did_setup?: boolean | null;
   notes?: string | null;
+  // How the pitch is descended: abseil, jump, or down_climb (null = abseil).
+  pitch_type?: string | null;
 }
 
 export interface ActivityTemplateAttributes {

@@ -18,6 +18,7 @@ import {
 import { useTypeEditorState } from './useTypeEditorState';
 import { TypeEditorActions } from './TypeEditorActions';
 import { PitchEditor } from './PitchEditor';
+import { countAbseils } from './pitchUtils';
 import { TemplateSelector } from './TemplateSelector';
 import { CreateTemplateDialog } from './CreateTemplateDialog';
 
@@ -70,7 +71,7 @@ export function AbseilingTripTypeEditor({
     onChange,
   });
 
-  const initialCalcAbseils = (initialData.pitches || []).length;
+  const initialCalcAbseils = countAbseils(initialData.pitches || []);
   const initialCalcLength = (initialData.pitches || []).reduce(
     (sum, p) => sum + (p.height || 0),
     0
@@ -182,7 +183,7 @@ export function AbseilingTripTypeEditor({
       ...(pitches.length > 0
         ? {
             pitches,
-            number_of_abseils: pitches.length,
+            number_of_abseils: countAbseils(pitches),
             total_length: pitches.reduce((sum, p) => sum + (p.height || 0), 0),
           }
         : {}),
@@ -195,7 +196,7 @@ export function AbseilingTripTypeEditor({
 
   const handlePitchesChange = (newPitches: AbseilPitch[]) => {
     setEditData(prev => {
-      const newCalcAbseils = newPitches.length;
+      const newCalcAbseils = countAbseils(newPitches);
       const newCalcLength = newPitches.reduce(
         (sum, p) => sum + (p.height || 0),
         0

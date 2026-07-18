@@ -577,6 +577,45 @@ test.describe('Journal Creation UI Flow', () => {
     await expect(pitchReadOnly).toContainText('70m');
   });
 
+  test('should count only abseil-type pitches as abseils when a pitch is a jump', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+    await navigateToNewJournal(page);
+
+    await fillJournalBasics(page, {
+      title: `Jump Pitch Trip ${Date.now()}`,
+      content: 'Canyon day with a jump in the middle.',
+      typeLabelRegex: /^abseiling trip$/i,
+    });
+
+    await page.getByTestId('add-pitch-button').click();
+    await page.getByTestId('pitch-row-0').getByPlaceholder('Height').fill('40');
+    await page.getByTestId('add-pitch-button').click();
+    await page.getByTestId('pitch-row-1').getByPlaceholder('Height').fill('5');
+
+    // Both pitches default to abseil.
+    await expect(page.getByTestId('number-of-abseils-input')).toHaveValue('2');
+    await expect(page.getByTestId('total-length-input')).toHaveValue('45');
+
+    // Mark the second pitch as a jump — it stops counting as an abseil but
+    // still contributes its height to the total descent.
+    await page.getByLabel('Type for pitch 2', { exact: true }).click();
+    await page.getByRole('option', { name: 'Jump' }).click();
+    await expect(page.getByTestId('number-of-abseils-input')).toHaveValue('1');
+    await expect(page.getByTestId('total-length-input')).toHaveValue('45');
+
+    await page.getByRole('button', { name: /create journal/i }).click();
+    await awaitCreationAndAssertBadge(page, 'manage-type-abseiling_trip');
+
+    await page.getByTestId('type-section-trigger-abseiling_trip').click();
+
+    // Read-only mode shows the jump badge for the second pitch.
+    const pitchReadOnly = page.getByTestId('pitch-editor-readonly');
+    await expect(pitchReadOnly).toBeVisible();
+    await expect(pitchReadOnly).toContainText('Jump');
+  });
+
   test('should create a CANYONING journal and verify transitive dependencies and summary', async ({
     authenticatedPage,
   }) => {

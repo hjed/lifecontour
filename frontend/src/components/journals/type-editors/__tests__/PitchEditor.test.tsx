@@ -73,8 +73,46 @@ describe('PitchEditor', () => {
         did_rescue: null,
         did_setup: null,
         notes: null,
+        pitch_type: null,
       },
     ]);
+  });
+
+  it('shows type badges for jump and down climb pitches in read-only mode', () => {
+    const pitches: AbseilPitch[] = [
+      { id: 1, pitch_number: 1, height: 20 },
+      { id: 2, pitch_number: 2, height: 5, pitch_type: 'jump' },
+      { id: 3, pitch_number: 3, height: 3, pitch_type: 'down_climb' },
+    ];
+
+    render(
+      <PitchEditor
+        pitches={pitches}
+        onChange={mockOnChange}
+        isEditing={false}
+      />
+    );
+
+    expect(screen.getByText('Jump')).toBeInTheDocument();
+    expect(screen.getByText('DC')).toBeInTheDocument();
+    // Abseil pitches (null type) show no type badge.
+    expect(screen.queryByText('Abseil')).not.toBeInTheDocument();
+  });
+
+  it('renders a type select per pitch row defaulting to Abseil', () => {
+    const pitches: AbseilPitch[] = [
+      { id: 1, pitch_number: 1 },
+      { id: 2, pitch_number: 2, pitch_type: 'jump' },
+    ];
+
+    render(
+      <PitchEditor pitches={pitches} onChange={mockOnChange} isEditing={true} />
+    );
+
+    const firstTypeSelect = screen.getByLabelText('Type for pitch 1');
+    const secondTypeSelect = screen.getByLabelText('Type for pitch 2');
+    expect(firstTypeSelect).toHaveTextContent('Abseil');
+    expect(secondTypeSelect).toHaveTextContent('Jump');
   });
 
   it('removes a pitch', async () => {

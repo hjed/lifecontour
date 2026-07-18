@@ -29,6 +29,7 @@ jest.mock('../TemplateSelector', () => ({
             pitches: [
               { pitch_number: 1, height: 20 },
               { pitch_number: 2, height: 30 },
+              { pitch_number: 3, height: 5, pitch_type: 'jump' },
             ],
           },
         })
@@ -96,6 +97,25 @@ describe('AbseilingTripTypeEditor', () => {
     expect(selector).toHaveAttribute(
       'data-template-type',
       ActivityTemplateType.ABSEILING
+    );
+  });
+
+  it('counts only abseil-type pitches when importing a template', async () => {
+    const user = userEvent.setup();
+    const handleChange = jest.fn();
+
+    render(
+      <AbseilingTripTypeEditor createMode={true} onChange={handleChange} />
+    );
+
+    await user.click(screen.getByTestId('mock-template-selector'));
+
+    // The jump pitch descends 5m but is not an abseil.
+    expect(handleChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        number_of_abseils: 2,
+        total_length: 55,
+      })
     );
   });
 

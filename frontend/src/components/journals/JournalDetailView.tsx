@@ -56,6 +56,7 @@ import { JournalTagBadge } from './JournalTagBadge';
 import { JournalChildrenList } from './JournalChildrenList';
 import { JournalParentSelector } from './JournalParentSelector';
 import { JournalTypeSection } from './JournalTypeSection';
+import { countAbseils } from './type-editors/pitchUtils';
 import { TemplateReference } from './TemplateReference';
 import { JournalTypeManager } from './JournalTypeManager';
 import { ActivityFeed as JournalActivityFeed } from './ActivityFeed';
@@ -433,7 +434,7 @@ export function JournalDetailView({
           ...(hasPitches
             ? {
                 pitches,
-                number_of_abseils: pitches.length,
+                number_of_abseils: countAbseils(pitches),
                 total_length: pitches.reduce(
                   (sum, p) => sum + (p.height || 0),
                   0

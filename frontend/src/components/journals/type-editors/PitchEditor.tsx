@@ -14,6 +14,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 import type { AbseilPitch } from '@/types/journals';
+import { PITCH_TYPES } from './pitchUtils';
 
 const VALID_ANCHOR_LOCATIONS = ['TR', 'TL', 'Centre'];
 const VALID_ANCHOR_TYPES = [
@@ -56,6 +57,7 @@ export function PitchEditor({
         did_rescue: null,
         did_setup: null,
         notes: null,
+        pitch_type: null,
       },
     ]);
   }, [pitches, onChange]);
@@ -111,6 +113,16 @@ export function PitchEditor({
                   {pitch.anchor_type || '-'}
                 </div>
                 <div className='flex gap-2 text-xs'>
+                  {pitch.pitch_type === 'jump' && (
+                    <span className='bg-secondary text-secondary-foreground rounded px-1.5'>
+                      Jump
+                    </span>
+                  )}
+                  {pitch.pitch_type === 'down_climb' && (
+                    <span className='bg-secondary text-secondary-foreground rounded px-1.5'>
+                      DC
+                    </span>
+                  )}
                   {pitch.did_setup && (
                     <span className='bg-primary/10 text-primary rounded px-1.5'>
                       Setup
@@ -154,8 +166,9 @@ export function PitchEditor({
 
       {pitches.length > 0 ? (
         <div className='bg-card overflow-hidden rounded-md border'>
-          <div className='bg-muted/50 text-muted-foreground grid grid-cols-[60px_1fr_1fr_2fr_60px_60px_40px] items-center gap-2 p-3 text-xs font-medium'>
+          <div className='bg-muted/50 text-muted-foreground grid grid-cols-[60px_1fr_1fr_1fr_2fr_60px_60px_40px] items-center gap-2 p-3 text-xs font-medium'>
             <div>Pitch #</div>
+            <div>Type</div>
             <div>Height (m)</div>
             <div>Location</div>
             <div>Anchor Type</div>
@@ -171,7 +184,7 @@ export function PitchEditor({
                   className='flex flex-col gap-2 p-2'
                   data-testid={`pitch-row-${index}`}
                 >
-                  <div className='grid grid-cols-[60px_1fr_1fr_2fr_60px_60px_40px] items-center gap-2'>
+                  <div className='grid grid-cols-[60px_1fr_1fr_1fr_2fr_60px_60px_40px] items-center gap-2'>
                     <Input
                       type='number'
                       min={1}
@@ -188,6 +201,27 @@ export function PitchEditor({
                       className='h-8 px-2'
                       aria-label={`Pitch number for row ${index + 1}`}
                     />
+
+                    <Select
+                      value={pitch.pitch_type ?? 'abseil'}
+                      onValueChange={value =>
+                        handleUpdatePitch(index, 'pitch_type', value)
+                      }
+                    >
+                      <SelectTrigger
+                        className='h-8 px-2'
+                        aria-label={`Type for pitch ${pitch.pitch_number}`}
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PITCH_TYPES.map(type => (
+                          <SelectItem key={type.value} value={type.value}>
+                            {type.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
 
                     <Input
                       type='number'
