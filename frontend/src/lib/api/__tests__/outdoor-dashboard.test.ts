@@ -37,12 +37,27 @@ function makeDashboardResponse(): OutdoorDashboardResponse {
             is_planning: false,
           },
         ],
-        checked_out_gear: [],
+        checked_out_gear: [
+          {
+            gear_item_id: 'gear-1',
+            name: 'Static rope 60m',
+            checked_out_since: '2026-07-10T12:00:00Z',
+            journal_id: 7,
+          },
+        ],
         activity_totals: {
           last_30_days: { [JournalType.CANYONING]: 1 },
           last_365_days: { [JournalType.CANYONING]: 3 },
         },
-        templates_done: {},
+        templates_done: {
+          canyoning: [
+            {
+              template_id: 'tpl-empress',
+              name: 'Empress Falls',
+              done_count: 3,
+            },
+          ],
+        },
       },
     },
   };
@@ -78,6 +93,16 @@ describe('useOutdoorDashboard', () => {
     expect(attributes?.activity_totals.last_365_days).toEqual({
       [JournalType.CANYONING]: 3,
     });
+    expect(attributes?.checked_out_gear).toHaveLength(1);
+    expect(attributes?.checked_out_gear[0]).toEqual({
+      gear_item_id: 'gear-1',
+      name: 'Static rope 60m',
+      checked_out_since: '2026-07-10T12:00:00Z',
+      journal_id: 7,
+    });
+    expect(attributes?.templates_done.canyoning).toEqual([
+      { template_id: 'tpl-empress', name: 'Empress Falls', done_count: 3 },
+    ]);
   });
 
   it('surfaces the JSON API error detail on failure', async () => {

@@ -205,8 +205,7 @@ gear, recent totals, templates done) slot in alongside it (ITER16-003).
   `GET /api/journals/outdoor-dashboard` resource. All dashboard widgets call
   the same hook and share one query key, so concurrent mounts dedupe into one
   fetch; the adapter types all four dashboard sections (upcoming activities,
-  checked-out gear, activity totals, templates done) even though only the
-  first two render so far (ITER16-003 Phase 5 adds the rest).
+  checked-out gear, activity totals, templates done).
 - **Upcoming activities**: `src/components/journals/UpcomingActivitiesList.tsx`
   — a card listing the next 30 days of outdoor activities and planning events
   (soonest first, capped at 10 server-side), each with its title (linking to
@@ -219,7 +218,21 @@ gear, recent totals, templates done) slot in alongside it (ITER16-003).
   journal type over the rolling last-30-day and last-365-day windows shown
   together (sr-only caption, `scope='col'`/`scope='row'` headers, missing
   window counts rendered as an explicit `0`).
-- **States**: both widgets own their loading skeletons, destructive error
+- **Checked-out gear**: `src/components/journals/CheckedOutGearList.tsx` — a
+  card listing the gear the user has out right now (longest out first, the
+  backend's ordering), each with its name and a "Checked out since {date}"
+  line. Rows are **informational text with no link**: there is no per-gear-item
+  page, and the spec only requires the item and its checkout date. See
+  [Database Design](./database-design.md) for the "checked out" definition.
+- **Templates done**: `src/components/journals/TemplatesDoneList.tsx` — a card
+  grouping the templates referenced by the user's abseiling activities by
+  template type (type-sorted `h4` headings, each labelling its own list), with
+  a per-template done-count rendered as readable text ("Done 2 times"). Each
+  template links to `/settings#templates`, matching the durable template
+  reference on journal detail (`TemplateReference.tsx`) — there is no
+  per-template route. Template types reuse `TYPE_LABELS` where they overlap the
+  journal type enum, falling back to a capitalised raw value for `abseiling`.
+- **States**: every widget owns its loading skeletons, destructive error
   alerts, and empty states, mirroring the incomplete review.
 
 ## Related Documents
