@@ -133,12 +133,15 @@ function CreateTemplateDialogContent({
 
   const mutation = useMutation({
     mutationFn: (values: CreateTemplateFormValues) => {
+      // The update endpoint treats null attributes as "leave unchanged", so
+      // when editing, emptied fields are sent as '' / [] to actually clear
+      // the stored values.
       const attributes = {
         name: values.name,
         template_type: values.template_type,
-        description: values.description || null,
-        region: values.region || null,
-        pitches: pitches.length > 0 ? pitches : null,
+        description: values.description || (isEditing ? '' : null),
+        region: values.region || (isEditing ? '' : null),
+        pitches: pitches.length > 0 ? pitches : isEditing ? [] : null,
       };
 
       if (isEditing) {

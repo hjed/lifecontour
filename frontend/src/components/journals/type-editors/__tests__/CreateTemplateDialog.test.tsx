@@ -188,6 +188,48 @@ describe('CreateTemplateDialog', () => {
       );
     });
 
+    it('sends explicit empty values so cleared fields are persisted', async () => {
+      const mockResponse = {
+        data: { id: 'tpl-42', attributes: { name: 'Empress Canyon' } },
+      };
+      (templatesApi.updateTemplate as jest.Mock).mockResolvedValue(
+        mockResponse
+      );
+
+      renderComponent({ template: existingTemplate });
+
+      await act(async () => {
+        fireEvent.change(screen.getByLabelText('Region'), {
+          target: { value: '' },
+        });
+        fireEvent.change(screen.getByLabelText(/Description/i), {
+          target: { value: '' },
+        });
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('remove-pitch-0'));
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+      });
+
+      await waitFor(() => {
+        // The update endpoint ignores nulls, so clears must be explicit.
+        expect(templatesApi.updateTemplate).toHaveBeenCalledWith('tpl-42', {
+          data: {
+            type: 'activity-templates',
+            id: 'tpl-42',
+            attributes: expect.objectContaining({
+              description: '',
+              region: '',
+              pitches: [],
+            }),
+          },
+        });
+      });
+    });
+
     it('submits changes via updateTemplate, not createTemplate', async () => {
       const mockResponse = {
         data: { id: 'tpl-42', attributes: { name: 'Renamed' } },
