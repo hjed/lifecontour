@@ -39,7 +39,7 @@ import {
   ActivityTemplateResource,
   TemplatePitch,
 } from '@/types/journals';
-import { createTemplate } from '@/lib/api/templates';
+import { createTemplate, updateTemplate } from '@/lib/api/templates';
 import { PitchEditor } from './PitchEditor';
 
 const createTemplateSchema = z.object({
@@ -59,12 +59,16 @@ interface CreateTemplateDialogProps {
   readonly defaultTemplateType?: ActivityTemplateType;
   readonly onCreated: (template: ActivityTemplateResource) => void;
   readonly initialPitches?: TemplatePitch[];
+  readonly template?: ActivityTemplateResource;
 }
 
 /**
  * Outer dialog wrapper. The inner form content remounts each time the
- * dialog opens so that `initialPitches` is always fresh via `useState`
- * on mount — no useEffect or useRef needed.
+ * dialog opens so that `initialPitches`/`template` are always fresh via
+ * `useState` on mount — no useEffect or useRef needed.
+ *
+ * When `template` is provided the dialog edits that template in place
+ * (PUT) instead of creating a new one.
  */
 export function CreateTemplateDialog({
   open,
@@ -72,6 +76,7 @@ export function CreateTemplateDialog({
   defaultTemplateType,
   onCreated,
   initialPitches = [],
+  template,
 }: CreateTemplateDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -79,6 +84,7 @@ export function CreateTemplateDialog({
         <CreateTemplateDialogContent
           defaultTemplateType={defaultTemplateType}
           initialPitches={initialPitches}
+          template={template}
           onCreated={onCreated}
           onClose={() => onOpenChange(false)}
         />
@@ -90,57 +96,83 @@ export function CreateTemplateDialog({
 interface CreateTemplateDialogContentProps {
   readonly defaultTemplateType?: ActivityTemplateType;
   readonly initialPitches: TemplatePitch[];
+  readonly template?: ActivityTemplateResource;
   readonly onCreated: (template: ActivityTemplateResource) => void;
   readonly onClose: () => void;
 }
 
 /**
  * Inner form content that mounts fresh each time the dialog opens.
- * This ensures `initialPitches` is always the current value.
+ * This ensures `initialPitches`/`template` are always the current values.
  */
 function CreateTemplateDialogContent({
   defaultTemplateType,
   initialPitches,
+  template,
   onCreated,
   onClose,
 }: CreateTemplateDialogContentProps) {
   const queryClient = useQueryClient();
-  const [pitches, setPitches] = useState<TemplatePitch[]>(initialPitches);
+  const isEditing = template != null;
+  const [pitches, setPitches] = useState<TemplatePitch[]>(
+    template?.attributes.pitches ?? initialPitches
+  );
 
   const form = useForm<CreateTemplateFormValues>({
     resolver: zodResolver(createTemplateSchema),
     defaultValues: {
-      name: '',
-      description: '',
-      region: '',
-      template_type: defaultTemplateType || ActivityTemplateType.CANYONING,
+      name: template?.attributes.name ?? '',
+      description: template?.attributes.description ?? '',
+      region: template?.attributes.region ?? '',
+      template_type:
+        template?.attributes.template_type ??
+        defaultTemplateType ??
+        ActivityTemplateType.CANYONING,
     },
   });
 
   const mutation = useMutation({
     mutationFn: (values: CreateTemplateFormValues) => {
+      const attributes = {
+        name: values.name,
+        template_type: values.template_type,
+        description: values.description || null,
+        region: values.region || null,
+        pitches: pitches.length > 0 ? pitches : null,
+      };
+
+      if (isEditing) {
+        return updateTemplate(template.id, {
+          data: {
+            type: 'activity-templates',
+            id: template.id,
+            attributes,
+          },
+        });
+      }
+
       return createTemplate({
         data: {
           type: 'activity-templates',
-          attributes: {
-            name: values.name,
-            template_type: values.template_type,
-            description: values.description || null,
-            region: values.region || null,
-            pitches: pitches.length > 0 ? pitches : null,
-          },
+          attributes,
         },
       });
     },
     onSuccess: response => {
-      toast.success('Template created successfully');
+      toast.success(
+        isEditing
+          ? 'Template updated successfully'
+          : 'Template created successfully'
+      );
       queryClient.invalidateQueries({ queryKey: ['templates'] });
       onCreated(response.data);
       onClose();
     },
     onError: error => {
-      toast.error('Failed to create template');
-      console.error('Template creation error:', error);
+      toast.error(
+        isEditing ? 'Failed to update template' : 'Failed to create template'
+      );
+      console.error('Template save error:', error);
     },
   });
 
@@ -151,9 +183,13 @@ function CreateTemplateDialogContent({
   return (
     <DialogContent className='max-h-[90vh] overflow-y-auto sm:max-w-[600px]'>
       <DialogHeader>
-        <DialogTitle>Create Template</DialogTitle>
+        <DialogTitle>
+          {isEditing ? 'Edit Template' : 'Create Template'}
+        </DialogTitle>
         <DialogDescription>
-          Create a new template to quickly populate your journal entries.
+          {isEditing
+            ? 'Update this template used to populate your journal entries.'
+            : 'Create a new template to quickly populate your journal entries.'}
         </DialogDescription>
       </DialogHeader>
 
@@ -258,7 +294,12 @@ function CreateTemplateDialogContent({
               Cancel
             </Button>
             <Button type='submit' disabled={mutation.isPending}>
-              {mutation.isPending ? 'Creating...' : 'Create Template'}
+              {(() => {
+                if (mutation.isPending) {
+                  return isEditing ? 'Saving...' : 'Creating...';
+                }
+                return isEditing ? 'Save Changes' : 'Create Template';
+              })()}
             </Button>
           </DialogFooter>
         </form>

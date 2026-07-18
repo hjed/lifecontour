@@ -12,7 +12,27 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 jest.mock('@/lib/api/templates', () => ({
   createTemplate: jest.fn(),
+  updateTemplate: jest.fn(),
 }));
+
+const existingTemplate = {
+  type: 'activity-templates' as const,
+  id: 'tpl-42',
+  attributes: {
+    name: 'Empress Canyon',
+    template_type: ActivityTemplateType.CANYONING,
+    region: 'Blue Mountains',
+    description: 'Classic starter canyon',
+    pitches: [
+      {
+        pitch_number: 1,
+        height: 30,
+        notes: 'Wet start',
+        pitch_type: 'abseil',
+      },
+    ],
+  },
+};
 
 describe('CreateTemplateDialog', () => {
   let queryClient: QueryClient;
@@ -145,6 +165,69 @@ describe('CreateTemplateDialog', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Name is required')).toBeInTheDocument();
+    });
+  });
+
+  describe('edit mode', () => {
+    it('prefills the form from the given template', () => {
+      renderComponent({ template: existingTemplate });
+
+      expect(
+        screen.getByRole('heading', { name: 'Edit Template' })
+      ).toBeInTheDocument();
+      expect(screen.getByLabelText('Template Name')).toHaveValue(
+        'Empress Canyon'
+      );
+      expect(screen.getByLabelText('Region')).toHaveValue('Blue Mountains');
+      expect(screen.getByLabelText(/Description/i)).toHaveValue(
+        'Classic starter canyon'
+      );
+      // Pitches are seeded into the editor.
+      expect(screen.getByLabelText('Notes for pitch 1')).toHaveValue(
+        'Wet start'
+      );
+    });
+
+    it('submits changes via updateTemplate, not createTemplate', async () => {
+      const mockResponse = {
+        data: { id: 'tpl-42', attributes: { name: 'Renamed' } },
+      };
+      (templatesApi.updateTemplate as jest.Mock).mockResolvedValue(
+        mockResponse
+      );
+
+      const handleCreated = jest.fn();
+      renderComponent({ template: existingTemplate, onCreated: handleCreated });
+
+      await act(async () => {
+        fireEvent.change(screen.getByLabelText('Template Name'), {
+          target: { value: 'Renamed Canyon' },
+        });
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+      });
+
+      await waitFor(() => {
+        expect(templatesApi.updateTemplate).toHaveBeenCalledWith('tpl-42', {
+          data: {
+            type: 'activity-templates',
+            id: 'tpl-42',
+            attributes: expect.objectContaining({
+              name: 'Renamed Canyon',
+              template_type: ActivityTemplateType.CANYONING,
+              region: 'Blue Mountains',
+              description: 'Classic starter canyon',
+              pitches: [
+                expect.objectContaining({ pitch_number: 1, height: 30 }),
+              ],
+            }),
+          },
+        });
+        expect(templatesApi.createTemplate).not.toHaveBeenCalled();
+        expect(handleCreated).toHaveBeenCalledWith(mockResponse.data);
+      });
     });
   });
 });
