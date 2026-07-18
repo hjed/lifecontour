@@ -59,6 +59,7 @@ from app.api.journals.schemas import (
     JournalTagListResponse,
     JournalTagResource,
     JournalTagResponse,
+    JournalTagUpdateRequest,
     JournalTypeAddRequest,
     JournalTypeDataUpdateRequest,
     JournalUpdateRequest,
@@ -89,6 +90,7 @@ from app.core.integrations.immich.album_cover_proxy_service import (
 from app.core.journal.adapters.sql.album_sync_read_repository import (
     AlbumSyncReadRepository,
 )
+from app.core.journal.models.journal_tag import JournalTag
 from app.core.journal.models.repositories import (
     AbseilingDataRepository,
     AbseilPitchRepository,
@@ -565,6 +567,25 @@ async def _enrich_journal_data(
     return types, type_data, contacts, tags, calendar, routes
 
 
+def _journal_tag_resource(tag: JournalTag, base_url: str) -> JournalTagResource:
+    """Build the JSON:API resource for a journal tag."""
+    return JournalTagResource(
+        type="journal-tags",
+        id=str(tag.id) if tag.id else "",
+        attributes={
+            "name": tag.name,
+            "color": tag.color,
+            "description": tag.description,
+            "parent_id": str(tag.parent_id) if tag.parent_id else None,
+        },
+        links=JsonApiLinks(
+            self=f"{base_url}/api/journals/tags/{tag.id}",
+        )
+        if tag.id
+        else None,
+    )
+
+
 @router.get("/tags")
 @inject
 async def list_journal_tags(
@@ -583,24 +604,7 @@ async def list_journal_tags(
     all_tags = await tag_repo.get_all()
 
     # Convert to resources
-    tag_resources = [
-        JournalTagResource(
-            type="journal-tags",
-            id=str(tag.id) if tag.id else "",
-            attributes={
-                "name": tag.name,
-                "color": tag.color,
-                "description": tag.description,
-                "parent_id": str(tag.parent_id) if tag.parent_id else None,
-            },
-            links=JsonApiLinks(
-                self=f"{base_url}/api/journals/tags/{tag.id}",
-            )
-            if tag.id
-            else None,
-        )
-        for tag in all_tags
-    ]
+    tag_resources = [_journal_tag_resource(tag, base_url) for tag in all_tags]
 
     return JournalTagListResponse(data=tag_resources)
 
@@ -620,8 +624,6 @@ async def create_journal_tag(
     Creates a new journal tag with the provided data and returns the created resource.
     """
     from uuid import UUID
-
-    from app.core.journal.models.journal_tag import JournalTag
 
     base_url = get_request_base_url(request)
 
@@ -644,24 +646,92 @@ async def create_journal_tag(
     # Save tag as a committed unit of work (duplicate names map to a 400)
     created_tag = await journal_tag_service.create_tag(tag, connection)
 
-    # Convert to resource
-    tag_resource = JournalTagResource(
-        type="journal-tags",
-        id=str(created_tag.id) if created_tag.id else "",
-        attributes={
-            "name": created_tag.name,
-            "color": created_tag.color,
-            "description": created_tag.description,
-            "parent_id": str(created_tag.parent_id) if created_tag.parent_id else None,
-        },
-        links=JsonApiLinks(
-            self=f"{base_url}/api/journals/tags/{created_tag.id}",
+    return JournalTagResponse(data=_journal_tag_resource(created_tag, base_url))
+
+
+@router.patch("/tags/{tag_id}")
+@inject
+async def update_journal_tag(
+    tag_id: str,
+    request: Request,
+    tag_request: JournalTagUpdateRequest,
+    journal_tag_service: FromDishka[JournalTagService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> JournalTagResponse:
+    """
+    Update a journal tag.
+
+    Updates the supplied attributes and returns the updated resource. Omitted
+    attributes are left unchanged; an explicit null ``parent_id`` moves the tag
+    back to the root of the hierarchy.
+
+    Raises:
+        400: Invalid ID format, mismatched resource type or body ID, duplicate
+             name, malformed colour, or a parent that would create a cycle.
+        404: Tag not found, or the requested parent tag does not exist.
+    """
+    from uuid import UUID
+
+    base_url = get_request_base_url(request)
+
+    # Validated unconditionally: type is the JSON:API discriminator, so a falsy
+    # but wrong value (an empty string) must not slip through. The schema
+    # defaults it to "journal-tags" when the client omits it.
+    if tag_request.data.type != "journal-tags":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid resource type, expected 'journal-tags'",
         )
-        if created_tag.id
-        else None,
+
+    try:
+        tag_uuid = UUID(tag_id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid tag ID format",
+        ) from e
+
+    if tag_request.data.id is not None:
+        # Compare parsed UUIDs so equivalent ids that differ only in case or
+        # hyphenation are not rejected.
+        try:
+            body_uuid = UUID(tag_request.data.id)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid tag ID format in request body",
+            ) from e
+        if body_uuid != tag_uuid:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Path ID does not match body ID",
+            )
+
+    attrs = tag_request.data.attributes
+
+    # An explicit null parent_id is the wire signal for "move to the root";
+    # an omitted parent_id leaves the existing parent alone.
+    set_parent_null = "parent_id" in attrs.model_fields_set and attrs.parent_id is None
+
+    parent_id = None
+    if attrs.parent_id is not None:
+        try:
+            parent_id = UUID(attrs.parent_id)
+        except ValueError as e:
+            raise JournalValidationError("parent_id", INVALID_UUID_FORMAT_MSG) from e
+
+    updated_tag = await journal_tag_service.update_tag(
+        tag_id=tag_uuid,
+        transaction=connection,
+        name=attrs.name,
+        color=attrs.color,
+        description=attrs.description,
+        parent_id=parent_id,
+        set_parent_null=set_parent_null,
     )
 
-    return JournalTagResponse(data=tag_resource)
+    return JournalTagResponse(data=_journal_tag_resource(updated_tag, base_url))
 
 
 @router.delete("/tags/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)

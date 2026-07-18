@@ -72,6 +72,14 @@ class JournalNotFoundError(JournalDomainError):
         self.journal_id = journal_id
 
 
+class JournalTagNotFoundError(JournalDomainError):
+    """Exception raised when a journal tag is not found."""
+
+    def __init__(self, tag_id: str):
+        super().__init__(f"Journal tag with ID {tag_id} not found", 404)
+        self.tag_id = tag_id
+
+
 class JournalSeriesNotFoundError(JournalDomainError):
     """Exception raised when a journal series is not found."""
 

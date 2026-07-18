@@ -173,6 +173,9 @@ from app.core.journal.services.journal_contact_service import JournalContactServ
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_series_service import JournalSeriesService
 from app.core.journal.services.journal_service import JournalService
+from app.core.journal.services.journal_tag_hierarchy_service import (
+    JournalTagHierarchyService,
+)
 from app.core.journal.services.journal_tag_service import JournalTagService
 from app.core.journal.services.journal_write_service import JournalWriteService
 from app.core.journal.services.logbook_data_service import LogbookDataService
@@ -520,12 +523,21 @@ class JournalProvider(Provider):
         )
 
     @provide(scope=Scope.REQUEST)
+    def journal_tag_hierarchy_service(
+        self,
+        tag_repo: JournalTagRepository,
+    ) -> JournalTagHierarchyService:
+        """Provide a JournalTagHierarchyService instance."""
+        return JournalTagHierarchyService(tag_repo=tag_repo)
+
+    @provide(scope=Scope.REQUEST)
     def journal_tag_service(
         self,
         tag_repo: JournalTagRepository,
+        hierarchy_service: JournalTagHierarchyService,
     ) -> JournalTagService:
         """Provide a JournalTagService instance."""
-        return JournalTagService(tag_repo=tag_repo)
+        return JournalTagService(tag_repo=tag_repo, hierarchy_service=hierarchy_service)
 
     @provide(scope=Scope.REQUEST)
     def journal_series_service(

@@ -3,7 +3,10 @@
 import pytest
 from pydantic import ValidationError
 
-from app.api.journals.schemas import JournalTagCreateAttributes
+from app.api.journals.schemas import (
+    JournalTagCreateAttributes,
+    JournalTagUpdateAttributes,
+)
 
 
 @pytest.mark.unit
@@ -33,3 +36,44 @@ class TestJournalTagCreateAttributes:
         """Test adding description did not make name optional."""
         with pytest.raises(ValidationError):
             JournalTagCreateAttributes(description="No name given")  # type: ignore[call-arg]
+
+
+@pytest.mark.unit
+class TestJournalTagUpdateAttributes:
+    """Test the update-tag request attributes.
+
+    Mirrors the contact ``TagUpdateAttributes`` contract: every field is
+    optional, an explicit null is rejected for the string fields, and an
+    explicit null ``parent_id`` is the wire signal for "move to root".
+    """
+
+    def test_all_fields_optional(self):
+        """Test a PATCH may supply no attributes at all."""
+        attributes = JournalTagUpdateAttributes()
+        assert attributes.name is None
+        assert attributes.color is None
+        assert attributes.description is None
+        assert attributes.parent_id is None
+
+    def test_accepts_partial_update(self):
+        """Test supplying a single field leaves the rest unset."""
+        attributes = JournalTagUpdateAttributes(name="training")
+        assert attributes.name == "training"
+        assert "color" not in attributes.model_fields_set
+
+    @pytest.mark.parametrize("field", ["name", "color", "description"])
+    def test_rejects_explicit_null_string_fields(self, field):
+        """Test explicit nulls are rejected for the string fields."""
+        with pytest.raises(ValidationError):
+            JournalTagUpdateAttributes(**{field: None})
+
+    def test_allows_explicit_null_parent_id(self):
+        """Test an explicit null parent_id is valid and recorded as set."""
+        attributes = JournalTagUpdateAttributes(parent_id=None)
+        assert attributes.parent_id is None
+        assert "parent_id" in attributes.model_fields_set
+
+    def test_rejects_empty_name(self):
+        """Test a blank name is rejected rather than clearing the name."""
+        with pytest.raises(ValidationError):
+            JournalTagUpdateAttributes(name="")

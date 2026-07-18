@@ -578,6 +578,56 @@ class JournalTagCreateRequest(JsonApiCreateRequest[JournalTagCreateData]):
     pass
 
 
+# Journal Tag Update Schemas
+class JournalTagUpdateAttributes(BaseModel):
+    """Attributes for updating a journal tag.
+
+    Every field is optional so a PATCH can change one attribute in isolation.
+    An explicit null is rejected for the string fields (there is no way to
+    "unset" a name or colour), while an explicit null ``parent_id`` is the
+    wire signal for moving the tag back to the root.
+    """
+
+    name: str | None = Field(
+        default=None, description="Tag name", min_length=1, max_length=100
+    )
+    color: str | None = Field(default=None, description="Tag color (hex code)")
+    description: str | None = Field(default=None, description="Tag description")
+    parent_id: str | None = Field(
+        default=None,
+        description=(
+            "Parent tag ID (for hierarchy). Provide an explicit null to move "
+            "the tag to the root."
+        ),
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_non_nulls(cls, data: Any) -> Any:
+        """Reject explicit nulls for fields that cannot be cleared."""
+        if isinstance(data, dict):
+            for field in ("name", "color", "description"):
+                if field in data and data[field] is None:
+                    raise ValueError(f"Explicit null is not allowed for '{field}'")
+        return data
+
+
+class JournalTagUpdateData(BaseModel):
+    """Data for updating a journal tag."""
+
+    type: str = Field(default="journal-tags", description=RESOURCE_TYPE_DESC)
+    id: str | None = Field(default=None, description="Tag ID")
+    attributes: JournalTagUpdateAttributes = Field(
+        ..., description="Tag attributes to update"
+    )
+
+
+class JournalTagUpdateRequest(BaseModel):
+    """Request model for updating a journal tag."""
+
+    data: JournalTagUpdateData = Field(..., description="Tag update data")
+
+
 # Journal Series Schemas
 class JournalSeriesResource(BaseModel):
     """Journal series resource following JSON API specification."""
