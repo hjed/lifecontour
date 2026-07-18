@@ -32,6 +32,7 @@ from core_shared.models.journals import (
     JournalContactRelationshipType,
     JournalNotFoundError,
     JournalType,
+    JournalValidationError,
     KayakingData,
     MoodData,
     OutdoorActivityData,
@@ -127,6 +128,7 @@ from app.core.journal.services.incomplete_outdoor_activity_service import (
 from app.core.journal.services.journal_contact_service import JournalContactService
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_service import JournalService
+from app.core.journal.services.journal_tag_service import JournalTagService
 from app.core.journal.services.journal_write_service import JournalWriteService
 from app.core.journal.services.outdoor_activity_dismissal_service import (
     OutdoorActivityDismissalService,
@@ -188,6 +190,7 @@ from app.mcp.shared.dependencies import (
     get_gear_item_service,
     get_incomplete_outdoor_activity_service,
     get_journal_contact_service,
+    get_journal_tag_service,
     get_journal_write_service,
     get_outbox_event_publisher,
     get_outdoor_activity_dismissal_service,
@@ -5169,6 +5172,87 @@ async def list_journal_tags(
     return MCPResponseBuilder.success_response(response_data)
 
 
+@mcp_unified_error_handler("update_journal_tag", "tag")
+async def update_journal_tag(
+    tag_id: Annotated[str, Field(description="UUID of the journal tag to update")],
+    name: Annotated[
+        str | None, Field(description="New tag name (must be unique)")
+    ] = None,
+    color: Annotated[
+        str | None, Field(description="New hex colour code, e.g. #FF0000")
+    ] = None,
+    description: Annotated[
+        str | None, Field(description="New description of what the tag is for")
+    ] = None,
+    parent_id: Annotated[
+        str | None, Field(description="UUID of the new parent tag")
+    ] = None,
+    move_to_root: Annotated[
+        bool,
+        Field(description="Clear the tag's parent, making it a root tag"),
+    ] = False,
+    tag_service: JournalTagService = mcp_depends(get_journal_tag_service),
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+) -> str:
+    """
+    Update an existing journal tag's name, colour, description, or parent.
+
+    Journal tags are a separate namespace from contact tags — use
+    update_contact_tag for those, and list_journal_tags to find tag UUIDs.
+
+    Only the arguments you supply are changed; omitted arguments are left as
+    they are. To move a tag to the root of the hierarchy, pass
+    move_to_root=true rather than a null parent_id, since an omitted parent_id
+    means "leave the parent alone".
+
+    Args:
+        tag_id: UUID of the tag to update
+        name: New name; must not collide with another tag (case-insensitive)
+        color: New hex colour code (7 characters, e.g. #FF0000)
+        description: New description of what the tag is for
+        parent_id: UUID of the new parent tag
+        move_to_root: Clear the parent instead of setting one
+
+    Returns:
+        JSON string containing the updated tag.
+    """
+    try:
+        tag_uuid = UUID(tag_id)
+    except ValueError as e:
+        raise JournalValidationError("tag_id", f"Invalid tag UUID: {tag_id}") from e
+
+    parent_uuid = None
+    if parent_id is not None:
+        try:
+            parent_uuid = UUID(parent_id)
+        except ValueError as e:
+            raise JournalValidationError(
+                "parent_id", f"Invalid parent tag UUID: {parent_id}"
+            ) from e
+
+    # The service owns the unit of work; MCP tools never open transactions.
+    updated = await tag_service.update_tag(
+        tag_id=tag_uuid,
+        transaction=db_connection,
+        name=name,
+        color=color,
+        description=description,
+        parent_id=parent_uuid,
+        set_parent_null=move_to_root,
+    )
+
+    response_data = JournalTagInfo(
+        id=str(updated.id),
+        name=updated.name,
+        color=updated.color,
+        description=updated.description,
+        parent_id=str(updated.parent_id) if updated.parent_id else None,
+        created_at=updated.created_at.isoformat() if updated.created_at else None,
+    )
+
+    return MCPResponseBuilder.success_response(response_data)
+
+
 def register_journal_tools(mcp: FastMCP[None]) -> None:
     """
     Register journal-related MCP tools with the FastMCP server.
@@ -5211,3 +5295,4 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
     mcp.add_tool(get_gear_item)
     mcp.add_tool(update_gear_item)
     mcp.add_tool(list_journal_tags)
+    mcp.add_tool(update_journal_tag)

@@ -16,6 +16,8 @@ from core_shared.models.journals import JournalDomainError, JournalNotFoundError
 
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
+    DuplicateTagNameError,
+    TagNotFoundError,
 )
 from app.mcp.shared.response_builders import MCPLogger, MCPResponseBuilder
 
@@ -79,6 +81,18 @@ def mcp_unified_error_handler(
             except ContactValidationError as e:
                 MCPLogger.log_validation_error(operation_name, str(e))
                 return MCPResponseBuilder.validation_error_response(e.field, e.message)
+
+            except TagNotFoundError as e:
+                # Without this, a missing tag is indistinguishable from a server
+                # failure, which callers cannot act on. Mirrors the journal
+                # domain handling below. The builder formats the second argument
+                # as the id, so pass the id itself rather than the message.
+                MCPLogger.log_not_found_error(operation_name, "Tag", e.tag_id)
+                return MCPResponseBuilder.not_found_error_response("Tag", e.tag_id)
+
+            except DuplicateTagNameError as e:
+                MCPLogger.log_validation_error(operation_name, str(e))
+                return MCPResponseBuilder.validation_error_response("name", str(e))
 
             except JournalNotFoundError as e:
                 MCPLogger.log_not_found_error(operation_name, "Journal", str(e))

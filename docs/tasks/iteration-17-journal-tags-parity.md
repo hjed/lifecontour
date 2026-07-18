@@ -120,23 +120,32 @@ Every phase below must meet the same completion bar before merge:
 - **Integration:** migration applies cleanly; create/list round-trip with description; MCP list tool test mirroring the contact `list_tags` tests. — `tests/integration/journal/test_journal_tag_repository_integration.py` (all six read paths), `tests/integration/api/test_journal_tag_endpoints.py`, `tests/integration/mcp/test_journal_tag_mcp.py`
 - **E2E:** deferred to ITER17-004 (no UI surface yet); MCP integration tests are the equivalent bar for the tool surface. — deferral taken as stated.
 
-#### Phase 2: Tag Update (REST + MCP)
+#### Phase 2: Tag Update (REST + MCP) ✅ COMPLETE
 
-**Estimated diff:** ~500 lines
+**Estimated diff:** ~500 lines · **Actual:** ~900 lines, split into two commits (see decisions below)
 
 **Acceptance Criteria:**
-- [ ] `JournalTagService.update_tag(tag_id, transaction, name, color, description, parent_id, set_parent_null)` mirroring the contact `TagService.update_tag` signature and validation:
-  - name uniqueness (case-insensitive) with a clear validation error on conflict
-  - colour format validation (7-char hex `#RRGGBB`)
-  - parent hierarchy cycle prevention (a tag cannot become its own ancestor)
-- [ ] `PATCH /api/journals/tags/{tag_id}` endpoint following the contact `PATCH /api/tags/{tag_id}` request/response shape.
-- [ ] **MCP (same phase):** tag update is reachable via MCP to the same extent it is for contact tags (verify the contact baseline first and match it exactly).
-- [ ] Write path commits via `@transactional`/`unit_of_work` in the service layer; MCP tools call the same `@transactional` service and do not open transactions.
+- [x] `JournalTagService.update_tag(tag_id, transaction, name, color, description, parent_id, set_parent_null)` mirroring the contact `TagService.update_tag` signature and validation:
+  - name uniqueness (case-insensitive) with a clear validation error on conflict — delegated to the new `JournalTagHierarchyService`, which reuses the repository's existing `LOWER(name)` lookup
+  - colour format validation (7-char hex `#RRGGBB`) — the updated entity is rebuilt via `dataclasses.replace` so `JournalTag.__post_init__` re-runs, and the resulting `ValueError` is mapped to `JournalValidationError`
+  - parent hierarchy cycle prevention (a tag cannot become its own ancestor) — ancestor walk with a `visited` set, mirroring `TagHierarchyService._check_circular_reference`
+- [x] `PATCH /api/journals/tags/{tag_id}` endpoint following the contact `PATCH /api/tags/{tag_id}` request/response shape. — validates resource type, path/body id agreement, and derives `set_parent_null` from `model_fields_set`
+- [x] **MCP (same phase):** tag update is reachable via MCP to the same extent it is for contact tags. — the contact baseline exposed **no** update tool, so this phase added `update_journal_tag` **and** `update_contact_tag` (see decisions below)
+- [x] Write path commits via `@transactional`/`unit_of_work` in the service layer; MCP tools call the same `@transactional` service and do not open transactions.
+
+**Decisions taken (Phase 2):**
+- **The contact baseline had no MCP tag-update tool**, so "match it exactly" would have shipped zero MCP work — contradicting this iteration's REST+MCP-per-phase strategy. Rather than propagate the gap into Phases 3 and 4, the phase closed it in **both** domains: `update_journal_tag` (journals) and `update_contact_tag` (contacts). Each tool's docstring points at the other, matching the Phase 1 naming convention.
+- **`mcp_unified_error_handler` now recognises contacts' `TagNotFoundError` and `DuplicateTagNameError`.** It already special-cased `ContactNotFoundError`, `ContactValidationError`, and the whole `JournalDomainError` tree, but contacts' tag errors fell through to the catch-all — so an unknown tag id came back as a generic "an error occurred" that callers could not distinguish from a server failure. Surfaced by review of `update_contact_tag`; the fix also improves the pre-existing `merge_tags`.
+- **Clearing a parent over MCP uses a `move_to_root` boolean**, not a null `parent_id`. MCP arguments cannot distinguish "omitted" from "explicitly null", so the REST `set_parent_null` signal needs an explicit argument at the tool boundary. REST keeps the contact-style explicit-null convention.
+- **An explicit parent wins over the clear-parent flag** when a caller supplies both, so the two MCP tools cannot diverge on the same argument pair. Unreachable via REST (the controller only sets `set_parent_null` when `parent_id` is explicitly null), but reachable via MCP. Review of this phase surfaced that contacts' `TagService._apply_parent_change` had a flat `if parent_id is not None and tag.parent_id != parent_id: ... elif set_parent_null:` — so passing a `parent_id` **equal to the current parent** alongside the clear flag fell through and cleared it. That condition is now nested to match the journal implementation; it was latent before this phase because only the new MCP tool can reach the combination.
+- **Duplicate names and cycles map to `JournalValidationError` (400)**, not the contacts' `DuplicateTagNameError` (409) / `ContactValidationError` (422). This matches the existing journal tag *create* path, which already returns 400 for a duplicate name; journal-domain internal consistency was preferred over cross-domain status-code parity.
+- **Split into two commits** because the two-domain MCP work pushed the diff to ~900 lines, past the 500-line PR standard: (A) service + hierarchy validation + REST PATCH, (B) both MCP tools.
+- **`_journal_tag_resource` helper extracted** in `backend/app/api/journals/controllers.py` — the list, create, and new update endpoints all built the same JSON:API resource dict by hand.
 
 **Required Test Coverage:**
-- **Unit:** update validation (duplicate name, invalid colour, cycle prevention), set-parent-null semantics, MCP tool schema/serialisation.
-- **Integration:** PATCH endpoint round-trip with real DB; uniqueness constraint behaviour; MCP update tool test if the contact baseline exposes update.
-- **E2E:** deferred to ITER17-004.
+- **Unit:** update validation (duplicate name, invalid colour, cycle prevention), set-parent-null semantics, MCP tool schema/serialisation. — `tests/unit/journal/test_journal_tag_service.py` (`TestUpdateTag`, 13 tests), `tests/unit/journal/test_journal_tag_schemas.py` (`TestJournalTagUpdateAttributes`), `tests/unit/mcp/domains/journals/test_tools.py` + `tests/unit/mcp/domains/contacts/test_tools.py` (tool schema tests)
+- **Integration:** PATCH endpoint round-trip with real DB; uniqueness constraint behaviour; MCP update tool test. — `tests/integration/api/test_journal_tag_endpoints.py` (`TestUpdateJournalTagEndpoint`, 14 tests), `tests/integration/journal/test_journal_tag_repository_integration.py` (re-parent round-trip, case-insensitive lookup), `tests/integration/mcp/test_journal_tag_mcp.py` (`TestUpdateJournalTagMCPTool`, 8 tests), `tests/integration/mcp/test_contact_tools_integration.py` (2 `update_contact_tag` tests)
+- **E2E:** deferred to ITER17-004 — no frontend surface edits journal tags, and `JournalTag` in `frontend/src/types/journals.ts` still carries only id/name/color. Deferral taken as stated.
 
 #### Phase 3: Delete Parity (REST + MCP)
 
@@ -377,6 +386,7 @@ Deliberate, accepted asymmetries with contact tags (not to be "fixed" in this it
 
 - **`description` on tags embedded in journal resources:** Phase 1 added `description` to the standalone `/api/journals/tags` resources (its stated scope), but `JournalTagSchema` (`backend/app/api/journals/schemas.py`) and its converter — the shape used for tags embedded in `GET /api/journals/{id}` — still expose only id/name/color. Contacts embed description on the equivalent shape (`TagAttributes` in `backend/app/api/contacts/schemas.py`). ITER17-003 should add it when the detail-page editor needs to display a tag's description.
 - **Rename `merge_tags` → `merge_contact_tags`:** Phase 1 renamed contacts' `list_tags` to `list_contact_tags` when `list_journal_tags` landed beside it. `merge_tags` is still contact-only and unscoped; rename it in ITER17-001 Phase 4 when the journal merge tool ships, so both namespaces stay symmetrically named.
+- **Contact tag ID typing across MCP ([#1139](https://github.com/hjed/personal-management-system/issues/1139)):** `list_contact_tags` returns `TagInfo.id` as a string while the write tools (`merge_tags`, and `update_contact_tag` added in Phase 2) take ints, so an AI caller cannot round-trip an ID between them. Phase 2's new tool matched the existing `merge_tags` convention rather than fix half the surface. Align `TagInfo`, `UpdatedTagInfo`, `merge_tags`, and `update_contact_tag` in one change. Journal tags are unaffected — UUID-keyed and stringified consistently.
 - **Shared tag component consolidation:** if ITER17-003/004 duplicate the contact editor/dialog components rather than generalising them, consolidate into shared domain-agnostic components afterwards.
 - **Tags at journal creation time:** `JournalCreateForm.tsx` has no tag input (the API supports tags on create via MCP). Contacts likewise only edit tags from the detail/edit surfaces, so this is not a parity gap — treat as an independent enhancement if wanted.
 - **Search document tag names:** the journal search document indexes `tag_ids` only, while the MCP search converter reads a non-existent `tag_names` field (`backend/app/mcp/domains/journals/converters.py` line ~225) and contact documents index tag names as searchable text. Aligning journal search to also index tag names (making journals findable by tag text) is a small follow-up once events from ITER17-005 exist to keep names fresh on rename.

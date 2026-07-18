@@ -28,6 +28,7 @@ from app.core.journal.services.incomplete_outdoor_activity_service import (
 )
 from app.core.journal.services.journal_contact_service import JournalContactService
 from app.core.journal.services.journal_series_service import JournalSeriesService
+from app.core.journal.services.journal_tag_service import JournalTagService
 from app.core.journal.services.journal_write_service import JournalWriteService
 from app.core.journal.services.outdoor_activity_dismissal_service import (
     OutdoorActivityDismissalService,
@@ -251,6 +252,11 @@ async def get_activity_template_service() -> ActivityTemplateService:
     return cast(
         ActivityTemplateService, await _resolve_dependency(ActivityTemplateService)
     )
+
+
+async def get_journal_tag_service() -> JournalTagService:
+    """Resolve the journal tag service for the current MCP request."""
+    return cast(JournalTagService, await _resolve_dependency(JournalTagService))
 
 
 async def get_gear_item_service() -> GearItemService:
