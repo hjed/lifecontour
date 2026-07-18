@@ -351,8 +351,13 @@ test.describe('Outdoor Logbook — dashboard widgets', () => {
     });
 
     testCleanup(async () => {
-      await dataManager.clearAllJournals();
+      // Targeted cleanup first — it deletes the tracked journals by id, then
+      // the gear items and templates they referenced. Purging journals first
+      // would leave cleanup() 404ing on ids it had already lost, drowning any
+      // real cleanup failure in noise. The global purge then runs as a
+      // backstop so the next test's exact-count assertions start clean.
       await dataManager.cleanup();
+      await dataManager.clearAllJournals();
     });
 
     await contactTestHelpers.navigateToAuthenticatedPage(
