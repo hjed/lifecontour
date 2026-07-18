@@ -1,6 +1,6 @@
 # Iteration 17: Journal Tags Parity
 
-**Status:** 🔵 PLANNED
+**Status:** 🟡 IN PROGRESS (ITER17-001 Phase 1 complete)
 **Dependencies:** Iteration 4 (journal tag tables and relationship endpoints), Iteration 4.6 (journal tag filtering + detail-view tag add/remove), Iteration 12 (unified event-driven history), Iteration 2.6 (contact tag management UX — the reference behaviour)
 **Goal:** Bring journal tag functionality to exact parity with contact tags across the UI, backend management operations, filtering, history, and MCP.
 
@@ -25,7 +25,7 @@ This iteration closes the gap so that journal tags behave **exactly like contact
 
 ### What journal tags already have
 
-- **Database**: `journal_tags` (UUID PK, unique `name`, `parent_id` hierarchy, `color`) and `journal_tag_assignments` (composite PK `(journal_id, tag_id)`, cascade deletes) — migration `0012_create_journal_relationships_and_tags.py`. **No `description` column** (contact tags have one).
+- **Database**: `journal_tags` (UUID PK, unique `name`, `parent_id` hierarchy, `color`, and `description` since migration `0102`) and `journal_tag_assignments` (composite PK `(journal_id, tag_id)`, cascade deletes) — migration `0012_create_journal_relationships_and_tags.py`.
 - **Backend endpoints** (`backend/app/api/journals/controllers.py`):
   - `GET /api/journals/tags`, `POST /api/journals/tags`
   - `DELETE /api/journals/tags/{tag_id}` — **returns 409 Conflict when the tag is in use** (contact tag delete instead removes the tag from all contacts)
@@ -39,7 +39,7 @@ This iteration closes the gap so that journal tags behave **exactly like contact
   - No journal tag tree in the sidebar (`Sidebar.tsx` renders the tag tree for contacts only); no `?tag=` deep link on `/journals`.
   - `JournalCreateForm.tsx` has no tag input.
 - **Search**: `journal_indexing_service.py` indexes `tag_ids` as a filterable field.
-- **MCP**: `create_journal_entry` / `update_journal_entry` / journal reads support tags; `list_tags` and `merge_tags` MCP tools are **contact-only** (`backend/app/mcp/domains/contacts/tools.py`).
+- **MCP**: `create_journal_entry` / `update_journal_entry` / journal reads support tags; `merge_tags` is still **contact-only** (`backend/app/mcp/domains/contacts/tools.py`). Journal tag listing shipped in ITER17-001 Phase 1 as `list_journal_tags`, alongside which contacts' `list_tags` was renamed `list_contact_tags`.
 - **History**: no tag domain events for journals — tag changes do not appear in the journal activity feed (contacts publish `TagAssigned` / `TagRemoved` / `TagUpdated` / `TagDeleted` and project them into history).
 
 ### Gap summary
@@ -49,12 +49,12 @@ This iteration closes the gap so that journal tags behave **exactly like contact
 | Inline editor: searchable add popover, create-new-tag with colour, dismissible colour badges | Plain select dropdown, no create, no colours, dead end when no tags exist | ITER17-003 |
 | Sidebar hierarchical tag tree with click-to-filter | Absent | ITER17-004 |
 | Tag management: edit name/colour/description/parent, delete, merge (context menu + dialogs) | Create only; delete 409s when in use; no update/merge | ITER17-001, ITER17-004 |
-| `description` field on tags | Missing column | ITER17-001 |
+| `description` field on tags | ✅ Closed — column added in ITER17-001 Phase 1 | ITER17-001 |
 | Delete removes tag from all entities | Delete blocked (409) when in use | ITER17-001 |
 | Multi-tag filter param + hierarchical descendant expansion | Singular `tag_id`, first-selected-only, no hierarchy expansion | ITER17-002 |
 | URL deep link (`?tag=`) on the list page | Absent | ITER17-002 |
 | Tag change history in activity feed | No tag domain events | ITER17-005 |
-| MCP tag management (list, merge) | Contact-only tools | ITER17-001 (with the matching API changes) |
+| MCP tag management (list, merge) | List closed in Phase 1 (`list_journal_tags`); merge still contact-only | ITER17-001 (with the matching API changes) |
 
 ## Delivery Rules
 
@@ -97,24 +97,28 @@ Every phase below must meet the same completion bar before merge:
 **Relevant documents:**
 - [Database Design — Migration Strategy](../architecture/database-design.md#migration-strategy)
 - [API Design](../architecture/api-design.md) (REST and FastMCP patterns)
-- Contact reference: `backend/app/core/contacts/services/tag_service.py`, `backend/app/api/tags/controllers.py`, and the MCP tools `list_tags` / `merge_tags` in `backend/app/mcp/domains/contacts/tools.py`
+- Contact reference: `backend/app/core/contacts/services/tag_service.py`, `backend/app/api/tags/controllers.py`, and the MCP tools `list_contact_tags` (renamed from `list_tags` in Phase 1) / `merge_tags` in `backend/app/mcp/domains/contacts/tools.py`
 - Memory note: MCP tool documentation lives in docstrings/schemas, not in `mcp-setup.md`.
 - MCP rules: MCP tools are controller-equivalent — they call `@transactional` services and never open transactions.
 
-#### Phase 1: Description Column and MCP Tag Listing
+#### Phase 1: Description Column and MCP Tag Listing ✅ COMPLETE
 
 **Estimated diff:** ~350 lines
 
 **Acceptance Criteria:**
-- [ ] Alembic migration adds nullable `description TEXT` to `journal_tags` (follow the sequential naming convention in the `creating-migrations` skill).
-- [ ] `JournalTag` domain model and repository read/write `description`.
-- [ ] `GET /api/journals/tags` and `POST /api/journals/tags` include `description` in resources.
-- [ ] **MCP (same phase as the listing surface change):** journal tags are listable via MCP with hierarchy, colour, and description — either by extending the existing `list_tags` tool with a domain parameter or adding a journal-scoped equivalent (match whichever pattern the MCP domain structure prefers; document the choice).
+- [x] Alembic migration adds nullable `description TEXT` to `journal_tags` (follow the sequential naming convention in the `creating-migrations` skill). — `0102_add_description_to_journal_tags.py`
+- [x] `JournalTag` domain model and repository read/write `description`. — the repository's six duplicated row-mapping blocks were collapsed into a `_row_to_tag` helper so the column is declared once.
+- [x] `GET /api/journals/tags` and `POST /api/journals/tags` include `description` in resources.
+- [x] **MCP (same phase as the listing surface change):** journal tags are listable via MCP with hierarchy, colour, and description — either by extending the existing `list_tags` tool with a domain parameter or adding a journal-scoped equivalent (match whichever pattern the MCP domain structure prefers; document the choice). — **new `list_journal_tags` tool** (see decision below).
+
+**Decisions taken (Phase 1):**
+- **New `list_journal_tags` tool in the journals MCP domain, not a `domain=` parameter on `list_tags`.** REST already separates `/api/tags` from `/api/journals/tags`; journal tags are UUID-keyed with colour and timestamps while contact tags are int-keyed behind a different repository, so one tool would need repository branching and a polymorphic response schema; and `docs/architecture/api-design.md` prescribes per-domain tool organisation with no cross-domain-parameter precedent in the codebase.
+- **Contacts' `list_tags` renamed to `list_contact_tags`** so the two namespaces are symmetrically named and neither tool is the ambiguous default. This is a breaking rename for MCP clients, which is acceptable because clients re-fetch the tool list on each session. Each tool's docstring now points at the other. `merge_tags` keeps its name for now — rename it to `merge_contact_tags` in Phase 4 when the journal merge tool lands beside it.
 
 **Required Test Coverage:**
-- **Unit:** model/serialisation with and without description; MCP list tool schema.
-- **Integration:** migration applies cleanly; create/list round-trip with description; MCP list tool test mirroring the contact `list_tags` tests.
-- **E2E:** deferred to ITER17-004 (no UI surface yet); MCP integration tests are the equivalent bar for the tool surface.
+- **Unit:** model/serialisation with and without description; MCP list tool schema. — `tests/unit/journal/test_journal_tag_entity.py`, `tests/unit/journal/test_journal_tag_schemas.py`, `tests/unit/mcp/domains/journals/test_tools.py`
+- **Integration:** migration applies cleanly; create/list round-trip with description; MCP list tool test mirroring the contact `list_tags` tests. — `tests/integration/journal/test_journal_tag_repository_integration.py` (all six read paths), `tests/integration/api/test_journal_tag_endpoints.py`, `tests/integration/mcp/test_journal_tag_mcp.py`
+- **E2E:** deferred to ITER17-004 (no UI surface yet); MCP integration tests are the equivalent bar for the tool surface. — deferral taken as stated.
 
 #### Phase 2: Tag Update (REST + MCP)
 
@@ -358,7 +362,7 @@ Every phase below must meet the same completion bar before merge:
 The only schema change is additive:
 
 ```sql
--- ITER17-001 Phase 1
+-- ITER17-001 Phase 1 — applied in migration 0102
 ALTER TABLE journal_tags
   ADD COLUMN description TEXT NULL;
 ```
@@ -371,6 +375,8 @@ Deliberate, accepted asymmetries with contact tags (not to be "fixed" in this it
 
 ## Known Follow-up Work
 
+- **`description` on tags embedded in journal resources:** Phase 1 added `description` to the standalone `/api/journals/tags` resources (its stated scope), but `JournalTagSchema` (`backend/app/api/journals/schemas.py`) and its converter — the shape used for tags embedded in `GET /api/journals/{id}` — still expose only id/name/color. Contacts embed description on the equivalent shape (`TagAttributes` in `backend/app/api/contacts/schemas.py`). ITER17-003 should add it when the detail-page editor needs to display a tag's description.
+- **Rename `merge_tags` → `merge_contact_tags`:** Phase 1 renamed contacts' `list_tags` to `list_contact_tags` when `list_journal_tags` landed beside it. `merge_tags` is still contact-only and unscoped; rename it in ITER17-001 Phase 4 when the journal merge tool ships, so both namespaces stay symmetrically named.
 - **Shared tag component consolidation:** if ITER17-003/004 duplicate the contact editor/dialog components rather than generalising them, consolidate into shared domain-agnostic components afterwards.
 - **Tags at journal creation time:** `JournalCreateForm.tsx` has no tag input (the API supports tags on create via MCP). Contacts likewise only edit tags from the detail/edit surfaces, so this is not a parity gap — treat as an independent enhancement if wanted.
 - **Search document tag names:** the journal search document indexes `tag_ids` only, while the MCP search converter reads a non-existent `tag_names` field (`backend/app/mcp/domains/journals/converters.py` line ~225) and contact documents index tag names as searchable text. Aligning journal search to also index tag names (making journals findable by tag text) is a small follow-up once events from ITER17-005 exist to keep names fresh on rename.

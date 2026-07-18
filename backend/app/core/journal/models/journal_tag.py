@@ -18,6 +18,7 @@ class JournalTag:
         id: UUID primary key (auto-generated)
         parent_id: UUID of parent tag (nullable, for hierarchy)
         color: Hex color code (e.g., #FF0000)
+        description: Free-text description of what the tag is for (nullable)
         created_at: Creation timestamp
         updated_at: Last update timestamp
     """
@@ -26,6 +27,7 @@ class JournalTag:
     id: UUID | None = None
     parent_id: UUID | None = None
     color: str | None = None
+    description: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

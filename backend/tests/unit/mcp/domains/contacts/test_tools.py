@@ -52,8 +52,8 @@ class TestContactTools:
             )
 
     @pytest.mark.asyncio
-    async def test_list_tags_tool_registered(self, mcp_server):
-        """Test that list_tags tool is registered."""
+    async def test_list_contact_tags_tool_registered(self, mcp_server):
+        """Test that list_contact_tags tool is registered under its scoped name."""
         from fastmcp.client import Client
 
         async with Client(mcp_server) as client:
@@ -66,10 +66,13 @@ class TestContactTools:
             else:
                 tools = tools_response
 
-            # Verify list_tags tool is registered
+            # Verify list_contact_tags tool is registered
             tool_names = [tool.name for tool in tools]
-            assert "list_tags" in tool_names, (
-                "list_tags tool not found in registered tools"
+            assert "list_contact_tags" in tool_names, (
+                "list_contact_tags tool not found in registered tools"
+            )
+            assert "list_tags" not in tool_names, (
+                "list_tags should have been renamed to list_contact_tags"
             )
 
     @pytest.mark.asyncio
@@ -96,7 +99,7 @@ class TestContactTools:
                 "update_contact",
                 "list_contacts",
                 "toggle_contact_favourite",
-                "list_tags",
+                "list_contact_tags",
             ]
 
             for expected_tool in expected_tools:

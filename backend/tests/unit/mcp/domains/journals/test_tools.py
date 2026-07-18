@@ -73,12 +73,35 @@ class TestJournalTools:
                 "merge_journals",
                 "get_merge_candidates",
                 "get_daily_summary",
+                "list_journal_tags",
             ]
 
             for expected_tool in expected_tools:
                 assert expected_tool in tool_names, (
                     f"Tool {expected_tool} not found in registered tools"
                 )
+
+    @pytest.mark.asyncio
+    async def test_list_journal_tags_tool_schema(self, mcp_server):
+        """Test list_journal_tags exposes an optional bounded limit parameter."""
+        async with Client(mcp_server) as client:
+            tools_response = await client.list_tools()
+
+            if hasattr(tools_response, "tools"):
+                tools = tools_response.tools
+            else:
+                tools = tools_response
+
+            tool = next(t for t in tools if t.name == "list_journal_tags")
+
+            schema = tool.inputSchema
+            assert "limit" in schema["properties"], (
+                "list_journal_tags should expose a limit parameter"
+            )
+            # limit is optional so AI callers can list tags with no arguments
+            assert "limit" not in schema.get("required", [])
+            assert schema["properties"]["limit"]["maximum"] == 100
+            assert schema["properties"]["limit"]["minimum"] == 1
 
     @pytest.mark.asyncio
     async def test_create_journal_entry_tool_registration(self, mcp_server):

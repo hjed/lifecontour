@@ -162,6 +162,8 @@ from app.mcp.domains.journals.schemas import (
     JournalHistoryResponse,
     JournalSearchResponse,
     JournalSearchResult,
+    JournalTagInfo,
+    JournalTagListMCPResponse,
     JournalTemplateMCPResponse,
     JournalUpdateRequest,
     MergeCandidateResult,
@@ -5114,6 +5116,59 @@ async def update_gear_item(
     return MCPResponseBuilder.success_response(response)
 
 
+@mcp_unified_error_handler("list_journal_tags", "tag")
+async def list_journal_tags(
+    limit: Annotated[
+        int, Field(description="Maximum number of tags to return", ge=1, le=100)
+    ] = 50,
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+) -> str:
+    """
+    List all available journal tags for organising journal entries.
+
+    Journal tags are a separate namespace from contact tags — use
+    list_contact_tags for those. Tags are hierarchical: a tag with a
+    parent_id is a child of that tag, and a null parent_id marks a root tag.
+
+    Args:
+        limit: Maximum number of tags to return (1-100, default: 50)
+
+    Returns:
+        JSON string containing journal tags ordered by name, each with its
+        colour, description, and parent_id for reconstructing the hierarchy.
+    """
+    repos = _create_journal_tool_repositories(db_connection)
+
+    all_tags = await repos.tag_repo.get_all()
+    tags = all_tags[:limit]
+
+    tag_data = [
+        JournalTagInfo(
+            id=str(tag.id),
+            name=tag.name,
+            color=tag.color,
+            description=tag.description,
+            parent_id=str(tag.parent_id) if tag.parent_id else None,
+            created_at=tag.created_at.isoformat() if tag.created_at else None,
+        )
+        for tag in tags
+    ]
+
+    response_data = JournalTagListMCPResponse(
+        tags=tag_data,
+        total_count=len(tag_data),
+        summary=f"Found {len(tag_data)} journal tag(s). "
+        "Journal tags categorise journal entries by theme, project, or activity.",
+        suggestions=[
+            "Use tags to group journals by theme (training, travel, reflection)",
+            "Nest tags under a parent to build a hierarchy (activities/climbing)",
+            "Assign tags when creating or updating a journal entry",
+        ],
+    )
+
+    return MCPResponseBuilder.success_response(response_data)
+
+
 def register_journal_tools(mcp: FastMCP[None]) -> None:
     """
     Register journal-related MCP tools with the FastMCP server.
@@ -5155,3 +5210,4 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
     mcp.add_tool(list_gear_items)
     mcp.add_tool(get_gear_item)
     mcp.add_tool(update_gear_item)
+    mcp.add_tool(list_journal_tags)

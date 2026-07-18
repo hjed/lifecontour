@@ -224,7 +224,7 @@ class TestContactToolsIntegration:
                 "update_contact",
                 "list_contacts",
                 "toggle_contact_favourite",
-                "list_tags",
+                "list_contact_tags",
             ]
 
             for expected_tool in expected_tools:
@@ -686,7 +686,7 @@ class TestContactToolsIntegration:
         assert str(retrieved_contact.tags[0].name) == "updated"
 
     @pytest.mark.asyncio
-    async def test_list_tags_via_mounted_http_session(
+    async def test_list_contact_tags_via_mounted_http_session(
         self,
         authenticated_lifespan_client,
         tag_repo,
@@ -704,7 +704,7 @@ class TestContactToolsIntegration:
                     "id": 2,
                     "method": "tools/call",
                     "params": {
-                        "name": "list_tags",
+                        "name": "list_contact_tags",
                         "arguments": {"limit": 10},
                     },
                 },

@@ -115,6 +115,70 @@ class TestJournalTagEndpoints:
         assert tag_json["data"]["attributes"]["parent_id"] == parent_id
         assert tag_json["data"]["id"] is not None
 
+    async def test_create_journal_tag_with_description(self, integration_api_client):
+        """Test POST echoes the description back in the created resource."""
+        tag_data = {
+            "data": {
+                "type": "journal-tags",
+                "attributes": {
+                    "name": "training",
+                    "color": "#00FF00",
+                    "description": "Structured training sessions",
+                },
+            }
+        }
+
+        response = await integration_api_client.post(
+            "/api/journals/tags", json=tag_data
+        )
+
+        assert response.status_code == 201
+        attributes = response.json()["data"]["attributes"]
+        assert attributes["description"] == "Structured training sessions"
+
+    async def test_create_journal_tag_without_description_is_null(
+        self, integration_api_client
+    ):
+        """Test description is optional and serialises as null when omitted."""
+        tag_data = {
+            "data": {
+                "type": "journal-tags",
+                "attributes": {"name": "training"},
+            }
+        }
+
+        response = await integration_api_client.post(
+            "/api/journals/tags", json=tag_data
+        )
+
+        assert response.status_code == 201
+        attributes = response.json()["data"]["attributes"]
+        assert attributes["description"] is None
+
+    async def test_list_journal_tags_includes_description(self, integration_api_client):
+        """Test GET returns the persisted description for each tag."""
+        create_response = await integration_api_client.post(
+            "/api/journals/tags",
+            json={
+                "data": {
+                    "type": "journal-tags",
+                    "attributes": {
+                        "name": "training",
+                        "description": "Structured training sessions",
+                    },
+                }
+            },
+        )
+        assert create_response.status_code == 201
+        tag_id = create_response.json()["data"]["id"]
+
+        response = await integration_api_client.get("/api/journals/tags")
+
+        assert response.status_code == 200
+        tags = response.json()["data"]
+        tag = next(t for t in tags if t["id"] == tag_id)
+        assert tag["attributes"]["description"] == "Structured training sessions"
+
     async def test_create_journal_tag_missing_name(self, integration_api_client):
         """Test creating a journal tag without a name returns validation error."""
         tag_data = {

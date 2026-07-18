@@ -86,7 +86,7 @@ class TagInfo(BaseModel):
 
 
 class TagListResponse(BaseModel):
-    """Response for list_tags MCP tool."""
+    """Response for list_contact_tags MCP tool."""
 
     tags: list[TagInfo]
     total_count: int
@@ -1153,8 +1153,8 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             raise
 
     @mcp.tool
-    @mcp_unified_error_handler("list_tags", "tag")
-    async def list_tags(
+    @mcp_unified_error_handler("list_contact_tags", "tag")
+    async def list_contact_tags(
         limit: Annotated[
             int, Field(description="Maximum number of tags to return", ge=1, le=100)
         ] = 50,
@@ -1165,7 +1165,8 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
         Retrieves all tags that can be used to categorize contacts, providing
         AI with a comprehensive view of available contact categories and
-        organizational structures.
+        organizational structures. Contact tags are a separate namespace from
+        journal tags — use list_journal_tags for those.
 
         Args:
             limit: Maximum number of tags to return (1-100, default: 50)
