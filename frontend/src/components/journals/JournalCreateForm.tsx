@@ -643,17 +643,25 @@ export function JournalCreateForm({
           },
         };
       });
-      if (typeFieldUpdates) {
-        // Seed with the user's current values plus the template's so the
-        // remounted editor re-emits a complete block to the parent form.
-        setTemplateSeedData(prev => ({
-          ...prev,
-          [typeFieldUpdates.journalType]: {
-            ...(typeData[typeFieldUpdates.journalType] || {}),
-            ...typeFieldUpdates.fields,
-          },
-        }));
-      }
+      // Every template selection remounts the subtype editors (via
+      // abseilKey), and a remounted editor re-emits its seed to the parent
+      // form — so the seed must snapshot the user's current values for every
+      // derived block on every selection, with the template's own fields
+      // overlaid where applicable. Seeding only the template's block would
+      // wipe user-entered fields in the others.
+      setTemplateSeedData({
+        [JournalType.CANYONING]: typeData[JournalType.CANYONING],
+        [JournalType.CAVING]: typeData[JournalType.CAVING],
+        [JournalType.CLIMBING]: typeData[JournalType.CLIMBING],
+        ...(typeFieldUpdates
+          ? {
+              [typeFieldUpdates.journalType]: {
+                ...(typeData[typeFieldUpdates.journalType] || {}),
+                ...typeFieldUpdates.fields,
+              },
+            }
+          : {}),
+      });
       setAbseilKey(k => k + 1);
 
       if (

@@ -754,6 +754,43 @@ describe('JournalCreateForm', () => {
       );
     });
 
+    it('keeps user-entered subtype fields when the selected template has none', async () => {
+      const user = userEvent.setup();
+      mockMutateAsync.mockResolvedValueOnce({
+        data: { id: '11', type: 'journals', attributes: {} },
+      });
+
+      renderWithClient(<JournalCreateForm />);
+
+      await user.type(screen.getByLabelText(/title/i), 'Sticky Canyon Fields');
+      await user.click(screen.getByLabelText(/^canyoning$/i));
+
+      // User fills a canyoning field first…
+      fireEvent.change(screen.getByTestId('french-grade-input'), {
+        target: { value: 'v3a2IV' },
+      });
+
+      // …then selects a template that carries no canyon-specific fields. The
+      // remounted canyoning editor must be reseeded with the user's values.
+      await user.click(
+        screen.getByTestId('mock-template-selector-nopitch-canyoning')
+      );
+
+      await user.click(screen.getByRole('button', { name: /create journal/i }));
+
+      await waitFor(() => {
+        expect(mockMutateAsync).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type_data: expect.objectContaining({
+              [JournalType.CANYONING]: expect.objectContaining({
+                french_grade: 'v3a2IV',
+              }),
+            }),
+          })
+        );
+      });
+    });
+
     it('links a pitch-less template without clearing user-entered abseil data', async () => {
       const user = userEvent.setup();
       mockMutateAsync.mockResolvedValueOnce({
