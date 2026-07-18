@@ -1381,7 +1381,7 @@ export class TestDataManager {
    */
   async cleanup(): Promise<void> {
     console.debug(
-      `🧹 [Data Manager] Starting cleanup of ${this.createdContactIds.length} contacts, ${this.createdTagIds.length} contact tags, ${this.createdJournalTagIds.length} journal tags, ${this.createdJournalIds.length} journals, and ${this.createdCalendars.length} calendars...`
+      `🧹 [Data Manager] Starting cleanup of ${this.createdContactIds.length} contacts, ${this.createdTagIds.length} contact tags, ${this.createdJournalTagIds.length} journal tags, ${this.createdJournalIds.length} journals, ${this.createdCalendars.length} calendars, ${this.createdGearItemIds.length} gear items, and ${this.createdTemplateIds.length} templates...`
     );
 
     // Add timeout to prevent cleanup from hanging
