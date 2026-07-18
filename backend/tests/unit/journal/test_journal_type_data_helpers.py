@@ -270,6 +270,41 @@ class TestUpdateAbseilingTypeData:
         assert saved.template_id is None
 
     @pytest.mark.asyncio
+    async def test_pitch_notes_are_persisted(self) -> None:
+        repo = AsyncMock()
+        repo.find_by_journal_id.return_value = AbseilingData(journal_id=5)
+        pitch_repo = AsyncMock()
+
+        await helpers.update_abseiling_type_data(
+            5,
+            "ABSEILING_TRIP",
+            {"pitches": [{"pitch_number": 1, "height": 20, "notes": "wet start"}]},
+            repo,
+            pitch_repo,
+        )
+
+        pitch_repo.save.assert_awaited_once()
+        saved_pitch = pitch_repo.save.await_args.args[0]
+        assert saved_pitch.notes == "wet start"
+
+    @pytest.mark.asyncio
+    async def test_pitch_notes_absent_default_to_none(self) -> None:
+        repo = AsyncMock()
+        repo.find_by_journal_id.return_value = AbseilingData(journal_id=5)
+        pitch_repo = AsyncMock()
+
+        await helpers.update_abseiling_type_data(
+            5,
+            "ABSEILING_TRIP",
+            {"pitches": [{"pitch_number": 1, "height": 20}]},
+            repo,
+            pitch_repo,
+        )
+
+        saved_pitch = pitch_repo.save.await_args.args[0]
+        assert saved_pitch.notes is None
+
+    @pytest.mark.asyncio
     async def test_invalid_template_id_raises(self) -> None:
         repo = AsyncMock()
         repo.find_by_journal_id.return_value = AbseilingData(journal_id=5)

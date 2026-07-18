@@ -490,6 +490,7 @@ class TypeDataConverter:
                     anchor_type=pitch.anchor_type,
                     did_rescue=pitch.did_rescue,
                     did_setup=pitch.did_setup,
+                    notes=pitch.notes,
                 )
                 for pitch in pitches
             ]
