@@ -186,6 +186,7 @@ class TestActivityTemplateEndpoints:
                                 "pitch_number": 1,
                                 "height": 15,
                                 "notes": "Awkward start over the chockstone",
+                                "pitch_type": "jump",
                             },
                             {"pitch_number": 2, "height": 25},
                         ],
@@ -197,12 +198,15 @@ class TestActivityTemplateEndpoints:
         template_id = create_response.json()["data"]["id"]
         created_pitches = create_response.json()["data"]["attributes"]["pitches"]
         assert created_pitches[0]["notes"] == "Awkward start over the chockstone"
+        assert created_pitches[0]["pitch_type"] == "jump"
         assert created_pitches[1].get("notes") is None
+        assert created_pitches[1].get("pitch_type") is None
 
         get_response = await authenticated_client.get(f"/api/templates/{template_id}")
         assert get_response.status_code == 200
         pitches = get_response.json()["data"]["attributes"]["pitches"]
         assert pitches[0]["notes"] == "Awkward start over the chockstone"
+        assert pitches[0]["pitch_type"] == "jump"
 
         update_response = await authenticated_client.put(
             f"/api/templates/{template_id}",

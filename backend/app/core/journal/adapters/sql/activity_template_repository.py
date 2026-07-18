@@ -53,6 +53,7 @@ class SqlActivityTemplateRepository(ActivityTemplateRepository):
             did_rescue=row.did_rescue,
             did_setup=row.did_setup,
             notes=row.notes,
+            pitch_type=row.pitch_type,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -153,15 +154,17 @@ class SqlActivityTemplateRepository(ActivityTemplateRepository):
                 """
                 INSERT INTO template_pitches (
                     template_id, pitch_number, height,
-                    anchor_location, anchor_type, did_rescue, did_setup, notes
+                    anchor_location, anchor_type, did_rescue, did_setup,
+                    notes, pitch_type
                 )
                 VALUES (
                     :template_id, :pitch_number, :height,
-                    :anchor_location, :anchor_type, :did_rescue, :did_setup, :notes
+                    :anchor_location, :anchor_type, :did_rescue, :did_setup,
+                    :notes, :pitch_type
                 )
                 RETURNING id, template_id, pitch_number, height,
                           anchor_location, anchor_type, did_rescue, did_setup,
-                          notes, created_at, updated_at
+                          notes, pitch_type, created_at, updated_at
                 """
             )
             pitch_result = await self.conn.execute(
@@ -175,6 +178,7 @@ class SqlActivityTemplateRepository(ActivityTemplateRepository):
                     "did_rescue": pitch.did_rescue,
                     "did_setup": pitch.did_setup,
                     "notes": pitch.notes,
+                    "pitch_type": pitch.pitch_type,
                 },
             )
             pitch_row = pitch_result.fetchone()
@@ -311,7 +315,7 @@ class SqlActivityTemplateRepository(ActivityTemplateRepository):
             """
             SELECT id, template_id, pitch_number, height,
                    anchor_location, anchor_type, did_rescue, did_setup,
-                   notes, created_at, updated_at
+                   notes, pitch_type, created_at, updated_at
             FROM template_pitches
             WHERE template_id = :template_id
             ORDER BY pitch_number

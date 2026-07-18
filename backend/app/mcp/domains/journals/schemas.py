@@ -529,6 +529,13 @@ class TemplatePitchMCPSchema(BaseModel):
     notes: str | None = Field(
         default=None, description="Optional short notes for the pitch"
     )
+    pitch_type: str | None = Field(
+        default=None,
+        description=(
+            "How the pitch is descended: abseil, jump, or down_climb "
+            "(null is treated as abseil)"
+        ),
+    )
 
 
 class ActivityTemplateMCPResponse(BaseModel):

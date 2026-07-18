@@ -566,6 +566,7 @@ class TestActivityTemplateRepositoryPitchOperations:
                     did_rescue=True,
                     did_setup=False,
                     notes="Watch the rub point on the lip",
+                    pitch_type="down_climb",
                 ),
             ],
         )
@@ -581,5 +582,6 @@ class TestActivityTemplateRepositoryPitchOperations:
         assert pitch.did_rescue is True
         assert pitch.did_setup is False
         assert pitch.notes == "Watch the rub point on the lip"
+        assert pitch.pitch_type == "down_climb"
         assert pitch.created_at is not None
         assert pitch.updated_at is not None

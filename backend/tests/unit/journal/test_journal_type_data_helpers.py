@@ -14,6 +14,7 @@ from uuid import uuid4
 import pytest
 from core_shared.models.journals import (
     AbseilingData,
+    AbseilPitchValidationError,
     ClimbingData,
     JournalType,
     JournalValidationError,
@@ -304,6 +305,40 @@ class TestUpdateAbseilingTypeData:
         pitch_repo.save.assert_awaited_once()
         saved_pitch = pitch_repo.save.await_args.args[0]
         assert saved_pitch.notes is None
+
+    @pytest.mark.asyncio
+    async def test_pitch_type_is_persisted(self) -> None:
+        repo = AsyncMock()
+        repo.find_by_journal_id.return_value = AbseilingData(journal_id=5)
+        pitch_repo = AsyncMock()
+
+        await helpers.update_abseiling_type_data(
+            5,
+            "ABSEILING_TRIP",
+            {"pitches": [{"pitch_number": 1, "height": 5, "pitch_type": "jump"}]},
+            repo,
+            pitch_repo,
+        )
+
+        saved_pitch = pitch_repo.save.await_args.args[0]
+        assert saved_pitch.pitch_type == "jump"
+
+    @pytest.mark.asyncio
+    async def test_invalid_pitch_type_raises(self) -> None:
+        repo = AsyncMock()
+        repo.find_by_journal_id.return_value = AbseilingData(journal_id=5)
+        pitch_repo = AsyncMock()
+
+        with pytest.raises(AbseilPitchValidationError):
+            await helpers.update_abseiling_type_data(
+                5,
+                "ABSEILING_TRIP",
+                {"pitches": [{"pitch_number": 1, "pitch_type": "swim"}]},
+                repo,
+                pitch_repo,
+            )
+
+        pitch_repo.save.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_invalid_template_id_raises(self) -> None:

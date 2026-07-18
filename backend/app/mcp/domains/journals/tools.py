@@ -4665,7 +4665,7 @@ async def create_template(
         list[dict[str, Any]] | None,
         Field(
             default=None,
-            description="List of pitch objects (must contain pitch_number, optionally height, anchor_location, anchor_type, did_rescue, did_setup, notes)",
+            description="List of pitch objects (must contain pitch_number, optionally height, anchor_location, anchor_type, did_rescue, did_setup, notes, pitch_type [abseil|jump|down_climb])",
         ),
     ] = None,
     user_id: str = mcp_depends(get_current_user_id),
@@ -4695,6 +4695,7 @@ async def create_template(
                     did_rescue=p.get("did_rescue"),
                     did_setup=p.get("did_setup"),
                     notes=p.get("notes"),
+                    pitch_type=p.get("pitch_type"),
                 )
             )
 
@@ -4864,7 +4865,7 @@ async def update_template(
         list[dict[str, Any]] | None,
         Field(
             default=None,
-            description="List of pitch objects (must contain pitch_number, optionally height, anchor_location, anchor_type, did_rescue, did_setup, notes)",
+            description="List of pitch objects (must contain pitch_number, optionally height, anchor_location, anchor_type, did_rescue, did_setup, notes, pitch_type [abseil|jump|down_climb])",
         ),
     ] = None,
     user_id: str = mcp_depends(get_current_user_id),
@@ -4924,6 +4925,7 @@ async def update_template(
                         did_rescue=p.get("did_rescue"),
                         did_setup=p.get("did_setup"),
                         notes=p.get("notes"),
+                        pitch_type=p.get("pitch_type"),
                     )
                 )
             template.pitches = pitch_entities

@@ -270,6 +270,7 @@ class ActivityTemplateMCPConverter:
                         did_rescue=p.did_rescue or False,
                         did_setup=p.did_setup or False,
                         notes=p.notes,
+                        pitch_type=p.pitch_type,
                     )
                 )
 

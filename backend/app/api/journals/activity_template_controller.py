@@ -65,6 +65,7 @@ async def create_template(
                         did_rescue=p.did_rescue,
                         did_setup=p.did_setup,
                         notes=p.notes,
+                        pitch_type=p.pitch_type,
                     )
                 )
             template.pitches = pitches
@@ -193,6 +194,7 @@ async def update_template(
                         did_rescue=p.did_rescue,
                         did_setup=p.did_setup,
                         notes=p.notes,
+                        pitch_type=p.pitch_type,
                     )
                 )
             template.pitches = pitches
