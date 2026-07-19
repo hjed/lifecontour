@@ -257,7 +257,9 @@ export function AbseilingTripTypeEditor({
         <CreateTemplateDialog
           open={selectTemplateCreateOpen}
           onOpenChange={setSelectTemplateCreateOpen}
-          defaultTemplateType={templateTypes[0]}
+          defaultTemplateType={
+            templateTypes[0] ?? ActivityTemplateType.ABSEILING
+          }
           onCreated={handleTemplateSelection}
         />
       </div>

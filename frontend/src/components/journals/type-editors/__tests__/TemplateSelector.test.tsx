@@ -104,18 +104,16 @@ describe('TemplateSelector', () => {
         pitches: [{ pitch_number: 1 }],
       },
     };
-    const cavingTemplate = {
-      type: 'activity-templates',
-      id: '4',
-      attributes: {
-        name: 'Cave Template',
-        template_type: ActivityTemplateType.CAVING,
-        pitches: [],
-      },
-    };
-    (templatesApi.getTemplates as jest.Mock).mockResolvedValue({
-      data: [...mockTemplates, abseilTemplate, cavingTemplate],
-    });
+    const allTemplates = [...mockTemplates, abseilTemplate];
+    // The mock honours the server-side type filter, mirroring the backend.
+    (templatesApi.getTemplates as jest.Mock).mockImplementation(
+      (type?: ActivityTemplateType) =>
+        Promise.resolve({
+          data: allTemplates.filter(
+            t => !type || t.attributes.template_type === type
+          ),
+        })
+    );
 
     renderComponent({
       templateType: [
@@ -133,10 +131,16 @@ describe('TemplateSelector', () => {
       expect(screen.getByText('Test Canyoning Template')).toBeInTheDocument();
       expect(screen.getByText('Plain Abseil Template')).toBeInTheDocument();
     });
-    // Templates of unlisted types are filtered out.
-    expect(screen.queryByText('Cave Template')).not.toBeInTheDocument();
-    // Multi-type searches fetch unfiltered (the API filter takes one type).
-    expect(templatesApi.getTemplates).toHaveBeenCalledWith(undefined, '');
+    // One server-filtered request per requested type, never unfiltered.
+    expect(templatesApi.getTemplates).toHaveBeenCalledWith(
+      ActivityTemplateType.CANYONING,
+      ''
+    );
+    expect(templatesApi.getTemplates).toHaveBeenCalledWith(
+      ActivityTemplateType.ABSEILING,
+      ''
+    );
+    expect(templatesApi.getTemplates).not.toHaveBeenCalledWith(undefined, '');
   });
 
   it('calls onCreateTemplate when create button is clicked', async () => {

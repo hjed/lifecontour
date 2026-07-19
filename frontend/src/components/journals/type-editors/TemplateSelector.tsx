@@ -64,28 +64,27 @@ export function TemplateSelector({
   const templateTypes = Array.isArray(templateType)
     ? templateType
     : [templateType];
-  const singleType = templateTypes.length === 1 ? templateTypes[0] : undefined;
 
   // Search templates. The backend filter accepts a single type, so a
-  // multi-type selector fetches unfiltered and filters client-side.
+  // multi-type selector issues one server-filtered request per type — this
+  // keeps results complete even if the endpoint ever becomes paginated.
   const {
     data: searchResults,
     isLoading,
     error,
   } = useQuery({
-    queryKey: [
-      'templates',
-      singleType ?? templateTypes.join(','),
-      debouncedQuery,
-    ],
-    queryFn: () => getTemplates(singleType, debouncedQuery),
+    queryKey: ['templates', templateTypes, debouncedQuery],
+    queryFn: async () => {
+      const responses = await Promise.all(
+        templateTypes.map(type => getTemplates(type, debouncedQuery))
+      );
+      return responses.flatMap(response => response.data);
+    },
     // We always want to fetch templates of a certain type, even if the search query is empty.
     staleTime: 30000, // 30 seconds
   });
 
-  const templates = (searchResults?.data || []).filter(template =>
-    templateTypes.includes(template.attributes.template_type)
-  );
+  const templates = searchResults || [];
 
   // Cleanup timeout on unmount
   useEffect(() => {
