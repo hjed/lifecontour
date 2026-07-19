@@ -18,6 +18,7 @@ import {
 import { useTypeEditorState } from './useTypeEditorState';
 import { TypeEditorActions } from './TypeEditorActions';
 import { PitchEditor } from './PitchEditor';
+import { countAbseils } from './pitchUtils';
 import { TemplateSelector } from './TemplateSelector';
 import { CreateTemplateDialog } from './CreateTemplateDialog';
 
@@ -70,7 +71,8 @@ export function AbseilingTripTypeEditor({
     onChange,
   });
 
-  const initialCalcAbseils = (initialData.pitches || []).length;
+  const initialPitchCount = (initialData.pitches || []).length;
+  const initialCalcAbseils = countAbseils(initialData.pitches || []);
   const initialCalcLength = (initialData.pitches || []).reduce(
     (sum, p) => sum + (p.height || 0),
     0
@@ -83,10 +85,13 @@ export function AbseilingTripTypeEditor({
     null
   );
 
+  // Gate on the pitch count, not the abseil count: an all-jump/DC pitch list
+  // legitimately calculates to zero abseils, and a user-entered count must
+  // still register as a manual override in that case.
   const isManualAbseils =
     manualAbseilsState ??
     (initialData.number_of_abseils != null &&
-      initialCalcAbseils > 0 &&
+      initialPitchCount > 0 &&
       initialData.number_of_abseils !== initialCalcAbseils);
 
   const isManualLength =
@@ -131,10 +136,9 @@ export function AbseilingTripTypeEditor({
 
     const summaryItems: ReadOnlyTypeSummaryItem[] = [];
 
-    if (
-      initialData.number_of_abseils != null &&
-      initialData.number_of_abseils > 0
-    ) {
+    // Show an explicit 0 too: an all-jump/down-climb trip legitimately has
+    // pitches but zero abseils.
+    if (initialData.number_of_abseils != null) {
       summaryItems.push({
         label: 'Abseils',
         value: initialData.number_of_abseils,
@@ -182,7 +186,7 @@ export function AbseilingTripTypeEditor({
       ...(pitches.length > 0
         ? {
             pitches,
-            number_of_abseils: pitches.length,
+            number_of_abseils: countAbseils(pitches),
             total_length: pitches.reduce((sum, p) => sum + (p.height || 0), 0),
           }
         : {}),
@@ -195,7 +199,7 @@ export function AbseilingTripTypeEditor({
 
   const handlePitchesChange = (newPitches: AbseilPitch[]) => {
     setEditData(prev => {
-      const newCalcAbseils = newPitches.length;
+      const newCalcAbseils = countAbseils(newPitches);
       const newCalcLength = newPitches.reduce(
         (sum, p) => sum + (p.height || 0),
         0
@@ -203,7 +207,9 @@ export function AbseilingTripTypeEditor({
 
       let nextAbseils = prev.number_of_abseils;
       if (!isManualAbseils || nextAbseils == null) {
-        nextAbseils = newCalcAbseils > 0 ? newCalcAbseils : null;
+        // Key off the pitch count, not the abseil count: a list of only
+        // jump/down-climb pitches is legitimately zero abseils.
+        nextAbseils = newPitches.length > 0 ? newCalcAbseils : null;
       }
 
       let nextLength = prev.total_length;

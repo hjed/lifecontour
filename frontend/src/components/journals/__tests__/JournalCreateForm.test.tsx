@@ -106,6 +106,7 @@ jest.mock('@/components/journals/type-editors/TemplateSelector', () => ({
               pitches: [
                 { pitch_number: 1, height: 30, notes: 'Wet start, keep left' },
                 { pitch_number: 2, height: 15 },
+                { pitch_number: 3, height: 5, pitch_type: 'jump' },
               ],
             },
           })
@@ -708,14 +709,19 @@ describe('JournalCreateForm', () => {
             type_data: expect.objectContaining({
               [JournalType.ABSEILING_TRIP]: expect.objectContaining({
                 template_id: 'tpl-consolidated-1',
+                // The jump pitch is not an abseil but still descends 5m.
                 number_of_abseils: 2,
-                total_length: 45,
+                total_length: 50,
                 pitches: [
                   expect.objectContaining({
                     pitch_number: 1,
                     notes: 'Wet start, keep left',
                   }),
                   expect.objectContaining({ pitch_number: 2 }),
+                  expect.objectContaining({
+                    pitch_number: 3,
+                    pitch_type: 'jump',
+                  }),
                 ],
               }),
             }),

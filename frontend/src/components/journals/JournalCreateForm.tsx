@@ -114,6 +114,7 @@ import {
   GearMaintenanceTypeEditor,
   GearUsageTypeEditor,
 } from './type-editors';
+import { countAbseils } from './type-editors/pitchUtils';
 import { JournalSearchCombobox } from './JournalSearchCombobox';
 
 // Form validation schema
@@ -610,7 +611,7 @@ export function JournalCreateForm({
             ...(hasPitches
               ? {
                   pitches,
-                  number_of_abseils: pitches.length,
+                  number_of_abseils: countAbseils(pitches),
                   total_length: pitches.reduce(
                     (sum, p) => sum + (p.height || 0),
                     0

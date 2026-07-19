@@ -197,6 +197,9 @@ export interface JoggingData {
   pace?: number | null; // seconds per kilometre
 }
 
+// How a pitch is descended. A null/absent pitch_type is treated as an abseil.
+export type PitchType = 'abseil' | 'jump' | 'down_climb';
+
 export interface AbseilPitch {
   id?: number | null;
   pitch_number: number;
@@ -206,6 +209,7 @@ export interface AbseilPitch {
   did_rescue?: boolean | null;
   did_setup?: boolean | null;
   notes?: string | null;
+  pitch_type?: PitchType | null;
 }
 
 // Activity Templates
@@ -225,6 +229,7 @@ export interface TemplatePitch {
   did_rescue?: boolean | null;
   did_setup?: boolean | null;
   notes?: string | null;
+  pitch_type?: PitchType | null;
 }
 
 export interface ActivityTemplateAttributes {
