@@ -365,10 +365,31 @@ class JournalMergeService:
     async def _move_contact_relationships(
         self, target_id: int, source_id: int, transaction: AsyncConnection
     ) -> None:
+        # Both statements cover every relationship_type (PARTICIPANT, INVITEE,
+        # MENTION, ABOUT), not just participants.
+        #
+        # Backfill first: existing target rows keep their own status/role, but pick
+        # up the source's values wherever the target left them unset.
         await transaction.execute(
             text("""
-                INSERT INTO journal_contact_relationships (journal_id, contact_id, relationship_type)
-                SELECT :target_id, contact_id, relationship_type
+                UPDATE journal_contact_relationships target_rels
+                SET status = COALESCE(target_rels.status, source_rels.status),
+                    role = COALESCE(target_rels.role, source_rels.role)
+                FROM journal_contact_relationships source_rels
+                WHERE target_rels.journal_id = :target_id
+                AND source_rels.journal_id = :source_id
+                AND target_rels.contact_id = source_rels.contact_id
+                AND target_rels.relationship_type = source_rels.relationship_type
+            """),
+            {"target_id": target_id, "source_id": source_id},
+        )
+        # Then carry over the relationships the target does not have at all, status
+        # and role included.
+        await transaction.execute(
+            text("""
+                INSERT INTO journal_contact_relationships
+                    (journal_id, contact_id, relationship_type, status, role)
+                SELECT :target_id, contact_id, relationship_type, status, role
                 FROM journal_contact_relationships source_rels
                 WHERE journal_id = :source_id
                 AND NOT EXISTS (

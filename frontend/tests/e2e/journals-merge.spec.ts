@@ -268,10 +268,10 @@ test.describe('Journal Merge Workflow', () => {
 
     // We expect to see conflicts for mood_value and energy_level
     await expect(
-      resolutionDialog.getByText('MOOD_RATING - mood_value')
+      resolutionDialog.getByText('Mood Rating — Mood Value')
     ).toBeVisible();
     await expect(
-      resolutionDialog.getByText('MOOD_RATING - energy_level')
+      resolutionDialog.getByText('Mood Rating — Energy Level')
     ).toBeVisible();
 
     // Let's resolve mood_value to use Source (value 8)
