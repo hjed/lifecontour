@@ -107,6 +107,30 @@ class TestJournalTagRepositoryIntegration:
         assert found_tag is not None
         assert found_tag.description == "Revised text"
 
+    async def test_update_tag_reparent_persists(self, tag_repo):
+        """Test the update path persists a changed parent, including clearing it."""
+        parent = await tag_repo.save(JournalTag(name="outdoors"))
+        child = await tag_repo.save(JournalTag(name="climbing"))
+
+        child.parent_id = parent.id
+        await tag_repo.save(child)
+        reparented = await tag_repo.find_by_id(child.id)
+        assert reparented is not None
+        assert reparented.parent_id == parent.id
+
+        reparented.parent_id = None
+        await tag_repo.save(reparented)
+        cleared = await tag_repo.find_by_id(child.id)
+        assert cleared is not None
+        assert cleared.parent_id is None
+
+    async def test_find_by_name_is_case_insensitive(self, tag_repo):
+        """Test the uniqueness lookup matches regardless of case."""
+        await tag_repo.save(JournalTag(name="Training"))
+
+        assert await tag_repo.find_by_name("training") is not None
+        assert await tag_repo.find_by_name("TRAINING") is not None
+
     async def test_find_by_name_returns_description(self, tag_repo):
         """Test find_by_name selects the description column."""
         await tag_repo.save(JournalTag(name="work", description="Work entries"))

@@ -223,6 +223,40 @@ async def test_update_tag_clear_parent(service, repo, publisher):
 
 
 @pytest.mark.asyncio
+async def test_update_tag_explicit_parent_wins_over_clear(service, repo):
+    """An explicit parent takes precedence over set_parent_null."""
+    tag = Tag(id=1, name=TagName("Test"), parent_id=None)
+    await repo.save(tag)
+    parent_tag = Tag(id=2, name=TagName("Parent"))
+    await repo.save(parent_tag)
+
+    updated = await service.update_tag(
+        tag_id=1, transaction=None, parent_id=2, set_parent_null=True
+    )
+
+    assert updated.parent_id == 2
+
+
+@pytest.mark.asyncio
+async def test_update_tag_unchanged_parent_is_not_cleared(service, repo):
+    """A parent_id equal to the current parent must not fall through to clearing.
+
+    The no-change case is nested inside the parent_id branch; a flat
+    ``elif set_parent_null`` would clear the parent here instead of keeping it.
+    """
+    parent_tag = Tag(id=2, name=TagName("Parent"))
+    await repo.save(parent_tag)
+    tag = Tag(id=1, name=TagName("Test"), parent_id=2)
+    await repo.save(tag)
+
+    updated = await service.update_tag(
+        tag_id=1, transaction=None, parent_id=2, set_parent_null=True
+    )
+
+    assert updated.parent_id == 2
+
+
+@pytest.mark.asyncio
 async def test_delete_tag(service, repo, publisher):
     tag = Tag(id=1, name=TagName("To_Delete"))
     await repo.save(tag)

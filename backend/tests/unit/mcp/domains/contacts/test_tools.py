@@ -76,6 +76,36 @@ class TestContactTools:
             )
 
     @pytest.mark.asyncio
+    async def test_update_contact_tag_tool_schema(self, mcp_server):
+        """Test update_contact_tag exposes the editable fields and requires only the id."""
+        async with Client(mcp_server) as client:
+            tools_response = await client.list_tools()
+
+            if hasattr(tools_response, "tools"):
+                tools = tools_response.tools
+            else:
+                tools = tools_response
+
+            tool = next(t for t in tools if t.name == "update_contact_tag")
+
+            schema = tool.inputSchema
+            properties = schema["properties"]
+            for field in ("tag_id", "name", "color", "description", "parent_id"):
+                assert field in properties, f"{field} should be an update parameter"
+
+            # Only the tag id is mandatory: every other field is an optional edit.
+            assert schema.get("required", []) == ["tag_id"]
+
+            # move_to_root is how callers clear a parent, since an omitted
+            # parent_id means "leave the parent alone".
+            assert "move_to_root" in properties
+
+            assert tool.description is not None
+            assert "update_journal_tag" in tool.description, (
+                "contact tag tool should point at the journal tag equivalent"
+            )
+
+    @pytest.mark.asyncio
     async def test_list_tools(self, mcp_server):
         """Test that contact tools are properly registered and listed."""
         # Use FastMCP Client for in-memory testing

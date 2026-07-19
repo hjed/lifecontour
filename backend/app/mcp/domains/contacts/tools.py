@@ -85,6 +85,16 @@ class TagInfo(BaseModel):
     description: str
 
 
+class UpdatedTagInfo(BaseModel):
+    """A contact tag as returned by update_contact_tag."""
+
+    id: str
+    name: str
+    color: str | None = None
+    description: str | None = None
+    parent_id: int | None = None
+
+
 class TagListResponse(BaseModel):
     """Response for list_contact_tags MCP tool."""
 
@@ -1224,6 +1234,80 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 "MCP: Failed to list tags",
                 error=str(e),
                 limit=limit,
+            )
+            raise
+
+    @mcp.tool
+    @mcp_unified_error_handler("update_contact_tag", "tag")
+    async def update_contact_tag(
+        tag_id: Annotated[int, Field(description="ID of the contact tag to update")],
+        name: Annotated[
+            str | None, Field(description="New tag name (must be unique)")
+        ] = None,
+        color: Annotated[
+            str | None, Field(description="New hex colour code, e.g. #FF0000")
+        ] = None,
+        description: Annotated[
+            str | None, Field(description="New description of what the tag is for")
+        ] = None,
+        parent_id: Annotated[
+            int | None, Field(description="ID of the new parent tag")
+        ] = None,
+        move_to_root: Annotated[
+            bool,
+            Field(description="Clear the tag's parent, making it a root tag"),
+        ] = False,
+        tag_service: TagService = mcp_depends(get_tag_service),
+        connection: AsyncConnection = mcp_depends(get_async_connection),
+    ) -> str:
+        """
+        Update an existing contact tag's name, colour, description, or parent.
+
+        Contact tags are a separate namespace from journal tags — use
+        update_journal_tag for those, and list_contact_tags to find tag IDs.
+
+        Only the arguments you supply are changed; omitted arguments are left
+        as they are. To move a tag to the root of the hierarchy, pass
+        move_to_root=true rather than a null parent_id, since an omitted
+        parent_id means "leave the parent alone".
+
+        Args:
+            tag_id: The ID of the tag to update
+            name: New name; must not collide with another tag
+            color: New hex colour code (7 characters, e.g. #FF0000)
+            description: New description of what the tag is for
+            parent_id: ID of the new parent tag
+            move_to_root: Clear the parent instead of setting one
+
+        Returns:
+            JSON string containing the updated tag
+        """
+        logger.info("MCP: Updating contact tag", tag_id=tag_id)
+
+        try:
+            # The service owns the unit of work; MCP tools never open transactions.
+            updated = await tag_service.update_tag(
+                tag_id=tag_id,
+                transaction=connection,
+                name=name,
+                color=color,
+                description=description,
+                parent_id=parent_id,
+                set_parent_null=move_to_root,
+            )
+
+            response = UpdatedTagInfo(
+                id=str(updated.id),
+                name=updated.name.value,
+                color=updated.color,
+                description=updated.description,
+                parent_id=updated.parent_id,
+            )
+            return MCPResponseBuilder.success_response(response)
+
+        except Exception as e:
+            logger.error(
+                "MCP: Failed to update contact tag", error=str(e), tag_id=tag_id
             )
             raise
 

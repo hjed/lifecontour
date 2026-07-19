@@ -256,6 +256,288 @@ class TestJournalTagEndpoints:
         assert created_tag_id in tag_ids
 
 
+async def create_tag(client: Any, name: str, **attributes: Any) -> dict[str, Any]:
+    """Create a journal tag via the API and return its resource."""
+    response = await client.post(
+        "/api/journals/tags",
+        json={
+            "data": {
+                "type": "journal-tags",
+                "attributes": {"name": name, **attributes},
+            }
+        },
+    )
+    assert response.status_code == 201, response.text
+    resource: dict[str, Any] = response.json()["data"]
+    return resource
+
+
+async def patch_tag(client: Any, tag_id: str, **attributes: Any) -> Any:
+    """PATCH a journal tag with the supplied attributes."""
+    return await client.patch(
+        f"/api/journals/tags/{tag_id}",
+        json={
+            "data": {
+                "type": "journal-tags",
+                "id": tag_id,
+                "attributes": attributes,
+            }
+        },
+    )
+
+
+@pytest.mark.integration
+class TestUpdateJournalTagEndpoint:
+    """Tests for PATCH /api/journals/tags/{tag_id}."""
+
+    async def test_patch_updates_name_colour_and_description(
+        self, integration_api_client
+    ):
+        """Test PATCH updates all editable fields and persists them."""
+        tag = await create_tag(
+            integration_api_client, "training", color="#00FF00", description="Old"
+        )
+
+        response = await patch_tag(
+            integration_api_client,
+            tag["id"],
+            name="conditioning",
+            color="#123456",
+            description="Structured conditioning work",
+        )
+
+        assert response.status_code == 200, response.text
+        attributes = response.json()["data"]["attributes"]
+        assert attributes["name"] == "conditioning"
+        assert attributes["color"] == "#123456"
+        assert attributes["description"] == "Structured conditioning work"
+
+        # Re-read to prove the write committed before the response was sent.
+        list_response = await integration_api_client.get("/api/journals/tags")
+        persisted = next(
+            t for t in list_response.json()["data"] if t["id"] == tag["id"]
+        )
+        assert persisted["attributes"]["name"] == "conditioning"
+        assert persisted["attributes"]["description"] == "Structured conditioning work"
+
+    async def test_patch_partial_update_leaves_other_fields(
+        self, integration_api_client
+    ):
+        """Test omitted attributes are left untouched."""
+        tag = await create_tag(
+            integration_api_client, "training", color="#00FF00", description="Keep me"
+        )
+
+        response = await patch_tag(integration_api_client, tag["id"], name="cardio")
+
+        assert response.status_code == 200
+        attributes = response.json()["data"]["attributes"]
+        assert attributes["name"] == "cardio"
+        assert attributes["color"] == "#00FF00"
+        assert attributes["description"] == "Keep me"
+
+    async def test_patch_duplicate_name_returns_400(self, integration_api_client):
+        """Test the case-insensitive unique index is enforced on update."""
+        await create_tag(integration_api_client, "training")
+        other = await create_tag(integration_api_client, "reflection")
+
+        response = await patch_tag(integration_api_client, other["id"], name="TRAINING")
+
+        assert response.status_code == 400
+        error = response.json()["errors"][0]
+        assert "already exists" in error["detail"].lower()
+
+    async def test_patch_rename_to_own_name_different_case_succeeds(
+        self, integration_api_client
+    ):
+        """Test re-casing a tag's own name is not a uniqueness conflict."""
+        tag = await create_tag(integration_api_client, "training")
+
+        response = await patch_tag(integration_api_client, tag["id"], name="Training")
+
+        assert response.status_code == 200
+        assert response.json()["data"]["attributes"]["name"] == "Training"
+
+    async def test_patch_reparent_then_clear_parent(self, integration_api_client):
+        """Test a tag can be re-parented and then moved back to the root."""
+        parent = await create_tag(integration_api_client, "outdoors")
+        child = await create_tag(integration_api_client, "climbing")
+
+        reparent = await patch_tag(
+            integration_api_client, child["id"], parent_id=parent["id"]
+        )
+        assert reparent.status_code == 200
+        assert reparent.json()["data"]["attributes"]["parent_id"] == parent["id"]
+
+        cleared = await patch_tag(integration_api_client, child["id"], parent_id=None)
+        assert cleared.status_code == 200
+        assert cleared.json()["data"]["attributes"]["parent_id"] is None
+
+    async def test_patch_cycle_returns_400(self, integration_api_client):
+        """Test a tag cannot become its own ancestor."""
+        parent = await create_tag(integration_api_client, "outdoors")
+        child = await create_tag(integration_api_client, "climbing")
+        assert (
+            await patch_tag(integration_api_client, child["id"], parent_id=parent["id"])
+        ).status_code == 200
+
+        response = await patch_tag(
+            integration_api_client, parent["id"], parent_id=child["id"]
+        )
+
+        assert response.status_code == 400
+        assert "circular" in response.json()["errors"][0]["detail"].lower()
+
+    async def test_patch_self_parent_returns_400(self, integration_api_client):
+        """Test a tag cannot be its own parent."""
+        tag = await create_tag(integration_api_client, "training")
+
+        response = await patch_tag(
+            integration_api_client, tag["id"], parent_id=tag["id"]
+        )
+
+        assert response.status_code == 400
+
+    async def test_patch_invalid_colour_returns_400(self, integration_api_client):
+        """Test a malformed colour is rejected."""
+        tag = await create_tag(integration_api_client, "training")
+
+        response = await patch_tag(integration_api_client, tag["id"], color="green")
+
+        assert response.status_code == 400
+
+    async def test_patch_unknown_tag_returns_404(self, integration_api_client):
+        """Test updating a tag that does not exist returns 404."""
+        response = await patch_tag(
+            integration_api_client,
+            "00000000-0000-0000-0000-000000000000",
+            name="ghost",
+        )
+
+        assert response.status_code == 404
+
+    async def test_patch_unknown_parent_returns_404(self, integration_api_client):
+        """Test re-parenting under a tag that does not exist returns 404."""
+        tag = await create_tag(integration_api_client, "training")
+
+        response = await patch_tag(
+            integration_api_client,
+            tag["id"],
+            parent_id="00000000-0000-0000-0000-000000000000",
+        )
+
+        assert response.status_code == 404
+
+    async def test_patch_invalid_id_format_returns_400(self, integration_api_client):
+        """Test a non-UUID path id is rejected."""
+        response = await patch_tag(integration_api_client, "not-a-uuid", name="x")
+
+        assert response.status_code == 400
+
+    async def test_patch_wrong_resource_type_returns_400(self, integration_api_client):
+        """Test the JSON:API resource type is validated."""
+        tag = await create_tag(integration_api_client, "training")
+
+        response = await integration_api_client.patch(
+            f"/api/journals/tags/{tag['id']}",
+            json={
+                "data": {
+                    "type": "tags",
+                    "id": tag["id"],
+                    "attributes": {"name": "renamed"},
+                }
+            },
+        )
+
+        assert response.status_code == 400
+
+    async def test_patch_empty_resource_type_returns_400(self, integration_api_client):
+        """Test a falsy but invalid resource type is rejected, not skipped."""
+        tag = await create_tag(integration_api_client, "training")
+
+        response = await integration_api_client.patch(
+            f"/api/journals/tags/{tag['id']}",
+            json={
+                "data": {
+                    "type": "",
+                    "id": tag["id"],
+                    "attributes": {"name": "renamed"},
+                }
+            },
+        )
+
+        assert response.status_code == 400
+
+    async def test_patch_body_id_case_insensitive_match(self, integration_api_client):
+        """Test a body id differing only in case is accepted as the same UUID."""
+        tag = await create_tag(integration_api_client, "training")
+
+        response = await integration_api_client.patch(
+            f"/api/journals/tags/{tag['id']}",
+            json={
+                "data": {
+                    "type": "journal-tags",
+                    "id": tag["id"].upper(),
+                    "attributes": {"name": "renamed"},
+                }
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["attributes"]["name"] == "renamed"
+
+    async def test_patch_malformed_body_id_returns_400(self, integration_api_client):
+        """Test a non-UUID body id is rejected."""
+        tag = await create_tag(integration_api_client, "training")
+
+        response = await integration_api_client.patch(
+            f"/api/journals/tags/{tag['id']}",
+            json={
+                "data": {
+                    "type": "journal-tags",
+                    "id": "not-a-uuid",
+                    "attributes": {"name": "renamed"},
+                }
+            },
+        )
+
+        assert response.status_code == 400
+
+    async def test_patch_body_id_mismatch_returns_400(self, integration_api_client):
+        """Test a body id that disagrees with the path is rejected."""
+        tag = await create_tag(integration_api_client, "training")
+        other = await create_tag(integration_api_client, "reflection")
+
+        response = await integration_api_client.patch(
+            f"/api/journals/tags/{tag['id']}",
+            json={
+                "data": {
+                    "type": "journal-tags",
+                    "id": other["id"],
+                    "attributes": {"name": "renamed"},
+                }
+            },
+        )
+
+        assert response.status_code == 400
+
+    async def test_patch_empty_parent_id_returns_400(self, integration_api_client):
+        """Test an empty-string parent_id is rejected, not silently ignored."""
+        tag = await create_tag(integration_api_client, "training")
+
+        response = await patch_tag(integration_api_client, tag["id"], parent_id="")
+
+        assert response.status_code == 400
+
+    async def test_patch_explicit_null_name_returns_400(self, integration_api_client):
+        """Test an explicit null name is rejected rather than clearing the name."""
+        tag = await create_tag(integration_api_client, "training")
+
+        response = await patch_tag(integration_api_client, tag["id"], name=None)
+
+        assert response.status_code == 400
+
+
 @pytest.mark.integration
 class TestJournalTagAssignment:
     """Tests for assigning tags to journals."""

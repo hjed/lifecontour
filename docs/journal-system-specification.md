@@ -814,6 +814,36 @@ GET /api/contacts/{id}/journals
 - Returns: paginated journal list
 ```
 
+**Tag Management:**
+
+```
+GET /api/journals/tags
+- List all journal tags
+- Returns: tags with name, color, description, parent_id
+
+POST /api/journals/tags
+- Create a journal tag
+- Body: { name, color?, description?, parent_id? }
+- Returns: created tag
+
+PATCH /api/journals/tags/{tag_id}
+- Update a journal tag
+- Body: any of { name, color, description, parent_id }
+- Omitted attributes are unchanged
+- parent_id is the only field where null is meaningful: an explicit null moves
+  the tag to the root of the hierarchy
+- An explicit null for name, color, or description is rejected with a 400 —
+  these fields cannot be cleared, only set to a new value. Omit a field to
+  leave it as it is
+- Validates name uniqueness (case-insensitive), hex colour format, and
+  rejects a parent that would make the tag its own ancestor
+- Returns: updated tag
+
+DELETE /api/journals/tags/{tag_id}
+- Delete a journal tag
+- Returns: 204 No Content
+```
+
 **Search:**
 
 ```

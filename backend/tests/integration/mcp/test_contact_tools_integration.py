@@ -717,6 +717,190 @@ class TestContactToolsIntegration:
         assert [tag["name"] for tag in payload["tags"]] == ["colleague", "friend"]
 
     @pytest.mark.asyncio
+    async def test_update_contact_tag_via_mounted_http_session(
+        self,
+        authenticated_lifespan_client,
+        tag_repo,
+    ):
+        """The update_contact_tag tool updates a tag and commits the write."""
+        tag = await tag_repo.save(Tag(name=TagName("friend"), color="#00FF00"))
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            response = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "update_contact_tag",
+                        "arguments": {
+                            "tag_id": tag.id,
+                            "name": "close-friend",
+                            "color": "#123456",
+                            "description": "People I see often",
+                        },
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+
+        assert response.status_code == 200
+        payload = extract_mcp_json_payload(response.text)
+        assert payload["name"] == "close-friend"
+        assert payload["color"] == "#123456"
+        assert payload["description"] == "People I see often"
+
+        persisted = await tag_repo.find_by_id(tag.id)
+        assert persisted is not None
+        assert str(persisted.name) == "close-friend"
+
+    @pytest.mark.asyncio
+    async def test_update_contact_tag_unknown_tag_reports_not_found(
+        self,
+        authenticated_lifespan_client,
+        clean_database,
+    ):
+        """An unknown tag id is reported as not-found, not a generic failure.
+
+        Callers need to distinguish a missing tag from a server error, so the
+        error handler must recognise TagNotFoundError rather than letting it
+        fall through to the catch-all.
+        """
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            response = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "update_contact_tag",
+                        "arguments": {"tag_id": 999999, "name": "ghost"},
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+
+        assert response.status_code == 200
+        payload = extract_mcp_json_payload(response.text)
+        assert "not found" in payload["error"].lower()
+        # The id must be reported as the id, so a client can surface or retry
+        # with it rather than parsing it back out of a message.
+        assert payload["tag_id"] == 999999
+
+    @pytest.mark.asyncio
+    async def test_update_contact_tag_reparent_and_move_to_root(
+        self,
+        authenticated_lifespan_client,
+        tag_repo,
+    ):
+        """The tool can re-parent a tag and then move it back to the root."""
+        parent = await tag_repo.save(Tag(name=TagName("work")))
+        child = await tag_repo.save(Tag(name=TagName("colleague")))
+
+        async def call(arguments):
+            async with authenticated_lifespan_client() as authenticated_client:
+                session_id = await initialize_mcp_session(authenticated_client)
+                return await authenticated_client.post(
+                    "/mcp-server/mcp",
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "update_contact_tag",
+                            "arguments": arguments,
+                        },
+                    },
+                    headers=mcp_headers(session_id),
+                )
+
+        await call({"tag_id": child.id, "parent_id": parent.id})
+        reparented = await tag_repo.find_by_id(child.id)
+        assert reparented is not None
+        assert reparented.parent_id == parent.id
+
+        await call({"tag_id": child.id, "move_to_root": True})
+        cleared = await tag_repo.find_by_id(child.id)
+        assert cleared is not None
+        assert cleared.parent_id is None
+
+    @pytest.mark.asyncio
+    async def test_update_contact_tag_explicit_parent_wins_over_move_to_root(
+        self,
+        authenticated_lifespan_client,
+        tag_repo,
+    ):
+        """Supplying the current parent alongside move_to_root keeps the parent.
+
+        A flat parent/clear precedence would treat the unchanged parent_id as
+        "no parent supplied" and clear it instead.
+        """
+        parent = await tag_repo.save(Tag(name=TagName("work")))
+        child = await tag_repo.save(Tag(name=TagName("colleague"), parent_id=parent.id))
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            response = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "update_contact_tag",
+                        "arguments": {
+                            "tag_id": child.id,
+                            "parent_id": parent.id,
+                            "move_to_root": True,
+                        },
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+
+        assert response.status_code == 200
+        persisted = await tag_repo.find_by_id(child.id)
+        assert persisted is not None
+        assert persisted.parent_id == parent.id
+
+    @pytest.mark.asyncio
+    async def test_update_contact_tag_duplicate_name_errors(
+        self,
+        authenticated_lifespan_client,
+        tag_repo,
+    ):
+        """A name held by another tag is rejected and nothing is written."""
+        await tag_repo.save(Tag(name=TagName("friend")))
+        other = await tag_repo.save(Tag(name=TagName("colleague")))
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            response = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "update_contact_tag",
+                        "arguments": {"tag_id": other.id, "name": "friend"},
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+
+        assert response.status_code == 200
+        assert "already exists" in response.text.lower()
+
+        persisted = await tag_repo.find_by_id(other.id)
+        assert persisted is not None
+        assert str(persisted.name) == "colleague"
+
+    @pytest.mark.asyncio
     async def test_contact_relationships_via_mounted_http_session(
         self,
         authenticated_lifespan_client,

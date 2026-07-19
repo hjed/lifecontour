@@ -206,16 +206,20 @@ class TagService:
         changed_fields: dict[str, Any],
     ) -> None:
         """Validate and apply a parent_id change, or clear it if requested."""
-        if parent_id is not None and tag.parent_id != parent_id:
-            await self.tag_hierarchy_service.validate_parent_child_relationship(
-                parent_id=parent_id, child_id=tag_id, transaction=transaction
-            )
-            parent_tag = await self.tag_repo.find_by_id(parent_id)
-            if not parent_tag:
-                raise TagNotFoundError(parent_id)
-            old_parent = tag.parent_id
-            tag.parent_id = parent_id
-            changed_fields["parent_id"] = (old_parent, parent_id)
+        # An explicit parent wins over set_parent_null. The "no change needed"
+        # case is nested rather than flat so that supplying a parent_id equal to
+        # the current parent does not fall through and clear it instead.
+        if parent_id is not None:
+            if tag.parent_id != parent_id:
+                await self.tag_hierarchy_service.validate_parent_child_relationship(
+                    parent_id=parent_id, child_id=tag_id, transaction=transaction
+                )
+                parent_tag = await self.tag_repo.find_by_id(parent_id)
+                if not parent_tag:
+                    raise TagNotFoundError(parent_id)
+                old_parent = tag.parent_id
+                tag.parent_id = parent_id
+                changed_fields["parent_id"] = (old_parent, parent_id)
         elif set_parent_null and tag.parent_id is not None:
             old_parent = tag.parent_id
             tag.parent_id = None

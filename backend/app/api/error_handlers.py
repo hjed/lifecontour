@@ -23,6 +23,7 @@ from core_shared.models.journals import (
     JournalDomainError,
     JournalMaxDepthExceededError,
     JournalNotFoundError,
+    JournalTagNotFoundError,
     JournalTypeDependencyError,
     JournalValidationError,
     MoodDataValidationError,
@@ -138,6 +139,7 @@ def create_domain_error_response(domain_error: DomainError) -> JsonApiErrorRespo
         DuplicateBirthdayError: "DUPLICATE_BIRTHDAY",
         # Journal errors
         JournalNotFoundError: "JOURNAL_NOT_FOUND",
+        JournalTagNotFoundError: "JOURNAL_TAG_NOT_FOUND",
         JournalValidationError: "JOURNAL_VALIDATION_ERROR",
         JournalCycleError: "JOURNAL_CYCLE_ERROR",
         JournalMaxDepthExceededError: "JOURNAL_MAX_DEPTH_EXCEEDED",
