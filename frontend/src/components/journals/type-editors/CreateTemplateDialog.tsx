@@ -114,8 +114,10 @@ function CreateTemplateDialogContent({
 }: CreateTemplateDialogContentProps) {
   const queryClient = useQueryClient();
   const isEditing = template != null;
+  // When editing, a template with null pitches means "no pitches" — only fall
+  // back to initialPitches (create-mode seed data) when no template is given.
   const [pitches, setPitches] = useState<TemplatePitch[]>(
-    template?.attributes.pitches ?? initialPitches
+    template ? (template.attributes.pitches ?? []) : initialPitches
   );
 
   const form = useForm<CreateTemplateFormValues>({

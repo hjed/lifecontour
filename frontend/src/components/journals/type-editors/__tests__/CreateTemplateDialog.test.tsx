@@ -188,6 +188,19 @@ describe('CreateTemplateDialog', () => {
       );
     });
 
+    it('does not seed create-mode pitches when the template has none', () => {
+      renderComponent({
+        template: {
+          ...existingTemplate,
+          attributes: { ...existingTemplate.attributes, pitches: null },
+        },
+        initialPitches: [{ pitch_number: 1, height: 99 }],
+      });
+
+      // The edited template's (empty) pitches win over initialPitches.
+      expect(screen.queryByTestId('pitch-row-0')).not.toBeInTheDocument();
+    });
+
     it('sends explicit empty values so cleared fields are persisted', async () => {
       const mockResponse = {
         data: { id: 'tpl-42', attributes: { name: 'Empress Canyon' } },

@@ -92,6 +92,7 @@ test.describe('Settings - Template Management', () => {
       },
     });
     expect(templateRes.ok()).toBeTruthy();
+    const templateId = (await templateRes.json()).data.id as string;
 
     // 2. Open the edit dialog from settings
     await page.goto('/settings');
@@ -139,5 +140,9 @@ test.describe('Settings - Template Management', () => {
     await expect(
       page.getByRole('dialog').getByLabel('Height for pitch 1')
     ).toHaveValue('35');
+
+    // Clean up the template so it doesn't leak into later e2e runs.
+    const deleteRes = await page.request.delete(`/api/templates/${templateId}`);
+    expect(deleteRes.ok()).toBeTruthy();
   });
 });
