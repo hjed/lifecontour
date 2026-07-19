@@ -610,6 +610,13 @@ test.describe('Journal Creation UI Flow', () => {
 
     await page.getByTestId('type-section-trigger-abseiling_trip').click();
 
+    // The persisted summary keeps the abseil-only count while total length
+    // still includes the jump's descent.
+    const summary = page.getByTestId('abseiling-trip-summary');
+    await expect(summary).toBeVisible();
+    await expect(summary).toContainText('1');
+    await expect(summary).toContainText('45 m');
+
     // Read-only mode shows the jump badge for the second pitch.
     const pitchReadOnly = page.getByTestId('pitch-editor-readonly');
     await expect(pitchReadOnly).toBeVisible();

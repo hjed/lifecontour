@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
-import type { AbseilPitch } from '@/types/journals';
+import type { AbseilPitch, PitchType } from '@/types/journals';
 import { PITCH_TYPES } from './pitchUtils';
 
 const VALID_ANCHOR_LOCATIONS = ['TR', 'TL', 'Centre'];
@@ -72,10 +72,12 @@ export function PitchEditor({
   );
 
   const handleUpdatePitch = useCallback(
-    (
+    // Generic so the value type is coupled to the field being updated —
+    // e.g. only PitchType | null is assignable to pitch_type.
+    <K extends keyof AbseilPitch>(
       index: number,
-      field: keyof AbseilPitch,
-      value: AbseilPitch[keyof AbseilPitch]
+      field: K,
+      value: AbseilPitch[K]
     ) => {
       const newPitches = [...pitches];
       newPitches[index] = { ...newPitches[index], [field]: value };
@@ -205,7 +207,12 @@ export function PitchEditor({
                     <Select
                       value={pitch.pitch_type ?? 'abseil'}
                       onValueChange={value =>
-                        handleUpdatePitch(index, 'pitch_type', value)
+                        // Safe: the only options rendered are PITCH_TYPES.
+                        handleUpdatePitch(
+                          index,
+                          'pitch_type',
+                          value as PitchType
+                        )
                       }
                     >
                       <SelectTrigger
