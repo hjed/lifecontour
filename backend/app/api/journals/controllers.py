@@ -57,6 +57,7 @@ from app.api.journals.schemas import (
     JournalTagAddRequest,
     JournalTagCreateRequest,
     JournalTagListResponse,
+    JournalTagMergeRequest,
     JournalTagResource,
     JournalTagResponse,
     JournalTagUpdateRequest,
@@ -780,6 +781,65 @@ async def delete_journal_tag(
     # Delete as a committed unit of work. The service raises
     # JournalTagNotFoundError (404) when the tag does not exist.
     await journal_tag_service.delete_tag(tag_uuid, connection)
+
+    return None
+
+
+@router.post("/tags/{tag_id}/merge", status_code=status.HTTP_204_NO_CONTENT)
+@inject
+async def merge_journal_tag(
+    tag_id: str,
+    merge_request: JournalTagMergeRequest,
+    journal_tag_service: FromDishka[JournalTagService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> None:
+    """
+    Merge a journal tag into another tag, deleting the source.
+
+    Every journal tagged with the source tag ends up tagged with the target
+    instead; journals already carrying both keep a single assignment. Child
+    tags of the source are adopted by the target rather than moved to the root.
+
+    Args:
+        tag_id: UUID of the source tag, which is merged away and deleted
+        merge_request: Body carrying the target tag id
+        journal_tag_service: Service owning the merge unit of work
+        connection: Database connection
+        user: Authenticated user
+
+    Returns:
+        None (204 No Content)
+
+    Raises:
+        400: Invalid tag ID format, wrong resource type, merging a tag into
+             itself, or merging a tag into one of its own descendants.
+        404: Either tag does not exist.
+    """
+    from uuid import UUID
+
+    if merge_request.data.type != "journal-tags":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid resource type, expected 'journal-tags'",
+        )
+
+    try:
+        source_uuid = UUID(tag_id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid tag ID format",
+        ) from e
+
+    try:
+        target_uuid = UUID(merge_request.data.attributes.target_tag_id)
+    except ValueError as e:
+        raise JournalValidationError("target_tag_id", INVALID_UUID_FORMAT_MSG) from e
+
+    # Merge as a committed unit of work. The service validates both tags exist
+    # and that the target is not a descendant of the source.
+    await journal_tag_service.merge_tag(source_uuid, target_uuid, connection)
 
     return None
 

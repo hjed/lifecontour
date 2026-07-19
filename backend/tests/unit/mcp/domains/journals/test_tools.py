@@ -75,6 +75,7 @@ class TestJournalTools:
                 "get_daily_summary",
                 "list_journal_tags",
                 "delete_journal_tag",
+                "merge_journal_tag",
             ]
 
             for expected_tool in expected_tools:
@@ -159,6 +160,41 @@ class TestJournalTools:
             assert "every journal" in tool.description.lower()
             assert "re-parented" in tool.description.lower()
             assert "delete_contact_tag" in tool.description, (
+                "journal tag tool should point at the contact tag equivalent"
+            )
+
+    @pytest.mark.asyncio
+    async def test_merge_journal_tag_tool_schema(self, mcp_server):
+        """Test merge_journal_tag takes both tag ids and documents the semantics."""
+        async with Client(mcp_server) as client:
+            tools_response = await client.list_tools()
+
+            if hasattr(tools_response, "tools"):
+                tools = tools_response.tools
+            else:
+                tools = tools_response
+
+            tool = next(t for t in tools if t.name == "merge_journal_tag")
+
+            schema = tool.inputSchema
+            properties = schema["properties"]
+            assert "source_tag_id" in properties
+            assert "target_tag_id" in properties
+            # Both ids are mandatory: there is no sensible default survivor.
+            assert sorted(schema.get("required", [])) == [
+                "source_tag_id",
+                "target_tag_id",
+            ]
+
+            assert tool.description is not None
+            description = tool.description.lower()
+            # The destructive half of the contract must be stated, not implied
+            # by the tool name — the source tag is deleted.
+            assert "deleted" in description
+            assert "descendant" in description, (
+                "the rejected-merge rule should be documented for callers"
+            )
+            assert "merge_contact_tags" in tool.description, (
                 "journal tag tool should point at the contact tag equivalent"
             )
 

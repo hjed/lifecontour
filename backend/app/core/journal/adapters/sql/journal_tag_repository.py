@@ -145,6 +145,71 @@ class SqlJournalTagRepository(JournalTagRepository):
         query = text("DELETE FROM journal_tags WHERE id = :tag_id")
         await self.conn.execute(query, {"tag_id": tag_id})
 
+    async def merge_into(self, source_id: UUID, target_id: UUID) -> None:
+        """Fold the source tag into the target tag and delete the source."""
+        # Merging a tag into itself would delete every one of its assignments
+        # (step 1's EXISTS matches the row against itself) and then delete the
+        # tag — silent data loss from what reads like a no-op. The service
+        # rejects it before reaching here, so this is a precondition failure
+        # rather than user input, and a bare ValueError is the right shape.
+        if source_id == target_id:
+            raise ValueError(
+                "merge_into requires distinct source and target tags; "
+                f"both were {source_id}"
+            )
+
+        params = {"source_id": source_id, "target_id": target_id}
+
+        # 1. Drop source assignments the journal already holds for the target,
+        #    so the re-point below cannot violate the composite primary key.
+        await self.conn.execute(
+            text(
+                """
+                DELETE FROM journal_tag_assignments src
+                WHERE src.tag_id = :source_id
+                AND EXISTS (
+                    SELECT 1 FROM journal_tag_assignments tgt
+                    WHERE tgt.journal_id = src.journal_id
+                    AND tgt.tag_id = :target_id
+                )
+                """
+            ),
+            params,
+        )
+
+        # 2. Re-point the remaining assignments onto the target.
+        await self.conn.execute(
+            text(
+                """
+                UPDATE journal_tag_assignments
+                SET tag_id = :target_id
+                WHERE tag_id = :source_id
+                """
+            ),
+            params,
+        )
+
+        # 3. Adopt the source's children so deleting it does not send them to
+        #    the root via the ON DELETE SET NULL FK. The target is excluded:
+        #    when it is itself a child of the source it would otherwise become
+        #    its own parent, and a self-cycle would poison every later
+        #    ancestry walk. Its parent is cleared instead, promoting it to the
+        #    root — the position the source it replaces would have vacated.
+        await self.conn.execute(
+            text(
+                """
+                UPDATE journal_tags
+                SET parent_id = CASE WHEN id = :target_id THEN NULL
+                                     ELSE :target_id END,
+                    updated_at = now()
+                WHERE parent_id = :source_id
+                """
+            ),
+            params,
+        )
+
+        await self.delete(source_id)
+
     async def get_all(self) -> list[JournalTag]:
         """Get all tags."""
         query = text(

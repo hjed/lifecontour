@@ -134,6 +134,38 @@ class TestContactTools:
             )
 
     @pytest.mark.asyncio
+    async def test_merge_contact_tags_tool_schema(self, mcp_server):
+        """Test merge_contact_tags is registered under its scoped name.
+
+        Renamed from the unscoped ``merge_tags`` when ``merge_journal_tag``
+        landed beside it, matching ``list_contact_tags`` and the other scoped
+        tag tools.
+        """
+        async with Client(mcp_server) as client:
+            tools_response = await client.list_tools()
+
+            if hasattr(tools_response, "tools"):
+                tools = tools_response.tools
+            else:
+                tools = tools_response
+
+            tool_names = [tool.name for tool in tools]
+            assert "merge_contact_tags" in tool_names
+            assert "merge_tags" not in tool_names, (
+                "merge_tags should have been renamed to merge_contact_tags"
+            )
+
+            tool = next(t for t in tools if t.name == "merge_contact_tags")
+            properties = tool.inputSchema["properties"]
+            assert "source_id" in properties
+            assert "target_id" in properties
+
+            assert tool.description is not None
+            assert "merge_journal_tag" in tool.description, (
+                "contact tag tool should point at the journal tag equivalent"
+            )
+
+    @pytest.mark.asyncio
     async def test_list_tools(self, mcp_server):
         """Test that contact tools are properly registered and listed."""
         # Use FastMCP Client for in-memory testing

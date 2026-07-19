@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from app.api.journals.schemas import (
     JournalTagCreateAttributes,
+    JournalTagMergeRequest,
     JournalTagUpdateAttributes,
 )
 
@@ -77,3 +78,38 @@ class TestJournalTagUpdateAttributes:
         """Test a blank name is rejected rather than clearing the name."""
         with pytest.raises(ValidationError):
             JournalTagUpdateAttributes(name="")
+
+
+@pytest.mark.unit
+class TestJournalTagMergeRequest:
+    """Test the merge-tag request body.
+
+    Mirrors the contact ``TagMergeRequest`` shape: the source tag is the path
+    parameter, so the body carries only the target.
+    """
+
+    def test_accepts_valid_body(self):
+        """Test a well-formed merge body parses."""
+        request = JournalTagMergeRequest.model_validate(
+            {
+                "data": {
+                    "type": "journal-tags",
+                    "attributes": {"target_tag_id": "some-uuid"},
+                }
+            }
+        )
+        assert request.data.attributes.target_tag_id == "some-uuid"
+
+    def test_type_defaults_to_journal_tags(self):
+        """Test an omitted resource type defaults rather than failing."""
+        request = JournalTagMergeRequest.model_validate(
+            {"data": {"attributes": {"target_tag_id": "some-uuid"}}}
+        )
+        assert request.data.type == "journal-tags"
+
+    def test_rejects_missing_target(self):
+        """Test the target tag id is required."""
+        with pytest.raises(ValidationError):
+            JournalTagMergeRequest.model_validate(
+                {"data": {"type": "journal-tags", "attributes": {}}}
+            )

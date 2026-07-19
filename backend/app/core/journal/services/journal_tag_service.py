@@ -168,6 +168,35 @@ class JournalTagService:
         await self.tag_repo.delete(tag_id)
 
     @transactional
+    async def merge_tag(
+        self,
+        source_id: UUID,
+        target_id: UUID,
+        transaction: AsyncConnection,
+    ) -> None:
+        """Merge the source tag into the target tag, deleting the source.
+
+        Mirrors the contact ``TagService.merge_tags`` contract: journals tagged
+        with the source end up tagged with the target (journals already holding
+        both keep one assignment), the source's children are adopted by the
+        target, and the source tag is deleted. The row-level work lives in the
+        repository so this layer holds no SQL.
+
+        Args:
+            source_id: The tag to merge away and delete.
+            target_id: The surviving tag.
+            transaction: Request connection; the write commits before the response.
+
+        Raises:
+            JournalTagNotFoundError: Either tag does not exist.
+            JournalValidationError: The target is the source itself or one of
+                its descendants.
+        """
+        await self.hierarchy_service.validate_merge_target(source_id, target_id)
+
+        await self.tag_repo.merge_into(source_id, target_id)
+
+    @transactional
     async def assign_tag(
         self,
         journal_id: int,

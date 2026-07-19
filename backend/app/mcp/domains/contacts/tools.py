@@ -1353,8 +1353,8 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             raise
 
     @mcp.tool
-    @mcp_unified_error_handler("merge_tags", "tag")
-    async def merge_tags(
+    @mcp_unified_error_handler("merge_contact_tags", "tag")
+    async def merge_contact_tags(
         source_id: Annotated[
             int, Field(description="ID of the source tag to merge and delete")
         ],
@@ -1365,7 +1365,10 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         connection: AsyncConnection = mcp_depends(get_async_connection),
     ) -> str:
         """
-        Merge a source tag into a target tag.
+        Merge a source contact tag into a target contact tag.
+
+        Contact tags are a separate namespace from journal tags — use
+        merge_journal_tag for those, and list_contact_tags to find tag IDs.
 
         This will reassign all contacts associated with the source tag to the target tag,
         re-parent any child tags to the target tag, and then permanently delete the source tag.
