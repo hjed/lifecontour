@@ -52,6 +52,23 @@ describe('AbseilingTripTypeEditor', () => {
     expect(screen.getByTestId('total-length-input')).toBeInTheDocument();
   });
 
+  it('shows an explicit zero abseil count in view mode for all-jump trips', () => {
+    render(
+      <AbseilingTripTypeEditor
+        createMode={false}
+        data={{
+          number_of_abseils: 0,
+          total_length: 8,
+          pitches: [{ pitch_number: 1, height: 8, pitch_type: 'jump' }],
+        }}
+      />
+    );
+
+    const summary = screen.getByTestId('abseiling-trip-summary');
+    expect(summary).toHaveTextContent('Abseils');
+    expect(summary).toHaveTextContent('0');
+  });
+
   it('renders view mode with abseiling summary values', () => {
     render(
       <AbseilingTripTypeEditor

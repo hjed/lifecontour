@@ -136,10 +136,9 @@ export function AbseilingTripTypeEditor({
 
     const summaryItems: ReadOnlyTypeSummaryItem[] = [];
 
-    if (
-      initialData.number_of_abseils != null &&
-      initialData.number_of_abseils > 0
-    ) {
+    // Show an explicit 0 too: an all-jump/down-climb trip legitimately has
+    // pitches but zero abseils.
+    if (initialData.number_of_abseils != null) {
       summaryItems.push({
         label: 'Abseils',
         value: initialData.number_of_abseils,
