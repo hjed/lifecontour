@@ -11,7 +11,7 @@ performed a rescue or set up the abseil.
 from dataclasses import dataclass
 from datetime import datetime
 
-from .constants import VALID_ANCHOR_LOCATIONS, VALID_ANCHOR_TYPES
+from .constants import VALID_ANCHOR_LOCATIONS, VALID_ANCHOR_TYPES, VALID_PITCH_TYPES
 from .exceptions import AbseilPitchValidationError
 
 
@@ -33,6 +33,8 @@ class AbseilPitch:
         did_rescue: Whether a rescue was performed on this pitch (nullable)
         did_setup: Whether the user set up the abseil on this pitch (nullable)
         notes: Optional short notes for the pitch (nullable)
+        pitch_type: How the pitch is descended — abseil, jump, or down_climb
+            (nullable; null is treated as abseil)
         created_at: Creation timestamp
         updated_at: Last update timestamp
     """
@@ -46,6 +48,7 @@ class AbseilPitch:
     did_rescue: bool | None = None
     did_setup: bool | None = None
     notes: str | None = None
+    pitch_type: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -56,6 +59,7 @@ class AbseilPitch:
         self._validate_height()
         self._validate_anchor_location()
         self._validate_anchor_type()
+        self._validate_pitch_type()
 
     def _validate_journal_id(self) -> None:
         """Validate journal_id is positive."""
@@ -92,4 +96,13 @@ class AbseilPitch:
                 raise AbseilPitchValidationError(
                     "anchor_type",
                     f"Anchor type must be one of: {', '.join(VALID_ANCHOR_TYPES)}",
+                )
+
+    def _validate_pitch_type(self) -> None:
+        """Validate pitch_type is one of the valid values if provided."""
+        if self.pitch_type is not None:
+            if self.pitch_type not in VALID_PITCH_TYPES:
+                raise AbseilPitchValidationError(
+                    "pitch_type",
+                    f"Pitch type must be one of: {', '.join(VALID_PITCH_TYPES)}",
                 )

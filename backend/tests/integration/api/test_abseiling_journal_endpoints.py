@@ -192,6 +192,61 @@ async def test_pitch_notes_round_trip(
     assert updated_pitches[0]["notes"] == "Dry in low water"
 
 
+async def test_pitch_type_round_trip_and_abseil_count(
+    authenticated_client: AsyncClient,
+    base_journal_payload: dict[str, Any],
+):
+    """pitch_type persists and only abseil-type pitches count as abseils."""
+    payload = base_journal_payload.copy()
+    payload["data"]["attributes"]["type_data"] = {
+        JournalType.ABSEILING_TRIP.value: {
+            "pitches": [
+                {"pitch_number": 1, "height": 20},
+                {"pitch_number": 2, "height": 25, "pitch_type": "abseil"},
+                {"pitch_number": 3, "height": 5, "pitch_type": "jump"},
+                {"pitch_number": 4, "height": 3, "pitch_type": "down_climb"},
+            ]
+        }
+    }
+
+    create_resp = await authenticated_client.post("/api/journals", json=payload)
+    assert create_resp.status_code == 201, create_resp.json()
+    journal_id = create_resp.json()["data"]["id"]
+
+    get_resp = await authenticated_client.get(f"/api/journals/{journal_id}")
+    assert get_resp.status_code == 200
+    type_data = get_resp.json()["data"]["attributes"]["type_data"][
+        JournalType.ABSEILING_TRIP.value
+    ]
+    pitches = type_data["pitches"]
+    # Journal serialization excludes None fields, so an untyped pitch omits
+    # the key entirely (mirrors the notes assertion above).
+    assert "pitch_type" not in pitches[0]
+    assert pitches[1]["pitch_type"] == "abseil"
+    assert pitches[2]["pitch_type"] == "jump"
+    assert pitches[3]["pitch_type"] == "down_climb"
+    # Only the None and "abseil" pitches count as abseils.
+    assert type_data["number_of_abseils"] == 2
+    # Every pitch descends its height regardless of type.
+    assert type_data["total_length"] == 53
+
+
+async def test_invalid_pitch_type_rejected(
+    authenticated_client: AsyncClient,
+    base_journal_payload: dict[str, Any],
+):
+    """An unknown pitch_type is rejected with a 400."""
+    payload = base_journal_payload.copy()
+    payload["data"]["attributes"]["type_data"] = {
+        JournalType.ABSEILING_TRIP.value: {
+            "pitches": [{"pitch_number": 1, "pitch_type": "swim"}]
+        }
+    }
+
+    response = await authenticated_client.post("/api/journals", json=payload)
+    assert response.status_code == 400
+
+
 async def _create_template(
     client: AsyncClient, template_type: str = "canyoning"
 ) -> str:

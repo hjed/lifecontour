@@ -28,6 +28,7 @@ class SqlAbseilPitchRepository(AbseilPitchRepository):
             did_rescue=row.did_rescue,
             did_setup=row.did_setup,
             notes=row.notes,
+            pitch_type=row.pitch_type,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -49,11 +50,11 @@ class SqlAbseilPitchRepository(AbseilPitchRepository):
             """
             INSERT INTO abseil_pitches (
                 journal_id, pitch_number, height, anchor_location,
-                anchor_type, did_rescue, did_setup, notes
+                anchor_type, did_rescue, did_setup, notes, pitch_type
             )
             VALUES (
                 :journal_id, :pitch_number, :height, :anchor_location,
-                :anchor_type, :did_rescue, :did_setup, :notes
+                :anchor_type, :did_rescue, :did_setup, :notes, :pitch_type
             )
             ON CONFLICT (journal_id, pitch_number) DO UPDATE SET
                 height = EXCLUDED.height,
@@ -62,9 +63,11 @@ class SqlAbseilPitchRepository(AbseilPitchRepository):
                 did_rescue = EXCLUDED.did_rescue,
                 did_setup = EXCLUDED.did_setup,
                 notes = EXCLUDED.notes,
+                pitch_type = EXCLUDED.pitch_type,
                 updated_at = now()
             RETURNING id, journal_id, pitch_number, height, anchor_location,
-                      anchor_type, did_rescue, did_setup, notes, created_at, updated_at
+                      anchor_type, did_rescue, did_setup, notes, pitch_type,
+                      created_at, updated_at
             """
         )
         result = await self.conn.execute(
@@ -78,6 +81,7 @@ class SqlAbseilPitchRepository(AbseilPitchRepository):
                 "did_rescue": pitch.did_rescue,
                 "did_setup": pitch.did_setup,
                 "notes": pitch.notes,
+                "pitch_type": pitch.pitch_type,
             },
         )
         row = result.fetchone()
@@ -88,7 +92,8 @@ class SqlAbseilPitchRepository(AbseilPitchRepository):
         query = text(
             """
             SELECT id, journal_id, pitch_number, height, anchor_location,
-                   anchor_type, did_rescue, did_setup, notes, created_at, updated_at
+                   anchor_type, did_rescue, did_setup, notes, pitch_type,
+                   created_at, updated_at
             FROM abseil_pitches
             WHERE journal_id = :journal_id
             ORDER BY pitch_number

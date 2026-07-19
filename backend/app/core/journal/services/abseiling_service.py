@@ -8,6 +8,7 @@ import dataclasses
 
 from core_shared.models.journals.abseil_pitch import AbseilPitch
 from core_shared.models.journals.abseiling_data import AbseilingData
+from core_shared.models.journals.constants import PITCH_TYPE_ABSEIL
 from core_shared.models.journals.exceptions import JournalValidationError
 
 from app.core.journal.models.repositories import (
@@ -38,8 +39,12 @@ class AbseilingService:
         Returns:
             A new AbseilingData instance with updated calculations.
         """
-        # Calculate totals from pitches
-        calculated_abseils = len(pitches)
+        # Calculate totals from pitches. Only abseil-type pitches count as
+        # abseils (a null pitch_type means abseil); jumps and down climbs still
+        # contribute to total_length/setups/rescues since they descend height.
+        calculated_abseils = sum(
+            1 for p in pitches if p.pitch_type in (None, PITCH_TYPE_ABSEIL)
+        )
         calculated_length = sum((p.height for p in pitches if p.height is not None), 0)
         calculated_setups = sum(1 for p in pitches if p.did_setup)
         calculated_rescues = sum(1 for p in pitches if p.did_rescue)

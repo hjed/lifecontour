@@ -94,6 +94,16 @@ VALID_ANCHOR_TYPES: list[str] = [
     "artificial removable",
 ]
 
+# How a pitch is descended. A null pitch_type is treated as "abseil" for
+# backward compatibility with rows created before the column existed.
+PITCH_TYPE_ABSEIL: str = "abseil"
+
+VALID_PITCH_TYPES: list[str] = [
+    PITCH_TYPE_ABSEIL,
+    "jump",
+    "down_climb",
+]
+
 # ActivityTemplate constants (activity_templates table)
 VALID_TEMPLATE_TYPES: list[str] = [
     "abseiling",

@@ -21,8 +21,29 @@ class TestAbseilPitch:
         assert pitch.did_rescue is None
         assert pitch.did_setup is None
         assert pitch.notes is None
+        assert pitch.pitch_type is None
         assert pitch.created_at is None
         assert pitch.updated_at is None
+
+    # --- pitch_type validation ---
+
+    @pytest.mark.parametrize("pitch_type", ["abseil", "jump", "down_climb"])
+    def test_valid_pitch_types(self, pitch_type: str):
+        """Test all valid pitch type values."""
+        pitch = AbseilPitch(journal_id=1, pitch_number=1, pitch_type=pitch_type)
+        assert pitch.pitch_type == pitch_type
+
+    def test_invalid_pitch_type(self):
+        """Test that an invalid pitch type raises validation error."""
+        with pytest.raises(AbseilPitchValidationError) as exc_info:
+            AbseilPitch(journal_id=1, pitch_number=1, pitch_type="swim")
+
+        assert "pitch_type" in str(exc_info.value)
+
+    def test_none_pitch_type_valid(self):
+        """Test that None pitch type is valid (defaults to abseil semantics)."""
+        pitch = AbseilPitch(journal_id=1, pitch_number=1, pitch_type=None)
+        assert pitch.pitch_type is None
 
     def test_create_abseil_pitch_with_all_fields(self):
         """Test creating an abseil pitch with all fields populated."""

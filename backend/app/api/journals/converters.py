@@ -491,6 +491,7 @@ class TypeDataConverter:
                     did_rescue=pitch.did_rescue,
                     did_setup=pitch.did_setup,
                     notes=pitch.notes,
+                    pitch_type=pitch.pitch_type,
                 )
                 for pitch in pitches
             ]
@@ -706,6 +707,7 @@ class ActivityTemplateConverter:
                         did_rescue=p.did_rescue,
                         did_setup=p.did_setup,
                         notes=p.notes,
+                        pitch_type=p.pitch_type,
                     )
                 )
 

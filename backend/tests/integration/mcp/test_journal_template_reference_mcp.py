@@ -219,6 +219,7 @@ async def test_mcp_template_pitch_notes_round_trip(
                         "pitch_number": 1,
                         "height": 30,
                         "notes": "Awkward start over the chockstone",
+                        "pitch_type": "jump",
                     }
                 ],
             },
@@ -226,11 +227,13 @@ async def test_mcp_template_pitch_notes_round_trip(
         assert "error" not in created, created
         template_id = str(created["id"])
         assert created["pitches"][0]["notes"] == "Awkward start over the chockstone"
+        assert created["pitches"][0]["pitch_type"] == "jump"
 
         fetched = await _call_tool(
             client, session_id, "get_template", {"template_id": template_id}, req_id=2
         )
         assert fetched["pitches"][0]["notes"] == "Awkward start over the chockstone"
+        assert fetched["pitches"][0]["pitch_type"] == "jump"
 
         updated = await _call_tool(
             client,
@@ -239,13 +242,19 @@ async def test_mcp_template_pitch_notes_round_trip(
             {
                 "template_id": template_id,
                 "pitches": [
-                    {"pitch_number": 1, "height": 30, "notes": "Rebolted in 2026"}
+                    {
+                        "pitch_number": 1,
+                        "height": 30,
+                        "notes": "Rebolted in 2026",
+                        "pitch_type": "abseil",
+                    }
                 ],
             },
             req_id=3,
         )
         assert "error" not in updated, updated
         assert updated["pitches"][0]["notes"] == "Rebolted in 2026"
+        assert updated["pitches"][0]["pitch_type"] == "abseil"
 
 
 @pytest.mark.asyncio

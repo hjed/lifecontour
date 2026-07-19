@@ -790,6 +790,7 @@ async def update_abseiling_type_data(
                             did_rescue=parsed_pitch.did_rescue,
                             did_setup=parsed_pitch.did_setup,
                             notes=parsed_pitch.notes,
+                            pitch_type=parsed_pitch.pitch_type,
                         )
                     )
                 except ValidationError as e:
