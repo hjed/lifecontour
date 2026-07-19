@@ -1152,7 +1152,14 @@ test.describe('Journal Creation UI Flow', () => {
     await dialog.getByRole('combobox', { name: 'Template Type' }).click();
     await page.getByRole('option', { name: 'Canyoning' }).click();
 
-    await dialog.getByRole('button', { name: 'Create Template' }).click();
+    // Keyboard activation: with pitch rows seeded into the dialog, Mobile
+    // Chrome pointer hit-testing misreports this button as covered (same
+    // artifact as submitJournalFormViaKeyboard).
+    const createTemplateButton = dialog.getByRole('button', {
+      name: 'Create Template',
+    });
+    await createTemplateButton.focus();
+    await createTemplateButton.press('Enter');
 
     // Dialog should close
     await expect(dialog).toBeHidden();
