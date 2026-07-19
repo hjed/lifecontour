@@ -441,6 +441,181 @@ class TestUpdateTag:
         mock_tag_repo.save.assert_not_awaited()
 
 
+class TestMergeTag:
+    """Test the merge_tag unit of work.
+
+    Mirrors the contact ``TagService.merge_tags`` contract: the source tag's
+    assignments move to the target, its children are re-parented to the target,
+    and the source is deleted. The row-level work lives in the repository, so
+    these tests assert the validation rules and the delegation.
+    """
+
+    @staticmethod
+    def _wire_repo(mock_tag_repo, tags: list[JournalTag]) -> None:
+        """Make the mock repo resolve ``find_by_id`` over ``tags``."""
+        by_id = {tag.id: tag for tag in tags}
+
+        async def find_by_id(tag_id):
+            return by_id.get(tag_id)
+
+        mock_tag_repo.find_by_id.side_effect = find_by_id
+
+    @pytest.mark.asyncio
+    async def test_merge_delegates_to_repository(
+        self, tag_service, mock_tag_repo, mock_transaction
+    ):
+        """A valid merge delegates the row work to the repository."""
+        source_id, target_id = uuid4(), uuid4()
+        self._wire_repo(
+            mock_tag_repo,
+            [
+                JournalTag(id=source_id, name="Hiking"),
+                JournalTag(id=target_id, name="Bushwalking"),
+            ],
+        )
+
+        await tag_service.merge_tag(source_id, target_id, transaction=mock_transaction)
+
+        mock_tag_repo.merge_into.assert_awaited_once_with(source_id, target_id)
+
+    @pytest.mark.asyncio
+    async def test_merge_into_unrelated_tag_with_parent_allowed(
+        self, tag_service, mock_tag_repo, mock_transaction
+    ):
+        """A target whose ancestry does not include the source is a legal target."""
+        source_id, target_id, other_id = uuid4(), uuid4(), uuid4()
+        self._wire_repo(
+            mock_tag_repo,
+            [
+                JournalTag(id=source_id, name="Hiking"),
+                JournalTag(id=other_id, name="Outdoors"),
+                JournalTag(id=target_id, name="Bushwalking", parent_id=other_id),
+            ],
+        )
+
+        await tag_service.merge_tag(source_id, target_id, transaction=mock_transaction)
+
+        mock_tag_repo.merge_into.assert_awaited_once_with(source_id, target_id)
+
+    @pytest.mark.asyncio
+    async def test_merge_into_self_rejected(
+        self, tag_service, mock_tag_repo, mock_transaction
+    ):
+        """Merging a tag into itself is rejected before any write."""
+        tag_id = uuid4()
+        self._wire_repo(mock_tag_repo, [JournalTag(id=tag_id, name="Hiking")])
+
+        with pytest.raises(JournalValidationError) as exc_info:
+            await tag_service.merge_tag(tag_id, tag_id, transaction=mock_transaction)
+
+        assert exc_info.value.field == "target_tag_id"
+        mock_tag_repo.merge_into.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_merge_unknown_source_rejected(
+        self, tag_service, mock_tag_repo, mock_transaction
+    ):
+        """An unknown source tag raises the journal not-found error (404)."""
+        target_id = uuid4()
+        self._wire_repo(mock_tag_repo, [JournalTag(id=target_id, name="Bushwalking")])
+
+        with pytest.raises(JournalTagNotFoundError) as exc_info:
+            await tag_service.merge_tag(
+                uuid4(), target_id, transaction=mock_transaction
+            )
+
+        assert exc_info.value.status_code == 404
+        mock_tag_repo.merge_into.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_merge_unknown_target_rejected(
+        self, tag_service, mock_tag_repo, mock_transaction
+    ):
+        """An unknown target tag raises the journal not-found error (404)."""
+        source_id = uuid4()
+        self._wire_repo(mock_tag_repo, [JournalTag(id=source_id, name="Hiking")])
+
+        with pytest.raises(JournalTagNotFoundError):
+            await tag_service.merge_tag(
+                source_id, uuid4(), transaction=mock_transaction
+            )
+
+        mock_tag_repo.merge_into.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_merge_into_descendant_rejected(
+        self, tag_service, mock_tag_repo, mock_transaction
+    ):
+        """Merging a tag into its own child would orphan the hierarchy."""
+        source_id, child_id = uuid4(), uuid4()
+        self._wire_repo(
+            mock_tag_repo,
+            [
+                JournalTag(id=source_id, name="Outdoors"),
+                JournalTag(id=child_id, name="Hiking", parent_id=source_id),
+            ],
+        )
+
+        with pytest.raises(JournalValidationError) as exc_info:
+            await tag_service.merge_tag(
+                source_id, child_id, transaction=mock_transaction
+            )
+
+        assert exc_info.value.field == "target_tag_id"
+        mock_tag_repo.merge_into.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_merge_into_deep_descendant_rejected(
+        self, tag_service, mock_tag_repo, mock_transaction
+    ):
+        """The descendant check walks the whole ancestry, not just one level."""
+        source_id, mid_id, leaf_id = uuid4(), uuid4(), uuid4()
+        self._wire_repo(
+            mock_tag_repo,
+            [
+                JournalTag(id=source_id, name="Outdoors"),
+                JournalTag(id=mid_id, name="Walking", parent_id=source_id),
+                JournalTag(id=leaf_id, name="Day walks", parent_id=mid_id),
+            ],
+        )
+
+        with pytest.raises(JournalValidationError):
+            await tag_service.merge_tag(
+                source_id, leaf_id, transaction=mock_transaction
+            )
+
+        mock_tag_repo.merge_into.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_merge_terminates_on_cyclic_ancestry(
+        self, tag_service, mock_tag_repo, mock_transaction
+    ):
+        """A pre-existing parent cycle in the data does not hang the walk.
+
+        The hierarchy should not contain a cycle, but the ancestry walk must be
+        guarded regardless so a corrupt row cannot spin the request forever.
+        The corrupt-data case must also be reported as what it is: the source
+        is nowhere in the target's ancestry here, so calling it a
+        descendant-merge would send the caller after the wrong problem.
+        """
+        source_id, a_id, b_id = uuid4(), uuid4(), uuid4()
+        self._wire_repo(
+            mock_tag_repo,
+            [
+                JournalTag(id=source_id, name="Hiking"),
+                JournalTag(id=a_id, name="A", parent_id=b_id),
+                JournalTag(id=b_id, name="B", parent_id=a_id),
+            ],
+        )
+
+        with pytest.raises(JournalValidationError) as exc_info:
+            await tag_service.merge_tag(source_id, a_id, transaction=mock_transaction)
+
+        assert "circular reference" in exc_info.value.message.lower()
+        assert "descendant" not in exc_info.value.message.lower()
+        mock_tag_repo.merge_into.assert_not_awaited()
+
+
 class TestAssignAndRemoveTag:
     """Test the journal<->tag assignment units of work."""
 

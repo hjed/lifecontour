@@ -960,6 +960,24 @@ class JournalTagRepository(ABC):
         pass
 
     @abstractmethod
+    async def merge_into(self, source_id: UUID, target_id: UUID) -> None:
+        """
+        Fold the source tag into the target tag and delete the source.
+
+        Every journal assigned the source tag ends up assigned the target tag
+        (journals already holding both keep a single assignment), and any child
+        tags of the source are re-parented to the target.
+
+        Callers are responsible for validating that both tags exist and that
+        the target is not a descendant of the source.
+
+        Args:
+            source_id: The tag being merged away and deleted
+            target_id: The surviving tag
+        """
+        pass
+
+    @abstractmethod
     async def get_all(self) -> list[JournalTag]:
         """
         Get all tags.

@@ -847,6 +847,19 @@ DELETE /api/journals/tags/{tag_id}
   rather than being deleted
 - Returns: 204 No Content, 400 if the tag id is not a well-formed UUID, or
   404 if no such tag exists
+
+POST /api/journals/tags/{tag_id}/merge
+- Merge the tag at {tag_id} (the source) into another tag, then delete it
+- Body: { target_tag_id }
+- Every journal tagged with the source ends up tagged with the target; a
+  journal already carrying both keeps a single assignment
+- Child tags of the source are adopted by the target rather than being moved
+  to the root of the hierarchy
+- A tag cannot be merged into itself, nor into one of its own descendants —
+  the surviving hierarchy would run through a tag that no longer exists
+- Returns: 204 No Content, 400 if either id is not a well-formed UUID, the
+  resource type is not "journal-tags", or the merge is rejected as a self- or
+  descendant-merge; 404 if either tag does not exist
 ```
 
 **Search:**

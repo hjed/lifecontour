@@ -640,6 +640,175 @@ class TestDeleteJournalTagEndpoint:
         assert response.status_code == 400
 
 
+async def merge_tag(client: Any, source_id: str, target_id: str) -> Any:
+    """POST the merge of ``source_id`` into ``target_id``."""
+    return await client.post(
+        f"/api/journals/tags/{source_id}/merge",
+        json={
+            "data": {
+                "type": "journal-tags",
+                "attributes": {"target_tag_id": target_id},
+            }
+        },
+    )
+
+
+@pytest.mark.integration
+class TestMergeJournalTagEndpoint:
+    """Tests for POST /api/journals/tags/{tag_id}/merge.
+
+    Merge mirrors the contact tag merge: the source's assignments and children
+    move to the target and the source tag is deleted.
+    """
+
+    async def test_merge_moves_assignments_and_deletes_source(
+        self, integration_api_client
+    ):
+        """Test a journal tagged with the source ends up tagged with the target."""
+        source = await create_tag(integration_api_client, "hiking")
+        target = await create_tag(
+            integration_api_client, "bushwalking", color="#00FF00"
+        )
+        journal = await create_journal_with_tag(
+            integration_api_client, "Blue Mountains", source["id"]
+        )
+
+        response = await merge_tag(integration_api_client, source["id"], target["id"])
+
+        assert response.status_code == 204, response.text
+
+        journal_response = await integration_api_client.get(
+            f"/api/journals/{journal['id']}"
+        )
+        tag_ids = [
+            t["id"] for t in journal_response.json()["data"]["attributes"]["tags"]
+        ]
+        assert tag_ids == [target["id"]]
+
+        list_response = await integration_api_client.get("/api/journals/tags")
+        remaining = [t["id"] for t in list_response.json()["data"]]
+        assert source["id"] not in remaining
+        assert target["id"] in remaining
+
+    async def test_merge_dedupes_when_journal_holds_both_tags(
+        self, integration_api_client
+    ):
+        """Test a journal already carrying both tags keeps one assignment."""
+        source = await create_tag(integration_api_client, "hiking")
+        target = await create_tag(integration_api_client, "bushwalking")
+        journal = await create_journal_with_tag(
+            integration_api_client, "Both tags", source["id"]
+        )
+        assign = await integration_api_client.post(
+            f"/api/journals/{journal['id']}/relationships/tags",
+            json={
+                "data": {"type": "journal-tag", "attributes": {"tag_id": target["id"]}}
+            },
+        )
+        assert assign.status_code == 200, assign.text
+
+        response = await merge_tag(integration_api_client, source["id"], target["id"])
+
+        assert response.status_code == 204, response.text
+
+        journal_response = await integration_api_client.get(
+            f"/api/journals/{journal['id']}"
+        )
+        tag_ids = [
+            t["id"] for t in journal_response.json()["data"]["attributes"]["tags"]
+        ]
+        assert tag_ids == [target["id"]]
+
+    async def test_merge_reparents_source_children_to_target(
+        self, integration_api_client
+    ):
+        """Test the source's children are adopted by the target."""
+        source = await create_tag(integration_api_client, "hiking")
+        target = await create_tag(integration_api_client, "bushwalking")
+        child = await create_tag(
+            integration_api_client, "day walks", parent_id=source["id"]
+        )
+
+        response = await merge_tag(integration_api_client, source["id"], target["id"])
+
+        assert response.status_code == 204, response.text
+
+        list_response = await integration_api_client.get("/api/journals/tags")
+        tags = {t["id"]: t for t in list_response.json()["data"]}
+        assert tags[child["id"]]["attributes"]["parent_id"] == target["id"]
+
+    async def test_merge_into_self_returns_400(self, integration_api_client):
+        """Test merging a tag into itself is rejected."""
+        tag = await create_tag(integration_api_client, "hiking")
+
+        response = await merge_tag(integration_api_client, tag["id"], tag["id"])
+
+        assert response.status_code == 400
+
+    async def test_merge_into_descendant_returns_400(self, integration_api_client):
+        """Test merging a tag into its own child is rejected."""
+        parent = await create_tag(integration_api_client, "outdoors")
+        child = await create_tag(
+            integration_api_client, "climbing", parent_id=parent["id"]
+        )
+
+        response = await merge_tag(integration_api_client, parent["id"], child["id"])
+
+        assert response.status_code == 400
+
+    async def test_merge_unknown_source_returns_404(self, integration_api_client):
+        """Test an unknown source tag returns 404."""
+        target = await create_tag(integration_api_client, "bushwalking")
+
+        response = await merge_tag(integration_api_client, str(uuid4()), target["id"])
+
+        assert response.status_code == 404
+
+    async def test_merge_unknown_target_returns_404(self, integration_api_client):
+        """Test an unknown target tag returns 404 and leaves the source alone."""
+        source = await create_tag(integration_api_client, "hiking")
+
+        response = await merge_tag(integration_api_client, source["id"], str(uuid4()))
+
+        assert response.status_code == 404
+
+        list_response = await integration_api_client.get("/api/journals/tags")
+        assert source["id"] in [t["id"] for t in list_response.json()["data"]]
+
+    async def test_merge_invalid_source_uuid_returns_400(self, integration_api_client):
+        """Test a malformed source id is rejected before any lookup."""
+        target = await create_tag(integration_api_client, "bushwalking")
+
+        response = await merge_tag(integration_api_client, "not-a-uuid", target["id"])
+
+        assert response.status_code == 400
+
+    async def test_merge_invalid_target_uuid_returns_400(self, integration_api_client):
+        """Test a malformed target id is rejected."""
+        source = await create_tag(integration_api_client, "hiking")
+
+        response = await merge_tag(integration_api_client, source["id"], "not-a-uuid")
+
+        assert response.status_code == 400
+
+    async def test_merge_wrong_resource_type_returns_400(self, integration_api_client):
+        """Test the JSON:API resource type is validated."""
+        source = await create_tag(integration_api_client, "hiking")
+        target = await create_tag(integration_api_client, "bushwalking")
+
+        response = await integration_api_client.post(
+            f"/api/journals/tags/{source['id']}/merge",
+            json={
+                "data": {
+                    "type": "tags",
+                    "attributes": {"target_tag_id": target["id"]},
+                }
+            },
+        )
+
+        assert response.status_code == 400
+
+
 @pytest.mark.integration
 class TestJournalTagAssignment:
     """Tests for assigning tags to journals."""

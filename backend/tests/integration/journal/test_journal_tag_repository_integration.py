@@ -291,6 +291,114 @@ class TestJournalTagRepositoryIntegration:
         assert surviving_child is not None
         assert surviving_child.parent_id is None
 
+    @staticmethod
+    async def _save_journal(async_connection, title: str):
+        """Persist a minimal journal to hang tag assignments off."""
+        from core_shared.models.journals import EventDateRange, Journal
+
+        from app.core.journal.adapters.sql.journal_repository import (
+            SqlJournalRepository,
+        )
+
+        journal_repo = SqlJournalRepository(async_connection)
+        return await journal_repo.save(
+            Journal(
+                user_id="test-user",
+                title=title,
+                content="Test content",
+                event_date_range=EventDateRange(
+                    start=datetime.now(UTC), end=datetime.now(UTC)
+                ),
+            )
+        )
+
+    async def test_merge_into_repoints_assignments(self, tag_repo, async_connection):
+        """Test merging moves the source tag's assignments onto the target."""
+        journal = await self._save_journal(async_connection, "Hike")
+        source = await tag_repo.save(JournalTag(name="hiking"))
+        target = await tag_repo.save(JournalTag(name="bushwalking"))
+        await tag_repo.assign_tag(journal.id, source.id)
+
+        await tag_repo.merge_into(source.id, target.id)
+
+        tag_ids = {tag.id for tag in await tag_repo.get_tags_for_journal(journal.id)}
+        assert tag_ids == {target.id}
+
+    async def test_merge_into_dedupes_overlapping_assignments(
+        self, tag_repo, async_connection
+    ):
+        """Test a journal holding both tags ends up with a single assignment.
+
+        A naive ``UPDATE ... SET tag_id`` would violate the composite primary
+        key on ``journal_tag_assignments`` here, so this is the case that
+        proves the pre-delete step is doing its job.
+        """
+        from sqlalchemy import text
+
+        journal = await self._save_journal(async_connection, "Both tags")
+        source = await tag_repo.save(JournalTag(name="hiking"))
+        target = await tag_repo.save(JournalTag(name="bushwalking"))
+        await tag_repo.assign_tag(journal.id, source.id)
+        await tag_repo.assign_tag(journal.id, target.id)
+
+        await tag_repo.merge_into(source.id, target.id)
+
+        result = await async_connection.execute(
+            text(
+                "SELECT COUNT(*) FROM journal_tag_assignments "
+                "WHERE journal_id = :journal_id"
+            ),
+            {"journal_id": journal.id},
+        )
+        assert result.scalar() == 1
+        tag_ids = {tag.id for tag in await tag_repo.get_tags_for_journal(journal.id)}
+        assert tag_ids == {target.id}
+
+    async def test_merge_into_reparents_children_to_target(self, tag_repo):
+        """Test the source's children are adopted by the target, not orphaned."""
+        source = await tag_repo.save(JournalTag(name="hiking"))
+        target = await tag_repo.save(JournalTag(name="bushwalking"))
+        child = await tag_repo.save(JournalTag(name="day walks", parent_id=source.id))
+
+        await tag_repo.merge_into(source.id, target.id)
+
+        surviving_child = await tag_repo.find_by_id(child.id)
+        assert surviving_child is not None
+        assert surviving_child.parent_id == target.id
+
+    async def test_merge_into_target_that_is_a_child_of_source(self, tag_repo):
+        """Test merging a tag into its own child does not self-parent the target.
+
+        The service rejects this combination, but the repository must not be
+        able to write a self-cycle if a future caller reaches it directly — a
+        tag that is its own parent would poison every later ancestry walk.
+        """
+        source = await tag_repo.save(JournalTag(name="outdoors"))
+        target = await tag_repo.save(JournalTag(name="climbing", parent_id=source.id))
+        sibling = await tag_repo.save(JournalTag(name="hiking", parent_id=source.id))
+
+        await tag_repo.merge_into(source.id, target.id)
+
+        surviving_target = await tag_repo.find_by_id(target.id)
+        assert surviving_target is not None
+        assert surviving_target.parent_id is None, (
+            "the target must not become its own parent"
+        )
+        # The genuine sibling is still adopted by the target.
+        surviving_sibling = await tag_repo.find_by_id(sibling.id)
+        assert surviving_sibling is not None
+        assert surviving_sibling.parent_id == target.id
+
+    async def test_merge_into_deletes_source_tag(self, tag_repo):
+        """Test the source tag is gone after the merge and the target survives."""
+        source = await tag_repo.save(JournalTag(name="hiking"))
+        target = await tag_repo.save(JournalTag(name="bushwalking"))
+
+        await tag_repo.merge_into(source.id, target.id)
+
+        assert await tag_repo.find_by_id(source.id) is None
+        assert await tag_repo.find_by_id(target.id) is not None
+
     async def test_get_tags_for_journal(self, tag_repo, async_connection):
         """Test getting tags assigned to a journal."""
         from core_shared.models.journals import EventDateRange, Journal

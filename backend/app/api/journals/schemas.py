@@ -635,6 +635,30 @@ class JournalTagUpdateRequest(BaseModel):
     data: JournalTagUpdateData = Field(..., description="Tag update data")
 
 
+class JournalTagMergeAttributes(BaseModel):
+    """Attributes for merging a journal tag into another."""
+
+    target_tag_id: str = Field(
+        ..., description="ID of the target tag to merge into (the survivor)"
+    )
+
+
+class JournalTagMergeData(BaseModel):
+    """Data for merging a journal tag."""
+
+    type: str = Field(default="journal-tags", description=RESOURCE_TYPE_DESC)
+    attributes: JournalTagMergeAttributes = Field(..., description="Merge attributes")
+
+
+class JournalTagMergeRequest(BaseModel):
+    """Request model for merging a journal tag.
+
+    The source tag is the path parameter, so the body carries only the target.
+    """
+
+    data: JournalTagMergeData = Field(..., description="Tag merge data")
+
+
 # Journal Series Schemas
 class JournalSeriesResource(BaseModel):
     """Journal series resource following JSON API specification."""
