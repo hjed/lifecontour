@@ -104,7 +104,7 @@ jest.mock('@/components/journals/type-editors/TemplateSelector', () => ({
               template_type: templateType,
               french_grade: 'v4a3IV',
               pitches: [
-                { pitch_number: 1, height: 30 },
+                { pitch_number: 1, height: 30, notes: 'Wet start, keep left' },
                 { pitch_number: 2, height: 15 },
               ],
             },
@@ -710,6 +710,13 @@ describe('JournalCreateForm', () => {
                 template_id: 'tpl-consolidated-1',
                 number_of_abseils: 2,
                 total_length: 45,
+                pitches: [
+                  expect.objectContaining({
+                    pitch_number: 1,
+                    notes: 'Wet start, keep left',
+                  }),
+                  expect.objectContaining({ pitch_number: 2 }),
+                ],
               }),
             }),
           })

@@ -705,6 +705,7 @@ class ActivityTemplateConverter:
                         anchor_type=p.anchor_type,
                         did_rescue=p.did_rescue,
                         did_setup=p.did_setup,
+                        notes=p.notes,
                     )
                 )
 

@@ -526,6 +526,9 @@ class TemplatePitchMCPSchema(BaseModel):
     )
     did_rescue: bool = Field(default=False, description="Did rescue occur")
     did_setup: bool = Field(default=False, description="Did user setup")
+    notes: str | None = Field(
+        default=None, description="Optional short notes for the pitch"
+    )
 
 
 class ActivityTemplateMCPResponse(BaseModel):

@@ -200,6 +200,55 @@ async def test_mcp_get_journal_template_returns_standard_pitches(
 
 
 @pytest.mark.asyncio
+async def test_mcp_template_pitch_notes_round_trip(
+    authenticated_lifespan_client,
+) -> None:
+    """Template pitch notes survive create_template, get_template, update_template."""
+    async with authenticated_lifespan_client() as client:
+        session_id = await initialize_mcp_session(client)
+
+        created = await _call_tool(
+            client,
+            session_id,
+            "create_template",
+            {
+                "name": "Notes Canyon",
+                "template_type": "canyoning",
+                "pitches": [
+                    {
+                        "pitch_number": 1,
+                        "height": 30,
+                        "notes": "Awkward start over the chockstone",
+                    }
+                ],
+            },
+        )
+        assert "error" not in created, created
+        template_id = str(created["id"])
+        assert created["pitches"][0]["notes"] == "Awkward start over the chockstone"
+
+        fetched = await _call_tool(
+            client, session_id, "get_template", {"template_id": template_id}, req_id=2
+        )
+        assert fetched["pitches"][0]["notes"] == "Awkward start over the chockstone"
+
+        updated = await _call_tool(
+            client,
+            session_id,
+            "update_template",
+            {
+                "template_id": template_id,
+                "pitches": [
+                    {"pitch_number": 1, "height": 30, "notes": "Rebolted in 2026"}
+                ],
+            },
+            req_id=3,
+        )
+        assert "error" not in updated, updated
+        assert updated["pitches"][0]["notes"] == "Rebolted in 2026"
+
+
+@pytest.mark.asyncio
 async def test_mcp_get_journal_template_when_none_set(
     authenticated_lifespan_client,
 ) -> None:

@@ -52,6 +52,7 @@ class SqlActivityTemplateRepository(ActivityTemplateRepository):
             anchor_type=row.anchor_type,
             did_rescue=row.did_rescue,
             did_setup=row.did_setup,
+            notes=row.notes,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -152,15 +153,15 @@ class SqlActivityTemplateRepository(ActivityTemplateRepository):
                 """
                 INSERT INTO template_pitches (
                     template_id, pitch_number, height,
-                    anchor_location, anchor_type, did_rescue, did_setup
+                    anchor_location, anchor_type, did_rescue, did_setup, notes
                 )
                 VALUES (
                     :template_id, :pitch_number, :height,
-                    :anchor_location, :anchor_type, :did_rescue, :did_setup
+                    :anchor_location, :anchor_type, :did_rescue, :did_setup, :notes
                 )
                 RETURNING id, template_id, pitch_number, height,
                           anchor_location, anchor_type, did_rescue, did_setup,
-                          created_at, updated_at
+                          notes, created_at, updated_at
                 """
             )
             pitch_result = await self.conn.execute(
@@ -173,6 +174,7 @@ class SqlActivityTemplateRepository(ActivityTemplateRepository):
                     "anchor_type": pitch.anchor_type,
                     "did_rescue": pitch.did_rescue,
                     "did_setup": pitch.did_setup,
+                    "notes": pitch.notes,
                 },
             )
             pitch_row = pitch_result.fetchone()
@@ -309,7 +311,7 @@ class SqlActivityTemplateRepository(ActivityTemplateRepository):
             """
             SELECT id, template_id, pitch_number, height,
                    anchor_location, anchor_type, did_rescue, did_setup,
-                   created_at, updated_at
+                   notes, created_at, updated_at
             FROM template_pitches
             WHERE template_id = :template_id
             ORDER BY pitch_number

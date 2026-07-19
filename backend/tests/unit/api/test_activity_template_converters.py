@@ -34,6 +34,7 @@ class TestActivityTemplateConverter:
             height=15,
             anchor_location="TR",
             anchor_type="double bolt",
+            notes="Awkward start",
         )
         template.pitches = [pitch1]
 
@@ -57,6 +58,7 @@ class TestActivityTemplateConverter:
         assert resource.attributes.pitches[0].height == 15
         assert resource.attributes.pitches[0].anchor_location == "TR"
         assert resource.attributes.pitches[0].anchor_type == "double bolt"
+        assert resource.attributes.pitches[0].notes == "Awkward start"
 
         assert resource.links is not None
         assert resource.links.self == f"http://test/api/templates/{template.id}"
