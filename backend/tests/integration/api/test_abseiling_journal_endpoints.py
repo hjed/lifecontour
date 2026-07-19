@@ -1,5 +1,6 @@
 """Integration tests for Abseiling journal API endpoints."""
 
+import copy
 from typing import Any
 
 import pytest
@@ -136,6 +137,59 @@ async def test_update_abseiling_journal_with_pitches(
     pitches = type_data["pitches"]
     assert len(pitches) == 1
     assert pitches[0]["height"] == 10
+
+
+async def test_pitch_notes_round_trip(
+    authenticated_client: AsyncClient,
+    base_journal_payload: dict[str, Any],
+):
+    """Pitch notes must survive create, read, and update round-trips."""
+    payload = copy.deepcopy(base_journal_payload)
+    payload["data"]["attributes"]["type_data"] = {
+        JournalType.ABSEILING_TRIP.value: {
+            "pitches": [
+                {
+                    "pitch_number": 1,
+                    "height": 20,
+                    "notes": "Wet start, keep left of the flow",
+                },
+                {"pitch_number": 2, "height": 30},
+            ]
+        }
+    }
+
+    create_resp = await authenticated_client.post("/api/journals", json=payload)
+    assert create_resp.status_code == 201, create_resp.json()
+    journal_id = create_resp.json()["data"]["id"]
+
+    get_resp = await authenticated_client.get(f"/api/journals/{journal_id}")
+    assert get_resp.status_code == 200
+    pitches = get_resp.json()["data"]["attributes"]["type_data"][
+        JournalType.ABSEILING_TRIP.value
+    ]["pitches"]
+    assert pitches[0]["notes"] == "Wet start, keep left of the flow"
+    # Serialization excludes None fields, so a note-less pitch omits the key.
+    assert "notes" not in pitches[1]
+
+    update_payload = {
+        "data": {
+            "type": "journal-type-data",
+            "attributes": {
+                "pitches": [
+                    {"pitch_number": 1, "height": 20, "notes": "Dry in low water"}
+                ]
+            },
+        }
+    }
+    update_resp = await authenticated_client.put(
+        f"/api/journals/{journal_id}/types/{JournalType.ABSEILING_TRIP.value}/data",
+        json=update_payload,
+    )
+    assert update_resp.status_code == 200
+    updated_pitches = update_resp.json()["data"]["attributes"]["type_data"][
+        JournalType.ABSEILING_TRIP.value
+    ]["pitches"]
+    assert updated_pitches[0]["notes"] == "Dry in low water"
 
 
 async def _create_template(
