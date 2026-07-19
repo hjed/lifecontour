@@ -219,7 +219,9 @@ async def test_pitch_type_round_trip_and_abseil_count(
         JournalType.ABSEILING_TRIP.value
     ]
     pitches = type_data["pitches"]
-    assert pitches[0].get("pitch_type") is None
+    # Journal serialization excludes None fields, so an untyped pitch omits
+    # the key entirely (mirrors the notes assertion above).
+    assert "pitch_type" not in pitches[0]
     assert pitches[1]["pitch_type"] == "abseil"
     assert pitches[2]["pitch_type"] == "jump"
     assert pitches[3]["pitch_type"] == "down_climb"

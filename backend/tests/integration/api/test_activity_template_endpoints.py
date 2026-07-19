@@ -199,8 +199,10 @@ class TestActivityTemplateEndpoints:
         created_pitches = create_response.json()["data"]["attributes"]["pitches"]
         assert created_pitches[0]["notes"] == "Awkward start over the chockstone"
         assert created_pitches[0]["pitch_type"] == "jump"
-        assert created_pitches[1].get("notes") is None
-        assert created_pitches[1].get("pitch_type") is None
+        # Template serialization keeps None fields, so the keys are present
+        # with explicit nulls.
+        assert created_pitches[1]["notes"] is None
+        assert created_pitches[1]["pitch_type"] is None
 
         get_response = await authenticated_client.get(f"/api/templates/{template_id}")
         assert get_response.status_code == 200
