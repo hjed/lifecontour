@@ -55,6 +55,10 @@ export function AbseilingTripTypeEditor({
   onTemplateSelect,
   templateTypes = DEFAULT_TEMPLATE_TYPES,
 }: AbseilingTripTypeEditorProps) {
+  // Guard against an empty array: the selector would otherwise issue no
+  // requests and render a permanently empty dropdown.
+  const effectiveTemplateTypes =
+    templateTypes.length > 0 ? templateTypes : DEFAULT_TEMPLATE_TYPES;
   const initialData = useMemo(() => data ?? DEFAULT_DATA, [data]);
   const baseId = useId();
   const abseilsFieldId = `${baseId}-number-of-abseils`;
@@ -249,7 +253,7 @@ export function AbseilingTripTypeEditor({
         </Label>
         <TemplateSelector
           inputId={templateSelectorId}
-          templateType={templateTypes}
+          templateType={effectiveTemplateTypes}
           onSelect={handleTemplateSelection}
           onCreateTemplate={() => setSelectTemplateCreateOpen(true)}
           placeholder='Select a template...'
@@ -257,9 +261,7 @@ export function AbseilingTripTypeEditor({
         <CreateTemplateDialog
           open={selectTemplateCreateOpen}
           onOpenChange={setSelectTemplateCreateOpen}
-          defaultTemplateType={
-            templateTypes[0] ?? ActivityTemplateType.ABSEILING
-          }
+          defaultTemplateType={effectiveTemplateTypes[0]}
           onCreated={handleTemplateSelection}
         />
       </div>

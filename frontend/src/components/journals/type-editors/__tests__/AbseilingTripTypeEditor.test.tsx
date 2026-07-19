@@ -137,6 +137,15 @@ describe('AbseilingTripTypeEditor', () => {
     );
   });
 
+  it('falls back to abseiling templates when templateTypes is empty', () => {
+    render(<AbseilingTripTypeEditor createMode={true} templateTypes={[]} />);
+
+    expect(screen.getByTestId('mock-template-selector')).toHaveAttribute(
+      'data-template-type',
+      ActivityTemplateType.ABSEILING
+    );
+  });
+
   it('counts only abseil-type pitches when importing a template', async () => {
     const user = userEvent.setup();
     const handleChange = jest.fn();

@@ -459,14 +459,24 @@ export function JournalDetailView({
         const currentTypeData = journal.type_data?.[
           typeFieldUpdates.journalType
         ] as Record<string, unknown> | undefined;
-        await updateTypeData.mutateAsync({
-          journalId: journal.id,
-          journalType: typeFieldUpdates.journalType,
-          typeData: {
-            ...(currentTypeData ?? {}),
-            ...typeFieldUpdates.fields,
-          },
-        });
+        try {
+          await updateTypeData.mutateAsync({
+            journalId: journal.id,
+            journalType: typeFieldUpdates.journalType,
+            typeData: {
+              ...(currentTypeData ?? {}),
+              ...typeFieldUpdates.fields,
+            },
+          });
+        } catch (error) {
+          // The template reference was already persisted above — surface the
+          // partial result instead of implying the whole apply failed.
+          console.error('Template subtype field update failed:', error);
+          toast.error(
+            `Template linked, but its ${typeFieldUpdates.journalType} fields could not be applied. Edit the section manually or reselect the template.`
+          );
+          return;
+        }
       }
 
       toast.success(
