@@ -845,7 +845,8 @@ DELETE /api/journals/tags/{tag_id}
   is assigned to, and those journals are otherwise untouched
 - Child tags of the deleted tag are re-parented to the root of the hierarchy
   rather than being deleted
-- Returns: 204 No Content, or 404 if no such tag exists
+- Returns: 204 No Content, 400 if the tag id is not a well-formed UUID, or
+  404 if no such tag exists
 ```
 
 **Search:**
