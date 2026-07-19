@@ -1,6 +1,6 @@
 # Iteration 17: Journal Tags Parity
 
-**Status:** 🟡 IN PROGRESS (ITER17-001 Phases 1–3 complete)
+**Status:** 🟡 IN PROGRESS (ITER17-001 complete — Phases 1–4)
 **Dependencies:** Iteration 4 (journal tag tables and relationship endpoints), Iteration 4.6 (journal tag filtering + detail-view tag add/remove), Iteration 12 (unified event-driven history), Iteration 2.6 (contact tag management UX — the reference behaviour)
 **Goal:** Bring journal tag functionality to exact parity with contact tags across the UI, backend management operations, filtering, history, and MCP.
 
@@ -29,6 +29,7 @@ This iteration closes the gap so that journal tags behave **exactly like contact
 - **Backend endpoints** (`backend/app/api/journals/controllers.py`):
   - `GET /api/journals/tags`, `POST /api/journals/tags`
   - `DELETE /api/journals/tags/{tag_id}` — ✅ un-assigns the tag from all journals and deletes it, matching contact behaviour (the 409-when-in-use guard was removed in ITER17-001 Phase 3)
+  - `POST /api/journals/tags/{tag_id}/merge` — ✅ folds a tag into another and deletes it (ITER17-001 Phase 4)
   - `POST /api/journals/{id}/relationships/tags`, `DELETE /api/journals/{id}/relationships/tags/{tag_id}`
   - `GET /api/journals?tag_id=` filter (singular)
 - **Service/repository**: `JournalTagService.create_tag` only; repository (`journal_tag_repository.py`) supports `find_by_name` (case-insensitive), `get_all`, `get_children`, `get_root_tags`, `get_tags_for_journal`, `save`. **No update / delete-with-unassign / merge service methods.**
@@ -39,7 +40,7 @@ This iteration closes the gap so that journal tags behave **exactly like contact
   - No journal tag tree in the sidebar (`Sidebar.tsx` renders the tag tree for contacts only); no `?tag=` deep link on `/journals`.
   - `JournalCreateForm.tsx` has no tag input.
 - **Search**: `journal_indexing_service.py` indexes `tag_ids` as a filterable field.
-- **MCP**: `create_journal_entry` / `update_journal_entry` / journal reads support tags; `merge_tags` is still **contact-only** (`backend/app/mcp/domains/contacts/tools.py`). Journal tag listing shipped in ITER17-001 Phase 1 as `list_journal_tags`, alongside which contacts' `list_tags` was renamed `list_contact_tags`; Phase 2 added `update_journal_tag` / `update_contact_tag` and Phase 3 added `delete_journal_tag` / `delete_contact_tag`.
+- **MCP**: `create_journal_entry` / `update_journal_entry` / journal reads support tags. Journal tag listing shipped in ITER17-001 Phase 1 as `list_journal_tags`, alongside which contacts' `list_tags` was renamed `list_contact_tags`; Phase 2 added `update_journal_tag` / `update_contact_tag`, Phase 3 added `delete_journal_tag` / `delete_contact_tag`, and Phase 4 added `merge_journal_tag` while renaming contacts' `merge_tags` to `merge_contact_tags`. The journal and contact tag tool surfaces are now symmetric.
 - **History**: no tag domain events for journals — tag changes do not appear in the journal activity feed (contacts publish `TagAssigned` / `TagRemoved` / `TagUpdated` / `TagDeleted` and project them into history).
 
 ### Gap summary
@@ -48,13 +49,13 @@ This iteration closes the gap so that journal tags behave **exactly like contact
 |---|---|---|
 | Inline editor: searchable add popover, create-new-tag with colour, dismissible colour badges | Plain select dropdown, no create, no colours, dead end when no tags exist | ITER17-003 |
 | Sidebar hierarchical tag tree with click-to-filter | Absent | ITER17-004 |
-| Tag management: edit name/colour/description/parent, delete, merge (context menu + dialogs) | Create, update and delete closed (Phases 1–3); merge still missing | ITER17-001, ITER17-004 |
+| Tag management: edit name/colour/description/parent, delete, merge (context menu + dialogs) | ✅ Backend closed — create, update, delete and merge (Phases 1–4); the UI surface remains | ITER17-004 |
 | `description` field on tags | ✅ Closed — column added in ITER17-001 Phase 1 | ITER17-001 |
 | Delete removes tag from all entities | ✅ Closed — delete un-assigns rather than blocking, ITER17-001 Phase 3 | ITER17-001 |
 | Multi-tag filter param + hierarchical descendant expansion | Singular `tag_id`, first-selected-only, no hierarchy expansion | ITER17-002 |
 | URL deep link (`?tag=`) on the list page | Absent | ITER17-002 |
 | Tag change history in activity feed | No tag domain events | ITER17-005 |
-| MCP tag management (list, merge) | List closed in Phase 1 (`list_journal_tags`); merge still contact-only | ITER17-001 (with the matching API changes) |
+| MCP tag management (list, merge) | ✅ Closed — `list_journal_tags` (Phase 1), `update_journal_tag` (Phase 2), `delete_journal_tag` (Phase 3), `merge_journal_tag` (Phase 4) | ITER17-001 |
 
 ## Delivery Rules
 
@@ -97,7 +98,7 @@ Every phase below must meet the same completion bar before merge:
 **Relevant documents:**
 - [Database Design — Migration Strategy](../architecture/database-design.md#migration-strategy)
 - [API Design](../architecture/api-design.md) (REST and FastMCP patterns)
-- Contact reference: `backend/app/core/contacts/services/tag_service.py`, `backend/app/api/tags/controllers.py`, and the MCP tools `list_contact_tags` (renamed from `list_tags` in Phase 1) / `merge_tags` in `backend/app/mcp/domains/contacts/tools.py`
+- Contact reference: `backend/app/core/contacts/services/tag_service.py`, `backend/app/api/tags/controllers.py`, and the MCP tools `list_contact_tags` (renamed from `list_tags` in Phase 1) / `merge_contact_tags` (renamed from `merge_tags` in Phase 4) in `backend/app/mcp/domains/contacts/tools.py`
 - Memory note: MCP tool documentation lives in docstrings/schemas, not in `mcp-setup.md`.
 - MCP rules: MCP tools are controller-equivalent — they call `@transactional` services and never open transactions.
 
@@ -113,7 +114,7 @@ Every phase below must meet the same completion bar before merge:
 
 **Decisions taken (Phase 1):**
 - **New `list_journal_tags` tool in the journals MCP domain, not a `domain=` parameter on `list_tags`.** REST already separates `/api/tags` from `/api/journals/tags`; journal tags are UUID-keyed with colour and timestamps while contact tags are int-keyed behind a different repository, so one tool would need repository branching and a polymorphic response schema; and `docs/architecture/api-design.md` prescribes per-domain tool organisation with no cross-domain-parameter precedent in the codebase.
-- **Contacts' `list_tags` renamed to `list_contact_tags`** so the two namespaces are symmetrically named and neither tool is the ambiguous default. This is a breaking rename for MCP clients, which is acceptable because clients re-fetch the tool list on each session. Each tool's docstring now points at the other. `merge_tags` keeps its name for now — rename it to `merge_contact_tags` in Phase 4 when the journal merge tool lands beside it.
+- **Contacts' `list_tags` renamed to `list_contact_tags`** so the two namespaces are symmetrically named and neither tool is the ambiguous default. This is a breaking rename for MCP clients, which is acceptable because clients re-fetch the tool list on each session. Each tool's docstring now points at the other. `merge_tags` kept its name for now — it was renamed to `merge_contact_tags` in Phase 4 when the journal merge tool landed beside it.
 
 **Required Test Coverage:**
 - **Unit:** model/serialisation with and without description; MCP list tool schema. — `tests/unit/journal/test_journal_tag_entity.py`, `tests/unit/journal/test_journal_tag_schemas.py`, `tests/unit/mcp/domains/journals/test_tools.py`
@@ -135,7 +136,7 @@ Every phase below must meet the same completion bar before merge:
 
 **Decisions taken (Phase 2):**
 - **The contact baseline had no MCP tag-update tool**, so "match it exactly" would have shipped zero MCP work — contradicting this iteration's REST+MCP-per-phase strategy. Rather than propagate the gap into Phases 3 and 4, the phase closed it in **both** domains: `update_journal_tag` (journals) and `update_contact_tag` (contacts). Each tool's docstring points at the other, matching the Phase 1 naming convention.
-- **`mcp_unified_error_handler` now recognises contacts' `TagNotFoundError` and `DuplicateTagNameError`.** It already special-cased `ContactNotFoundError`, `ContactValidationError`, and the whole `JournalDomainError` tree, but contacts' tag errors fell through to the catch-all — so an unknown tag id came back as a generic "an error occurred" that callers could not distinguish from a server failure. Surfaced by review of `update_contact_tag`; the fix also improves the pre-existing `merge_tags`.
+- **`mcp_unified_error_handler` now recognises contacts' `TagNotFoundError` and `DuplicateTagNameError`.** It already special-cased `ContactNotFoundError`, `ContactValidationError`, and the whole `JournalDomainError` tree, but contacts' tag errors fell through to the catch-all — so an unknown tag id came back as a generic "an error occurred" that callers could not distinguish from a server failure. Surfaced by review of `update_contact_tag`; the fix also improves the pre-existing merge tool (renamed `merge_contact_tags` in Phase 4).
 - **Clearing a parent over MCP uses a `move_to_root` boolean**, not a null `parent_id`. MCP arguments cannot distinguish "omitted" from "explicitly null", so the REST `set_parent_null` signal needs an explicit argument at the tool boundary. REST keeps the contact-style explicit-null convention.
 - **An explicit parent wins over the clear-parent flag** when a caller supplies both, so the two MCP tools cannot diverge on the same argument pair. Unreachable via REST (the controller only sets `set_parent_null` when `parent_id` is explicitly null), but reachable via MCP. Review of this phase surfaced that contacts' `TagService._apply_parent_change` had a flat `if parent_id is not None and tag.parent_id != parent_id: ... elif set_parent_null:` — so passing a `parent_id` **equal to the current parent** alongside the clear flag fell through and cleared it. That condition is now nested to match the journal implementation; it was latent before this phase because only the new MCP tool can reach the combination.
 - **Duplicate names and cycles map to `JournalValidationError` (400)**, not the contacts' `DuplicateTagNameError` (409) / `ContactValidationError` (422). This matches the existing journal tag *create* path, which already returns 400 for a duplicate name; journal-domain internal consistency was preferred over cross-domain status-code parity.
@@ -169,24 +170,36 @@ Every phase below must meet the same completion bar before merge:
 - **Integration:** delete removes assignments from journals with real DB; hierarchy re-parenting; MCP delete tool test. — `tests/integration/api/test_journal_tag_endpoints.py` (`TestDeleteJournalTagEndpoint`, 5 tests), `tests/integration/journal/test_journal_tag_repository_integration.py` (`test_delete_cascades_assignments`, `test_delete_sets_child_parent_id_null`), `tests/integration/mcp/test_journal_tag_mcp.py` (`TestDeleteJournalTagMCPTool`, 4 tests), `tests/integration/mcp/test_contact_tools_integration.py` (2 `delete_contact_tag` tests). Search index state after delete is not asserted — see the re-indexing deferral above.
 - **E2E:** deferred to ITER17-004 Phase 3 — no frontend surface deletes journal tags in this phase; the MCP integration tests are the equivalent bar for the tool surface. Deferral taken as stated.
 
-#### Phase 4: Tag Merge (REST + MCP)
+#### Phase 4: Tag Merge (REST + MCP) ✅ COMPLETE (except the re-indexing criterion, deferred to ITER17-005 Phase 2)
 
-**Estimated diff:** ~500 lines
+**Estimated diff:** ~500 lines · **Actual:** ~1050 changed lines, split into two commits: (A) repository + service + REST + their tests (~680), (B) both MCP tools + their tests (~380).
 
 **Acceptance Criteria:**
-- [ ] `JournalTagService.merge_tag(source_id, target_id, transaction)` mirroring contact merge semantics:
-  - all assignments of the source tag are repointed to the target (duplicate `(journal_id, tag_id)` rows resolved via `ON CONFLICT DO NOTHING`)
+- [x] `JournalTagService.merge_tag(source_id, target_id, transaction)` mirroring contact merge semantics:
+  - all assignments of the source tag are repointed to the target — duplicates are resolved by **deleting the source rows the journal already holds for the target before the `UPDATE`**, not by `ON CONFLICT DO NOTHING` (see decisions below)
   - children of the source tag are re-parented to the target
   - the source tag is deleted
   - merging a tag into itself or into a descendant is rejected
-- [ ] `POST /api/journals/tags/{tag_id}/merge` endpoint following the contact merge endpoint shape.
-- [ ] **MCP (same phase):** journal tags can be merged via MCP, mirroring the contact `merge_tags` tool semantics and reusing `JournalTagService.merge_tag`.
-- [ ] Journals affected by merge are re-indexed in MeiliSearch (same mechanism chosen in Phase 3).
+- [x] `POST /api/journals/tags/{tag_id}/merge` endpoint following the contact merge endpoint shape. — 204 No Content, JSON:API body carrying `target_tag_id`.
+- [x] **MCP (same phase):** journal tags can be merged via MCP, mirroring the contact `merge_tags` tool semantics and reusing `JournalTagService.merge_tag`. — added `merge_journal_tag`; contacts' `merge_tags` **renamed to `merge_contact_tags`** (see decisions below).
+- [ ] Journals affected by merge are re-indexed in MeiliSearch — **NOT DONE, deferred to ITER17-005 Phase 2** as Phase 3 anticipated (see decisions below). Left unticked deliberately: the work is not done, only justified. **Known consequence until then:** a merged journal's search document keeps `tag_ids` pointing at the deleted source tag, so tag-filtered search returns stale results until that journal is next re-indexed for another reason.
+
+**Decisions taken (Phase 4):**
+- **The merge SQL lives in the repository, not the service.** Contacts' `TagService.merge_tags` inlines three `text()` statements straight into the service using the injected transaction. The journal domain keeps services SQL-free per ports-and-adapters, and every other journal service already does, so the row work went into `JournalTagRepository.merge_into(source_id, target_id)` and `merge_tag` holds only validation and delegation. Deliberate, justified divergence from the contact reference under delivery rule 4.
+- **Dedupe is a pre-`DELETE`, not `ON CONFLICT DO NOTHING`.** The acceptance criterion as written named the wrong mechanism: the conflicting statement is an `UPDATE ... SET tag_id`, and `ON CONFLICT` is only available on `INSERT`. The source rows whose journal already carries the target are deleted first, which is also exactly what contacts' `merge_tags` and `repoint_tags` do. `test_merge_into_dedupes_overlapping_assignments` was verified to fail with a duplicate-key violation when that step is removed.
+- **Validation errors map to `JournalValidationError` (400) and `JournalTagNotFoundError` (404)**, where contacts raise a bare `ValueError` the controller converts to 400. This follows the Phase 2 decision to keep journal-domain internal consistency over cross-domain status-code parity.
+- **`merge_into` defends the self-parent case itself rather than trusting its caller.** When the target is a child of the source, the naive child-adoption `UPDATE` would set `target.parent_id = target` — a self-cycle that would poison every later ancestry walk. `validate_merge_target` already rejects that combination, so the path is unreachable through the service, but the repository is directly callable and its integration tests exercise it directly. Step 3 therefore uses `CASE WHEN id = :target_id THEN NULL`, promoting the target to the root (the position the source it replaces vacated). This matches the precedent in migration `0048_case_insensitive_tags.py`, which guards the same shape. Pinned by `test_merge_into_target_that_is_a_child_of_source`.
+- **The ancestry walk was refactored to report *which* condition it hit.** `_check_circular_reference` previously raised for both "found the tag" and "the data contains a cycle", so merge's re-labelling wrapper reported a genuine corrupt-data cycle as "Cannot merge a tag into its own descendant" — pointing the caller at the wrong problem. The walk now returns a `_AncestryWalk` outcome (`FOUND` / `CYCLE` / `CLEAR`) and each caller phrases its own error, blaming `parent_id` or `target_tag_id` as appropriate.
+- **No row locking, matching contacts.** Validation and the merge writes share one REQUEST-scoped connection and therefore one transaction, but there is no `SELECT ... FOR UPDATE`, so concurrent `A→B` and `B→A` merges could both validate before either executes. Contacts' `merge_tags` has the identical weakness; this is faithful parity rather than a new defect, and a single-user system makes it theoretical. Recorded rather than silently inherited.
+- **Descendant detection reuses the shared ancestry walk.** The target is a descendant of the source exactly when the source appears in the target's ancestry — the same walk re-parenting already makes — so `validate_merge_target` calls `_walk_ancestry` rather than duplicating it, and raises against `target_tag_id`. The walk's `visited` set means a corrupt parent cycle in the data cannot spin the request forever — covered by `test_merge_terminates_on_cyclic_ancestry`, which also asserts the cycle is *not* misreported as a descendant-merge.
+- **`merge_tags` renamed to `merge_contact_tags`**, closing the follow-up item Phase 1 recorded when `list_tags` became `list_contact_tags`. Breaking for MCP clients, acceptable on the same grounds as Phase 1 (clients re-fetch the tool list each session). The contacts `TagService.merge_tags` *service* method keeps its name — only the tool is renamed. Each tool's docstring points at the other.
+- **Re-indexing deferred to ITER17-005 Phase 2**, matching Phase 3's delete deferral and the expectation ITER17-005 Phase 2 already records. Re-indexing is event-driven, journal tags publish no domain events yet, and contacts do not re-index on tag merge either. Search index state after merge is therefore not asserted here.
+- **Commit A ran to ~680 lines, over the 500-line standard.** The service/REST slice was not further splittable without shipping an endpoint whose service did not exist (violating delivery rule 9), and roughly half of it is test code. Recorded rather than hidden.
 
 **Required Test Coverage:**
-- **Unit:** merge validation (self-merge, descendant-merge rejection), MCP merge tool schema/serialisation.
-- **Integration:** merge with overlapping assignments (no duplicate-key failure), hierarchy re-parenting, search index state after merge, MCP merge tool test against a real DB.
-- **E2E:** deferred to ITER17-004.
+- **Unit:** merge validation (self-merge, descendant-merge rejection), MCP merge tool schema/serialisation. — `tests/unit/journal/test_journal_tag_service.py` (`TestMergeTag`, 8 tests: delegation, unrelated-target-with-parent, self-merge, unknown source, unknown target, direct descendant, deep descendant, cyclic-ancestry termination), `tests/unit/journal/test_journal_tag_schemas.py` (`TestJournalTagMergeRequest`, 3 tests), `tests/unit/mcp/domains/journals/test_tools.py` (`test_merge_journal_tag_tool_schema`) and `tests/unit/mcp/domains/contacts/test_tools.py` (`test_merge_contact_tags_tool_schema`, which also asserts the old `merge_tags` name is gone). Tool **serialisation** is covered at the integration level, not here — `test_merge_journal_tag_moves_assignments_and_children` pins the response `summary` names both tags and reports the deletion.
+- **Integration:** merge with overlapping assignments (no duplicate-key failure), hierarchy re-parenting, ~~search index state after merge~~ (struck: nothing re-indexes on merge, per the deferral above — this bullet has no implementation to test), MCP merge tool test against a real DB. — `tests/integration/journal/test_journal_tag_repository_integration.py` (5 tests: re-point, dedupe overlap, re-parent children, target-is-a-child-of-source self-parent guard, source deleted), `tests/integration/api/test_journal_tag_endpoints.py` (`TestMergeJournalTagEndpoint`, 10 tests), `tests/integration/mcp/test_journal_tag_mcp.py` (`TestMergeJournalTagMCPTool`, 6 tests), `tests/integration/mcp/test_contact_tools_integration.py` (2 tests covering the renamed tool and the absence of the old name).
+- **E2E:** deferred to ITER17-004 Phase 3 — no frontend surface merges journal tags in this phase; the MCP and API integration tests are the equivalent bar. Deferral taken as stated.
 
 ---
 
@@ -366,7 +379,7 @@ Every phase below must meet the same completion bar before merge:
 
 **Acceptance Criteria:**
 - [ ] Tag update/delete/merge publish the corresponding events (`TagUpdated` / `TagDeleted` / merge as the contact implementation models it); history entries on affected journals describe the change the same way contact history does.
-- [ ] Search re-indexing of affected journals on tag delete/merge is driven by these events. **ITER17-001 Phase 3 deferred delete re-indexing here** (journal tags publish no events yet, and contacts likewise do not re-index on `TagDeleted`), so this phase now owns it; Phase 4 is expected to defer merge re-indexing the same way.
+- [ ] Search re-indexing of affected journals on tag delete/merge is driven by these events. **ITER17-001 Phases 3 and 4 deferred delete and merge re-indexing here** (journal tags publish no events yet, and contacts likewise do not re-index on `TagDeleted` or on tag merge), so this phase now owns both.
 
 **Required Test Coverage:**
 - **Unit:** event payload construction for update, delete, and merge.
@@ -392,8 +405,8 @@ Deliberate, accepted asymmetries with contact tags (not to be "fixed" in this it
 ## Known Follow-up Work
 
 - **`description` on tags embedded in journal resources:** Phase 1 added `description` to the standalone `/api/journals/tags` resources (its stated scope), but `JournalTagSchema` (`backend/app/api/journals/schemas.py`) and its converter — the shape used for tags embedded in `GET /api/journals/{id}` — still expose only id/name/color. Contacts embed description on the equivalent shape (`TagAttributes` in `backend/app/api/contacts/schemas.py`). ITER17-003 should add it when the detail-page editor needs to display a tag's description.
-- **Rename `merge_tags` → `merge_contact_tags`:** Phase 1 renamed contacts' `list_tags` to `list_contact_tags` when `list_journal_tags` landed beside it. `merge_tags` is still contact-only and unscoped; rename it in ITER17-001 Phase 4 when the journal merge tool ships, so both namespaces stay symmetrically named.
-- **Contact tag ID typing across MCP ([#1139](https://github.com/hjed/personal-management-system/issues/1139)):** `list_contact_tags` returns `TagInfo.id` as a string while the write tools (`merge_tags`, and `update_contact_tag` added in Phase 2) take ints, so an AI caller cannot round-trip an ID between them. Phase 2's new tool matched the existing `merge_tags` convention rather than fix half the surface. Align `TagInfo`, `UpdatedTagInfo`, `merge_tags`, and `update_contact_tag` in one change. Journal tags are unaffected — UUID-keyed and stringified consistently.
+- **Contact tag ID typing across MCP ([#1139](https://github.com/hjed/personal-management-system/issues/1139)):** `list_contact_tags` returns `TagInfo.id` as a string while the write tools (`merge_contact_tags`, `update_contact_tag`, `delete_contact_tag`) take ints, so an AI caller cannot round-trip an ID between them. Phase 2's and Phase 4's tools matched the existing convention rather than fix half the surface. Align `TagInfo`, `UpdatedTagInfo`, and the contact tag write tools in one change. Journal tags are unaffected — UUID-keyed and stringified consistently.
+- **Contacts' merge SQL still lives in the service:** `TagService.merge_tags` inlines its `text()` statements, which is what ITER17-001 Phase 4 deliberately declined to copy into the journal domain. Moving it into `SqlTagRepository` would bring contacts in line with the journal implementation and the ports-and-adapters rule; out of scope for this iteration since it touches no journal behaviour.
 - **Shared tag component consolidation:** if ITER17-003/004 duplicate the contact editor/dialog components rather than generalising them, consolidate into shared domain-agnostic components afterwards.
 - **Tags at journal creation time:** `JournalCreateForm.tsx` has no tag input (the API supports tags on create via MCP). Contacts likewise only edit tags from the detail/edit surfaces, so this is not a parity gap — treat as an independent enhancement if wanted.
 - **Search document tag names:** the journal search document indexes `tag_ids` only, while the MCP search converter reads a non-existent `tag_names` field (`backend/app/mcp/domains/journals/converters.py` line ~225) and contact documents index tag names as searchable text. Aligning journal search to also index tag names (making journals findable by tag text) is a small follow-up once events from ITER17-005 exist to keep names fresh on rename.

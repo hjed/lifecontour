@@ -95,6 +95,27 @@ async def call_delete_journal_tag(
     return str(response.text)
 
 
+async def call_merge_journal_tag(
+    authenticated_lifespan_client, arguments: dict[str, Any]
+) -> str:
+    """Call the merge_journal_tag MCP tool and return the raw SSE response text."""
+    async with authenticated_lifespan_client() as authenticated_client:
+        session_id = await initialize_mcp_session(authenticated_client)
+        response = await authenticated_client.post(
+            "/mcp-server/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "merge_journal_tag", "arguments": arguments},
+            },
+            headers=mcp_headers(session_id),
+        )
+
+    assert response.status_code == 200
+    return str(response.text)
+
+
 @pytest.mark.integration
 class TestUpdateJournalTagMCPTool:
     """Integration tests for the update_journal_tag MCP tool."""
@@ -365,6 +386,162 @@ class TestDeleteJournalTagMCPTool:
         """A malformed tag id is reported rather than raising an unhandled error."""
         raw = await call_delete_journal_tag(
             authenticated_lifespan_client, {"tag_id": "not-a-uuid"}
+        )
+
+        payload = extract_mcp_json_payload(raw)
+        assert payload["error"] == "Journal error"
+        assert "invalid tag uuid" in payload["message"].lower()
+
+
+@pytest.mark.integration
+class TestMergeJournalTagMCPTool:
+    """Integration tests for the merge_journal_tag MCP tool."""
+
+    @pytest.mark.asyncio
+    async def test_merge_journal_tag_moves_assignments_and_children(
+        self,
+        authenticated_lifespan_client,
+        journal_tag_repo,
+        async_connection: AsyncConnection,
+    ):
+        """The tool re-points assignments, adopts children, and deletes the source."""
+        from core_shared.models.journals import EventDateRange, Journal
+
+        from app.core.journal.adapters.sql.journal_repository import (
+            SqlJournalRepository,
+        )
+
+        journal = await SqlJournalRepository(async_connection).save(
+            Journal(
+                user_id="test-user",
+                title="Blue Mountains",
+                content="Test content",
+                event_date_range=EventDateRange(
+                    start=datetime.now(UTC), end=datetime.now(UTC)
+                ),
+            )
+        )
+        source = await journal_tag_repo.save(JournalTag(name="hiking"))
+        target = await journal_tag_repo.save(JournalTag(name="bushwalking"))
+        child = await journal_tag_repo.save(
+            JournalTag(name="day walks", parent_id=source.id)
+        )
+        await journal_tag_repo.assign_tag(journal.id, source.id)
+
+        raw = await call_merge_journal_tag(
+            authenticated_lifespan_client,
+            {"source_tag_id": str(source.id), "target_tag_id": str(target.id)},
+        )
+        payload = extract_mcp_json_payload(raw)
+
+        assert payload["status"] == "success"
+        # The summary is what an AI caller reads back, so pin it names both
+        # tags and says the source is gone rather than only checking status.
+        assert str(source.id) in payload["summary"]
+        assert str(target.id) in payload["summary"]
+        assert "deleted" in payload["summary"].lower()
+
+        assert await journal_tag_repo.find_by_id(source.id) is None
+        assigned = await journal_tag_repo.get_tags_for_journal(journal.id)
+        assert [tag.id for tag in assigned] == [target.id]
+        surviving_child = await journal_tag_repo.find_by_id(child.id)
+        assert surviving_child is not None
+        assert surviving_child.parent_id == target.id
+
+    @pytest.mark.asyncio
+    async def test_merge_journal_tag_into_self_errors(
+        self,
+        authenticated_lifespan_client,
+        journal_tag_repo,
+    ):
+        """Merging a tag into itself is reported rather than silently deleting it."""
+        tag = await journal_tag_repo.save(JournalTag(name="hiking"))
+
+        raw = await call_merge_journal_tag(
+            authenticated_lifespan_client,
+            {"source_tag_id": str(tag.id), "target_tag_id": str(tag.id)},
+        )
+
+        payload = extract_mcp_json_payload(raw)
+        assert payload["error"] == "Journal error"
+        assert "itself" in payload["message"].lower()
+        # The tag must survive a rejected merge.
+        assert await journal_tag_repo.find_by_id(tag.id) is not None
+
+    @pytest.mark.asyncio
+    async def test_merge_journal_tag_into_descendant_errors(
+        self,
+        authenticated_lifespan_client,
+        journal_tag_repo,
+    ):
+        """Merging a tag into its own child is reported and changes nothing."""
+        parent = await journal_tag_repo.save(JournalTag(name="outdoors"))
+        child = await journal_tag_repo.save(
+            JournalTag(name="climbing", parent_id=parent.id)
+        )
+
+        raw = await call_merge_journal_tag(
+            authenticated_lifespan_client,
+            {"source_tag_id": str(parent.id), "target_tag_id": str(child.id)},
+        )
+
+        payload = extract_mcp_json_payload(raw)
+        assert payload["error"] == "Journal error"
+        assert "descendant" in payload["message"].lower()
+        assert await journal_tag_repo.find_by_id(parent.id) is not None
+
+    @pytest.mark.asyncio
+    async def test_merge_journal_tag_unknown_target_errors(
+        self,
+        authenticated_lifespan_client,
+        journal_tag_repo,
+    ):
+        """An unknown target reports not-found and leaves the source in place."""
+        source = await journal_tag_repo.save(JournalTag(name="hiking"))
+
+        raw = await call_merge_journal_tag(
+            authenticated_lifespan_client,
+            {
+                "source_tag_id": str(source.id),
+                "target_tag_id": "00000000-0000-0000-0000-000000000000",
+            },
+        )
+
+        payload = extract_mcp_json_payload(raw)
+        assert payload["error"] == "Not found"
+        assert await journal_tag_repo.find_by_id(source.id) is not None
+
+    @pytest.mark.asyncio
+    async def test_merge_journal_tag_unknown_source_errors(
+        self,
+        authenticated_lifespan_client,
+        journal_tag_repo,
+    ):
+        """An unknown source reports not-found and leaves the target in place."""
+        target = await journal_tag_repo.save(JournalTag(name="bushwalking"))
+
+        raw = await call_merge_journal_tag(
+            authenticated_lifespan_client,
+            {
+                "source_tag_id": "00000000-0000-0000-0000-000000000000",
+                "target_tag_id": str(target.id),
+            },
+        )
+
+        payload = extract_mcp_json_payload(raw)
+        assert payload["error"] == "Not found"
+        assert await journal_tag_repo.find_by_id(target.id) is not None
+
+    @pytest.mark.asyncio
+    async def test_merge_journal_tag_invalid_uuid_errors(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+    ):
+        """A malformed tag id is reported rather than raising an unhandled error."""
+        raw = await call_merge_journal_tag(
+            authenticated_lifespan_client,
+            {"source_tag_id": "not-a-uuid", "target_tag_id": "also-not-a-uuid"},
         )
 
         payload = extract_mcp_json_payload(raw)

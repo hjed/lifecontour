@@ -5302,6 +5302,74 @@ async def delete_journal_tag(
     )
 
 
+@mcp_unified_error_handler("merge_journal_tag", "tag")
+async def merge_journal_tag(
+    source_tag_id: Annotated[
+        str, Field(description="UUID of the journal tag to merge away and delete")
+    ],
+    target_tag_id: Annotated[
+        str, Field(description="UUID of the journal tag to merge into (the survivor)")
+    ],
+    tag_service: JournalTagService = mcp_depends(get_journal_tag_service),
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+) -> str:
+    """
+    Merge one journal tag into another, consolidating duplicates.
+
+    Journal tags are a separate namespace from contact tags — use
+    merge_contact_tags for those, and list_journal_tags to find tag UUIDs.
+
+    Every journal tagged with the source tag ends up tagged with the target
+    instead; a journal already carrying both keeps a single tag. Child tags of
+    the source are adopted by the target rather than moved to the root. The
+    source tag is then deleted.
+
+    A tag cannot be merged into itself, nor into one of its own descendants —
+    the surviving hierarchy would run through a tag that no longer exists.
+
+    Args:
+        source_tag_id: UUID of the tag to merge away and delete
+        target_tag_id: UUID of the tag that survives the merge
+
+    Returns:
+        JSON string confirming the merge.
+    """
+    try:
+        source_uuid = UUID(source_tag_id)
+    except ValueError as e:
+        raise JournalValidationError(
+            "source_tag_id", f"Invalid tag UUID: {source_tag_id}"
+        ) from e
+
+    try:
+        target_uuid = UUID(target_tag_id)
+    except ValueError as e:
+        raise JournalValidationError(
+            "target_tag_id", f"Invalid tag UUID: {target_tag_id}"
+        ) from e
+
+    # The service owns the unit of work; MCP tools never open transactions.
+    await tag_service.merge_tag(
+        source_id=source_uuid,
+        target_id=target_uuid,
+        transaction=db_connection,
+    )
+
+    class MergeJournalTagResponse(BaseModel):
+        status: str
+        summary: str
+
+    return MCPResponseBuilder.success_response(
+        MergeJournalTagResponse(
+            status="success",
+            summary=(
+                f"Merged journal tag {source_tag_id} into {target_tag_id}; "
+                "the source tag was deleted"
+            ),
+        )
+    )
+
+
 def register_journal_tools(mcp: FastMCP[None]) -> None:
     """
     Register journal-related MCP tools with the FastMCP server.
@@ -5346,3 +5414,4 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
     mcp.add_tool(list_journal_tags)
     mcp.add_tool(update_journal_tag)
     mcp.add_tool(delete_journal_tag)
+    mcp.add_tool(merge_journal_tag)

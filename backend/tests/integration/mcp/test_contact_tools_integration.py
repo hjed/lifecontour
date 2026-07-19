@@ -980,6 +980,93 @@ class TestContactToolsIntegration:
         assert payload["tag_id"] == 999999
 
     @pytest.mark.asyncio
+    async def test_merge_contact_tags_moves_assignments_and_children(
+        self,
+        authenticated_lifespan_client,
+        tag_repo,
+        contact_service: ContactService,
+        clean_database,
+    ):
+        """The renamed merge_contact_tags tool still performs the merge.
+
+        Registered as ``merge_contact_tags`` (was the unscoped ``merge_tags``)
+        so it sits symmetrically beside ``merge_journal_tag``.
+        """
+        from core_shared.models.contacts.entities import Contact
+        from sqlalchemy import text
+
+        contact = await contact_service.create_contact(
+            Contact(first_name="Jane", last_name="Doe"), clean_database
+        )
+        source = await tag_repo.save(Tag(name=TagName("colleague")))
+        target = await tag_repo.save(Tag(name=TagName("work")))
+        child = await tag_repo.save(Tag(name=TagName("team"), parent_id=source.id))
+        await clean_database.execute(
+            text(
+                "INSERT INTO contact_tags (contact_id, tag_id) "
+                "VALUES (:contact_id, :tag_id)"
+            ),
+            {"contact_id": contact.id, "tag_id": source.id},
+        )
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            response = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "merge_contact_tags",
+                        "arguments": {
+                            "source_id": source.id,
+                            "target_id": target.id,
+                        },
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+
+        assert response.status_code == 200
+        payload = extract_mcp_json_payload(response.text)
+        assert payload["status"] == "success"
+
+        assert await tag_repo.find_by_id(source.id) is None
+        assigned = await clean_database.execute(
+            text("SELECT tag_id FROM contact_tags WHERE contact_id = :contact_id"),
+            {"contact_id": contact.id},
+        )
+        assert [row.tag_id for row in assigned.fetchall()] == [target.id]
+        surviving_child = await tag_repo.find_by_id(child.id)
+        assert surviving_child is not None
+        assert surviving_child.parent_id == target.id
+
+    @pytest.mark.asyncio
+    async def test_merge_tags_old_tool_name_is_gone(
+        self,
+        authenticated_lifespan_client,
+        clean_database,
+    ):
+        """The pre-rename tool name is no longer registered."""
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            response = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/list",
+                    "params": {},
+                },
+                headers=mcp_headers(session_id),
+            )
+
+        assert response.status_code == 200
+        assert '"merge_tags"' not in response.text
+        assert "merge_contact_tags" in response.text
+
+    @pytest.mark.asyncio
     async def test_contact_relationships_via_mounted_http_session(
         self,
         authenticated_lifespan_client,
