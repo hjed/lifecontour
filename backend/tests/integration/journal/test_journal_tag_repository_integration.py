@@ -244,6 +244,53 @@ class TestJournalTagRepositoryIntegration:
         found_tag = await tag_repo.find_by_id(saved_tag.id)
         assert found_tag.color == "#FF0000"
 
+    async def test_delete_cascades_assignments(self, tag_repo, async_connection):
+        """Test deleting a tag removes its journal assignments via ON DELETE CASCADE.
+
+        This is what makes delete parity safe: the service does not have to
+        un-assign the tag by hand before deleting it.
+        """
+        from core_shared.models.journals import EventDateRange, Journal
+        from sqlalchemy import text
+
+        from app.core.journal.adapters.sql.journal_repository import (
+            SqlJournalRepository,
+        )
+
+        journal_repo = SqlJournalRepository(async_connection)
+        saved_journal = await journal_repo.save(
+            Journal(
+                user_id="test-user",
+                title="Tagged Journal",
+                content="Test content",
+                event_date_range=EventDateRange(
+                    start=datetime.now(UTC), end=datetime.now(UTC)
+                ),
+            )
+        )
+        saved_tag = await tag_repo.save(JournalTag(name="doomed"))
+        await tag_repo.assign_tag(saved_journal.id, saved_tag.id)
+
+        await tag_repo.delete(saved_tag.id)
+
+        result = await async_connection.execute(
+            text("SELECT COUNT(*) FROM journal_tag_assignments WHERE tag_id = :tag_id"),
+            {"tag_id": saved_tag.id},
+        )
+        assert result.scalar() == 0
+        assert await tag_repo.get_tags_for_journal(saved_journal.id) == []
+
+    async def test_delete_sets_child_parent_id_null(self, tag_repo):
+        """Test deleting a parent tag re-parents its children to NULL."""
+        parent = await tag_repo.save(JournalTag(name="outdoors"))
+        child = await tag_repo.save(JournalTag(name="climbing", parent_id=parent.id))
+
+        await tag_repo.delete(parent.id)
+
+        surviving_child = await tag_repo.find_by_id(child.id)
+        assert surviving_child is not None
+        assert surviving_child.parent_id is None
+
     async def test_get_tags_for_journal(self, tag_repo, async_connection):
         """Test getting tags assigned to a journal."""
         from core_shared.models.journals import EventDateRange, Journal

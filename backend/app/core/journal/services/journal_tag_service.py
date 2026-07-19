@@ -9,11 +9,9 @@ from dataclasses import replace
 from uuid import UUID
 
 from core_shared.models.journals import (
-    JournalDomainError,
     JournalTagNotFoundError,
     JournalValidationError,
 )
-from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -23,13 +21,6 @@ from app.core.journal.services.journal_tag_hierarchy_service import (
     JournalTagHierarchyService,
 )
 from app.infrastructure.unit_of_work import transactional
-
-
-class JournalTagInUseError(JournalDomainError):
-    """Raised when attempting to delete a tag still assigned to journals (409)."""
-
-    def __init__(self, message: str):
-        super().__init__(message, 409)
 
 
 class JournalTagService:
@@ -155,36 +146,24 @@ class JournalTagService:
         tag_id: UUID,
         transaction: AsyncConnection,
     ) -> None:
-        """Delete a journal tag after verifying it is not in use.
+        """Delete a journal tag, un-assigning it from every journal.
+
+        Mirrors the contact ``TagService.delete_tag`` contract: an in-use tag is
+        deleted rather than blocked. The ``journal_tag_assignments`` rows are
+        removed by the table's ``ON DELETE CASCADE`` FK and any child tags are
+        re-parented to NULL by ``journal_tags.parent_id``'s ``ON DELETE SET
+        NULL``, so no explicit clean-up is needed here.
 
         Args:
-            tag_id: The tag to delete (already validated to exist by the caller).
+            tag_id: The tag to delete.
             transaction: Request connection; the write commits before the response.
 
         Raises:
-            JournalTagInUseError: The tag is still assigned to one or more journals.
+            JournalTagNotFoundError: No tag exists with this id.
         """
-        # Check if tag is in use by any journals. This prevents accidental
-        # deletion of tags that are actively being used.
-        check_query = text(
-            """
-            SELECT COUNT(*) as count
-            FROM journal_tag_assignments
-            WHERE tag_id = :tag_id
-            """
-        )
-        result = await transaction.execute(check_query, {"tag_id": tag_id})
-        row = result.fetchone()
-        usage_count: int = row[0] if row else 0
-
-        if usage_count > 0:
-            tag = await self.tag_repo.find_by_id(tag_id)
-            tag_name = tag.name if tag else str(tag_id)
-            raise JournalTagInUseError(
-                f"Cannot delete tag '{tag_name}' because it is assigned to "
-                f"{usage_count} journal(s). "
-                "Remove the tag from all journals before deleting it."
-            )
+        tag = await self.tag_repo.find_by_id(tag_id)
+        if not tag:
+            raise JournalTagNotFoundError(str(tag_id))
 
         await self.tag_repo.delete(tag_id)
 

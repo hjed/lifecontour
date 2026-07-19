@@ -1,6 +1,6 @@
 """Unit tests for JournalTagService."""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -14,10 +14,7 @@ from app.core.journal.models.journal_tag import JournalTag
 from app.core.journal.services.journal_tag_hierarchy_service import (
     JournalTagHierarchyService,
 )
-from app.core.journal.services.journal_tag_service import (
-    JournalTagInUseError,
-    JournalTagService,
-)
+from app.core.journal.services.journal_tag_service import JournalTagService
 
 
 @pytest.fixture
@@ -93,40 +90,56 @@ class TestCreateTag:
 
 
 class TestDeleteTag:
-    """Test the delete_tag unit of work."""
+    """Test the delete_tag unit of work.
 
-    @staticmethod
-    def _transaction_with_usage(usage_count: int) -> AsyncMock:
-        """Build a mock transaction whose usage query returns ``usage_count``."""
-        transaction = AsyncMock()
-        result = MagicMock()
-        result.fetchone.return_value = (usage_count,)
-        transaction.execute.return_value = result
-        return transaction
+    Mirrors the contact ``TagService.delete_tag`` contract: deleting a tag
+    always succeeds, un-assigning it from every journal rather than blocking.
+    """
 
     @pytest.mark.asyncio
-    async def test_delete_tag_deletes_when_unused(self, tag_service, mock_tag_repo):
+    async def test_delete_tag_deletes_when_unused(
+        self, tag_service, mock_tag_repo, mock_transaction
+    ):
         """delete_tag removes the tag when no journals reference it."""
         tag_id = uuid4()
-        transaction = self._transaction_with_usage(0)
+        mock_tag_repo.find_by_id.return_value = JournalTag(
+            id=tag_id, name="Spare", color="#000000"
+        )
 
-        await tag_service.delete_tag(tag_id, transaction=transaction)
+        await tag_service.delete_tag(tag_id, transaction=mock_transaction)
 
         mock_tag_repo.delete.assert_awaited_once_with(tag_id)
 
     @pytest.mark.asyncio
-    async def test_delete_tag_rejects_in_use(self, tag_service, mock_tag_repo):
-        """delete_tag raises an in-use error when journals reference it."""
+    async def test_delete_tag_removes_tag_in_use(
+        self, tag_service, mock_tag_repo, mock_transaction
+    ):
+        """A tag assigned to journals is deleted, matching contact behaviour.
+
+        The assignments are removed by the ``ON DELETE CASCADE`` FK, so the
+        service issues no usage check and never blocks the delete.
+        """
         tag_id = uuid4()
-        transaction = self._transaction_with_usage(3)
         mock_tag_repo.find_by_id.return_value = JournalTag(
             id=tag_id, name="Busy", color="#000000"
         )
 
-        with pytest.raises(JournalTagInUseError) as exc_info:
-            await tag_service.delete_tag(tag_id, transaction=transaction)
+        await tag_service.delete_tag(tag_id, transaction=mock_transaction)
 
-        assert exc_info.value.status_code == 409
+        mock_tag_repo.delete.assert_awaited_once_with(tag_id)
+        mock_transaction.execute.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_delete_tag_raises_not_found_for_missing_tag(
+        self, tag_service, mock_tag_repo, mock_transaction
+    ):
+        """An unknown tag id raises the journal not-found error (404)."""
+        tag_id = uuid4()
+        mock_tag_repo.find_by_id.return_value = None
+
+        with pytest.raises(JournalTagNotFoundError):
+            await tag_service.delete_tag(tag_id, transaction=mock_transaction)
+
         mock_tag_repo.delete.assert_not_awaited()
 
 

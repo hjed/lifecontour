@@ -5,6 +5,7 @@ Mirrors the contact `list_contact_tags` coverage in
 `test_contact_tools_integration.py` for the journal tag namespace.
 """
 
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -65,6 +66,27 @@ async def call_update_journal_tag(
                 "id": 2,
                 "method": "tools/call",
                 "params": {"name": "update_journal_tag", "arguments": arguments},
+            },
+            headers=mcp_headers(session_id),
+        )
+
+    assert response.status_code == 200
+    return str(response.text)
+
+
+async def call_delete_journal_tag(
+    authenticated_lifespan_client, arguments: dict[str, Any]
+) -> str:
+    """Call the delete_journal_tag MCP tool and return the raw SSE response text."""
+    async with authenticated_lifespan_client() as authenticated_client:
+        session_id = await initialize_mcp_session(authenticated_client)
+        response = await authenticated_client.post(
+            "/mcp-server/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "delete_journal_tag", "arguments": arguments},
             },
             headers=mcp_headers(session_id),
         )
@@ -256,6 +278,98 @@ class TestUpdateJournalTagMCPTool:
         )
 
         assert "invalid tag uuid" in raw.lower()
+
+
+@pytest.mark.integration
+class TestDeleteJournalTagMCPTool:
+    """Integration tests for the delete_journal_tag MCP tool."""
+
+    @pytest.mark.asyncio
+    async def test_delete_journal_tag_via_mounted_http_session(
+        self,
+        authenticated_lifespan_client,
+        journal_tag_repo,
+    ):
+        """The tool deletes an unused tag and the write is committed."""
+        tag = await journal_tag_repo.save(JournalTag(name="obsolete"))
+
+        raw = await call_delete_journal_tag(
+            authenticated_lifespan_client, {"tag_id": str(tag.id)}
+        )
+        payload = extract_mcp_json_payload(raw)
+
+        assert payload["status"] == "success"
+        assert await journal_tag_repo.find_by_id(tag.id) is None
+
+    @pytest.mark.asyncio
+    async def test_delete_journal_tag_in_use_unassigns_it(
+        self,
+        authenticated_lifespan_client,
+        journal_tag_repo,
+        async_connection: AsyncConnection,
+    ):
+        """Deleting an assigned tag succeeds and leaves the journal untagged."""
+        from core_shared.models.journals import EventDateRange, Journal
+
+        from app.core.journal.adapters.sql.journal_repository import (
+            SqlJournalRepository,
+        )
+
+        journal = await SqlJournalRepository(async_connection).save(
+            Journal(
+                user_id="test-user",
+                title="Tagged Journal",
+                content="Test content",
+                event_date_range=EventDateRange(
+                    start=datetime.now(UTC), end=datetime.now(UTC)
+                ),
+            )
+        )
+        tag = await journal_tag_repo.save(JournalTag(name="in-use"))
+        await journal_tag_repo.assign_tag(journal.id, tag.id)
+
+        raw = await call_delete_journal_tag(
+            authenticated_lifespan_client, {"tag_id": str(tag.id)}
+        )
+
+        assert extract_mcp_json_payload(raw)["status"] == "success"
+        assert await journal_tag_repo.find_by_id(tag.id) is None
+        assert await journal_tag_repo.get_tags_for_journal(journal.id) == []
+
+    @pytest.mark.asyncio
+    async def test_delete_journal_tag_unknown_tag_errors(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+    ):
+        """An unknown tag id reports not-found, not a generic failure.
+
+        Asserted on the parsed payload rather than the raw SSE envelope so a
+        success response that merely mentions the phrase cannot pass.
+        """
+        tag_id = "00000000-0000-0000-0000-000000000000"
+        raw = await call_delete_journal_tag(
+            authenticated_lifespan_client, {"tag_id": tag_id}
+        )
+
+        payload = extract_mcp_json_payload(raw)
+        assert payload["error"] == "Not found"
+        assert str(tag_id) in payload["message"]
+
+    @pytest.mark.asyncio
+    async def test_delete_journal_tag_invalid_uuid_errors(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+    ):
+        """A malformed tag id is reported rather than raising an unhandled error."""
+        raw = await call_delete_journal_tag(
+            authenticated_lifespan_client, {"tag_id": "not-a-uuid"}
+        )
+
+        payload = extract_mcp_json_payload(raw)
+        assert payload["error"] == "Journal error"
+        assert "invalid tag uuid" in payload["message"].lower()
 
 
 @pytest.mark.integration

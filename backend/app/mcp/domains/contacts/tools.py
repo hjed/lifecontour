@@ -1312,6 +1312,47 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             raise
 
     @mcp.tool
+    @mcp_unified_error_handler("delete_contact_tag", "tag")
+    async def delete_contact_tag(
+        tag_id: Annotated[int, Field(description="ID of the contact tag to delete")],
+        tag_service: TagService = mcp_depends(get_tag_service),
+        connection: AsyncConnection = mcp_depends(get_async_connection),
+    ) -> str:
+        """
+        Delete a contact tag, removing it from every contact it is assigned to.
+
+        Contact tags are a separate namespace from journal tags — use
+        delete_journal_tag for those, and list_contact_tags to find tag IDs.
+
+        This is not blocked when the tag is in use: contacts are kept and simply
+        lose this tag. Any child tags of the deleted tag are re-parented to the
+        root of the hierarchy rather than being deleted.
+
+        Args:
+            tag_id: The ID of the tag to delete
+
+        Returns:
+            JSON string confirming the deletion
+        """
+        logger.info("MCP: Deleting contact tag", tag_id=tag_id)
+
+        try:
+            # The service owns the unit of work; MCP tools never open transactions.
+            await tag_service.delete_tag(tag_id=tag_id, transaction=connection)
+
+            response = ContactActionResponse(
+                status="success",
+                message=(f"Tag {tag_id} deleted and removed from all contacts"),
+            )
+            return MCPResponseBuilder.success_response(response)
+
+        except Exception as e:
+            logger.error(
+                "MCP: Failed to delete contact tag", error=str(e), tag_id=tag_id
+            )
+            raise
+
+    @mcp.tool
     @mcp_unified_error_handler("merge_tags", "tag")
     async def merge_tags(
         source_id: Annotated[

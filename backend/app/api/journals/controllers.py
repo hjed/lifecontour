@@ -738,26 +738,25 @@ async def update_journal_tag(
 @inject
 async def delete_journal_tag(
     tag_id: str,
-    tag_repo: FromDishka[JournalTagRepository],
     journal_tag_service: FromDishka[JournalTagService],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> None:
     """
-    Delete a journal tag.
+    Delete a journal tag, removing it from every journal it is assigned to.
 
-    This is a minimal implementation to support E2E testing cleanup.
+    Matches contact tag delete: an in-use tag is deleted rather than blocked.
+    Assignments cascade away and child tags are re-parented to the root.
 
     IMPORTANT SECURITY NOTES:
     - Journal tags are global (not user-scoped) - any authenticated user can delete any tag
-    - This endpoint checks if the tag is in use and returns 409 Conflict if it is
     - In production, this endpoint should be restricted to admin users only
     - Future improvement: Add role-based access control (admin-only deletion)
 
     Args:
         tag_id: UUID of the tag to delete
-        tag_repo: Tag repository
-        connection: Database connection (to check if tag is in use)
+        journal_tag_service: Service owning the delete unit of work
+        connection: Database connection
         user: Authenticated user
 
     Returns:
@@ -766,7 +765,6 @@ async def delete_journal_tag(
     Raises:
         400: Invalid tag ID format
         404: Tag not found
-        409: Tag is in use by one or more journals
     """
     from uuid import UUID
 
@@ -779,16 +777,8 @@ async def delete_journal_tag(
             detail="Invalid tag ID format",
         ) from e
 
-    # Get the tag to verify it exists
-    tag = await tag_repo.find_by_id(tag_uuid)
-    if not tag:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Tag not found",
-        )
-
-    # Delete the tag as a committed unit of work. The service raises a 409 if the
-    # tag is still assigned to any journals.
+    # Delete as a committed unit of work. The service raises
+    # JournalTagNotFoundError (404) when the tag does not exist.
     await journal_tag_service.delete_tag(tag_uuid, connection)
 
     return None

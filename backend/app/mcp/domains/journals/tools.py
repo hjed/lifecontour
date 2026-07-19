@@ -5253,6 +5253,48 @@ async def update_journal_tag(
     return MCPResponseBuilder.success_response(response_data)
 
 
+@mcp_unified_error_handler("delete_journal_tag", "tag")
+async def delete_journal_tag(
+    tag_id: Annotated[str, Field(description="UUID of the journal tag to delete")],
+    tag_service: JournalTagService = mcp_depends(get_journal_tag_service),
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+) -> str:
+    """
+    Delete a journal tag, removing it from every journal it is assigned to.
+
+    Journal tags are a separate namespace from contact tags — use
+    delete_contact_tag for those, and list_journal_tags to find tag UUIDs.
+
+    This is not blocked when the tag is in use: journals keep their content and
+    simply lose this tag. Any child tags of the deleted tag are re-parented to
+    the root of the hierarchy rather than being deleted.
+
+    Args:
+        tag_id: UUID of the tag to delete
+
+    Returns:
+        JSON string confirming the deletion.
+    """
+    try:
+        tag_uuid = UUID(tag_id)
+    except ValueError as e:
+        raise JournalValidationError("tag_id", f"Invalid tag UUID: {tag_id}") from e
+
+    # The service owns the unit of work; MCP tools never open transactions.
+    await tag_service.delete_tag(tag_id=tag_uuid, transaction=db_connection)
+
+    class DeleteJournalTagResponse(BaseModel):
+        status: str
+        summary: str
+
+    return MCPResponseBuilder.success_response(
+        DeleteJournalTagResponse(
+            status="success",
+            summary=f"Deleted journal tag {tag_id} and removed it from all journals",
+        )
+    )
+
+
 def register_journal_tools(mcp: FastMCP[None]) -> None:
     """
     Register journal-related MCP tools with the FastMCP server.
@@ -5296,3 +5338,4 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
     mcp.add_tool(update_gear_item)
     mcp.add_tool(list_journal_tags)
     mcp.add_tool(update_journal_tag)
+    mcp.add_tool(delete_journal_tag)
