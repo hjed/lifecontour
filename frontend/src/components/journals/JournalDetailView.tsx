@@ -701,7 +701,11 @@ export function JournalDetailView({
                       isPending ? handlePendingTypeSave : handleTypeDataSave
                     }
                     onTemplateSelect={handleTemplateSelect}
-                    templateTypes={templateTypesForJournalTypes(displayedTypes)}
+                    // Offer subtype templates only for persisted types: the
+                    // type-data update in handleTemplateSelect 400s on a type
+                    // whose row doesn't exist yet, so the selector must not
+                    // offer templates whose fields couldn't be applied.
+                    templateTypes={templateTypesForJournalTypes(persistedTypes)}
                     defaultOpen={isPending}
                   />
                 );
