@@ -144,6 +144,33 @@ describe('AbseilingTripTypeEditor', () => {
     );
   });
 
+  it('treats a user-entered count over an all-jump pitch list as manual', async () => {
+    const user = userEvent.setup();
+    const handleChange = jest.fn();
+
+    // Calculated abseils are 0 (both pitches are jumps) but the user has
+    // entered 3 — that manual override must survive later pitch edits.
+    render(
+      <AbseilingTripTypeEditor
+        createMode={true}
+        data={{
+          number_of_abseils: 3,
+          pitches: [
+            { pitch_number: 1, height: 5, pitch_type: 'jump' },
+            { pitch_number: 2, height: 3, pitch_type: 'jump' },
+          ],
+        }}
+        onChange={handleChange}
+      />
+    );
+
+    await user.click(screen.getByTestId('remove-pitch-1'));
+
+    expect(handleChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ number_of_abseils: 3 })
+    );
+  });
+
   it('calls onTemplateSelect with the selected template', async () => {
     const user = userEvent.setup();
     const onTemplateSelect = jest.fn();

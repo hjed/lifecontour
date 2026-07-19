@@ -71,6 +71,7 @@ export function AbseilingTripTypeEditor({
     onChange,
   });
 
+  const initialPitchCount = (initialData.pitches || []).length;
   const initialCalcAbseils = countAbseils(initialData.pitches || []);
   const initialCalcLength = (initialData.pitches || []).reduce(
     (sum, p) => sum + (p.height || 0),
@@ -84,10 +85,13 @@ export function AbseilingTripTypeEditor({
     null
   );
 
+  // Gate on the pitch count, not the abseil count: an all-jump/DC pitch list
+  // legitimately calculates to zero abseils, and a user-entered count must
+  // still register as a manual override in that case.
   const isManualAbseils =
     manualAbseilsState ??
     (initialData.number_of_abseils != null &&
-      initialCalcAbseils > 0 &&
+      initialPitchCount > 0 &&
       initialData.number_of_abseils !== initialCalcAbseils);
 
   const isManualLength =
