@@ -901,6 +901,85 @@ class TestContactToolsIntegration:
         assert str(persisted.name) == "colleague"
 
     @pytest.mark.asyncio
+    async def test_delete_contact_tag_removes_it_from_contacts(
+        self,
+        authenticated_lifespan_client,
+        tag_repo,
+        contact_service: ContactService,
+        clean_database,
+    ):
+        """The delete_contact_tag tool deletes a tag that is still assigned."""
+        from core_shared.models.contacts.entities import Contact
+        from sqlalchemy import text
+
+        contact = await contact_service.create_contact(
+            Contact(first_name="Jane", last_name="Doe"), clean_database
+        )
+        tag = await tag_repo.save(Tag(name=TagName("friend")))
+        await clean_database.execute(
+            text(
+                "INSERT INTO contact_tags (contact_id, tag_id) "
+                "VALUES (:contact_id, :tag_id)"
+            ),
+            {"contact_id": contact.id, "tag_id": tag.id},
+        )
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            response = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "delete_contact_tag",
+                        "arguments": {"tag_id": tag.id},
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+
+        assert response.status_code == 200
+        payload = extract_mcp_json_payload(response.text)
+        assert payload["status"] == "success"
+
+        assert await tag_repo.find_by_id(tag.id) is None
+        remaining = await clean_database.execute(
+            text("SELECT COUNT(*) FROM contact_tags WHERE contact_id = :contact_id"),
+            {"contact_id": contact.id},
+        )
+        assert remaining.scalar() == 0
+
+    @pytest.mark.asyncio
+    async def test_delete_contact_tag_unknown_tag_reports_not_found(
+        self,
+        authenticated_lifespan_client,
+        clean_database,
+    ):
+        """An unknown tag id is reported as not-found, not a generic failure."""
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            response = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "delete_contact_tag",
+                        "arguments": {"tag_id": 999999},
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+
+        assert response.status_code == 200
+        payload = extract_mcp_json_payload(response.text)
+        assert "not found" in payload["error"].lower()
+        assert payload["tag_id"] == 999999
+
+    @pytest.mark.asyncio
     async def test_contact_relationships_via_mounted_http_session(
         self,
         authenticated_lifespan_client,

@@ -1,6 +1,6 @@
 # Iteration 17: Journal Tags Parity
 
-**Status:** 🟡 IN PROGRESS (ITER17-001 Phase 1 complete)
+**Status:** 🟡 IN PROGRESS (ITER17-001 Phases 1–3 complete)
 **Dependencies:** Iteration 4 (journal tag tables and relationship endpoints), Iteration 4.6 (journal tag filtering + detail-view tag add/remove), Iteration 12 (unified event-driven history), Iteration 2.6 (contact tag management UX — the reference behaviour)
 **Goal:** Bring journal tag functionality to exact parity with contact tags across the UI, backend management operations, filtering, history, and MCP.
 
@@ -28,7 +28,7 @@ This iteration closes the gap so that journal tags behave **exactly like contact
 - **Database**: `journal_tags` (UUID PK, unique `name`, `parent_id` hierarchy, `color`, and `description` since migration `0102`) and `journal_tag_assignments` (composite PK `(journal_id, tag_id)`, cascade deletes) — migration `0012_create_journal_relationships_and_tags.py`.
 - **Backend endpoints** (`backend/app/api/journals/controllers.py`):
   - `GET /api/journals/tags`, `POST /api/journals/tags`
-  - `DELETE /api/journals/tags/{tag_id}` — **returns 409 Conflict when the tag is in use** (contact tag delete instead removes the tag from all contacts)
+  - `DELETE /api/journals/tags/{tag_id}` — ✅ un-assigns the tag from all journals and deletes it, matching contact behaviour (the 409-when-in-use guard was removed in ITER17-001 Phase 3)
   - `POST /api/journals/{id}/relationships/tags`, `DELETE /api/journals/{id}/relationships/tags/{tag_id}`
   - `GET /api/journals?tag_id=` filter (singular)
 - **Service/repository**: `JournalTagService.create_tag` only; repository (`journal_tag_repository.py`) supports `find_by_name` (case-insensitive), `get_all`, `get_children`, `get_root_tags`, `get_tags_for_journal`, `save`. **No update / delete-with-unassign / merge service methods.**
@@ -39,7 +39,7 @@ This iteration closes the gap so that journal tags behave **exactly like contact
   - No journal tag tree in the sidebar (`Sidebar.tsx` renders the tag tree for contacts only); no `?tag=` deep link on `/journals`.
   - `JournalCreateForm.tsx` has no tag input.
 - **Search**: `journal_indexing_service.py` indexes `tag_ids` as a filterable field.
-- **MCP**: `create_journal_entry` / `update_journal_entry` / journal reads support tags; `merge_tags` is still **contact-only** (`backend/app/mcp/domains/contacts/tools.py`). Journal tag listing shipped in ITER17-001 Phase 1 as `list_journal_tags`, alongside which contacts' `list_tags` was renamed `list_contact_tags`.
+- **MCP**: `create_journal_entry` / `update_journal_entry` / journal reads support tags; `merge_tags` is still **contact-only** (`backend/app/mcp/domains/contacts/tools.py`). Journal tag listing shipped in ITER17-001 Phase 1 as `list_journal_tags`, alongside which contacts' `list_tags` was renamed `list_contact_tags`; Phase 2 added `update_journal_tag` / `update_contact_tag` and Phase 3 added `delete_journal_tag` / `delete_contact_tag`.
 - **History**: no tag domain events for journals — tag changes do not appear in the journal activity feed (contacts publish `TagAssigned` / `TagRemoved` / `TagUpdated` / `TagDeleted` and project them into history).
 
 ### Gap summary
@@ -48,9 +48,9 @@ This iteration closes the gap so that journal tags behave **exactly like contact
 |---|---|---|
 | Inline editor: searchable add popover, create-new-tag with colour, dismissible colour badges | Plain select dropdown, no create, no colours, dead end when no tags exist | ITER17-003 |
 | Sidebar hierarchical tag tree with click-to-filter | Absent | ITER17-004 |
-| Tag management: edit name/colour/description/parent, delete, merge (context menu + dialogs) | Create only; delete 409s when in use; no update/merge | ITER17-001, ITER17-004 |
+| Tag management: edit name/colour/description/parent, delete, merge (context menu + dialogs) | Create, update and delete closed (Phases 1–3); merge still missing | ITER17-001, ITER17-004 |
 | `description` field on tags | ✅ Closed — column added in ITER17-001 Phase 1 | ITER17-001 |
-| Delete removes tag from all entities | Delete blocked (409) when in use | ITER17-001 |
+| Delete removes tag from all entities | ✅ Closed — delete un-assigns rather than blocking, ITER17-001 Phase 3 | ITER17-001 |
 | Multi-tag filter param + hierarchical descendant expansion | Singular `tag_id`, first-selected-only, no hierarchy expansion | ITER17-002 |
 | URL deep link (`?tag=`) on the list page | Absent | ITER17-002 |
 | Tag change history in activity feed | No tag domain events | ITER17-005 |
@@ -147,20 +147,27 @@ Every phase below must meet the same completion bar before merge:
 - **Integration:** PATCH endpoint round-trip with real DB; uniqueness constraint behaviour; MCP update tool test. — `tests/integration/api/test_journal_tag_endpoints.py` (`TestUpdateJournalTagEndpoint`, 14 tests), `tests/integration/journal/test_journal_tag_repository_integration.py` (re-parent round-trip, case-insensitive lookup), `tests/integration/mcp/test_journal_tag_mcp.py` (`TestUpdateJournalTagMCPTool`, 8 tests), `tests/integration/mcp/test_contact_tools_integration.py` (2 `update_contact_tag` tests)
 - **E2E:** deferred to ITER17-004 — no frontend surface edits journal tags, and `JournalTag` in `frontend/src/types/journals.ts` still carries only id/name/color. Deferral taken as stated.
 
-#### Phase 3: Delete Parity (REST + MCP)
+#### Phase 3: Delete Parity (REST + MCP) ✅ COMPLETE
 
-**Estimated diff:** ~400 lines
+**Estimated diff:** ~400 lines · **Actual:** ~630 changed lines (~520 added, ~110 removed), split into two commits: (A) service + REST + their tests, (B) both MCP tools + their tests.
 
 **Acceptance Criteria:**
-- [ ] `JournalTagService.delete_tag(tag_id, transaction)`: deleting a tag removes it from all journals (assignments cascade via existing FK) and deletes the tag — matching contact behaviour. The current 409-when-in-use guard in `DELETE /api/journals/tags/{tag_id}` is removed.
-- [ ] Child tags of a deleted tag are re-parented to NULL (existing `ON DELETE SET NULL`), matching contact behaviour.
-- [ ] **MCP (same phase):** tag delete is reachable via MCP to the same extent it is for contact tags.
-- [ ] Journals affected by delete are re-indexed in MeiliSearch (their `tag_ids` change) — verify how contact tag events drive re-indexing and mirror it (may move to ITER17-005 if event-driven; state the choice in the PR).
+- [x] `JournalTagService.delete_tag(tag_id, transaction)`: deleting a tag removes it from all journals (assignments cascade via existing FK) and deletes the tag — matching contact behaviour. The current 409-when-in-use guard in `DELETE /api/journals/tags/{tag_id}` is removed. — the usage-count query and `JournalTagInUseError` are gone; the service now does find-by-id → `JournalTagNotFoundError` (404) → `tag_repo.delete`.
+- [x] Child tags of a deleted tag are re-parented to NULL (existing `ON DELETE SET NULL`), matching contact behaviour. — no application code needed; locked in by repository integration tests against the real FK.
+- [x] **MCP (same phase):** tag delete is reachable via MCP to the same extent it is for contact tags. — added `delete_journal_tag` **and** `delete_contact_tag` (see decisions below).
+- [x] Journals affected by delete are re-indexed in MeiliSearch — **deferred to ITER17-005 Phase 2** (see decisions below).
+
+**Decisions taken (Phase 3):**
+- **Re-indexing deferred to ITER17-005 Phase 2.** Re-indexing is event-driven, and journal tags publish no domain events yet — so there is nothing to hook. Contacts are the reference and they behave the same way: `TagAssigned`/`TagRemoved` re-index a contact, but `TagDeleted` does not. Mirroring contacts therefore means shipping no re-indexing here, and the journal tag domain events in ITER17-005 Phase 2 are the correct home for it.
+- **Delete tools added in both domains.** As in Phase 2 with update, the contact baseline exposed **no** delete tool, so "match it exactly" would have shipped zero MCP work and violated delivery rule 7. The phase added `delete_journal_tag` and `delete_contact_tag`, each docstring pointing at the other, matching the Phase 1/2 naming convention.
+- **`JournalTagInUseError` removed rather than deprecated.** Nothing raised it once the guard was gone and no caller caught it; leaving the class behind would imply the 409 path still existed.
+- **The existence check moved from the controller into the service.** Previously the controller pre-checked via `JournalTagRepository` and raised its own 404, which meant the controller took a repository dependency purely for validation. The service now owns it and raises `JournalTagNotFoundError`, which the existing journal domain error handler already maps to 404 — so the controller dropped its `tag_repo` dependency and its bespoke `HTTPException`. This also gives the MCP tool the same 404 semantics for free.
+- **No frontend change was needed:** no frontend code calls `DELETE /api/journals/tags/{id}`, so the removed 409 path had no client. `api-design.md` likewise needed no change — it documented no 409-on-delete contract for journal tags. `journal-system-specification.md` **did** need updating: it described DELETE as a bare 204, so it now states the un-assign and child-re-parenting semantics alongside the 400/404 responses.
 
 **Required Test Coverage:**
-- **Unit:** delete semantics (assignments removed, children re-parented to NULL).
-- **Integration:** delete removes assignments from journals with real DB; hierarchy re-parenting; search index state after delete; MCP delete tool test if the contact baseline exposes delete.
-- **E2E:** deferred to ITER17-004.
+- **Unit:** delete semantics (assignments removed, children re-parented to NULL). — `tests/unit/journal/test_journal_tag_service.py` (`TestDeleteTag`: deletes when unused, deletes when in use with no usage query issued, 404 on unknown id), plus `delete_journal_tag` / `delete_contact_tag` tool-schema tests in `tests/unit/mcp/domains/{journals,contacts}/test_tools.py`
+- **Integration:** delete removes assignments from journals with real DB; hierarchy re-parenting; MCP delete tool test. — `tests/integration/api/test_journal_tag_endpoints.py` (`TestDeleteJournalTagEndpoint`, 5 tests), `tests/integration/journal/test_journal_tag_repository_integration.py` (`test_delete_cascades_assignments`, `test_delete_sets_child_parent_id_null`), `tests/integration/mcp/test_journal_tag_mcp.py` (`TestDeleteJournalTagMCPTool`, 4 tests), `tests/integration/mcp/test_contact_tools_integration.py` (2 `delete_contact_tag` tests). Search index state after delete is not asserted — see the re-indexing deferral above.
+- **E2E:** deferred to ITER17-004 Phase 3 — no frontend surface deletes journal tags in this phase; the MCP integration tests are the equivalent bar for the tool surface. Deferral taken as stated.
 
 #### Phase 4: Tag Merge (REST + MCP)
 
@@ -359,7 +366,7 @@ Every phase below must meet the same completion bar before merge:
 
 **Acceptance Criteria:**
 - [ ] Tag update/delete/merge publish the corresponding events (`TagUpdated` / `TagDeleted` / merge as the contact implementation models it); history entries on affected journals describe the change the same way contact history does.
-- [ ] Search re-indexing of affected journals on tag delete/merge is driven by these events if ITER17-001 Phases 3–4 deferred it here.
+- [ ] Search re-indexing of affected journals on tag delete/merge is driven by these events. **ITER17-001 Phase 3 deferred delete re-indexing here** (journal tags publish no events yet, and contacts likewise do not re-index on `TagDeleted`), so this phase now owns it; Phase 4 is expected to defer merge re-indexing the same way.
 
 **Required Test Coverage:**
 - **Unit:** event payload construction for update, delete, and merge.

@@ -841,7 +841,12 @@ PATCH /api/journals/tags/{tag_id}
 
 DELETE /api/journals/tags/{tag_id}
 - Delete a journal tag
-- Returns: 204 No Content
+- Not blocked when the tag is in use: the tag is removed from every journal it
+  is assigned to, and those journals are otherwise untouched
+- Child tags of the deleted tag are re-parented to the root of the hierarchy
+  rather than being deleted
+- Returns: 204 No Content, 400 if the tag id is not a well-formed UUID, or
+  404 if no such tag exists
 ```
 
 **Search:**

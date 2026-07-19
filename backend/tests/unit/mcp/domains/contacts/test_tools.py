@@ -106,6 +106,34 @@ class TestContactTools:
             )
 
     @pytest.mark.asyncio
+    async def test_delete_contact_tag_tool_schema(self, mcp_server):
+        """Test delete_contact_tag takes only the tag id and warns about un-assignment."""
+        async with Client(mcp_server) as client:
+            tools_response = await client.list_tools()
+
+            if hasattr(tools_response, "tools"):
+                tools = tools_response.tools
+            else:
+                tools = tools_response
+
+            tool = next(t for t in tools if t.name == "delete_contact_tag")
+
+            schema = tool.inputSchema
+            assert "tag_id" in schema["properties"]
+            assert schema.get("required", []) == ["tag_id"]
+
+            assert tool.description is not None
+            # Deleting un-assigns the tag from every contact, so the docstring
+            # must say so rather than letting callers assume it is blocked.
+            # Assert the phrase, not just the word "contact" — the tool name
+            # alone would satisfy that and the contract would go undefended.
+            assert "every contact" in tool.description.lower()
+            assert "re-parented" in tool.description.lower()
+            assert "delete_journal_tag" in tool.description, (
+                "contact tag tool should point at the journal tag equivalent"
+            )
+
+    @pytest.mark.asyncio
     async def test_list_tools(self, mcp_server):
         """Test that contact tools are properly registered and listed."""
         # Use FastMCP Client for in-memory testing
@@ -130,6 +158,7 @@ class TestContactTools:
                 "list_contacts",
                 "toggle_contact_favourite",
                 "list_contact_tags",
+                "delete_contact_tag",
             ]
 
             for expected_tool in expected_tools:

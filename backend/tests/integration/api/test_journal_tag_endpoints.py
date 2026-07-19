@@ -7,6 +7,7 @@ tag assignment to journals, and filtering journals by tags.
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import uuid4
 
 import pytest
 
@@ -534,6 +535,107 @@ class TestUpdateJournalTagEndpoint:
         tag = await create_tag(integration_api_client, "training")
 
         response = await patch_tag(integration_api_client, tag["id"], name=None)
+
+        assert response.status_code == 400
+
+
+async def create_journal_with_tag(
+    client: Any, title: str, tag_id: str
+) -> dict[str, Any]:
+    """Create a journal and assign ``tag_id`` to it, returning the journal resource."""
+    journal_response = await client.post(
+        "/api/journals",
+        json=create_journal_request_data(title=title, content="content"),
+    )
+    assert journal_response.status_code == 201, journal_response.text
+    journal: dict[str, Any] = journal_response.json()["data"]
+
+    assign_response = await client.post(
+        f"/api/journals/{journal['id']}/relationships/tags",
+        json={"data": {"type": "journal-tag", "attributes": {"tag_id": tag_id}}},
+    )
+    assert assign_response.status_code == 200, assign_response.text
+    assigned: dict[str, Any] = assign_response.json()["data"]
+    return assigned
+
+
+@pytest.mark.integration
+class TestDeleteJournalTagEndpoint:
+    """Tests for DELETE /api/journals/tags/{tag_id}.
+
+    Delete mirrors contact tag delete: it always succeeds, un-assigning the tag
+    from every journal rather than returning 409 when the tag is in use.
+    """
+
+    async def test_delete_unused_tag_returns_204(self, integration_api_client):
+        """Test deleting an unassigned tag removes it from the tag list."""
+        tag = await create_tag(integration_api_client, "obsolete")
+
+        response = await integration_api_client.delete(
+            f"/api/journals/tags/{tag['id']}"
+        )
+
+        assert response.status_code == 204, response.text
+
+        list_response = await integration_api_client.get("/api/journals/tags")
+        tag_ids = [t["id"] for t in list_response.json()["data"]]
+        assert tag["id"] not in tag_ids
+
+    async def test_delete_tag_in_use_removes_it_from_journals(
+        self, integration_api_client
+    ):
+        """Test deleting an assigned tag succeeds and un-assigns it.
+
+        This is the parity change: the endpoint previously returned 409 here.
+        """
+        tag = await create_tag(integration_api_client, "in-use", color="#FF0000")
+        journal = await create_journal_with_tag(
+            integration_api_client, "Tagged journal", tag["id"]
+        )
+        assert len(journal["attributes"]["tags"]) == 1
+
+        response = await integration_api_client.delete(
+            f"/api/journals/tags/{tag['id']}"
+        )
+
+        assert response.status_code == 204, response.text
+
+        journal_response = await integration_api_client.get(
+            f"/api/journals/{journal['id']}"
+        )
+        assert journal_response.status_code == 200
+        assert journal_response.json()["data"]["attributes"]["tags"] == []
+
+    async def test_delete_parent_tag_reparents_children_to_null(
+        self, integration_api_client
+    ):
+        """Test children of a deleted tag survive as root tags."""
+        parent = await create_tag(integration_api_client, "outdoors")
+        child = await create_tag(
+            integration_api_client, "climbing", parent_id=parent["id"]
+        )
+
+        response = await integration_api_client.delete(
+            f"/api/journals/tags/{parent['id']}"
+        )
+
+        assert response.status_code == 204, response.text
+
+        list_response = await integration_api_client.get("/api/journals/tags")
+        tags = {t["id"]: t for t in list_response.json()["data"]}
+        assert parent["id"] not in tags
+        assert child["id"] in tags
+        assert tags[child["id"]]["attributes"]["parent_id"] is None
+
+    async def test_delete_missing_tag_returns_404(self, integration_api_client):
+        """Test deleting an unknown tag id returns 404."""
+        response = await integration_api_client.delete(f"/api/journals/tags/{uuid4()}")
+
+        assert response.status_code == 404
+
+    async def test_delete_invalid_uuid_returns_400(self, integration_api_client):
+        """Test a malformed tag id is rejected before any lookup."""
+        response = await integration_api_client.delete("/api/journals/tags/not-a-uuid")
 
         assert response.status_code == 400
 
