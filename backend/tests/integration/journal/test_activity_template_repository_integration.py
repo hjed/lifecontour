@@ -585,3 +585,33 @@ class TestActivityTemplateRepositoryPitchOperations:
         assert pitch.pitch_type == "down_climb"
         assert pitch.created_at is not None
         assert pitch.updated_at is not None
+
+
+@pytest.mark.integration
+class TestPitchTypeDbConstraint:
+    """The pitch_type CHECK constraints back up the domain-level validation."""
+
+    async def test_invalid_pitch_type_rejected_by_db(
+        self,
+        template_repository: SqlActivityTemplateRepository,
+        async_connection: AsyncConnection,
+    ):
+        """A raw insert bypassing the domain layer still cannot store junk."""
+        from sqlalchemy import text
+        from sqlalchemy.exc import IntegrityError
+
+        template = ActivityTemplate(
+            name="Constraint Test",
+            template_type="canyoning",
+            user_id=TEST_USER_ID,
+        )
+        saved = await template_repository.save(template)
+
+        with pytest.raises(IntegrityError):
+            await async_connection.execute(
+                text(
+                    "INSERT INTO template_pitches (template_id, pitch_number, pitch_type)"
+                    " VALUES (:template_id, 1, 'swim')"
+                ),
+                {"template_id": saved.id},
+            )
