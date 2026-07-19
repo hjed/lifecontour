@@ -111,10 +111,14 @@ test.describe('Settings - Template Management', () => {
       'Wet start'
     );
 
-    // 3. Rename, tweak the pitch, and save
+    // 3. Rename, tweak the pitch, and save. Submit via keyboard activation:
+    // with pitch rows in the dialog, Mobile Chrome pointer hit-testing
+    // misreports the button as covered and taps time out.
     const updatedName = `${templateName} v2`;
     await dialog.getByLabel('Template Name').fill(updatedName);
     await dialog.getByLabel('Height for pitch 1').fill('35');
+    const saveButton = dialog.getByRole('button', { name: 'Save Changes' });
+    await saveButton.focus();
     await Promise.all([
       page.waitForResponse(
         resp =>
@@ -122,7 +126,7 @@ test.describe('Settings - Template Management', () => {
           resp.request().method() === 'PUT' &&
           resp.ok()
       ),
-      dialog.getByRole('button', { name: 'Save Changes' }).click(),
+      saveButton.press('Enter'),
     ]);
 
     await expect(dialog).toBeHidden();
