@@ -147,6 +147,17 @@ class SqlJournalTagRepository(JournalTagRepository):
 
     async def merge_into(self, source_id: UUID, target_id: UUID) -> None:
         """Fold the source tag into the target tag and delete the source."""
+        # Merging a tag into itself would delete every one of its assignments
+        # (step 1's EXISTS matches the row against itself) and then delete the
+        # tag — silent data loss from what reads like a no-op. The service
+        # rejects it before reaching here, so this is a precondition failure
+        # rather than user input, and a bare ValueError is the right shape.
+        if source_id == target_id:
+            raise ValueError(
+                "merge_into requires distinct source and target tags; "
+                f"both were {source_id}"
+            )
+
         params = {"source_id": source_id, "target_id": target_id}
 
         # 1. Drop source assignments the journal already holds for the target,

@@ -974,6 +974,11 @@ class JournalTagRepository(ABC):
         Args:
             source_id: The tag being merged away and deleted
             target_id: The surviving tag
+
+        Raises:
+            ValueError: ``source_id`` and ``target_id`` are the same tag.
+                Merging a tag into itself would delete all of its assignments
+                and then the tag, so it is rejected rather than performed.
         """
         pass
 

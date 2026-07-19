@@ -389,6 +389,26 @@ class TestJournalTagRepositoryIntegration:
         assert surviving_sibling is not None
         assert surviving_sibling.parent_id == target.id
 
+    async def test_merge_into_self_is_rejected(self, tag_repo, async_connection):
+        """Test merging a tag into itself is refused rather than deleting it.
+
+        Without the guard the dedupe step matches every assignment against
+        itself, so the tag would lose all its assignments and then be deleted —
+        silent data loss from a call that reads like a no-op. The service
+        rejects this first; this pins the repository's own contract.
+        """
+        journal = await self._save_journal(async_connection, "Kept")
+        tag = await tag_repo.save(JournalTag(name="hiking"))
+        await tag_repo.assign_tag(journal.id, tag.id)
+
+        with pytest.raises(ValueError, match="distinct source and target"):
+            await tag_repo.merge_into(tag.id, tag.id)
+
+        assert await tag_repo.find_by_id(tag.id) is not None
+        assert [t.id for t in await tag_repo.get_tags_for_journal(journal.id)] == [
+            tag.id
+        ]
+
     async def test_merge_into_deletes_source_tag(self, tag_repo):
         """Test the source tag is gone after the merge and the target survives."""
         source = await tag_repo.save(JournalTag(name="hiking"))
