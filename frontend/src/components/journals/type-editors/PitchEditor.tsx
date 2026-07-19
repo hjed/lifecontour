@@ -167,195 +167,210 @@ export function PitchEditor({
       </div>
 
       {pitches.length > 0 ? (
-        <div className='bg-card overflow-hidden rounded-md border'>
-          <div className='bg-muted/50 text-muted-foreground grid grid-cols-[60px_1fr_1fr_1fr_2fr_60px_60px_40px] items-center gap-2 p-3 text-xs font-medium'>
-            <div>Pitch #</div>
-            <div>Type</div>
-            <div>Height (m)</div>
-            <div>Location</div>
-            <div>Anchor Type</div>
-            <div className='text-center'>Setup?</div>
-            <div className='text-center'>Rescue?</div>
-            <div></div>
-          </div>
-          <div className='divide-y'>
-            {pitches.map((pitch, index) => {
-              return (
-                <div
-                  key={pitch.id ?? `temp-${index}`}
-                  className='flex flex-col gap-2 p-2'
-                  data-testid={`pitch-row-${index}`}
-                >
-                  <div className='grid grid-cols-[60px_1fr_1fr_1fr_2fr_60px_60px_40px] items-center gap-2'>
-                    <Input
-                      type='number'
-                      min={1}
-                      value={pitch.pitch_number || ''}
-                      onChange={e =>
-                        handleUpdatePitch(
-                          index,
-                          'pitch_number',
-                          e.target.value === ''
-                            ? 0
-                            : Number.parseInt(e.target.value, 10)
-                        )
-                      }
-                      className='h-8 px-2'
-                      aria-label={`Pitch number for row ${index + 1}`}
-                    />
-
-                    <Select
-                      value={pitch.pitch_type ?? 'abseil'}
-                      onValueChange={value =>
-                        // Safe: the only options rendered are PITCH_TYPES.
-                        handleUpdatePitch(
-                          index,
-                          'pitch_type',
-                          value as PitchType
-                        )
-                      }
-                    >
-                      <SelectTrigger
-                        className='h-8 px-2'
-                        aria-label={`Type for pitch ${pitch.pitch_number}`}
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {PITCH_TYPES.map(type => (
-                          <SelectItem key={type.value} value={type.value}>
-                            {type.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-
-                    <Input
-                      type='number'
-                      min={0}
-                      value={pitch.height ?? ''}
-                      onChange={e =>
-                        handleUpdatePitch(
-                          index,
-                          'height',
-                          e.target.value === ''
-                            ? null
-                            : Number.parseInt(e.target.value, 10)
-                        )
-                      }
-                      className='h-8 px-2'
-                      placeholder='Height'
-                      aria-label={`Height for pitch ${pitch.pitch_number}`}
-                    />
-
-                    <Select
-                      value={pitch.anchor_location ?? ''}
-                      onValueChange={value =>
-                        handleUpdatePitch(
-                          index,
-                          'anchor_location',
-                          value === 'none' ? null : value
-                        )
-                      }
-                    >
-                      <SelectTrigger
-                        className='h-8 px-2'
-                        aria-label={`Location for pitch ${pitch.pitch_number}`}
-                      >
-                        <SelectValue placeholder='-' />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value='none'>- None -</SelectItem>
-                        {VALID_ANCHOR_LOCATIONS.map(loc => (
-                          <SelectItem key={loc} value={loc}>
-                            {loc}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-
-                    <Select
-                      value={pitch.anchor_type ?? ''}
-                      onValueChange={value =>
-                        handleUpdatePitch(
-                          index,
-                          'anchor_type',
-                          value === 'none' ? null : value
-                        )
-                      }
-                    >
-                      <SelectTrigger
-                        className='h-8 px-2'
-                        aria-label={`Anchor type for pitch ${pitch.pitch_number}`}
-                      >
-                        <SelectValue placeholder='-' />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value='none'>- None -</SelectItem>
-                        {VALID_ANCHOR_TYPES.map(type => (
-                          <SelectItem key={type} value={type}>
-                            {type}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-
-                    <div className='flex justify-center'>
-                      <Checkbox
-                        checked={pitch.did_setup ?? false}
-                        onCheckedChange={checked =>
+        // The row grid needs more width than small viewports offer, so it
+        // scrolls inside this container instead of squeezing eight columns
+        // into a phone-width layout.
+        <div className='bg-card overflow-x-auto rounded-md border'>
+          <div className='min-w-[640px]'>
+            <div className='bg-muted/50 text-muted-foreground grid grid-cols-[60px_1fr_1fr_1fr_2fr_60px_60px_40px] items-center gap-2 p-3 text-xs font-medium'>
+              <div>Pitch #</div>
+              <div>Type</div>
+              <div>Height (m)</div>
+              <div>Location</div>
+              <div>Anchor Type</div>
+              <div className='text-center'>Setup?</div>
+              <div className='text-center'>Rescue?</div>
+              <div></div>
+            </div>
+            <div className='divide-y'>
+              {pitches.map((pitch, index) => {
+                return (
+                  <div
+                    key={pitch.id ?? `temp-${index}`}
+                    className='flex flex-col gap-2 p-2'
+                    data-testid={`pitch-row-${index}`}
+                  >
+                    <div className='grid grid-cols-[60px_1fr_1fr_1fr_2fr_60px_60px_40px] items-center gap-2'>
+                      <Input
+                        type='number'
+                        min={1}
+                        value={pitch.pitch_number || ''}
+                        onChange={e =>
                           handleUpdatePitch(
                             index,
-                            'did_setup',
-                            checked === true
+                            'pitch_number',
+                            e.target.value === ''
+                              ? 0
+                              : Number.parseInt(e.target.value, 10)
                           )
                         }
-                        aria-label={`Setup for pitch ${pitch.pitch_number}`}
-                        data-testid={`pitch-setup-${index}`}
+                        className='h-8 px-2'
+                        aria-label={`Pitch number for row ${index + 1}`}
                       />
-                    </div>
 
-                    <div className='flex justify-center'>
-                      <Checkbox
-                        checked={pitch.did_rescue ?? false}
-                        onCheckedChange={checked =>
+                      <Select
+                        value={pitch.pitch_type ?? 'abseil'}
+                        onValueChange={value =>
+                          // Safe: the only options rendered are PITCH_TYPES.
                           handleUpdatePitch(
                             index,
-                            'did_rescue',
-                            checked === true
+                            'pitch_type',
+                            value as PitchType
                           )
                         }
-                        aria-label={`Rescue for pitch ${pitch.pitch_number}`}
-                        data-testid={`pitch-rescue-${index}`}
-                      />
-                    </div>
-
-                    <div className='flex justify-center'>
-                      <Button
-                        type='button'
-                        variant='ghost'
-                        size='icon'
-                        className='text-muted-foreground hover:text-destructive h-8 w-8'
-                        onClick={() => handleRemovePitch(index)}
-                        aria-label={`Remove pitch ${pitch.pitch_number}`}
-                        data-testid={`remove-pitch-${index}`}
                       >
-                        <Trash2 className='h-4 w-4' />
-                      </Button>
+                        <SelectTrigger
+                          className='h-8 px-2'
+                          aria-label={`Type for pitch ${pitch.pitch_number}`}
+                        >
+                          {/* Deterministic label instead of <SelectValue />: a
+                            pre-selected SelectValue resolves its text from a
+                            client-only registry, which SSR renders empty and
+                            hydration then mismatches (breaking the page's
+                            pointer hit-testing on mobile). */}
+                          {
+                            PITCH_TYPES.find(
+                              type =>
+                                type.value === (pitch.pitch_type ?? 'abseil')
+                            )?.label
+                          }
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PITCH_TYPES.map(type => (
+                            <SelectItem key={type.value} value={type.value}>
+                              {type.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+
+                      <Input
+                        type='number'
+                        min={0}
+                        value={pitch.height ?? ''}
+                        onChange={e =>
+                          handleUpdatePitch(
+                            index,
+                            'height',
+                            e.target.value === ''
+                              ? null
+                              : Number.parseInt(e.target.value, 10)
+                          )
+                        }
+                        className='h-8 px-2'
+                        placeholder='Height'
+                        aria-label={`Height for pitch ${pitch.pitch_number}`}
+                      />
+
+                      <Select
+                        value={pitch.anchor_location ?? ''}
+                        onValueChange={value =>
+                          handleUpdatePitch(
+                            index,
+                            'anchor_location',
+                            value === 'none' ? null : value
+                          )
+                        }
+                      >
+                        <SelectTrigger
+                          className='h-8 px-2'
+                          aria-label={`Location for pitch ${pitch.pitch_number}`}
+                        >
+                          <SelectValue placeholder='-' />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value='none'>- None -</SelectItem>
+                          {VALID_ANCHOR_LOCATIONS.map(loc => (
+                            <SelectItem key={loc} value={loc}>
+                              {loc}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+
+                      <Select
+                        value={pitch.anchor_type ?? ''}
+                        onValueChange={value =>
+                          handleUpdatePitch(
+                            index,
+                            'anchor_type',
+                            value === 'none' ? null : value
+                          )
+                        }
+                      >
+                        <SelectTrigger
+                          className='h-8 px-2'
+                          aria-label={`Anchor type for pitch ${pitch.pitch_number}`}
+                        >
+                          <SelectValue placeholder='-' />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value='none'>- None -</SelectItem>
+                          {VALID_ANCHOR_TYPES.map(type => (
+                            <SelectItem key={type} value={type}>
+                              {type}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+
+                      <div className='flex justify-center'>
+                        <Checkbox
+                          checked={pitch.did_setup ?? false}
+                          onCheckedChange={checked =>
+                            handleUpdatePitch(
+                              index,
+                              'did_setup',
+                              checked === true
+                            )
+                          }
+                          aria-label={`Setup for pitch ${pitch.pitch_number}`}
+                          data-testid={`pitch-setup-${index}`}
+                        />
+                      </div>
+
+                      <div className='flex justify-center'>
+                        <Checkbox
+                          checked={pitch.did_rescue ?? false}
+                          onCheckedChange={checked =>
+                            handleUpdatePitch(
+                              index,
+                              'did_rescue',
+                              checked === true
+                            )
+                          }
+                          aria-label={`Rescue for pitch ${pitch.pitch_number}`}
+                          data-testid={`pitch-rescue-${index}`}
+                        />
+                      </div>
+
+                      <div className='flex justify-center'>
+                        <Button
+                          type='button'
+                          variant='ghost'
+                          size='icon'
+                          className='text-muted-foreground hover:text-destructive h-8 w-8'
+                          onClick={() => handleRemovePitch(index)}
+                          aria-label={`Remove pitch ${pitch.pitch_number}`}
+                          data-testid={`remove-pitch-${index}`}
+                        >
+                          <Trash2 className='h-4 w-4' />
+                        </Button>
+                      </div>
                     </div>
+                    <Input
+                      value={pitch.notes || ''}
+                      onChange={e =>
+                        handleUpdatePitch(index, 'notes', e.target.value)
+                      }
+                      className='h-8 w-full'
+                      placeholder='Optional pitch notes...'
+                      aria-label={`Notes for pitch ${pitch.pitch_number}`}
+                    />
                   </div>
-                  <Input
-                    value={pitch.notes || ''}
-                    onChange={e =>
-                      handleUpdatePitch(index, 'notes', e.target.value)
-                    }
-                    className='h-8 w-full'
-                    placeholder='Optional pitch notes...'
-                    aria-label={`Notes for pitch ${pitch.pitch_number}`}
-                  />
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         </div>
       ) : (

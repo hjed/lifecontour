@@ -41,6 +41,19 @@ async function fillAndSubmitJournal(
   await page.getByRole('button', { name: /create journal/i }).click();
 }
 
+/**
+ * Submit the create form via keyboard activation. On Mobile Chrome, pages
+ * containing pitch rows (several Radix selects each) make Playwright's
+ * pointer hit-testing misreport the submit button as covered, so taps time
+ * out even though the button is visibly tappable — keyboard activation
+ * bypasses pointer hit-testing (established de-flake pattern, see PR #1014).
+ */
+async function submitJournalFormViaKeyboard(page: Page) {
+  const submitButton = page.getByRole('button', { name: /create journal/i });
+  await submitButton.focus();
+  await submitButton.press('Enter');
+}
+
 // Removed createRoute and selectRouteInEditor as they are obsolete
 // Routes are now created by uploading GPX files during journal creation
 
@@ -134,7 +147,7 @@ async function createRouteBackedComplexJournal(
 
   await opts.fillTypeFields({ page, editor });
 
-  await page.getByRole('button', { name: /create journal/i }).click();
+  await submitJournalFormViaKeyboard(page);
 
   await awaitCreationAndAssertBadge(page, opts.badgeTestId);
   await assertAttachedTypeBadges(page, opts.attachedTypes);
@@ -553,7 +566,7 @@ test.describe('Journal Creation UI Flow', () => {
     await expect(page.getByTestId('total-length-input')).toHaveValue('120');
     await expect(page.getByTestId('number-of-abseils-input')).toHaveValue('4');
 
-    await page.getByRole('button', { name: /create journal/i }).click();
+    await submitJournalFormViaKeyboard(page);
 
     await awaitCreationAndAssertBadge(page, 'manage-type-abseiling_trip');
     await assertAttachedTypeBadges(page, [
@@ -599,13 +612,16 @@ test.describe('Journal Creation UI Flow', () => {
     await expect(page.getByTestId('total-length-input')).toHaveValue('45');
 
     // Mark the second pitch as a jump — it stops counting as an abseil but
-    // still contributes its height to the total descent.
+    // still contributes its height to the total descent. Commit the option
+    // via keyboard typeahead: on Mobile Chrome, Playwright mis-computes the
+    // portaled Radix option's position and pointer clicks never land.
     await page.getByLabel('Type for pitch 2', { exact: true }).click();
-    await page.getByRole('option', { name: 'Jump' }).click();
+    await page.keyboard.type('Jump', { delay: 50 });
+    await page.keyboard.press('Enter');
     await expect(page.getByTestId('number-of-abseils-input')).toHaveValue('1');
     await expect(page.getByTestId('total-length-input')).toHaveValue('45');
 
-    await page.getByRole('button', { name: /create journal/i }).click();
+    await submitJournalFormViaKeyboard(page);
     await awaitCreationAndAssertBadge(page, 'manage-type-abseiling_trip');
 
     await page.getByTestId('type-section-trigger-abseiling_trip').click();
