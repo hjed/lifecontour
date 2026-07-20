@@ -58,6 +58,11 @@ updates:
       interval: "weekly"
       day: "monday"
       time: "09:00"
+    # pnpm v11 defaults minimumReleaseAge to 1 day and rejects installing packages
+    # published more recently than that. Keep this cooldown at least as long so PRs
+    # aren't opened for packages CI can't install yet.
+    cooldown:
+      default-days: 2
     open-pull-requests-limit: 3
     assignees:
       - "hjed"
