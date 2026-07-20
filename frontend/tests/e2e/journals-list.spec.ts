@@ -882,20 +882,19 @@ test.describe('Journal List Page', () => {
       await expect(filtersSection.getByText(parentTag.name)).toBeVisible();
 
       const parentCheckbox = filtersSection.getByLabel(parentTag.name);
+      await expect(parentCheckbox).toHaveAttribute('aria-checked', 'false');
 
-      await expect(async () => {
-        const responsePromise = page.waitForResponse(
-          response =>
-            response.url().includes('/api/journals') &&
-            response.url().includes('tag_ids=') &&
-            response.status() === 200,
-          { timeout: 3000 }
-        );
-        if ((await parentCheckbox.getAttribute('aria-checked')) !== 'true') {
-          await parentCheckbox.click();
-        }
-        await responsePromise;
-      }).toPass({ timeout: 10000 });
+      // Arm the wait before the click so the response cannot be missed, then
+      // click exactly once. No retry loop: the checkbox starts unchecked and
+      // Playwright waits for it to be actionable.
+      const parentFilterResponse = page.waitForResponse(
+        response =>
+          response.url().includes('/api/journals') &&
+          response.url().includes('tag_ids=') &&
+          response.status() === 200
+      );
+      await parentCheckbox.click();
+      await parentFilterResponse;
 
       // The journal carries only the child tag, but the parent filter expands
       // to descendants server-side (ITER17-002 Phase 1).
@@ -957,40 +956,30 @@ test.describe('Journal List Page', () => {
       const alphaCheckbox = filtersSection.getByLabel(tags[0].name);
       const betaCheckbox = filtersSection.getByLabel(tags[1].name);
 
-      await expect(async () => {
-        const responsePromise = page.waitForResponse(
-          response =>
-            response.url().includes('/api/journals') &&
-            response.url().includes('tag_ids=') &&
-            response.status() === 200,
-          { timeout: 3000 }
-        );
-        if ((await alphaCheckbox.getAttribute('aria-checked')) !== 'true') {
-          await alphaCheckbox.click();
-        }
-        await responsePromise;
-      }).toPass({ timeout: 10000 });
+      await expect(alphaCheckbox).toHaveAttribute('aria-checked', 'false');
+      await expect(betaCheckbox).toHaveAttribute('aria-checked', 'false');
+
+      // Arm each wait before its click so no response can be missed.
+      const alphaFilterResponse = page.waitForResponse(
+        response =>
+          response.url().includes('/api/journals') &&
+          response.url().includes('tag_ids=') &&
+          response.status() === 200
+      );
+      await alphaCheckbox.click();
+      await alphaFilterResponse;
 
       // Selecting the second tag must send BOTH ids, not just the first.
-      let unionRequestUrl = '';
-      await expect(async () => {
-        const responsePromise = page.waitForResponse(
-          response => {
-            const url = response.url();
-            const matches =
-              url.includes('/api/journals') &&
-              (url.match(/tag_ids=/g) || []).length === 2 &&
-              response.status() === 200;
-            if (matches) unionRequestUrl = url;
-            return matches;
-          },
-          { timeout: 3000 }
+      const unionResponse = page.waitForResponse(response => {
+        const url = new URL(response.url());
+        return (
+          url.pathname.endsWith('/api/journals') &&
+          url.searchParams.getAll('tag_ids').length === 2 &&
+          response.status() === 200
         );
-        if ((await betaCheckbox.getAttribute('aria-checked')) !== 'true') {
-          await betaCheckbox.click();
-        }
-        await responsePromise;
-      }).toPass({ timeout: 10000 });
+      });
+      await betaCheckbox.click();
+      const unionRequestUrl = (await unionResponse).url();
 
       expect(unionRequestUrl).toContain(`tag_ids=${tags[0].id}`);
       expect(unionRequestUrl).toContain(`tag_ids=${tags[1].id}`);

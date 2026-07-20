@@ -380,12 +380,14 @@ function JournalsPageContent() {
       const processingTime = searchData.meta.processing_time_ms
         ? ` (${searchData.meta.processing_time_ms}ms)`
         : '';
-      // Journal search has no tag parameter, so an active tag filter does not
-      // narrow search results. Say so rather than letting the tag-named heading
-      // imply otherwise.
-      const tagCaveat = activeTagId
-        ? ' — search covers all tags, not just the selected one'
-        : '';
+      // Journal search has no tag parameter, so tag filters do not narrow
+      // search results — whether they came from the URL or the filter panel.
+      // Say so rather than letting the UI imply a narrowing that is not applied.
+      const selectedTagCount = effectiveFilters.tag_ids?.length ?? 0;
+      const tagCaveat =
+        selectedTagCount > 0
+          ? ` — search covers all tags, not just the ${selectedTagCount === 1 ? 'selected one' : 'selected ones'}`
+          : '';
       return `${journalCount} found for "${debouncedSearchQuery}"${processingTime}${tagCaveat}`;
     }
 

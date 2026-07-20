@@ -6,7 +6,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import JournalsPage from '../page';
 import { renderWithQueryClient } from '@/components/journals/test-helpers';
-import { useInfiniteJournals } from '@/lib/api/journals';
+import { useInfiniteJournals, useSearchJournals } from '@/lib/api/journals';
 import type { JournalFilters as JournalFiltersType } from '@/types/journals';
 
 // Mock next/navigation
@@ -127,6 +127,13 @@ describe('JournalsPage', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockSearchParams = new URLSearchParams();
+    // clearAllMocks leaves implementations in place, so a per-test
+    // mockReturnValue would otherwise leak into later tests.
+    (useSearchJournals as jest.Mock).mockReturnValue({
+      data: null,
+      isLoading: false,
+      error: null,
+    });
   });
 
   it('renders the page title and description', () => {
@@ -279,6 +286,33 @@ describe('JournalsPage', () => {
         expect(Object.keys(getLatestInfiniteFilters())).not.toContain('types');
       });
       expect(screen.queryByTestId('clear-filters')).not.toBeInTheDocument();
+    });
+
+    it('flags that search ignores tag filters selected in the panel', async () => {
+      const user = userEvent.setup();
+      (useSearchJournals as jest.Mock).mockReturnValue({
+        data: { data: [], meta: { total_count: 0 } },
+        isLoading: false,
+        error: null,
+      });
+
+      renderWithQueryClient(<JournalsPage />);
+
+      // A panel-selected tag counts, not just a URL one — journal search has
+      // no tag parameter either way.
+      await user.click(screen.getByLabelText('Work'));
+      await user.type(screen.getByTestId('search-input'), 'hike');
+
+      await waitFor(
+        () => {
+          expect(
+            screen.getByText(
+              /search covers all tags, not just the selected one/i
+            )
+          ).toBeInTheDocument();
+        },
+        { timeout: 3000 }
+      );
     });
 
     it('applies no tag filter and a plain heading without a tag param', () => {
