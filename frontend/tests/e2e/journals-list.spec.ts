@@ -760,7 +760,7 @@ test.describe('Journal List Page', () => {
         const responsePromise = page.waitForResponse(
           response =>
             response.url().includes('/api/journals') &&
-            response.url().includes('tag_id') &&
+            response.url().includes('tag_ids=') &&
             response.status() === 200,
           { timeout: 3000 }
         );
@@ -812,7 +812,7 @@ test.describe('Journal List Page', () => {
         const responsePromise = page.waitForResponse(
           response =>
             response.url().includes('/api/journals') &&
-            response.url().includes('tag_id') &&
+            response.url().includes('tag_ids=') &&
             response.status() === 200,
           { timeout: 3000 }
         );
@@ -834,6 +834,253 @@ test.describe('Journal List Page', () => {
       await expect(
         page.getByRole('heading', { name: /Work Meeting/i })
       ).toBeHidden();
+    });
+
+    test('should include child-tagged journals when filtering by a parent tag', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const page = authenticatedPage;
+      const dataManager = new (
+        await import('./data-management')
+      ).TestDataManager(page);
+
+      await dataManager.clearAllJournals();
+
+      const [parentTag] = await dataManager.createJournalTags([
+        { name: 'Outdoors', color: '#FF0000' },
+      ]);
+      const childTag = await dataManager.createJournalTag({
+        name: 'Climbing',
+        color: '#00FF00',
+        parent_id: parentTag.id,
+      });
+
+      const journals = await dataManager.createJournals([
+        {
+          title: 'Crag Day',
+          content: 'Tagged with the child tag only',
+          event_date_range: { start: relativeDate(-1), end: relativeDate(-1) },
+        },
+        {
+          title: 'Untagged Errand',
+          content: 'No tags at all',
+          event_date_range: { start: relativeDate(0), end: relativeDate(0) },
+        },
+      ]);
+
+      await dataManager.assignTagsToJournal(journals[0].id, [childTag.id]);
+
+      testCleanup(async () => {
+        await dataManager.cleanup();
+      });
+
+      await page.goto('/journals');
+      await expect(page.getByTestId('journals-list-ready')).toBeVisible();
+
+      const filtersSection = page.locator('[data-testid="journal-filters"]');
+      await expect(filtersSection.getByText(parentTag.name)).toBeVisible();
+
+      const parentCheckbox = filtersSection.getByLabel(parentTag.name);
+
+      await expect(async () => {
+        const responsePromise = page.waitForResponse(
+          response =>
+            response.url().includes('/api/journals') &&
+            response.url().includes('tag_ids=') &&
+            response.status() === 200,
+          { timeout: 3000 }
+        );
+        if ((await parentCheckbox.getAttribute('aria-checked')) !== 'true') {
+          await parentCheckbox.click();
+        }
+        await responsePromise;
+      }).toPass({ timeout: 10000 });
+
+      // The journal carries only the child tag, but the parent filter expands
+      // to descendants server-side (ITER17-002 Phase 1).
+      await expect(
+        page.getByRole('heading', { name: /Crag Day/i })
+      ).toBeVisible({ timeout: 30000 });
+      await expect(
+        page.getByRole('heading', { name: /Untagged Errand/i })
+      ).toBeHidden();
+    });
+
+    test('should return the union of journals when multiple tags are selected', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const page = authenticatedPage;
+      const dataManager = new (
+        await import('./data-management')
+      ).TestDataManager(page);
+
+      await dataManager.clearAllJournals();
+
+      const tags = await dataManager.createJournalTags([
+        { name: 'Alpha', color: '#FF0000' },
+        { name: 'Beta', color: '#00FF00' },
+      ]);
+
+      const journals = await dataManager.createJournals([
+        {
+          title: 'Alpha Entry',
+          content: 'Tagged Alpha',
+          event_date_range: { start: relativeDate(-2), end: relativeDate(-2) },
+        },
+        {
+          title: 'Beta Entry',
+          content: 'Tagged Beta',
+          event_date_range: { start: relativeDate(-1), end: relativeDate(-1) },
+        },
+        {
+          title: 'Control Entry',
+          content: 'Untagged',
+          event_date_range: { start: relativeDate(0), end: relativeDate(0) },
+        },
+      ]);
+
+      await dataManager.assignTagsToJournal(journals[0].id, [tags[0].id]);
+      await dataManager.assignTagsToJournal(journals[1].id, [tags[1].id]);
+
+      testCleanup(async () => {
+        await dataManager.cleanup();
+      });
+
+      await page.goto('/journals');
+      await expect(page.getByTestId('journals-list-ready')).toBeVisible();
+
+      const filtersSection = page.locator('[data-testid="journal-filters"]');
+      await expect(filtersSection.getByText(tags[0].name)).toBeVisible();
+
+      const alphaCheckbox = filtersSection.getByLabel(tags[0].name);
+      const betaCheckbox = filtersSection.getByLabel(tags[1].name);
+
+      await expect(async () => {
+        const responsePromise = page.waitForResponse(
+          response =>
+            response.url().includes('/api/journals') &&
+            response.url().includes('tag_ids=') &&
+            response.status() === 200,
+          { timeout: 3000 }
+        );
+        if ((await alphaCheckbox.getAttribute('aria-checked')) !== 'true') {
+          await alphaCheckbox.click();
+        }
+        await responsePromise;
+      }).toPass({ timeout: 10000 });
+
+      // Selecting the second tag must send BOTH ids, not just the first.
+      let unionRequestUrl = '';
+      await expect(async () => {
+        const responsePromise = page.waitForResponse(
+          response => {
+            const url = response.url();
+            const matches =
+              url.includes('/api/journals') &&
+              (url.match(/tag_ids=/g) || []).length === 2 &&
+              response.status() === 200;
+            if (matches) unionRequestUrl = url;
+            return matches;
+          },
+          { timeout: 3000 }
+        );
+        if ((await betaCheckbox.getAttribute('aria-checked')) !== 'true') {
+          await betaCheckbox.click();
+        }
+        await responsePromise;
+      }).toPass({ timeout: 10000 });
+
+      expect(unionRequestUrl).toContain(`tag_ids=${tags[0].id}`);
+      expect(unionRequestUrl).toContain(`tag_ids=${tags[1].id}`);
+
+      await expect(
+        page.getByRole('heading', { name: /Alpha Entry/i })
+      ).toBeVisible({ timeout: 30000 });
+      await expect(
+        page.getByRole('heading', { name: /Beta Entry/i })
+      ).toBeVisible({ timeout: 30000 });
+      await expect(
+        page.getByRole('heading', { name: /Control Entry/i })
+      ).toBeHidden();
+    });
+
+    test('should filter the list from a /journals?tag= deep link and clear it', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const page = authenticatedPage;
+      const dataManager = new (
+        await import('./data-management')
+      ).TestDataManager(page);
+
+      await dataManager.clearAllJournals();
+
+      const [deepLinkTag] = await dataManager.createJournalTags([
+        { name: 'Reading', color: '#FF0000' },
+      ]);
+
+      const journals = await dataManager.createJournals([
+        {
+          title: 'Book Notes',
+          content: 'Tagged for the deep link',
+          event_date_range: { start: relativeDate(-1), end: relativeDate(-1) },
+        },
+        {
+          title: 'Unrelated Entry',
+          content: 'Not tagged',
+          event_date_range: { start: relativeDate(0), end: relativeDate(0) },
+        },
+      ]);
+
+      await dataManager.assignTagsToJournal(journals[0].id, [deepLinkTag.id]);
+
+      testCleanup(async () => {
+        await dataManager.cleanup();
+      });
+
+      await page.goto(`/journals?tag=${deepLinkTag.id}`);
+      await expect(page.getByTestId('journals-list-ready')).toBeVisible();
+
+      // Heading names the active tag, and the list is filtered to it.
+      await expect(
+        page.getByRole('heading', {
+          name: new RegExp(`${deepLinkTag.name} Journals`, 'i'),
+          level: 1,
+        })
+      ).toBeVisible();
+      await expect(
+        page.getByRole('heading', { name: /Book Notes/i })
+      ).toBeVisible({ timeout: 30000 });
+      await expect(
+        page.getByRole('heading', { name: /Unrelated Entry/i })
+      ).toBeHidden();
+
+      // The filter panel reflects the URL state.
+      const filtersSection = page.locator('[data-testid="journal-filters"]');
+      const tagCheckbox = filtersSection.getByLabel(deepLinkTag.name);
+      await expect(tagCheckbox).toHaveAttribute('aria-checked', 'true');
+
+      // The dismissible badge is present even with the filters panel hidden.
+      await expect(page.getByTestId('active-tag-filter')).toBeVisible();
+      await page.getByTestId('toggle-filters').click();
+      await expect(filtersSection).toBeHidden();
+      await expect(
+        page.getByRole('button', {
+          name: `Remove ${deepLinkTag.name} filter`,
+        })
+      ).toBeVisible();
+      await page.getByTestId('toggle-filters').click();
+      await expect(filtersSection).toBeVisible();
+
+      // Unchecking it drops the URL param and restores the full list.
+      await tagCheckbox.click();
+
+      await expect(page).toHaveURL(/\/journals(?!.*[?&]tag=)/);
+      await expect(
+        page.getByRole('heading', { name: /Unrelated Entry/i })
+      ).toBeVisible({ timeout: 30000 });
     });
 
     test('should filter journals with combined filters (date + type + contact)', async ({

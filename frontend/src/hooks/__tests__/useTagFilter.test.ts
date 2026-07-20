@@ -107,6 +107,59 @@ describe('useTagFilter', () => {
     expect(pushMock).toHaveBeenCalledWith('/contacts');
   });
 
+  it('setTag navigates to the given base path', () => {
+    const pushMock = jest.fn();
+    mockUseRouter.mockReturnValue({
+      push: pushMock,
+    } as unknown as ReturnType<typeof useRouter>);
+    mockUsePathname.mockReturnValue('/journals');
+
+    const { result } = renderHook(() => useTagFilter('/journals'));
+    act(() => {
+      result.current.setTag('7');
+    });
+
+    expect(pushMock).toHaveBeenCalledWith('/journals?tag=7');
+  });
+
+  it('clearTag falls back to the given base path when no params remain', () => {
+    mockUseSearchParams.mockReturnValue(
+      new URLSearchParams('tag=42') as ReturnType<typeof useSearchParams>
+    );
+    mockUsePathname.mockReturnValue('/journals');
+    const pushMock = jest.fn();
+    mockUseRouter.mockReturnValue({
+      push: pushMock,
+    } as unknown as ReturnType<typeof useRouter>);
+
+    const { result } = renderHook(() => useTagFilter('/journals'));
+    act(() => {
+      result.current.clearTag();
+    });
+
+    expect(pushMock).toHaveBeenCalledWith('/journals');
+  });
+
+  it('clearTag preserves other params on the given base path', () => {
+    mockUseSearchParams.mockReturnValue(
+      new URLSearchParams('tag=42&view=month') as ReturnType<
+        typeof useSearchParams
+      >
+    );
+    mockUsePathname.mockReturnValue('/journals');
+    const pushMock = jest.fn();
+    mockUseRouter.mockReturnValue({
+      push: pushMock,
+    } as unknown as ReturnType<typeof useRouter>);
+
+    const { result } = renderHook(() => useTagFilter('/journals'));
+    act(() => {
+      result.current.clearTag();
+    });
+
+    expect(pushMock).toHaveBeenCalledWith('/journals?view=month');
+  });
+
   it('setTag replaces existing tag param', () => {
     mockUseSearchParams.mockReturnValue(
       new URLSearchParams('tag=1') as ReturnType<typeof useSearchParams>

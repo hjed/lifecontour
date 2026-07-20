@@ -159,6 +159,41 @@ describe('JournalFilters', () => {
     });
   });
 
+  it('renders a tag as checked when present in filters', () => {
+    renderFilters({ tag_ids: ['1'] });
+
+    expect(screen.getByLabelText('Personal')).toHaveAttribute(
+      'aria-checked',
+      'true'
+    );
+    expect(screen.getByLabelText('Work')).toHaveAttribute(
+      'aria-checked',
+      'false'
+    );
+  });
+
+  it('keeps previously selected tags when a second tag is checked', async () => {
+    const user = userEvent.setup();
+    renderFilters({ tag_ids: ['1'] });
+
+    await user.click(screen.getByLabelText('Work'));
+
+    expect(mockOnFiltersChange).toHaveBeenCalledWith({
+      tag_ids: ['1', '2'],
+    });
+  });
+
+  it('removes only the unchecked tag', async () => {
+    const user = userEvent.setup();
+    renderFilters({ tag_ids: ['1', '2'] });
+
+    await user.click(screen.getByLabelText('Personal'));
+
+    expect(mockOnFiltersChange).toHaveBeenCalledWith({
+      tag_ids: ['2'],
+    });
+  });
+
   it('renders contact search component', () => {
     renderFilters();
 

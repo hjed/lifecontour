@@ -38,6 +38,13 @@ export interface TagCreateRequest {
   parent_id?: number | null;
 }
 
+/** Journal tags are UUID-keyed, so their parent reference is a string. */
+export interface JournalTagCreateRequest {
+  name: string;
+  color?: string;
+  parent_id?: string;
+}
+
 export interface CalendarCreateRequest {
   name: string;
   color?: string;
@@ -769,9 +776,12 @@ export class TestDataManager {
 
   /**
    * Create a journal tag via API
+   *
+   * Journal tags use UUID primary keys, so `parent_id` is a string here rather
+   * than the numeric contact-tag id in {@link TagCreateRequest}.
    */
   async createJournalTag(
-    tagData: TagCreateRequest
+    tagData: JournalTagCreateRequest
   ): Promise<{ id: string; name: string }> {
     // Make tag names unique to avoid conflicts using UUID
     const uniqueId = this.generateUniqueId();
@@ -790,6 +800,7 @@ export class TestDataManager {
             attributes: {
               name: uniqueName,
               color: tagData.color || '#3B82F6',
+              ...(tagData.parent_id ? { parent_id: tagData.parent_id } : {}),
             },
           },
         }),
@@ -827,7 +838,7 @@ export class TestDataManager {
    * Create multiple journal tags
    */
   async createJournalTags(
-    tagsData: TagCreateRequest[]
+    tagsData: JournalTagCreateRequest[]
   ): Promise<{ id: string; name: string }[]> {
     console.debug(
       `🏷️ [Data Manager] Creating ${tagsData.length} journal tags...`
