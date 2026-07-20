@@ -717,6 +717,47 @@ class TestContactToolsIntegration:
         assert [tag["name"] for tag in payload["tags"]] == ["colleague", "friend"]
 
     @pytest.mark.asyncio
+    async def test_list_contact_tags_stringifies_ids_and_parent_ids(
+        self,
+        authenticated_lifespan_client,
+        tag_repo,
+    ):
+        """Both id and parent_id are strings so they round-trip into write tools.
+
+        parent_id was previously emitted as a raw int while id was stringified,
+        leaving the same tool internally inconsistent (issue #1139).
+        """
+        parent = await tag_repo.save(Tag(name=TagName("work")))
+        child = await tag_repo.save(Tag(name=TagName("colleague"), parent_id=parent.id))
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            response = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "list_contact_tags",
+                        "arguments": {"limit": 10},
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+
+        assert response.status_code == 200
+        payload = extract_mcp_json_payload(response.text)
+        tags_by_name = {tag["name"]: tag for tag in payload["tags"]}
+
+        assert tags_by_name["colleague"]["id"] == str(child.id)
+        # parent_id is a string, matching id, so a caller can feed it straight
+        # back into update_contact_tag as the parent.
+        assert tags_by_name["colleague"]["parent_id"] == str(parent.id)
+        # A root tag reports a null parent, not the string "None".
+        assert tags_by_name["work"]["parent_id"] is None
+
+    @pytest.mark.asyncio
     async def test_update_contact_tag_via_mounted_http_session(
         self,
         authenticated_lifespan_client,
@@ -736,7 +777,7 @@ class TestContactToolsIntegration:
                     "params": {
                         "name": "update_contact_tag",
                         "arguments": {
-                            "tag_id": tag.id,
+                            "tag_id": str(tag.id),
                             "name": "close-friend",
                             "color": "#123456",
                             "description": "People I see often",
@@ -748,6 +789,8 @@ class TestContactToolsIntegration:
 
         assert response.status_code == 200
         payload = extract_mcp_json_payload(response.text)
+        # The id round-trips as the string the caller passed in (issue #1139).
+        assert payload["id"] == str(tag.id)
         assert payload["name"] == "close-friend"
         assert payload["color"] == "#123456"
         assert payload["description"] == "People I see often"
@@ -778,7 +821,7 @@ class TestContactToolsIntegration:
                     "method": "tools/call",
                     "params": {
                         "name": "update_contact_tag",
-                        "arguments": {"tag_id": 999999, "name": "ghost"},
+                        "arguments": {"tag_id": "999999", "name": "ghost"},
                     },
                 },
                 headers=mcp_headers(session_id),
@@ -790,6 +833,40 @@ class TestContactToolsIntegration:
         # The id must be reported as the id, so a client can surface or retry
         # with it rather than parsing it back out of a message.
         assert payload["tag_id"] == 999999
+
+    @pytest.mark.asyncio
+    async def test_update_contact_tag_non_numeric_id_is_a_validation_error(
+        self,
+        authenticated_lifespan_client,
+        clean_database,
+    ):
+        """A non-numeric tag id is rejected as bad input, not a server error.
+
+        Contact tag ids are strings on the wire but int-keyed underneath, so the
+        tool converts at the edge and must report an unparseable id clearly
+        rather than letting the int() cast surface as a generic failure.
+        """
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            response = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "update_contact_tag",
+                        "arguments": {"tag_id": "not-a-number", "name": "ghost"},
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+
+        assert response.status_code == 200
+        payload = extract_mcp_json_payload(response.text)
+        assert payload["error"] == "Validation error"
+        # The offending field is named so the caller knows what to fix.
+        assert payload["field"] == "tag_id"
 
     @pytest.mark.asyncio
     async def test_update_contact_tag_reparent_and_move_to_root(
@@ -818,12 +895,12 @@ class TestContactToolsIntegration:
                     headers=mcp_headers(session_id),
                 )
 
-        await call({"tag_id": child.id, "parent_id": parent.id})
+        await call({"tag_id": str(child.id), "parent_id": str(parent.id)})
         reparented = await tag_repo.find_by_id(child.id)
         assert reparented is not None
         assert reparented.parent_id == parent.id
 
-        await call({"tag_id": child.id, "move_to_root": True})
+        await call({"tag_id": str(child.id), "move_to_root": True})
         cleared = await tag_repo.find_by_id(child.id)
         assert cleared is not None
         assert cleared.parent_id is None
@@ -853,8 +930,8 @@ class TestContactToolsIntegration:
                     "params": {
                         "name": "update_contact_tag",
                         "arguments": {
-                            "tag_id": child.id,
-                            "parent_id": parent.id,
+                            "tag_id": str(child.id),
+                            "parent_id": str(parent.id),
                             "move_to_root": True,
                         },
                     },
@@ -887,7 +964,7 @@ class TestContactToolsIntegration:
                     "method": "tools/call",
                     "params": {
                         "name": "update_contact_tag",
-                        "arguments": {"tag_id": other.id, "name": "friend"},
+                        "arguments": {"tag_id": str(other.id), "name": "friend"},
                     },
                 },
                 headers=mcp_headers(session_id),
@@ -934,7 +1011,7 @@ class TestContactToolsIntegration:
                     "method": "tools/call",
                     "params": {
                         "name": "delete_contact_tag",
-                        "arguments": {"tag_id": tag.id},
+                        "arguments": {"tag_id": str(tag.id)},
                     },
                 },
                 headers=mcp_headers(session_id),
@@ -968,7 +1045,7 @@ class TestContactToolsIntegration:
                     "method": "tools/call",
                     "params": {
                         "name": "delete_contact_tag",
-                        "arguments": {"tag_id": 999999},
+                        "arguments": {"tag_id": "999999"},
                     },
                 },
                 headers=mcp_headers(session_id),
@@ -1020,8 +1097,8 @@ class TestContactToolsIntegration:
                     "params": {
                         "name": "merge_contact_tags",
                         "arguments": {
-                            "source_id": source.id,
-                            "target_id": target.id,
+                            "source_id": str(source.id),
+                            "target_id": str(target.id),
                         },
                     },
                 },

@@ -93,6 +93,15 @@ class TestContactTools:
             for field in ("tag_id", "name", "color", "description", "parent_id"):
                 assert field in properties, f"{field} should be an update parameter"
 
+            # Contact tag IDs cross the MCP boundary as strings so they round-trip
+            # from list_contact_tags into the write tools (issue #1139).
+            assert properties["tag_id"]["type"] == "string"
+            # parent_id is optional, so it is a string-or-null union.
+            parent_types = {
+                option["type"] for option in properties["parent_id"]["anyOf"]
+            }
+            assert parent_types == {"string", "null"}
+
             # Only the tag id is mandatory: every other field is an optional edit.
             assert schema.get("required", []) == ["tag_id"]
 
@@ -120,6 +129,8 @@ class TestContactTools:
 
             schema = tool.inputSchema
             assert "tag_id" in schema["properties"]
+            # Contact tag IDs are strings across the MCP surface (issue #1139).
+            assert schema["properties"]["tag_id"]["type"] == "string"
             assert schema.get("required", []) == ["tag_id"]
 
             assert tool.description is not None
@@ -159,6 +170,9 @@ class TestContactTools:
             properties = tool.inputSchema["properties"]
             assert "source_id" in properties
             assert "target_id" in properties
+            # Contact tag IDs are strings across the MCP surface (issue #1139).
+            assert properties["source_id"]["type"] == "string"
+            assert properties["target_id"]["type"] == "string"
 
             assert tool.description is not None
             assert "merge_journal_tag" in tool.description, (
