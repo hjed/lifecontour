@@ -30,6 +30,42 @@ interface Conflict {
   targetValue: unknown;
   sourceValue: unknown;
   isText: boolean;
+  /** Human-readable stand-ins for opaque values (e.g. a calendar name). */
+  targetDisplay?: string;
+  sourceDisplay?: string;
+}
+
+/** Field names whose humanised form is not just a title-cased identifier. */
+const FIELD_LABELS: Record<string, string> = {
+  calendar_id: 'Calendar',
+};
+
+/** Turn `MOOD_RATING` / `mood_value` into `Mood Rating` / `Mood Value`. */
+function humanise(segment: string): string {
+  return segment
+    .split('_')
+    .filter(Boolean)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+}
+
+function buildTypeDataLabel(typeKey: string, fieldKey: string): string {
+  const field = FIELD_LABELS[fieldKey] ?? humanise(fieldKey);
+  return `${humanise(typeKey)} — ${field}`;
+}
+
+/**
+ * Resolve a calendar id to its name using the calendar embedded on the journal
+ * that the value came from. Falls back to the raw id when there is no embedded
+ * calendar, or when it describes a different calendar.
+ */
+function resolveCalendarName(
+  journal: JournalResource | null,
+  value: unknown
+): string | undefined {
+  const calendar = journal?.attributes?.calendar;
+  if (!calendar?.name || calendar.id !== String(value)) return undefined;
+  return calendar.name;
 }
 
 export type ResolutionChoice = 'target' | 'source' | 'custom';
@@ -131,12 +167,21 @@ export function MergeResolutionDialog({
               sVal !== tVal
             ) {
               const fieldId = `type_data.${typeKey}.${fieldKey}`;
+              const isCalendar = fieldKey === 'calendar_id';
               newConflicts.push({
                 fieldId,
-                label: `${typeKey} - ${fieldKey}`,
+                label: buildTypeDataLabel(typeKey, fieldKey),
                 targetValue: tVal,
                 sourceValue: sVal,
-                isText: typeof sVal === 'string',
+                // A calendar id is an opaque identifier, not free text the
+                // user should be able to hand-edit.
+                isText: typeof sVal === 'string' && !isCalendar,
+                targetDisplay: isCalendar
+                  ? resolveCalendarName(targetJournal, tVal)
+                  : undefined,
+                sourceDisplay: isCalendar
+                  ? resolveCalendarName(sourceJournal, sVal)
+                  : undefined,
               });
               initialResolutions[fieldId] = { choice: defaultChoice };
             }
@@ -205,7 +250,8 @@ export function MergeResolutionDialog({
     onResolve(overrides);
   };
 
-  const renderConflictValue = (val: unknown) => {
+  const renderConflictValue = (val: unknown, display?: string) => {
+    if (display) return display;
     if (val === null || val === undefined) return 'None';
     if (typeof val === 'object') {
       const v = val as { start?: string; end?: string };
@@ -311,7 +357,10 @@ export function MergeResolutionDialog({
                           Target (Current)
                         </Label>
                         <p className='text-muted-foreground whitespace-pre-wrap'>
-                          {renderConflictValue(conflict.targetValue)}
+                          {renderConflictValue(
+                            conflict.targetValue,
+                            conflict.targetDisplay
+                          )}
                         </p>
                       </div>
                     </div>
@@ -330,7 +379,10 @@ export function MergeResolutionDialog({
                           Source (Incoming)
                         </Label>
                         <p className='text-muted-foreground whitespace-pre-wrap'>
-                          {renderConflictValue(conflict.sourceValue)}
+                          {renderConflictValue(
+                            conflict.sourceValue,
+                            conflict.sourceDisplay
+                          )}
                         </p>
                       </div>
                     </div>

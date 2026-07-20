@@ -557,3 +557,199 @@ async def test_merge_journals_moves_source_only_external_link(
     row = result.fetchone()
     assert row is not None
     assert row[0] == "source-only-event-999"
+
+
+async def _create_journal(client: AsyncClient, title: str, day: str) -> int:
+    """Create a journal via the API and return its id."""
+    res = await client.post(
+        "/api/journals",
+        json={
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": title,
+                    "content": f"{title} content",
+                    "event_date_range": {
+                        "start": f"2024-01-{day}T00:00:00Z",
+                        "end": f"2024-01-{day}T01:00:00Z",
+                    },
+                },
+            }
+        },
+    )
+    assert res.status_code == 201, res.text
+    return int(res.json()["data"]["id"])
+
+
+async def _create_contact(connection: AsyncConnection, first_name: str) -> int:
+    """Create a contact directly and return its id."""
+    from sqlalchemy import text
+
+    result = await connection.execute(
+        text("INSERT INTO contacts (first_name) VALUES (:first_name) RETURNING id"),
+        {"first_name": first_name},
+    )
+    contact_id = result.scalar()
+    assert contact_id is not None
+    return int(contact_id)
+
+
+async def _add_participant(
+    connection: AsyncConnection,
+    journal_id: int,
+    contact_id: int,
+    status: str | None,
+    role: str | None,
+) -> None:
+    """Attach a contact to a journal as a PARTICIPANT with optional status/role."""
+    from sqlalchemy import text
+
+    await connection.execute(
+        text("""
+            INSERT INTO journal_contact_relationships
+                (journal_id, contact_id, relationship_type, status, role)
+            VALUES (:journal_id, :contact_id, 'PARTICIPANT', :status, :role)
+        """),
+        {
+            "journal_id": journal_id,
+            "contact_id": contact_id,
+            "status": status,
+            "role": role,
+        },
+    )
+
+
+async def _get_participant(
+    connection: AsyncConnection, journal_id: int, contact_id: int
+) -> tuple[str | None, str | None]:
+    """Return (status, role) for a journal's participant row."""
+    from sqlalchemy import text
+
+    result = await connection.execute(
+        text("""
+            SELECT status, role
+            FROM journal_contact_relationships
+            WHERE journal_id = :journal_id
+              AND contact_id = :contact_id
+              AND relationship_type = 'PARTICIPANT'
+        """),
+        {"journal_id": journal_id, "contact_id": contact_id},
+    )
+    row = result.fetchone()
+    assert row is not None, "expected a participant row on the target journal"
+    return row[0], row[1]
+
+
+async def _merge(client: AsyncClient, target_id: int, source_id: int) -> None:
+    """Merge source into target via the API."""
+    res = await client.post(
+        f"/api/journals/{target_id}/merge",
+        json={
+            "data": {
+                "type": "journal-merge",
+                "attributes": {"source_journal_id": source_id},
+            }
+        },
+    )
+    assert res.status_code == 200, res.text
+
+
+@pytest.mark.integration
+async def test_merge_preserves_participant_role_and_status(
+    authenticated_client: AsyncClient,
+    async_connection: AsyncConnection,
+    clean_database: None,
+) -> None:
+    """A participant only on the source keeps its status and role after merging."""
+    target_id = await _create_journal(authenticated_client, "Target", "01")
+    source_id = await _create_journal(authenticated_client, "Source", "02")
+    contact_id = await _create_contact(async_connection, "Attendee")
+
+    await _add_participant(
+        async_connection, source_id, contact_id, status="ATTENDING", role="ORGANISER"
+    )
+
+    await _merge(authenticated_client, target_id, source_id)
+
+    status, role = await _get_participant(async_connection, target_id, contact_id)
+    assert status == "ATTENDING"
+    assert role == "ORGANISER"
+
+
+@pytest.mark.integration
+async def test_merge_backfills_null_participant_fields(
+    authenticated_client: AsyncClient,
+    async_connection: AsyncConnection,
+    clean_database: None,
+) -> None:
+    """An existing target participant with empty fields is backfilled from the source."""
+    target_id = await _create_journal(authenticated_client, "Target", "01")
+    source_id = await _create_journal(authenticated_client, "Source", "02")
+    contact_id = await _create_contact(async_connection, "Attendee")
+
+    await _add_participant(
+        async_connection, target_id, contact_id, status=None, role=None
+    )
+    await _add_participant(
+        async_connection, source_id, contact_id, status="MAYBE", role="ORGANISER"
+    )
+
+    await _merge(authenticated_client, target_id, source_id)
+
+    status, role = await _get_participant(async_connection, target_id, contact_id)
+    assert status == "MAYBE"
+    assert role == "ORGANISER"
+
+
+@pytest.mark.integration
+async def test_merge_does_not_overwrite_existing_participant_fields(
+    authenticated_client: AsyncClient,
+    async_connection: AsyncConnection,
+    clean_database: None,
+) -> None:
+    """The target's own status and role win over conflicting source values."""
+    target_id = await _create_journal(authenticated_client, "Target", "01")
+    source_id = await _create_journal(authenticated_client, "Source", "02")
+    contact_id = await _create_contact(async_connection, "Attendee")
+
+    await _add_participant(
+        async_connection,
+        target_id,
+        contact_id,
+        status="ATTENDING",
+        role="FACILITATOR_HELPER",
+    )
+    await _add_participant(
+        async_connection, source_id, contact_id, status="DECLINED", role="ORGANISER"
+    )
+
+    await _merge(authenticated_client, target_id, source_id)
+
+    status, role = await _get_participant(async_connection, target_id, contact_id)
+    assert status == "ATTENDING"
+    assert role == "FACILITATOR_HELPER"
+
+
+@pytest.mark.integration
+async def test_merge_preserves_null_when_neither_participant_set(
+    authenticated_client: AsyncClient,
+    async_connection: AsyncConnection,
+    clean_database: None,
+) -> None:
+    """Merging never invents a status or role that was not set on either side."""
+    target_id = await _create_journal(authenticated_client, "Target", "01")
+    source_id = await _create_journal(authenticated_client, "Source", "02")
+    contact_id = await _create_contact(async_connection, "Attendee")
+
+    await _add_participant(
+        async_connection, target_id, contact_id, status=None, role=None
+    )
+    await _add_participant(
+        async_connection, source_id, contact_id, status=None, role=None
+    )
+
+    await _merge(authenticated_client, target_id, source_id)
+
+    status, role = await _get_participant(async_connection, target_id, contact_id)
+    assert status is None
+    assert role is None
