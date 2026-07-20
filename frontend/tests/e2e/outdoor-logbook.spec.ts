@@ -1,8 +1,9 @@
 /**
  * E2E Tests for the Outdoor Logbook overview page: the incomplete activities
  * review (flagging with reasons, linking to the journal, dismiss,
- * show-dismissed and un-dismiss flows) and the dashboard widgets (upcoming
- * activities, recent activity totals).
+ * show-dismissed and un-dismiss flows) and the four dashboard widgets
+ * (upcoming activities, recent activity totals, checked-out gear, and the
+ * abseil templates done).
  */
 
 import { test, expect } from './fixtures';
@@ -261,7 +262,7 @@ test.describe('Outdoor Logbook — incomplete activities review', () => {
 });
 
 test.describe('Outdoor Logbook — dashboard widgets', () => {
-  test('shows upcoming activities and recent activity totals for seeded journals', async ({
+  test('shows upcoming, totals, checked-out gear and templates done for seeded data', async ({
     authenticatedPage,
     testCleanup,
   }) => {
@@ -306,7 +307,56 @@ test.describe('Outdoor Logbook — dashboard widgets', () => {
       types: ['bushwalking'],
     });
 
+    // Gear: an open checkout (window spans now) and a returned one (window
+    // fully in the past) — only the open item is currently checked out.
+    const openGear = await dataManager.createGearItem('Static rope 60m');
+    const returnedGear = await dataManager.createGearItem('Descender');
+    await dataManager.createGearUsageJournal({
+      title: 'Rope out for the season',
+      gearItemId: openGear.id,
+      start: noonOffsetDays(-2),
+      end: noonOffsetDays(2),
+    });
+    await dataManager.createGearUsageJournal({
+      title: 'Descender returned',
+      gearItemId: returnedGear.id,
+      start: noonOffsetDays(-20),
+      end: noonOffsetDays(-18),
+    });
+
+    // Templates: a canyoning template done twice and a caving template done
+    // once, so the widget groups by type and counts per template.
+    const canyonTemplate = await dataManager.createTemplate(
+      'Empress Falls',
+      'canyoning'
+    );
+    const caveTemplate = await dataManager.createTemplate('Jenolan', 'caving');
+    await dataManager.createAbseilingJournal({
+      title: 'Empress first run',
+      templateId: canyonTemplate.id,
+      start: noonOffsetDays(-30),
+      end: noonOffsetDays(-30),
+    });
+    await dataManager.createAbseilingJournal({
+      title: 'Empress second run',
+      templateId: canyonTemplate.id,
+      start: noonOffsetDays(-15),
+      end: noonOffsetDays(-15),
+    });
+    await dataManager.createAbseilingJournal({
+      title: 'Jenolan trip',
+      templateId: caveTemplate.id,
+      start: noonOffsetDays(-40),
+      end: noonOffsetDays(-40),
+    });
+
     testCleanup(async () => {
+      // Targeted cleanup first — it deletes the tracked journals by id, then
+      // the gear items and templates they referenced. Purging journals first
+      // would leave cleanup() 404ing on ids it had already lost, drowning any
+      // real cleanup failure in noise. The global purge then runs as a
+      // backstop so the next test's exact-count assertions start clean.
+      await dataManager.cleanup();
       await dataManager.clearAllJournals();
     });
 
@@ -356,6 +406,43 @@ test.describe('Outdoor Logbook — dashboard widgets', () => {
     await expect(totals.getByTestId('totals-30d-bushwalking')).toHaveText('0');
     await expect(totals.getByTestId('totals-365d-bushwalking')).toHaveText('1');
 
+    // Checked-out gear widget: the open checkout is listed with its
+    // checked-out-since date; the returned item is not.
+    const gear = page.getByTestId('checked-out-gear-ready');
+    await expect(gear).toBeVisible({ timeout: 15000 });
+    const openGearItem = gear.getByTestId(
+      `checked-out-gear-item-${openGear.id}`
+    );
+    await expect(openGearItem).toBeVisible();
+    await expect(openGearItem).toContainText(openGear.name);
+    await expect(openGearItem).toContainText('Checked out since');
+    await expect(
+      gear.getByTestId(`checked-out-gear-item-${returnedGear.id}`)
+    ).toHaveCount(0);
+
+    // Templates-done widget: grouped by template type with per-template counts.
+    const templates = page.getByTestId('templates-done-ready');
+    await expect(templates).toBeVisible({ timeout: 15000 });
+
+    const canyonGroup = templates.getByTestId('templates-done-group-canyoning');
+    await expect(canyonGroup).toBeVisible();
+    await expect(
+      canyonGroup.getByTestId(`templates-done-count-${canyonTemplate.id}`)
+    ).toHaveText('Done 2 times');
+
+    const caveGroup = templates.getByTestId('templates-done-group-caving');
+    await expect(caveGroup).toBeVisible();
+    await expect(
+      caveGroup.getByTestId(`templates-done-count-${caveTemplate.id}`)
+    ).toHaveText('Done 1 time');
+
+    // Each template links to the templates settings section.
+    await expect(
+      templates
+        .getByTestId(`templates-done-item-${canyonTemplate.id}`)
+        .getByRole('link', { name: canyonTemplate.name })
+    ).toHaveAttribute('href', '/settings#templates');
+
     // The upcoming entry links to the journal detail screen
     await futureItem.getByRole('link', { name: futureCanyon.title }).click();
     await expect(page).toHaveURL(new RegExp(`/journals/${futureCanyon.id}$`));
@@ -390,5 +477,17 @@ test.describe('Outdoor Logbook — dashboard widgets', () => {
       timeout: 15000,
     });
     await expect(page.getByTestId('totals-empty-state')).toBeVisible();
+
+    await expect(page.getByTestId('checked-out-gear-ready')).toBeVisible({
+      timeout: 15000,
+    });
+    await expect(
+      page.getByTestId('checked-out-gear-empty-state')
+    ).toBeVisible();
+
+    await expect(page.getByTestId('templates-done-ready')).toBeVisible({
+      timeout: 15000,
+    });
+    await expect(page.getByTestId('templates-done-empty-state')).toBeVisible();
   });
 });

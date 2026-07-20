@@ -83,6 +83,8 @@ export class TestDataManager {
   private createdTagIds: string[] = []; // Contact tags
   private createdJournalTagIds: string[] = []; // Journal tags
   private createdJournalIds: string[] = [];
+  private createdGearItemIds: string[] = [];
+  private createdTemplateIds: string[] = [];
   private readonly createdCalendars: string[] = [];
 
   constructor(private readonly page: Page) {}
@@ -1137,6 +1139,126 @@ export class TestDataManager {
   }
 
   /**
+   * Create a gear item via API.
+   *
+   * The name is made unique so parallel workers don't collide; the returned
+   * name is the one actually stored, for assertions.
+   */
+  async createGearItem(name: string): Promise<{ id: string; name: string }> {
+    const uniqueName = `${name}_${this.generateUniqueId()}`;
+    console.debug(`🎒 [Data Manager] Creating gear item "${uniqueName}"`);
+
+    const response = await this.page.request.post('/api/gear-items', {
+      data: {
+        data: {
+          type: 'gear-items',
+          attributes: { name: uniqueName },
+        },
+      },
+    });
+
+    if (!response.ok()) {
+      const errorText = await response.text();
+      throw new Error(
+        `Failed to create gear item: ${response.status()} ${errorText}`
+      );
+    }
+
+    const responseData = await response.json();
+    const gearItemId = responseData.data.id;
+    this.createdGearItemIds.push(gearItemId);
+
+    console.debug(`✅ [Data Manager] Created gear item ${gearItemId}`);
+    return { id: gearItemId, name: uniqueName };
+  }
+
+  /**
+   * Create an activity template via API.
+   *
+   * `templateType` is one of the template types (canyoning / caving /
+   * climbing / abseiling) — it drives the grouping in the dashboard's
+   * templates-done widget.
+   */
+  async createTemplate(
+    name: string,
+    templateType: string
+  ): Promise<{ id: string; name: string }> {
+    const uniqueName = `${name}_${this.generateUniqueId()}`;
+    console.debug(
+      `📐 [Data Manager] Creating ${templateType} template "${uniqueName}"`
+    );
+
+    const response = await this.page.request.post('/api/templates', {
+      data: {
+        data: {
+          type: 'templates',
+          attributes: { name: uniqueName, template_type: templateType },
+        },
+      },
+    });
+
+    if (!response.ok()) {
+      const errorText = await response.text();
+      throw new Error(
+        `Failed to create template: ${response.status()} ${errorText}`
+      );
+    }
+
+    const responseData = await response.json();
+    const templateId = responseData.data.id;
+    this.createdTemplateIds.push(templateId);
+
+    console.debug(`✅ [Data Manager] Created template ${templateId}`);
+    return { id: templateId, name: uniqueName };
+  }
+
+  /**
+   * Create a GEAR_USAGE journal recording a checkout of `gearItemId`.
+   *
+   * The checkout window resolves to the journal's event range, so a range
+   * spanning "now" is a currently-checked-out item and a past range is not.
+   */
+  async createGearUsageJournal(options: {
+    title: string;
+    gearItemId: string;
+    start: string;
+    end: string;
+  }): Promise<TestJournal> {
+    return this.createJournal({
+      title: options.title,
+      content: 'Gear usage seeded for e2e testing',
+      event_date_range: { start: options.start, end: options.end },
+      types: ['gear_usage'],
+      type_data: {
+        gear_usage: { gear_item_id: options.gearItemId },
+      },
+    });
+  }
+
+  /**
+   * Create an abseiling trip journal carrying a durable template reference.
+   *
+   * The consolidated `abseiling_trip.template_id` is what the dashboard's
+   * templates-done widget counts.
+   */
+  async createAbseilingJournal(options: {
+    title: string;
+    templateId: string;
+    start: string;
+    end: string;
+  }): Promise<TestJournal> {
+    return this.createJournal({
+      title: options.title,
+      content: 'Abseiling trip seeded for e2e testing',
+      event_date_range: { start: options.start, end: options.end },
+      types: ['abseiling_trip'],
+      type_data: {
+        abseiling_trip: { template_id: options.templateId },
+      },
+    });
+  }
+
+  /**
    * Create a review item for testing
    */
   async createReviewItem(
@@ -1259,7 +1381,7 @@ export class TestDataManager {
    */
   async cleanup(): Promise<void> {
     console.debug(
-      `🧹 [Data Manager] Starting cleanup of ${this.createdContactIds.length} contacts, ${this.createdTagIds.length} contact tags, ${this.createdJournalTagIds.length} journal tags, ${this.createdJournalIds.length} journals, and ${this.createdCalendars.length} calendars...`
+      `🧹 [Data Manager] Starting cleanup of ${this.createdContactIds.length} contacts, ${this.createdTagIds.length} contact tags, ${this.createdJournalTagIds.length} journal tags, ${this.createdJournalIds.length} journals, ${this.createdCalendars.length} calendars, ${this.createdGearItemIds.length} gear items, and ${this.createdTemplateIds.length} templates...`
     );
 
     // Add timeout to prevent cleanup from hanging
@@ -1337,12 +1459,26 @@ export class TestDataManager {
       '/api/calendars',
       'calendar'
     );
+    // Gear items and templates are referenced by the journals deleted above,
+    // so they must be removed after them.
+    await this.cleanupSpecificItems(
+      this.createdGearItemIds,
+      '/api/gear-items',
+      'gear item'
+    );
+    await this.cleanupSpecificItems(
+      this.createdTemplateIds,
+      '/api/templates',
+      'template'
+    );
 
     // Clear tracking arrays
     this.createdContactIds = [];
     this.createdTagIds = [];
     this.createdJournalTagIds = [];
     this.createdJournalIds = [];
+    this.createdGearItemIds = [];
+    this.createdTemplateIds = [];
     // Note: createdCalendars is readonly, so we can't reassign it
     // The array will be cleared when the TestDataManager instance is destroyed
 

@@ -464,7 +464,7 @@ export function JournalDetailView({
             journalId: journal.id,
             journalType: typeFieldUpdates.journalType,
             typeData: {
-              ...(currentTypeData ?? {}),
+              ...currentTypeData,
               ...typeFieldUpdates.fields,
             },
           });

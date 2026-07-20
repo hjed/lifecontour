@@ -43,6 +43,36 @@ export type TemplateTypeFieldUpdates =
       readonly fields: ClimbingData;
     };
 
+type TemplateAttributes = ActivityTemplateResource['attributes'];
+
+function canyoningFields(attrs: TemplateAttributes): CanyoningData {
+  const fields: CanyoningData = {};
+  if (attrs.french_grade) fields.french_grade = attrs.french_grade;
+  if (attrs.water_gauge_name) fields.water_guage_name = attrs.water_gauge_name;
+  // Canyoning templates express vertical-ness as canyon_type; the backend
+  // nulls is_vertical on non-caving templates, so reading it here would never
+  // populate anything. Only a 'vertical' canyon_type implies the flag —
+  // 'mixed' is left to the user, since mixed canyons can still have
+  // significant vertical sections.
+  if (attrs.canyon_type === 'vertical') fields.is_vertical = true;
+  return fields;
+}
+
+function cavingFields(attrs: TemplateAttributes): CavingData {
+  const fields: CavingData = {};
+  if (attrs.is_vertical != null) fields.is_vertical = attrs.is_vertical;
+  if (attrs.is_horizontal != null) fields.is_horizontal = attrs.is_horizontal;
+  return fields;
+}
+
+function climbingFields(attrs: TemplateAttributes): ClimbingData {
+  const fields: ClimbingData = {};
+  if (attrs.climbing_type) fields.climbing_type = attrs.climbing_type;
+  if (attrs.grade != null) fields.grade = attrs.grade;
+  if (attrs.length != null) fields.length = attrs.length;
+  return fields;
+}
+
 /**
  * Type-specific fields a template contributes to its matching type block
  * (e.g. a canyoning template's french grade belongs on the canyoning block).
@@ -55,36 +85,19 @@ export function templateTypeFieldUpdates(
 
   switch (attrs.template_type) {
     case ActivityTemplateType.CANYONING: {
-      const fields: CanyoningData = {};
-      if (attrs.french_grade) fields.french_grade = attrs.french_grade;
-      if (attrs.water_gauge_name) {
-        fields.water_guage_name = attrs.water_gauge_name;
-      }
-      // Canyoning templates express vertical-ness as canyon_type; the
-      // backend nulls is_vertical on non-caving templates, so reading it
-      // here would never populate anything. Only a 'vertical' canyon_type
-      // implies the flag — 'mixed' is left to the user, since mixed canyons
-      // can still have significant vertical sections.
-      if (attrs.canyon_type === 'vertical') fields.is_vertical = true;
+      const fields = canyoningFields(attrs);
       return Object.keys(fields).length > 0
         ? { journalType: JournalType.CANYONING, fields }
         : null;
     }
     case ActivityTemplateType.CAVING: {
-      const fields: CavingData = {};
-      if (attrs.is_vertical != null) fields.is_vertical = attrs.is_vertical;
-      if (attrs.is_horizontal != null) {
-        fields.is_horizontal = attrs.is_horizontal;
-      }
+      const fields = cavingFields(attrs);
       return Object.keys(fields).length > 0
         ? { journalType: JournalType.CAVING, fields }
         : null;
     }
     case ActivityTemplateType.CLIMBING: {
-      const fields: ClimbingData = {};
-      if (attrs.climbing_type) fields.climbing_type = attrs.climbing_type;
-      if (attrs.grade != null) fields.grade = attrs.grade;
-      if (attrs.length != null) fields.length = attrs.length;
+      const fields = climbingFields(attrs);
       return Object.keys(fields).length > 0
         ? { journalType: JournalType.CLIMBING, fields }
         : null;
