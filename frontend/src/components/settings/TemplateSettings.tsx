@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { BookTemplate, Trash2 } from 'lucide-react';
+import { BookTemplate, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -23,6 +23,7 @@ import { LoadingSpinner } from '@/components/ui/loading';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ActivityTemplateResource } from '@/types/journals';
 import { getTemplates, deleteTemplate } from '@/lib/api/templates';
+import { CreateTemplateDialog } from '@/components/journals/type-editors/CreateTemplateDialog';
 import { toast } from 'sonner';
 
 export function TemplateSettings() {
@@ -44,6 +45,8 @@ export function TemplateSettings() {
   });
 
   const [templateToDelete, setTemplateToDelete] =
+    useState<ActivityTemplateResource | null>(null);
+  const [templateToEdit, setTemplateToEdit] =
     useState<ActivityTemplateResource | null>(null);
 
   const templates = data?.data || [];
@@ -138,6 +141,14 @@ export function TemplateSettings() {
                     <Button
                       variant='ghost'
                       size='sm'
+                      onClick={() => setTemplateToEdit(template)}
+                      aria-label={`Edit template ${template.attributes.name}`}
+                    >
+                      <Pencil className='h-4 w-4' />
+                    </Button>
+                    <Button
+                      variant='ghost'
+                      size='sm'
                       onClick={() => handleDeleteClick(template)}
                       disabled={deleteMutation.isPending}
                       aria-label={`Delete template ${template.attributes.name}`}
@@ -151,6 +162,15 @@ export function TemplateSettings() {
           )}
         </CardContent>
       </Card>
+
+      <CreateTemplateDialog
+        open={templateToEdit !== null}
+        onOpenChange={open => {
+          if (!open) setTemplateToEdit(null);
+        }}
+        template={templateToEdit ?? undefined}
+        onCreated={() => setTemplateToEdit(null)}
+      />
 
       <Dialog
         open={templateToDelete !== null}

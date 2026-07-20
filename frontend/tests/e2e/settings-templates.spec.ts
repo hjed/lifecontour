@@ -70,4 +70,83 @@ test.describe('Settings - Template Management', () => {
     await expect(page.getByText('Template deleted successfully')).toBeVisible();
     await expect(templateRow).toBeHidden({ timeout: 15000 });
   });
+
+  test('should allow editing a template name and pitches', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+
+    // 1. Create a template with a pitch via API
+    const templateName = `E2E Edit Template ${Date.now()}`;
+    const templateRes = await page.request.post('/api/templates', {
+      data: {
+        data: {
+          type: 'activity-templates',
+          attributes: {
+            name: templateName,
+            template_type: 'canyoning',
+            region: 'Blue Mountains',
+            pitches: [{ pitch_number: 1, height: 20, notes: 'Wet start' }],
+          },
+        },
+      },
+    });
+    expect(templateRes.ok()).toBeTruthy();
+    const templateId = (await templateRes.json()).data.id as string;
+
+    // 2. Open the edit dialog from settings
+    await page.goto('/settings');
+    const templateRow = page.locator(`[data-testid^="template-row-"]`, {
+      hasText: templateName,
+    });
+    await expect(templateRow).toBeVisible();
+    await templateRow
+      .getByRole('button', { name: `Edit template ${templateName}` })
+      .click();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByLabel('Template Name')).toHaveValue(templateName);
+    await expect(dialog.getByLabel('Notes for pitch 1')).toHaveValue(
+      'Wet start'
+    );
+
+    // 3. Rename, tweak the pitch, and save. Submit via keyboard activation:
+    // with pitch rows in the dialog, Mobile Chrome pointer hit-testing
+    // misreports the button as covered and taps time out.
+    const updatedName = `${templateName} v2`;
+    await dialog.getByLabel('Template Name').fill(updatedName);
+    await dialog.getByLabel('Height for pitch 1').fill('35');
+    const saveButton = dialog.getByRole('button', { name: 'Save Changes' });
+    await saveButton.focus();
+    await Promise.all([
+      page.waitForResponse(
+        resp =>
+          resp.url().includes('/api/templates') &&
+          resp.request().method() === 'PUT' &&
+          resp.ok()
+      ),
+      saveButton.press('Enter'),
+    ]);
+
+    await expect(dialog).toBeHidden();
+    await expect(page.getByText('Template updated successfully')).toBeVisible();
+
+    // 4. Reload and verify the change persisted
+    await page.reload();
+    const updatedRow = page.locator(`[data-testid^="template-row-"]`, {
+      hasText: updatedName,
+    });
+    await expect(updatedRow).toBeVisible();
+    await updatedRow
+      .getByRole('button', { name: `Edit template ${updatedName}` })
+      .click();
+    await expect(
+      page.getByRole('dialog').getByLabel('Height for pitch 1')
+    ).toHaveValue('35');
+
+    // Clean up the template so it doesn't leak into later e2e runs.
+    const deleteRes = await page.request.delete(`/api/templates/${templateId}`);
+    expect(deleteRes.ok()).toBeTruthy();
+  });
 });

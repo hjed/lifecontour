@@ -4,6 +4,7 @@ import {
   ActivityTemplateListResponse,
   ActivityTemplateResponse,
   ActivityTemplateType,
+  ActivityTemplateUpdateRequest,
 } from '@/types/journals';
 
 /**
@@ -71,6 +72,29 @@ export async function createTemplate(
 
   if (!response.ok) {
     throw new Error('Failed to create activity template');
+  }
+
+  return response.json();
+}
+
+/**
+ * Update an existing activity template. The request body's data.id must match
+ * the id in the URL or the backend rejects the request with a 400.
+ */
+export async function updateTemplate(
+  id: string,
+  request: ActivityTemplateUpdateRequest
+): Promise<ActivityTemplateResponse> {
+  const response = await fetch(API_ENDPOINTS.TEMPLATES.BY_ID(id), {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to update activity template');
   }
 
   return response.json();
