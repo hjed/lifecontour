@@ -413,9 +413,12 @@ class JournalService:
 
         Filtering by a parent tag therefore also returns journals tagged with any
         descendant, matching ``ContactService._expand_tag_ids_with_descendants``.
-        IDs that are not valid UUIDs are skipped for the hierarchy lookup rather
-        than raising; the REST layer already rejects them with a 400, so this is
-        defence in depth for other callers.
+
+        Ids are coerced via ``str`` before parsing so callers holding ``UUID``
+        objects expand correctly rather than being silently skipped. An id that
+        is not a well-formed UUID is left out of the hierarchy lookup but kept in
+        the returned filter, so it narrows the result set instead of widening it;
+        the REST layer rejects such ids with a 400 before reaching here.
         """
         if not tag_ids:
             return tag_ids
@@ -426,7 +429,7 @@ class JournalService:
         parsed_ids = []
         for tag_id in tag_ids:
             try:
-                parsed_ids.append(UUID(tag_id))
+                parsed_ids.append(UUID(str(tag_id)))
             except ValueError:
                 continue
 

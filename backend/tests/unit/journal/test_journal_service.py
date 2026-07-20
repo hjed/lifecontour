@@ -550,6 +550,25 @@ class TestTagFilterExpansion:
         mock_tag_hierarchy.get_all_descendants_bulk.assert_awaited_once_with([])
         assert mock_journal_repo.get_all.call_args.kwargs["tag_ids"] == ["not-a-uuid"]
 
+    async def test_uuid_objects_are_expanded_not_skipped(
+        self, service_with_hierarchy, mock_journal_repo, mock_tag_hierarchy
+    ):
+        """A caller holding UUID objects gets expansion, not a TypeError."""
+        parent_id, child_id = uuid4(), uuid4()
+        mock_tag_hierarchy.get_all_descendants_bulk.return_value = [
+            self._tag(child_id, "Child")
+        ]
+        mock_journal_repo.get_all.return_value = []
+
+        await service_with_hierarchy.get_journals_paginated(
+            user_id="user123", tag_ids=[parent_id]
+        )
+
+        mock_tag_hierarchy.get_all_descendants_bulk.assert_awaited_once_with(
+            [parent_id]
+        )
+        assert str(child_id) in mock_journal_repo.get_all.call_args.kwargs["tag_ids"]
+
     async def test_expansion_skipped_when_hierarchy_unavailable(
         self, mock_journal_repo, mock_event_publisher
     ):

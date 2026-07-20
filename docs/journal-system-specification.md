@@ -743,7 +743,9 @@ GET /api/journals
 - Query params: type, date_range, contact_id, tag_ids, calendar_id, parent_id, search
 - `tag_ids` is repeatable; a journal matching any of the given tags is returned, and
   each tag expands to include its descendant tags (matching contact tag filtering)
-- `tag_id` (singular) is retained for backward compatibility and is unioned with `tag_ids`
+- `tag_id` (singular) is retained for backward compatibility and is unioned with `tag_ids`;
+  it expands to descendant tags exactly as `tag_ids` does, so the two spellings behave identically
+- Both params must be well-formed UUIDs; a malformed id is a 400 validation error
 - Returns: paginated list with embedded type data and relationships
 - Includes child count for parent journals
 
