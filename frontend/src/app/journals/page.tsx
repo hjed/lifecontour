@@ -99,11 +99,29 @@ function getEmptyStateMessage(searchQuery: string, hasFilters: boolean) {
   return 'Get started by creating your first journal entry.';
 }
 
+/**
+ * Strip keys whose value is `undefined`.
+ *
+ * `JournalFilters` clears a filter by setting its key to `undefined` rather
+ * than deleting it, so the key survives the spread. Any check of the form
+ * `Object.keys(filters).length > 0` would then read a cleared filter as an
+ * active one.
+ */
+function withoutClearedFilters(
+  filters: JournalFiltersType
+): JournalFiltersType {
+  return Object.fromEntries(
+    Object.entries(filters).filter(([, value]) => value !== undefined)
+  ) as JournalFiltersType;
+}
+
 export default function JournalsPage() {
   return (
-    <Suspense>
-      <JournalsPageContent />
-    </Suspense>
+    <AuthGuard>
+      <Suspense>
+        <JournalsPageContent />
+      </Suspense>
+    </AuthGuard>
   );
 }
 
@@ -184,15 +202,16 @@ function JournalsPageContent() {
       const remaining = activeTagId
         ? nextTagIds.filter(id => id !== activeTagId)
         : nextTagIds;
-      // Drop the key rather than storing `undefined`: `hasActiveFilters` and
-      // the empty-state message count keys, and a phantom key reads as a filter.
+      // Drop cleared keys rather than storing `undefined`: `hasActiveFilters`
+      // and the empty-state message count keys, so a phantom key from any
+      // filter — not just tags — would read as an active filter.
       const stored: JournalFiltersType = { ...next };
       if (remaining.length > 0) {
         stored.tag_ids = remaining;
       } else {
         delete stored.tag_ids;
       }
-      setFilters(stored);
+      setFilters(withoutClearedFilters(stored));
     },
     [activeTagId, clearTag]
   );
@@ -374,7 +393,7 @@ function JournalsPageContent() {
   };
 
   return (
-    <AuthGuard>
+    <>
       <div className='mb-6'>
         <h1 className='flex items-center gap-2 text-3xl font-bold tracking-tight'>
           {activeTagName ? (
@@ -717,6 +736,6 @@ function JournalsPageContent() {
         open={exportDialogOpen}
         onOpenChange={setExportDialogOpen}
       />
-    </AuthGuard>
+    </>
   );
 }

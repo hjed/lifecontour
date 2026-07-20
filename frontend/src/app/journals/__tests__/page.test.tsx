@@ -262,6 +262,25 @@ describe('JournalsPage', () => {
       expect(screen.queryByTestId('clear-filters')).not.toBeInTheDocument();
     });
 
+    it('does not leave a phantom key for any cleared filter', async () => {
+      const user = userEvent.setup();
+      renderWithQueryClient(<JournalsPage />);
+
+      // Journal types clear to `undefined` the same way tags do.
+      const noteCheckbox = screen.getByLabelText('Note');
+      await user.click(noteCheckbox);
+      await waitFor(() => {
+        expect(getLatestInfiniteFilters().types).toEqual(['note']);
+      });
+
+      await user.click(noteCheckbox);
+
+      await waitFor(() => {
+        expect(Object.keys(getLatestInfiniteFilters())).not.toContain('types');
+      });
+      expect(screen.queryByTestId('clear-filters')).not.toBeInTheDocument();
+    });
+
     it('applies no tag filter and a plain heading without a tag param', () => {
       renderWithQueryClient(<JournalsPage />);
 

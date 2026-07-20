@@ -15,6 +15,15 @@ import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 /** Key used in URL search params for the tag filter. */
 export const TAG_PARAM = 'tag';
 
+/**
+ * List routes that support tag filtering.
+ *
+ * Deliberately a closed union rather than `string`: the base path is
+ * concatenated into a `router.push` target, and a caller-supplied path would
+ * make that navigation an unconstrained redirect sink.
+ */
+export type TagFilterBasePath = '/contacts' | '/journals';
+
 export interface TagFilter {
   /** Current tag ID from URL, or null if no tag filter is active. */
   readonly tagId: string | null;
@@ -27,7 +36,9 @@ export interface TagFilter {
 /**
  * @param basePath List route the tag filter navigates to (defaults to `/contacts`).
  */
-export function useTagFilter(basePath: string = '/contacts'): TagFilter {
+export function useTagFilter(
+  basePath: TagFilterBasePath = '/contacts'
+): TagFilter {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();

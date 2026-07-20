@@ -1046,7 +1046,7 @@ test.describe('Journal List Page', () => {
       // Heading names the active tag, and the list is filtered to it.
       await expect(
         page.getByRole('heading', {
-          name: new RegExp(`${deepLinkTag.name} Journals`, 'i'),
+          name: `${deepLinkTag.name} Journals`,
           level: 1,
         })
       ).toBeVisible();
@@ -1077,7 +1077,9 @@ test.describe('Journal List Page', () => {
       // Unchecking it drops the URL param and restores the full list.
       await tagCheckbox.click();
 
-      await expect(page).toHaveURL(/\/journals(?!.*[?&]tag=)/);
+      await expect(page).toHaveURL(
+        url => url.pathname === '/journals' && !url.searchParams.has('tag')
+      );
       await expect(
         page.getByRole('heading', { name: /Unrelated Entry/i })
       ).toBeVisible({ timeout: 30000 });
