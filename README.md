@@ -8,7 +8,7 @@ A personal relationship management and journaling system with AI integration thr
 ### Prerequisites
 
 - Python 3.14+ with [UV](https://github.com/astral-sh/uv) for dependency management
-- Node.js 22.13+ with [pnpm](https://pnpm.io/) 11+ for frontend dependencies (use `nvm use` to activate — see `.nvmrc`)
+- Node.js 26+ with [pnpm](https://pnpm.io/) 11+ for frontend dependencies (use `nvm use` to activate — see `.nvmrc`)
 - Docker and Docker Compose
 - PostgreSQL database
 
