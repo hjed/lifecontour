@@ -13,9 +13,9 @@ concurrency:
 
 env:
   PYTHON_VERSION: "3.14"
-  NODE_VERSION: "24"
+  NODE_VERSION: "26"
   UV_VERSION: "0.11.15"
-  PNPM_VERSION: "11.0.4"
+  PNPM_VERSION: "11.7.0"
 
 jobs:
   # Detect which files have changed to conditionally run jobs

@@ -1,16 +1,17 @@
 # Unified Frontend Dockerfile - Next.js
 # Supports both development and production builds via build args
 
-FROM node:24-alpine AS base
+FROM node:26-alpine AS base
 
 # Build arguments
 ARG BUILD_ENV=production
 ARG NODE_ENV=production
 
-# Install curl and enable corepack for pnpm (version from packageManager field)
+# Install curl and pnpm. Node 26 no longer bundles corepack, so pnpm is
+# installed directly via npm. Keep this version in sync with the
+# "packageManager" field in frontend/package.json.
 RUN apk add --no-cache curl && \
-    corepack enable && \
-    corepack prepare pnpm@11.0.4 --activate
+    npm install -g pnpm@11.7.0
 
 # Create app user
 RUN addgroup -g 1001 -S nodejs && \

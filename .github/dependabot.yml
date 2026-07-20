@@ -162,6 +162,22 @@ updates:
       - "dependencies"
       - "docker"
 
+  - package-ecosystem: "docker"
+    directory: "/docker/oauth-login-consent"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 2
+    assignees:
+      - "hjed"
+    commit-message:
+      prefix: "chore(docker)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "docker"
+
   - package-ecosystem: "docker-compose"
     directory: "/"
     schedule:
