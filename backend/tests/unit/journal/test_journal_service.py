@@ -569,6 +569,22 @@ class TestTagFilterExpansion:
         )
         assert str(child_id) in mock_journal_repo.get_all.call_args.kwargs["tag_ids"]
 
+    async def test_uuid_and_string_spellings_dedupe_to_one_string(
+        self, service_with_hierarchy, mock_journal_repo, mock_tag_hierarchy
+    ):
+        """The same tag given as UUID and str collapses to a single str entry."""
+        tag_id = uuid4()
+        mock_tag_hierarchy.get_all_descendants_bulk.return_value = []
+        mock_journal_repo.get_all.return_value = []
+
+        await service_with_hierarchy.get_journals_paginated(
+            user_id="user123", tag_ids=[tag_id, str(tag_id)]
+        )
+
+        passed_tag_ids = mock_journal_repo.get_all.call_args.kwargs["tag_ids"]
+        assert passed_tag_ids == [str(tag_id)]
+        assert all(isinstance(value, str) for value in passed_tag_ids)
+
     async def test_expansion_skipped_when_hierarchy_unavailable(
         self, mock_journal_repo, mock_event_publisher
     ):

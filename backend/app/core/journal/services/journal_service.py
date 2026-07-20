@@ -414,22 +414,24 @@ class JournalService:
         Filtering by a parent tag therefore also returns journals tagged with any
         descendant, matching ``ContactService._expand_tag_ids_with_descendants``.
 
-        Ids are coerced via ``str`` before parsing so callers holding ``UUID``
-        objects expand correctly rather than being silently skipped. An id that
-        is not a well-formed UUID is left out of the hierarchy lookup but kept in
-        the returned filter, so it narrows the result set instead of widening it;
-        the REST layer rejects such ids with a 400 before reaching here.
+        Ids are coerced via ``str`` on the way in and out, so callers holding
+        ``UUID`` objects expand correctly rather than being silently skipped, the
+        return value always honours the declared ``list[str]``, and a tag named
+        both ways collapses to one entry. An id that is not a well-formed UUID is
+        left out of the hierarchy lookup but kept in the returned filter, so it
+        narrows the result set instead of widening it; the REST layer rejects
+        such ids with a 400 before reaching here.
         """
         if not tag_ids:
             return tag_ids
         if self.tag_hierarchy is None:
-            return tag_ids
+            return [str(tag_id) for tag_id in tag_ids]
 
-        expanded = dict.fromkeys(tag_ids)
+        expanded = dict.fromkeys(str(tag_id) for tag_id in tag_ids)
         parsed_ids = []
-        for tag_id in tag_ids:
+        for tag_id in expanded:
             try:
-                parsed_ids.append(UUID(str(tag_id)))
+                parsed_ids.append(UUID(tag_id))
             except ValueError:
                 continue
 
