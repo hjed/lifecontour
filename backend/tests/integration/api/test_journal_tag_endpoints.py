@@ -1125,3 +1125,222 @@ class TestJournalTagFiltering:
         journal_ids = [j["id"] for j in journals]
         assert note_journal_id in journal_ids
         assert event_journal_id not in journal_ids
+
+
+@pytest.mark.integration
+class TestJournalHierarchicalTagFiltering:
+    """GET /api/journals multi-tag and descendant-expanding filtering.
+
+    Mirrors the contact list behaviour: repeated ``tag_ids`` params combine as a
+    logical OR, and each requested tag expands to its descendants.
+    """
+
+    @staticmethod
+    async def _create_tag(client, name: str, parent_id: str | None = None) -> str:
+        attributes: dict[str, Any] = {"name": name, "color": "#FF0000"}
+        if parent_id is not None:
+            attributes["parent_id"] = parent_id
+        response = await client.post(
+            "/api/journals/tags",
+            json={"data": {"type": "journal-tags", "attributes": attributes}},
+        )
+        assert response.status_code == 201, response.text
+        return str(response.json()["data"]["id"])
+
+    @staticmethod
+    async def _create_journal(client, title: str) -> str:
+        response = await client.post(
+            "/api/journals",
+            json=create_journal_request_data(title=title, content="content"),
+        )
+        assert response.status_code == 201, response.text
+        return str(response.json()["data"]["id"])
+
+    @staticmethod
+    async def _assign_tag(client, journal_id: str, tag_id: str) -> None:
+        response = await client.post(
+            f"/api/journals/{journal_id}/relationships/tags",
+            json={"data": {"type": "journal-tag", "attributes": {"tag_id": tag_id}}},
+        )
+        assert response.status_code in (200, 201), response.text
+
+    async def test_parent_tag_returns_child_tagged_journal(
+        self, integration_api_client
+    ):
+        parent_id = await self._create_tag(integration_api_client, "outdoors")
+        child_id = await self._create_tag(
+            integration_api_client, "climbing", parent_id=parent_id
+        )
+        journal_id = await self._create_journal(integration_api_client, "Child Tagged")
+        await self._assign_tag(integration_api_client, journal_id, child_id)
+
+        response = await integration_api_client.get(
+            f"/api/journals?tag_ids={parent_id}"
+        )
+
+        assert response.status_code == 200
+        assert [j["id"] for j in response.json()["data"]] == [journal_id]
+
+    async def test_grandchild_tagged_journal_matches_root_tag(
+        self, integration_api_client
+    ):
+        root_id = await self._create_tag(integration_api_client, "outdoors")
+        child_id = await self._create_tag(
+            integration_api_client, "climbing", parent_id=root_id
+        )
+        grandchild_id = await self._create_tag(
+            integration_api_client, "sport-climbing", parent_id=child_id
+        )
+        journal_id = await self._create_journal(
+            integration_api_client, "Grandchild Tagged"
+        )
+        await self._assign_tag(integration_api_client, journal_id, grandchild_id)
+
+        response = await integration_api_client.get(f"/api/journals?tag_ids={root_id}")
+
+        assert response.status_code == 200
+        assert [j["id"] for j in response.json()["data"]] == [journal_id]
+
+    async def test_leaf_tag_does_not_expand_upwards(self, integration_api_client):
+        parent_id = await self._create_tag(integration_api_client, "outdoors")
+        child_id = await self._create_tag(
+            integration_api_client, "climbing", parent_id=parent_id
+        )
+        parent_journal_id = await self._create_journal(
+            integration_api_client, "Parent Tagged"
+        )
+        child_journal_id = await self._create_journal(
+            integration_api_client, "Child Tagged"
+        )
+        await self._assign_tag(integration_api_client, parent_journal_id, parent_id)
+        await self._assign_tag(integration_api_client, child_journal_id, child_id)
+
+        response = await integration_api_client.get(f"/api/journals?tag_ids={child_id}")
+
+        assert response.status_code == 200
+        assert [j["id"] for j in response.json()["data"]] == [child_journal_id]
+
+    async def test_multiple_tag_ids_return_the_union(self, integration_api_client):
+        work_id = await self._create_tag(integration_api_client, "work")
+        personal_id = await self._create_tag(integration_api_client, "personal")
+        other_id = await self._create_tag(integration_api_client, "other")
+        work_journal_id = await self._create_journal(
+            integration_api_client, "Work Journal"
+        )
+        personal_journal_id = await self._create_journal(
+            integration_api_client, "Personal Journal"
+        )
+        other_journal_id = await self._create_journal(
+            integration_api_client, "Other Journal"
+        )
+        await self._assign_tag(integration_api_client, work_journal_id, work_id)
+        await self._assign_tag(integration_api_client, personal_journal_id, personal_id)
+        await self._assign_tag(integration_api_client, other_journal_id, other_id)
+
+        response = await integration_api_client.get(
+            f"/api/journals?tag_ids={work_id}&tag_ids={personal_id}"
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert {j["id"] for j in body["data"]} == {
+            work_journal_id,
+            personal_journal_id,
+        }
+        assert body["meta"]["total_count"] == 2
+
+    async def test_journal_with_both_filter_tags_counted_once(
+        self, integration_api_client
+    ):
+        work_id = await self._create_tag(integration_api_client, "work")
+        personal_id = await self._create_tag(integration_api_client, "personal")
+        journal_id = await self._create_journal(integration_api_client, "Both Tags")
+        await self._assign_tag(integration_api_client, journal_id, work_id)
+        await self._assign_tag(integration_api_client, journal_id, personal_id)
+
+        response = await integration_api_client.get(
+            f"/api/journals?tag_ids={work_id}&tag_ids={personal_id}"
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert [j["id"] for j in body["data"]] == [journal_id]
+        assert body["meta"]["total_count"] == 1
+
+    async def test_legacy_singular_tag_id_still_filters_and_expands(
+        self, integration_api_client
+    ):
+        """``tag_id`` is retained for the frontend until ITER17-002 Phase 2."""
+        parent_id = await self._create_tag(integration_api_client, "outdoors")
+        child_id = await self._create_tag(
+            integration_api_client, "climbing", parent_id=parent_id
+        )
+        journal_id = await self._create_journal(integration_api_client, "Child Tagged")
+        await self._assign_tag(integration_api_client, journal_id, child_id)
+        untagged_id = await self._create_journal(integration_api_client, "Untagged")
+
+        response = await integration_api_client.get(f"/api/journals?tag_id={parent_id}")
+
+        assert response.status_code == 200
+        journal_ids = [j["id"] for j in response.json()["data"]]
+        assert journal_ids == [journal_id]
+        assert untagged_id not in journal_ids
+
+    async def test_tag_id_and_tag_ids_are_unioned(self, integration_api_client):
+        work_id = await self._create_tag(integration_api_client, "work")
+        personal_id = await self._create_tag(integration_api_client, "personal")
+        work_journal_id = await self._create_journal(
+            integration_api_client, "Work Journal"
+        )
+        personal_journal_id = await self._create_journal(
+            integration_api_client, "Personal Journal"
+        )
+        await self._assign_tag(integration_api_client, work_journal_id, work_id)
+        await self._assign_tag(integration_api_client, personal_journal_id, personal_id)
+
+        response = await integration_api_client.get(
+            f"/api/journals?tag_id={work_id}&tag_ids={personal_id}"
+        )
+
+        assert response.status_code == 200
+        assert {j["id"] for j in response.json()["data"]} == {
+            work_journal_id,
+            personal_journal_id,
+        }
+
+    async def test_tag_filter_ands_with_type_filter(self, integration_api_client):
+        parent_id = await self._create_tag(integration_api_client, "outdoors")
+        child_id = await self._create_tag(
+            integration_api_client, "climbing", parent_id=parent_id
+        )
+        note_journal_id = await self._create_journal(
+            integration_api_client, "Note Journal"
+        )
+        await self._assign_tag(integration_api_client, note_journal_id, child_id)
+
+        matching = await integration_api_client.get(
+            f"/api/journals?tag_ids={parent_id}&type=NOTE"
+        )
+        non_matching = await integration_api_client.get(
+            f"/api/journals?tag_ids={parent_id}&type=MOOD_RATING"
+        )
+
+        assert [j["id"] for j in matching.json()["data"]] == [note_journal_id]
+        assert non_matching.json()["data"] == []
+
+    async def test_malformed_tag_id_is_rejected(self, integration_api_client):
+        """Malformed ids are a client error, not a database failure."""
+        assert (
+            await integration_api_client.get("/api/journals?tag_ids=not-a-uuid")
+        ).status_code == 400
+        assert (
+            await integration_api_client.get("/api/journals?tag_id=not-a-uuid")
+        ).status_code == 400
+
+    async def test_unknown_tag_id_returns_no_journals(self, integration_api_client):
+        await self._create_journal(integration_api_client, "Untagged")
+
+        response = await integration_api_client.get(f"/api/journals?tag_ids={uuid4()}")
+
+        assert response.status_code == 200
+        assert response.json()["data"] == []

@@ -589,3 +589,76 @@ class TestJournalTagRepositoryIntegration:
         tags = await tag_repo.get_tags_for_journal(saved_journal.id)
         assert len(tags) == 1
         assert tags[0].name == "personal"
+
+
+@pytest.mark.integration
+class TestGetDescendantsForTags:
+    """Recursive descendant lookup backing hierarchical journal tag filtering."""
+
+    async def test_returns_all_levels_of_descendants(self, tag_repo):
+        parent = await tag_repo.save(JournalTag(name="outdoors"))
+        child = await tag_repo.save(JournalTag(name="climbing", parent_id=parent.id))
+        grandchild = await tag_repo.save(
+            JournalTag(name="sport-climbing", parent_id=child.id)
+        )
+
+        descendants = await tag_repo.get_descendants_for_tags([parent.id])
+
+        assert {tag.id for tag in descendants} == {child.id, grandchild.id}
+
+    async def test_handles_multiple_roots_in_one_call(self, tag_repo):
+        first_root = await tag_repo.save(JournalTag(name="work"))
+        first_child = await tag_repo.save(
+            JournalTag(name="work-meetings", parent_id=first_root.id)
+        )
+        second_root = await tag_repo.save(JournalTag(name="personal"))
+        second_child = await tag_repo.save(
+            JournalTag(name="personal-health", parent_id=second_root.id)
+        )
+
+        descendants = await tag_repo.get_descendants_for_tags(
+            [first_root.id, second_root.id]
+        )
+
+        assert {tag.id for tag in descendants} == {first_child.id, second_child.id}
+
+    async def test_leaf_tag_has_no_descendants(self, tag_repo):
+        parent = await tag_repo.save(JournalTag(name="outdoors"))
+        leaf = await tag_repo.save(JournalTag(name="climbing", parent_id=parent.id))
+
+        assert await tag_repo.get_descendants_for_tags([leaf.id]) == []
+
+    async def test_empty_input_returns_empty_list(self, tag_repo):
+        await tag_repo.save(JournalTag(name="outdoors"))
+
+        assert await tag_repo.get_descendants_for_tags([]) == []
+
+    async def test_excludes_ancestors_and_unrelated_tags(self, tag_repo):
+        parent = await tag_repo.save(JournalTag(name="outdoors"))
+        child = await tag_repo.save(JournalTag(name="climbing", parent_id=parent.id))
+        await tag_repo.save(JournalTag(name="unrelated"))
+
+        descendants = await tag_repo.get_descendants_for_tags([child.id])
+
+        assert descendants == []
+
+    async def test_maps_full_tag_row(self, tag_repo):
+        parent = await tag_repo.save(JournalTag(name="outdoors"))
+        child = await tag_repo.save(
+            JournalTag(
+                name="climbing",
+                parent_id=parent.id,
+                color="#FF0000",
+                description="Rock climbing entries",
+            )
+        )
+
+        descendants = await tag_repo.get_descendants_for_tags([parent.id])
+
+        assert len(descendants) == 1
+        assert descendants[0].id == child.id
+        assert descendants[0].name == "climbing"
+        assert descendants[0].parent_id == parent.id
+        assert descendants[0].color == "#FF0000"
+        assert descendants[0].description == "Rock climbing entries"
+        assert descendants[0].created_at is not None

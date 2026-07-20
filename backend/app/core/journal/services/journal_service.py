@@ -1,6 +1,7 @@
 """Main journal service with transaction management and type dependency resolution."""
 
 from typing import Any
+from uuid import UUID
 
 import structlog
 from core_shared.models.history import Provenance
@@ -30,6 +31,9 @@ from app.core.journal.models.repositories import (
     JournalContactRelationshipRepository,
     JournalRepository,
 )
+from app.core.journal.services.journal_tag_hierarchy_service import (
+    JournalTagHierarchyService,
+)
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.unit_of_work import transactional
 
@@ -57,6 +61,7 @@ class JournalService:
         journal_repo: JournalRepository,
         event_publisher: OutboxEventPublisher,
         contact_relationship_repo: JournalContactRelationshipRepository | None = None,
+        tag_hierarchy: JournalTagHierarchyService | None = None,
     ):
         """
         Initialize the journal service.
@@ -65,10 +70,13 @@ class JournalService:
             journal_repo: Repository for journal persistence
             event_publisher: Publisher for domain events (outbox pattern)
             contact_relationship_repo: Repository for contact relationships
+            tag_hierarchy: Tag hierarchy service used to expand tag filters to
+                their descendants. Without it, tag filtering stays flat.
         """
         self.journal_repo = journal_repo
         self.event_publisher = event_publisher
         self.contact_relationship_repo = contact_relationship_repo
+        self.tag_hierarchy = tag_hierarchy
 
     @transactional
     async def create_journal(
@@ -358,7 +366,7 @@ class JournalService:
         start_date: str | None = None,
         end_date: str | None = None,
         contact_id: str | None = None,
-        tag_id: str | None = None,
+        tag_ids: list[str] | None = None,
         calendar_id: str | None = None,
         parent_id: int | None = None,
         search: str | None = None,
@@ -374,7 +382,9 @@ class JournalService:
             start_date: Optional start date filter (ISO format)
             end_date: Optional end date filter (ISO format)
             contact_id: Optional contact ID to filter journals by
-            tag_id: Optional tag ID to filter journals by
+            tag_ids: Optional tag IDs to filter journals by. Each is expanded to
+                include its descendant tags, and a journal matching any of the
+                resulting tags is returned.
             calendar_id: Optional calendar ID to filter journals by
             parent_id: Optional parent journal ID to filter by (None for root journals)
             search: Optional search query for full-text search
@@ -383,18 +393,49 @@ class JournalService:
             List of journals matching the filter criteria
         """
         return await self.journal_repo.get_all(
-            user_id,
-            limit,
-            offset,
-            journal_type,
-            start_date,
-            end_date,
-            contact_id,
-            tag_id,
-            calendar_id,
-            parent_id,
-            search,
+            user_id=user_id,
+            limit=limit,
+            offset=offset,
+            journal_type=journal_type,
+            start_date=start_date,
+            end_date=end_date,
+            contact_id=contact_id,
+            tag_ids=await self._expand_tag_ids_with_descendants(tag_ids),
+            calendar_id=calendar_id,
+            parent_id=parent_id,
+            search=search,
         )
+
+    async def _expand_tag_ids_with_descendants(
+        self, tag_ids: list[str] | None
+    ) -> list[str] | None:
+        """Expand tag IDs to include all descendant tag IDs.
+
+        Filtering by a parent tag therefore also returns journals tagged with any
+        descendant, matching ``ContactService._expand_tag_ids_with_descendants``.
+        IDs that are not valid UUIDs are skipped for the hierarchy lookup rather
+        than raising; the REST layer already rejects them with a 400, so this is
+        defence in depth for other callers.
+        """
+        if not tag_ids:
+            return tag_ids
+        if self.tag_hierarchy is None:
+            return tag_ids
+
+        expanded = dict.fromkeys(tag_ids)
+        parsed_ids = []
+        for tag_id in tag_ids:
+            try:
+                parsed_ids.append(UUID(tag_id))
+            except ValueError:
+                continue
+
+        descendants = await self.tag_hierarchy.get_all_descendants_bulk(parsed_ids)
+        for descendant in descendants:
+            if descendant.id is not None:
+                expanded[str(descendant.id)] = None
+
+        return list(expanded)
 
     async def get_journals_count(
         self,
@@ -403,7 +444,7 @@ class JournalService:
         start_date: str | None = None,
         end_date: str | None = None,
         contact_id: str | None = None,
-        tag_id: str | None = None,
+        tag_ids: list[str] | None = None,
         calendar_id: str | None = None,
         parent_id: int | None = None,
         search: str | None = None,
@@ -417,7 +458,7 @@ class JournalService:
             start_date: Optional start date filter (ISO format)
             end_date: Optional end date filter (ISO format)
             contact_id: Optional contact ID to filter journals by
-            tag_id: Optional tag ID to filter journals by
+            tag_ids: Optional tag IDs to filter journals by (expanded to descendants)
             calendar_id: Optional calendar ID to filter journals by
             parent_id: Optional parent journal ID to filter by
             search: Optional search query for full-text search
@@ -432,7 +473,7 @@ class JournalService:
                 start_date,
                 end_date,
                 contact_id,
-                tag_id,
+                tag_ids,
                 calendar_id,
                 parent_id,
                 search,
@@ -444,7 +485,7 @@ class JournalService:
                 start_date=start_date,
                 end_date=end_date,
                 contact_id=contact_id,
-                tag_id=tag_id,
+                tag_ids=await self._expand_tag_ids_with_descendants(tag_ids),
                 calendar_id=calendar_id,
                 parent_id=parent_id,
                 search=search,

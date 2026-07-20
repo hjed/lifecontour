@@ -13,6 +13,7 @@ from core_shared.models.journals import (
     JournalValidationError,
 )
 
+from app.core.journal.models.journal_tag import JournalTag
 from app.core.journal.models.repositories import JournalTagRepository
 
 
@@ -108,6 +109,16 @@ class JournalTagHierarchyService:
                 "target_tag_id",
                 "Circular reference detected in tag hierarchy",
             )
+
+    async def get_all_descendants_bulk(self, tag_ids: list[UUID]) -> list[JournalTag]:
+        """Get all descendant tags for multiple tags in a single query.
+
+        Mirrors the contact ``TagHierarchyService.get_all_descendants_bulk`` so
+        journal list filtering can expand a parent tag to its whole subtree.
+        """
+        if not tag_ids:
+            return []
+        return await self.tag_repo.get_descendants_for_tags(tag_ids)
 
     async def _check_circular_reference(self, parent_id: UUID, child_id: UUID) -> None:
         """Walk the proposed parent's ancestry looking for ``child_id``."""

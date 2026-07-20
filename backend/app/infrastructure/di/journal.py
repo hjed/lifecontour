@@ -478,12 +478,14 @@ class JournalProvider(Provider):
         journal_repo: JournalRepository,
         event_publisher: OutboxEventPublisher,
         contact_relationship_repo: JournalContactRelationshipRepository,
+        tag_hierarchy: JournalTagHierarchyService,
     ) -> JournalService:
         """Provide a JournalService instance."""
         return JournalService(
             journal_repo=journal_repo,
             event_publisher=event_publisher,
             contact_relationship_repo=contact_relationship_repo,
+            tag_hierarchy=tag_hierarchy,
         )
 
     @provide(scope=Scope.REQUEST)

@@ -740,7 +740,10 @@ journal_jogging_data table:
 ```
 GET /api/journals
 - List journals with filtering and pagination
-- Query params: type, date_range, contact_id, tag_id, calendar_id, parent_id, search
+- Query params: type, date_range, contact_id, tag_ids, calendar_id, parent_id, search
+- `tag_ids` is repeatable; a journal matching any of the given tags is returned, and
+  each tag expands to include its descendant tags (matching contact tag filtering)
+- `tag_id` (singular) is retained for backward compatibility and is unioned with `tag_ids`
 - Returns: paginated list with embedded type data and relationships
 - Includes child count for parent journals
 

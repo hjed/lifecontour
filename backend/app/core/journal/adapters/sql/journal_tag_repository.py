@@ -224,6 +224,34 @@ class SqlJournalTagRepository(JournalTagRepository):
 
         return [_row_to_tag(row) for row in rows]
 
+    async def get_descendants_for_tags(self, tag_ids: list[UUID]) -> list[JournalTag]:
+        """Get all descendant tags (recursively) for a list of tag IDs."""
+        if not tag_ids:
+            return []
+
+        query = text(
+            f"""
+            WITH RECURSIVE descendants AS (
+                SELECT {_TAG_COLUMNS}
+                FROM journal_tags
+                WHERE parent_id = ANY(:tag_ids)
+
+                UNION ALL
+
+                SELECT {_tag_columns("t")}
+                FROM journal_tags t
+                INNER JOIN descendants d ON t.parent_id = d.id
+            )
+            SELECT DISTINCT {_TAG_COLUMNS}
+            FROM descendants
+            ORDER BY name
+        """
+        )
+        result = await self.conn.execute(query, {"tag_ids": tag_ids})
+        rows = result.fetchall()
+
+        return [_row_to_tag(row) for row in rows]
+
     async def get_children(self, parent_id: UUID) -> list[JournalTag]:
         """Get child tags of a parent tag."""
         query = text(
