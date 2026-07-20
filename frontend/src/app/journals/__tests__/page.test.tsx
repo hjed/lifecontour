@@ -6,13 +6,18 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import JournalsPage from '../page';
 import { renderWithQueryClient } from '@/components/journals/test-helpers';
+import { useInfiniteJournals, useSearchJournals } from '@/lib/api/journals';
+import type { JournalFilters as JournalFiltersType } from '@/types/journals';
 
 // Mock next/navigation
 const mockPush = jest.fn();
+let mockSearchParams = new URLSearchParams();
 jest.mock('next/navigation', () => ({
   useRouter: () => ({
     push: mockPush,
   }),
+  useSearchParams: () => mockSearchParams,
+  usePathname: () => '/journals',
 }));
 
 // mock removed
@@ -89,7 +94,12 @@ jest.mock('@/lib/api/journals', () => {
       error: null,
     })),
     useJournalTags: jest.fn(() => ({
-      data: { data: [] },
+      data: {
+        data: [
+          { id: 'tag-1', name: 'Holidays', color: '#FF0000' },
+          { id: 'tag-2', name: 'Work', color: '#00FF00' },
+        ],
+      },
       isLoading: false,
     })),
     useCalendars: jest.fn(() => ({
@@ -116,6 +126,14 @@ global.IntersectionObserver = mockIntersectionObserver;
 describe('JournalsPage', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockSearchParams = new URLSearchParams();
+    // clearAllMocks leaves implementations in place, so a per-test
+    // mockReturnValue would otherwise leak into later tests.
+    (useSearchJournals as jest.Mock).mockReturnValue({
+      data: null,
+      isLoading: false,
+      error: null,
+    });
   });
 
   it('renders the page title and description', () => {
@@ -147,6 +165,164 @@ describe('JournalsPage', () => {
     renderWithQueryClient(<JournalsPage />);
 
     expect(screen.getByText('Test Journal 1')).toBeInTheDocument();
+  });
+
+  describe('tag deep link (/journals?tag=<id>)', () => {
+    const getLatestInfiniteFilters = () => {
+      const calls = (useInfiniteJournals as jest.Mock).mock.calls;
+      return calls[calls.length - 1][0] as JournalFiltersType;
+    };
+
+    it('applies the URL tag to the journals query', () => {
+      mockSearchParams = new URLSearchParams('tag=tag-1');
+      renderWithQueryClient(<JournalsPage />);
+
+      expect(getLatestInfiniteFilters().tag_ids).toEqual(['tag-1']);
+    });
+
+    it('reflects the URL tag in the filter panel', () => {
+      mockSearchParams = new URLSearchParams('tag=tag-1');
+      renderWithQueryClient(<JournalsPage />);
+
+      expect(screen.getByLabelText('Holidays')).toHaveAttribute(
+        'aria-checked',
+        'true'
+      );
+      expect(screen.getByLabelText('Work')).toHaveAttribute(
+        'aria-checked',
+        'false'
+      );
+    });
+
+    it('names the active tag in the page heading', () => {
+      mockSearchParams = new URLSearchParams('tag=tag-1');
+      renderWithQueryClient(<JournalsPage />);
+
+      expect(
+        screen.getByRole('heading', { name: /holidays journals/i })
+      ).toBeInTheDocument();
+    });
+
+    it('clears the tag param when the URL tag is unchecked', async () => {
+      const user = userEvent.setup();
+      mockSearchParams = new URLSearchParams('tag=tag-1');
+      renderWithQueryClient(<JournalsPage />);
+
+      await user.click(screen.getByLabelText('Holidays'));
+
+      await waitFor(() => {
+        expect(mockPush).toHaveBeenCalledWith('/journals');
+      });
+    });
+
+    it('queries the union of the URL tag and an additionally selected tag', async () => {
+      const user = userEvent.setup();
+      mockSearchParams = new URLSearchParams('tag=tag-1');
+      renderWithQueryClient(<JournalsPage />);
+
+      await user.click(screen.getByLabelText('Work'));
+
+      await waitFor(() => {
+        expect(getLatestInfiniteFilters().tag_ids).toEqual(['tag-2', 'tag-1']);
+      });
+    });
+
+    it('offers a dismissible badge so the tag stays clearable with filters hidden', async () => {
+      const user = userEvent.setup();
+      mockSearchParams = new URLSearchParams('tag=tag-1');
+      renderWithQueryClient(<JournalsPage />);
+
+      // Hide the filters sidebar — the badge must remain the escape hatch.
+      await user.click(screen.getByRole('button', { name: /hide filters/i }));
+
+      const badge = screen.getByTestId('active-tag-filter');
+      expect(badge).toBeInTheDocument();
+
+      await user.click(
+        screen.getByRole('button', { name: 'Remove Holidays filter' })
+      );
+
+      await waitFor(() => {
+        expect(mockPush).toHaveBeenCalledWith('/journals');
+      });
+    });
+
+    it('does not leave a phantom tag_ids key after the last tag is unchecked', async () => {
+      const user = userEvent.setup();
+      renderWithQueryClient(<JournalsPage />);
+
+      const workCheckbox = screen.getByLabelText('Work');
+      await user.click(workCheckbox);
+      await waitFor(() => {
+        expect(getLatestInfiniteFilters().tag_ids).toEqual(['tag-2']);
+      });
+
+      await user.click(workCheckbox);
+
+      // Must be genuinely empty, not `{tag_ids: undefined}` — a phantom key
+      // reads as an active filter to the empty-state and Clear-button checks.
+      await waitFor(() => {
+        expect(Object.keys(getLatestInfiniteFilters())).not.toContain(
+          'tag_ids'
+        );
+      });
+      expect(screen.queryByTestId('clear-filters')).not.toBeInTheDocument();
+    });
+
+    it('does not leave a phantom key for any cleared filter', async () => {
+      const user = userEvent.setup();
+      renderWithQueryClient(<JournalsPage />);
+
+      // Journal types clear to `undefined` the same way tags do.
+      const noteCheckbox = screen.getByLabelText('Note');
+      await user.click(noteCheckbox);
+      await waitFor(() => {
+        expect(getLatestInfiniteFilters().types).toEqual(['note']);
+      });
+
+      await user.click(noteCheckbox);
+
+      await waitFor(() => {
+        expect(Object.keys(getLatestInfiniteFilters())).not.toContain('types');
+      });
+      expect(screen.queryByTestId('clear-filters')).not.toBeInTheDocument();
+    });
+
+    it('flags that search ignores tag filters selected in the panel', async () => {
+      const user = userEvent.setup();
+      (useSearchJournals as jest.Mock).mockReturnValue({
+        data: { data: [], meta: { total_count: 0 } },
+        isLoading: false,
+        error: null,
+      });
+
+      renderWithQueryClient(<JournalsPage />);
+
+      // A panel-selected tag counts, not just a URL one — journal search has
+      // no tag parameter either way.
+      await user.click(screen.getByLabelText('Work'));
+      await user.type(screen.getByTestId('search-input'), 'hike');
+
+      await waitFor(
+        () => {
+          expect(
+            screen.getByText(
+              /search covers all tags, not just the selected one/i
+            )
+          ).toBeInTheDocument();
+        },
+        { timeout: 3000 }
+      );
+    });
+
+    it('applies no tag filter and a plain heading without a tag param', () => {
+      renderWithQueryClient(<JournalsPage />);
+
+      expect(getLatestInfiniteFilters().tag_ids).toBeUndefined();
+      expect(
+        screen.getByRole('heading', { name: 'Journals' })
+      ).toBeInTheDocument();
+    });
   });
 
   it('toggles filter visibility', async () => {

@@ -92,10 +92,12 @@ async function fetchJournals(
     params.append('type', filters.types[0]);
   }
   if (filters.contact_id) params.append('contact_id', filters.contact_id);
-  // Backend expects 'tag_id' (singular) for filtering by a single tag
+  // Backend accepts a repeatable 'tag_ids' param and expands each tag to its
+  // descendants, so every selected tag is sent.
   if (filters.tag_ids && filters.tag_ids.length > 0) {
-    // For now, only send the first tag since backend expects singular
-    params.append('tag_id', filters.tag_ids[0]);
+    for (const tagId of filters.tag_ids) {
+      params.append('tag_ids', tagId);
+    }
   }
   if (filters.calendar_id) params.append('calendar_id', filters.calendar_id);
   if (filters.parent_id !== undefined && filters.parent_id !== null) {

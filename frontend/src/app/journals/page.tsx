@@ -4,11 +4,13 @@
  * Integrates JournalList, JournalFilters, and calendar view components
  * to provide a comprehensive journal browsing experience.
  * Supports List (default), Month, and Agenda view modes.
+ * Supports URL-based tag filtering via `?tag=<id>` so that tag links open the
+ * same list experience, matching `/contacts?tag=<id>`.
  */
 
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { Suspense, useState, useMemo, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import type { Route } from 'next';
 import { AuthGuard } from '@/components/auth/AuthGuard';
@@ -25,15 +27,18 @@ import { CalendarWeekView } from '@/components/journals/CalendarWeekView';
 import { CalendarDayView } from '@/components/journals/CalendarDayView';
 import { CalendarQuickCreateDialog } from '@/components/journals/CalendarQuickCreateDialog';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import {
   useInfiniteJournals,
   useJournals,
+  useJournalTags,
   useSearchJournals,
   useReviewItems,
 } from '@/lib/api/journals';
 import { useDebounce } from '@/hooks/useDebounce';
+import { useTagFilter } from '@/hooks/useTagFilter';
 import { useDisplayJournals } from '@/hooks/useDisplayJournals';
 import { JournalFilters as JournalFiltersType } from '@/types/journals';
 import {
@@ -51,6 +56,8 @@ import {
   FileText,
   CalendarIcon,
   Download,
+  Tag,
+  X,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { Calendar } from '@/components/ui/calendar';
@@ -86,17 +93,39 @@ function getDateBounds(
   return { start: minDate, end: maxDate };
 }
 
-function getEmptyStateMessage(
-  searchQuery: string,
-  filters: JournalFiltersType
-) {
+function getEmptyStateMessage(searchQuery: string, hasFilters: boolean) {
   if (searchQuery) return `No journals match "${searchQuery}"`;
-  if (Object.keys(filters).length > 0)
-    return 'Try adjusting your filters or create a new journal.';
+  if (hasFilters) return 'Try adjusting your filters or create a new journal.';
   return 'Get started by creating your first journal entry.';
 }
 
+/**
+ * Strip keys whose value is `undefined`.
+ *
+ * `JournalFilters` clears a filter by setting its key to `undefined` rather
+ * than deleting it, so the key survives the spread. Any check of the form
+ * `Object.keys(filters).length > 0` would then read a cleared filter as an
+ * active one.
+ */
+function withoutClearedFilters(
+  filters: JournalFiltersType
+): JournalFiltersType {
+  return Object.fromEntries(
+    Object.entries(filters).filter(([, value]) => value !== undefined)
+  ) as JournalFiltersType;
+}
+
 export default function JournalsPage() {
+  return (
+    <AuthGuard>
+      <Suspense>
+        <JournalsPageContent />
+      </Suspense>
+    </AuthGuard>
+  );
+}
+
+function JournalsPageContent() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filters, setFilters] = useState<JournalFiltersType>({});
   const [showFilters, setShowFilters] = useState(true);
@@ -142,6 +171,51 @@ export default function JournalsPage() {
   // Use search query if present, otherwise use regular journal list
   const shouldUseSearch = debouncedSearchQuery.length > 0;
 
+  // Tag filter from URL search params (?tag=<id>). The URL is the source of
+  // truth for this tag; `filters.tag_ids` holds only the panel-selected tags.
+  const { tagId: activeTagId, clearTag } = useTagFilter('/journals');
+
+  const { data: tagsData } = useJournalTags();
+  const activeTagName = useMemo(() => {
+    if (!activeTagId || !tagsData?.data) return null;
+    return tagsData.data.find(t => t.id === activeTagId)?.name ?? null;
+  }, [activeTagId, tagsData]);
+
+  // Merge the URL tag into the active filters for querying and for the panel.
+  const effectiveFilters = useMemo<JournalFiltersType>(() => {
+    if (!activeTagId) return filters;
+    const tagIds = filters.tag_ids ?? [];
+    return {
+      ...filters,
+      tag_ids: tagIds.includes(activeTagId) ? tagIds : [...tagIds, activeTagId],
+    };
+  }, [filters, activeTagId]);
+
+  // Unchecking the URL-derived tag clears the param; everything else is stored
+  // as panel state with the URL tag stripped back out.
+  const handleFiltersChange = useCallback(
+    (next: JournalFiltersType) => {
+      const nextTagIds = next.tag_ids ?? [];
+      if (activeTagId && !nextTagIds.includes(activeTagId)) {
+        clearTag();
+      }
+      const remaining = activeTagId
+        ? nextTagIds.filter(id => id !== activeTagId)
+        : nextTagIds;
+      // Drop cleared keys rather than storing `undefined`: `hasActiveFilters`
+      // and the empty-state message count keys, so a phantom key from any
+      // filter — not just tags — would read as an active filter.
+      const stored: JournalFiltersType = { ...next };
+      if (remaining.length > 0) {
+        stored.tag_ids = remaining;
+      } else {
+        delete stored.tag_ids;
+      }
+      setFilters(withoutClearedFilters(stored));
+    },
+    [activeTagId, clearTag]
+  );
+
   const {
     data: infiniteData,
     isLoading: isInfiniteLoading,
@@ -152,7 +226,10 @@ export default function JournalsPage() {
     hasPreviousPage,
     isFetchingNextPage,
     isFetchingPreviousPage,
-  } = useInfiniteJournals(filters, { enabled: !shouldUseSearch, anchorDate });
+  } = useInfiniteJournals(effectiveFilters, {
+    enabled: !shouldUseSearch,
+    anchorDate,
+  });
 
   const {
     data: searchData,
@@ -191,7 +268,7 @@ export default function JournalsPage() {
   );
 
   const calendarFilters: JournalFiltersType = useMemo(() => {
-    const baseFilters = { ...filters };
+    const baseFilters = { ...effectiveFilters };
     if (viewMode === 'month') {
       return {
         ...baseFilters,
@@ -226,7 +303,7 @@ export default function JournalsPage() {
     }
     return baseFilters;
   }, [
-    filters,
+    effectiveFilters,
     viewMode,
     monthDateRange,
     weekDateRange,
@@ -281,7 +358,15 @@ export default function JournalsPage() {
   const clearSearch = () => {
     setSearchQuery('');
     setFilters({});
+    if (activeTagId) {
+      clearTag();
+    }
   };
+
+  const hasActiveFilters =
+    searchQuery.length > 0 ||
+    Object.keys(filters).length > 0 ||
+    activeTagId !== null;
 
   // Generate results summary text
   const getResultsSummary = () => {
@@ -295,18 +380,37 @@ export default function JournalsPage() {
       const processingTime = searchData.meta.processing_time_ms
         ? ` (${searchData.meta.processing_time_ms}ms)`
         : '';
-      return `${journalCount} found for "${debouncedSearchQuery}"${processingTime}`;
+      // Journal search has no tag parameter, so tag filters do not narrow
+      // search results — whether they came from the URL or the filter panel.
+      // Say so rather than letting the UI imply a narrowing that is not applied.
+      const selectedTagCount = effectiveFilters.tag_ids?.length ?? 0;
+      const tagCaveat =
+        selectedTagCount > 0
+          ? ` — search covers all tags, not just the ${selectedTagCount === 1 ? 'selected one' : 'selected ones'}`
+          : '';
+      return `${journalCount} found for "${debouncedSearchQuery}"${processingTime}${tagCaveat}`;
     }
 
     return `${journalCount} found`;
   };
 
   return (
-    <AuthGuard>
+    <>
       <div className='mb-6'>
-        <h1 className='text-3xl font-bold tracking-tight'>Journals</h1>
+        <h1 className='flex items-center gap-2 text-3xl font-bold tracking-tight'>
+          {activeTagName ? (
+            <>
+              <Tag className='h-7 w-7' aria-hidden='true' />
+              {activeTagName} Journals
+            </>
+          ) : (
+            'Journals'
+          )}
+        </h1>
         <p className='text-muted-foreground'>
-          Your journal entries and memories.
+          {activeTagName
+            ? `Journals tagged with "${activeTagName}"`
+            : 'Your journal entries and memories.'}
         </p>
       </div>
 
@@ -367,9 +471,7 @@ export default function JournalsPage() {
                   </PopoverContent>
                 </Popover>
 
-                {(searchQuery ||
-                  Object.keys(filters).length > 0 ||
-                  anchorDate) && (
+                {(hasActiveFilters || anchorDate) && (
                   <Button
                     variant='outline'
                     size='sm'
@@ -434,6 +536,31 @@ export default function JournalsPage() {
         </Card>
       </div>
 
+      {/* Active Tag Filter Badge — always visible, so the tag filter stays
+          dismissible even when the filters sidebar is hidden. */}
+      {activeTagId && (
+        <div
+          className='mb-4 flex items-center gap-2'
+          data-testid='active-tag-filter'
+        >
+          <Badge
+            variant='secondary'
+            className='flex items-center gap-1 px-3 py-1'
+          >
+            <Tag className='h-3 w-3' aria-hidden='true' />
+            {activeTagName ?? `Tag ${activeTagId}`}
+            <button
+              onClick={clearTag}
+              className='hover:bg-muted ml-1 rounded-full p-0.5'
+              aria-label={`Remove ${activeTagName ?? 'tag'} filter`}
+              data-testid='clear-tag-filter'
+            >
+              <X className='h-3 w-3' />
+            </button>
+          </Badge>
+        </div>
+      )}
+
       {/* Results Summary */}
       <div className='mb-4 flex items-center gap-2'>
         <BookOpen className='text-muted-foreground h-4 w-4' />
@@ -450,8 +577,8 @@ export default function JournalsPage() {
               <Card>
                 <CardContent className='pt-6'>
                   <JournalFilters
-                    filters={filters}
-                    onFiltersChange={setFilters}
+                    filters={effectiveFilters}
+                    onFiltersChange={handleFiltersChange}
                   />
                 </CardContent>
               </Card>
@@ -494,9 +621,7 @@ export default function JournalsPage() {
                     shouldUseSearch ? undefined : fetchPreviousPage
                   }
                   dateBounds={dateBounds}
-                  collapseEmptyDays={
-                    shouldUseSearch || Object.keys(filters).length > 0
-                  }
+                  collapseEmptyDays={shouldUseSearch || hasActiveFilters}
                   onJumpToDate={date => setAnchorDate(date)}
                   focusDate={anchorDate || format(new Date(), 'yyyy-MM-dd')}
                   emptyState={
@@ -507,7 +632,7 @@ export default function JournalsPage() {
                           No journals found
                         </h3>
                         <p className='text-muted-foreground mt-2 text-sm'>
-                          {getEmptyStateMessage(searchQuery, filters)}
+                          {getEmptyStateMessage(searchQuery, hasActiveFilters)}
                         </p>
                         <Button asChild className='mt-4 gap-2'>
                           <Link href={'/journals/new' as Route}>
@@ -613,6 +738,6 @@ export default function JournalsPage() {
         open={exportDialogOpen}
         onOpenChange={setExportDialogOpen}
       />
-    </AuthGuard>
+    </>
   );
 }

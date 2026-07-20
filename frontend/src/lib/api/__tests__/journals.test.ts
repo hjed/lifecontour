@@ -177,11 +177,77 @@ describe('Journals API', () => {
         expect(mockFetch).toHaveBeenCalled();
       });
 
-      // Backend expects singular 'type' and 'tag_id', and 'start_date'/'end_date'
-      // Currently only the first type and tag are sent since backend doesn't support multiple
+      // Backend expects singular 'type' and 'start_date'/'end_date', and a
+      // repeatable 'tag_ids' param (one entry per selected tag).
       const expectedUrl =
-        '/api/journals?search=test&type=note&contact_id=contact-1&tag_id=tag-1&start_date=2024-01-01&end_date=2024-12-31';
+        '/api/journals?search=test&type=note&contact_id=contact-1&tag_ids=tag-1&tag_ids=tag-2&start_date=2024-01-01&end_date=2024-12-31';
       expect(mockFetch).toHaveBeenCalledWith(expectedUrl, expect.any(Object));
+    });
+
+    it('should send every selected tag as a repeated tag_ids param', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: [], meta: {} }),
+      } as Response);
+
+      renderHook(() => useJournals({ tag_ids: ['tag-a', 'tag-b', 'tag-c'] }), {
+        wrapper: createWrapper,
+      });
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalled();
+      });
+
+      const url = new URL(
+        mockFetch.mock.calls[0][0] as string,
+        'http://localhost'
+      );
+      expect(url.searchParams.getAll('tag_ids')).toEqual([
+        'tag-a',
+        'tag-b',
+        'tag-c',
+      ]);
+    });
+
+    it('should send a single tag as tag_ids, not the legacy tag_id param', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: [], meta: {} }),
+      } as Response);
+
+      renderHook(() => useJournals({ tag_ids: ['tag-only'] }), {
+        wrapper: createWrapper,
+      });
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalled();
+      });
+
+      const url = new URL(
+        mockFetch.mock.calls[0][0] as string,
+        'http://localhost'
+      );
+      expect(url.searchParams.getAll('tag_ids')).toEqual(['tag-only']);
+      expect(url.searchParams.has('tag_id')).toBe(false);
+    });
+
+    it('should omit tag params entirely when no tags are selected', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: [], meta: {} }),
+      } as Response);
+
+      renderHook(() => useJournals({ tag_ids: [], search: 'x' }), {
+        wrapper: createWrapper,
+      });
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalled();
+      });
+
+      const requestedUrl = mockFetch.mock.calls[0][0] as string;
+      expect(requestedUrl).not.toContain('tag_ids');
+      expect(requestedUrl).not.toContain('tag_id');
     });
 
     it('should handle fetch error', async () => {

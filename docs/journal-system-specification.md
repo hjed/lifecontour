@@ -1133,9 +1133,14 @@ suggest_merge_candidates(
 - Date range picker
 - Type multi-select
 - Contact autocomplete
-- Tag multi-select
+- Tag multi-select — every selected tag is applied (sent as repeated `tag_ids`), and each expands to its descendant tags
 - Calendar select
 - Parent/child toggle
+
+**URL tag deep link:**
+- `/journals?tag=<id>` opens the list filtered to that tag, matching `/contacts?tag=<id>`
+- The filter panel reflects the URL state (the tag's checkbox is checked) and the heading names the tag
+- Unchecking that tag removes the `tag` param; other selected tags are combined with it as a union
 
 **Display:**
 - Calendar color bar on left edge

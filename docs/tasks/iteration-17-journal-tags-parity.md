@@ -1,6 +1,6 @@
 # Iteration 17: Journal Tags Parity
 
-**Status:** 🟡 IN PROGRESS (ITER17-001 complete — Phases 1–4; ITER17-002 Phase 1 complete)
+**Status:** 🟡 IN PROGRESS (ITER17-001 complete — Phases 1–4; ITER17-002 complete — Phases 1–2)
 **Dependencies:** Iteration 4 (journal tag tables and relationship endpoints), Iteration 4.6 (journal tag filtering + detail-view tag add/remove), Iteration 12 (unified event-driven history), Iteration 2.6 (contact tag management UX — the reference behaviour)
 **Goal:** Bring journal tag functionality to exact parity with contact tags across the UI, backend management operations, filtering, history, and MCP.
 
@@ -35,9 +35,9 @@ This iteration closes the gap so that journal tags behave **exactly like contact
 - **Service/repository**: `JournalTagService.create_tag` only; repository (`journal_tag_repository.py`) supports `find_by_name` (case-insensitive), `get_all`, `get_children`, `get_root_tags`, `get_tags_for_journal`, `save`. **No update / delete-with-unassign / merge service methods.**
 - **Frontend**:
   - `JournalTagBadge.tsx` wired into `JournalDetailView.tsx` with working `useAddJournalTag` / `useRemoveJournalTag` mutations — but add uses a plain `Select` dropdown (no search, no inline create, badges not colour-coded, and the "Add Tag" button is hidden when there are no unassigned tags, so an empty tag list is a dead end).
-  - `JournalFilters.tsx` has a multi-select checkbox tag filter, but `fetchJournals` (`frontend/src/lib/api/journals.ts`) **only sends the first selected tag** as singular `tag_id`.
+  - `JournalFilters.tsx` has a multi-select checkbox tag filter, and `fetchJournals` (`frontend/src/lib/api/journals.ts`) sends **every** selected tag as repeated `tag_ids` (ITER17-002 Phase 2).
   - `JournalListItem.tsx` already renders colour-coded tag chips on list items.
-  - No journal tag tree in the sidebar (`Sidebar.tsx` renders the tag tree for contacts only); no `?tag=` deep link on `/journals`.
+  - No journal tag tree in the sidebar (`Sidebar.tsx` renders the tag tree for contacts only). The `?tag=` deep link on `/journals` shipped in ITER17-002 Phase 2, so the sidebar tree has a destination to link to.
   - `JournalCreateForm.tsx` has no tag input.
 - **Search**: `journal_indexing_service.py` indexes `tag_ids` as a filterable field.
 - **MCP**: `create_journal_entry` / `update_journal_entry` / journal reads support tags. Journal tag listing shipped in ITER17-001 Phase 1 as `list_journal_tags`, alongside which contacts' `list_tags` was renamed `list_contact_tags`; Phase 2 added `update_journal_tag` / `update_contact_tag`, Phase 3 added `delete_journal_tag` / `delete_contact_tag`, and Phase 4 added `merge_journal_tag` while renaming contacts' `merge_tags` to `merge_contact_tags`. The journal and contact tag tool surfaces are now symmetric.
@@ -52,8 +52,8 @@ This iteration closes the gap so that journal tags behave **exactly like contact
 | Tag management: edit name/colour/description/parent, delete, merge (context menu + dialogs) | ✅ Backend closed — create, update, delete and merge (Phases 1–4); the UI surface remains | ITER17-004 |
 | `description` field on tags | ✅ Closed — column added in ITER17-001 Phase 1 | ITER17-001 |
 | Delete removes tag from all entities | ✅ Closed — delete un-assigns rather than blocking, ITER17-001 Phase 3 | ITER17-001 |
-| Multi-tag filter param + hierarchical descendant expansion | ✅ Backend closed — repeated `tag_ids` with descendant expansion (ITER17-002 Phase 1); the frontend still sends only the first tag until Phase 2 | ITER17-002 |
-| URL deep link (`?tag=`) on the list page | Absent | ITER17-002 |
+| Multi-tag filter param + hierarchical descendant expansion | ✅ Closed — repeated `tag_ids` with descendant expansion (ITER17-002 Phase 1); the frontend sends every selected tag (Phase 2) | ITER17-002 |
+| URL deep link (`?tag=`) on the list page | ✅ Closed — `/journals?tag=<id>` via the generalised `useTagFilter` (ITER17-002 Phase 2) | ITER17-002 |
 | Tag change history in activity feed | No tag domain events | ITER17-005 |
 | MCP tag management (list, merge) | ✅ Closed — `list_journal_tags` (Phase 1), `update_journal_tag` (Phase 2), `delete_journal_tag` (Phase 3), `merge_journal_tag` (Phase 4) | ITER17-001 |
 
@@ -232,21 +232,35 @@ Every phase below must meet the same completion bar before merge:
 - **Integration:** repository/service filter tests — parent tag returns child-tagged journals; multi-tag combinations; combined with type/date filters (existing AND semantics preserved). — `tests/integration/journal/test_journal_tag_repository_integration.py` (`TestGetDescendantsForTags`, 6 tests), `tests/integration/journal/test_journal_repository_integration.py` (union, DISTINCT/count, AND with date range, empty list), `tests/integration/api/test_journal_tag_endpoints.py` (`TestJournalHierarchicalTagFiltering`, 9 tests: parent→child, root→grandchild, no upward expansion, multi-`tag_ids` union with `meta.total_count`, both-tags-counted-once, legacy `tag_id` expansion, `tag_id`+`tag_ids` union, AND with `type`, unknown tag, malformed id → 400)
 - **E2E:** existing journal list filter specs continue to pass (frontend behaviour unchanged this phase). — `frontend/tests/e2e/journals-list.spec.ts` tag filter (still asserts the singular `tag_id` request), run on Chromium.
 
-#### Phase 2: Frontend Multi-Tag Params and URL Deep Link
+#### Phase 2: Frontend Multi-Tag Params and URL Deep Link ✅ COMPLETE
 
-**Estimated diff:** ~350 lines
+**Estimated diff:** ~350 lines · **Actual:** ~200 lines of production code plus ~500 lines of tests
 
 **Prerequisites:** Phase 1 merged.
 
 **Acceptance Criteria:**
-- [ ] `fetchJournals` sends **all** selected tags, not just the first.
-- [ ] `/journals?tag=<id>` deep link filters the list (reuse or generalise `useTagFilter`), and the filter UI reflects the URL state.
-- [ ] `JournalFilters.tsx` checkbox behaviour is unchanged from the user's perspective apart from now actually applying every selected tag.
+- [x] `fetchJournals` sends **all** selected tags, not just the first. — one repeated `tag_ids` param per selected tag in `frontend/src/lib/api/journals.ts`; `useJournals` and `useInfiniteJournals` both route through it, so both gained multi-tag support with no further change.
+- [x] `/journals?tag=<id>` deep link filters the list (reuse or generalise `useTagFilter`), and the filter UI reflects the URL state. — `useTagFilter` gained an optional `basePath` (default `/contacts`); `/journals` passes `'/journals'`. The page merges the URL tag into `effectiveFilters`, which feeds both the query **and** `JournalFilters`, so the tag's checkbox renders checked.
+- [x] `JournalFilters.tsx` checkbox behaviour is unchanged from the user's perspective apart from now actually applying every selected tag. — the component is untouched; it was already controlled and already accumulated into `tag_ids`.
+
+**Decisions taken (Phase 2):**
+- **`useTagFilter` generalised with a defaulted `basePath` rather than a second hook.** The whole hook differed only in the literal `/contacts`; a defaulted parameter keeps every contact call site and its existing tests untouched, satisfying delivery rule 5 (reuse before rebuild).
+- **The URL is the single source of truth for the deep-linked tag.** `filters.tag_ids` holds only panel-selected tags; `effectiveFilters` unions the URL tag in for querying and display, and `handleFiltersChange` strips it back out. Unchecking the URL tag calls `clearTag()` rather than storing a contradictory local state, so the URL and the UI can never disagree.
+- **The page was split into `JournalsPage` (Suspense boundary) and `JournalsPageContent`**, matching `/contacts` — `useSearchParams` requires a Suspense boundary in the app router.
+- **Contacts-parity heading added** ("<Tag> Journals" plus a matching subtitle and the `Tag` icon) although the acceptance criteria did not require it. Delivery rule 4 makes the contacts implementation the specification, and it gives the deep-link e2e test a user-visible anchor.
+- **The legacy singular `tag_id` param is no longer sent by the frontend.** Phase 1 deliberately kept the backend accepting it, so this is not a breaking change; the backend contract is unchanged and non-REST callers keep working.
+- **E2E helper extended:** `TestDataManager.createJournalTag` now accepts a string `parent_id` via a new `JournalTagCreateRequest` type (journal tags are UUID-keyed, unlike the integer-keyed contact `TagCreateRequest`), so the parent→child descendant test can build a real hierarchy.
+- **Dismissible active-tag badge added, matching contacts.** The journals filter panel is collapsible, so without the badge a user arriving via `/journals?tag=<id>` with the panel hidden would have no in-page control to remove the filter (only the global Clear, which also wipes search and the anchor date). Mirrors `data-testid="active-tag-filter"` / `clear-tag-filter` and the `aria-label={\`Remove <tag> filter\`}` from `/contacts`.
+- **`hasActiveFilters` is computed explicitly rather than by counting filter keys.** `JournalFilters` emits `tag_ids: undefined` when the last tag is unchecked, so `Object.keys(filters).length` counted a phantom key — leaving the Clear button visible, empty days collapsed and the empty state blaming filters when none were active. `handleFiltersChange` now deletes the key, and the three call sites share one `hasActiveFilters` flag, matching `contacts/page.tsx`.
+- **Union rather than replace, diverging from contacts.** Contacts' `effectiveFilters` *replaces* panel selections with the URL tag; journals unions them, so a deep link plus panel selections behave additively. Deliberate — the union is what "multi-tag filtering" means for this page — and now documented in the journal system specification.
+- **Journal search still ignores tag filters** (`useSearchJournals` has no tag parameter — adding one is a backend/MeiliSearch change, out of scope for a frontend-only phase). Contacts passes its active tag into search. Rather than let the tag-named heading imply a narrowing that does not happen, the results summary says so explicitly while a search is active. **Follow-up:** add tag filtering to the journal search endpoint and thread `effectiveFilters` into `useSearchJournals`.
+- **Pre-existing e2e flake observed, not introduced:** `journals-list-ready` intermittently fails to appear on the first `/journals` load of a cold dev server. Reproduced on an unmodified checkout (`journal-infinite-scroll.spec.ts`) and passes on re-run; recorded here rather than attributed to this phase.
+- **Diff ran to ~700 lines, over the 500-line standard** (roughly 200 production, 500 test). Splitting further would have shipped either a multi-tag param with no deep link or a deep link whose filter panel disagreed with the URL — both worse than a single coherent slice. Recorded rather than hidden, as in ITER17-001 Phase 4.
 
 **Required Test Coverage:**
-- **Unit:** frontend filter param construction; `useTagFilter` generalisation.
-- **Integration:** n/a beyond RTL (no new backend).
-- **E2E:** filter journals by a parent tag and assert a child-tagged journal appears; deep-link `/journals?tag=` renders a filtered list; multi-tag selection returns the union.
+- **Unit:** frontend filter param construction; `useTagFilter` generalisation. — `frontend/src/lib/api/__tests__/journals.test.ts` (4 tests: repeated `tag_ids` for many tags, single tag without the legacy `tag_id`, no tag param when none selected, and the combined-filter URL), `frontend/src/hooks/__tests__/useTagFilter.test.ts` (3 new tests for `basePath`, plus the 7 existing contact tests unchanged), `frontend/src/components/journals/__tests__/JournalFilters.test.tsx` (3 tests: checked state from props, second tag accumulates, unchecking removes only that id), `frontend/src/app/journals/__tests__/page.test.tsx` (8 tests: URL tag applied to the query, reflected in the panel, named in the heading, unchecking clears the param, union with a panel-selected tag, the dismissible badge remains operable with the filter panel hidden, no phantom `tag_ids` key after the last tag is unchecked, and a no-tag regression guard).
+- **Integration:** n/a beyond RTL (no new backend). Phase 1's `tests/integration/api/test_journal_tag_endpoints.py` (55 tests) was re-run as a regression check on the contract this phase consumes.
+- **E2E:** filter journals by a parent tag and assert a child-tagged journal appears; deep-link `/journals?tag=` renders a filtered list; multi-tag selection returns the union. — `frontend/tests/e2e/journals-list.spec.ts`, run on Chromium: `should include child-tagged journals when filtering by a parent tag`, `should return the union of journals when multiple tags are selected` (asserts two `tag_ids` values on the wire), `should filter the list from a /journals?tag= deep link and clear it` (heading, filtered list, checked checkbox, and URL param dropped on uncheck). The existing `should filter journals by tag` test now asserts `tag_ids=` instead of `tag_id`.
 
 ---
 
