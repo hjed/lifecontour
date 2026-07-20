@@ -721,11 +721,11 @@ test.describe('Journal Creation UI Flow', () => {
 
     await expect(page.getByTestId('climbing-type-editor')).toBeVisible();
 
-    // Select the template by typing to filter and trigger the dropdown
-    await page.getByPlaceholder('Select a climbing template...').click();
-    await page
-      .getByPlaceholder('Select a climbing template...')
-      .fill('E2E Climbing');
+    // Template selection lives on the consolidated abseiling block, which
+    // offers climbing templates for climbing journals.
+    await expect(page.getByTestId('abseiling-trip-type-editor')).toBeVisible();
+    await page.getByPlaceholder('Select a template...').click();
+    await page.getByPlaceholder('Select a template...').fill('E2E Climbing');
 
     // Wait for the option to appear and click it. Firefox can swallow the
     // click while the combobox list is still settling (the option calls
@@ -986,6 +986,7 @@ test.describe('Journal Creation UI Flow', () => {
             template_type: 'canyoning',
             region: 'Blue Mountains',
             french_grade: 'v4a3V*',
+            canyon_type: 'vertical',
             pitches: [
               { pitch_number: 1, height: 15 },
               { pitch_number: 2, height: 25 },
@@ -1004,11 +1005,11 @@ test.describe('Journal Creation UI Flow', () => {
 
     await expect(page.getByTestId('canyoning-type-editor')).toBeVisible();
 
-    // Select the template by typing to filter and trigger the dropdown
-    await page.getByPlaceholder('Select a canyoning template...').click();
-    await page
-      .getByPlaceholder('Select a canyoning template...')
-      .fill('E2E Hydration');
+    // Template selection lives on the consolidated abseiling block, which
+    // offers canyoning templates for canyoning journals.
+    await expect(page.getByTestId('abseiling-trip-type-editor')).toBeVisible();
+    await page.getByPlaceholder('Select a template...').click();
+    await page.getByPlaceholder('Select a template...').fill('E2E Hydration');
 
     // Wait for the option to appear and click it. Firefox can swallow the
     // click while the combobox list is still settling (the option calls
@@ -1028,6 +1029,9 @@ test.describe('Journal Creation UI Flow', () => {
         { timeout: 2000 }
       );
     }).toPass({ timeout: 20000 });
+
+    // A 'vertical' canyon_type sets the canyoning block's vertical flag.
+    await expect(page.getByTestId('vertical-switch')).toBeChecked();
 
     // Verify Abseiling Trip editor is visible and pitches are populated
     await expect(page.getByTestId('abseiling-trip-type-editor')).toBeVisible();
@@ -1061,12 +1065,10 @@ test.describe('Journal Creation UI Flow', () => {
       });
     }).toPass({ timeout: 15000 });
 
-    // Open template selector by typing — wrap in toPass() because
-    // Firefox may need the combobox focus cycle to complete before the
-    // options list populates.
-    const templateInput = page.getByPlaceholder(
-      'Select a canyoning template...'
-    );
+    // Open the consolidated abseiling block's template selector by typing —
+    // wrap in toPass() because Firefox may need the combobox focus cycle to
+    // complete before the options list populates.
+    const templateInput = page.getByPlaceholder('Select a template...');
     await expect(async () => {
       await templateInput.click({ timeout: 2000 });
       await templateInput.fill('new template', { timeout: 2000 });

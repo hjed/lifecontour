@@ -94,6 +94,55 @@ describe('TemplateSelector', () => {
     expect(screen.getByRole('combobox')).toHaveValue('');
   });
 
+  it('offers templates of every listed type when given multiple types', async () => {
+    const abseilTemplate = {
+      type: 'activity-templates',
+      id: '3',
+      attributes: {
+        name: 'Plain Abseil Template',
+        template_type: ActivityTemplateType.ABSEILING,
+        pitches: [{ pitch_number: 1 }],
+      },
+    };
+    const allTemplates = [...mockTemplates, abseilTemplate];
+    // The mock honours the server-side type filter, mirroring the backend.
+    (templatesApi.getTemplates as jest.Mock).mockImplementation(
+      (type?: ActivityTemplateType) =>
+        Promise.resolve({
+          data: allTemplates.filter(
+            t => !type || t.attributes.template_type === type
+          ),
+        })
+    );
+
+    renderComponent({
+      templateType: [
+        ActivityTemplateType.CANYONING,
+        ActivityTemplateType.ABSEILING,
+      ],
+    });
+
+    const combobox = screen.getByRole('combobox');
+    act(() => {
+      fireEvent.keyDown(combobox, { key: 'ArrowDown' });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Canyoning Template')).toBeInTheDocument();
+      expect(screen.getByText('Plain Abseil Template')).toBeInTheDocument();
+    });
+    // One server-filtered request per requested type, never unfiltered.
+    expect(templatesApi.getTemplates).toHaveBeenCalledWith(
+      ActivityTemplateType.CANYONING,
+      ''
+    );
+    expect(templatesApi.getTemplates).toHaveBeenCalledWith(
+      ActivityTemplateType.ABSEILING,
+      ''
+    );
+    expect(templatesApi.getTemplates).not.toHaveBeenCalledWith(undefined, '');
+  });
+
   it('calls onCreateTemplate when create button is clicked', async () => {
     const handleCreate = jest.fn();
     renderComponent({ onCreateTemplate: handleCreate });

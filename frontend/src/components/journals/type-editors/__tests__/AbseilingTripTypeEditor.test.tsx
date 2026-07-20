@@ -14,30 +14,33 @@ jest.mock('../TemplateSelector', () => ({
     templateType,
   }: {
     onSelect: (template: ActivityTemplateResource) => void;
-    templateType: ActivityTemplateType;
-  }) => (
-    <button
-      data-testid='mock-template-selector'
-      data-template-type={templateType}
-      onClick={() =>
-        onSelect({
-          id: 'template-abseil-1',
-          type: 'activity-templates',
-          attributes: {
-            name: 'Claustral Canyon',
-            template_type: templateType,
-            pitches: [
-              { pitch_number: 1, height: 20 },
-              { pitch_number: 2, height: 30 },
-              { pitch_number: 3, height: 5, pitch_type: 'jump' },
-            ],
-          },
-        })
-      }
-    >
-      Select Template
-    </button>
-  ),
+    templateType: ActivityTemplateType | ActivityTemplateType[];
+  }) => {
+    const types = Array.isArray(templateType) ? templateType : [templateType];
+    return (
+      <button
+        data-testid='mock-template-selector'
+        data-template-type={types.join(',')}
+        onClick={() =>
+          onSelect({
+            id: 'template-abseil-1',
+            type: 'activity-templates',
+            attributes: {
+              name: 'Claustral Canyon',
+              template_type: types[0],
+              pitches: [
+                { pitch_number: 1, height: 20 },
+                { pitch_number: 2, height: 30 },
+                { pitch_number: 3, height: 5, pitch_type: 'jump' },
+              ],
+            },
+          })
+        }
+      >
+        Select Template
+      </button>
+    );
+  },
 }));
 
 jest.mock('../CreateTemplateDialog', () => ({
@@ -112,6 +115,32 @@ describe('AbseilingTripTypeEditor', () => {
     const selector = screen.getByTestId('mock-template-selector');
     expect(selector).toBeInTheDocument();
     expect(selector).toHaveAttribute(
+      'data-template-type',
+      ActivityTemplateType.ABSEILING
+    );
+  });
+
+  it('passes additional template types through to the selector', () => {
+    render(
+      <AbseilingTripTypeEditor
+        createMode={true}
+        templateTypes={[
+          ActivityTemplateType.CANYONING,
+          ActivityTemplateType.ABSEILING,
+        ]}
+      />
+    );
+
+    expect(screen.getByTestId('mock-template-selector')).toHaveAttribute(
+      'data-template-type',
+      `${ActivityTemplateType.CANYONING},${ActivityTemplateType.ABSEILING}`
+    );
+  });
+
+  it('falls back to abseiling templates when templateTypes is empty', () => {
+    render(<AbseilingTripTypeEditor createMode={true} templateTypes={[]} />);
+
+    expect(screen.getByTestId('mock-template-selector')).toHaveAttribute(
       'data-template-type',
       ActivityTemplateType.ABSEILING
     );

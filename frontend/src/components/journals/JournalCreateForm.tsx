@@ -115,6 +115,10 @@ import {
   GearUsageTypeEditor,
 } from './type-editors';
 import { countAbseils } from './type-editors/pitchUtils';
+import {
+  templateTypeFieldUpdates,
+  templateTypesForJournalTypes,
+} from './templateUtils';
 import { JournalSearchCombobox } from './JournalSearchCombobox';
 
 // Form validation schema
@@ -480,6 +484,11 @@ export function JournalCreateForm({
     useCreateRoute();
   const [typeData, setTypeData] = useState<TypeDataState>({});
   const [abseilKey, setAbseilKey] = useState(0);
+  // Snapshot of type-specific values applied from a template. Passed as the
+  // editors' `data` (with `key={abseilKey}` forcing a remount on template
+  // apply) so template fields render without feeding live edits back into the
+  // editors' internal state.
+  const [templateSeedData, setTemplateSeedData] = useState<TypeDataState>({});
 
   // Fetch parent journal title for pre-population
   const { data: parentJournalData } = useJournal(
@@ -595,12 +604,25 @@ export function JournalCreateForm({
 
   const handleTemplateSelect = useCallback(
     (template: ActivityTemplateResource) => {
+      // A canyoning/caving/climbing template also contributes its
+      // type-specific fields (grade, gauge, style, …) to the matching type
+      // block; unselected types are dropped at submission.
+      const typeFieldUpdates = templateTypeFieldUpdates(template);
+
       setTypeData(prev => {
         const pitches = (template.attributes.pitches || []) as AbseilPitch[];
         const hasPitches = pitches.length > 0;
 
         return {
           ...prev,
+          ...(typeFieldUpdates
+            ? {
+                [typeFieldUpdates.journalType]: {
+                  ...(prev[typeFieldUpdates.journalType] || {}),
+                  ...typeFieldUpdates.fields,
+                },
+              }
+            : {}),
           [JournalType.ABSEILING_TRIP]: {
             ...(prev[JournalType.ABSEILING_TRIP] || {}),
             // Durable template reference lives on the consolidated abseiling
@@ -621,6 +643,25 @@ export function JournalCreateForm({
           },
         };
       });
+      // Every template selection remounts the subtype editors (via
+      // abseilKey), and a remounted editor re-emits its seed to the parent
+      // form — so the seed must snapshot the user's current values for every
+      // derived block on every selection, with the template's own fields
+      // overlaid where applicable. Seeding only the template's block would
+      // wipe user-entered fields in the others.
+      setTemplateSeedData({
+        [JournalType.CANYONING]: typeData[JournalType.CANYONING],
+        [JournalType.CAVING]: typeData[JournalType.CAVING],
+        [JournalType.CLIMBING]: typeData[JournalType.CLIMBING],
+        ...(typeFieldUpdates
+          ? {
+              [typeFieldUpdates.journalType]: {
+                ...(typeData[typeFieldUpdates.journalType] || {}),
+                ...typeFieldUpdates.fields,
+              },
+            }
+          : {}),
+      });
       setAbseilKey(k => k + 1);
 
       if (
@@ -630,7 +671,7 @@ export function JournalCreateForm({
         toast.success('Pitches imported from template');
       }
     },
-    []
+    [typeData]
   );
 
   const handleClimbingChange = useCallback(
@@ -1046,20 +1087,25 @@ export function JournalCreateForm({
                         data={typeData[JournalType.ABSEILING_TRIP]}
                         onChange={handleAbseilingTripChange}
                         onTemplateSelect={handleTemplateSelect}
+                        templateTypes={templateTypesForJournalTypes(
+                          selectedTypes
+                        )}
                       />
                     )}
                     {type === JournalType.CANYONING && (
                       <CanyoningTypeEditor
+                        key={abseilKey}
                         createMode
+                        data={templateSeedData[JournalType.CANYONING]}
                         onChange={handleCanyoningChange}
-                        onTemplateSelect={handleTemplateSelect}
                       />
                     )}
                     {type === JournalType.CAVING && (
                       <CavingTypeEditor
+                        key={abseilKey}
                         createMode
+                        data={templateSeedData[JournalType.CAVING]}
                         onChange={handleCavingChange}
-                        onTemplateSelect={handleTemplateSelect}
                       />
                     )}
                     {type === JournalType.CANOEING && (
@@ -1070,9 +1116,10 @@ export function JournalCreateForm({
                     )}
                     {type === JournalType.CLIMBING && (
                       <ClimbingTypeEditor
+                        key={abseilKey}
                         createMode
+                        data={templateSeedData[JournalType.CLIMBING]}
                         onChange={handleClimbingChange}
-                        onTemplateSelect={handleTemplateSelect}
                       />
                     )}
                     {type === JournalType.KAYAKING && (
