@@ -19,6 +19,36 @@ async def journal_repository(
     return SqlJournalRepository(async_connection)
 
 
+async def _insert_tag(
+    connection: AsyncConnection, name: str, parent_id: object | None = None
+) -> object:
+    """Insert a journal tag and return its id."""
+    result = await connection.execute(
+        text("""
+        INSERT INTO journal_tags (name, color, parent_id)
+        VALUES (:name, '#FF0000', :parent_id)
+        RETURNING id
+        """),
+        {"name": name, "parent_id": parent_id},
+    )
+    row = result.fetchone()
+    assert row is not None
+    return row[0]
+
+
+async def _assign_tag(
+    connection: AsyncConnection, journal_id: int | None, tag_id: object
+) -> None:
+    """Assign a journal tag to a journal."""
+    await connection.execute(
+        text("""
+        INSERT INTO journal_tag_assignments (journal_id, tag_id)
+        VALUES (:journal_id, :tag_id)
+        """),
+        {"journal_id": journal_id, "tag_id": tag_id},
+    )
+
+
 def create_test_journal(
     user_id: str = "test-user-123",
     title: str = "Test Journal",
@@ -559,13 +589,108 @@ class TestJournalRepositoryFiltering:
             {"journal_id": saved2.id, "tag_id": tag2_id},
         )
 
-        # Filter by tag_id
+        # Filter by tag_ids
         filtered = await journal_repository.get_all(
-            "test-user-123", tag_id=str(tag1_id)
+            "test-user-123", tag_ids=[str(tag1_id)]
         )
 
         assert len(filtered) == 1
         assert filtered[0].title == "Work Journal"
+
+    async def test_filter_by_multiple_tag_ids_returns_union(
+        self,
+        journal_repository: SqlJournalRepository,
+        async_connection: AsyncConnection,
+    ):
+        """Multiple tag ids combine as a logical OR, matching contact filtering."""
+        work_id, personal_id, other_id = [
+            await _insert_tag(async_connection, name)
+            for name in ("Work", "Personal", "Other")
+        ]
+
+        work_journal = await journal_repository.save(
+            create_test_journal(title="Work Journal")
+        )
+        personal_journal = await journal_repository.save(
+            create_test_journal(title="Personal Journal")
+        )
+        other_journal = await journal_repository.save(
+            create_test_journal(title="Other Journal")
+        )
+        await _assign_tag(async_connection, work_journal.id, work_id)
+        await _assign_tag(async_connection, personal_journal.id, personal_id)
+        await _assign_tag(async_connection, other_journal.id, other_id)
+
+        filtered = await journal_repository.get_all(
+            "test-user-123", tag_ids=[str(work_id), str(personal_id)]
+        )
+
+        assert {journal.title for journal in filtered} == {
+            "Work Journal",
+            "Personal Journal",
+        }
+
+    async def test_journal_matching_multiple_tags_returned_once(
+        self,
+        journal_repository: SqlJournalRepository,
+        async_connection: AsyncConnection,
+    ):
+        """A journal carrying both filter tags is not duplicated by the JOIN."""
+        work_id = await _insert_tag(async_connection, "Work")
+        personal_id = await _insert_tag(async_connection, "Personal")
+
+        journal = await journal_repository.save(create_test_journal(title="Both Tags"))
+        await _assign_tag(async_connection, journal.id, work_id)
+        await _assign_tag(async_connection, journal.id, personal_id)
+
+        tag_ids = [str(work_id), str(personal_id)]
+        filtered = await journal_repository.get_all("test-user-123", tag_ids=tag_ids)
+        count = await journal_repository.count_all("test-user-123", tag_ids=tag_ids)
+
+        assert len(filtered) == 1
+        assert count == 1
+
+    async def test_tag_filter_ands_with_date_range(
+        self,
+        journal_repository: SqlJournalRepository,
+        async_connection: AsyncConnection,
+    ):
+        """Tag filtering keeps AND semantics against the other filters."""
+        work_id = await _insert_tag(async_connection, "Work")
+        now = datetime.now(UTC)
+
+        in_range = await journal_repository.save(
+            create_test_journal(title="In Range", start=now, end=now)
+        )
+        out_of_range = await journal_repository.save(
+            create_test_journal(
+                title="Out Of Range",
+                start=now - timedelta(days=30),
+                end=now - timedelta(days=30),
+            )
+        )
+        await _assign_tag(async_connection, in_range.id, work_id)
+        await _assign_tag(async_connection, out_of_range.id, work_id)
+
+        filtered = await journal_repository.get_all(
+            "test-user-123",
+            tag_ids=[str(work_id)],
+            start_date=(now - timedelta(days=1)).date().isoformat(),
+            end_date=(now + timedelta(days=1)).date().isoformat(),
+        )
+
+        assert [journal.title for journal in filtered] == ["In Range"]
+
+    async def test_empty_tag_ids_list_does_not_filter(
+        self,
+        journal_repository: SqlJournalRepository,
+    ):
+        """An empty list means "no tag filter", not "match nothing"."""
+        await journal_repository.save(create_test_journal(title="Untagged"))
+
+        filtered = await journal_repository.get_all("test-user-123", tag_ids=[])
+
+        assert [journal.title for journal in filtered] == ["Untagged"]
 
     async def test_filter_by_calendar_id(
         self,

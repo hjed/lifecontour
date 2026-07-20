@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
+from uuid import UUID, uuid4
 
 import pytest
 from core_shared.models.journals import (
@@ -14,6 +15,7 @@ from core_shared.models.journals import (
     JournalValidationError,
 )
 
+from app.core.journal.models.journal_tag import JournalTag
 from app.core.journal.services.journal_service import JournalService
 
 
@@ -422,3 +424,178 @@ class TestJournalServiceTypeManagement:
         for jtype in base_types:
             result = journal_service._resolve_type_dependencies(jtype)
             assert result == [jtype], f"Type {jtype} should have no dependencies"
+
+
+class TestTagFilterExpansion:
+    """Tag filters expand to descendants before reaching the repository.
+
+    Mirrors ``ContactService._expand_tag_ids_with_descendants`` so a journal
+    tagged only with a child tag is returned when filtering by its parent.
+    """
+
+    @pytest.fixture
+    def mock_tag_hierarchy(self):
+        """Create a mock journal tag hierarchy service."""
+        return AsyncMock()
+
+    @pytest.fixture
+    def service_with_hierarchy(
+        self, mock_journal_repo, mock_event_publisher, mock_tag_hierarchy
+    ):
+        """Create a JournalService wired to the mocked hierarchy service."""
+        return JournalService(
+            journal_repo=mock_journal_repo,
+            event_publisher=mock_event_publisher,
+            tag_hierarchy=mock_tag_hierarchy,
+        )
+
+    @staticmethod
+    def _tag(tag_id: UUID, name: str) -> JournalTag:
+        return JournalTag(id=tag_id, name=name)
+
+    async def test_parent_tag_expands_to_all_descendants(
+        self, service_with_hierarchy, mock_journal_repo, mock_tag_hierarchy
+    ):
+        parent_id, child_id, grandchild_id = uuid4(), uuid4(), uuid4()
+        mock_tag_hierarchy.get_all_descendants_bulk.return_value = [
+            self._tag(child_id, "Child"),
+            self._tag(grandchild_id, "Grandchild"),
+        ]
+        mock_journal_repo.get_all.return_value = []
+
+        await service_with_hierarchy.get_journals_paginated(
+            user_id="user123", tag_ids=[str(parent_id)]
+        )
+
+        passed_tag_ids = mock_journal_repo.get_all.call_args.kwargs["tag_ids"]
+        assert set(passed_tag_ids) == {
+            str(parent_id),
+            str(child_id),
+            str(grandchild_id),
+        }
+
+    async def test_count_expands_parent_tag(
+        self, service_with_hierarchy, mock_journal_repo, mock_tag_hierarchy
+    ):
+        parent_id, child_id = uuid4(), uuid4()
+        mock_tag_hierarchy.get_all_descendants_bulk.return_value = [
+            self._tag(child_id, "Child")
+        ]
+        mock_journal_repo.count_all.return_value = 0
+
+        await service_with_hierarchy.get_journals_count(
+            user_id="user123", tag_ids=[str(parent_id)]
+        )
+
+        passed_tag_ids = mock_journal_repo.count_all.call_args.kwargs["tag_ids"]
+        assert set(passed_tag_ids) == {str(parent_id), str(child_id)}
+
+    async def test_multiple_tags_are_deduplicated(
+        self, service_with_hierarchy, mock_journal_repo, mock_tag_hierarchy
+    ):
+        parent_id, shared_child_id, other_id = uuid4(), uuid4(), uuid4()
+        mock_tag_hierarchy.get_all_descendants_bulk.return_value = [
+            self._tag(shared_child_id, "Shared"),
+        ]
+        mock_journal_repo.get_all.return_value = []
+
+        await service_with_hierarchy.get_journals_paginated(
+            user_id="user123",
+            tag_ids=[str(parent_id), str(other_id), str(parent_id)],
+        )
+
+        passed_tag_ids = mock_journal_repo.get_all.call_args.kwargs["tag_ids"]
+        assert sorted(passed_tag_ids) == sorted(
+            {str(parent_id), str(other_id), str(shared_child_id)}
+        )
+        assert len(passed_tag_ids) == len(set(passed_tag_ids))
+
+    async def test_leaf_tag_passes_through_unchanged(
+        self, service_with_hierarchy, mock_journal_repo, mock_tag_hierarchy
+    ):
+        leaf_id = uuid4()
+        mock_tag_hierarchy.get_all_descendants_bulk.return_value = []
+        mock_journal_repo.get_all.return_value = []
+
+        await service_with_hierarchy.get_journals_paginated(
+            user_id="user123", tag_ids=[str(leaf_id)]
+        )
+
+        assert mock_journal_repo.get_all.call_args.kwargs["tag_ids"] == [str(leaf_id)]
+
+    async def test_no_tag_filter_skips_expansion(
+        self, service_with_hierarchy, mock_journal_repo, mock_tag_hierarchy
+    ):
+        mock_journal_repo.get_all.return_value = []
+
+        await service_with_hierarchy.get_journals_paginated(user_id="user123")
+
+        mock_tag_hierarchy.get_all_descendants_bulk.assert_not_awaited()
+        assert mock_journal_repo.get_all.call_args.kwargs["tag_ids"] is None
+
+    async def test_malformed_tag_id_is_skipped_by_expansion(
+        self, service_with_hierarchy, mock_journal_repo, mock_tag_hierarchy
+    ):
+        """A non-UUID id is skipped for the hierarchy lookup rather than raising.
+
+        The REST layer rejects malformed ids with a 400 before reaching here.
+        """
+        mock_tag_hierarchy.get_all_descendants_bulk.return_value = []
+        mock_journal_repo.get_all.return_value = []
+
+        await service_with_hierarchy.get_journals_paginated(
+            user_id="user123", tag_ids=["not-a-uuid"]
+        )
+
+        mock_tag_hierarchy.get_all_descendants_bulk.assert_awaited_once_with([])
+        assert mock_journal_repo.get_all.call_args.kwargs["tag_ids"] == ["not-a-uuid"]
+
+    async def test_uuid_objects_are_expanded_not_skipped(
+        self, service_with_hierarchy, mock_journal_repo, mock_tag_hierarchy
+    ):
+        """A caller holding UUID objects gets expansion, not a TypeError."""
+        parent_id, child_id = uuid4(), uuid4()
+        mock_tag_hierarchy.get_all_descendants_bulk.return_value = [
+            self._tag(child_id, "Child")
+        ]
+        mock_journal_repo.get_all.return_value = []
+
+        await service_with_hierarchy.get_journals_paginated(
+            user_id="user123", tag_ids=[parent_id]
+        )
+
+        mock_tag_hierarchy.get_all_descendants_bulk.assert_awaited_once_with(
+            [parent_id]
+        )
+        assert str(child_id) in mock_journal_repo.get_all.call_args.kwargs["tag_ids"]
+
+    async def test_uuid_and_string_spellings_dedupe_to_one_string(
+        self, service_with_hierarchy, mock_journal_repo, mock_tag_hierarchy
+    ):
+        """The same tag given as UUID and str collapses to a single str entry."""
+        tag_id = uuid4()
+        mock_tag_hierarchy.get_all_descendants_bulk.return_value = []
+        mock_journal_repo.get_all.return_value = []
+
+        await service_with_hierarchy.get_journals_paginated(
+            user_id="user123", tag_ids=[tag_id, str(tag_id)]
+        )
+
+        passed_tag_ids = mock_journal_repo.get_all.call_args.kwargs["tag_ids"]
+        assert passed_tag_ids == [str(tag_id)]
+        assert all(isinstance(value, str) for value in passed_tag_ids)
+
+    async def test_expansion_skipped_when_hierarchy_unavailable(
+        self, mock_journal_repo, mock_event_publisher
+    ):
+        """Without the optional dependency the filter stays flat, not broken."""
+        service = JournalService(
+            journal_repo=mock_journal_repo,
+            event_publisher=mock_event_publisher,
+        )
+        tag_id = uuid4()
+        mock_journal_repo.get_all.return_value = []
+
+        await service.get_journals_paginated(user_id="user123", tag_ids=[str(tag_id)])
+
+        assert mock_journal_repo.get_all.call_args.kwargs["tag_ids"] == [str(tag_id)]

@@ -1,6 +1,6 @@
 # Iteration 17: Journal Tags Parity
 
-**Status:** 🟡 IN PROGRESS (ITER17-001 complete — Phases 1–4)
+**Status:** 🟡 IN PROGRESS (ITER17-001 complete — Phases 1–4; ITER17-002 Phase 1 complete)
 **Dependencies:** Iteration 4 (journal tag tables and relationship endpoints), Iteration 4.6 (journal tag filtering + detail-view tag add/remove), Iteration 12 (unified event-driven history), Iteration 2.6 (contact tag management UX — the reference behaviour)
 **Goal:** Bring journal tag functionality to exact parity with contact tags across the UI, backend management operations, filtering, history, and MCP.
 
@@ -31,7 +31,7 @@ This iteration closes the gap so that journal tags behave **exactly like contact
   - `DELETE /api/journals/tags/{tag_id}` — ✅ un-assigns the tag from all journals and deletes it, matching contact behaviour (the 409-when-in-use guard was removed in ITER17-001 Phase 3)
   - `POST /api/journals/tags/{tag_id}/merge` — ✅ folds a tag into another and deletes it (ITER17-001 Phase 4)
   - `POST /api/journals/{id}/relationships/tags`, `DELETE /api/journals/{id}/relationships/tags/{tag_id}`
-  - `GET /api/journals?tag_id=` filter (singular)
+  - `GET /api/journals?tag_ids=` filter — repeatable, expands each tag to its descendants (ITER17-002 Phase 1); singular `tag_id` still accepted and unioned in
 - **Service/repository**: `JournalTagService.create_tag` only; repository (`journal_tag_repository.py`) supports `find_by_name` (case-insensitive), `get_all`, `get_children`, `get_root_tags`, `get_tags_for_journal`, `save`. **No update / delete-with-unassign / merge service methods.**
 - **Frontend**:
   - `JournalTagBadge.tsx` wired into `JournalDetailView.tsx` with working `useAddJournalTag` / `useRemoveJournalTag` mutations — but add uses a plain `Select` dropdown (no search, no inline create, badges not colour-coded, and the "Add Tag" button is hidden when there are no unassigned tags, so an empty tag list is a dead end).
@@ -52,7 +52,7 @@ This iteration closes the gap so that journal tags behave **exactly like contact
 | Tag management: edit name/colour/description/parent, delete, merge (context menu + dialogs) | ✅ Backend closed — create, update, delete and merge (Phases 1–4); the UI surface remains | ITER17-004 |
 | `description` field on tags | ✅ Closed — column added in ITER17-001 Phase 1 | ITER17-001 |
 | Delete removes tag from all entities | ✅ Closed — delete un-assigns rather than blocking, ITER17-001 Phase 3 | ITER17-001 |
-| Multi-tag filter param + hierarchical descendant expansion | Singular `tag_id`, first-selected-only, no hierarchy expansion | ITER17-002 |
+| Multi-tag filter param + hierarchical descendant expansion | ✅ Backend closed — repeated `tag_ids` with descendant expansion (ITER17-002 Phase 1); the frontend still sends only the first tag until Phase 2 | ITER17-002 |
 | URL deep link (`?tag=`) on the list page | Absent | ITER17-002 |
 | Tag change history in activity feed | No tag domain events | ITER17-005 |
 | MCP tag management (list, merge) | ✅ Closed — `list_journal_tags` (Phase 1), `update_journal_tag` (Phase 2), `delete_journal_tag` (Phase 3), `merge_journal_tag` (Phase 4) | ITER17-001 |
@@ -211,19 +211,26 @@ Every phase below must meet the same completion bar before merge:
 **Relevant documents:**
 - Contact reference: `_expand_tag_ids_with_descendants` in `backend/app/core/contacts/services/contact_service.py`; `useTagFilter` hook.
 
-#### Phase 1: Backend Multi-Tag and Hierarchical Filtering
+#### Phase 1: Backend Multi-Tag and Hierarchical Filtering ✅ COMPLETE
 
-**Estimated diff:** ~450 lines
+**Estimated diff:** ~450 lines · **Actual:** ~190 lines of production code plus ~530 lines of tests
 
 **Acceptance Criteria:**
-- [ ] `GET /api/journals` accepts repeated `tag_ids` query params (list), keeping `tag_id` working for backward compatibility (or migrating all callers in the same PR — state the choice).
-- [ ] Tag filtering expands each requested tag to include all descendant tags before querying, matching contact behaviour (a journal tagged only with a child tag appears when filtering by the parent).
-- [ ] Multiple tags combine the same way the contacts list combines them (verify: contacts use a single JOIN over the expanded ID set, i.e. logical OR across tags — replicate exactly).
+- [x] `GET /api/journals` accepts repeated `tag_ids` query params (list), keeping `tag_id` working for backward compatibility (or migrating all callers in the same PR — state the choice). — **`tag_id` kept** and unioned with `tag_ids` (see decisions below).
+- [x] Tag filtering expands each requested tag to include all descendant tags before querying, matching contact behaviour (a journal tagged only with a child tag appears when filtering by the parent). — new `JournalTagRepository.get_descendants_for_tags` recursive CTE + `JournalTagHierarchyService.get_all_descendants_bulk` + `JournalService._expand_tag_ids_with_descendants`.
+- [x] Multiple tags combine the same way the contacts list combines them (verify: contacts use a single JOIN over the expanded ID set, i.e. logical OR across tags — replicate exactly). — verified: contacts use a single `JOIN` + `tag_id IN (...)` + `SELECT DISTINCT` (`_build_contact_filter_query_parts`); the journal repository's `_add_relationship_filters` now does the same over `journal_tag_assignments` and keeps its existing `DISTINCT`.
+
+**Decisions taken (Phase 1):**
+- **`tag_id` (singular) retained rather than migrated.** The journal list UI still sends it and the frontend migration is ITER17-002 Phase 2, which must not depend on this phase shipping first (the "every phase is shippable" rule). The controller unions `tag_id` into `tag_ids`, so either spelling — or both at once — works.
+- **The legacy `tag_id` now expands to descendants too.** Applying expansion to only the new param would have made the two spellings behave differently, and Phase 2's switch to `tag_ids` would have silently changed results. Behaviour change is deliberate and matches the contacts contract.
+- **Expansion lives in the service, not the repository or controller**, mirroring `ContactService._expand_tag_ids_with_descendants`. `JournalService` takes `JournalTagHierarchyService` as an **optional** constructor dependency (like the existing optional `contact_relationship_repo`) so the many direct constructions in tests and workers keep working; without it, tag filtering simply stays flat rather than failing.
+- **Both query params are typed `UUID` at the controller**, so a malformed id is a **400 validation error** instead of the **500** it produced before this phase (asyncpg raises `DataError` when binding a non-UUID to the `uuid` column — verified against the running database, not assumed). Contacts get this for free from `list[int]`; journals needed the annotation. Ids are converted back to strings for the service/repository, which already bound them as strings. The service still skips unparseable ids when calling the hierarchy lookup, as defence in depth for non-REST callers.
+- **Repository params renamed `tag_id` → `tag_ids`** on `JournalRepository.get_all` / `count_all`. All call sites (MCP tools, the daily-summary assembler, `JournalService`) pass by keyword, so the rename is contained.
 
 **Required Test Coverage:**
-- **Unit:** descendant expansion logic.
-- **Integration:** repository/service filter tests — parent tag returns child-tagged journals; multi-tag combinations; combined with type/date filters (existing AND semantics preserved).
-- **E2E:** existing journal list filter specs continue to pass (frontend behaviour unchanged this phase).
+- **Unit:** descendant expansion logic. — `tests/unit/journal/test_journal_service.py` (`TestTagFilterExpansion`, 7 tests: multi-level expansion for list and count, dedup across tags, leaf pass-through, no-filter short-circuit, malformed uuid, missing-hierarchy fallback), `tests/unit/journal/test_journal_tag_hierarchy_service.py` (`TestGetAllDescendantsBulk`, 2 tests)
+- **Integration:** repository/service filter tests — parent tag returns child-tagged journals; multi-tag combinations; combined with type/date filters (existing AND semantics preserved). — `tests/integration/journal/test_journal_tag_repository_integration.py` (`TestGetDescendantsForTags`, 6 tests), `tests/integration/journal/test_journal_repository_integration.py` (union, DISTINCT/count, AND with date range, empty list), `tests/integration/api/test_journal_tag_endpoints.py` (`TestJournalHierarchicalTagFiltering`, 9 tests: parent→child, root→grandchild, no upward expansion, multi-`tag_ids` union with `meta.total_count`, both-tags-counted-once, legacy `tag_id` expansion, `tag_id`+`tag_ids` union, AND with `type`, unknown tag, malformed id → 400)
+- **E2E:** existing journal list filter specs continue to pass (frontend behaviour unchanged this phase). — `frontend/tests/e2e/journals-list.spec.ts` tag filter (still asserts the singular `tag_id` request), run on Chromium.
 
 #### Phase 2: Frontend Multi-Tag Params and URL Deep Link
 

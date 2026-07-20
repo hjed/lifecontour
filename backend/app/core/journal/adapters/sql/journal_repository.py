@@ -236,7 +236,7 @@ class SqlJournalRepository(JournalRepository):
         where_clauses: list[str],
         params: dict[str, Any],
         contact_id: str | None,
-        tag_id: str | None,
+        tag_ids: list[str] | None,
         calendar_id: str | None,
         journal_type: str | None,
     ) -> bool:
@@ -247,7 +247,7 @@ class SqlJournalRepository(JournalRepository):
             where_clauses: List to append WHERE conditions to
             params: Dictionary to add query parameters to
             contact_id: Optional contact ID filter
-            tag_id: Optional tag ID filter
+            tag_ids: Optional tag IDs to filter by (matches any of them)
             calendar_id: Optional calendar ID filter
             journal_type: Optional journal type (affects calendar join logic)
 
@@ -265,13 +265,18 @@ class SqlJournalRepository(JournalRepository):
             params["contact_id"] = int(contact_id)
             needs_distinct = True
 
-        # Tag filter (many-to-many relationship)
-        if tag_id is not None:
+        # Tag filter (many-to-many relationship). Multiple tags combine as a
+        # logical OR over a single JOIN, matching the contacts list filter.
+        if tag_ids:
             joins.append(
                 "INNER JOIN journal_tag_assignments jta ON j.id = jta.journal_id"
             )
-            where_clauses.append("jta.tag_id = :tag_id")
-            params["tag_id"] = tag_id
+            placeholders = []
+            for tag_index, tag_id_value in enumerate(tag_ids):
+                param_name = f"tag_id_param_{tag_index}"
+                placeholders.append(f":{param_name}")
+                params[param_name] = tag_id_value
+            where_clauses.append(f"jta.tag_id IN ({', '.join(placeholders)})")
             needs_distinct = True
 
         # Calendar filter
@@ -752,7 +757,7 @@ class SqlJournalRepository(JournalRepository):
         start_date: str | None = None,
         end_date: str | None = None,
         contact_id: str | None = None,
-        tag_id: str | None = None,
+        tag_ids: list[str] | None = None,
         calendar_id: str | None = None,
         parent_id: int | None = None,
         search: str | None = None,
@@ -768,7 +773,7 @@ class SqlJournalRepository(JournalRepository):
             start_date: Optional start date filter (ISO format)
             end_date: Optional end date filter (ISO format)
             contact_id: Optional contact ID to filter journals by
-            tag_id: Optional tag ID to filter journals by
+            tag_ids: Optional tag IDs to filter journals by (matches any of them)
             calendar_id: Optional calendar ID to filter journals by
             parent_id: Optional parent journal ID to filter by (None for root journals)
             search: Optional search query for full-text search
@@ -795,7 +800,7 @@ class SqlJournalRepository(JournalRepository):
 
         # Add relationship filters (contacts, tags, calendars)
         needs_distinct = self._add_relationship_filters(
-            joins, where_clauses, params, contact_id, tag_id, calendar_id, journal_type
+            joins, where_clauses, params, contact_id, tag_ids, calendar_id, journal_type
         )
 
         # Add date range filters
@@ -840,7 +845,7 @@ class SqlJournalRepository(JournalRepository):
         start_date: str | None = None,
         end_date: str | None = None,
         contact_id: str | None = None,
-        tag_id: str | None = None,
+        tag_ids: list[str] | None = None,
         calendar_id: str | None = None,
         parent_id: int | None = None,
         search: str | None = None,
@@ -857,7 +862,7 @@ class SqlJournalRepository(JournalRepository):
             start_date: Optional start date filter (ISO format)
             end_date: Optional end date filter (ISO format)
             contact_id: Optional contact ID to filter journals by
-            tag_id: Optional tag ID to filter journals by
+            tag_ids: Optional tag IDs to filter journals by (matches any of them)
             calendar_id: Optional calendar ID to filter journals by
             parent_id: Optional parent journal ID to filter by
             search: Optional search query for full-text search
@@ -882,7 +887,7 @@ class SqlJournalRepository(JournalRepository):
 
         # Add relationship filters (reuse helper method)
         self._add_relationship_filters(
-            joins, where_clauses, params, contact_id, tag_id, calendar_id, journal_type
+            joins, where_clauses, params, contact_id, tag_ids, calendar_id, journal_type
         )
 
         # Add date range filters (reuse helper method)

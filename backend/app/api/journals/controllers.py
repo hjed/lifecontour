@@ -7,6 +7,7 @@ Controllers act as adapters between HTTP and domain services.
 
 from datetime import UTC, datetime
 from typing import Annotated, Any
+from uuid import UUID
 
 import structlog
 from core_shared.models.history import Provenance
@@ -1168,7 +1169,20 @@ async def list_journals(
         str | None, Query(description="Filter by end date (inclusive)")
     ] = None,
     contact_id: Annotated[int | None, Query(description="Filter by contact ID")] = None,
-    tag_id: Annotated[str | None, Query(description="Filter by tag ID")] = None,
+    tag_id: Annotated[
+        UUID | None,
+        Query(description="Filter by tag ID (deprecated: use tag_ids)"),
+    ] = None,
+    tag_ids: Annotated[
+        list[UUID] | None,
+        Query(
+            description=(
+                "Filter by tag IDs. Repeat the parameter for multiple tags; a "
+                "journal matching any of them (or any of their descendant tags) "
+                "is returned."
+            )
+        ),
+    ] = None,
     calendar_id: Annotated[
         str | None, Query(description="Filter by calendar ID")
     ] = None,
@@ -1183,6 +1197,15 @@ async def list_journals(
     pagination = PaginationParams(page=page, limit=limit)
     base_url = get_request_base_url(request)
 
+    # `tag_id` predates the repeatable `tag_ids` param and is still sent by the
+    # journal list UI; the two are unioned so either spelling works. Both are
+    # parsed as UUIDs here, so a malformed id is a 400 rather than a 500.
+    requested_tag_ids = list(
+        dict.fromkeys(
+            str(value) for value in [*(tag_ids or []), *([tag_id] if tag_id else [])]
+        )
+    )
+
     # Get all journals for the user
     journals = await journal_service.get_journals_paginated(
         user_id=user.id,
@@ -1192,7 +1215,7 @@ async def list_journals(
         start_date=start_date if start_date else None,
         end_date=end_date if end_date else None,
         contact_id=str(contact_id) if contact_id else None,
-        tag_id=tag_id,
+        tag_ids=requested_tag_ids or None,
         calendar_id=calendar_id,
         parent_id=parent_id,
         search=search,
@@ -1204,7 +1227,7 @@ async def list_journals(
         start_date=start_date if start_date else None,
         end_date=end_date if end_date else None,
         contact_id=str(contact_id) if contact_id else None,
-        tag_id=tag_id,
+        tag_ids=requested_tag_ids or None,
         calendar_id=calendar_id,
         parent_id=parent_id,
         search=search,

@@ -280,7 +280,7 @@ class JournalRepository(ABC):
         start_date: str | None = None,
         end_date: str | None = None,
         contact_id: str | None = None,
-        tag_id: str | None = None,
+        tag_ids: list[str] | None = None,
         calendar_id: str | None = None,
         parent_id: int | None = None,
         search: str | None = None,
@@ -297,7 +297,7 @@ class JournalRepository(ABC):
             start_date: Optional start date filter (ISO format)
             end_date: Optional end date filter (ISO format)
             contact_id: Optional contact ID to filter journals by
-            tag_id: Optional tag ID to filter journals by
+            tag_ids: Optional tag IDs to filter journals by (matches any of them)
             calendar_id: Optional calendar ID to filter journals by
             parent_id: Optional parent journal ID to filter by (None for root journals)
             search: Optional search query for full-text search
@@ -345,7 +345,7 @@ class JournalRepository(ABC):
         start_date: str | None = None,
         end_date: str | None = None,
         contact_id: str | None = None,
-        tag_id: str | None = None,
+        tag_ids: list[str] | None = None,
         calendar_id: str | None = None,
         parent_id: int | None = None,
         search: str | None = None,
@@ -363,7 +363,7 @@ class JournalRepository(ABC):
             start_date: Optional start date filter (ISO format)
             end_date: Optional end date filter (ISO format)
             contact_id: Optional contact ID to filter journals by
-            tag_id: Optional tag ID to filter journals by
+            tag_ids: Optional tag IDs to filter journals by (matches any of them)
             calendar_id: Optional calendar ID to filter journals by
             parent_id: Optional parent journal ID to filter by
             search: Optional search query for full-text search
@@ -989,6 +989,22 @@ class JournalTagRepository(ABC):
 
         Returns:
             List of all tags
+        """
+        pass
+
+    @abstractmethod
+    async def get_descendants_for_tags(self, tag_ids: list[UUID]) -> list[JournalTag]:
+        """
+        Get all descendant tags (recursively) for a list of tag UUIDs.
+
+        Backs hierarchical tag filtering: a journal tagged only with a child
+        tag is returned when filtering by any of its ancestors.
+
+        Args:
+            tag_ids: The tag UUIDs to expand
+
+        Returns:
+            Descendant tags, excluding the requested tags themselves
         """
         pass
 
