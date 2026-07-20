@@ -60,7 +60,12 @@ export function templateTypeFieldUpdates(
       if (attrs.water_gauge_name) {
         fields.water_guage_name = attrs.water_gauge_name;
       }
-      if (attrs.is_vertical != null) fields.is_vertical = attrs.is_vertical;
+      // Canyoning templates express vertical-ness as canyon_type; the
+      // backend nulls is_vertical on non-caving templates, so reading it
+      // here would never populate anything. Only a 'vertical' canyon_type
+      // implies the flag — 'mixed' is left to the user, since mixed canyons
+      // can still have significant vertical sections.
+      if (attrs.canyon_type === 'vertical') fields.is_vertical = true;
       return Object.keys(fields).length > 0
         ? { journalType: JournalType.CANYONING, fields }
         : null;

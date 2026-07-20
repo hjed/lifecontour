@@ -53,7 +53,7 @@ describe('templateTypeFieldUpdates', () => {
         template_type: ActivityTemplateType.CANYONING,
         french_grade: 'v4a3IV',
         water_gauge_name: 'Kowmung',
-        is_vertical: true,
+        canyon_type: 'vertical',
       })
     );
 
@@ -65,6 +65,29 @@ describe('templateTypeFieldUpdates', () => {
         is_vertical: true,
       },
     });
+  });
+
+  it('derives canyoning vertical-ness from canyon_type, not is_vertical', () => {
+    // The backend nulls is_vertical on non-caving templates, so it can never
+    // populate the canyoning block; canyon_type is the real source.
+    expect(
+      templateTypeFieldUpdates(
+        makeTemplate({
+          template_type: ActivityTemplateType.CANYONING,
+          is_vertical: true,
+        })
+      )
+    ).toBeNull();
+
+    // A mixed canyon leaves the flag to the user.
+    expect(
+      templateTypeFieldUpdates(
+        makeTemplate({
+          template_type: ActivityTemplateType.CANYONING,
+          canyon_type: 'mixed',
+        })
+      )
+    ).toBeNull();
   });
 
   it('maps caving template fields onto the caving block', () => {

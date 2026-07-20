@@ -986,6 +986,7 @@ test.describe('Journal Creation UI Flow', () => {
             template_type: 'canyoning',
             region: 'Blue Mountains',
             french_grade: 'v4a3V*',
+            canyon_type: 'vertical',
             pitches: [
               { pitch_number: 1, height: 15 },
               { pitch_number: 2, height: 25 },
@@ -1028,6 +1029,9 @@ test.describe('Journal Creation UI Flow', () => {
         { timeout: 2000 }
       );
     }).toPass({ timeout: 20000 });
+
+    // A 'vertical' canyon_type sets the canyoning block's vertical flag.
+    await expect(page.getByTestId('vertical-switch')).toBeChecked();
 
     // Verify Abseiling Trip editor is visible and pitches are populated
     await expect(page.getByTestId('abseiling-trip-type-editor')).toBeVisible();
