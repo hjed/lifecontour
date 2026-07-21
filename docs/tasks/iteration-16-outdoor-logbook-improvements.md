@@ -247,9 +247,9 @@ Each sub-iteration defines its objective, the specification section it realises,
 
 **Phase Breakdown** (intra-iteration order: Phase 1 precedes Phases 2–3; Phase 5 precedes Phase 6; Phase 4 is independent):
 
-**Phase 1 — Navigation: section anchors + summary-first + table of contents.** PR ~400 lines.
+**Phase 1 — Navigation: section anchors + summary-first + table of contents.** PR ~400 lines. ✅ DONE — the yearly summary now renders immediately after the cover (before entries); a linked table of contents ("Contents") follows it, listing the summary, each top-level trip, and the participant index as internal hyperlinks; every entry and section carries a stable `entry_{id}` / `section_*` anchor that the TOC (and Phases 2–3's outline / linked indexes) reuse. Document order is cover → summary → TOC → entries → participant index.
 - Give each entry/section a stable internal anchor. Move the yearly summary to immediately after the cover, before entries. Add a TOC listing major sections (summary, each year/top-level trip, indexes) with internal links.
-- **Tests:** unit (`test_logbook_pdf_renderer.py`) — summary precedes entries; TOC present with working internal anchors.
+- **Tests:** unit (`test_logbook_pdf_renderer.py`) — summary precedes entries; TOC present with working internal anchors. Added `test_summary_precedes_entries`, `test_table_of_contents_present`, `test_toc_internal_links_resolve`, `test_entry_has_stable_anchor`, `test_toc_absent_for_empty_logbook`; integration (`test_logbook_pdf_renderer_integration.py`) — `test_pdf_navigation_summary_first_and_toc` asserts summary-first + TOC survive the real repo→data-service→renderer pipeline.
 
 **Phase 2 — PDF document outline (bookmarks).** PR ~250 lines.
 - A viewer-navigable outline mirroring the TOC and journal hierarchy (summary, years/top-level trips with nested child activities, indexes), reusing Phase 1 anchors.

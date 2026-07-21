@@ -294,3 +294,73 @@ async def test_pdf_generation_empty_result(
     text_content = _extract_pdf_text(pdf_bytes)
     assert "Outdoor Logbook" in text_content
     assert "0 journal entries" in text_content
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_pdf_navigation_summary_first_and_toc(
+    journal_repo: SqlJournalRepository,
+    async_connection: AsyncConnection,
+    data_service: LogbookDataService,
+    renderer: LogbookPdfRenderer,
+) -> None:
+    """Full pipeline lays the PDF out summary-first with a table of contents.
+
+    Seeds outdoor journals that yield a yearly summary, then asserts the
+    summary section precedes the entries and a linked contents page is present.
+    """
+    user_id = "user_pdf_test_navigation"
+
+    bushwalk = Journal(
+        user_id=user_id,
+        title="Grose Valley Bushwalk",
+        content="Long day out",
+        event_date_range=EventDateRange(
+            start=datetime(2024, 6, 1, tzinfo=UTC),
+            end=datetime(2024, 6, 1, tzinfo=UTC),
+        ),
+    )
+    bushwalk = await journal_repo.save(bushwalk)
+    await async_connection.execute(
+        text("INSERT INTO journal_bushwalking_data (journal_id) VALUES (:id)"),
+        {"id": bushwalk.id},
+    )
+
+    canyon = Journal(
+        user_id=user_id,
+        title="Empress Canyon",
+        content="Classic beginner canyon",
+        event_date_range=EventDateRange(
+            start=datetime(2024, 7, 12, tzinfo=UTC),
+            end=datetime(2024, 7, 12, tzinfo=UTC),
+        ),
+    )
+    canyon = await journal_repo.save(canyon)
+    await async_connection.execute(
+        text("INSERT INTO journal_canyoning_data (journal_id) VALUES (:id)"),
+        {"id": canyon.id},
+    )
+    await async_connection.execute(
+        text(
+            "INSERT INTO journal_abseiling_data "
+            "(journal_id, number_of_abseils, total_length) "
+            "VALUES (:id, 3, 60)"
+        ),
+        {"id": canyon.id},
+    )
+
+    export_data = await data_service.get_logbook_data(user_id=user_id)
+    pdf_bytes = renderer.render(export_data)
+
+    assert pdf_bytes[:5] == b"%PDF-"
+    text_content = _extract_pdf_text(pdf_bytes)
+
+    # The summary section and a contents page are both present...
+    assert "Yearly Summaries" in text_content
+    assert "Contents" in text_content
+    assert "Grose Valley Bushwalk" in text_content
+    # ...and the summary precedes the entry SECTION. The entry title now also
+    # appears in the TOC (which follows the summary), so anchor the ordering on
+    # the entry body content, which only appears in the section itself.
+    assert "Long day out" in text_content
+    assert text_content.index("Yearly Summaries") < text_content.index("Long day out")

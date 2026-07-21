@@ -237,6 +237,37 @@ def _extract_pdf_text(pdf_bytes: bytes) -> str:
     return "\n".join(parts)
 
 
+def _internal_link_target_pages(pdf_bytes: bytes) -> list[int | None]:
+    """Resolve every intra-document link annotation to its target page index.
+
+    ReportLab renders ``<a href="#anchor">`` links as ``/Link`` annotations
+    carrying an explicit ``/Dest`` array whose first element references the
+    destination page. External ``/URI`` links have no ``/Dest`` and are
+    ignored. Returns one entry per internal link: the 0-based index of the
+    page it points to, or ``None`` when the target cannot be resolved.
+    """
+    from pypdf import PdfReader
+
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    page_idnums = {
+        page.indirect_reference.idnum: idx
+        for idx, page in enumerate(reader.pages)
+        if page.indirect_reference is not None
+    }
+    targets: list[int | None] = []
+    for page in reader.pages:
+        for annot in page.get("/Annots") or []:
+            obj = annot.get_object()
+            if obj.get("/Subtype") != "/Link" or "/Dest" not in obj:
+                continue
+            dest = obj["/Dest"]
+            if isinstance(dest, list) and dest and hasattr(dest[0], "idnum"):
+                targets.append(page_idnums.get(dest[0].idnum))
+            else:
+                targets.append(None)
+    return targets
+
+
 # ─── Test class ──────────────────────────────────────────────────────
 
 
@@ -624,3 +655,90 @@ class TestLogbookPdfRenderer:
         result = self._renderer().render(data)
         text = _extract_pdf_text(result)
         assert "Bushwalking" in text
+
+    # ── Navigation: summary-first + table of contents + anchors ─
+
+    def test_summary_precedes_entries(self) -> None:
+        """Yearly summaries render before the journal entries (spec 3.1)."""
+        data = _make_rich_export_data()
+        result = self._renderer().render(data)
+        text = _extract_pdf_text(result)
+        # Both the summaries section and the first entry are present...
+        assert "Yearly Summaries" in text
+        assert "Leadership Walk" in text
+        # ...and the summary precedes the entry SECTION. The entry title now
+        # also appears in the TOC (which follows the summary), so we anchor the
+        # ordering on entry-body text that only appears in the section itself.
+        assert "Weather: Sunny and warm" in text
+        assert text.index("Yearly Summaries") < text.index("Weather: Sunny and warm")
+
+    def test_table_of_contents_present(self) -> None:
+        """A table of contents lists the major sections (spec 3.2)."""
+        data = _make_rich_export_data()
+        result = self._renderer().render(data)
+        text = _extract_pdf_text(result)
+        assert "Contents" in text
+        # The TOC lists the summary, a top-level trip, and the indexes.
+        assert "Summary" in text
+        assert "Participant Index" in text
+        # The TOC precedes the entry SECTIONS it links to. Anchor on entry-body
+        # text (absent from the TOC) so the check targets the section, not the
+        # entry's own TOC row.
+        assert text.index("Contents") < text.index("Weather: Sunny and warm")
+
+    def test_toc_internal_links_resolve(self) -> None:
+        """Every TOC row is an internal link that resolves to a real page.
+
+        The TOC has exactly one row per major section — summary, each top-level
+        trip, and the participant index — so a dropped row would change the
+        count. Combined with the all-resolve check this locks in that every
+        expected link is present and points to a live destination.
+        """
+        data = _make_rich_export_data()
+        result = self._renderer().render(data)
+        targets = _internal_link_target_pages(result)
+        expected = 1 + len(data.entries) + 1  # summary + trips + participant index
+        assert len(targets) == expected
+        assert all(t is not None for t in targets)
+
+    def test_entry_has_stable_anchor(self) -> None:
+        """A trip's TOC link jumps to the page that actually contains the trip.
+
+        Uses a single top-level entry so the entry link is unambiguous: link
+        order is [summary, entry], and the entry link must resolve to a page
+        whose text contains the entry title. This proves the ``entry_{id}``
+        anchor is real and correctly targeted (not merely that some link
+        resolves somewhere).
+        """
+        from pypdf import PdfReader
+
+        entry = _make_entry(42, title="Solo Ridge Traverse", types=["BUSHWALKING"])
+        summary = LogbookYearlySummary(
+            year=2024,
+            total_activities_by_type={"BUSHWALKING": 1},
+            total_abseiling_metres=0,
+            total_abseils=0,
+        )
+        data = LogbookExportData(
+            entries=[entry], yearly_summaries=[summary], participant_index=[]
+        )
+        result = self._renderer().render(data)
+
+        targets = _internal_link_target_pages(result)
+        # Exactly the summary link and the single entry link.
+        assert len(targets) == 2
+        assert all(t is not None for t in targets)
+
+        reader = PdfReader(io.BytesIO(result))
+        entry_link_page = targets[1]
+        assert entry_link_page is not None
+        entry_page_text = reader.pages[entry_link_page].extract_text()
+        assert "Solo Ridge Traverse" in entry_page_text
+
+    def test_toc_absent_for_empty_logbook(self) -> None:
+        """An empty logbook renders no table of contents."""
+        data = LogbookExportData(entries=[], yearly_summaries=[], participant_index=[])
+        result = self._renderer().render(data)
+        text = _extract_pdf_text(result)
+        assert "Contents" not in text
+        assert _internal_link_target_pages(result) == []
