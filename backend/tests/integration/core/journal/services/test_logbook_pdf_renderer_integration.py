@@ -69,6 +69,27 @@ def _extract_pdf_text(pdf_bytes: bytes) -> str:
     return "\n".join(parts)
 
 
+def _outline_tree(pdf_bytes: bytes) -> list[tuple[str, list[str]]]:
+    """Read the PDF outline as ``(title, [child titles])`` pairs.
+
+    ``pypdf`` returns the document outline as a flat list in which a nested
+    list of bookmarks follows the entry it belongs to.
+    """
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    nodes: list[tuple[str, list[str]]] = []
+    for item in reader.outline:
+        if isinstance(item, list):
+            assert nodes, "nested outline entries without a parent entry"
+            title, _ = nodes[-1]
+            nodes[-1] = (
+                title,
+                [str(child.title) for child in item if not isinstance(child, list)],
+            )
+        else:
+            nodes.append((str(item.title), []))
+    return nodes
+
+
 # --- Tests ---
 
 
@@ -364,3 +385,90 @@ async def test_pdf_navigation_summary_first_and_toc(
     # the entry body content, which only appears in the section itself.
     assert "Long day out" in text_content
     assert text_content.index("Yearly Summaries") < text_content.index("Long day out")
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_pdf_document_outline_from_seeded_data(
+    journal_repo: SqlJournalRepository,
+    async_connection: AsyncConnection,
+    data_service: LogbookDataService,
+    renderer: LogbookPdfRenderer,
+) -> None:
+    """The full pipeline produces a document outline mirroring the hierarchy.
+
+    Seeds a parent trip with a child activity, plus a trip in a second year, so
+    the repository returns both a nested entry and a two-year summary. Asserts
+    the generated PDF carries a viewer-navigable outline in the real ordering:
+    summaries newest-first, trips oldest-first, child activities nested.
+    """
+    user_id = "user_pdf_test_outline"
+
+    trip = Journal(
+        user_id=user_id,
+        title="Kanangra Weekend",
+        content="Two days out",
+        event_date_range=EventDateRange(
+            start=datetime(2024, 8, 3, tzinfo=UTC),
+            end=datetime(2024, 8, 4, tzinfo=UTC),
+        ),
+    )
+    trip = await journal_repo.save(trip)
+    await async_connection.execute(
+        text("INSERT INTO journal_bushwalking_data (journal_id) VALUES (:id)"),
+        {"id": trip.id},
+    )
+
+    child = Journal(
+        user_id=user_id,
+        title="Kalang Falls Abseil",
+        content="Three pitches",
+        parent_id=trip.id,
+        event_date_range=EventDateRange(
+            start=datetime(2024, 8, 4, tzinfo=UTC),
+            end=datetime(2024, 8, 4, tzinfo=UTC),
+        ),
+    )
+    child = await journal_repo.save(child)
+    await async_connection.execute(
+        text("INSERT INTO journal_canyoning_data (journal_id) VALUES (:id)"),
+        {"id": child.id},
+    )
+    await async_connection.execute(
+        text(
+            "INSERT INTO journal_abseiling_data "
+            "(journal_id, number_of_abseils, total_length) "
+            "VALUES (:id, 3, 75)"
+        ),
+        {"id": child.id},
+    )
+
+    later_trip = Journal(
+        user_id=user_id,
+        title="Empress Canyon",
+        content="Classic beginner canyon",
+        event_date_range=EventDateRange(
+            start=datetime(2025, 2, 15, tzinfo=UTC),
+            end=datetime(2025, 2, 15, tzinfo=UTC),
+        ),
+    )
+    later_trip = await journal_repo.save(later_trip)
+    await async_connection.execute(
+        text("INSERT INTO journal_canyoning_data (journal_id) VALUES (:id)"),
+        {"id": later_trip.id},
+    )
+
+    export_data = await data_service.get_logbook_data(user_id=user_id)
+    pdf_bytes = renderer.render(export_data)
+
+    assert pdf_bytes[:5] == b"%PDF-"
+    outline = _outline_tree(pdf_bytes)
+
+    assert [title for title, _ in outline] == [
+        "Summary",
+        "Kanangra Weekend",
+        "Empress Canyon",
+    ]
+    assert outline[0][1] == ["Year 2025", "Year 2024"]
+    assert outline[1][1] == ["Kalang Falls Abseil"]
+    assert outline[2][1] == []
