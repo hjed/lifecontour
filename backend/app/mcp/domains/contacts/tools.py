@@ -75,12 +75,31 @@ logger = structlog.get_logger()
 DEFAULT_HISTORY_LIMIT = 10
 
 
+def _parse_contact_tag_id(field_name: str, raw_id: str) -> int:
+    """Parse a contact tag ID from its MCP-boundary string form into an int.
+
+    Contact tag IDs cross the MCP boundary as strings so they round-trip cleanly
+    from read tools (``list_contact_tags``) into write tools, and match the
+    stringified journal tag tools. The database and service layer key contact
+    tags by int, so the tools convert here at the edge.
+
+    Raises:
+        ContactValidationError: if ``raw_id`` is not a valid integer id.
+    """
+    try:
+        return int(raw_id)
+    except TypeError, ValueError:
+        raise ContactValidationError(
+            field_name, f"must be a numeric tag ID, got {raw_id!r}"
+        ) from None
+
+
 class TagInfo(BaseModel):
     """Information about a tag."""
 
     id: str
     name: str
-    parent_id: int | None = None
+    parent_id: str | None = None
     usage_count: int
     description: str
 
@@ -92,7 +111,7 @@ class UpdatedTagInfo(BaseModel):
     name: str
     color: str | None = None
     description: str | None = None
-    parent_id: int | None = None
+    parent_id: str | None = None
 
 
 class TagListResponse(BaseModel):
@@ -1201,7 +1220,9 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 tag_info = TagInfo(
                     id=str(tag.id) if tag.id else "unknown",
                     name=tag.name.value,
-                    parent_id=tag.parent_id,
+                    parent_id=(
+                        str(tag.parent_id) if tag.parent_id is not None else None
+                    ),
                     usage_count=0,  # TODO: Add usage count when available
                     description=f"Tag for categorizing contacts as '{tag.name.value}'",
                 )
@@ -1240,7 +1261,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
     @mcp.tool
     @mcp_unified_error_handler("update_contact_tag", "tag")
     async def update_contact_tag(
-        tag_id: Annotated[int, Field(description="ID of the contact tag to update")],
+        tag_id: Annotated[str, Field(description="ID of the contact tag to update")],
         name: Annotated[
             str | None, Field(description="New tag name (must be unique)")
         ] = None,
@@ -1251,7 +1272,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             str | None, Field(description="New description of what the tag is for")
         ] = None,
         parent_id: Annotated[
-            int | None, Field(description="ID of the new parent tag")
+            str | None, Field(description="ID of the new parent tag")
         ] = None,
         move_to_root: Annotated[
             bool,
@@ -1285,14 +1306,20 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         logger.info("MCP: Updating contact tag", tag_id=tag_id)
 
         try:
+            parsed_tag_id = _parse_contact_tag_id("tag_id", tag_id)
+            parsed_parent_id = (
+                _parse_contact_tag_id("parent_id", parent_id)
+                if parent_id is not None
+                else None
+            )
             # The service owns the unit of work; MCP tools never open transactions.
             updated = await tag_service.update_tag(
-                tag_id=tag_id,
+                tag_id=parsed_tag_id,
                 transaction=connection,
                 name=name,
                 color=color,
                 description=description,
-                parent_id=parent_id,
+                parent_id=parsed_parent_id,
                 set_parent_null=move_to_root,
             )
 
@@ -1301,7 +1328,9 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 name=updated.name.value,
                 color=updated.color,
                 description=updated.description,
-                parent_id=updated.parent_id,
+                parent_id=(
+                    str(updated.parent_id) if updated.parent_id is not None else None
+                ),
             )
             return MCPResponseBuilder.success_response(response)
 
@@ -1314,7 +1343,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
     @mcp.tool
     @mcp_unified_error_handler("delete_contact_tag", "tag")
     async def delete_contact_tag(
-        tag_id: Annotated[int, Field(description="ID of the contact tag to delete")],
+        tag_id: Annotated[str, Field(description="ID of the contact tag to delete")],
         tag_service: TagService = mcp_depends(get_tag_service),
         connection: AsyncConnection = mcp_depends(get_async_connection),
     ) -> str:
@@ -1337,12 +1366,13 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         logger.info("MCP: Deleting contact tag", tag_id=tag_id)
 
         try:
+            parsed_tag_id = _parse_contact_tag_id("tag_id", tag_id)
             # The service owns the unit of work; MCP tools never open transactions.
-            await tag_service.delete_tag(tag_id=tag_id, transaction=connection)
+            await tag_service.delete_tag(tag_id=parsed_tag_id, transaction=connection)
 
             response = ContactActionResponse(
                 status="success",
-                message=(f"Tag {tag_id} deleted and removed from all contacts"),
+                message=(f"Tag {parsed_tag_id} deleted and removed from all contacts"),
             )
             return MCPResponseBuilder.success_response(response)
 
@@ -1356,10 +1386,10 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
     @mcp_unified_error_handler("merge_contact_tags", "tag")
     async def merge_contact_tags(
         source_id: Annotated[
-            int, Field(description="ID of the source tag to merge and delete")
+            str, Field(description="ID of the source tag to merge and delete")
         ],
         target_id: Annotated[
-            int, Field(description="ID of the target tag to merge into")
+            str, Field(description="ID of the target tag to merge into")
         ],
         tag_service: TagService = mcp_depends(get_tag_service),
         connection: AsyncConnection = mcp_depends(get_async_connection),
@@ -1383,13 +1413,20 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         logger.info("MCP: Merging tags", source_id=source_id, target_id=target_id)
 
         try:
+            parsed_source_id = _parse_contact_tag_id("source_id", source_id)
+            parsed_target_id = _parse_contact_tag_id("target_id", target_id)
             await tag_service.merge_tags(
-                source_id=source_id, target_id=target_id, transaction=connection
+                source_id=parsed_source_id,
+                target_id=parsed_target_id,
+                transaction=connection,
             )
 
             response = ContactActionResponse(
                 status="success",
-                message=f"Tag {source_id} successfully merged into tag {target_id}",
+                message=(
+                    f"Tag {parsed_source_id} successfully merged "
+                    f"into tag {parsed_target_id}"
+                ),
             )
             return MCPResponseBuilder.success_response(response)
 
