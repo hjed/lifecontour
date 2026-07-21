@@ -342,6 +342,10 @@ export function TagsEditor({
                     variant='outline'
                     size='sm'
                     onClick={handleCancelCreate}
+                    // Disabled mid-flight like every other control here, so the
+                    // user cannot leave the create form and then have the
+                    // resolving mutation reset the popover underneath them.
+                    disabled={isMutating}
                     className='flex-1'
                     data-testid='cancel-create-tag'
                   >

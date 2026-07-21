@@ -275,7 +275,7 @@ Every phase below must meet the same completion bar before merge:
 
 #### Phase 1: Tags Editor Component and Unit Tests ✅ COMPLETE
 
-**Estimated diff:** ~500 lines
+**Estimated diff:** ~500 lines · **Actual:** ~1360 changed lines (~1040 added, ~320 removed), roughly half tests — the extraction also rewrote `ContactTagsEditor` into an adapter (see decisions below)
 
 **Acceptance Criteria:**
 - [x] Assigned tags render as dismissible badges with the tag colour (border/dot styling identical to the contact editor). — same badge/border markup, now in the shared `TagsEditor`.
@@ -291,7 +291,7 @@ Every phase below must meet the same completion bar before merge:
 - **Self-fetch vs prop asymmetry lives in the adapters.** The contact adapter self-fetches assigned tags via `useContactTags(contactId)`; the journal adapter takes `assignedTags` as a prop because journal tags are embedded on the journal detail resource and there is no per-journal assigned-tags endpoint. The shared core is agnostic to both.
 - **`JournalTag` gained `parent_id`.** The flat `JournalTag` type now carries `parent_id?: string | null` and `fetchJournalTags` maps it, so the editor renders the `Parent › Child` hierarchy path like contacts. This updated the existing `useJournalTags` mapping test expectation.
 - **`useCreateJournalTag` toast uses a literal string** (`'Tag created successfully'`), matching the sibling `useAddJournalTag` / `useRemoveJournalTag` pattern rather than a `SUCCESS_MESSAGES` constant.
-- **Split into two commits** for the 500-line rule: (A) shared `TagsEditor` + contact adapter refactor + core test; (B) journal adapter + `createJournalTag`/`useCreateJournalTag` + `parent_id` mapping + tests.
+- **Shipped as one slice rather than the planned two.** The intent was to split the extraction (shared `TagsEditor` + contact adapter refactor) from the journal adapter for the 500-line rule, but the repository's pre-commit hook type-checks the **whole** project while stashing unstaged edits — so an intermediate commit left the journal files referencing a `useCreateJournalTag`/`parent_id` that had been stashed away, failing `tsc`. The phase is a single reviewable slice on one PR; roughly half the diff is tests. Recorded rather than hidden, as in ITER17-001 Phase 4.
 
 **Required Test Coverage:**
 - **Unit (RTL):** shared-core `frontend/src/components/shared/__tests__/TagsEditor.test.tsx` (badges/colour, remove, open popover, add existing, search filtering, duplicate prevention, create-with-colour, always-reachable add, a11y, loading, error, hierarchy path); journal-adapter `frontend/src/components/journals/__tests__/JournalTagsEditor.test.tsx` (mapping, assign, remove, create-then-assign order, create-failure keeps form open, loading/error); API `frontend/src/lib/api/__tests__/journals.test.ts` (`createJournalTag` POST body + error, `useCreateJournalTag` invalidation, `parent_id` mapping). The existing `ContactTagsEditor.test.tsx` runs unchanged as the refactor regression proof. — **4 suites, 63 tests, all passing.**

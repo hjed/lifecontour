@@ -35,22 +35,32 @@ function renderEditor(options: RenderOptions = {}) {
   const onRemove = options.onRemove ?? jest.fn();
   const onCreate = options.onCreate ?? jest.fn().mockResolvedValue(undefined);
 
-  render(
-    <TagsEditor
-      assignedTags={options.assigned ?? assignedTags}
-      allTags={options.all ?? allTags}
-      isLoading={options.isLoading ?? false}
-      isError={options.isError ?? false}
-      isMutating={options.isMutating ?? false}
-      colors={COLORS}
-      onAssign={onAssign}
-      onRemove={onRemove}
-      onCreate={onCreate}
-      rootTestId='tags-editor'
-    />
-  );
+  const element = (overrides: RenderOptions = {}) => {
+    const merged = { ...options, ...overrides };
+    return (
+      <TagsEditor
+        assignedTags={merged.assigned ?? assignedTags}
+        allTags={merged.all ?? allTags}
+        isLoading={merged.isLoading ?? false}
+        isError={merged.isError ?? false}
+        isMutating={merged.isMutating ?? false}
+        colors={COLORS}
+        onAssign={onAssign}
+        onRemove={onRemove}
+        onCreate={onCreate}
+        rootTestId='tags-editor'
+      />
+    );
+  };
 
-  return { onAssign, onRemove, onCreate };
+  const { rerender } = render(element());
+
+  return {
+    onAssign,
+    onRemove,
+    onCreate,
+    rerenderWith: (overrides: RenderOptions) => rerender(element(overrides)),
+  };
 }
 
 describe('TagsEditor', () => {
@@ -186,6 +196,22 @@ describe('TagsEditor', () => {
     // The create form stays open so the user can retry or amend
     expect(screen.getByTestId('confirm-create-tag')).toBeInTheDocument();
     expect(screen.getByTestId('new-tag-name-input')).toBeInTheDocument();
+  });
+
+  it('disables both create-form buttons while a mutation is in flight', async () => {
+    const user = userEvent.setup();
+    const { rerenderWith } = renderEditor();
+
+    await user.click(screen.getByTestId('add-tag-button'));
+    await user.type(screen.getByTestId('tag-search-input'), 'Holiday');
+    await user.click(screen.getByTestId('create-tag-option'));
+
+    rerenderWith({ isMutating: true });
+
+    // Cancel must not let the user leave mid-flight and have the resolving
+    // mutation reset the popover underneath them.
+    expect(screen.getByTestId('cancel-create-tag')).toBeDisabled();
+    expect(screen.getByTestId('confirm-create-tag')).toBeDisabled();
   });
 
   it('keeps the Add Tag affordance reachable when there are no tags at all', () => {
