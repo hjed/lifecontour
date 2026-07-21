@@ -1,6 +1,6 @@
 # Iteration 17: Journal Tags Parity
 
-**Status:** 🟡 IN PROGRESS (ITER17-001 complete — Phases 1–4; ITER17-002 complete — Phases 1–2)
+**Status:** 🟡 IN PROGRESS (ITER17-001 complete — Phases 1–4; ITER17-002 complete — Phases 1–2; ITER17-003 Phase 1 complete)
 **Dependencies:** Iteration 4 (journal tag tables and relationship endpoints), Iteration 4.6 (journal tag filtering + detail-view tag add/remove), Iteration 12 (unified event-driven history), Iteration 2.6 (contact tag management UX — the reference behaviour)
 **Goal:** Bring journal tag functionality to exact parity with contact tags across the UI, backend management operations, filtering, history, and MCP.
 
@@ -273,21 +273,28 @@ Every phase below must meet the same completion bar before merge:
 - [Frontend Design — Component Architecture](../architecture/frontend-design.md#component-architecture)
 - Contact reference: `frontend/src/components/contacts/ContactTagsEditor.tsx`, `TAG_COLORS` in `frontend/src/lib/constants.ts`
 
-#### Phase 1: Tags Editor Component and Unit Tests
+#### Phase 1: Tags Editor Component and Unit Tests ✅ COMPLETE
 
-**Estimated diff:** ~500 lines
+**Estimated diff:** ~500 lines · **Actual:** ~1360 changed lines (~1040 added, ~320 removed), roughly half tests — the extraction also rewrote `ContactTagsEditor` into an adapter (see decisions below)
 
 **Acceptance Criteria:**
-- [ ] Assigned tags render as dismissible badges with the tag colour (border/dot styling identical to the contact editor).
-- [ ] Adding a tag opens a searchable popover listing unassigned tags filtered by the query (autocomplete), not a plain select.
-- [ ] When the search query matches no existing tag, the user can create a new tag inline with name + colour (from `TAG_COLORS`), which is created via `POST /api/journals/tags` and immediately assigned.
-- [ ] The add affordance is available even when there are no unassigned tags or no tags at all (the create flow is always reachable).
-- [ ] Duplicate assignment is prevented in the UI; already-assigned tags do not appear in the add list.
-- [ ] Accessibility matches the contact editor: labelled controls, keyboard operability, `aria-label` on remove buttons.
-- [ ] The component is exported but not yet mounted in `JournalDetailView` (existing behaviour unchanged this phase — the phase is shippable with no user-visible change).
+- [x] Assigned tags render as dismissible badges with the tag colour (border/dot styling identical to the contact editor). — same badge/border markup, now in the shared `TagsEditor`.
+- [x] Adding a tag opens a searchable popover listing unassigned tags filtered by the query (autocomplete), not a plain select.
+- [x] When the search query matches no existing tag, the user can create a new tag inline with name + colour (from `TAG_COLORS`), which is created via `POST /api/journals/tags` and immediately assigned. — new `createJournalTag` / `useCreateJournalTag`; the adapter awaits create then assign.
+- [x] The add affordance is available even when there are no unassigned tags or no tags at all (the create flow is always reachable).
+- [x] Duplicate assignment is prevented in the UI; already-assigned tags do not appear in the add list.
+- [x] Accessibility matches the contact editor: labelled controls, keyboard operability, `aria-label` on remove buttons (plus `aria-label` on each colour swatch and the search input).
+- [x] The component is exported but not yet mounted in `JournalDetailView` (existing behaviour unchanged this phase — the phase is shippable with no user-visible change). — `JournalTagsEditor` is imported only by its own test; `JournalDetailView` still uses `JournalTagBadge`.
+
+**Decisions taken (Phase 1):**
+- **Generic extraction over structural copy.** Rather than duplicate `ContactTagsEditor`, the shared render/interaction logic was lifted into a domain-agnostic `frontend/src/components/shared/TagsEditor.tsx` operating on a normalised `TagView` view-model plus callbacks, and **both** domains became thin adapters over it (`ContactTagsEditor` refactored, `JournalTagsEditor` new). This is the iteration's preferred path (delivery rule 5) and **closes the "Shared tag component consolidation" follow-up below** now rather than deferring it. The contact refactor is behaviour-preserving — proven by its existing, unchanged `ContactTagsEditor.test.tsx`.
+- **Self-fetch vs prop asymmetry lives in the adapters.** The contact adapter self-fetches assigned tags via `useContactTags(contactId)`; the journal adapter takes `assignedTags` as a prop because journal tags are embedded on the journal detail resource and there is no per-journal assigned-tags endpoint. The shared core is agnostic to both.
+- **`JournalTag` gained `parent_id`.** The flat `JournalTag` type now carries `parent_id?: string | null` and `fetchJournalTags` maps it, so the editor renders the `Parent › Child` hierarchy path like contacts. This updated the existing `useJournalTags` mapping test expectation.
+- **`useCreateJournalTag` toast uses a literal string** (`'Tag created successfully'`), matching the sibling `useAddJournalTag` / `useRemoveJournalTag` pattern rather than a `SUCCESS_MESSAGES` constant.
+- **Shipped as one slice rather than the planned two.** The intent was to split the extraction (shared `TagsEditor` + contact adapter refactor) from the journal adapter for the 500-line rule, but the repository's pre-commit hook type-checks the **whole** project while stashing unstaged edits — so an intermediate commit left the journal files referencing a `useCreateJournalTag`/`parent_id` that had been stashed away, failing `tsc`. The phase is a single reviewable slice on one PR; roughly half the diff is tests. Recorded rather than hidden, as in ITER17-001 Phase 4.
 
 **Required Test Coverage:**
-- **Unit (RTL):** mirror `ContactTagsEditor.test.tsx` — open/close, search filtering, add existing, create new (name + colour), remove, duplicate prevention, error handling.
+- **Unit (RTL):** shared-core `frontend/src/components/shared/__tests__/TagsEditor.test.tsx` (badges/colour, remove, open popover, add existing, search filtering, duplicate prevention, create-with-colour, always-reachable add, a11y, loading, error, hierarchy path); journal-adapter `frontend/src/components/journals/__tests__/JournalTagsEditor.test.tsx` (mapping, assign, remove, create-then-assign order, create-failure keeps form open, loading/error); API `frontend/src/lib/api/__tests__/journals.test.ts` (`createJournalTag` POST body + error, `useCreateJournalTag` invalidation, `parent_id` mapping). The existing `ContactTagsEditor.test.tsx` runs unchanged as the refactor regression proof. — **4 suites, 63 tests, all passing.**
 - **Integration:** n/a (no backend change).
 - **E2E:** deferred to Phase 2 (component not yet mounted).
 
@@ -428,7 +435,7 @@ Deliberate, accepted asymmetries with contact tags (not to be "fixed" in this it
 - **`description` on tags embedded in journal resources:** Phase 1 added `description` to the standalone `/api/journals/tags` resources (its stated scope), but `JournalTagSchema` (`backend/app/api/journals/schemas.py`) and its converter — the shape used for tags embedded in `GET /api/journals/{id}` — still expose only id/name/color. Contacts embed description on the equivalent shape (`TagAttributes` in `backend/app/api/contacts/schemas.py`). ITER17-003 should add it when the detail-page editor needs to display a tag's description.
 - **Contact tag ID typing across MCP ([#1139](https://github.com/hjed/personal-management-system/issues/1139)):** `list_contact_tags` returns `TagInfo.id` as a string while the write tools (`merge_contact_tags`, `update_contact_tag`, `delete_contact_tag`) take ints, so an AI caller cannot round-trip an ID between them. Phase 2's and Phase 4's tools matched the existing convention rather than fix half the surface. Align `TagInfo`, `UpdatedTagInfo`, and the contact tag write tools in one change. Journal tags are unaffected — UUID-keyed and stringified consistently.
 - **Contacts' merge SQL still lives in the service:** `TagService.merge_tags` inlines its `text()` statements, which is what ITER17-001 Phase 4 deliberately declined to copy into the journal domain. Moving it into `SqlTagRepository` would bring contacts in line with the journal implementation and the ports-and-adapters rule; out of scope for this iteration since it touches no journal behaviour.
-- **Shared tag component consolidation:** if ITER17-003/004 duplicate the contact editor/dialog components rather than generalising them, consolidate into shared domain-agnostic components afterwards.
+- **Shared tag component consolidation:** ~~if ITER17-003/004 duplicate the contact editor/dialog components rather than generalising them, consolidate into shared domain-agnostic components afterwards.~~ ✅ **Closed for the editor** in ITER17-003 Phase 1: the contact and journal tag *editors* now share `frontend/src/components/shared/TagsEditor.tsx`. The management *dialogs* (`TagManagementDialog`, `CreateTagDialog`, `TagContextMenu`) in ITER17-004 remain candidates for the same treatment.
 - **Tags at journal creation time:** `JournalCreateForm.tsx` has no tag input (the API supports tags on create via MCP). Contacts likewise only edit tags from the detail/edit surfaces, so this is not a parity gap — treat as an independent enhancement if wanted.
 - **Search document tag names:** the journal search document indexes `tag_ids` only, while the MCP search converter reads a non-existent `tag_names` field (`backend/app/mcp/domains/journals/converters.py` line ~225) and contact documents index tag names as searchable text. Aligning journal search to also index tag names (making journals findable by tag text) is a small follow-up once events from ITER17-005 exist to keep names fresh on rename.
 - **Journal tag filter semantics doc:** record the OR-across-tags semantics (inherited from contacts) in the API design doc if it isn't already stated.

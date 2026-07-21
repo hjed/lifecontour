@@ -615,9 +615,46 @@ async function fetchJournalTags(): Promise<{ data: JournalTag[] }> {
     id: resource.id,
     name: resource.attributes.name,
     color: resource.attributes.color,
+    parent_id: resource.attributes.parent_id ?? null,
   }));
 
   return { data: tags };
+}
+
+// Attributes accepted when creating a journal tag.
+export interface JournalTagCreateAttributes {
+  name: string;
+  color?: string;
+  description?: string;
+  parent_id?: string;
+}
+
+// Create a new journal tag and return the created JSON:API resource.
+async function createJournalTag(
+  attributes: JournalTagCreateAttributes
+): Promise<{ data: { id: string } }> {
+  const response = await fetch('/api/journals/tags', {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      data: {
+        type: 'journal-tags',
+        attributes,
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.CREATE_FAILED
+    );
+  }
+
+  return response.json();
 }
 
 // Fetch available calendars
@@ -962,6 +999,22 @@ export function useJournalTags() {
     queryKey: journalTagKeys.lists(),
     queryFn: fetchJournalTags,
     staleTime: 10 * 60 * 1000, // 10 minutes
+  });
+}
+
+export function useCreateJournalTag() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (attributes: JournalTagCreateAttributes) =>
+      createJournalTag(attributes),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: journalTagKeys.lists() });
+      toast.success('Tag created successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
   });
 }
 
