@@ -155,6 +155,29 @@ describe('JournalTagsEditor', () => {
     );
   });
 
+  it('leaves the create form when the tag was created but assigning it failed', async () => {
+    const user = userEvent.setup();
+    mockCreateMutateAsync.mockResolvedValueOnce({ data: { id: 'new-id' } });
+    mockAddMutateAsync.mockRejectedValueOnce(new Error('Assign failed'));
+    renderEditor();
+
+    await user.click(screen.getByTestId('add-tag-button'));
+    await user.type(screen.getByTestId('tag-search-input'), 'Holiday');
+    await user.click(screen.getByTestId('create-tag-option'));
+    await user.click(screen.getByTestId('confirm-create-tag'));
+
+    await waitFor(() => {
+      expect(mockAddMutateAsync).toHaveBeenCalled();
+    });
+    // The tag exists now, so the user must not be stranded on the create form
+    // where a retry would re-create the same name and fail.
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId('confirm-create-tag')
+      ).not.toBeInTheDocument();
+    });
+  });
+
   it('keeps the create form open when creation fails', async () => {
     const user = userEvent.setup();
     mockCreateMutateAsync.mockRejectedValueOnce(new Error('Name exists'));

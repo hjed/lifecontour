@@ -369,12 +369,12 @@ describe('Journals API', () => {
         data: [
           {
             id: '1',
-            type: 'journal_tag',
+            type: 'journal-tags',
             attributes: { name: 'Tag 1', color: '#FF0000', parent_id: null },
           },
           {
             id: '2',
-            type: 'journal_tag',
+            type: 'journal-tags',
             attributes: { name: 'Tag 2', color: '#00FF00', parent_id: '1' },
           },
         ],

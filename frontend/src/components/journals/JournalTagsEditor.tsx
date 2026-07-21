@@ -65,7 +65,14 @@ export function JournalTagsEditor({
 
   const handleCreate = async (name: string, color: string) => {
     const response = await createTag.mutateAsync({ name, color });
-    await addTag.mutateAsync({ journalId, tagId: response.data.id });
+    try {
+      await addTag.mutateAsync({ journalId, tagId: response.data.id });
+    } catch {
+      // The tag was created; only the assignment failed (its hook already
+      // toasted). Swallow so the editor leaves the create form — retrying there
+      // would re-create the same name and fail. The new tag is in the
+      // invalidated list, so the user can just select it.
+    }
   };
 
   return (
