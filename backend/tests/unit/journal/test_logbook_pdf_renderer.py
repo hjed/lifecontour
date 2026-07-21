@@ -666,8 +666,11 @@ class TestLogbookPdfRenderer:
         # Both the summaries section and the first entry are present...
         assert "Yearly Summaries" in text
         assert "Leadership Walk" in text
-        # ...and the summary appears earlier in the document than any entry.
-        assert text.index("Yearly Summaries") < text.index("Leadership Walk")
+        # ...and the summary precedes the entry SECTION. The entry title now
+        # also appears in the TOC (which follows the summary), so we anchor the
+        # ordering on entry-body text that only appears in the section itself.
+        assert "Weather: Sunny and warm" in text
+        assert text.index("Yearly Summaries") < text.index("Weather: Sunny and warm")
 
     def test_table_of_contents_present(self) -> None:
         """A table of contents lists the major sections (spec 3.2)."""
@@ -678,8 +681,10 @@ class TestLogbookPdfRenderer:
         # The TOC lists the summary, a top-level trip, and the indexes.
         assert "Summary" in text
         assert "Participant Index" in text
-        # The TOC precedes the entries it links to.
-        assert text.index("Contents") < text.index("Leadership Walk")
+        # The TOC precedes the entry SECTIONS it links to. Anchor on entry-body
+        # text (absent from the TOC) so the check targets the section, not the
+        # entry's own TOC row.
+        assert text.index("Contents") < text.index("Weather: Sunny and warm")
 
     def test_toc_internal_links_resolve(self) -> None:
         """Every TOC row is an internal link that resolves to a real page.

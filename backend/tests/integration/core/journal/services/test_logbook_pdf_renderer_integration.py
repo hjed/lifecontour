@@ -359,7 +359,8 @@ async def test_pdf_navigation_summary_first_and_toc(
     assert "Yearly Summaries" in text_content
     assert "Contents" in text_content
     assert "Grose Valley Bushwalk" in text_content
-    # ...and the summary precedes the entries in the document.
-    assert text_content.index("Yearly Summaries") < text_content.index(
-        "Grose Valley Bushwalk"
-    )
+    # ...and the summary precedes the entry SECTION. The entry title now also
+    # appears in the TOC (which follows the summary), so anchor the ordering on
+    # the entry body content, which only appears in the section itself.
+    assert "Long day out" in text_content
+    assert text_content.index("Yearly Summaries") < text_content.index("Long day out")
