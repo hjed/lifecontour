@@ -1,0 +1,83 @@
+/* Tailwind entry for design-sync previews.
+ *
+ * The app's real stylesheet (src/app/globals.css) is a Tailwind v4 *source*
+ * file, not a compiled one, so it can't be shipped as-is — design-sync needs
+ * static CSS. This file compiles it, adding explicit @source roots so the
+ * utility classes used by the components and by the authored preview cards are
+ * all generated.
+ *
+ * Build with: node .design-sync/build-css.mjs
+ */
+
+@import '../src/app/globals.css';
+
+@source '../src/components';
+@source '../src/lib';
+@source './previews';
+
+/* Tailwind only emits utilities it can SEE. Scanning src/ alone yields exactly
+ * the classes this app happens to use today — `bg-sidebar` and `ring-ring`, for
+ * instance, were missing entirely. That is fine for the app, but the design
+ * agent consuming this system writes NEW layouts with class combinations that
+ * appear nowhere in src/, and any utility absent from the shipped stylesheet
+ * renders silently unstyled.
+ *
+ * So force-generate the vocabulary the design system actually promises: every
+ * semantic token across bg/text/border/ring, plus the common layout, spacing
+ * and typography scales. Keep this in sync with the class table in
+ * conventions.md — that file tells the agent these names are safe to use. */
+
+@source inline(
+  '{bg,text,border,ring}-{background,foreground,card,card-foreground,popover,popover-foreground,primary,primary-foreground,secondary,secondary-foreground,muted,muted-foreground,accent,accent-foreground,destructive,border,input,ring,sidebar,sidebar-foreground,sidebar-primary,sidebar-accent,sidebar-border,chart-1,chart-2,chart-3,chart-4,chart-5}'
+);
+@source inline(
+  'hover:{bg,text}-{primary,secondary,muted,accent,destructive,accent-foreground}'
+);
+
+@source inline(
+  '{p,px,py,pt,pr,pb,pl,m,mx,my,mt,mr,mb,ml,gap,gap-x,gap-y}-{0,0.5,1,1.5,2,2.5,3,3.5,4,5,6,7,8,10,12,16,20,24}'
+);
+@source inline('{space-y,space-x}-{0,1,1.5,2,3,4,6,8}');
+
+@source inline(
+  '{w,h,size}-{0,1,2,3,4,5,6,7,8,9,10,11,12,14,16,20,24,32,40,full,auto,fit}'
+);
+@source inline('max-w-{xs,sm,md,lg,xl,2xl,3xl,4xl,5xl,full,none,fit}');
+@source inline('{min-h,min-w}-{0,full,fit}');
+
+@source inline('text-{xs,sm,base,lg,xl,2xl,3xl,4xl,5xl}');
+@source inline('font-{normal,medium,semibold,bold}');
+@source inline('text-{left,center,right}');
+@source inline('leading-{none,tight,snug,normal,relaxed}');
+@source inline('tracking-{tighter,tight,normal,wide}');
+@source inline(
+  '{truncate,italic,underline,uppercase,lowercase,capitalize,whitespace-nowrap,break-words,line-clamp-1,line-clamp-2,line-clamp-3}'
+);
+
+@source inline(
+  '{sm:,md:,lg:,xl:,}{flex,grid,block,inline-flex,inline-block,hidden}'
+);
+@source inline('{sm:,md:,lg:,xl:,}grid-cols-{1,2,3,4,5,6,12}');
+@source inline('{sm:,md:,lg:,}{flex-row,flex-col}');
+@source inline(
+  '{flex-wrap,flex-nowrap,flex-1,flex-auto,flex-none,shrink,shrink-0,grow,grow-0}'
+);
+@source inline('items-{start,center,end,baseline,stretch}');
+@source inline('justify-{start,center,end,between,around,evenly}');
+@source inline(
+  '{self-start,self-center,self-end,self-stretch,col-span-2,col-span-3,col-span-full,row-span-2}'
+);
+
+@source inline('rounded-{none,xs,sm,md,lg,xl,2xl,3xl,full}');
+@source inline('border-{0,2,4,8,t,r,b,l,x,y}');
+@source inline('shadow-{2xs,xs,sm,md,lg,xl,2xl,none}');
+@source inline(
+  '{relative,absolute,fixed,sticky,static,inset-0,top-0,right-0,bottom-0,left-0,z-10,z-20,z-50}'
+);
+@source inline(
+  '{overflow-hidden,overflow-auto,overflow-x-auto,overflow-y-auto,overflow-visible}'
+);
+@source inline('opacity-{0,25,50,60,70,75,80,90,100}');
+@source inline(
+  '{cursor-pointer,cursor-default,cursor-not-allowed,select-none,pointer-events-none,transition,transition-all,transition-colors,duration-150,duration-200,duration-300}'
+);

@@ -22,6 +22,12 @@ const eslintConfig = [
       '*.config.mjs',
       '*.config.cjs',
       'next-env.d.ts',
+      // design-sync tooling: staged converter scripts, generated bundle output,
+      // and the declaration-only tsc tree. All gitignored and regenerated.
+      '.ds-sync/**',
+      'ds-bundle/**',
+      'types/**',
+      'index.d.ts',
     ],
   },
   ...fixupConfigRules(nextCoreWebVitals),
