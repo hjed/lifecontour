@@ -1,0 +1,27 @@
+{
+  "//": "Declaration-only emit for design-sync. The app itself is noEmit, so there is no .d.ts tree for the converter's prop extractor to read and every <Name>Props came out as `[key: string]: unknown`. Emitting real declarations into frontend/types/ gives the extractor the true prop types. findTypesRoot() discovers `types/` by convention, so package.json needs no `types` field — and because exportedNames() only reads <pkg>/index.d.ts (which does not exist), the component list still comes solely from cfg.componentSrcMap rather than ballooning to every export.",
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "declarationDir": "../types",
+    "rootDir": "../src",
+    "incremental": false,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["../src/**/*.ts", "../src/**/*.tsx"],
+  "exclude": [
+    "../node_modules",
+    "../src/**/__tests__/**",
+    "../src/**/__mocks__/**",
+    "../src/**/*.test.ts",
+    "../src/**/*.test.tsx",
+    "../src/**/*.spec.ts",
+    "../src/**/*.spec.tsx",
+    "../src/**/test-helpers.tsx",
+    "../src/**/test-utils.tsx",
+    "../src/test-utils/**"
+  ]
+}

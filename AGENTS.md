@@ -172,6 +172,48 @@ pnpm type-check       # TypeScript type checking
   `text-foreground`, `border-border`
 - Leverage shadcn/ui's CSS custom properties for theming
 
+### Design System Sync (`frontend/.design-sync/`)
+
+`frontend/.design-sync/` holds the inputs that publish this app's UI kit to
+**Claude Design** (claude.ai/design), so the design agent builds screens from our
+real components instead of generic ones. It is tooling configuration, **not
+application code** — nothing under it is imported by the app at runtime.
+
+Scope is the design-system surface: `components/ui/` plus the shared app chrome
+(`layout/`, `navigation/`, `auth/UserMenu`, `history/`, `shared/`). Feature
+components under `journals/`, `contacts/`, `integrations/`, `settings/` and
+`search/` are deliberately excluded.
+
+| Path | Purpose |
+|---|---|
+| `config.json` | Component list, groups, card viewports, target project |
+| `ds-entry.ts` | Barrel re-exporting the real components (no `dist/` exists — this is the bundle entry) |
+| `previews/<Name>.tsx` | Hand-authored preview cards, one named export per card cell |
+| `preview-providers.tsx` | Mock Next-router / auth / query context so app chrome renders outside Next |
+| `process-shim.ts` | Browser `process` shim — **must stay the first import** in the two entries |
+| `preview.css` | Tailwind entry + `@source inline(...)` safelist |
+| `prepare.mjs` | Generates the compiled CSS and the `.d.ts` tree (`cfg.buildCmd`) |
+| `conventions.md` | Prepended to the generated README; tells the design agent how to build with the kit |
+| `docs/<Name>.md` | Group-assignment stubs |
+| `NOTES.md` | **Read this first** — repo-specific gotchas and re-sync risks |
+
+**To re-sync**, run `/design-sync` from the repo — it is incremental and reuses
+everything above. Do not hand-edit `ds-bundle/`; it is generated output.
+
+**When adding a design-system component**, add it in three places or it stays
+invisible to the sync: `ds-entry.ts`, `componentSrcMap` in `config.json`, and a
+`docs/<Name>.md` group stub. Then author `previews/<Name>.tsx`.
+
+Two constraints that bite if forgotten (both explained in `NOTES.md`):
+
+- Run `node .design-sync/prepare.mjs` **before** each build, and again after
+  editing previews — Tailwind only emits utilities it can see.
+- Keep `.design-sync/` Prettier-clean, and format **before** grading previews:
+  reformatting a preview changes its source hash and clears its verification.
+
+Generated and gitignored: `ds-bundle/`, `.ds-sync/`, `types/`, `index.d.ts`,
+`.design-sync/.cache/`.
+
 ## Development Standards
 
 ### TypeScript Configuration
