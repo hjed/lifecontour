@@ -3,6 +3,7 @@
 Tests PDF structure assertions using deterministic fixture data.
 """
 
+import dataclasses
 import datetime
 import io
 
@@ -186,6 +187,49 @@ def _make_hierarchical_data() -> LogbookExportData:
     )
 
 
+def _make_deep_hierarchy_data() -> LogbookExportData:
+    """Create data three levels deep (trip → day → activity)."""
+    grandchild = _make_entry(3, title="Afternoon Abseil", types=["ABSEILING_TRIP"])
+    grandchild.parent_id = 2
+    child = _make_entry(2, title="Saturday", types=["BUSHWALKING"])
+    child.parent_id = 1
+    child.children = [grandchild]
+    parent = _make_entry(1, title="Kanangra Weekend", types=["NOTE"])
+    parent.children = [child]
+
+    return LogbookExportData(
+        entries=[parent],
+        yearly_summaries=[],
+        participant_index=[],
+    )
+
+
+def _make_summary(year: int) -> LogbookYearlySummary:
+    """Create a minimal yearly summary for a given year."""
+    return LogbookYearlySummary(
+        year=year,
+        total_activities_by_type={"BUSHWALKING": 1},
+        leadership_activities_by_type={},
+        total_abseiling_metres=0,
+        total_abseils=0,
+        total_setups=0,
+        total_rescues=0,
+    )
+
+
+def _make_two_year_summary_data() -> LogbookExportData:
+    """Create data whose summary section spans two years.
+
+    Years are newest-first, matching the order ``LogbookSummaryCalculator``
+    produces, so the navigation order asserted here is the real one.
+    """
+    return LogbookExportData(
+        entries=[_make_entry(1, title="Ridge Walk", types=["BUSHWALKING"])],
+        yearly_summaries=[_make_summary(2025), _make_summary(2024)],
+        participant_index=[],
+    )
+
+
 def _make_rich_export_data() -> LogbookExportData:
     """Create a rich export data set with summaries and participant index."""
     entries = [
@@ -266,6 +310,63 @@ def _internal_link_target_pages(pdf_bytes: bytes) -> list[int | None]:
             else:
                 targets.append(None)
     return targets
+
+
+@dataclasses.dataclass
+class _OutlineNode:
+    """A single PDF outline (bookmark) entry and its nested children."""
+
+    title: str
+    page: int | None
+    children: list[_OutlineNode]
+
+
+def _outline_tree(pdf_bytes: bytes) -> list[_OutlineNode]:
+    """Read the PDF document outline as a tree of title/page/children nodes.
+
+    ``pypdf`` returns the outline as a flat list in which a nested list follows
+    the entry it belongs to. This rebuilds that into an explicit tree and
+    resolves each bookmark's destination page to a 0-based page index using the
+    same object-number mapping as ``_internal_link_target_pages``.
+    """
+    from pypdf import PdfReader
+
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    page_idnums = {
+        page.indirect_reference.idnum: idx
+        for idx, page in enumerate(reader.pages)
+        if page.indirect_reference is not None
+    }
+
+    def _page_index(destination: object) -> int | None:
+        raw = destination.raw_get("/Page")  # type: ignore[attr-defined]
+        idnum = getattr(raw, "idnum", None)
+        if idnum is None:
+            idnum = getattr(getattr(raw, "indirect_reference", None), "idnum", None)
+        return page_idnums.get(idnum) if idnum is not None else None
+
+    def _convert(items: list[object]) -> list[_OutlineNode]:
+        nodes: list[_OutlineNode] = []
+        for item in items:
+            if isinstance(item, list):
+                assert nodes, "nested outline entries without a parent entry"
+                nodes[-1].children = _convert(item)
+            else:
+                nodes.append(
+                    _OutlineNode(
+                        title=str(item.title),  # type: ignore[attr-defined]
+                        page=_page_index(item),
+                        children=[],
+                    )
+                )
+        return nodes
+
+    return _convert(list(reader.outline))
+
+
+def _outline_titles(nodes: list[_OutlineNode]) -> list[str]:
+    """Return the titles of a list of outline nodes."""
+    return [node.title for node in nodes]
 
 
 # ─── Test class ──────────────────────────────────────────────────────
@@ -689,26 +790,43 @@ class TestLogbookPdfRenderer:
     def test_toc_internal_links_resolve(self) -> None:
         """Every TOC row is an internal link that resolves to a real page.
 
-        The TOC has exactly one row per major section — summary, each top-level
-        trip, and the participant index — so a dropped row would change the
-        count. Combined with the all-resolve check this locks in that every
-        expected link is present and points to a live destination.
+        The TOC has exactly one row per major section — summary, each year
+        within it, each top-level trip, and the participant index — so a
+        dropped row would change the count. Combined with the all-resolve
+        check this locks in that every expected link is present and points to
+        a live destination.
         """
         data = _make_rich_export_data()
         result = self._renderer().render(data)
         targets = _internal_link_target_pages(result)
-        expected = 1 + len(data.entries) + 1  # summary + trips + participant index
+        # summary + one row per year + trips + participant index
+        expected = 1 + len(data.yearly_summaries) + len(data.entries) + 1
         assert len(targets) == expected
+        assert all(t is not None for t in targets)
+
+    def test_toc_lists_summary_years(self) -> None:
+        """The contents page lists each year of the summary as a linked row."""
+        data = _make_two_year_summary_data()
+        result = self._renderer().render(data)
+        text = _extract_pdf_text(result)
+
+        assert "Contents" in text
+        assert "Year 2025" in text
+        assert "Year 2024" in text
+
+        targets = _internal_link_target_pages(result)
+        # summary + two years + the single trip (no participant index)
+        assert len(targets) == 4
         assert all(t is not None for t in targets)
 
     def test_entry_has_stable_anchor(self) -> None:
         """A trip's TOC link jumps to the page that actually contains the trip.
 
         Uses a single top-level entry so the entry link is unambiguous: link
-        order is [summary, entry], and the entry link must resolve to a page
-        whose text contains the entry title. This proves the ``entry_{id}``
-        anchor is real and correctly targeted (not merely that some link
-        resolves somewhere).
+        order is [summary, year, entry], and the entry link must resolve to a
+        page whose text contains the entry title. This proves the
+        ``entry_{id}`` anchor is real and correctly targeted (not merely that
+        some link resolves somewhere).
         """
         from pypdf import PdfReader
 
@@ -725,12 +843,12 @@ class TestLogbookPdfRenderer:
         result = self._renderer().render(data)
 
         targets = _internal_link_target_pages(result)
-        # Exactly the summary link and the single entry link.
-        assert len(targets) == 2
+        # Exactly the summary link, its single year link, and the entry link.
+        assert len(targets) == 3
         assert all(t is not None for t in targets)
 
         reader = PdfReader(io.BytesIO(result))
-        entry_link_page = targets[1]
+        entry_link_page = targets[2]
         assert entry_link_page is not None
         entry_page_text = reader.pages[entry_link_page].extract_text()
         assert "Solo Ridge Traverse" in entry_page_text
@@ -742,3 +860,85 @@ class TestLogbookPdfRenderer:
         text = _extract_pdf_text(result)
         assert "Contents" not in text
         assert _internal_link_target_pages(result) == []
+
+    # ── Document outline / bookmarks (spec 3.7) ────────────────
+
+    def test_document_outline_top_level_mirrors_toc(self) -> None:
+        """The outline's top level mirrors the contents page (spec 3.7)."""
+        data = _make_rich_export_data()
+        result = self._renderer().render(data)
+
+        outline = _outline_tree(result)
+        assert _outline_titles(outline) == [
+            "Summary",
+            *[entry.title for entry in data.entries],
+            "Participant Index",
+        ]
+        assert all(node.page is not None for node in outline)
+
+    def test_outline_nests_summary_years(self) -> None:
+        """Each year of the summary is nested under the Summary entry."""
+        data = _make_two_year_summary_data()
+        result = self._renderer().render(data)
+
+        outline = _outline_tree(result)
+        assert _outline_titles(outline) == ["Summary", "Ridge Walk"]
+        assert _outline_titles(outline[0].children) == ["Year 2025", "Year 2024"]
+
+    def test_outline_nests_child_activities(self) -> None:
+        """Child activities nest under their parent trip in the outline.
+
+        They are deliberately *not* listed on the contents page, which stays a
+        list of major sections (spec 3.2) — so the parent trip is the only TOC
+        row here, and each child title appears once, in the entry body.
+        """
+        data = _make_hierarchical_data()
+        result = self._renderer().render(data)
+
+        outline = _outline_tree(result)
+        assert _outline_titles(outline) == ["Blue Mountains Weekend"]
+        assert _outline_titles(outline[0].children) == [
+            "Saturday Bushwalk",
+            "Sunday Canyoning",
+        ]
+
+        # One TOC row (the parent trip) — the children add no contents rows.
+        assert len(_internal_link_target_pages(result)) == 1
+        assert _extract_pdf_text(result).count("Saturday Bushwalk") == 1
+
+    def test_outline_nests_grandchild_activities(self) -> None:
+        """The outline nests the full journal hierarchy, not just one level."""
+        data = _make_deep_hierarchy_data()
+        result = self._renderer().render(data)
+
+        outline = _outline_tree(result)
+        assert _outline_titles(outline) == ["Kanangra Weekend"]
+        child = outline[0].children[0]
+        assert child.title == "Saturday"
+        assert _outline_titles(child.children) == ["Afternoon Abseil"]
+
+    def test_outline_entry_targets_entry_page(self) -> None:
+        """An entry's bookmark jumps to the page that contains the entry."""
+        from pypdf import PdfReader
+
+        entry = _make_entry(42, title="Solo Ridge Traverse", types=["BUSHWALKING"])
+        data = LogbookExportData(
+            entries=[entry],
+            yearly_summaries=[_make_summary(2024)],
+            participant_index=[],
+        )
+        result = self._renderer().render(data)
+
+        outline = _outline_tree(result)
+        entry_node = outline[1]
+        assert entry_node.title == "Solo Ridge Traverse"
+        assert entry_node.page is not None
+
+        reader = PdfReader(io.BytesIO(result))
+        assert "Solo Ridge Traverse" in reader.pages[entry_node.page].extract_text()
+
+    def test_outline_absent_for_empty_logbook(self) -> None:
+        """An empty logbook renders no document outline."""
+        data = LogbookExportData(entries=[], yearly_summaries=[], participant_index=[])
+        result = self._renderer().render(data)
+        assert _outline_tree(result) == []

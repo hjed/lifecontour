@@ -5,9 +5,16 @@ into a downloadable PDF byte stream. The document is laid out summary-first
 (cover, yearly summaries, then a linked table of contents) so the reader gets
 the high-level picture before the entry detail, with stable intra-document
 anchors on each entry and section for navigation.
+
+Navigation is driven by a single tree of sections (:func:`_build_navigation`)
+so the contents page and the PDF document outline (viewer bookmarks) always
+mirror each other. The contents page lists the major sections — the summary
+with its years, each top-level trip, and the indexes — while the outline
+additionally nests child activities, reflecting the journal hierarchy.
 """
 
 import io
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from xml.sax.saxutils import escape as xml_escape
 
@@ -21,6 +28,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm, mm
+from reportlab.pdfgen.canvas import Canvas
 from reportlab.platypus import (
     Paragraph,
     SimpleDocTemplate,
@@ -37,8 +45,8 @@ def _safe_str(text: object) -> str:
     return xml_escape(str(text))
 
 
-# Stable intra-document anchor names. The table of contents links to these,
-# and later phases (outline/bookmarks, linked indexes) reuse them.
+# Stable intra-document anchor names. The table of contents and the document
+# outline both link to these, and later phases (linked indexes) reuse them.
 _SUMMARY_ANCHOR = "section_summary"
 _PARTICIPANT_INDEX_ANCHOR = "section_participant_index"
 
@@ -46,6 +54,28 @@ _PARTICIPANT_INDEX_ANCHOR = "section_participant_index"
 def _entry_anchor(entry_id: int) -> str:
     """Return the stable anchor name for a journal entry."""
     return f"entry_{entry_id}"
+
+
+def _summary_year_anchor(year: int) -> str:
+    """Return the stable anchor name for a year within the summary section."""
+    return f"section_summary_year_{year}"
+
+
+@dataclass(frozen=True)
+class _NavNode:
+    """A navigable section of the document.
+
+    ``anchor`` is the intra-document anchor the section renders, ``label`` the
+    text shown in the contents page and the outline. ``expand_in_toc`` marks
+    sections whose children are also major sections (the summary's years) as
+    opposed to detail the contents page deliberately omits (child activities,
+    which the outline still nests).
+    """
+
+    anchor: str
+    label: str
+    children: tuple[_NavNode, ...] = ()
+    expand_in_toc: bool = False
 
 
 class LogbookPdfRenderer:
@@ -79,6 +109,10 @@ class LogbookPdfRenderer:
         styles = self._build_styles()
         story: list[object] = []
 
+        # The navigation tree drives both the contents page and the document
+        # outline, so the two always mirror each other.
+        navigation = self._build_navigation(data)
+
         # Cover page
         self._render_cover(story, data, styles)
 
@@ -88,7 +122,7 @@ class LogbookPdfRenderer:
             self._render_summaries(story, data.yearly_summaries, styles)
 
         # Table of contents, following the summary, linking to each section.
-        self._render_toc(story, data, styles)
+        self._render_toc(story, navigation, styles)
 
         # Journal entries
         if data.entries:
@@ -100,7 +134,14 @@ class LogbookPdfRenderer:
         if data.participant_index:
             self._render_participant_index(story, data.participant_index, styles)
 
-        doc.build(story)
+        # The outline is registered from the first-page callback — the only
+        # place with a live canvas. Any future page furniture (footers, page
+        # numbers) must be composed with this callback, not replace it, or the
+        # outline silently disappears.
+        doc.build(
+            story,
+            onFirstPage=lambda canvas, _doc: self._add_outline(canvas, navigation),
+        )
         return buffer.getvalue()
 
     # ── Style definitions ─────────────────────────────────────
@@ -201,7 +242,62 @@ class LogbookPdfRenderer:
             textColor=self._ACCENT,
         )
 
+        styles["toc_link_nested"] = ParagraphStyle(
+            "LogbookTocLinkNested",
+            parent=styles["toc_link"],
+            fontSize=10,
+            leading=15,
+            leftIndent=6 * mm,
+        )
+
         return styles
+
+    # ── Navigation tree ───────────────────────────────────────
+
+    def _build_navigation(self, data: LogbookExportData) -> tuple[_NavNode, ...]:
+        """Build the tree of navigable sections for this document.
+
+        Every node names an anchor the document actually renders, so both the
+        contents page and the outline are guaranteed to resolve — an anchor
+        that is never rendered would fail the build.
+        """
+        nodes: list[_NavNode] = []
+
+        if data.yearly_summaries:
+            nodes.append(
+                _NavNode(
+                    anchor=_SUMMARY_ANCHOR,
+                    label="Summary",
+                    children=tuple(
+                        _NavNode(
+                            anchor=_summary_year_anchor(summary.year),
+                            label=f"Year {summary.year}",
+                        )
+                        for summary in data.yearly_summaries
+                    ),
+                    expand_in_toc=True,
+                )
+            )
+
+        nodes.extend(self._entry_nav_nodes(data.entries))
+
+        if data.participant_index:
+            nodes.append(
+                _NavNode(anchor=_PARTICIPANT_INDEX_ANCHOR, label="Participant Index")
+            )
+
+        return tuple(nodes)
+
+    def _entry_nav_nodes(self, entries: list[LogbookEntryData]) -> tuple[_NavNode, ...]:
+        """Build navigation nodes for entries, nesting child activities."""
+        return tuple(
+            _NavNode(
+                anchor=_entry_anchor(entry.id),
+                label=entry.title,
+                children=self._entry_nav_nodes(entry.children),
+            )
+            for entry in entries
+        )
 
     # ── Table of contents ─────────────────────────────────────
 
@@ -216,34 +312,27 @@ class LogbookPdfRenderer:
     def _render_toc(
         self,
         story: list[object],
-        data: LogbookExportData,
+        navigation: tuple[_NavNode, ...],
         styles: dict[str, ParagraphStyle],
     ) -> None:
         """Render a table of contents linking to each major section.
 
-        Lists the summary, each top-level trip, and the indexes, each as an
-        internal hyperlink. Rendered only when there is at least one linkable
-        section, so an empty logbook produces no contents page.
+        Lists the summary (with each of its years), each top-level trip, and
+        the indexes, each as an internal hyperlink. Rendered only when there is
+        at least one linkable section, so an empty logbook produces no contents
+        page.
         """
         link_style = styles["toc_link"]
+        nested_style = styles["toc_link_nested"]
         rows: list[Paragraph] = []
 
-        if data.yearly_summaries:
-            rows.append(self._toc_link(_SUMMARY_ANCHOR, "Summary", link_style))
-
-        for entry in data.entries:
-            if entry.id is None:
-                continue
-            rows.append(
-                self._toc_link(_entry_anchor(entry.id), entry.title, link_style)
-            )
-
-        if data.participant_index:
-            rows.append(
-                self._toc_link(
-                    _PARTICIPANT_INDEX_ANCHOR, "Participant Index", link_style
+        for node in navigation:
+            rows.append(self._toc_link(node.anchor, node.label, link_style))
+            if node.expand_in_toc:
+                rows.extend(
+                    self._toc_link(child.anchor, child.label, nested_style)
+                    for child in node.children
                 )
-            )
 
         if not rows:
             return
@@ -251,6 +340,30 @@ class LogbookPdfRenderer:
         story.append(Paragraph("Contents", styles["section_heading"]))
         story.extend(rows)
         story.append(Spacer(1, 6 * mm))
+
+    # ── Document outline (viewer bookmarks) ───────────────────
+
+    def _add_outline(
+        self,
+        canvas: Canvas,
+        navigation: tuple[_NavNode, ...],
+        level: int = 0,
+    ) -> None:
+        """Register the document outline, mirroring the table of contents.
+
+        Called once at the start of the build. The anchors are forward
+        references at this point — ReportLab binds each destination when the
+        anchored paragraph is drawn — so the whole tree can be registered up
+        front in document order.
+
+        The document's page mode is deliberately left alone (no
+        ``showOutline()``): the bookmarks are there for readers who open their
+        viewer's outline panel, rather than forcing the panel open on every
+        reader who opens the logbook.
+        """
+        for node in navigation:
+            canvas.addOutlineEntry(node.label, node.anchor, level)
+            self._add_outline(canvas, node.children, level + 1)
 
     # ── Cover page ────────────────────────────────────────────
 
@@ -680,7 +793,15 @@ class LogbookPdfRenderer:
         )
 
         for summary in summaries:
-            story.append(Paragraph(f"Year {summary.year}", styles["heading2"]))
+            # Anchor each year so the contents page and the outline can jump
+            # straight to it.
+            story.append(
+                Paragraph(
+                    f'<a name="{_summary_year_anchor(summary.year)}"/>'
+                    f"Year {summary.year}",
+                    styles["heading2"],
+                )
+            )
 
             # Activities by type table
             if summary.total_activities_by_type:
