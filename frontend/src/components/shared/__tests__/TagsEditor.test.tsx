@@ -130,6 +130,18 @@ describe('TagsEditor', () => {
     expect(screen.queryByTestId('tag-option-4')).not.toBeInTheDocument();
   });
 
+  it('matches options ignoring leading/trailing whitespace in the query', async () => {
+    const user = userEvent.setup();
+    renderEditor();
+
+    await user.click(screen.getByTestId('add-tag-button'));
+    // Trailing space must not empty the list or wrongly hide the create option
+    await user.type(screen.getByTestId('tag-search-input'), 'Friends ');
+
+    expect(screen.getByTestId('tag-option-3')).toBeInTheDocument();
+    expect(screen.queryByTestId('create-tag-option')).not.toBeInTheDocument();
+  });
+
   it('shows the Create option when the query matches no existing tag', async () => {
     const user = userEvent.setup();
     renderEditor();

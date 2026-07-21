@@ -27,6 +27,11 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
+// Safe default when a caller passes an empty palette, so the inline create flow
+// never seeds `newTagColor` with `undefined`. Current callers always pass a
+// non-empty `TAG_COLORS`, so this is defence for the shared contract.
+const FALLBACK_TAG_COLOR = '#718096';
+
 /**
  * Normalised, domain-agnostic view of a tag. Adapters map their own tag
  * resources (contact `TagResource`, journal `JournalTag`, …) onto this shape.
@@ -73,20 +78,23 @@ export function TagsEditor({
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isCreating, setIsCreating] = useState(false);
-  const [newTagColor, setNewTagColor] = useState<string>(colors[0]);
+  const [newTagColor, setNewTagColor] = useState<string>(
+    colors[0] ?? FALLBACK_TAG_COLOR
+  );
 
   const assignedTagIds = useMemo(
     () => new Set(assignedTags.map(t => t.id)),
     [assignedTags]
   );
 
-  // Filter unassigned tags matching the search query
+  // Filter unassigned tags matching the search query. Trim before matching so
+  // the list and the "Create" affordance (which also trims) stay consistent —
+  // a trailing space must not empty the list and hide the create option.
   const unassignedTags = useMemo(() => {
     const filtered = allTags.filter(tag => !assignedTagIds.has(tag.id));
-    if (!searchQuery.trim()) return filtered;
-    return filtered.filter(tag =>
-      tag.name.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return filtered;
+    return filtered.filter(tag => tag.name.toLowerCase().includes(query));
   }, [allTags, assignedTagIds, searchQuery]);
 
   // Check if an exact match exists (for showing the "Create" option)
@@ -100,7 +108,7 @@ export function TagsEditor({
   const resetAddState = () => {
     setSearchQuery('');
     setIsCreating(false);
-    setNewTagColor(colors[0]);
+    setNewTagColor(colors[0] ?? FALLBACK_TAG_COLOR);
   };
 
   const handleAssignTag = (tagId: string) => {
@@ -131,7 +139,7 @@ export function TagsEditor({
 
   const handleCancelCreate = () => {
     setIsCreating(false);
-    setNewTagColor(colors[0]);
+    setNewTagColor(colors[0] ?? FALLBACK_TAG_COLOR);
   };
 
   // Compute tag display with hierarchy path
