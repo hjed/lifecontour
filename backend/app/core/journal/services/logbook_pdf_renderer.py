@@ -1,7 +1,10 @@
 """PDF renderer for the outdoor logbook export.
 
-Takes the LogbookExportData contracts from the data service
-and renders them into a downloadable PDF byte stream.
+Takes the LogbookExportData contracts from the data service and renders them
+into a downloadable PDF byte stream. The document is laid out summary-first
+(cover, yearly summaries, then a linked table of contents) so the reader gets
+the high-level picture before the entry detail, with stable intra-document
+anchors on each entry and section for navigation.
 """
 
 import io
@@ -34,6 +37,17 @@ def _safe_str(text: object) -> str:
     return xml_escape(str(text))
 
 
+# Stable intra-document anchor names. The table of contents links to these,
+# and later phases (outline/bookmarks, linked indexes) reuse them.
+_SUMMARY_ANCHOR = "section_summary"
+_PARTICIPANT_INDEX_ANCHOR = "section_participant_index"
+
+
+def _entry_anchor(entry_id: int) -> str:
+    """Return the stable anchor name for a journal entry."""
+    return f"entry_{entry_id}"
+
+
 class LogbookPdfRenderer:
     """Renders LogbookExportData into a PDF byte stream."""
 
@@ -42,10 +56,11 @@ class LogbookPdfRenderer:
     _MARGIN = 2.0 * cm
 
     # Colours
+    _ACCENT_HEX = "#2b6cb0"  # Blue-600 (also used inline for link glyphs)
     _HEADER_BG = colors.HexColor("#1a365d")  # Dark navy
     _HEADER_TEXT = colors.white
     _SECTION_BG = colors.HexColor("#e2e8f0")  # Slate-200
-    _ACCENT = colors.HexColor("#2b6cb0")  # Blue-600
+    _ACCENT = colors.HexColor(_ACCENT_HEX)  # Blue-600
     _LIGHT_ROW = colors.HexColor("#f7fafc")  # Gray-50
     _TABLE_BORDER = colors.HexColor("#cbd5e0")  # Gray-300
 
@@ -67,15 +82,19 @@ class LogbookPdfRenderer:
         # Cover page
         self._render_cover(story, data, styles)
 
+        # Yearly summaries move to the front, before the entries, so the reader
+        # gets the high-level picture first.
+        if data.yearly_summaries:
+            self._render_summaries(story, data.yearly_summaries, styles)
+
+        # Table of contents, following the summary, linking to each section.
+        self._render_toc(story, data, styles)
+
         # Journal entries
         if data.entries:
             story.append(Spacer(1, 12 * mm))
             for entry in data.entries:
                 self._render_entry(story, entry, styles, depth=0)
-
-        # Yearly summaries
-        if data.yearly_summaries:
-            self._render_summaries(story, data.yearly_summaries, styles)
 
         # Participant index
         if data.participant_index:
@@ -173,7 +192,65 @@ class LogbookPdfRenderer:
             spaceAfter=4 * mm,
         )
 
+        styles["toc_link"] = ParagraphStyle(
+            "LogbookTocLink",
+            parent=base["Normal"],
+            fontSize=11,
+            leading=18,
+            spaceAfter=1 * mm,
+            textColor=self._ACCENT,
+        )
+
         return styles
+
+    # ── Table of contents ─────────────────────────────────────
+
+    def _toc_link(self, anchor: str, label: str, style: ParagraphStyle) -> Paragraph:
+        """Build a single TOC row as an internal hyperlink to ``anchor``."""
+        return Paragraph(
+            f'<a href="#{anchor}" color="{self._ACCENT_HEX}">'
+            f"<u>{_safe_str(label)}</u></a>",
+            style,
+        )
+
+    def _render_toc(
+        self,
+        story: list[object],
+        data: LogbookExportData,
+        styles: dict[str, ParagraphStyle],
+    ) -> None:
+        """Render a table of contents linking to each major section.
+
+        Lists the summary, each top-level trip, and the indexes, each as an
+        internal hyperlink. Rendered only when there is at least one linkable
+        section, so an empty logbook produces no contents page.
+        """
+        link_style = styles["toc_link"]
+        rows: list[Paragraph] = []
+
+        if data.yearly_summaries:
+            rows.append(self._toc_link(_SUMMARY_ANCHOR, "Summary", link_style))
+
+        for entry in data.entries:
+            if entry.id is None:
+                continue
+            rows.append(
+                self._toc_link(_entry_anchor(entry.id), entry.title, link_style)
+            )
+
+        if data.participant_index:
+            rows.append(
+                self._toc_link(
+                    _PARTICIPANT_INDEX_ANCHOR, "Participant Index", link_style
+                )
+            )
+
+        if not rows:
+            return
+
+        story.append(Paragraph("Contents", styles["section_heading"]))
+        story.extend(rows)
+        story.append(Spacer(1, 6 * mm))
 
     # ── Cover page ────────────────────────────────────────────
 
@@ -254,9 +331,14 @@ class LogbookPdfRenderer:
             parent=styles["entry_title"],
             leftIndent=indent,
         )
+        # Give every entry a stable anchor so the TOC (and later the outline /
+        # linked indexes) can jump straight to it.
+        anchor = (
+            f'<a name="{_entry_anchor(entry.id)}"/>' if entry.id is not None else ""
+        )
         story.append(
             Paragraph(
-                f"{_safe_str(entry.title)} — {date_str}{types_label}",
+                f"{anchor}{_safe_str(entry.title)} — {date_str}{types_label}",
                 title_style,
             )
         )
@@ -590,7 +672,12 @@ class LogbookPdfRenderer:
         styles: dict[str, ParagraphStyle],
     ) -> None:
         """Render yearly summary pages."""
-        story.append(Paragraph("Yearly Summaries", styles["section_heading"]))
+        story.append(
+            Paragraph(
+                f'<a name="{_SUMMARY_ANCHOR}"/>Yearly Summaries',
+                styles["section_heading"],
+            )
+        )
 
         for summary in summaries:
             story.append(Paragraph(f"Year {summary.year}", styles["heading2"]))
@@ -672,7 +759,12 @@ class LogbookPdfRenderer:
         styles: dict[str, ParagraphStyle],
     ) -> None:
         """Render the participant index as a sorted table."""
-        story.append(Paragraph("Participant Index", styles["section_heading"]))
+        story.append(
+            Paragraph(
+                f'<a name="{_PARTICIPANT_INDEX_ANCHOR}"/>Participant Index',
+                styles["section_heading"],
+            )
+        )
         story.append(
             Paragraph(
                 "Contacts appearing in 3 or more journal entries.",
