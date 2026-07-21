@@ -10,6 +10,8 @@ import {
   useJournal,
   useSearchJournals,
   useJournalTags,
+  useCreateJournalTag,
+  journalTagKeys,
   useCreateJournal,
   useUpdateJournal,
   useDeleteJournal,
@@ -373,7 +375,7 @@ describe('Journals API', () => {
           {
             id: '2',
             type: 'journal_tag',
-            attributes: { name: 'Tag 2', color: '#00FF00', parent_id: null },
+            attributes: { name: 'Tag 2', color: '#00FF00', parent_id: '1' },
           },
         ],
       };
@@ -396,6 +398,96 @@ describe('Journals API', () => {
         id: '1',
         name: 'Tag 1',
         color: '#FF0000',
+        parent_id: null,
+      });
+      // Hierarchy is preserved so the editor can render the parent path
+      expect(result.current.data?.data[1].parent_id).toBe('1');
+    });
+  });
+
+  describe('useCreateJournalTag', () => {
+    it('should POST a journal-tags resource and return the created id', async () => {
+      const mockResponse = {
+        data: {
+          id: 'new-tag-id',
+          type: 'journal-tags',
+          attributes: { name: 'Holiday', color: '#DD6B20', parent_id: null },
+        },
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockResponse,
+      } as Response);
+
+      const { result } = renderHook(() => useCreateJournalTag(), {
+        wrapper: createWrapper,
+      });
+
+      let created: Awaited<ReturnType<typeof result.current.mutateAsync>>;
+      await act(async () => {
+        created = await result.current.mutateAsync({
+          name: 'Holiday',
+          color: '#DD6B20',
+        });
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/journals/tags',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            data: {
+              type: 'journal-tags',
+              attributes: { name: 'Holiday', color: '#DD6B20' },
+            },
+          }),
+        })
+      );
+      expect(created!.data.id).toBe('new-tag-id');
+    });
+
+    it('should throw the JSON:API error detail on failure', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ errors: [{ detail: 'Name already exists' }] }),
+      } as Response);
+
+      const { result } = renderHook(() => useCreateJournalTag(), {
+        wrapper: createWrapper,
+      });
+
+      await expect(
+        result.current.mutateAsync({ name: 'Dup', color: '#DD6B20' })
+      ).rejects.toThrow('Name already exists');
+    });
+
+    it('should invalidate the journal tag list on success', async () => {
+      const mockResponse = {
+        data: {
+          id: 'new-tag-id',
+          type: 'journal-tags',
+          attributes: { name: 'Holiday', color: '#DD6B20', parent_id: null },
+        },
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockResponse,
+      } as Response);
+
+      const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
+
+      const { result } = renderHook(() => useCreateJournalTag(), {
+        wrapper: createWrapper,
+      });
+
+      await act(async () => {
+        await result.current.mutateAsync({ name: 'Holiday', color: '#DD6B20' });
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: journalTagKeys.lists(),
       });
     });
   });

@@ -401,6 +401,7 @@ export interface JournalTag {
   id: string; // UUID from backend
   name: string;
   color?: string | null;
+  parent_id?: string | null; // UUID of the parent tag, for hierarchy display
 }
 
 // Journal Series (a named group of related journals)
