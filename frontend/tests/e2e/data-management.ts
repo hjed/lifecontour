@@ -1883,7 +1883,7 @@ export class TagFactory {
   }
 
   static createWithPrefix(prefix: string, count: number): TagCreateRequest[] {
-    const randomStr = Math.random().toString(36).substring(2, 7);
+    const randomStr = crypto.randomUUID().slice(0, 8);
     return Array.from({ length: count }, (_, index) =>
       this.create({
         name: `${prefix}-${index + 1}-${Date.now()}-${randomStr}`,
@@ -1893,7 +1893,7 @@ export class TagFactory {
 
   static createHierarchy(): TagCreateRequest[] {
     const timestamp = Date.now();
-    const randomStr = Math.random().toString(36).substring(2, 7);
+    const randomStr = crypto.randomUUID().slice(0, 8);
     const suffix = `${timestamp}-${randomStr}`;
     return [
       this.create({ name: `Work-Parent-${suffix}`, color: '#FF6B6B' }),

@@ -310,6 +310,10 @@ describe('JournalDetailView', () => {
       isLoading: false,
       isError: false,
     };
+    // clearAllMocks() wipes calls but not implementations, so seed the create
+    // mock here rather than inside one test — otherwise its resolved value
+    // leaks into every case added after it.
+    mockCreateTag.mockResolvedValue({ data: { id: 'tag-new' } });
   });
 
   describe('Rendering', () => {
@@ -667,7 +671,6 @@ describe('JournalDetailView', () => {
 
     it('creates a new tag inline and assigns it', async () => {
       const user = userEvent.setup();
-      mockCreateTag.mockResolvedValue({ data: { id: 'tag-new' } });
       renderWithQueryClient(<JournalDetailView journal={mockJournal} />);
 
       await user.click(screen.getByTestId('add-tag-button'));

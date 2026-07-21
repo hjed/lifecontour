@@ -714,7 +714,10 @@ test.describe('Journal Detail Page', () => {
 
       testCleanup(async () => await dataManager.cleanup());
 
-      const newTagName = `InlineTag-${Date.now()}`;
+      // A UUID rather than Date.now(): journal tag names are globally unique,
+      // and projects running this spec in parallel workers can start within the
+      // same millisecond.
+      const newTagName = `InlineTag-${crypto.randomUUID().slice(0, 8)}`;
       // Green (#38A169) from TAG_COLORS — chosen explicitly rather than relying
       // on the palette's default first swatch.
       const chosenColour = '#38A169';

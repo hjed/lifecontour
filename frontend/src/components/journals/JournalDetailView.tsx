@@ -612,20 +612,17 @@ export function JournalDetailView({
               <StravaUnmatchedAthletesBadge journalId={journal.id} />
             </div>
 
-            {/* Tags */}
-            <div
-              role='group'
-              aria-labelledby='journal-tags-label'
-              className='space-y-2'
-            >
-              <div id='journal-tags-label' className='text-sm font-medium'>
-                Tags
-              </div>
+            {/* Tags. A fieldset/legend rather than a div + aria-labelledby:
+                the editor is a set of related controls, so the native grouping
+                element gives the same accessible name without an id that would
+                collide if this view were ever rendered twice. */}
+            <fieldset className='space-y-2 border-0 p-0'>
+              <legend className='text-sm font-medium'>Tags</legend>
               <JournalTagsEditor
                 journalId={journal.id}
                 assignedTags={journal.tags}
               />
-            </div>
+            </fieldset>
 
             {/* Series */}
             <div className='space-y-2'>

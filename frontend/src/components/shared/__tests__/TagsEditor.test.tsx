@@ -263,4 +263,26 @@ describe('TagsEditor', () => {
 
     expect(onRemove).toHaveBeenCalledWith('1');
   });
+
+  it('does not reopen the add popover with a stale query after an error clears', async () => {
+    const user = userEvent.setup();
+    const { rerenderWith } = renderEditor();
+
+    // Type a query, then have the definitions request fail underneath us.
+    await user.click(screen.getByTestId('add-tag-button'));
+    await user.type(screen.getByTestId('tag-search-input'), 'Holiday');
+    rerenderWith({ isError: true });
+
+    expect(screen.getByTestId('tags-error')).toBeInTheDocument();
+
+    // On recovery the popover must stay shut rather than springing open with
+    // the pre-failure query still in it.
+    rerenderWith({ isError: false });
+
+    expect(screen.getByTestId('add-tag-button')).toBeInTheDocument();
+    expect(screen.queryByTestId('tag-search-input')).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('add-tag-button'));
+    expect(screen.getByTestId('tag-search-input')).toHaveValue('');
+  });
 });

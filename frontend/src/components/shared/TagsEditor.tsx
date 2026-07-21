@@ -111,6 +111,20 @@ export function TagsEditor({
     setNewTagColor(colors[0] ?? FALLBACK_TAG_COLOR);
   };
 
+  // Entering the error state unmounts the popover, which bypasses the
+  // onOpenChange reset below. Without this, a later recovery would remount it
+  // still "open" and holding the query the user typed before the failure —
+  // the popover would spring open on its own. Adjusting state during render is
+  // React's prescribed alternative to a synchronising effect.
+  const [wasError, setWasError] = useState(isError);
+  if (isError !== wasError) {
+    setWasError(isError);
+    if (isError) {
+      setIsAddOpen(false);
+      resetAddState();
+    }
+  }
+
   const handleAssignTag = (tagId: string) => {
     onAssign(tagId);
     setIsAddOpen(false);
