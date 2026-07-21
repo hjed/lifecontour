@@ -13,7 +13,11 @@ import {
   createTestQueryClient,
   renderWithQueryClient,
 } from '../test-helpers';
-import { ActivityTemplateType, JournalType } from '@/types/journals';
+import {
+  ActivityTemplateType,
+  JournalType,
+  type JournalTag,
+} from '@/types/journals';
 import { getTemplate } from '@/lib/api/templates';
 
 jest.mock('@/lib/api/templates', () => ({
@@ -37,12 +41,27 @@ const mockAddContact = jest.fn();
 const mockRemoveContact = jest.fn();
 const mockAddTag = jest.fn();
 const mockRemoveTag = jest.fn();
+const mockCreateTag = jest.fn();
 const mockUpdateField = jest.fn();
 const mockAddType = jest.fn();
 const mockRemoveType = jest.fn();
 const mockAddToSeries = jest.fn();
 const mockRemoveFromSeries = jest.fn();
 const mockCreateSeries = jest.fn();
+
+// Journal tag definitions returned by `useJournalTags`. Mutable so a test can
+// swap in an empty namespace (the "no tags exist at all" case) without a
+// separate module mock.
+const ALL_JOURNAL_TAGS: JournalTag[] = [
+  { id: 'tag-1', name: 'Work', color: '#3182CE' },
+  { id: 'tag-2', name: 'Family', color: '#38A169' },
+  { id: 'tag-3', name: 'Hiking', color: '#D53F8C' },
+];
+let mockJournalTagsResult: {
+  data: { data: JournalTag[] };
+  isLoading: boolean;
+  isError: boolean;
+} = { data: { data: ALL_JOURNAL_TAGS }, isLoading: false, isError: false };
 
 jest.mock('@/lib/api/journals', () => ({
   useUpdateJournal: () => ({
@@ -63,14 +82,21 @@ jest.mock('@/lib/api/journals', () => ({
     mutateAsync: jest.fn(),
   }),
   useAddJournalTag: () => ({
+    mutate: mockAddTag,
     mutateAsync: mockAddTag,
+    isPending: false,
   }),
   useRemoveJournalTag: () => ({
+    mutate: mockRemoveTag,
     mutateAsync: mockRemoveTag,
+    isPending: false,
   }),
-  useJournalTags: () => ({
-    data: { data: [] },
+  useCreateJournalTag: () => ({
+    mutate: mockCreateTag,
+    mutateAsync: mockCreateTag,
+    isPending: false,
   }),
+  useJournalTags: () => mockJournalTagsResult,
   useUpdateJournalField: () => ({
     mutateAsync: mockUpdateField,
     isPending: false,
@@ -135,10 +161,6 @@ jest.mock('../JournalCalendarBadge', () => ({
 
 jest.mock('../JournalContactBadge', () => ({
   JournalContactBadge: () => <div data-testid='contact-badge'>Contacts</div>,
-}));
-
-jest.mock('../JournalTagBadge', () => ({
-  JournalTagBadge: () => <div data-testid='tag-badge'>Tags</div>,
 }));
 
 jest.mock('../JournalSeriesBadge', () => ({
@@ -283,6 +305,11 @@ describe('JournalDetailView', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockJournalTagsResult = {
+      data: { data: ALL_JOURNAL_TAGS },
+      isLoading: false,
+      isError: false,
+    };
   });
 
   describe('Rendering', () => {
@@ -306,7 +333,7 @@ describe('JournalDetailView', () => {
 
       expect(screen.getByTestId('calendar-badge')).toBeInTheDocument();
       expect(screen.getByTestId('contact-badge')).toBeInTheDocument();
-      expect(screen.getByTestId('tag-badge')).toBeInTheDocument();
+      expect(screen.getByTestId('journal-tags-editor')).toBeInTheDocument();
     });
 
     it('renders type manager', () => {
@@ -560,6 +587,113 @@ describe('JournalDetailView', () => {
       expect(
         screen.queryByTestId('journal-date-range-field')
       ).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Tags Section', () => {
+    const taggedJournal = {
+      ...mockJournal,
+      tags: [ALL_JOURNAL_TAGS[0], ALL_JOURNAL_TAGS[1]],
+    };
+
+    it('renders the tags editor with the assigned tags as colour-coded badges', () => {
+      renderWithQueryClient(<JournalDetailView journal={taggedJournal} />);
+
+      expect(screen.getByTestId('journal-tags-editor')).toBeInTheDocument();
+
+      const workBadge = screen.getByTestId('tag-badge-tag-1');
+      expect(workBadge).toHaveTextContent('Work');
+      expect(workBadge).toHaveStyle({ borderColor: '#3182CE' });
+      expect(screen.getByTestId('tag-badge-tag-2')).toHaveTextContent('Family');
+    });
+
+    it('names the tags section for assistive technology', () => {
+      renderWithQueryClient(<JournalDetailView journal={taggedJournal} />);
+
+      expect(screen.getByRole('group', { name: 'Tags' })).toBeInTheDocument();
+    });
+
+    it('assigns an existing tag chosen from the search popover', async () => {
+      const user = userEvent.setup();
+      renderWithQueryClient(<JournalDetailView journal={taggedJournal} />);
+
+      await user.click(screen.getByTestId('add-tag-button'));
+      await user.type(screen.getByTestId('tag-search-input'), 'Hik');
+      await user.click(screen.getByTestId('tag-option-tag-3'));
+
+      expect(mockAddTag).toHaveBeenCalledWith({
+        journalId: '1',
+        tagId: 'tag-3',
+      });
+    });
+
+    it('does not offer already-assigned tags in the add list', async () => {
+      const user = userEvent.setup();
+      renderWithQueryClient(<JournalDetailView journal={taggedJournal} />);
+
+      await user.click(screen.getByTestId('add-tag-button'));
+
+      expect(screen.queryByTestId('tag-option-tag-1')).not.toBeInTheDocument();
+      expect(screen.getByTestId('tag-option-tag-3')).toBeInTheDocument();
+    });
+
+    it('removes an assigned tag', async () => {
+      const user = userEvent.setup();
+      renderWithQueryClient(<JournalDetailView journal={taggedJournal} />);
+
+      await user.click(screen.getByTestId('remove-tag-tag-1'));
+
+      expect(mockRemoveTag).toHaveBeenCalledWith({
+        journalId: '1',
+        tagId: 'tag-1',
+      });
+    });
+
+    it('keeps the add affordance reachable when no tags exist at all', async () => {
+      const user = userEvent.setup();
+      mockJournalTagsResult = {
+        data: { data: [] },
+        isLoading: false,
+        isError: false,
+      };
+      renderWithQueryClient(<JournalDetailView journal={mockJournal} />);
+
+      const addButton = screen.getByTestId('add-tag-button');
+      expect(addButton).toBeInTheDocument();
+
+      await user.click(addButton);
+      expect(screen.getByTestId('tag-search-input')).toBeInTheDocument();
+    });
+
+    it('creates a new tag inline and assigns it', async () => {
+      const user = userEvent.setup();
+      mockCreateTag.mockResolvedValue({ data: { id: 'tag-new' } });
+      renderWithQueryClient(<JournalDetailView journal={mockJournal} />);
+
+      await user.click(screen.getByTestId('add-tag-button'));
+      await user.type(screen.getByTestId('tag-search-input'), 'Camping');
+      await user.click(screen.getByTestId('create-tag-option'));
+      await user.click(screen.getByTestId('colour-#38A169'));
+      await user.click(screen.getByTestId('confirm-create-tag'));
+
+      await waitFor(() => {
+        expect(mockCreateTag).toHaveBeenCalledWith({
+          name: 'Camping',
+          color: '#38A169',
+        });
+      });
+      await waitFor(() => {
+        expect(mockAddTag).toHaveBeenCalledWith({
+          journalId: '1',
+          tagId: 'tag-new',
+        });
+      });
+    });
+
+    it('no longer renders the legacy select-based tag control', () => {
+      renderWithQueryClient(<JournalDetailView journal={taggedJournal} />);
+
+      expect(screen.queryByTestId('tag-select')).not.toBeInTheDocument();
     });
   });
 

@@ -163,16 +163,6 @@ export function TagsEditor({
     );
   }
 
-  if (isError) {
-    return (
-      <div className={className} data-testid='tags-error'>
-        <p className='text-destructive text-sm'>
-          Failed to load tag definitions.
-        </p>
-      </div>
-    );
-  }
-
   return (
     <div className={className} data-testid={rootTestId}>
       <div className='flex flex-wrap items-center gap-2'>
@@ -214,157 +204,171 @@ export function TagsEditor({
           </span>
         )}
 
-        {/* Add Tag button */}
-        <Popover
-          open={isAddOpen}
-          onOpenChange={open => {
-            setIsAddOpen(open);
-            if (!open) resetAddState();
-          }}
-        >
-          <PopoverTrigger asChild>
-            <Button
-              variant='outline'
-              size='sm'
-              className='h-6 gap-1 text-xs'
-              disabled={isMutating}
-              data-testid='add-tag-button'
-            >
-              <Plus className='h-3 w-3' />
-              Add Tag
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className='w-72 p-3' align='start'>
-            {!isCreating ? (
-              <div className='space-y-2'>
-                {/* Search Input */}
-                <Input
-                  placeholder='Search or create a tag...'
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  className='h-8 text-sm'
-                  aria-label='Search or create a tag'
-                  data-testid='tag-search-input'
-                />
-
-                {/* Tag list */}
-                <div className='max-h-48 overflow-y-auto'>
-                  {unassignedTags.map(tag => (
-                    <button
-                      key={tag.id}
-                      type='button'
-                      onClick={() => handleAssignTag(tag.id)}
-                      className='hover:bg-accent flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors'
-                      data-testid={`tag-option-${tag.id}`}
-                      disabled={isMutating}
-                    >
-                      {tag.color && (
-                        <span
-                          className='h-3 w-3 shrink-0 rounded-full'
-                          style={{
-                            backgroundColor: tag.color,
-                          }}
-                        />
-                      )}
-                      <span>{getTagDisplayName(tag)}</span>
-                    </button>
-                  ))}
-
-                  {/* Create option */}
-                  {searchQuery.trim() && !exactMatchExists && (
-                    <button
-                      type='button'
-                      onClick={handleStartCreate}
-                      className='hover:bg-accent flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors'
-                      data-testid='create-tag-option'
-                      disabled={isMutating}
-                    >
-                      <Plus className='text-muted-foreground h-3 w-3' />
-                      <span>Create &ldquo;{searchQuery.trim()}&rdquo;</span>
-                    </button>
-                  )}
-
-                  {/* No results */}
-                  {unassignedTags.length === 0 &&
-                    (exactMatchExists || !searchQuery.trim()) && (
-                      <p className='text-muted-foreground py-2 text-center text-sm'>
-                        No tags available
-                      </p>
-                    )}
-                </div>
-              </div>
-            ) : (
-              /* Create tag mini-form */
-              <div className='space-y-3'>
-                <div className='space-y-1'>
-                  <label htmlFor='new-tag-name' className='text-sm font-medium'>
-                    Tag Name
-                  </label>
+        {/* Add Tag button. When the tag definitions fail to load there is
+            nothing to search or parent a new tag against, so the add
+            affordance is replaced by the error — but the assigned badges above
+            stay rendered and removable, since a caller that already holds them
+            (e.g. tags embedded on a journal resource) must not lose them to an
+            unrelated request's failure. */}
+        {isError ? (
+          <p className='text-destructive text-sm' data-testid='tags-error'>
+            Failed to load tag definitions.
+          </p>
+        ) : (
+          <Popover
+            open={isAddOpen}
+            onOpenChange={open => {
+              setIsAddOpen(open);
+              if (!open) resetAddState();
+            }}
+          >
+            <PopoverTrigger asChild>
+              <Button
+                variant='outline'
+                size='sm'
+                className='h-6 gap-1 text-xs'
+                disabled={isMutating}
+                data-testid='add-tag-button'
+              >
+                <Plus className='h-3 w-3' />
+                Add Tag
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className='w-72 p-3' align='start'>
+              {!isCreating ? (
+                <div className='space-y-2'>
+                  {/* Search Input */}
                   <Input
-                    id='new-tag-name'
+                    placeholder='Search or create a tag...'
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
                     className='h-8 text-sm'
-                    data-testid='new-tag-name-input'
+                    aria-label='Search or create a tag'
+                    data-testid='tag-search-input'
                   />
-                </div>
 
-                <div className='space-y-1'>
-                  <span className='flex items-center gap-1 text-sm font-medium'>
-                    <Palette className='h-3 w-3' />
-                    Colour
-                  </span>
-                  <div
-                    className='flex flex-wrap gap-1.5'
-                    data-testid='colour-picker'
-                  >
-                    {colors.map(color => (
+                  {/* Tag list */}
+                  <div className='max-h-48 overflow-y-auto'>
+                    {unassignedTags.map(tag => (
                       <button
-                        key={color}
+                        key={tag.id}
                         type='button'
-                        onClick={() => setNewTagColor(color)}
-                        className={cn(
-                          'h-6 w-6 rounded-full border-2 transition-transform',
-                          newTagColor === color
-                            ? 'border-foreground scale-110'
-                            : 'border-transparent hover:scale-105'
+                        onClick={() => handleAssignTag(tag.id)}
+                        className='hover:bg-accent flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors'
+                        data-testid={`tag-option-${tag.id}`}
+                        disabled={isMutating}
+                      >
+                        {tag.color && (
+                          <span
+                            className='h-3 w-3 shrink-0 rounded-full'
+                            style={{
+                              backgroundColor: tag.color,
+                            }}
+                          />
                         )}
-                        style={{ backgroundColor: color }}
-                        aria-label={`Select colour ${color}`}
-                        data-testid={`colour-${color}`}
-                      />
+                        <span>{getTagDisplayName(tag)}</span>
+                      </button>
                     ))}
+
+                    {/* Create option */}
+                    {searchQuery.trim() && !exactMatchExists && (
+                      <button
+                        type='button'
+                        onClick={handleStartCreate}
+                        className='hover:bg-accent flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors'
+                        data-testid='create-tag-option'
+                        disabled={isMutating}
+                      >
+                        <Plus className='text-muted-foreground h-3 w-3' />
+                        <span>Create &ldquo;{searchQuery.trim()}&rdquo;</span>
+                      </button>
+                    )}
+
+                    {/* No results */}
+                    {unassignedTags.length === 0 &&
+                      (exactMatchExists || !searchQuery.trim()) && (
+                        <p className='text-muted-foreground py-2 text-center text-sm'>
+                          No tags available
+                        </p>
+                      )}
                   </div>
                 </div>
+              ) : (
+                /* Create tag mini-form */
+                <div className='space-y-3'>
+                  <div className='space-y-1'>
+                    <label
+                      htmlFor='new-tag-name'
+                      className='text-sm font-medium'
+                    >
+                      Tag Name
+                    </label>
+                    <Input
+                      id='new-tag-name'
+                      value={searchQuery}
+                      onChange={e => setSearchQuery(e.target.value)}
+                      className='h-8 text-sm'
+                      data-testid='new-tag-name-input'
+                    />
+                  </div>
 
-                <div className='flex gap-2'>
-                  <Button
-                    variant='outline'
-                    size='sm'
-                    onClick={handleCancelCreate}
-                    // Disabled mid-flight like every other control here, so the
-                    // user cannot leave the create form and then have the
-                    // resolving mutation reset the popover underneath them.
-                    disabled={isMutating}
-                    className='flex-1'
-                    data-testid='cancel-create-tag'
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    size='sm'
-                    onClick={handleCreateAndAssign}
-                    disabled={!searchQuery.trim() || isMutating}
-                    className='flex-1'
-                    data-testid='confirm-create-tag'
-                  >
-                    Create & Add
-                  </Button>
+                  <div className='space-y-1'>
+                    <span className='flex items-center gap-1 text-sm font-medium'>
+                      <Palette className='h-3 w-3' />
+                      Colour
+                    </span>
+                    <div
+                      className='flex flex-wrap gap-1.5'
+                      data-testid='colour-picker'
+                    >
+                      {colors.map(color => (
+                        <button
+                          key={color}
+                          type='button'
+                          onClick={() => setNewTagColor(color)}
+                          className={cn(
+                            'h-6 w-6 rounded-full border-2 transition-transform',
+                            newTagColor === color
+                              ? 'border-foreground scale-110'
+                              : 'border-transparent hover:scale-105'
+                          )}
+                          style={{ backgroundColor: color }}
+                          aria-label={`Select colour ${color}`}
+                          data-testid={`colour-${color}`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className='flex gap-2'>
+                    <Button
+                      variant='outline'
+                      size='sm'
+                      onClick={handleCancelCreate}
+                      // Disabled mid-flight like every other control here, so the
+                      // user cannot leave the create form and then have the
+                      // resolving mutation reset the popover underneath them.
+                      disabled={isMutating}
+                      className='flex-1'
+                      data-testid='cancel-create-tag'
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      size='sm'
+                      onClick={handleCreateAndAssign}
+                      disabled={!searchQuery.trim() || isMutating}
+                      className='flex-1'
+                      data-testid='confirm-create-tag'
+                    >
+                      Create & Add
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            )}
-          </PopoverContent>
-        </Popover>
+              )}
+            </PopoverContent>
+          </Popover>
+        )}
       </div>
     </div>
   );

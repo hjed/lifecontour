@@ -646,7 +646,7 @@ test.describe('Journal Detail Page', () => {
   });
 
   test.describe('Tag Management', () => {
-    test('should add a tag to a journal', async ({
+    test('should add an existing tag to a journal via the tags editor', async ({
       authenticatedPage,
       testCleanup,
     }) => {
@@ -673,31 +673,90 @@ test.describe('Journal Detail Page', () => {
       await page.goto(`/journals/${journal.id}`);
       await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
-      // Add tag button should appear because there are unassigned tags
-      const addTagButton = page.getByTestId('add-tag-button');
+      const tagsEditor = page.getByTestId('journal-tags-editor');
+      await expect(tagsEditor).toBeVisible();
+
+      // Open the add popover with the keyboard to prove the control is operable
+      // without a pointer.
+      const addTagButton = tagsEditor.getByTestId('add-tag-button');
       await expect(addTagButton).toBeVisible();
-      await addTagButton.click();
+      await addTagButton.focus();
+      await page.keyboard.press('Enter');
 
-      // Select the tag from the dropdown
-      const tagSelect = page.getByTestId('tag-select');
-      await tagSelect.click();
-      await page.getByRole('option', { name: tag.name }).click();
+      // Narrow the list with the search box, then pick the tag
+      const searchInput = page.getByTestId('tag-search-input');
+      await expect(searchInput).toBeVisible();
+      await searchInput.fill(tag.name);
+      await page.getByTestId(`tag-option-${tag.id}`).click();
 
-      // Confirm addition — wait for the API response so the UI has time to update
-      await Promise.all([
-        page.waitForResponse(
-          resp =>
-            resp.url().includes(`/api/journals/${journal.id}`) &&
-            resp.request().method() === 'POST'
-        ),
-        page.getByRole('button', { name: 'Add', exact: true }).click(),
-      ]);
-
-      // Tag badge should now appear
-      await expect(page.getByTestId(`tag-badge-${tag.id}`)).toBeVisible();
+      // Tag badge should now appear on the journal
+      const tagBadge = tagsEditor.getByTestId(`tag-badge-${tag.id}`);
+      await expect(tagBadge).toBeVisible({ timeout: 10000 });
+      await expect(tagBadge).toContainText(tag.name);
     });
 
-    test('should remove a tag from a journal', async ({
+    test('should create a new tag inline and assign it with its colour', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const page = authenticatedPage;
+      const dataManager = new TestDataManager(page);
+
+      const journal = await dataManager.createJournal({
+        title: 'Tag Inline Create Test',
+        content: 'Testing inline tag creation.',
+        event_date_range: {
+          start: '2026-01-18T10:00:00Z',
+          end: '2026-01-18T10:30:00Z',
+        },
+        types: ['note'],
+      });
+
+      testCleanup(async () => await dataManager.cleanup());
+
+      const newTagName = `InlineTag-${Date.now()}`;
+      // Green (#38A169) from TAG_COLORS — chosen explicitly rather than relying
+      // on the palette's default first swatch.
+      const chosenColour = '#38A169';
+
+      await page.goto(`/journals/${journal.id}`);
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
+
+      const tagsEditor = page.getByTestId('journal-tags-editor');
+      await expect(tagsEditor).toBeVisible();
+
+      await tagsEditor.getByTestId('add-tag-button').click();
+      await page.getByTestId('tag-search-input').fill(newTagName);
+
+      // No tag matches, so the create affordance is offered
+      await page.getByTestId('create-tag-option').click();
+
+      await expect(page.getByTestId('new-tag-name-input')).toHaveValue(
+        newTagName
+      );
+      await page.getByTestId(`colour-${chosenColour}`).click();
+
+      // Capture the created tag's id so cleanup deletes it — it was created
+      // through the UI, not the data manager.
+      const [createResponse] = await Promise.all([
+        page.waitForResponse(
+          resp =>
+            resp.url().includes('/api/journals/tags') &&
+            resp.request().method() === 'POST'
+        ),
+        page.getByTestId('confirm-create-tag').click(),
+      ]);
+      const createdTagId = (await createResponse.json()).data.id as string;
+      dataManager.trackJournalTag(createdTagId);
+
+      // The new tag is assigned and rendered with the colour that was chosen
+      const tagBadge = tagsEditor.getByTestId(`tag-badge-${createdTagId}`);
+      await expect(tagBadge).toBeVisible({ timeout: 10000 });
+      await expect(tagBadge).toContainText(newTagName);
+      await expect(tagBadge).toHaveCSS('border-color', 'rgb(56, 161, 105)');
+    });
+
+    test('should remove a tag from a journal via the tags editor', async ({
       authenticatedPage,
       testCleanup,
     }) => {
@@ -726,8 +785,10 @@ test.describe('Journal Detail Page', () => {
       await page.goto(`/journals/${journal.id}`);
       await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
+      const tagsEditor = page.getByTestId('journal-tags-editor');
+
       // Tag badge should be visible before removal
-      const tagBadge = page.getByTestId(`tag-badge-${tag.id}`);
+      const tagBadge = tagsEditor.getByTestId(`tag-badge-${tag.id}`);
       await expect(tagBadge).toBeVisible();
 
       // Click the remove button on the tag badge. Removal isn't optimistic — the
@@ -735,7 +796,7 @@ test.describe('Journal Detail Page', () => {
       // the click as a unit: a click that races with a re-render (and is lost)
       // is retried, while a successful-but-slow delete satisfies the assertion
       // on the first pass without re-clicking.
-      const removeButton = page.getByTestId(`remove-tag-${tag.id}`);
+      const removeButton = tagsEditor.getByTestId(`remove-tag-${tag.id}`);
       await expect(removeButton).toBeVisible();
       await expect(async () => {
         if (await tagBadge.isVisible()) {
@@ -743,6 +804,40 @@ test.describe('Journal Detail Page', () => {
         }
         await expect(tagBadge).toBeHidden({ timeout: 5000 });
       }).toPass({ timeout: 15000 });
+    });
+
+    test('should keep the add affordance reachable when the journal has no tags', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const page = authenticatedPage;
+      const dataManager = new TestDataManager(page);
+
+      const journal = await dataManager.createJournal({
+        title: 'Tag Empty State Test',
+        content: 'Testing the tag editor with no assigned tags.',
+        event_date_range: {
+          start: '2026-01-18T10:00:00Z',
+          end: '2026-01-18T10:30:00Z',
+        },
+        types: ['note'],
+      });
+
+      testCleanup(async () => await dataManager.cleanup());
+
+      await page.goto(`/journals/${journal.id}`);
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
+
+      const tagsEditor = page.getByTestId('journal-tags-editor');
+      await expect(tagsEditor).toBeVisible();
+      await expect(tagsEditor).toContainText('No tags assigned');
+
+      // The legacy select flow hid "Add Tag" entirely in this state, making an
+      // untagged journal a dead end. The editor must always offer it.
+      const addTagButton = tagsEditor.getByTestId('add-tag-button');
+      await expect(addTagButton).toBeVisible();
+      await addTagButton.click();
+      await expect(page.getByTestId('tag-search-input')).toBeVisible();
     });
   });
 

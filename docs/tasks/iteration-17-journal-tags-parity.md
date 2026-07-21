@@ -1,6 +1,6 @@
 # Iteration 17: Journal Tags Parity
 
-**Status:** 🟡 IN PROGRESS (ITER17-001 complete — Phases 1–4; ITER17-002 complete — Phases 1–2; ITER17-003 Phase 1 complete)
+**Status:** 🟡 IN PROGRESS (ITER17-001 complete — Phases 1–4; ITER17-002 complete — Phases 1–2; ITER17-003 complete — Phases 1–2)
 **Dependencies:** Iteration 4 (journal tag tables and relationship endpoints), Iteration 4.6 (journal tag filtering + detail-view tag add/remove), Iteration 12 (unified event-driven history), Iteration 2.6 (contact tag management UX — the reference behaviour)
 **Goal:** Bring journal tag functionality to exact parity with contact tags across the UI, backend management operations, filtering, history, and MCP.
 
@@ -34,7 +34,7 @@ This iteration closes the gap so that journal tags behave **exactly like contact
   - `GET /api/journals?tag_ids=` filter — repeatable, expands each tag to its descendants (ITER17-002 Phase 1); singular `tag_id` still accepted and unioned in
 - **Service/repository**: `JournalTagService.create_tag` only; repository (`journal_tag_repository.py`) supports `find_by_name` (case-insensitive), `get_all`, `get_children`, `get_root_tags`, `get_tags_for_journal`, `save`. **No update / delete-with-unassign / merge service methods.**
 - **Frontend**:
-  - `JournalTagBadge.tsx` wired into `JournalDetailView.tsx` with working `useAddJournalTag` / `useRemoveJournalTag` mutations — but add uses a plain `Select` dropdown (no search, no inline create, badges not colour-coded, and the "Add Tag" button is hidden when there are no unassigned tags, so an empty tag list is a dead end).
+  - `JournalDetailView.tsx` mounts `JournalTagsEditor` — the journal adapter over the shared `TagsEditor` — giving the detail page a searchable add popover, inline create-with-colour, and dismissible colour-coded badges, with the add affordance always reachable (ITER17-003 Phases 1–2). The legacy select-dropdown `JournalTagBadge.tsx` was deleted.
   - `JournalFilters.tsx` has a multi-select checkbox tag filter, and `fetchJournals` (`frontend/src/lib/api/journals.ts`) sends **every** selected tag as repeated `tag_ids` (ITER17-002 Phase 2).
   - `JournalListItem.tsx` already renders colour-coded tag chips on list items.
   - No journal tag tree in the sidebar (`Sidebar.tsx` renders the tag tree for contacts only). The `?tag=` deep link on `/journals` shipped in ITER17-002 Phase 2, so the sidebar tree has a destination to link to.
@@ -47,7 +47,7 @@ This iteration closes the gap so that journal tags behave **exactly like contact
 
 | Behaviour (contact tags reference) | Journal tags today | Gap |
 |---|---|---|
-| Inline editor: searchable add popover, create-new-tag with colour, dismissible colour badges | Plain select dropdown, no create, no colours, dead end when no tags exist | ITER17-003 |
+| Inline editor: searchable add popover, create-new-tag with colour, dismissible colour badges | ✅ Closed — the shared `TagsEditor` is mounted on the journal detail page and the select-dropdown `JournalTagBadge` is deleted (Phases 1–2) | ITER17-003 |
 | Sidebar hierarchical tag tree with click-to-filter | Absent | ITER17-004 |
 | Tag management: edit name/colour/description/parent, delete, merge (context menu + dialogs) | ✅ Backend closed — create, update, delete and merge (Phases 1–4); the UI surface remains | ITER17-004 |
 | `description` field on tags | ✅ Closed — column added in ITER17-001 Phase 1 | ITER17-001 |
@@ -298,21 +298,30 @@ Every phase below must meet the same completion bar before merge:
 - **Integration:** n/a (no backend change).
 - **E2E:** deferred to Phase 2 (component not yet mounted).
 
-#### Phase 2: Detail View Wiring and E2E
+#### Phase 2: Detail View Wiring and E2E ✅ COMPLETE
 
-**Estimated diff:** ~300 lines
+**Estimated diff:** ~300 lines · **Actual:** ~1250 changed lines gross, ~90 net. The gross figure is misleading three ways: 367 removed lines are the outright deletion of `JournalTagBadge` and its test; ~280 lines of the `TagsEditor.tsx` diff are pure re-indentation from wrapping the add popover in a ternary (`git diff -w` reports **16 added / 12 removed** for that file); and roughly two thirds of the remainder is test code. Reviewable as one slice.
 
 **Prerequisites:** Phase 1 merged.
 
 **Acceptance Criteria:**
-- [ ] `JournalDetailView.tsx` uses the new editor; the old `JournalTagBadge` select flow is removed (keep the read-only badge rendering if still used elsewhere).
-- [ ] Mutations use the existing `useAddJournalTag` / `useRemoveJournalTag` / journal-tag query hooks with cache invalidation, and errors surface to the user (toast), not only `console.error`.
-- [ ] Existing journal-detail tag e2e tests are updated to the new interaction and still cover add + remove.
+- [x] `JournalDetailView.tsx` uses the new editor; the old `JournalTagBadge` select flow is removed (keep the read-only badge rendering if still used elsewhere). — the component had no other consumer (`JournalListItem` renders its own colour chips), so it and its test were **deleted** rather than kept.
+- [x] Mutations use the existing `useAddJournalTag` / `useRemoveJournalTag` / journal-tag query hooks with cache invalidation, and errors surface to the user (toast), not only `console.error`. — the detail view no longer owns any tag mutation; `JournalTagsEditor` calls the hooks, which already invalidate `journalKeys.detail` + `journalKeys.lists` and `toast.error` on failure. The legacy `console.error` swallow died with `JournalTagBadge`.
+- [x] Existing journal-detail tag e2e tests are updated to the new interaction and still cover add + remove.
+
+**Decisions taken (Phase 2):**
+- **`JournalTagBadge` deleted, not retained.** The AC's "keep the read-only badge rendering if still used elsewhere" clause did not apply: `JournalDetailView` was its only consumer. Keeping an unmounted component would have left a second, worse tag UI in the tree.
+- **No backend or integration-test work.** The phase is frontend-only — `POST`/`DELETE /api/journals/{id}/relationships/tags` and `POST /api/journals/tags` already existed and were already used by the Phase 1 hooks. The doc's "Integration: mutation hook tests if new hooks are added" bullet is met at the hook layer instead: `useAddJournalTag` / `useRemoveJournalTag` gained the request/invalidation/toast coverage that `contact-tag-mutations.test.ts` has for contacts (Phase 1 had already covered `useCreateJournalTag`). Backend `pytest`/`ruff`/`mypy` gates are **not applicable** to this phase.
+- **The tags block is now an ARIA group.** `role='group'` + `aria-labelledby` on the existing "Tags" heading gives the editor an accessible name without changing the visual style shared with the sibling Contacts/Series sections.
+- **`TestDataManager.trackJournalTag(tagId)` added.** The inline-create e2e test creates a tag *through the UI*, so the data manager cannot track it at creation time; without this the tag would be orphaned in the shared journal tag namespace and leak into other tests' tag lists.
+- **A failed tag-definitions fetch no longer blanks the assigned badges.** Phase 1's shared `TagsEditor` early-returned an error message *instead of* the whole editor when `isError` was set. Mounting it made that user-visible: journal tags are embedded on the journal resource, so a failed `GET /api/journals/tags` was hiding badges the page already had — and their remove buttons — a regression against the old `JournalTagBadge`, which always rendered its `tags` prop. Delivery rule 9 ("no phase may rely on a later phase to restore broken behaviour") made this in-scope. The error now replaces only the **add affordance** (which genuinely needs the definitions); badges stay rendered and removable. Fixed in the shared core, so contacts benefit identically.
+- **Journal tag removal remains non-optimistic** while contacts' `useRemoveContactTag` is optimistic. Out of scope for this phase's ACs; recorded as follow-up below rather than silently skipped. The e2e removal test keeps its `toPass` click-and-assert retry for this reason.
 
 **Required Test Coverage:**
-- **Unit (RTL):** detail-view integration test with the editor mounted.
-- **Integration:** mutation hook tests if new hooks are added (mirror `contact-tag-mutations.test.ts`).
-- **E2E:** on a journal detail page — add an existing tag, create a brand-new tag inline and see it assigned with its colour, remove a tag. Use fixture-created data; ProseMirror/typing-delay best practices where applicable.
+- **Unit (RTL):** `frontend/src/components/journals/__tests__/JournalDetailView.test.tsx` — the `JournalTagBadge` mock is gone, so the real `JournalTagsEditor` + shared `TagsEditor` mount. New `Tags Section` suite (8 tests): colour-coded assigned badges, accessible group name, assign-from-search-popover, already-assigned tags excluded from the add list, remove, add affordance reachable with an empty tag namespace, inline create-then-assign, and no legacy `tag-select`. **32 tests in the file, all passing** (7 of the new ones verified failing against the pre-change component).
+- **Integration:** `frontend/src/lib/api/__tests__/journals.test.ts` — new `useAddJournalTag` and `useRemoveJournalTag` suites (4 tests each: request shape, detail+list invalidation, success toast, error toast), mirroring `contact-tag-mutations.test.ts`. No backend change, so no backend integration tests (see decisions).
+- **E2E:** `frontend/tests/e2e/journal-detail.spec.ts` `Tag Management` (4 tests) — add an existing tag via the search popover (opened by keyboard), create a new tag inline with an explicitly chosen colour and assert the badge's `border-color`, remove a tag, and the add affordance stays reachable on an untagged journal. All fixture-created via `TestDataManager`; no skips, no multi-outcome assertions, and no conditionals on data state. The removal test keeps a pre-existing `if (await tagBadge.isVisible())` *inside* its `toPass` retry — a transient-UI guard, not a data-state branch — because removal is not optimistic (see decisions).
+- **Shared-core regression fix:** `frontend/src/components/shared/__tests__/TagsEditor.test.tsx` gained a test proving assigned badges stay visible and removable when the tag-definitions request fails, and the existing error test now also asserts the add button stands down.
 
 ---
 
@@ -439,6 +448,7 @@ Deliberate, accepted asymmetries with contact tags (not to be "fixed" in this it
 - **Tags at journal creation time:** `JournalCreateForm.tsx` has no tag input (the API supports tags on create via MCP). Contacts likewise only edit tags from the detail/edit surfaces, so this is not a parity gap — treat as an independent enhancement if wanted.
 - **Search document tag names:** the journal search document indexes `tag_ids` only, while the MCP search converter reads a non-existent `tag_names` field (`backend/app/mcp/domains/journals/converters.py` line ~225) and contact documents index tag names as searchable text. Aligning journal search to also index tag names (making journals findable by tag text) is a small follow-up once events from ITER17-005 exist to keep names fresh on rename.
 - **Journal tag filter semantics doc:** record the OR-across-tags semantics (inherited from contacts) in the API design doc if it isn't already stated.
+- **Optimistic journal tag removal:** contacts' `useRemoveContactTag` removes the badge from the cache immediately and rolls back on failure; `useRemoveJournalTag` waits for the DELETE plus a refetch, so the badge lingers for a round-trip. Noted in ITER17-003 Phase 2 (outside its ACs) — the e2e removal test carries a `toPass` retry because of it. Aligning the two would let that retry go.
 
 ## Definition of Done for the Iteration
 

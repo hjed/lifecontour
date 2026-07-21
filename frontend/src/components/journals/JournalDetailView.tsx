@@ -52,7 +52,7 @@ import { JournalBreadcrumb } from './JournalBreadcrumb';
 import { JournalCalendarBadge } from './JournalCalendarBadge';
 import { JournalContactBadge } from './JournalContactBadge';
 import { JournalSeriesBadge } from './JournalSeriesBadge';
-import { JournalTagBadge } from './JournalTagBadge';
+import { JournalTagsEditor } from './JournalTagsEditor';
 import { JournalChildrenList } from './JournalChildrenList';
 import { JournalParentSelector } from './JournalParentSelector';
 import { JournalTypeSection } from './JournalTypeSection';
@@ -79,9 +79,6 @@ import {
   useDeleteJournal,
   useAddContactRelationship,
   useRemoveContactRelationship,
-  useAddJournalTag,
-  useRemoveJournalTag,
-  useJournalTags,
   useJournalSeries,
   useAddJournalToSeries,
   useRemoveJournalFromSeries,
@@ -150,8 +147,6 @@ export function JournalDetailView({
   const addContact = useAddContactRelationship();
   const removeContact = useRemoveContactRelationship();
   const updateContact = useUpdateContactRelationship();
-  const addTag = useAddJournalTag();
-  const removeTag = useRemoveJournalTag();
   const addToSeries = useAddJournalToSeries();
   const removeFromSeries = useRemoveJournalFromSeries();
   const createSeries = useCreateJournalSeries();
@@ -170,12 +165,10 @@ export function JournalDetailView({
   ];
 
   // Data fetching
-  const { data: tagsResponse } = useJournalTags();
   const { data: seriesResponse } = useJournalSeries();
   const { data: calendarsData } = useCalendars();
   const { data: externalLinksData } = useJournalExternalLinks(journal.id);
 
-  const availableTags = tagsResponse?.data || [];
   const availableSeries = seriesResponse?.data || [];
   const availableCalendars: JournalCalendar[] =
     calendarsData?.data.map(c => ({
@@ -262,20 +255,6 @@ export function JournalDetailView({
       relationshipType,
       status,
       role,
-    });
-  };
-
-  const handleTagAdd = async (tagId: string) => {
-    await addTag.mutateAsync({
-      journalId: journal.id,
-      tagId: tagId,
-    });
-  };
-
-  const handleTagRemove = async (tagId: string) => {
-    await removeTag.mutateAsync({
-      journalId: journal.id,
-      tagId: tagId,
     });
   };
 
@@ -634,13 +613,17 @@ export function JournalDetailView({
             </div>
 
             {/* Tags */}
-            <div className='space-y-2'>
-              <div className='text-sm font-medium'>Tags</div>
-              <JournalTagBadge
-                tags={journal.tags}
-                onTagAdd={handleTagAdd}
-                onTagRemove={handleTagRemove}
-                availableTags={availableTags}
+            <div
+              role='group'
+              aria-labelledby='journal-tags-label'
+              className='space-y-2'
+            >
+              <div id='journal-tags-label' className='text-sm font-medium'>
+                Tags
+              </div>
+              <JournalTagsEditor
+                journalId={journal.id}
+                assignedTags={journal.tags}
               />
             </div>
 

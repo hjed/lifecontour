@@ -244,5 +244,23 @@ describe('TagsEditor', () => {
     renderEditor({ isError: true });
 
     expect(screen.getByTestId('tags-error')).toBeInTheDocument();
+    // The add affordance needs the definitions, so it stands down.
+    expect(screen.queryByTestId('add-tag-button')).not.toBeInTheDocument();
+  });
+
+  it('keeps assigned badges visible and removable when tag definitions fail', async () => {
+    // A caller may already hold the assigned tags (journal tags are embedded on
+    // the journal resource). A failure of the *definitions* request must not
+    // blank the badges the caller handed us, or the user loses the ability to
+    // see and remove tags the page already has.
+    const user = userEvent.setup();
+    const { onRemove } = renderEditor({ isError: true });
+
+    expect(screen.getByTestId('tag-badge-1')).toHaveTextContent('Work');
+    expect(screen.getByTestId('tag-badge-2')).toHaveTextContent('Family');
+
+    await user.click(screen.getByTestId('remove-tag-1'));
+
+    expect(onRemove).toHaveBeenCalledWith('1');
   });
 });
