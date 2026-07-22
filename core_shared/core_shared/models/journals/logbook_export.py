@@ -75,8 +75,9 @@ class LogbookEntryData:
     template_name: str | None = None
     gear_item_name: str | None = None
 
-    # Immich photo album public shared link (ITER11-005 Phase 2)
-    album_shared_link: str | None = None
+    # Immich photo album public shared links, one per linked album, in the
+    # order the link store returns them. Empty when the entry has no album.
+    album_shared_links: list[str] = field(default_factory=list)
 
 
 @dataclass

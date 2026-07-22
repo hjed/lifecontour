@@ -9,6 +9,7 @@ import io
 
 import pytest
 from core_shared.models.journals import (
+    JOURNAL_TYPE_GLYPHS,
     AbseilingData,
     AbseilPitch,
     ActivityTypeIndexEntry,
@@ -16,6 +17,7 @@ from core_shared.models.journals import (
     EventDateRange,
     FitnessData,
     GearMaintenanceData,
+    JournalType,
     KayakingData,
     LogbookEntryContact,
     LogbookEntryData,
@@ -26,7 +28,12 @@ from core_shared.models.journals import (
     ParticipantIndexEntry,
 )
 
-from app.core.journal.services.logbook_pdf_renderer import LogbookPdfRenderer
+from app.core.journal.services.logbook_pdf_renderer import (
+    LogbookPdfRenderer,
+    glyph_font_name,
+    resolve_glyph_font_path,
+)
+from tests.pdf_assertions import external_link_uris
 
 # ─── Fixture helpers ─────────────────────────────────────────────────
 
@@ -737,12 +744,12 @@ class TestLogbookPdfRenderer:
         text = _extract_pdf_text(result)
         assert "Based on:" not in text
 
-    # ── Immich photo album shared link ─────────────────────────
+    # ── Immich photo album shared links (spec 3.5) ─────────────
 
     def test_photo_album_link_rendered_when_present(self) -> None:
         """The album shared link is rendered after the participants line."""
         entry = _make_entry(1, title="Trip With Photos")
-        entry.album_shared_link = "https://immich.example.com/share/abc123"
+        entry.album_shared_links = ["https://immich.example.com/share/abc123"]
         data = LogbookExportData(
             entries=[entry], yearly_summaries=[], participant_index=[]
         )
@@ -750,16 +757,54 @@ class TestLogbookPdfRenderer:
         text = _extract_pdf_text(result)
         assert "Photo Album:" in text
         assert "https://immich.example.com/share/abc123" in text
+        assert external_link_uris(result) == ["https://immich.example.com/share/abc123"]
+
+    def test_photo_album_links_rendered_for_every_album(self) -> None:
+        """Every album on an entry gets its own clickable link, in order."""
+        entry = _make_entry(1, title="Trip With Two Albums")
+        entry.album_shared_links = [
+            "https://immich.example.com/share/first",
+            "https://immich.example.com/share/second",
+        ]
+        data = LogbookExportData(
+            entries=[entry], yearly_summaries=[], participant_index=[]
+        )
+        result = self._renderer().render(data)
+
+        text = _extract_pdf_text(result)
+        assert text.count("Photo Album:") == 2
+        assert external_link_uris(result) == entry.album_shared_links
+
+    def test_photo_album_link_url_with_quote_is_escaped(self) -> None:
+        """A quote in the share URL cannot break the href attribute.
+
+        The URL is interpolated into ``href="…"``; ``_safe_str`` alone does not
+        escape quotes, so an unescaped ``"`` would close the attribute early and
+        corrupt (or fail) the link. The link must still resolve to the exact URL.
+        """
+        url = 'https://immich.example.com/share/a"b?x="y"'
+        entry = _make_entry(1, title="Trip With Tricky Url")
+        entry.album_shared_links = [url]
+        data = LogbookExportData(
+            entries=[entry], yearly_summaries=[], participant_index=[]
+        )
+
+        result = self._renderer().render(data)
+
+        assert result[:5] == b"%PDF-"
+        assert external_link_uris(result) == [url]
 
     def test_photo_album_link_absent_when_none(self) -> None:
         """No album link line is rendered when there is no shared link."""
         entry = _make_entry(1, title="Trip Without Photos")
+        assert entry.album_shared_links == []
         data = LogbookExportData(
             entries=[entry], yearly_summaries=[], participant_index=[]
         )
         result = self._renderer().render(data)
         text = _extract_pdf_text(result)
         assert "Photo Album:" not in text
+        assert external_link_uris(result) == []
 
     # ── Yearly summaries ───────────────────────────────────────
 
@@ -1198,3 +1243,128 @@ class TestLogbookPdfRenderer:
 
         assert result[:5] == b"%PDF-"
         assert "Trip Number 300" in _extract_pdf_text(result)
+
+    # ── Per-type icon glyphs (spec 3.4) ────────────────────────
+
+    def test_entry_type_labels_carry_their_glyph(self) -> None:
+        """Each of an entry's type labels is preceded by that type's glyph."""
+        entry = _make_entry(
+            1, title="Claustral Canyon", types=["CANYONING", "BUSHWALKING"]
+        )
+        data = LogbookExportData(
+            entries=[entry], yearly_summaries=[], participant_index=[]
+        )
+
+        text = _extract_pdf_text(self._renderer().render(data))
+
+        assert f"{JOURNAL_TYPE_GLYPHS[JournalType.CANYONING]} Canyoning" in text
+        assert f"{JOURNAL_TYPE_GLYPHS[JournalType.BUSHWALKING]} Bushwalking" in text
+
+    def test_activity_type_index_rows_carry_their_glyph(self) -> None:
+        """The activity-type index labels each section with its glyph."""
+        data = _make_indexed_export_data()
+
+        full_text = _extract_pdf_text(self._renderer().render(data))
+        # The heading also appears as a contents row, so scope the assertions
+        # to the index section itself rather than the entry type labels above.
+        text = full_text[full_text.rindex("Activity Type Index") :]
+
+        for journal_type, label in (
+            (JournalType.BUSHWALKING, "Bushwalking"),
+            (JournalType.CANYONING, "Canyoning"),
+            (JournalType.CAVING, "Caving"),
+        ):
+            assert f"{JOURNAL_TYPE_GLYPHS[journal_type]} {label}" in text
+
+    def test_all_mapped_glyphs_are_covered_by_the_glyph_font(self) -> None:
+        """Every mapped glyph has a real outline in the registered font.
+
+        An uncovered codepoint renders as an empty box rather than failing, so
+        without this the PDF would silently degrade. A missing system font
+        fails here loudly instead of being skipped.
+        """
+        from reportlab.pdfbase import pdfmetrics
+
+        font_path = resolve_glyph_font_path()
+        assert font_path is not None, (
+            "No glyph font found — install fonts-dejavu-core (Debian/Ubuntu) "
+            "or the distribution equivalent."
+        )
+
+        # Rendering a *typed* entry is what registers the font — an empty
+        # logbook renders no type label and so would leave it unregistered.
+        self._renderer().render(
+            LogbookExportData(
+                entries=[_make_entry(1, types=["CANYONING"])],
+                yearly_summaries=[],
+                participant_index=[],
+            )
+        )
+        char_to_glyph = pdfmetrics.getFont(glyph_font_name(font_path)).face.charToGlyph
+
+        uncovered = [
+            f"{journal_type}={glyph}"
+            for journal_type, glyph in JOURNAL_TYPE_GLYPHS.items()
+            if ord(glyph) not in char_to_glyph
+        ]
+        assert uncovered == []
+
+    def test_glyph_font_name_is_stable_and_collision_free(self) -> None:
+        """Distinct paths get distinct names; the same path is always stable.
+
+        The name keys ReportLab's global font registry, so a collision would
+        let one path's font be reused for another. The mapping is drawn from a
+        path-keyed registry, so this holds by construction rather than by a
+        low-probability hash.
+        """
+        name_a = glyph_font_name("/fonts/a.ttf")
+        name_b = glyph_font_name("/fonts/b.ttf")
+
+        assert name_a != name_b
+        assert glyph_font_name("/fonts/a.ttf") == name_a
+        assert glyph_font_name("/fonts/b.ttf") == name_b
+
+    def test_unusable_glyph_font_degrades_instead_of_failing(self, tmp_path) -> None:
+        """A font file that exists but cannot be parsed drops the glyphs.
+
+        Icons are decoration, so a corrupt or unreadable font must never fail
+        an export — the same degraded output as having no font at all.
+        """
+        broken_font = tmp_path / "broken.ttf"
+        broken_font.write_bytes(b"not a font")
+        entry = _make_entry(1, title="Claustral Canyon", types=["CANYONING"])
+        data = LogbookExportData(
+            entries=[entry], yearly_summaries=[], participant_index=[]
+        )
+
+        result = LogbookPdfRenderer(glyph_font_path=str(broken_font)).render(data)
+
+        text = _extract_pdf_text(result)
+        assert result[:5] == b"%PDF-"
+        assert "Canyoning" in text
+        assert JOURNAL_TYPE_GLYPHS[JournalType.CANYONING] not in text
+
+    def test_labels_render_without_glyphs_when_font_unavailable(self) -> None:
+        """With no glyph font the export still succeeds, labels intact."""
+        entry = _make_entry(1, title="Claustral Canyon", types=["CANYONING"])
+        entry.album_shared_links = ["https://immich.example.com/share/abc123"]
+        data = LogbookExportData(
+            entries=[entry],
+            yearly_summaries=[],
+            participant_index=[],
+            activity_type_index=[
+                ActivityTypeIndexEntry(
+                    activity_type="CANYONING",
+                    journals=[LogbookIndexJournal(journal_id=1, title=entry.title)],
+                )
+            ],
+        )
+
+        result = LogbookPdfRenderer(glyph_font_path=None).render(data)
+
+        text = _extract_pdf_text(result)
+        assert result[:5] == b"%PDF-"
+        assert "Canyoning" in text
+        assert "Photo Album:" in text
+        for glyph in JOURNAL_TYPE_GLYPHS.values():
+            assert glyph not in text

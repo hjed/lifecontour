@@ -365,8 +365,9 @@ class SqlLogbookExportRepository(LogbookExportRepository):
         # Batched over all journal ids to avoid an N+1 (the rest of this method
         # is batched too); mirrors AlbumSyncReadRepository's SQL/constants and
         # reuses its malformed-tolerant reference_data decoder so a corrupt row
-        # can never 500 the export. The field is singular, so the first
-        # non-empty shared link per journal wins (ordered for determinism).
+        # can never 500 the export. A journal may carry several album links, so
+        # every non-empty shared link is kept, ordered for determinism and
+        # de-duplicated in case two albums publish the same share URL.
         # ITER15-001 Phase 5: ``reference_data`` is read directly from the
         # canonical ``sync_metadata`` link store (the album link is the sole
         # writer of it since Phase 4) — the legacy ``external_references`` join
@@ -386,16 +387,17 @@ class SqlLogbookExportRepository(LogbookExportRepository):
                 "journal_ids": final_journal_ids,
             },
         )
-        album_shared_links: dict[int, str] = {}
+        album_shared_links: dict[int, list[str]] = defaultdict(list)
         for row in result.fetchall():
-            if row.journal_id in album_shared_links:
-                continue  # first non-null share link wins
             ref = AlbumSyncReadRepository._decode_reference_data(
                 row.reference_data, row.journal_id
             )
             shared_link_url = ref.get("shared_link_url")
-            if isinstance(shared_link_url, str) and shared_link_url:
-                album_shared_links[row.journal_id] = shared_link_url
+            if not isinstance(shared_link_url, str) or not shared_link_url:
+                continue
+            links = album_shared_links[row.journal_id]
+            if shared_link_url not in links:
+                links.append(shared_link_url)
 
         entries = []
         for row in final_journal_rows:
@@ -513,7 +515,7 @@ class SqlLogbookExportRepository(LogbookExportRepository):
             if gear and gear.get("gear_item_id"):
                 entry.gear_item_name = gear_item_names.get(gear["gear_item_id"])
 
-            entry.album_shared_link = album_shared_links.get(row.id)
+            entry.album_shared_links = album_shared_links.get(row.id, [])
 
             entries.append(entry)
 

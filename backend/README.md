@@ -10,6 +10,15 @@ Python FastAPI backend for the Personal CRM & Journal System with PostgreSQL dat
 - UV for dependency management
 - PostgreSQL database
 - Docker and Docker Compose (optional)
+- **DejaVu Sans** (`sudo apt-get install fonts-dejavu-core` on Debian/Ubuntu, or
+  the distribution equivalent) — the outdoor logbook PDF export draws its
+  journal-type icon glyphs with it, because the built-in PDF fonts are
+  WinAnsi-encoded and would render those codepoints as empty boxes. Without it
+  the export still succeeds with plain text labels, but the glyph tests fail
+  (in `tests/unit/journal/test_logbook_pdf_renderer.py`,
+  `tests/integration/core/journal/services/test_logbook_pdf_renderer_integration.py`
+  and `tests/integration/api/journals/test_logbook_export_api.py`). The Docker
+  images install it via `docker/python-base/Dockerfile`.
 
 ### Development Setup
 

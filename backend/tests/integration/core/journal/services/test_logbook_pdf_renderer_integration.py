@@ -9,9 +9,11 @@ from datetime import UTC, datetime
 
 import pytest
 from core_shared.models.journals import (
+    JOURNAL_TYPE_GLYPHS,
     ActivityTypeIndexCalculator,
     EventDateRange,
     Journal,
+    JournalType,
     LogbookSummaryCalculator,
     ParticipantIndexCalculator,
 )
@@ -25,6 +27,7 @@ from app.core.journal.adapters.sql.logbook_export_repository import (
 )
 from app.core.journal.services.logbook_data_service import LogbookDataService
 from app.core.journal.services.logbook_pdf_renderer import LogbookPdfRenderer
+from tests.pdf_assertions import external_link_uris
 
 # --- Fixtures ---
 
@@ -256,7 +259,7 @@ async def test_pdf_generation_includes_album_shared_link(
     data_service: LogbookDataService,
     renderer: LogbookPdfRenderer,
 ) -> None:
-    """An Immich-linked PHOTO_ALBUM journal renders its shared link in the PDF."""
+    """Every Immich album linked to a journal renders as a clickable link."""
     user_id = "user_pdf_album_link"
 
     journal = Journal(
@@ -273,21 +276,26 @@ async def test_pdf_generation_includes_album_shared_link(
         text("INSERT INTO journal_bushwalking_data (journal_id) VALUES (:id)"),
         {"id": journal.id},
     )
-    # Link the journal to an Immich album with a public shared link.
-    await async_connection.execute(
-        text("""
-            INSERT INTO sync_metadata (
-                internal_id, integration_source, external_id,
-                last_synced_at, version_hash, sync_status,
-                internal_entity_type, external_entity_type, reference_data
-            ) VALUES (:id, 'immich_album', 'album-pdf-1', now(), 'h', 'success',
-                      'journal', 'album', :ref)
-        """),
-        {
-            "id": journal.id,
-            "ref": '{"shared_link_url": "https://immich.example.com/share/xyz"}',
-        },
-    )
+    # Link the journal to two Immich albums, each with a public shared link.
+    for album_id, share in (
+        ("album-pdf-1", "https://immich.example.com/share/xyz"),
+        ("album-pdf-2", "https://immich.example.com/share/abc"),
+    ):
+        await async_connection.execute(
+            text("""
+                INSERT INTO sync_metadata (
+                    internal_id, integration_source, external_id,
+                    last_synced_at, version_hash, sync_status,
+                    internal_entity_type, external_entity_type, reference_data
+                ) VALUES (:id, 'immich_album', :album_id, now(), 'h', 'success',
+                          'journal', 'album', :ref)
+            """),
+            {
+                "id": journal.id,
+                "album_id": album_id,
+                "ref": f'{{"shared_link_url": "{share}"}}',
+            },
+        )
 
     export_data = await data_service.get_logbook_data(user_id=user_id)
     pdf_bytes = renderer.render(export_data)
@@ -295,8 +303,58 @@ async def test_pdf_generation_includes_album_shared_link(
     assert pdf_bytes[:5] == b"%PDF-"
     text_content = _extract_pdf_text(pdf_bytes)
     assert "Bushwalk With Photos" in text_content
-    assert "Photo Album:" in text_content
-    assert "https://immich.example.com/share/xyz" in text_content
+    assert text_content.count("Photo Album:") == 2
+    assert external_link_uris(pdf_bytes) == [
+        "https://immich.example.com/share/xyz",
+        "https://immich.example.com/share/abc",
+    ]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_pdf_type_labels_carry_glyphs_from_seeded_data(
+    journal_repo: SqlJournalRepository,
+    async_connection: AsyncConnection,
+    data_service: LogbookDataService,
+    renderer: LogbookPdfRenderer,
+) -> None:
+    """Type glyphs survive the real repo -> data service -> renderer pipeline.
+
+    Asserted on the entry line *and* in the activity-type index, which is the
+    pair of surfaces the spec requires icons on.
+    """
+    user_id = "user_pdf_type_glyphs"
+
+    journal = Journal(
+        user_id=user_id,
+        title="Claustral Canyon Descent",
+        content="Down the canyon",
+        event_date_range=EventDateRange(
+            start=datetime(2024, 8, 3, tzinfo=UTC),
+            end=datetime(2024, 8, 3, tzinfo=UTC),
+        ),
+    )
+    journal = await journal_repo.save(journal)
+    await async_connection.execute(
+        text("INSERT INTO journal_canyoning_data (journal_id) VALUES (:id)"),
+        {"id": journal.id},
+    )
+    await async_connection.execute(
+        text("INSERT INTO journal_bushwalking_data (journal_id) VALUES (:id)"),
+        {"id": journal.id},
+    )
+
+    export_data = await data_service.get_logbook_data(user_id=user_id)
+    text_content = _extract_pdf_text(renderer.render(export_data))
+
+    canyoning = JOURNAL_TYPE_GLYPHS[JournalType.CANYONING]
+    bushwalking = JOURNAL_TYPE_GLYPHS[JournalType.BUSHWALKING]
+    assert f"{canyoning} Canyoning" in text_content
+    assert f"{bushwalking} Bushwalking" in text_content
+
+    index_text = text_content[text_content.rindex("Activity Type Index") :]
+    assert f"{canyoning} Canyoning" in index_text
+    assert f"{bushwalking} Bushwalking" in index_text
 
 
 @pytest.mark.integration

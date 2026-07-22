@@ -438,7 +438,52 @@ async def test_get_logbook_entries_includes_album_shared_link(
 
     assert len(entries) == 1
     assert "PHOTO_ALBUM" in entries[0].journal_types
-    assert entries[0].album_shared_link == "https://immich.example.com/share/xyz"
+    assert entries[0].album_shared_links == ["https://immich.example.com/share/xyz"]
+
+
+@pytest.mark.asyncio
+async def test_get_logbook_entries_includes_every_album_shared_link(
+    repo: SqlLogbookExportRepository,
+    journal_repo: JournalRepository,
+    async_connection: AsyncConnection,
+) -> None:
+    """A journal linked to several albums surfaces every shared link, in order."""
+    user_id = "user_album_shared_links_many"
+    now = datetime.now(UTC)
+
+    journal = Journal(
+        user_id=user_id,
+        title="Bushwalk With Two Albums",
+        content="Photos from both cameras",
+        event_date_range=EventDateRange(start=now, end=now),
+    )
+    journal = await journal_repo.save(journal)
+    assert journal.id is not None
+
+    await async_connection.execute(
+        text("INSERT INTO journal_bushwalking_data (journal_id) VALUES (:id)"),
+        {"id": journal.id},
+    )
+    await _link_immich_album(
+        async_connection,
+        journal_id=journal.id,
+        album_id="album-first",
+        reference_data='{"shared_link_url": "https://immich.example.com/share/first"}',
+    )
+    await _link_immich_album(
+        async_connection,
+        journal_id=journal.id,
+        album_id="album-second",
+        reference_data='{"shared_link_url": "https://immich.example.com/share/second"}',
+    )
+
+    entries = await repo.get_logbook_entries(user_id=user_id)
+
+    assert len(entries) == 1
+    assert entries[0].album_shared_links == [
+        "https://immich.example.com/share/first",
+        "https://immich.example.com/share/second",
+    ]
 
 
 @pytest.mark.asyncio
@@ -447,7 +492,7 @@ async def test_get_logbook_entries_album_without_shared_link(
     journal_repo: JournalRepository,
     async_connection: AsyncConnection,
 ) -> None:
-    """A PHOTO_ALBUM journal with no shared link leaves album_shared_link None."""
+    """A PHOTO_ALBUM journal with no shared link leaves album_shared_links empty."""
     user_id = "user_album_no_link"
     now = datetime.now(UTC)
 
@@ -475,4 +520,4 @@ async def test_get_logbook_entries_album_without_shared_link(
 
     assert len(entries) == 1
     assert "PHOTO_ALBUM" in entries[0].journal_types
-    assert entries[0].album_shared_link is None
+    assert entries[0].album_shared_links == []

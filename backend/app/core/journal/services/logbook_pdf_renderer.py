@@ -17,26 +17,40 @@ whose journal names are internal hyperlinks back to the entries, reusing the
 same anchors. Their rows can grow arbitrarily tall, so those tables split
 inside a row rather than failing the export when a prolific participant's list
 outgrows a page.
+
+Type labels on entries and in the activity-type index carry an icon glyph
+mirroring the UI's journal-type iconography. The built-in PDF fonts are
+WinAnsi-encoded and draw an empty box for those codepoints, so the glyph runs
+use a separately registered DejaVu-class system font; when no such font is
+installed the glyphs are dropped and the labels render alone.
 """
 
 import io
+import os
+import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Final
 from xml.sax.saxutils import escape as xml_escape
 
+import structlog
 from core_shared.models.journals import (
     ActivityTypeIndexEntry,
+    JournalType,
     LogbookEntryData,
     LogbookExportData,
     LogbookIndexJournal,
     LogbookYearlySummary,
     ParticipantIndexEntry,
+    glyph_for_journal_type,
 )
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm, mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFError, TTFont
 from reportlab.pdfgen.canvas import Canvas
 from reportlab.platypus import (
     Paragraph,
@@ -46,12 +60,79 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+logger = structlog.get_logger()
+
+# The font the type glyphs are drawn with. Provided by ``fonts-dejavu-core`` on
+# Debian/Ubuntu (installed in the shared python base image); the other paths
+# cover the common non-Debian layouts so a developer's machine works too.
+_GLYPH_FONT_PREFIX: Final = "LogbookGlyph"
+_GLYPH_FONT_CANDIDATES: Final = (
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",  # Debian / Ubuntu
+    "/usr/share/fonts/dejavu/DejaVuSans.ttf",  # Fedora / RHEL
+    "/usr/share/fonts/TTF/DejaVuSans.ttf",  # Arch
+    "/usr/local/share/fonts/DejaVuSans.ttf",
+)
+
+# Sentinel distinguishing "caller passed no path" (resolve one) from an
+# explicit ``None`` (render without glyphs).
+_RESOLVE_GLYPH_FONT: Final = "<resolve>"
+
+# Path → ReportLab font name, assigned on first sight. Keyed by the exact path,
+# so the mapping is a bijection: the same path always yields the same name and
+# two different paths never share one — a hard guarantee a hash of the path
+# could not make. Guarded by a lock so the name allocation stays one-to-one even
+# if two threads register different paths for the first time at once.
+_GLYPH_FONT_NAMES: dict[str, str] = {}
+_GLYPH_FONT_NAMES_LOCK = threading.Lock()
+
+
+def resolve_glyph_font_path() -> str | None:
+    """Return the first installed glyph font, or ``None`` if there is none."""
+    for candidate in _GLYPH_FONT_CANDIDATES:
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def glyph_font_name(font_path: str) -> str:
+    """Return the ReportLab font name a given glyph font registers under.
+
+    ReportLab's font registry is global and keyed by name, so a distinct name
+    per distinct path is what stops a second renderer configured with a broken
+    font from silently reusing an earlier good font's registration. Names are
+    handed out from a process-wide registry keyed by the exact path, so the
+    path → name mapping is one-to-one by construction (no hash, no collisions).
+    """
+    name = _GLYPH_FONT_NAMES.get(font_path)
+    if name is not None:
+        return name
+    with _GLYPH_FONT_NAMES_LOCK:
+        # Re-check inside the lock: another thread may have registered this
+        # path between the fast-path read above and acquiring the lock.
+        name = _GLYPH_FONT_NAMES.get(font_path)
+        if name is None:
+            name = f"{_GLYPH_FONT_PREFIX}-{len(_GLYPH_FONT_NAMES)}"
+            _GLYPH_FONT_NAMES[font_path] = name
+        return name
+
 
 def _safe_str(text: object) -> str:
     """Escape XML special characters for ReportLab Paragraphs."""
     if text is None:
         return ""
     return xml_escape(str(text))
+
+
+def _attr_escape(text: object) -> str:
+    """Escape a value for use inside a double-quoted XML/RML attribute.
+
+    ``_safe_str`` escapes ``&``/``<``/``>`` but not quotes, so a value carrying
+    a ``"`` — e.g. a shared-link URL — would otherwise close an ``href="…"``
+    attribute early and corrupt the link (or fail the parse).
+    """
+    if text is None:
+        return ""
+    return xml_escape(str(text), {'"': "&quot;", "'": "&#39;"})
 
 
 def _type_label(journal_type: str) -> str:
@@ -108,6 +189,82 @@ class LogbookPdfRenderer:
     _ACCENT = colors.HexColor(_ACCENT_HEX)  # Blue-600
     _LIGHT_ROW = colors.HexColor("#f7fafc")  # Gray-50
     _TABLE_BORDER = colors.HexColor("#cbd5e0")  # Gray-300
+
+    def __init__(self, glyph_font_path: str | None = _RESOLVE_GLYPH_FONT) -> None:
+        """Create a renderer, resolving the glyph font unless one is given.
+
+        Passing ``None`` explicitly renders type labels without glyphs — the
+        same degraded output an environment with no suitable font produces.
+        """
+        if glyph_font_path == _RESOLVE_GLYPH_FONT:
+            glyph_font_path = resolve_glyph_font_path()
+            if glyph_font_path is None:
+                logger.warning(
+                    "logbook_glyph_font_missing",
+                    message=(
+                        "No DejaVu-class font found; the logbook PDF will render "
+                        "type labels without icon glyphs."
+                    ),
+                    candidates=_GLYPH_FONT_CANDIDATES,
+                )
+        self._glyph_font_path = glyph_font_path
+        self._glyph_font_name = (
+            glyph_font_name(glyph_font_path) if glyph_font_path else None
+        )
+        self._glyph_font_ready: bool | None = None
+
+    def _glyphs_available(self) -> bool:
+        """Register the glyph font on first use; report whether glyphs render.
+
+        Registration is global to ReportLab and memoised here, so repeated
+        renders (and the per-label calls below) cost nothing after the first.
+
+        A font file that exists but cannot be parsed (truncated, unreadable by
+        the service account) is treated exactly like a missing one: glyphs are
+        dropped and the labels render alone. Icons are decoration, so no font
+        problem should ever fail an export.
+        """
+        if self._glyph_font_ready is None:
+            self._glyph_font_ready = self._register_glyph_font()
+        return self._glyph_font_ready
+
+    def _register_glyph_font(self) -> bool:
+        """Register the configured glyph font, reporting whether it is usable."""
+        if self._glyph_font_path is None or self._glyph_font_name is None:
+            return False
+        if self._glyph_font_name in pdfmetrics.getRegisteredFontNames():
+            return True
+        try:
+            pdfmetrics.registerFont(
+                TTFont(self._glyph_font_name, self._glyph_font_path)
+            )
+        except TTFError, OSError, ValueError:
+            logger.warning(
+                "logbook_glyph_font_unusable",
+                message=(
+                    "Glyph font could not be registered; the logbook PDF will "
+                    "render type labels without icon glyphs."
+                ),
+                font_path=self._glyph_font_path,
+                exc_info=True,
+            )
+            return False
+        return True
+
+    def _labelled_type(self, journal_type: str) -> str:
+        """Render a journal type as its icon glyph plus its human label.
+
+        The glyph is dropped when no glyph font is available or the type has no
+        mapped glyph; the label always renders, so the glyph is decoration and
+        never the only carrier of meaning.
+        """
+        label = _safe_str(_type_label(journal_type))
+        glyph = (
+            glyph_for_journal_type(journal_type) if self._glyphs_available() else None
+        )
+        if glyph is None:
+            return label
+        return f'<font name="{self._glyph_font_name}">{glyph}</font> {label}'
 
     def render(self, data: LogbookExportData) -> bytes:
         """Render the logbook data to PDF bytes."""
@@ -476,7 +633,7 @@ class LogbookPdfRenderer:
 
         # Title with date and type labels
         date_str = entry.event_date_range.start.strftime("%d/%m/%Y")
-        types_str = ", ".join(_type_label(t) for t in entry.journal_types)
+        types_str = ", ".join(self._labelled_type(t) for t in entry.journal_types)
         types_label = f' <font color="gray" size="8">[{types_str}]</font>'
 
         title_style = ParagraphStyle(
@@ -575,12 +732,15 @@ class LogbookPdfRenderer:
             ]
             story.append(Paragraph(f"Participants: {', '.join(names)}", small_style))
 
-        # Immich photo album shared link (ITER11-005 Phase 2)
-        if entry.album_shared_link:
-            url = _safe_str(entry.album_shared_link)
+        # Immich photo album shared links — one line per linked album, each a
+        # clickable hyperlink whose visible text is the URL, so a printed copy
+        # stays usable.
+        for shared_link in entry.album_shared_links:
+            album_glyph = self._labelled_type(JournalType.PHOTO_ALBUM)
             story.append(
                 Paragraph(
-                    f'\U0001f4f7 Photo Album: <a href="{url}">{url}</a>',
+                    f'{album_glyph}: <a href="{_attr_escape(shared_link)}">'
+                    f"{_safe_str(shared_link)}</a>",
                     small_style,
                 )
             )
@@ -1030,7 +1190,7 @@ class LogbookPdfRenderer:
         for section in activity_types:
             rows.append(
                 [
-                    Paragraph(_type_label(section.activity_type), cell_style),
+                    Paragraph(self._labelled_type(section.activity_type), cell_style),
                     self._entry_links(section.journals, cell_style),
                 ]
             )

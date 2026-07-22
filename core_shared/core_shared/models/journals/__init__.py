@@ -121,6 +121,7 @@ from .incomplete_outdoor_activity import (
 from .jogging_data import JoggingData
 from .journal_contact_relationship import JournalContactRelationship
 from .journal_relationship_types import JournalContactRelationshipType
+from .journal_type_glyphs import JOURNAL_TYPE_GLYPHS, glyph_for_journal_type
 from .journal_types import JournalType
 from .kayaking_data import KayakingData
 from .logbook_calculators import (
@@ -274,6 +275,9 @@ __all__ = [
     "effective_outdoor_journal_types",
     "is_currently_checked_out",
     "templates_done_by_type",
+    # Journal type glyphs
+    "JOURNAL_TYPE_GLYPHS",
+    "glyph_for_journal_type",
     # Enums
     "AttendeeStatus",
     "ContactEventRole",
