@@ -68,6 +68,24 @@ def make_type_facts(
     )
 
 
+def make_template_reference(
+    journal_id: int,
+    start: datetime.datetime,
+    *,
+    end: datetime.datetime | None = None,
+    template_id: str = "22222222-2222-2222-2222-222222222222",
+    template_name: str = "Empress Falls",
+    template_type: str = "canyoning",
+) -> TemplateReferenceFacts:
+    return TemplateReferenceFacts(
+        journal_id=journal_id,
+        template_id=template_id,
+        template_name=template_name,
+        template_type=template_type,
+        event_date_range=_range(start, end),
+    )
+
+
 def make_checkout_facts(
     *,
     journal_id: int = 1,
@@ -303,6 +321,47 @@ class TestActivityTotals:
 
         assert totals.last_30_days == {}
         assert totals.last_365_days == {}
+        assert totals.total_last_30_days == 0
+        assert totals.total_last_365_days == 0
+
+    @pytest.mark.asyncio
+    async def test_totals_count_journals_once_per_window(
+        self, service: OutdoorDashboardService, mock_dashboard_repo: AsyncMock
+    ) -> None:
+        mock_dashboard_repo.list_outdoor_type_facts.return_value = [
+            # 10 days before the anchor: inside both windows.
+            make_type_facts(1, datetime.datetime(2026, 6, 21, tzinfo=datetime.UTC)),
+            # 100 days before the anchor: only inside the 365-day window.
+            make_type_facts(2, datetime.datetime(2026, 3, 23, tzinfo=datetime.UTC)),
+        ]
+
+        totals = await service.activity_totals(USER_ID, anchor=ANCHOR)
+
+        assert totals.total_last_30_days == 1
+        assert totals.total_last_365_days == 2
+
+    @pytest.mark.asyncio
+    async def test_a_multi_type_journal_counts_once_in_the_totals(
+        self, service: OutdoorDashboardService, mock_dashboard_repo: AsyncMock
+    ) -> None:
+        # Two genuinely independent subtypes: the journal contributes to two
+        # per-type buckets but is a single logged activity.
+        mock_dashboard_repo.list_outdoor_type_facts.return_value = [
+            make_type_facts(
+                1,
+                datetime.datetime(2026, 6, 21, tzinfo=datetime.UTC),
+                subtypes=[
+                    OutdoorActivitySubtype.KAYAKING,
+                    OutdoorActivitySubtype.CLIMBING,
+                ],
+            ),
+        ]
+
+        totals = await service.activity_totals(USER_ID, anchor=ANCHOR)
+
+        assert totals.last_30_days == {"climbing": 1, "kayaking": 1}
+        assert totals.total_last_30_days == 1
+        assert totals.total_last_365_days == 1
 
     @pytest.mark.asyncio
     async def test_totals_window_uses_user_timezone(
@@ -384,7 +443,7 @@ class TestTemplatesDone:
     async def test_scopes_repo_call_to_user(
         self, service: OutdoorDashboardService, mock_dashboard_repo: AsyncMock
     ) -> None:
-        await service.templates_done("other-user")
+        await service.templates_done("other-user", anchor=ANCHOR)
 
         mock_dashboard_repo.list_template_references.assert_awaited_once_with(
             "other-user"
@@ -396,30 +455,22 @@ class TestTemplatesDone:
     ) -> None:
         canyon_template = "22222222-2222-2222-2222-222222222222"
         climb_template = "55555555-5555-5555-5555-555555555555"
+        done_on = datetime.datetime(2026, 6, 21, tzinfo=datetime.UTC)
         mock_dashboard_repo.list_template_references.return_value = [
-            TemplateReferenceFacts(
-                journal_id=1,
-                template_id=canyon_template,
-                template_name="Empress Falls",
-                template_type="canyoning",
-            ),
-            TemplateReferenceFacts(
-                journal_id=2,
-                template_id=canyon_template,
-                template_name="Empress Falls",
-                template_type="canyoning",
-            ),
-            TemplateReferenceFacts(
-                journal_id=3,
+            make_template_reference(1, done_on, template_id=canyon_template),
+            make_template_reference(2, done_on, template_id=canyon_template),
+            make_template_reference(
+                3,
+                done_on,
                 template_id=climb_template,
                 template_name="Sweet Dreams",
                 template_type="climbing",
             ),
         ]
 
-        result = await service.templates_done(USER_ID)
+        result = await service.templates_done(USER_ID, anchor=ANCHOR)
 
-        assert result == {
+        assert result.by_type == {
             "canyoning": [
                 TemplateDone(
                     template_id=canyon_template,
@@ -439,7 +490,79 @@ class TestTemplatesDone:
         }
 
     @pytest.mark.asyncio
-    async def test_no_references_yield_empty_mapping(
+    async def test_recent_count_is_unique_templates_in_the_last_thirty_days(
         self, service: OutdoorDashboardService, mock_dashboard_repo: AsyncMock
     ) -> None:
-        assert await service.templates_done(USER_ID) == {}
+        canyon_template = "22222222-2222-2222-2222-222222222222"
+        climb_template = "55555555-5555-5555-5555-555555555555"
+        mock_dashboard_repo.list_template_references.return_value = [
+            # Same canyon done twice inside the window: one unique template.
+            make_template_reference(
+                1,
+                datetime.datetime(2026, 6, 21, tzinfo=datetime.UTC),
+                template_id=canyon_template,
+            ),
+            make_template_reference(
+                2,
+                datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
+                template_id=canyon_template,
+            ),
+            # A different template, also inside the window.
+            make_template_reference(
+                3,
+                datetime.datetime(2026, 6, 28, tzinfo=datetime.UTC),
+                template_id=climb_template,
+                template_name="Sweet Dreams",
+                template_type="climbing",
+            ),
+        ]
+
+        result = await service.templates_done(USER_ID, anchor=ANCHOR)
+
+        assert result.recent_unique_count == 2
+
+    @pytest.mark.asyncio
+    async def test_recent_count_excludes_templates_done_before_the_window(
+        self, service: OutdoorDashboardService, mock_dashboard_repo: AsyncMock
+    ) -> None:
+        mock_dashboard_repo.list_template_references.return_value = [
+            # 100 days before the anchor: grouped, but not "recent".
+            make_template_reference(
+                1, datetime.datetime(2026, 3, 23, tzinfo=datetime.UTC)
+            ),
+        ]
+
+        result = await service.templates_done(USER_ID, anchor=ANCHOR)
+
+        assert result.recent_unique_count == 0
+        assert set(result.by_type) == {"canyoning"}
+
+    @pytest.mark.asyncio
+    async def test_recent_window_uses_user_timezone(
+        self,
+        service: OutdoorDashboardService,
+        mock_dashboard_repo: AsyncMock,
+        mock_settings_repo: AsyncMock,
+    ) -> None:
+        # Sydney is UTC+10, so its 30-day window opens 10 hours earlier than
+        # UTC's. A trip at 2026-05-31T20:00Z is 2026-06-01T06:00 in Sydney —
+        # inside the Sydney window, outside the UTC one.
+        mock_settings_repo.get_timezone.return_value = "Australia/Sydney"
+        mock_dashboard_repo.list_template_references.return_value = [
+            make_template_reference(
+                1, datetime.datetime(2026, 5, 31, 20, 0, tzinfo=datetime.UTC)
+            ),
+        ]
+
+        result = await service.templates_done(USER_ID, anchor=ANCHOR)
+
+        assert result.recent_unique_count == 1
+
+    @pytest.mark.asyncio
+    async def test_no_references_yield_empty_summary(
+        self, service: OutdoorDashboardService, mock_dashboard_repo: AsyncMock
+    ) -> None:
+        result = await service.templates_done(USER_ID, anchor=ANCHOR)
+
+        assert result.by_type == {}
+        assert result.recent_unique_count == 0

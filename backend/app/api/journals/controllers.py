@@ -1682,6 +1682,10 @@ async def get_outdoor_dashboard(
     windows and the templates done with per-template counts. Windows are
     anchored on "today" in the user's configured timezone server-side, so
     the endpoint takes no date parameters.
+
+    Alongside the per-type mappings the totals carry distinct-journal counts,
+    and ``templates_done_last_30_days`` counts the distinct templates done
+    recently; neither can be derived from the mappings they sit beside.
     """
     upcoming = await dashboard_service.list_upcoming_activities(user.id)
     totals = await dashboard_service.activity_totals(user.id)
@@ -1717,6 +1721,8 @@ async def get_outdoor_dashboard(
                 activity_totals=OutdoorActivityTotalsSchema(
                     last_30_days=totals.last_30_days,
                     last_365_days=totals.last_365_days,
+                    total_last_30_days=totals.total_last_30_days,
+                    total_last_365_days=totals.total_last_365_days,
                 ),
                 templates_done={
                     template_type: [
@@ -1727,8 +1733,9 @@ async def get_outdoor_dashboard(
                         )
                         for template in templates
                     ]
-                    for template_type, templates in templates_done.items()
+                    for template_type, templates in templates_done.by_type.items()
                 },
+                templates_done_last_30_days=templates_done.recent_unique_count,
             ),
         )
     )

@@ -2615,5 +2615,9 @@ class OutdoorDashboardRepository(ABC):
     async def list_template_references(
         self, user_id: str
     ) -> list[TemplateReferenceFacts]:
-        """One row per abseiling-derived journal referencing a template."""
+        """One row per abseiling-derived journal referencing a template.
+
+        Each row carries the referencing journal's event range so the service
+        can apply the recent-templates window without a second query.
+        """
         pass

@@ -4517,10 +4517,16 @@ async def get_outdoor_dashboard(
     - ``checked_out_gear`` — gear whose resolved checkout window contains
       now and that Snipe-IT hasn't recorded as returned, longest out first.
     - ``activity_totals_last_30_days`` / ``activity_totals_last_365_days``
-      — outdoor activity counts by journal type over rolling windows.
+      — outdoor activity counts by journal type over rolling windows, plus
+      ``total_activities_last_30_days`` / ``total_activities_last_365_days``
+      counting *distinct journals*. A journal recording two independent
+      subtypes lands in two type buckets, so the totals are not the sums of
+      the mappings.
     - ``templates_done`` — the unique templates referenced by the user's
       abseiling activities, grouped by template type, each with how many
-      activities reference it.
+      activities reference it (all-time), plus
+      ``templates_done_last_30_days`` counting the distinct templates done
+      recently.
 
     Windows are anchored on "today" in the user's configured timezone
     server-side, so the tool takes no arguments.
@@ -4561,7 +4567,7 @@ async def get_outdoor_dashboard(
             )
             for template in templates
         ]
-        for template_type, templates in templates_done.items()
+        for template_type, templates in templates_done.by_type.items()
     }
 
     return MCPResponseBuilder.success_response(
@@ -4570,12 +4576,16 @@ async def get_outdoor_dashboard(
             checked_out_gear=gear_entries,
             activity_totals_last_30_days=totals.last_30_days,
             activity_totals_last_365_days=totals.last_365_days,
+            total_activities_last_30_days=totals.total_last_30_days,
+            total_activities_last_365_days=totals.total_last_365_days,
             templates_done=template_entries,
+            templates_done_last_30_days=templates_done.recent_unique_count,
             summary=build_dashboard_summary(
                 upcoming_activities=upcoming_entries,
                 checked_out_gear=gear_entries,
-                activity_totals_last_30_days=totals.last_30_days,
+                total_last_30_days=totals.total_last_30_days,
                 templates_done=template_entries,
+                templates_done_last_30_days=templates_done.recent_unique_count,
             ),
         )
     )

@@ -42,8 +42,14 @@ async def test_empty_dashboard_returns_singleton_resource_with_empty_sections(
     attributes = data["attributes"]
     assert attributes["upcoming_activities"] == []
     assert attributes["checked_out_gear"] == []
-    assert attributes["activity_totals"] == {"last_30_days": {}, "last_365_days": {}}
+    assert attributes["activity_totals"] == {
+        "last_30_days": {},
+        "last_365_days": {},
+        "total_last_30_days": 0,
+        "total_last_365_days": 0,
+    }
     assert attributes["templates_done"] == {}
+    assert attributes["templates_done_last_30_days"] == 0
 
 
 async def test_upcoming_lists_outdoor_and_planning_soonest_first(
@@ -103,6 +109,9 @@ async def test_totals_bucket_by_window_and_effective_type(
     totals = response.json()["data"]["attributes"]["activity_totals"]
     assert totals["last_30_days"] == {"canyoning": 1}
     assert totals["last_365_days"] == {"canyoning": 1, "outdoor_activity": 1}
+    # Distinct journals, counted alongside the per-type buckets.
+    assert totals["total_last_30_days"] == 1
+    assert totals["total_last_365_days"] == 2
 
 
 async def test_checked_out_gear_excludes_future_and_returned_checkouts(
@@ -154,11 +163,18 @@ async def test_templates_done_grouped_by_type_with_counts_and_ids(
     template_id = await seeder.create_template(
         name="Empress Falls", template_type="canyoning"
     )
+    stale_template = await seeder.create_template(
+        name="Claustral", template_type="canyoning"
+    )
     await seeder.create_abseiling_journal(
         title="First run", start=now - timedelta(days=30), template_id=template_id
     )
     await seeder.create_abseiling_journal(
         title="Second run", start=now - timedelta(days=10), template_id=template_id
+    )
+    # Done long ago: grouped all-time, but not counted as done recently.
+    await seeder.create_abseiling_journal(
+        title="Old run", start=now - timedelta(days=200), template_id=stale_template
     )
     # No template reference: not a "done" template row.
     await seeder.create_abseiling_journal(
@@ -168,9 +184,13 @@ async def test_templates_done_grouped_by_type_with_counts_and_ids(
     response = await authenticated_client.get(URL)
 
     assert response.status_code == 200
-    templates = response.json()["data"]["attributes"]["templates_done"]
-    assert templates == {
+    attributes = response.json()["data"]["attributes"]
+    assert attributes["templates_done"] == {
         "canyoning": [
-            {"template_id": template_id, "name": "Empress Falls", "done_count": 2}
+            {"template_id": stale_template, "name": "Claustral", "done_count": 1},
+            {"template_id": template_id, "name": "Empress Falls", "done_count": 2},
         ]
     }
+    # Only Empress Falls falls inside the 30-day window, and it counts once
+    # despite being done twice.
+    assert attributes["templates_done_last_30_days"] == 1

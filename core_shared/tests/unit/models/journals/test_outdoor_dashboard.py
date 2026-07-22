@@ -18,18 +18,25 @@ import pytest
 
 from core_shared.models.journals import (
     CheckedOutGearItem,
+    EventDateRange,
     GearCheckoutFacts,
     JournalType,
     OutdoorActivitySubtype,
     TemplateDone,
     TemplateReferenceFacts,
     checked_out_gear,
+    count_unique_templates_in_window,
     effective_outdoor_journal_types,
     is_currently_checked_out,
     templates_done_by_type,
 )
 
 NOW = datetime(2026, 7, 14, 12, 0, tzinfo=UTC)
+
+# A representative 30-day window for the pure overlap logic. The real service
+# anchors a calendar-day window (midnight → end-of-day) in the user's timezone;
+# this simplified rolling window is enough to exercise count_unique_templates_in_window.
+RECENT_WINDOW = EventDateRange(start=NOW - timedelta(days=30), end=NOW)
 
 
 def make_checkout_facts(
@@ -57,13 +64,22 @@ def make_reference(
     template_id: str = "22222222-2222-2222-2222-222222222222",
     template_name: str = "Empress Falls",
     template_type: str = "canyoning",
+    event_date_range: EventDateRange | None = None,
 ) -> TemplateReferenceFacts:
     return TemplateReferenceFacts(
         journal_id=journal_id,
         template_id=template_id,
         template_name=template_name,
         template_type=template_type,
+        event_date_range=event_date_range
+        or EventDateRange(start=NOW - timedelta(days=1), end=NOW - timedelta(days=1)),
     )
+
+
+def on_day(days_ago: float) -> EventDateRange:
+    """A point-in-time event range ``days_ago`` before :data:`NOW`."""
+    moment = NOW - timedelta(days=days_ago)
+    return EventDateRange(start=moment, end=moment)
 
 
 class TestEffectiveOutdoorJournalTypes:
@@ -275,3 +291,56 @@ class TestTemplatesDoneByType:
 
     def test_empty_references_yield_empty_mapping(self) -> None:
         assert templates_done_by_type([]) == {}
+
+
+class TestCountUniqueTemplatesInWindow:
+    def test_counts_each_template_once_however_often_it_was_done(self) -> None:
+        references = [
+            make_reference(journal_id=1, event_date_range=on_day(2)),
+            make_reference(journal_id=2, event_date_range=on_day(5)),
+        ]
+
+        assert count_unique_templates_in_window(references, RECENT_WINDOW) == 1
+
+    def test_counts_distinct_templates_separately(self) -> None:
+        canyon = make_reference(journal_id=1, event_date_range=on_day(2))
+        climb = make_reference(
+            journal_id=2,
+            template_id="55555555-5555-5555-5555-555555555555",
+            template_name="Sweet Dreams",
+            template_type="climbing",
+            event_date_range=on_day(3),
+        )
+
+        assert count_unique_templates_in_window([canyon, climb], RECENT_WINDOW) == 2
+
+    def test_excludes_templates_done_outside_the_window(self) -> None:
+        recent = make_reference(journal_id=1, event_date_range=on_day(2))
+        stale = make_reference(
+            journal_id=2,
+            template_id="55555555-5555-5555-5555-555555555555",
+            template_name="Claustral",
+            event_date_range=on_day(90),
+        )
+
+        assert count_unique_templates_in_window([recent, stale], RECENT_WINDOW) == 1
+
+    def test_counts_a_trip_straddling_the_window_boundary(self) -> None:
+        # A multi-day trip starting before the window but ending inside it
+        # overlaps, matching the activity-totals bucketing rule.
+        straddling = make_reference(
+            journal_id=1,
+            event_date_range=EventDateRange(
+                start=NOW - timedelta(days=32), end=NOW - timedelta(days=29)
+            ),
+        )
+
+        assert count_unique_templates_in_window([straddling], RECENT_WINDOW) == 1
+
+    def test_excludes_a_trip_ending_before_the_window_opens(self) -> None:
+        before = make_reference(journal_id=1, event_date_range=on_day(31))
+
+        assert count_unique_templates_in_window([before], RECENT_WINDOW) == 0
+
+    def test_empty_references_count_zero(self) -> None:
+        assert count_unique_templates_in_window([], RECENT_WINDOW) == 0

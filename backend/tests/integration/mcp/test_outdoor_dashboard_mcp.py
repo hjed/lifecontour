@@ -121,14 +121,19 @@ async def test_get_outdoor_dashboard_returns_all_four_sections(
         "abseiling_trip": 2,
         "canyoning": 1,
     }
+    assert payload["total_activities_last_30_days"] == 1
+    assert payload["total_activities_last_365_days"] == 3
     assert payload["templates_done"] == {
         "canyoning": [
             {"template_id": template_id, "name": "Empress Falls", "done_count": 2}
         ]
     }
+    # Both runs are 50+ days old, so the template is done but not done recently.
+    assert payload["templates_done_last_30_days"] == 0
     assert payload["summary"] == (
         "Dashboard: 1 upcoming activity, 1 gear item checked out, "
-        "1 outdoor activity in the last 30 days, 1 unique template done."
+        "1 outdoor activity in the last 30 days, 1 unique template done "
+        "(0 in the last 30 days)."
     )
 
 
@@ -144,8 +149,12 @@ async def test_get_outdoor_dashboard_empty(
     assert payload["checked_out_gear"] == []
     assert payload["activity_totals_last_30_days"] == {}
     assert payload["activity_totals_last_365_days"] == {}
+    assert payload["total_activities_last_30_days"] == 0
+    assert payload["total_activities_last_365_days"] == 0
     assert payload["templates_done"] == {}
+    assert payload["templates_done_last_30_days"] == 0
     assert payload["summary"] == (
         "Dashboard: 0 upcoming activities, 0 gear items checked out, "
-        "0 outdoor activities in the last 30 days, 0 unique templates done."
+        "0 outdoor activities in the last 30 days, 0 unique templates done "
+        "(0 in the last 30 days)."
     )

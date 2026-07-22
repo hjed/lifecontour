@@ -128,6 +128,8 @@ _TEMPLATE_REFERENCES_QUERY = text(
     """
     SELECT
         j.id AS journal_id,
+        j.event_date_range_start AS event_start,
+        j.event_date_range_end AS event_end,
         t.id AS template_id,
         t.name AS template_name,
         t.template_type AS template_type
@@ -253,6 +255,9 @@ class SqlOutdoorDashboardRepository(OutdoorDashboardRepository):
                 template_id=str(row["template_id"]),
                 template_name=str(row["template_name"]),
                 template_type=str(row["template_type"]),
+                event_date_range=EventDateRange(
+                    start=row["event_start"], end=row["event_end"]
+                ),
             )
             for row in result.mappings()
         ]
