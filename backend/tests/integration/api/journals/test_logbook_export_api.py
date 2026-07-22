@@ -64,6 +64,47 @@ def _internal_link_destinations(pdf_bytes: bytes) -> list[tuple[int, str, str]]:
     return destinations
 
 
+def _contents_row_labels(pdf_bytes: bytes) -> list[str]:
+    """The contents page's rows, in document order, read from the outline.
+
+    The renderer builds the contents page and the document outline from one
+    navigation tree: every top-level section gets a contents row, and the
+    summary's years are the only children the contents page expands (child
+    activities nest in the outline alone). Deriving the rows from the rendered
+    document keeps the link arithmetic tied to what the export actually
+    contains, rather than to a count that silently rots when a fixture changes.
+    """
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+
+    labels: list[str] = []
+    children: list[str] = []
+    for item in reader.outline:
+        if isinstance(item, list):
+            children = [str(c.title) for c in item if not isinstance(c, list)]
+            if labels and labels[-1] == "Summary":
+                labels.extend(children)
+        else:
+            labels.append(str(item.title))
+    return labels
+
+
+def _index_link_destinations(
+    pdf_bytes: bytes, entry_titles: list[str]
+) -> tuple[list[tuple[int, str, str]], list[tuple[int, str, str]]]:
+    """Split the document's link destinations into contents rows and index links.
+
+    Returns the destinations the named entries' contents rows resolve to, and
+    the destinations of every link that follows the contents page — i.e. the
+    index sections' links, which close the document.
+    """
+    destinations = _internal_link_destinations(pdf_bytes)
+    rows = _contents_row_labels(pdf_bytes)
+    assert len(destinations) > len(rows), "no index links were rendered"
+
+    by_row = dict(zip(rows, destinations[: len(rows)], strict=True))
+    return [by_row[title] for title in entry_titles], destinations[len(rows) :]
+
+
 # ─── Fixtures ────────────────────────────────────────────────────────
 
 
@@ -493,19 +534,15 @@ class TestLogbookExportEndpoint:
         assert "Occasionalguest" in text_content
         assert "Occasionalguest" not in indexes
 
-        # Every internal link, in document order. The contents page holds one
-        # row per navigable section — summary, its single year, the three
-        # trips, then the two index sections — so its trip rows give the
-        # authoritative destination for each entry's anchor. The index links
-        # follow: the contact's three journals, then the single bushwalking
+        # Each trip's contents row gives the authoritative destination for that
+        # entry's anchor. The index links that follow must resolve to the same
+        # places: the contact's three journals, then the single bushwalking
         # section listing the same three.
-        destinations = _internal_link_destinations(response.content)
-        assert len(destinations) == 7 + 3 + 3
-
-        entry_destinations = destinations[2:5]
+        entry_destinations, index_links = _index_link_destinations(
+            response.content, titles
+        )
         assert len(set(entry_destinations)) == len(titles)  # three distinct anchors
-        assert destinations[7:10] == entry_destinations
-        assert destinations[10:] == entry_destinations
+        assert index_links == entry_destinations * 2
 
     async def test_export_activity_type_index_links_to_entries(
         self,
@@ -525,21 +562,21 @@ class TestLogbookExportEndpoint:
         for label in ("Bushwalking", "Canyoning", "Caving"):
             assert label in index_section
 
-        # Contents rows: summary, its single year, the three trips, then this
-        # index — followed by the index's own links, one per type section. Each
-        # seeded journal carries exactly one type, and the sections are
-        # type-sorted, so every section links to a different entry.
-        assert set(seeded_outdoor_journals) == {
-            "Blue Mountains Bushwalk",  # BUSHWALKING
-            "Claustral Canyon",  # CANYONING
-            "Jenolan Caves Trip",  # CAVING
+        # Each seeded journal carries exactly one type and the sections are
+        # type-sorted, so the index links run one per section, each resolving
+        # to the destination that entry's own contents row resolves to.
+        titles_by_type = {
+            "BUSHWALKING": "Blue Mountains Bushwalk",
+            "CANYONING": "Claustral Canyon",
+            "CAVING": "Jenolan Caves Trip",
         }
-        destinations = _internal_link_destinations(response.content)
-        assert len(destinations) == 6 + 3
+        assert set(titles_by_type.values()) == set(seeded_outdoor_journals)
 
-        entry_destinations = destinations[2:5]
-        assert len(set(entry_destinations)) == 3
-        assert destinations[6:] == entry_destinations
+        entry_destinations, index_links = _index_link_destinations(
+            response.content, [titles_by_type[t] for t in sorted(titles_by_type)]
+        )
+        assert len(set(entry_destinations)) == len(titles_by_type)
+        assert index_links == entry_destinations
 
     async def test_export_empty_result(
         self,

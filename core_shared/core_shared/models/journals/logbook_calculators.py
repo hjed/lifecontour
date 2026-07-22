@@ -106,6 +106,26 @@ class _ParticipantAppearances:
     journals: list[LogbookIndexJournal] = field(default_factory=list)
 
 
+# The relationship types the participant index counts.
+_INDEXED_ROLES = ("PARTICIPANT", "INVITEE")
+
+
+def _indexed_contacts(entry: LogbookEntryData) -> dict[int, str]:
+    """Map contact id to name for everyone indexed on an entry or its children.
+
+    Collapsing the subtree into one mapping is what makes a contact listed on
+    both a trip and its child activities count once for that trip.
+    """
+    contacts = {
+        contact.contact_id: contact.name
+        for contact in entry.contacts
+        if contact.role in _INDEXED_ROLES
+    }
+    for child in entry.children:
+        contacts.update(_indexed_contacts(child))
+    return contacts
+
+
 class ParticipantIndexCalculator:
     """Calculates the participant index from logbook entries."""
 
@@ -119,29 +139,11 @@ class ParticipantIndexCalculator:
         entry, so ``appearances == len(journals)`` holds by construction and a
         contact listed on both a trip and its child activities is counted once.
         """
-        # Count appearances per root entry to avoid double counting
-        # if a contact appears in both parent and sub-entries.
-
         appearances_by_root: dict[int, _ParticipantAppearances] = {}
         for entry in entries:
-            entry_contacts: set[int] = set()
-            names: dict[int, str] = {}
-
-            def collect_contacts(
-                e: LogbookEntryData, contacts_set: set[int], names_dict: dict[int, str]
-            ) -> None:
-                for c in e.contacts:
-                    if c.role in ("PARTICIPANT", "INVITEE"):
-                        contacts_set.add(c.contact_id)
-                        names_dict[c.contact_id] = c.name
-                for child in e.children:
-                    collect_contacts(child, contacts_set, names_dict)
-
-            collect_contacts(entry, entry_contacts, names)
-
-            for cid in entry_contacts:
+            for contact_id, name in _indexed_contacts(entry).items():
                 accumulator = appearances_by_root.setdefault(
-                    cid, _ParticipantAppearances(name=names[cid])
+                    contact_id, _ParticipantAppearances(name=name)
                 )
                 # Counting the appearance and recording its link are the same
                 # step, so the count can never drift from the linked list.
@@ -149,19 +151,19 @@ class ParticipantIndexCalculator:
                     LogbookIndexJournal(journal_id=entry.id, title=entry.title)
                 )
 
-        result = []
-        for cid, accumulator in appearances_by_root.items():
-            if len(accumulator.journals) >= min_appearances:
-                result.append(
-                    ParticipantIndexEntry(
-                        contact_id=cid,
-                        name=accumulator.name,
-                        appearances=len(accumulator.journals),
-                        journals=accumulator.journals,
-                    )
+        return sorted(
+            (
+                ParticipantIndexEntry(
+                    contact_id=contact_id,
+                    name=accumulator.name,
+                    appearances=len(accumulator.journals),
+                    journals=accumulator.journals,
                 )
-
-        return sorted(result, key=lambda p: p.name)
+                for contact_id, accumulator in appearances_by_root.items()
+                if len(accumulator.journals) >= min_appearances
+            ),
+            key=lambda participant: participant.name,
+        )
 
 
 class ActivityTypeIndexCalculator:
