@@ -14,10 +14,44 @@ Repo-specific gotchas for future syncs. Read this before re-running.
   `ds-entry.ts`, `componentSrcMap`, and `.design-sync/docs/<Name>.md`.
 - Run everything from `frontend/`, not the repo root.
 - Node 26 (`.nvmrc`) — `export PATH="$HOME/.nvm/versions/node/v26.5.0/bin:$PATH"`.
-  Install with `COREPACK_ENABLE_STRICT=0 pnpm i --frozen-lockfile`.
+  **Do not then call bare `pnpm`: it hangs forever with no output.** The node 26
+  bin dir ships only `node`/`npm`/`npx` (no corepack, no pnpm), so `pnpm`
+  resolves to `~/.local/bin/pnpm` → `nvm-wrapper.sh`, which self-execs in a loop.
+  Invoke the pinned pnpm from the corepack cache directly instead:
+
+  ```sh
+  export PATH="$HOME/.nvm/versions/node/v26.5.0/bin:$PATH"
+  export COREPACK_ENABLE_STRICT=0 COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+  node ~/.cache/node/corepack/v1/pnpm/11.7.0/bin/pnpm.cjs i --frozen-lockfile
+  ```
+
+  11.7.0 is the `packageManager` pin; if that moves, look for the matching
+  directory under `~/.cache/node/corepack/v1/pnpm/`.
+
 - `cfg.buildCmd` is `node .design-sync/prepare.mjs`. **Run it before every
   `package-build.mjs`.** It generates two things the repo does not otherwise
-  produce (compiled CSS + a `.d.ts` tree) — details below.
+  produce (compiled CSS + a `.d.ts` tree) — details below. Nothing runs it for
+  you: `buildCmd` is only a config field, never executed by `resync.mjs` or
+  `package-build.mjs`.
+- **The `.ds-sync/` install needs two deps beyond the skill's default three**
+  (`esbuild ts-morph @types/react`), and `prepare.mjs` fails without the first:
+
+  ```sh
+  (cd .ds-sync && npm i esbuild ts-morph @types/react \
+     @tailwindcss/cli@4.3.3 playwright@1.61.1)
+  ```
+
+  - `@tailwindcss/cli` — `prepare.mjs` runs it from
+    `.ds-sync/node_modules/@tailwindcss/cli/dist/index.mjs`. Pin it to whatever
+    `node_modules/tailwindcss/package.json` reports (see the re-sync risk below).
+  - `playwright` — `package-validate.mjs` does a bare `import('playwright')`.
+    pnpm's isolated layout only links `@playwright/test` at the top level, never
+    `playwright`, so it will **not** resolve from `frontend/node_modules` and the
+    render check silently degrades to `[RENDER_SKIPPED]`. Pick the version whose
+    `browsers.json` pins a chromium build already in `~/.cache/ms-playwright/`
+    (1.61.1 → chromium 1228) so no ~200 MB download is needed. `npm`'s
+    `allow-scripts` warning about esbuild's blocked postinstall is harmless —
+    the platform binary package still works.
 
 ## Scope
 
@@ -224,7 +258,35 @@ dot-directory so `tsc -p` never includes it. `pnpm type-check` is unaffected.
   `Type '`/journals/series/${string}`' is not assignable to type
 'UrlObject | RouteImpl<…>'` in files you never touched. This is **not** a real
   type error — run `./node_modules/.bin/next typegen` (a few seconds, no full
-  build) and it clears.
+  build) and it clears. **`next typegen` also rewrites the tracked
+  `next-env.d.ts`**, flipping its import from `./.next/dev/types/routes.d.ts` to
+  `./.next/types/routes.d.ts` (the dev server writes the `dev/` variant). That
+  shows up as a stray modified file with nothing to do with the sync —
+  `git checkout -- frontend/next-env.d.ts` once the build is done.
+
+## Reading the re-sync verdict: DS-source-only changes grade nothing
+
+A change to the **app's** component source with no change to
+`.design-sync/previews/` yields `changed: []`, `pendingGrade: []` and
+`capture: skipped "empty_worklist"` — while `upload.any` is still true. That is
+correct, not a broken diff: `sourceKeys` are keyed on the authored previews and
+preview-affecting config, so DS source edits re-upload bytes
+(`upload.bundle` / `upload.styling`) without re-grading cards.
+
+Worked example — the `ui/loading.tsx` Skeleton collapse (#1177): 47/47
+`unchanged`, nothing to grade, `bundleSha12` and `styleSha` both moved. Diffing
+the old anchor against the freshly built `ds-bundle/_ds_sync.json` showed **zero
+differing `renderHashes`**, which is machine proof that the refactor was visually
+a no-op. That diff is the cheapest way to verify a "no visual change" claim:
+
+```sh
+python3 -c "
+import json; a=json.load(open('.design-sync/.cache/remote-sync.json')); b=json.load(open('ds-bundle/_ds_sync.json'))
+print([k for k in b['renderHashes'] if a['renderHashes'].get(k)!=b['renderHashes'][k]])"
+```
+
+Also note `scriptsSha`: identical between anchors means the skill scripts have not
+moved, which is why `canary` is `null` and no `[SPOT_CHECK]` sheets appear.
 
 ## Re-sync risks
 
