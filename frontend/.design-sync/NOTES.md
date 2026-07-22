@@ -77,13 +77,7 @@ globals (it still emits, but a clean exit is worth having).
 
 ## Verified upstream bugs (present in the app, not artefacts of the sync)
 
-1. **`Skeleton` is exported twice** — `ui/skeleton.tsx` and `ui/loading.tsx`. A
-   bare `export *` from both makes the name ambiguous and **silently drops it
-   from the bundle**, so `ds-entry.ts` lists `loading.tsx`'s exports explicitly,
-   minus `Skeleton`. The shadcn one wins the name (20 importers vs 0 —
-   `loading.tsx`'s is used only internally by its own `*Skeleton` composites).
-   Two same-named components in one directory is a trap regardless of this sync.
-2. **`dark:` variants are broken app-wide.** `globals.css:5` says the dark
+1. **`dark:` variants are broken app-wide.** `globals.css:5` says the dark
    `@custom-variant` was "replaced for SonarQube compatibility", but nothing
    replaced it. Tailwind v4 therefore compiles `dark:*` to
    `@media (prefers-color-scheme: dark)` — following the OS — while the app
@@ -91,7 +85,7 @@ globals (it still emits, but a clean exit is worth having).
    utilities key off the wrong signal. Semantic token classes are unaffected
    (`.dark` redefines the variables), which is why `conventions.md` tells the
    design agent to use tokens and never write `dark:`.
-3. **`text-destructive-foreground` does not exist.** `@theme inline` maps
+2. **`text-destructive-foreground` does not exist.** `@theme inline` maps
    `--color-destructive` but never `--color-destructive-foreground`, so no
    utility is generated — confirmed absent from the compiled CSS while
    `.text-destructive` is present. **5 files use it**
@@ -99,7 +93,7 @@ globals (it still emits, but a clean exit is worth having).
    `TagManagementDialog`, …). It is a silent no-op in production. The working
    pair, used by `buttonVariants({variant:'destructive'})`, is
    `bg-destructive text-white`.
-4. **Duplicate token blocks in `globals.css`.** Tokens are defined twice: an
+3. **Duplicate token blocks in `globals.css`.** Tokens are defined twice: an
    HSL-triplet set inside `@layer base { :root }` (~lines 8-51) and an oklch set
    in a plain unlayered `:root` (~lines 105-172). Unlayered beats layered, so
    **the oklch set wins** and the HSL block is dead weight. Same for `.dark`.
@@ -189,12 +183,10 @@ Everything else falls through to the real `fetch`.
 ## Known render warns
 
 - `ThemeToggle` can only ever be captured in light theme (the moon glyph is
-  behind a `dark:` variant — see upstream bug 2). Its cells are "bare" and
+  behind a `dark:` variant — see upstream bug 1). Its cells are "bare" and
   "in context"; it takes no props.
 - `ButtonLoading` hard-codes `h-4` for its spinner, so a size axis only varies
   the surrounding Button — a `variants render identically` warn here is legitimate.
-- The two `Skeleton`s look slightly different in sheets (`bg-accent` vs
-  `bg-muted`) — correct, not a bug.
 
 ## Grouping
 

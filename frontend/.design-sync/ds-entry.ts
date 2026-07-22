@@ -28,6 +28,7 @@ export * from '../src/components/ui/form';
 export * from '../src/components/ui/hover-card';
 export * from '../src/components/ui/input';
 export * from '../src/components/ui/label';
+export * from '../src/components/ui/loading';
 export * from '../src/components/ui/popover';
 export * from '../src/components/ui/radio-group';
 export * from '../src/components/ui/scroll-area';
@@ -42,21 +43,6 @@ export * from '../src/components/ui/textarea';
 export * from '../src/components/ui/theme-toggle';
 export * from '../src/components/ui/toggle';
 export * from '../src/components/ui/tooltip';
-
-// `loading.tsx` also exports a `Skeleton`, which collides with the canonical
-// shadcn one in `ui/skeleton.tsx` (20 importers across the app vs. 0 for
-// loading's, which is only used internally by the *Skeleton composites below).
-// A star export would make the name ambiguous and drop it from the bundle, so
-// loading's public surface is listed explicitly, minus `Skeleton`.
-export {
-  ButtonLoading,
-  CardSkeleton,
-  ListSkeleton,
-  LoadingOverlay,
-  LoadingSpinner,
-  PageLoading,
-  TableSkeleton,
-} from '../src/components/ui/loading';
 
 // The bundle inlines its own copy of sonner, and previews/designs only get
 // react + this package as externals. Without re-exporting `toast` here, a

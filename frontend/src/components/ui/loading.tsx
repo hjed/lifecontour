@@ -7,6 +7,7 @@
  * different use cases and layouts.
  */
 
+import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { Loader2 } from 'lucide-react';
 
@@ -74,23 +75,14 @@ interface SkeletonProps {
 }
 
 /**
- * Skeleton loading component for content placeholders
- */
-export function Skeleton({ className }: SkeletonProps) {
-  return (
-    <div
-      className={cn('bg-muted animate-pulse rounded-md', className)}
-      aria-hidden='true'
-    />
-  );
-}
-
-/**
  * Card skeleton for loading contact cards
  */
 export function CardSkeleton({ className }: SkeletonProps) {
   return (
-    <div className={cn('space-y-3 rounded-lg border p-4', className)}>
+    <div
+      className={cn('space-y-3 rounded-lg border p-4', className)}
+      aria-hidden='true'
+    >
       <div className='space-y-2'>
         <Skeleton className='h-4 w-3/4' />
         <Skeleton className='h-3 w-1/2' />
@@ -111,7 +103,7 @@ export function ListSkeleton({
   itemCount = 3,
 }: SkeletonProps & { readonly itemCount?: number }) {
   return (
-    <div className={cn('space-y-2', className)}>
+    <div className={cn('space-y-2', className)} aria-hidden='true'>
       {Array.from({ length: itemCount }).map((_, index) => (
         <div
           key={`list-skeleton-item-${index}`}
@@ -140,7 +132,7 @@ export function TableSkeleton({
   readonly columns?: number;
 }) {
   return (
-    <div className={cn('space-y-2', className)}>
+    <div className={cn('space-y-2', className)} aria-hidden='true'>
       {/* Header */}
       <div className='flex space-x-2 border-b pb-2'>
         {Array.from({ length: columns }).map((_, index) => (
