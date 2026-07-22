@@ -244,5 +244,45 @@ describe('TagsEditor', () => {
     renderEditor({ isError: true });
 
     expect(screen.getByTestId('tags-error')).toBeInTheDocument();
+    // The add affordance needs the definitions, so it stands down.
+    expect(screen.queryByTestId('add-tag-button')).not.toBeInTheDocument();
+  });
+
+  it('keeps assigned badges visible and removable when tag definitions fail', async () => {
+    // A caller may already hold the assigned tags (journal tags are embedded on
+    // the journal resource). A failure of the *definitions* request must not
+    // blank the badges the caller handed us, or the user loses the ability to
+    // see and remove tags the page already has.
+    const user = userEvent.setup();
+    const { onRemove } = renderEditor({ isError: true });
+
+    expect(screen.getByTestId('tag-badge-1')).toHaveTextContent('Work');
+    expect(screen.getByTestId('tag-badge-2')).toHaveTextContent('Family');
+
+    await user.click(screen.getByTestId('remove-tag-1'));
+
+    expect(onRemove).toHaveBeenCalledWith('1');
+  });
+
+  it('does not reopen the add popover with a stale query after an error clears', async () => {
+    const user = userEvent.setup();
+    const { rerenderWith } = renderEditor();
+
+    // Type a query, then have the definitions request fail underneath us.
+    await user.click(screen.getByTestId('add-tag-button'));
+    await user.type(screen.getByTestId('tag-search-input'), 'Holiday');
+    rerenderWith({ isError: true });
+
+    expect(screen.getByTestId('tags-error')).toBeInTheDocument();
+
+    // On recovery the popover must stay shut rather than springing open with
+    // the pre-failure query still in it.
+    rerenderWith({ isError: false });
+
+    expect(screen.getByTestId('add-tag-button')).toBeInTheDocument();
+    expect(screen.queryByTestId('tag-search-input')).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('add-tag-button'));
+    expect(screen.getByTestId('tag-search-input')).toHaveValue('');
   });
 });

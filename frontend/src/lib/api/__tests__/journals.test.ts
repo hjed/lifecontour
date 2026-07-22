@@ -11,6 +11,8 @@ import {
   useSearchJournals,
   useJournalTags,
   useCreateJournalTag,
+  useAddJournalTag,
+  useRemoveJournalTag,
   journalTagKeys,
   useCreateJournal,
   useUpdateJournal,
@@ -26,6 +28,7 @@ import {
   reviewItemKeys,
 } from '../journals';
 import { JournalType } from '@/types/journals';
+import { toast } from 'sonner';
 
 // Mock fetch
 globalThis.fetch = jest.fn();
@@ -488,6 +491,203 @@ describe('Journals API', () => {
 
       expect(invalidateSpy).toHaveBeenCalledWith({
         queryKey: journalTagKeys.lists(),
+      });
+    });
+  });
+
+  describe('useAddJournalTag', () => {
+    it('should POST the tag assignment to the journal relationships endpoint', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: {} }),
+      } as Response);
+
+      const { result } = renderHook(() => useAddJournalTag(), {
+        wrapper: createWrapper,
+      });
+
+      await act(async () => {
+        await result.current.mutateAsync({
+          journalId: 'journal-1',
+          tagId: 'tag-1',
+        });
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/journals/journal-1/relationships/tags',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            data: { type: 'journal-tag', attributes: { tag_id: 'tag-1' } },
+          }),
+        })
+      );
+    });
+
+    it('should invalidate the journal detail and list queries on success', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: {} }),
+      } as Response);
+
+      const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
+
+      const { result } = renderHook(() => useAddJournalTag(), {
+        wrapper: createWrapper,
+      });
+
+      await act(async () => {
+        await result.current.mutateAsync({
+          journalId: 'journal-1',
+          tagId: 'tag-1',
+        });
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: journalKeys.detail('journal-1'),
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: journalKeys.lists(),
+      });
+    });
+
+    it('should show a success toast on success', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: {} }),
+      } as Response);
+
+      const { result } = renderHook(() => useAddJournalTag(), {
+        wrapper: createWrapper,
+      });
+
+      await act(async () => {
+        await result.current.mutateAsync({
+          journalId: 'journal-1',
+          tagId: 'tag-1',
+        });
+      });
+
+      expect(toast.success).toHaveBeenCalledWith('Tag added successfully');
+    });
+
+    it('should surface the API error to the user as a toast', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ errors: [{ detail: 'Tag not found' }] }),
+      } as Response);
+
+      const { result } = renderHook(() => useAddJournalTag(), {
+        wrapper: createWrapper,
+      });
+
+      await act(async () => {
+        await expect(
+          result.current.mutateAsync({
+            journalId: 'journal-1',
+            tagId: 'missing',
+          })
+        ).rejects.toThrow('Tag not found');
+      });
+
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalledWith('Tag not found');
+      });
+    });
+  });
+
+  describe('useRemoveJournalTag', () => {
+    it('should DELETE the tag assignment from the journal relationships endpoint', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: {} }),
+      } as Response);
+
+      const { result } = renderHook(() => useRemoveJournalTag(), {
+        wrapper: createWrapper,
+      });
+
+      await act(async () => {
+        await result.current.mutateAsync({
+          journalId: 'journal-1',
+          tagId: 'tag-1',
+        });
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/journals/journal-1/relationships/tags/tag-1',
+        expect.objectContaining({ method: 'DELETE' })
+      );
+    });
+
+    it('should invalidate the journal detail and list queries on success', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: {} }),
+      } as Response);
+
+      const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
+
+      const { result } = renderHook(() => useRemoveJournalTag(), {
+        wrapper: createWrapper,
+      });
+
+      await act(async () => {
+        await result.current.mutateAsync({
+          journalId: 'journal-1',
+          tagId: 'tag-1',
+        });
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: journalKeys.detail('journal-1'),
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: journalKeys.lists(),
+      });
+    });
+
+    it('should show a success toast on success', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: {} }),
+      } as Response);
+
+      const { result } = renderHook(() => useRemoveJournalTag(), {
+        wrapper: createWrapper,
+      });
+
+      await act(async () => {
+        await result.current.mutateAsync({
+          journalId: 'journal-1',
+          tagId: 'tag-1',
+        });
+      });
+
+      expect(toast.success).toHaveBeenCalledWith('Tag removed successfully');
+    });
+
+    it('should surface the API error to the user as a toast', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ errors: [{ detail: 'Assignment not found' }] }),
+      } as Response);
+
+      const { result } = renderHook(() => useRemoveJournalTag(), {
+        wrapper: createWrapper,
+      });
+
+      await act(async () => {
+        await expect(
+          result.current.mutateAsync({
+            journalId: 'journal-1',
+            tagId: 'missing',
+          })
+        ).rejects.toThrow('Assignment not found');
+      });
+
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalledWith('Assignment not found');
       });
     });
   });

@@ -835,6 +835,16 @@ export class TestDataManager {
   }
 
   /**
+   * Track a journal tag this manager did not create itself, so it is deleted by
+   * {@link cleanup}. Used when a test creates a tag *through the UI* (the inline
+   * create-and-assign flow) — without this the tag would be orphaned in the
+   * shared journal tag namespace and leak into other tests' tag lists.
+   */
+  trackJournalTag(tagId: string): void {
+    this.createdJournalTagIds.push(tagId);
+  }
+
+  /**
    * Create multiple journal tags
    */
   async createJournalTags(
@@ -1873,7 +1883,7 @@ export class TagFactory {
   }
 
   static createWithPrefix(prefix: string, count: number): TagCreateRequest[] {
-    const randomStr = Math.random().toString(36).substring(2, 7);
+    const randomStr = crypto.randomUUID().slice(0, 8);
     return Array.from({ length: count }, (_, index) =>
       this.create({
         name: `${prefix}-${index + 1}-${Date.now()}-${randomStr}`,
@@ -1883,7 +1893,7 @@ export class TagFactory {
 
   static createHierarchy(): TagCreateRequest[] {
     const timestamp = Date.now();
-    const randomStr = Math.random().toString(36).substring(2, 7);
+    const randomStr = crypto.randomUUID().slice(0, 8);
     const suffix = `${timestamp}-${randomStr}`;
     return [
       this.create({ name: `Work-Parent-${suffix}`, color: '#FF6B6B' }),

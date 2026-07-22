@@ -11,6 +11,12 @@ so the contents page and the PDF document outline (viewer bookmarks) always
 mirror each other. The contents page lists the major sections — the summary
 with its years, each top-level trip, and the indexes — while the outline
 additionally nests child activities, reflecting the journal hierarchy.
+
+The document closes with two indexes — participants, then activity types —
+whose journal names are internal hyperlinks back to the entries, reusing the
+same anchors. Their rows can grow arbitrarily tall, so those tables split
+inside a row rather than failing the export when a prolific participant's list
+outgrows a page.
 """
 
 import io
@@ -19,12 +25,15 @@ from datetime import UTC, datetime
 from xml.sax.saxutils import escape as xml_escape
 
 from core_shared.models.journals import (
+    ActivityTypeIndexEntry,
     LogbookEntryData,
     LogbookExportData,
+    LogbookIndexJournal,
     LogbookYearlySummary,
     ParticipantIndexEntry,
 )
 from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm, mm
@@ -45,10 +54,16 @@ def _safe_str(text: object) -> str:
     return xml_escape(str(text))
 
 
-# Stable intra-document anchor names. The table of contents and the document
-# outline both link to these, and later phases (linked indexes) reuse them.
+def _type_label(journal_type: str) -> str:
+    """Render a raw journal type name as a human label."""
+    return journal_type.replace("_", " ").title()
+
+
+# Stable intra-document anchor names. The table of contents, the document
+# outline and the linked indexes all point at these.
 _SUMMARY_ANCHOR = "section_summary"
 _PARTICIPANT_INDEX_ANCHOR = "section_participant_index"
+_ACTIVITY_TYPE_INDEX_ANCHOR = "section_activity_type_index"
 
 
 def _entry_anchor(entry_id: int) -> str:
@@ -130,9 +145,12 @@ class LogbookPdfRenderer:
             for entry in data.entries:
                 self._render_entry(story, entry, styles, depth=0)
 
-        # Participant index
+        # Indexes, each linking its journal names back to the entries.
         if data.participant_index:
             self._render_participant_index(story, data.participant_index, styles)
+
+        if data.activity_type_index:
+            self._render_activity_type_index(story, data.activity_type_index, styles)
 
         # The outline is registered from the first-page callback — the only
         # place with a live canvas. Any future page furniture (footers, page
@@ -242,6 +260,21 @@ class LogbookPdfRenderer:
             textColor=self._ACCENT,
         )
 
+        styles["index_cell"] = ParagraphStyle(
+            "LogbookIndexCell",
+            parent=base["Normal"],
+            fontSize=9,
+            leading=12,
+        )
+
+        # Table-level ALIGN does not reach a Paragraph cell, so the centred
+        # count column the participant index has always had needs its own style.
+        styles["index_cell_centre"] = ParagraphStyle(
+            "LogbookIndexCellCentre",
+            parent=styles["index_cell"],
+            alignment=TA_CENTER,
+        )
+
         styles["toc_link_nested"] = ParagraphStyle(
             "LogbookTocLinkNested",
             parent=styles["toc_link"],
@@ -284,6 +317,13 @@ class LogbookPdfRenderer:
         if data.participant_index:
             nodes.append(
                 _NavNode(anchor=_PARTICIPANT_INDEX_ANCHOR, label="Participant Index")
+            )
+
+        if data.activity_type_index:
+            nodes.append(
+                _NavNode(
+                    anchor=_ACTIVITY_TYPE_INDEX_ANCHOR, label="Activity Type Index"
+                )
             )
 
         return tuple(nodes)
@@ -436,7 +476,7 @@ class LogbookPdfRenderer:
 
         # Title with date and type labels
         date_str = entry.event_date_range.start.strftime("%d/%m/%Y")
-        types_str = ", ".join(t.replace("_", " ").title() for t in entry.journal_types)
+        types_str = ", ".join(_type_label(t) for t in entry.journal_types)
         types_label = f' <font color="gray" size="8">[{types_str}]</font>'
 
         title_style = ParagraphStyle(
@@ -812,7 +852,7 @@ class LogbookPdfRenderer:
                         act_type, 0
                     )
                     row = [
-                        act_type.replace("_", " ").title(),
+                        _type_label(act_type),
                         str(count),
                         str(leadership_count),
                     ]
@@ -871,7 +911,49 @@ class LogbookPdfRenderer:
             story.append(abseil_table)
             story.append(Spacer(1, 6 * mm))
 
-    # ── Participant index ─────────────────────────────────────
+    # ── Linked indexes ────────────────────────────────────────
+
+    def _entry_links(
+        self, journals: list[LogbookIndexJournal], style: ParagraphStyle
+    ) -> Paragraph:
+        """Build a paragraph of internal links to the given journals.
+
+        Every id here came from an entry the document renders, so each link
+        resolves — ReportLab fails the build outright on a link whose anchor is
+        never emitted.
+        """
+        links = ", ".join(
+            f'<a href="#{_entry_anchor(journal.journal_id)}" '
+            f'color="{self._ACCENT_HEX}"><u>{_safe_str(journal.title)}</u></a>'
+            for journal in journals
+        )
+        return Paragraph(links, style)
+
+    def _index_table(self, rows: list[list[object]], col_widths: list[float]) -> Table:
+        """Build a styled index table whose rows may outgrow a page.
+
+        ``splitInRow`` lets a single row break across pages — without it a
+        contact linked to enough journals to fill a page fails the whole
+        export, since tables otherwise only split between rows.
+        """
+        table = Table(rows, colWidths=col_widths, repeatRows=1, splitInRow=1)
+        style = TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), self._HEADER_BG),
+                ("TEXTCOLOR", (0, 0), (-1, 0), self._HEADER_TEXT),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("GRID", (0, 0), (-1, -1), 0.5, self._TABLE_BORDER),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ]
+        )
+        for i in range(1, len(rows)):
+            if i % 2 == 0:
+                style.add("BACKGROUND", (0, i), (-1, i), self._LIGHT_ROW)
+        table.setStyle(style)
+        return table
 
     def _render_participant_index(
         self,
@@ -879,7 +961,7 @@ class LogbookPdfRenderer:
         participants: list[ParticipantIndexEntry],
         styles: dict[str, ParagraphStyle],
     ) -> None:
-        """Render the participant index as a sorted table."""
+        """Render the participant index, linking each contact's journals."""
         story.append(
             Paragraph(
                 f'<a name="{_PARTICIPANT_INDEX_ANCHOR}"/>Participant Index',
@@ -894,38 +976,64 @@ class LogbookPdfRenderer:
         )
         story.append(Spacer(1, 2 * mm))
 
-        headers = ["Name", "Appearances"]
-        table_data = [headers]
-        for p in participants:
-            table_data.append([p.name, str(p.appearances)])
+        cell_style = styles["index_cell"]
+        rows: list[list[object]] = [["Name", "Appearances", "Entries"]]
+        for participant in participants:
+            rows.append(
+                [
+                    Paragraph(_safe_str(participant.name), cell_style),
+                    Paragraph(
+                        str(participant.appearances), styles["index_cell_centre"]
+                    ),
+                    self._entry_links(participant.journals, cell_style),
+                ]
+            )
 
         avail_width = self._PAGE_WIDTH - 2 * self._MARGIN
-        col_widths = [avail_width * 0.70, avail_width * 0.30]
-        table = Table(table_data, colWidths=col_widths)
-        table.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, 0), self._HEADER_BG),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), self._HEADER_TEXT),
-                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                    ("FONTSIZE", (0, 0), (-1, -1), 9),
-                    ("ALIGN", (1, 0), (1, -1), "CENTER"),
-                    ("GRID", (0, 0), (-1, -1), 0.5, self._TABLE_BORDER),
-                    ("TOPPADDING", (0, 0), (-1, -1), 3),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-                ]
+        story.append(
+            self._index_table(
+                rows,
+                [avail_width * 0.26, avail_width * 0.16, avail_width * 0.58],
             )
         )
 
-        # Alternate row colours
-        for i in range(1, len(table_data)):
-            if i % 2 == 0:
-                table.setStyle(
-                    TableStyle(
-                        [
-                            ("BACKGROUND", (0, i), (-1, i), self._LIGHT_ROW),
-                        ]
-                    )
-                )
+    # ── Activity-type index ───────────────────────────────────
 
-        story.append(table)
+    def _render_activity_type_index(
+        self,
+        story: list[object],
+        activity_types: list[ActivityTypeIndexEntry],
+        styles: dict[str, ParagraphStyle],
+    ) -> None:
+        """Render the activity-type index, linking each type's journals.
+
+        A journal is listed under every type row it carries, so a canyoning
+        trip also appears under the bushwalking and abseiling rows its type
+        depends on.
+        """
+        story.append(
+            Paragraph(
+                f'<a name="{_ACTIVITY_TYPE_INDEX_ANCHOR}"/>Activity Type Index',
+                styles["section_heading"],
+            )
+        )
+        story.append(
+            Paragraph(
+                "Journal entries grouped by activity type.",
+                styles["small"],
+            )
+        )
+        story.append(Spacer(1, 2 * mm))
+
+        cell_style = styles["index_cell"]
+        rows: list[list[object]] = [["Activity Type", "Entries"]]
+        for section in activity_types:
+            rows.append(
+                [
+                    Paragraph(_type_label(section.activity_type), cell_style),
+                    self._entry_links(section.journals, cell_style),
+                ]
+            )
+
+        avail_width = self._PAGE_WIDTH - 2 * self._MARGIN
+        story.append(self._index_table(rows, [avail_width * 0.30, avail_width * 0.70]))

@@ -93,12 +93,37 @@ class LogbookYearlySummary:
 
 
 @dataclass
+class LogbookIndexJournal:
+    """A journal an index section links to.
+
+    Carries just enough to render an internal hyperlink: the id the renderer
+    turns into the entry's intra-document anchor, and the name to show.
+    """
+
+    journal_id: int
+    title: str
+
+
+@dataclass
 class ParticipantIndexEntry:
-    """Entry in the participant index."""
+    """Entry in the participant index.
+
+    ``journals`` lists the entries counted by ``appearances`` (one per root
+    entry the contact appears in), so the index can link to each of them.
+    """
 
     contact_id: int
     name: str
     appearances: int
+    journals: list[LogbookIndexJournal] = field(default_factory=list)
+
+
+@dataclass
+class ActivityTypeIndexEntry:
+    """One activity type's section of the activity-type index."""
+
+    activity_type: str  # Raw type name, e.g. "CANYONING"
+    journals: list[LogbookIndexJournal] = field(default_factory=list)
 
 
 @dataclass
@@ -108,3 +133,4 @@ class LogbookExportData:
     entries: list[LogbookEntryData]  # Root entries chronologically ordered
     yearly_summaries: list[LogbookYearlySummary]
     participant_index: list[ParticipantIndexEntry]
+    activity_type_index: list[ActivityTypeIndexEntry] = field(default_factory=list)

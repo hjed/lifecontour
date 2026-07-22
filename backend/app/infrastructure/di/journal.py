@@ -1,6 +1,7 @@
 """Dependency injection providers for the journal domain."""
 
 from core_shared.models.journals import (
+    ActivityTypeIndexCalculator,
     LogbookSummaryCalculator,
     ParticipantIndexCalculator,
 )
@@ -739,17 +740,24 @@ class JournalProvider(Provider):
         return ParticipantIndexCalculator()
 
     @provide(scope=Scope.REQUEST)
+    def activity_type_index_calculator(self) -> ActivityTypeIndexCalculator:
+        """Provide an ActivityTypeIndexCalculator instance."""
+        return ActivityTypeIndexCalculator()
+
+    @provide(scope=Scope.REQUEST)
     def logbook_data_service(
         self,
         repository: LogbookExportRepository,
         summary_calculator: LogbookSummaryCalculator,
         participant_calculator: ParticipantIndexCalculator,
+        activity_type_calculator: ActivityTypeIndexCalculator,
     ) -> LogbookDataService:
         """Provide a LogbookDataService instance."""
         return LogbookDataService(
             repository=repository,
             summary_calculator=summary_calculator,
             participant_calculator=participant_calculator,
+            activity_type_calculator=activity_type_calculator,
         )
 
     @provide(scope=Scope.APP)

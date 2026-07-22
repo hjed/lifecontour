@@ -1,6 +1,7 @@
 """Service for gathering and calculating logbook export data."""
 
 from core_shared.models.journals import (
+    ActivityTypeIndexCalculator,
     LogbookExportData,
     LogbookSummaryCalculator,
     ParticipantIndexCalculator,
@@ -17,11 +18,13 @@ class LogbookDataService:
         repository: LogbookExportRepository,
         summary_calculator: LogbookSummaryCalculator,
         participant_calculator: ParticipantIndexCalculator,
+        activity_type_calculator: ActivityTypeIndexCalculator,
     ):
         """Initialize the service."""
         self.repository = repository
         self.summary_calculator = summary_calculator
         self.participant_calculator = participant_calculator
+        self.activity_type_calculator = activity_type_calculator
 
     async def get_logbook_data(
         self,
@@ -85,11 +88,13 @@ class LogbookDataService:
         # 4. Calculate summaries
         yearly_summaries = self.summary_calculator.calculate(root_entries)
 
-        # 5. Calculate participant index
+        # 5. Calculate the indexes
         participant_index = self.participant_calculator.calculate(root_entries)
+        activity_type_index = self.activity_type_calculator.calculate(root_entries)
 
         return LogbookExportData(
             entries=root_entries,
             yearly_summaries=yearly_summaries,
             participant_index=participant_index,
+            activity_type_index=activity_type_index,
         )

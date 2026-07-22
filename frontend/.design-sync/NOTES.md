@@ -45,8 +45,18 @@ wraps it and `prepare.mjs` compiles to `.design-sync/.cache/compiled.css`.
 emits utilities it can see, so classes used solely by a new card don't exist
 until recompiled.
 
-`tailwind.config.cjs` at the package root is **dead config** — v4 never loads it.
-Plugins come from `@plugin` in `globals.css`.
+`tailwind.config.cjs` at the package root is **dead config** — v4 never loads it
+(there is no `@config` directive). Plugins come from `@plugin` in `globals.css`.
+See #1186: its `darkMode`, its colour map and two of its three plugins all do
+nothing.
+
+**Theme tokens are self-contained colour values, consumed as `var(--token)` —
+never `hsl(var(--token))`.** That wrapper is a v3-ism, and the dead config above
+is where it is still written down. The tokens were defined twice until #1178 (an
+HSL-triplet set inside `@layer base { :root }` and an oklch set in a plain
+unlayered `:root`; unlayered wins, so the HSL set was dead), and four runtime
+call sites had copied the v3 contract and were emitting `hsl(oklch(1 0 0))` — an
+invalid colour browsers drop. One token set survives, in oklch.
 
 ### The `@source inline(...)` safelist — do not delete it
 
@@ -77,13 +87,7 @@ globals (it still emits, but a clean exit is worth having).
 
 ## Verified upstream bugs (present in the app, not artefacts of the sync)
 
-1. **`Skeleton` is exported twice** — `ui/skeleton.tsx` and `ui/loading.tsx`. A
-   bare `export *` from both makes the name ambiguous and **silently drops it
-   from the bundle**, so `ds-entry.ts` lists `loading.tsx`'s exports explicitly,
-   minus `Skeleton`. The shadcn one wins the name (20 importers vs 0 —
-   `loading.tsx`'s is used only internally by its own `*Skeleton` composites).
-   Two same-named components in one directory is a trap regardless of this sync.
-2. **`dark:` variants are broken app-wide.** `globals.css:5` says the dark
+1. **`dark:` variants are broken app-wide.** `globals.css:5` says the dark
    `@custom-variant` was "replaced for SonarQube compatibility", but nothing
    replaced it. Tailwind v4 therefore compiles `dark:*` to
    `@media (prefers-color-scheme: dark)` — following the OS — while the app
@@ -91,28 +95,11 @@ globals (it still emits, but a clean exit is worth having).
    utilities key off the wrong signal. Semantic token classes are unaffected
    (`.dark` redefines the variables), which is why `conventions.md` tells the
    design agent to use tokens and never write `dark:`.
-3. ~~**`text-destructive-foreground` does not exist.**~~ **Fixed** (#1176). The
-   token had no `--color-*` mapping in `@theme inline`, so no utility was ever
-   generated and the class was a silent no-op in 5 files. Those now use
-   `bg-destructive text-white`, the pair
-   `buttonVariants({variant:'destructive'})` already used. shadcn v4 dropped
-   `--destructive-foreground` entirely — do not reintroduce it.
-4. ~~**Duplicate token blocks in `globals.css`.**~~ **Fixed** (#1178). Tokens
-   were defined twice — an HSL-triplet set inside `@layer base { :root }` and an
-   oklch set in a plain unlayered `:root`. Unlayered beats layered, so the oklch
-   set won and the HSL block was dead. The HSL block is gone; there is now one
-   token set, in oklch. The lasting rule: tokens are **self-contained colour
-   values**, consumed as `var(--token)` — never `hsl(var(--token))`. That v3
-   wrapper had already trapped four call sites into emitting
-   `hsl(oklch(1 0 0))`, an invalid colour browsers drop.
-5. **`frontend/tailwind.config.cjs` is never loaded.** Tailwind v4 is configured
-   from CSS and there is no `@config` directive, so its `darkMode: ['class']`,
-   its `hsl(var(--…))` colour map and its `plugins: [tailwindcss-animate,
-forms, typography]` all do nothing — only typography is re-registered, via
-   `@plugin` in `globals.css`. It is the origin of the `hsl(var(--…))` pattern
-   above. Consequence worth knowing: `animate-in`/`animate-out` (14 uses each)
-   generate no CSS, since neither `tailwindcss-animate` nor `tw-animate-css` is
-   loaded.
+2. **`animate-in` / `animate-out` generate no CSS** (#1186). Neither
+   `tailwindcss-animate` (v3-only, listed in the dead `tailwind.config.cjs`) nor
+   `tw-animate-css` (its v4 replacement, a dependency but imported nowhere) is
+   loaded. There are 14 uses of each class, mostly Radix enter/exit transitions
+   in the `ui/` primitives, so those animations silently do not run.
 
 ## `process` shim — required, keep it first
 
@@ -199,12 +186,10 @@ Everything else falls through to the real `fetch`.
 ## Known render warns
 
 - `ThemeToggle` can only ever be captured in light theme (the moon glyph is
-  behind a `dark:` variant — see upstream bug 2). Its cells are "bare" and
+  behind a `dark:` variant — see upstream bug 1). Its cells are "bare" and
   "in context"; it takes no props.
 - `ButtonLoading` hard-codes `h-4` for its spinner, so a size axis only varies
   the surrounding Button — a `variants render identically` warn here is legitimate.
-- The two `Skeleton`s look slightly different in sheets (`bg-accent` vs
-  `bg-muted`) — correct, not a bug.
 
 ## Grouping
 
