@@ -6,7 +6,6 @@ import { render, screen } from '@testing-library/react';
 import {
   LoadingSpinner,
   PageLoading,
-  Skeleton,
   CardSkeleton,
   ListSkeleton,
   TableSkeleton,
@@ -68,22 +67,6 @@ describe('PageLoading', () => {
 
     const pageContainer = container.firstChild as HTMLElement;
     expect(pageContainer).toHaveClass('custom-page-loading');
-  });
-});
-
-describe('Skeleton', () => {
-  it('renders skeleton with default styling', () => {
-    const { container } = render(<Skeleton />);
-
-    const skeleton = container.firstChild as HTMLElement;
-    expect(skeleton).toHaveClass('animate-pulse', 'rounded-md', 'bg-muted');
-  });
-
-  it('applies custom className', () => {
-    const { container } = render(<Skeleton className='h-4 w-full' />);
-
-    const skeleton = container.firstChild as HTMLElement;
-    expect(skeleton).toHaveClass('h-4', 'w-full');
   });
 });
 
@@ -242,11 +225,32 @@ describe('accessibility', () => {
     expect(screen.getByText('Loading...')).toHaveClass('sr-only');
   });
 
-  it('marks decorative elements as hidden from screen readers', () => {
-    const { container } = render(<Skeleton />);
+  it('hides the whole CardSkeleton placeholder from screen readers', () => {
+    const { container } = render(<CardSkeleton />);
 
-    const skeleton = container.firstChild as HTMLElement;
-    expect(skeleton).toHaveAttribute('aria-hidden', 'true');
+    expect(container.firstChild).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  it('hides the whole ListSkeleton placeholder from screen readers', () => {
+    const { container } = render(<ListSkeleton />);
+
+    expect(container.firstChild).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  it('hides the whole TableSkeleton placeholder from screen readers', () => {
+    const { container } = render(<TableSkeleton />);
+
+    expect(container.firstChild).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  it('builds skeleton placeholders from the canonical ui/skeleton primitive', () => {
+    const { container } = render(<CardSkeleton />);
+
+    // Guards against loading.tsx reintroducing its own `Skeleton`: only the
+    // shadcn primitive in `ui/skeleton.tsx` sets `data-slot="skeleton"`.
+    expect(container.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(
+      4
+    );
   });
 
   it('provides accessible loading overlay', () => {
