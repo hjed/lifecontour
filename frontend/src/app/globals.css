@@ -1,6 +1,6 @@
 @import 'tailwindcss';
-@plugin '@tailwindcss/typography';
 @import 'leaflet/dist/leaflet.css';
+@plugin '@tailwindcss/typography';
 
 /* Dark mode variant - replaced @custom-variant for SonarQube compatibility */
 
