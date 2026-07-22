@@ -278,7 +278,7 @@ export function TagManagementDialog({
                     <AlertDialogAction
                       onClick={handleDelete}
                       disabled={isDeleting}
-                      className='bg-destructive text-destructive-foreground hover:bg-destructive/90'
+                      className='bg-destructive hover:bg-destructive/90 text-white'
                     >
                       {isDeleting ? 'Deleting...' : 'Delete'}
                     </AlertDialogAction>

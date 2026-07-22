@@ -61,17 +61,9 @@ export function Providers({ children }: ProvidersProps) {
           {children}
 
           {/* Toast notifications */}
-          <Toaster
-            position='top-right'
-            toastOptions={{
-              duration: 4000,
-              style: {
-                background: 'hsl(var(--background))',
-                color: 'hsl(var(--foreground))',
-                border: '1px solid hsl(var(--border))',
-              },
-            }}
-          />
+          {/* Colours come from ui/sonner.tsx, which maps sonner's
+              --normal-* variables onto the app's theme tokens. */}
+          <Toaster position='top-right' toastOptions={{ duration: 4000 }} />
 
           {/* React Query DevTools - only in development */}
           {process.env.NODE_ENV === 'development' && (

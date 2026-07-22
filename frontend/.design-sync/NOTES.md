@@ -91,18 +91,28 @@ globals (it still emits, but a clean exit is worth having).
    utilities key off the wrong signal. Semantic token classes are unaffected
    (`.dark` redefines the variables), which is why `conventions.md` tells the
    design agent to use tokens and never write `dark:`.
-3. **`text-destructive-foreground` does not exist.** `@theme inline` maps
-   `--color-destructive` but never `--color-destructive-foreground`, so no
-   utility is generated — confirmed absent from the compiled CSS while
-   `.text-destructive` is present. **5 files use it**
-   (`MergeResolutionDialog`, `ReviewQueueSidebar`, `ReviewSuggestions`,
-   `TagManagementDialog`, …). It is a silent no-op in production. The working
-   pair, used by `buttonVariants({variant:'destructive'})`, is
-   `bg-destructive text-white`.
-4. **Duplicate token blocks in `globals.css`.** Tokens are defined twice: an
-   HSL-triplet set inside `@layer base { :root }` (~lines 8-51) and an oklch set
-   in a plain unlayered `:root` (~lines 105-172). Unlayered beats layered, so
-   **the oklch set wins** and the HSL block is dead weight. Same for `.dark`.
+3. ~~**`text-destructive-foreground` does not exist.**~~ **Fixed** (#1176). The
+   token had no `--color-*` mapping in `@theme inline`, so no utility was ever
+   generated and the class was a silent no-op in 5 files. Those now use
+   `bg-destructive text-white`, the pair
+   `buttonVariants({variant:'destructive'})` already used. shadcn v4 dropped
+   `--destructive-foreground` entirely — do not reintroduce it.
+4. ~~**Duplicate token blocks in `globals.css`.**~~ **Fixed** (#1178). Tokens
+   were defined twice — an HSL-triplet set inside `@layer base { :root }` and an
+   oklch set in a plain unlayered `:root`. Unlayered beats layered, so the oklch
+   set won and the HSL block was dead. The HSL block is gone; there is now one
+   token set, in oklch. The lasting rule: tokens are **self-contained colour
+   values**, consumed as `var(--token)` — never `hsl(var(--token))`. That v3
+   wrapper had already trapped four call sites into emitting
+   `hsl(oklch(1 0 0))`, an invalid colour browsers drop.
+5. **`frontend/tailwind.config.cjs` is never loaded.** Tailwind v4 is configured
+   from CSS and there is no `@config` directive, so its `darkMode: ['class']`,
+   its `hsl(var(--…))` colour map and its `plugins: [tailwindcss-animate,
+forms, typography]` all do nothing — only typography is re-registered, via
+   `@plugin` in `globals.css`. It is the origin of the `hsl(var(--…))` pattern
+   above. Consequence worth knowing: `animate-in`/`animate-out` (14 uses each)
+   generate no CSS, since neither `tailwindcss-animate` nor `tw-animate-css` is
+   loaded.
 
 ## `process` shim — required, keep it first
 
