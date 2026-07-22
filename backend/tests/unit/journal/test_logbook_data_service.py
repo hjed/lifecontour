@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from core_shared.models.journals import (
+    ActivityTypeIndexCalculator,
     EventDateRange,
     LogbookEntryData,
     LogbookSummaryCalculator,
@@ -42,6 +43,7 @@ def _make_service(raw_entries: list[LogbookEntryData]) -> LogbookDataService:
         repository=repo,
         summary_calculator=LogbookSummaryCalculator(),
         participant_calculator=ParticipantIndexCalculator(),
+        activity_type_calculator=ActivityTypeIndexCalculator(),
     )
 
 
@@ -164,6 +166,24 @@ class TestLogbookDataServiceHierarchy:
         root = result.entries[0]
         assert root.children[0].id == 2  # Earlier first
         assert root.children[1].id == 3
+
+    @pytest.mark.asyncio
+    async def test_activity_type_index_covers_the_assembled_tree(self) -> None:
+        """The activity-type index indexes roots and their nested children."""
+        parent = _make_entry(1, title="Blue Mountains Weekend", types=["NOTE"])
+        child = _make_entry(2, parent_id=1, title="Sunday Canyon", types=["CANYONING"])
+        service = _make_service([parent, child])
+
+        result = await service.get_logbook_data(user_id="u1")
+
+        sections = {
+            section.activity_type: [j.title for j in section.journals]
+            for section in result.activity_type_index
+        }
+        assert sections == {
+            "CANYONING": ["Sunday Canyon"],
+            "NOTE": ["Blue Mountains Weekend"],
+        }
 
     @pytest.mark.asyncio
     async def test_deep_hierarchy(self) -> None:

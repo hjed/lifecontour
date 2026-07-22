@@ -1,9 +1,11 @@
 """Calculators for logbook export data."""
 
-from typing import Any
+from dataclasses import dataclass, field
 
 from .logbook_export import (
+    ActivityTypeIndexEntry,
     LogbookEntryData,
+    LogbookIndexJournal,
     LogbookYearlySummary,
     ParticipantIndexEntry,
 )
@@ -92,47 +94,113 @@ class LogbookSummaryCalculator:
         return sorted(summaries_by_year.values(), key=lambda s: s.year, reverse=True)
 
 
+@dataclass
+class _ParticipantAppearances:
+    """A contact's accumulated appearances while building the index.
+
+    The appearance count is not tracked separately — it is the length of
+    ``journals``, so the count and the linked list cannot disagree.
+    """
+
+    name: str
+    journals: list[LogbookIndexJournal] = field(default_factory=list)
+
+
+# The relationship types the participant index counts.
+_INDEXED_ROLES = ("PARTICIPANT", "INVITEE")
+
+
+def _indexed_contacts(entry: LogbookEntryData) -> dict[int, str]:
+    """Map contact id to name for everyone indexed on an entry or its children.
+
+    Collapsing the subtree into one mapping is what makes a contact listed on
+    both a trip and its child activities count once for that trip.
+    """
+    contacts = {
+        contact.contact_id: contact.name
+        for contact in entry.contacts
+        if contact.role in _INDEXED_ROLES
+    }
+    for child in entry.children:
+        contacts.update(_indexed_contacts(child))
+    return contacts
+
+
 class ParticipantIndexCalculator:
     """Calculates the participant index from logbook entries."""
 
     def calculate(
         self, entries: list[LogbookEntryData], min_appearances: int = 3
     ) -> list[ParticipantIndexEntry]:
-        """Calculate the participant index for contacts with >= min_appearances."""
-        # Count appearances per root entry to avoid double counting
-        # if a contact appears in both parent and sub-entries.
+        """Calculate the participant index for contacts with >= min_appearances.
 
-        appearances_by_root: dict[int, dict[str, Any]] = {}
+        Each qualifying contact also carries the root entries they appear in,
+        so the PDF index can link to them. Appearances are counted per root
+        entry, so ``appearances == len(journals)`` holds by construction and a
+        contact listed on both a trip and its child activities is counted once.
+        """
+        appearances_by_root: dict[int, _ParticipantAppearances] = {}
         for entry in entries:
-            entry_contacts: set[int] = set()
-            names: dict[int, str] = {}
-
-            def collect_contacts(
-                e: LogbookEntryData, contacts_set: set[int], names_dict: dict[int, str]
-            ) -> None:
-                for c in e.contacts:
-                    if c.role in ("PARTICIPANT", "INVITEE"):
-                        contacts_set.add(c.contact_id)
-                        names_dict[c.contact_id] = c.name
-                for child in e.children:
-                    collect_contacts(child, contacts_set, names_dict)
-
-            collect_contacts(entry, entry_contacts, names)
-
-            for cid in entry_contacts:
-                if cid not in appearances_by_root:
-                    appearances_by_root[cid] = {"name": names[cid], "count": 0}
-                appearances_by_root[cid]["count"] += 1
-
-        result = []
-        for cid, data in appearances_by_root.items():
-            if data["count"] >= min_appearances:
-                result.append(
-                    ParticipantIndexEntry(
-                        contact_id=cid,
-                        name=data["name"],
-                        appearances=data["count"],
-                    )
+            for contact_id, name in _indexed_contacts(entry).items():
+                accumulator = appearances_by_root.setdefault(
+                    contact_id, _ParticipantAppearances(name=name)
+                )
+                # Counting the appearance and recording its link are the same
+                # step, so the count can never drift from the linked list.
+                accumulator.journals.append(
+                    LogbookIndexJournal(journal_id=entry.id, title=entry.title)
                 )
 
-        return sorted(result, key=lambda p: p.name)
+        return sorted(
+            (
+                ParticipantIndexEntry(
+                    contact_id=contact_id,
+                    name=accumulator.name,
+                    appearances=len(accumulator.journals),
+                    journals=accumulator.journals,
+                )
+                for contact_id, accumulator in appearances_by_root.items()
+                if len(accumulator.journals) >= min_appearances
+            ),
+            key=lambda participant: participant.name,
+        )
+
+
+class ActivityTypeIndexCalculator:
+    """Calculates the activity-type index from logbook entries."""
+
+    def calculate(
+        self, entries: list[LogbookEntryData]
+    ) -> list[ActivityTypeIndexEntry]:
+        """Group every entry under each of the journal types it carries.
+
+        Type rows are listed verbatim: a canyoning journal also carries the
+        bushwalking, abseiling and outdoor-activity rows its type depends on,
+        and appears under all of them. Sections are type-sorted; the journals
+        within a section keep document order (roots and their nested activities
+        in the order the PDF renders them).
+        """
+        journals_by_type: dict[str, list[LogbookIndexJournal]] = {}
+        seen_by_type: dict[str, set[int]] = {}
+
+        def index_entry(entry: LogbookEntryData) -> None:
+            for activity_type in entry.journal_types:
+                seen = seen_by_type.setdefault(activity_type, set())
+                if entry.id in seen:
+                    continue
+                seen.add(entry.id)
+                journals_by_type.setdefault(activity_type, []).append(
+                    LogbookIndexJournal(journal_id=entry.id, title=entry.title)
+                )
+            for child in entry.children:
+                index_entry(child)
+
+        for entry in entries:
+            index_entry(entry)
+
+        return [
+            ActivityTypeIndexEntry(
+                activity_type=activity_type, journals=journals_by_type[activity_type]
+            )
+            for activity_type in sorted(journals_by_type)
+        ]
