@@ -301,7 +301,7 @@ export function MergeResolutionDialog({
             <Button
               onClick={handleSubmit}
               disabled={isPending}
-              className='bg-destructive hover:bg-destructive/90 text-destructive-foreground'
+              className='bg-destructive hover:bg-destructive/90 text-white'
             >
               {isPending ? 'Merging...' : 'Merge'}
             </Button>

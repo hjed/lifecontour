@@ -11,22 +11,21 @@ jest.mock('react-leaflet', () => ({
   Polyline: (
     props: React.ComponentProps<'div'> & {
       positions?: [number, number][];
-      color?: string;
+      className?: string;
       weight?: number;
     }
   ) => (
     <div
       data-testid='polyline'
       data-positions={JSON.stringify(props.positions)}
-      data-color={props.color}
+      className={props.className}
       data-weight={props.weight}
     />
   ),
   CircleMarker: (
     props: React.ComponentProps<'div'> & {
       center?: [number, number];
-      color?: string;
-      fillColor?: string;
+      className?: string;
       fillOpacity?: number;
       weight?: number;
     }
@@ -34,8 +33,7 @@ jest.mock('react-leaflet', () => ({
     <div
       data-testid='circle-marker'
       data-center={JSON.stringify(props.center)}
-      data-color={props.color}
-      data-fillcolor={props.fillColor}
+      className={props.className}
     />
   ),
   useMap: () => ({ fitBounds: jest.fn() }),
@@ -60,7 +58,7 @@ describe('GPXTrackMap', () => {
     expect(polyline).toBeInTheDocument();
 
     // Verify direct style props are passed
-    expect(polyline).toHaveAttribute('data-color', 'hsl(var(--primary))');
+    expect(polyline).toHaveClass('stroke-chart-1');
     expect(polyline).toHaveAttribute('data-weight', '4');
   });
 });

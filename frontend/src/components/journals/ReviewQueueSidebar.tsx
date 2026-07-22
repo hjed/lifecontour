@@ -163,7 +163,7 @@ export function ReviewQueueSidebar({
                     <Button
                       variant='outline'
                       size='sm'
-                      className='border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground w-full text-xs'
+                      className='border-destructive text-destructive hover:bg-destructive w-full text-xs hover:text-white'
                       onClick={() => dismissMutation.mutate(id.toString())}
                       disabled={dismissMutation.isPending}
                       data-testid={`queue-dismiss-btn-${id}`}

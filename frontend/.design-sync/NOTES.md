@@ -79,8 +79,18 @@ wraps it and `prepare.mjs` compiles to `.design-sync/.cache/compiled.css`.
 emits utilities it can see, so classes used solely by a new card don't exist
 until recompiled.
 
-`tailwind.config.cjs` at the package root is **dead config** — v4 never loads it.
-Plugins come from `@plugin` in `globals.css`.
+`tailwind.config.cjs` at the package root is **dead config** — v4 never loads it
+(there is no `@config` directive). Plugins come from `@plugin` in `globals.css`.
+See #1186: its `darkMode`, its colour map and two of its three plugins all do
+nothing.
+
+**Theme tokens are self-contained colour values, consumed as `var(--token)` —
+never `hsl(var(--token))`.** That wrapper is a v3-ism, and the dead config above
+is where it is still written down. The tokens were defined twice until #1178 (an
+HSL-triplet set inside `@layer base { :root }` and an oklch set in a plain
+unlayered `:root`; unlayered wins, so the HSL set was dead), and four runtime
+call sites had copied the v3 contract and were emitting `hsl(oklch(1 0 0))` — an
+invalid colour browsers drop. One token set survives, in oklch.
 
 ### The `@source inline(...)` safelist — do not delete it
 
@@ -119,18 +129,11 @@ globals (it still emits, but a clean exit is worth having).
    utilities key off the wrong signal. Semantic token classes are unaffected
    (`.dark` redefines the variables), which is why `conventions.md` tells the
    design agent to use tokens and never write `dark:`.
-2. **`text-destructive-foreground` does not exist.** `@theme inline` maps
-   `--color-destructive` but never `--color-destructive-foreground`, so no
-   utility is generated — confirmed absent from the compiled CSS while
-   `.text-destructive` is present. **5 files use it**
-   (`MergeResolutionDialog`, `ReviewQueueSidebar`, `ReviewSuggestions`,
-   `TagManagementDialog`, …). It is a silent no-op in production. The working
-   pair, used by `buttonVariants({variant:'destructive'})`, is
-   `bg-destructive text-white`.
-3. **Duplicate token blocks in `globals.css`.** Tokens are defined twice: an
-   HSL-triplet set inside `@layer base { :root }` (~lines 8-51) and an oklch set
-   in a plain unlayered `:root` (~lines 105-172). Unlayered beats layered, so
-   **the oklch set wins** and the HSL block is dead weight. Same for `.dark`.
+2. **`animate-in` / `animate-out` generate no CSS** (#1186). Neither
+   `tailwindcss-animate` (v3-only, listed in the dead `tailwind.config.cjs`) nor
+   `tw-animate-css` (its v4 replacement, a dependency but imported nowhere) is
+   loaded. There are 14 uses of each class, mostly Radix enter/exit transitions
+   in the `ui/` primitives, so those animations silently do not run.
 
 ## `process` shim — required, keep it first
 

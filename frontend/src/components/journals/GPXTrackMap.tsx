@@ -17,6 +17,25 @@ interface GPXTrackMapProps {
   readonly tracks: ParsedTrack[];
 }
 
+// Leaflet applies `color`/`fillColor` as SVG presentation attributes, which lose
+// to any author CSS rule, so these classes win. The chart tokens are the theme's
+// categorical series palette and are defined for both light and dark. Class
+// strings must be spelled out in full — Tailwind cannot see `stroke-chart-${n}`.
+const TRACK_STROKE = [
+  'stroke-chart-1',
+  'stroke-chart-2',
+  'stroke-chart-3',
+  'stroke-chart-4',
+  'stroke-chart-5',
+];
+const TRACK_FILL = [
+  'fill-chart-1',
+  'fill-chart-2',
+  'fill-chart-3',
+  'fill-chart-4',
+  'fill-chart-5',
+];
+
 // Helper to fit bounds to polyline
 function MapBounds({ tracks }: { readonly tracks: ParsedTrack[] }) {
   const map = useMap();
@@ -80,20 +99,20 @@ export default function GPXTrackMap({ tracks }: GPXTrackMapProps) {
           startPoint[1] === endPoint[1];
 
         // Use different colors for different tracks to distinguish them
-        const hues = [220, 340, 160, 40, 280]; // Array of standard pleasant hues from primary
-        const hueIndex = i % hues.length;
-        const color =
-          i === 0 ? 'hsl(var(--primary))' : `hsl(${hues[hueIndex]}, 80%, 45%)`;
+        const colorIndex = i % TRACK_STROKE.length;
 
         return (
           <React.Fragment key={id}>
-            <Polyline positions={positions} color={color} weight={4} />
+            <Polyline
+              positions={positions}
+              className={TRACK_STROKE[colorIndex]}
+              weight={4}
+            />
             {startPoint && (
               <CircleMarker
                 center={startPoint}
                 radius={6}
-                color='white'
-                fillColor={color}
+                className={`${TRACK_FILL[colorIndex]} stroke-white`}
                 fillOpacity={1}
                 weight={2}
               />
@@ -102,8 +121,7 @@ export default function GPXTrackMap({ tracks }: GPXTrackMapProps) {
               <CircleMarker
                 center={endPoint}
                 radius={6}
-                color='white'
-                fillColor='hsl(var(--destructive))'
+                className='fill-destructive stroke-white'
                 fillOpacity={1}
                 weight={2}
               />

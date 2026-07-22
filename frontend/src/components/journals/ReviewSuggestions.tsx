@@ -71,7 +71,7 @@ export function ReviewSuggestions({
                 onClick={() => handleDismiss(suggestion.id)}
                 disabled={dismissMutation.isPending}
                 data-testid={`dismiss-btn-${suggestion.id}`}
-                className='border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground'
+                className='border-destructive text-destructive hover:bg-destructive hover:text-white'
               >
                 Dismiss
               </Button>
