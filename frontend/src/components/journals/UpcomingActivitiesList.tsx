@@ -19,7 +19,9 @@ import {
 } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert } from '@/components/ui/alert';
+import { CalendarDays } from 'lucide-react';
 import { JournalTypeBadges } from '@/components/journals/JournalTypeBadges';
+import { WidgetEmptyState } from '@/components/journals/WidgetEmptyState';
 import {
   UpcomingOutdoorActivityEntry,
   useOutdoorDashboard,
@@ -49,7 +51,7 @@ export function UpcomingActivitiesList() {
   const entries = data?.data.attributes.upcoming_activities ?? [];
 
   return (
-    <Card>
+    <Card className='flex flex-col'>
       <CardHeader>
         <CardTitle>Upcoming activities</CardTitle>
         <CardDescription>
@@ -57,7 +59,7 @@ export function UpcomingActivitiesList() {
           soonest first (up to 10).
         </CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className='flex flex-1 flex-col'>
         {isLoading && (
           <div className='space-y-3' data-testid='upcoming-loading'>
             <Skeleton className='h-16 w-full' />
@@ -72,14 +74,13 @@ export function UpcomingActivitiesList() {
         )}
 
         {!isLoading && !error && (
-          <div data-testid='upcoming-ready'>
+          <div className='flex flex-1 flex-col' data-testid='upcoming-ready'>
             {entries.length === 0 ? (
-              <p
-                className='text-muted-foreground py-4 text-sm'
+              <WidgetEmptyState
+                icon={CalendarDays}
+                message='No upcoming outdoor activities in the next 30 days.'
                 data-testid='upcoming-empty-state'
-              >
-                No upcoming outdoor activities in the next 30 days.
-              </p>
+              />
             ) : (
               <ul
                 className='space-y-3'

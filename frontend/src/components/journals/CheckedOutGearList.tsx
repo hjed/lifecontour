@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert } from '@/components/ui/alert';
+import { WidgetEmptyState } from '@/components/journals/WidgetEmptyState';
 import { useOutdoorDashboard } from '@/lib/api/outdoor-dashboard';
 import { formatDateRange } from '@/lib/date-utils';
 
@@ -29,14 +30,14 @@ export function CheckedOutGearList() {
   const items = data?.data.attributes.checked_out_gear ?? [];
 
   return (
-    <Card>
+    <Card className='flex flex-col'>
       <CardHeader>
         <CardTitle>Gear currently checked out</CardTitle>
         <CardDescription>
           Gear you have out right now, longest out first.
         </CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className='flex flex-1 flex-col'>
         {isLoading && (
           <div className='space-y-3' data-testid='checked-out-gear-loading'>
             <Skeleton className='h-12 w-full' />
@@ -51,14 +52,16 @@ export function CheckedOutGearList() {
         )}
 
         {!isLoading && !error && (
-          <div data-testid='checked-out-gear-ready'>
+          <div
+            className='flex flex-1 flex-col'
+            data-testid='checked-out-gear-ready'
+          >
             {items.length === 0 ? (
-              <p
-                className='text-muted-foreground py-4 text-sm'
+              <WidgetEmptyState
+                icon={Package}
+                message='No gear is currently checked out.'
                 data-testid='checked-out-gear-empty-state'
-              >
-                No gear is currently checked out.
-              </p>
+              />
             ) : (
               <ul className='space-y-3' aria-label='Gear currently checked out'>
                 {items.map(item => (

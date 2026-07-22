@@ -199,18 +199,12 @@ test.describe('Outdoor Logbook — incomplete activities review', () => {
       page.getByText('Activity restored to the incomplete review')
     ).toBeVisible();
 
-    // Back in the default (non-dismissed) list, the entry is live again
-    await Promise.all([
-      page.waitForResponse(
-        resp =>
-          resp.url().includes(LIST_API) &&
-          !resp.url().includes('include_dismissed=true') &&
-          !resp.url().includes('/dismiss') &&
-          resp.request().method() === 'GET' &&
-          resp.ok()
-      ),
-      showDismissedSwitch.click(),
-    ]);
+    // Back in the default (non-dismissed) list, the entry is live again.
+    // No refetch is awaited here: the stat row holds a permanent observer on
+    // the non-dismissed list, so the un-dismiss invalidation above already
+    // refetched it and toggling back is served from cache. Assert the
+    // resulting UI rather than a network round-trip that no longer happens.
+    await showDismissedSwitch.click();
 
     await expect(item).toBeVisible({ timeout: 15000 });
     await expect(item).toHaveAttribute('data-dismissed', 'false');
@@ -364,6 +358,25 @@ test.describe('Outdoor Logbook — dashboard widgets', () => {
       '/journals/outdoor-logbook'
     );
 
+    // Stat row: the headline numbers over the widget grid.
+    const stats = page.getByTestId('logbook-stats-ready');
+    await expect(stats).toBeVisible({ timeout: 15000 });
+    // The two future entries.
+    await expect(
+      stats.getByTestId('logbook-stat-upcoming').getByTestId('stat-value')
+    ).toHaveText('2');
+    // Empress Falls only: its runs are −30d and −15d, while Jenolan's −40d
+    // run falls outside the 30-day window. Done twice, counted once.
+    await expect(
+      stats.getByTestId('logbook-stat-templates').getByTestId('stat-value')
+    ).toHaveText('1');
+    // Distinct outdoor journals inside the 30-day window: the −10d canyon and
+    // the two Empress abseiling trips. The −40d Jenolan trip, the −100d
+    // bushwalk, the future trips and the gear-usage journals are all out.
+    await expect(
+      stats.getByTestId('logbook-stat-activities').getByTestId('stat-value')
+    ).toHaveText('3');
+
     // Upcoming widget: both future entries visible, soonest first; the past
     // journal stays out of the list.
     const upcoming = page.getByTestId('upcoming-ready');
@@ -467,6 +480,14 @@ test.describe('Outdoor Logbook — dashboard widgets', () => {
     await contactTestHelpers.navigateToAuthenticatedPage(
       '/journals/outdoor-logbook'
     );
+
+    const stats = page.getByTestId('logbook-stats-ready');
+    await expect(stats).toBeVisible({ timeout: 15000 });
+    for (const tile of ['incomplete', 'upcoming', 'templates', 'activities']) {
+      await expect(
+        stats.getByTestId(`logbook-stat-${tile}`).getByTestId('stat-value')
+      ).toHaveText('0');
+    }
 
     await expect(page.getByTestId('upcoming-ready')).toBeVisible({
       timeout: 15000,

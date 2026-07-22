@@ -31,9 +31,15 @@ export interface CheckedOutGearItem {
 }
 
 // Counts keyed by effective (dependency-reduced) journal type.
+//
+// The `total_*` fields count journals, so they are deliberately not the sum of
+// the matching mapping: a journal recording two independent subtypes appears in
+// two per-type counts but is one logged activity.
 export interface OutdoorActivityTotals {
   last_30_days: Partial<Record<JournalType, number>>;
   last_365_days: Partial<Record<JournalType, number>>;
+  total_last_30_days: number;
+  total_last_365_days: number;
 }
 
 export interface TemplateDone {
@@ -46,7 +52,10 @@ export interface OutdoorDashboardAttributes {
   upcoming_activities: UpcomingOutdoorActivityEntry[];
   checked_out_gear: CheckedOutGearItem[];
   activity_totals: OutdoorActivityTotals;
+  // `templates_done` done-counts are all-time, so the recent count is a
+  // separate server-computed field rather than something derivable here.
   templates_done: Record<string, TemplateDone[]>;
+  templates_done_last_30_days: number;
 }
 
 export interface OutdoorDashboardResponse {
