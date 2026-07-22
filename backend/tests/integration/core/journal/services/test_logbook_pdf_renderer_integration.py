@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 
 import pytest
 from core_shared.models.journals import (
+    ActivityTypeIndexCalculator,
     EventDateRange,
     Journal,
     LogbookSummaryCalculator,
@@ -55,6 +56,7 @@ def data_service(
         repository=export_repo,
         summary_calculator=LogbookSummaryCalculator(),
         participant_calculator=ParticipantIndexCalculator(),
+        activity_type_calculator=ActivityTypeIndexCalculator(),
     )
 
 
@@ -468,7 +470,9 @@ async def test_pdf_document_outline_from_seeded_data(
         "Summary",
         "Kanangra Weekend",
         "Empress Canyon",
+        "Activity Type Index",
     ]
     assert outline[0][1] == ["Year 2025", "Year 2024"]
     assert outline[1][1] == ["Kalang Falls Abseil"]
     assert outline[2][1] == []
+    assert outline[3][1] == []

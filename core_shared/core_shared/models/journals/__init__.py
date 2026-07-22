@@ -124,13 +124,16 @@ from .journal_relationship_types import JournalContactRelationshipType
 from .journal_types import JournalType
 from .kayaking_data import KayakingData
 from .logbook_calculators import (
+    ActivityTypeIndexCalculator,
     LogbookSummaryCalculator,
     ParticipantIndexCalculator,
 )
 from .logbook_export import (
+    ActivityTypeIndexEntry,
     LogbookEntryContact,
     LogbookEntryData,
     LogbookExportData,
+    LogbookIndexJournal,
     LogbookYearlySummary,
     ParticipantIndexEntry,
 )
@@ -244,11 +247,14 @@ __all__ = [
     "JoggingData",
     "ReviewItem",
     "SnorkellingData",
+    "ActivityTypeIndexCalculator",
     "LogbookSummaryCalculator",
     "ParticipantIndexCalculator",
+    "ActivityTypeIndexEntry",
     "LogbookEntryContact",
     "LogbookEntryData",
     "LogbookExportData",
+    "LogbookIndexJournal",
     "LogbookYearlySummary",
     "ParticipantIndexEntry",
     "SUBTYPE_FACTS_FIELDS",

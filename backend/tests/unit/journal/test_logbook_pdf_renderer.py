@@ -11,6 +11,7 @@ import pytest
 from core_shared.models.journals import (
     AbseilingData,
     AbseilPitch,
+    ActivityTypeIndexEntry,
     CavingData,
     EventDateRange,
     FitnessData,
@@ -19,6 +20,7 @@ from core_shared.models.journals import (
     LogbookEntryContact,
     LogbookEntryData,
     LogbookExportData,
+    LogbookIndexJournal,
     LogbookYearlySummary,
     OutdoorActivityData,
     ParticipantIndexEntry,
@@ -265,6 +267,45 @@ def _make_rich_export_data() -> LogbookExportData:
     )
 
 
+def _make_indexed_export_data() -> LogbookExportData:
+    """Export data whose indexes reference the entries they list.
+
+    Three entries across three types, one of them (the canyon trip) carrying
+    two type rows, plus a participant who appears in all three — enough to
+    exercise both index sections and their internal links.
+    """
+    walk = _make_entry(1, title="Ridge Walk", types=["BUSHWALKING"], day=1)
+    canyon = _make_entry(
+        2, title="Claustral Canyon", types=["CANYONING", "BUSHWALKING"], day=2
+    )
+    cave = _make_entry(3, title="Jenolan Caves", types=["CAVING"], day=3)
+
+    refs = {
+        entry.id: LogbookIndexJournal(journal_id=entry.id, title=entry.title)
+        for entry in (walk, canyon, cave)
+    }
+
+    return LogbookExportData(
+        entries=[walk, canyon, cave],
+        yearly_summaries=[],
+        participant_index=[
+            ParticipantIndexEntry(
+                contact_id=1,
+                name="Alice Smith",
+                appearances=3,
+                journals=[refs[1], refs[2], refs[3]],
+            )
+        ],
+        activity_type_index=[
+            ActivityTypeIndexEntry(
+                activity_type="BUSHWALKING", journals=[refs[1], refs[2]]
+            ),
+            ActivityTypeIndexEntry(activity_type="CANYONING", journals=[refs[2]]),
+            ActivityTypeIndexEntry(activity_type="CAVING", journals=[refs[3]]),
+        ],
+    )
+
+
 def _extract_pdf_text(pdf_bytes: bytes) -> str:
     """Extract text from PDF bytes using pypdf.
 
@@ -310,6 +351,67 @@ def _internal_link_target_pages(pdf_bytes: bytes) -> list[int | None]:
             else:
                 targets.append(None)
     return targets
+
+
+def _internal_link_destinations(pdf_bytes: bytes) -> list[tuple[int, str, str]]:
+    """Resolve every internal link to its exact destination, in document order.
+
+    ReportLab writes ``<a href="#x">`` as a ``/Link`` annotation whose ``/Dest``
+    is ``[page, '/XYZ', x, y, zoom]``, where the coordinates are those of the
+    anchored paragraph. Returning the page *with* those coordinates identifies
+    which anchor a link points at — resolving only to a page cannot tell two
+    entries apart when they share one, which in these fixtures they always do.
+
+    Annotations are read page by page in emission order, so the result follows
+    document order: the contents rows first, then each index section's links.
+    """
+    from pypdf import PdfReader
+
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    page_idnums = {
+        page.indirect_reference.idnum: idx
+        for idx, page in enumerate(reader.pages)
+        if page.indirect_reference is not None
+    }
+
+    destinations: list[tuple[int, str, str]] = []
+    for page in reader.pages:
+        for annot in page.get("/Annots") or []:
+            obj = annot.get_object()
+            if obj.get("/Subtype") != "/Link" or "/Dest" not in obj:
+                continue
+            dest = obj["/Dest"]
+            assert isinstance(dest, list) and hasattr(dest[0], "idnum"), dest
+            page_index = page_idnums[dest[0].idnum]
+            destinations.append((page_index, str(dest[2]), str(dest[3])))
+    return destinations
+
+
+def _entry_destinations(
+    pdf_bytes: bytes, data: LogbookExportData
+) -> tuple[dict[int, tuple[int, str, str]], int]:
+    """Map each entry id to its anchor's destination, via the contents rows.
+
+    The contents page holds exactly one row per navigable section, emitted
+    before any index links, so its rows give a trustworthy reference for where
+    each entry's anchor actually lives. Returns that mapping plus the number of
+    contents rows, so a caller can slice the index links that follow.
+    """
+    destinations = _internal_link_destinations(pdf_bytes)
+    toc_rows = (
+        len(data.entries)
+        + bool(data.yearly_summaries) * (1 + len(data.yearly_summaries))
+        + bool(data.participant_index)
+        + bool(data.activity_type_index)
+    )
+
+    # Entry rows follow the summary rows and precede the index rows.
+    first_entry_row = bool(data.yearly_summaries) * (1 + len(data.yearly_summaries))
+    entry_rows = destinations[first_entry_row : first_entry_row + len(data.entries)]
+    return {
+        entry.id: destination
+        for entry, destination in zip(data.entries, entry_rows, strict=True)
+    }, toc_rows
 
 
 @dataclasses.dataclass
@@ -942,3 +1044,157 @@ class TestLogbookPdfRenderer:
         data = LogbookExportData(entries=[], yearly_summaries=[], participant_index=[])
         result = self._renderer().render(data)
         assert _outline_tree(result) == []
+
+    # ── Linked indexes (spec 3.3) ──────────────────────────────
+
+    def test_participant_index_lists_linked_journals(self) -> None:
+        """Each contact's row lists the journals they appear in (spec 3.3).
+
+        The entry titles also appear in the entry bodies above, so the listing
+        is checked against the index section only — everything from the last
+        occurrence of the heading (the first is its contents row) onwards.
+        """
+        data = _make_indexed_export_data()
+        result = self._renderer().render(data)
+        text = _extract_pdf_text(result)
+
+        assert "Participant Index" in text
+        index_section = text[text.rindex("Participant Index") :]
+        assert "Alice Smith" in index_section
+        for journal in data.participant_index[0].journals:
+            assert journal.title in index_section
+
+    def test_participant_index_links_target_their_entries(self) -> None:
+        """Every participant journal name links to that journal's own anchor.
+
+        Compares each link's destination against the destination the contents
+        row for that entry resolves to, so a link pointing at the wrong entry —
+        or no link at all — fails. Page identity alone would not: every entry
+        in this fixture renders on the same page.
+        """
+        data = _make_indexed_export_data()
+        result = self._renderer().render(data)
+
+        destinations = _internal_link_destinations(result)
+        by_entry, toc_rows = _entry_destinations(result, data)
+        journals = data.participant_index[0].journals
+
+        participant_links = destinations[toc_rows : toc_rows + len(journals)]
+        assert participant_links == [by_entry[j.journal_id] for j in journals]
+        # Three distinct entries, so three distinct destinations.
+        assert len(set(participant_links)) == len(journals)
+
+    def test_activity_type_index_present_and_linked(self) -> None:
+        """The activity-type index lists each type's journals as links (spec 3.3)."""
+        data = _make_indexed_export_data()
+        result = self._renderer().render(data)
+        text = _extract_pdf_text(result)
+
+        assert "Activity Type Index" in text
+        index_section = text[text.rindex("Activity Type Index") :]
+        for label in ("Bushwalking", "Canyoning", "Caving"):
+            assert label in index_section
+
+        destinations = _internal_link_destinations(result)
+        by_entry, toc_rows = _entry_destinations(result, data)
+        expected = [
+            by_entry[journal.journal_id]
+            for section in data.activity_type_index
+            for journal in section.journals
+        ]
+
+        # Contents rows, then the participant links, then this section's.
+        first_link = toc_rows + len(data.participant_index[0].journals)
+        assert destinations[first_link:] == expected
+
+    def test_activity_type_index_lists_journal_under_every_type(self) -> None:
+        """A journal is listed under each type row it carries.
+
+        Subtype rows are stored verbatim, so a canyoning journal also carries
+        the bushwalking/abseiling/outdoor-activity rows its type depends on and
+        appears under all of them (product decision, 2026-07-22).
+        """
+        types = ["CANYONING", "BUSHWALKING", "ABSEILING_TRIP", "OUTDOOR_ACTIVITY"]
+        entry = _make_entry(1, title="Claustral Canyon", types=types)
+        reference = LogbookIndexJournal(journal_id=1, title="Claustral Canyon")
+        data = LogbookExportData(
+            entries=[entry],
+            yearly_summaries=[],
+            participant_index=[],
+            activity_type_index=[
+                ActivityTypeIndexEntry(activity_type=t, journals=[reference])
+                for t in sorted(types)
+            ],
+        )
+
+        result = self._renderer().render(data)
+        text = _extract_pdf_text(result)
+
+        index_section = text[text.rindex("Activity Type Index") :]
+        for label in ("Abseiling Trip", "Bushwalking", "Canyoning", "Outdoor Activity"):
+            assert label in index_section
+
+        # One link per section, each targeting the single entry's anchor.
+        destinations = _internal_link_destinations(result)
+        by_entry, toc_rows = _entry_destinations(result, data)
+        assert destinations[toc_rows:] == [by_entry[1]] * len(types)
+
+    def test_activity_type_index_absent_when_empty(self) -> None:
+        """No activity-type index section is rendered without index data."""
+        data = LogbookExportData(entries=[], yearly_summaries=[], participant_index=[])
+        result = self._renderer().render(data)
+        text = _extract_pdf_text(result)
+        assert "Activity Type Index" not in text
+
+    def test_indexes_listed_in_toc_and_outline(self) -> None:
+        """Both index sections appear on the contents page and in the outline."""
+        data = _make_indexed_export_data()
+        result = self._renderer().render(data)
+        text = _extract_pdf_text(result)
+
+        assert "Contents" in text
+        assert text.index("Contents") < text.index("Participant Index")
+
+        outline = _outline_tree(result)
+        assert _outline_titles(outline) == [
+            *[entry.title for entry in data.entries],
+            "Participant Index",
+            "Activity Type Index",
+        ]
+        assert all(node.page is not None for node in outline)
+
+    def test_participant_index_renders_long_journal_list(self) -> None:
+        """A contact linked to hundreds of journals still renders.
+
+        A linked list that tall exceeds a page, and a table row cannot break
+        across pages by default — this pins the row-splitting that keeps a
+        prolific participant from failing the whole export.
+        """
+        entries = [
+            _make_entry(i, title=f"Trip Number {i}", day=(i % 28) + 1)
+            for i in range(1, 301)
+        ]
+        references = [
+            LogbookIndexJournal(journal_id=entry.id, title=entry.title)
+            for entry in entries
+        ]
+        data = LogbookExportData(
+            entries=entries,
+            yearly_summaries=[],
+            participant_index=[
+                ParticipantIndexEntry(
+                    contact_id=1,
+                    name="Alice Smith",
+                    appearances=len(references),
+                    journals=references,
+                )
+            ],
+            activity_type_index=[
+                ActivityTypeIndexEntry(activity_type="BUSHWALKING", journals=references)
+            ],
+        )
+
+        result = self._renderer().render(data)
+
+        assert result[:5] == b"%PDF-"
+        assert "Trip Number 300" in _extract_pdf_text(result)

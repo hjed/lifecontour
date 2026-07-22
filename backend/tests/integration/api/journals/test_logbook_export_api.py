@@ -29,6 +29,41 @@ def _extract_pdf_text(pdf_bytes: bytes) -> str:
     return "\n".join(parts)
 
 
+def _internal_link_destinations(pdf_bytes: bytes) -> list[tuple[int, str, str]]:
+    """Resolve every internal link to its exact destination, in document order.
+
+    ReportLab writes ``<a href="#anchor">`` as a ``/Link`` annotation whose
+    ``/Dest`` is ``[page, '/XYZ', x, y, zoom]`` — the coordinates of the
+    anchored paragraph. External ``/URI`` links carry no ``/Dest`` and are
+    ignored. Keeping the coordinates identifies *which* anchor a link points
+    at; a page index alone cannot, since a short export puts every entry on
+    one page.
+
+    Annotations are read page by page in emission order, so the result follows
+    document order: one contents row per navigable section, then each index
+    section's links.
+    """
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    page_indexes = {
+        page.indirect_reference.idnum: idx
+        for idx, page in enumerate(reader.pages)
+        if page.indirect_reference is not None
+    }
+
+    destinations: list[tuple[int, str, str]] = []
+    for page in reader.pages:
+        for annotation in page.get("/Annots") or []:
+            obj = annotation.get_object()
+            if obj.get("/Subtype") != "/Link" or "/Dest" not in obj:
+                continue
+            dest = obj["/Dest"]
+            assert isinstance(dest, list) and hasattr(dest[0], "idnum"), dest
+            destinations.append(
+                (page_indexes[dest[0].idnum], str(dest[2]), str(dest[3]))
+            )
+    return destinations
+
+
 # ─── Fixtures ────────────────────────────────────────────────────────
 
 
@@ -371,6 +406,140 @@ class TestLogbookExportEndpoint:
         text_content = _extract_pdf_text(response.content)
         assert "Abseil Without Template" in text_content
         assert "Based on:" not in text_content
+
+    async def test_export_participant_index_links_to_entries(
+        self,
+        authenticated_client,
+        async_connection: AsyncConnection,
+        journal_repo: SqlJournalRepository,
+    ) -> None:
+        """The participant index lists a qualifying contact's linked journals.
+
+        Seeds one contact at the ``min_appearances = 3`` boundary (exactly
+        three entries) and a second contact just below it, then asserts the
+        qualifying contact's journals are listed and each name links to the
+        page holding that entry.
+        """
+        from core_shared.models.journals import EventDateRange, Journal
+
+        titles = ["Grose Valley Walk", "Empress Canyon", "Wollangambe Float"]
+        journal_ids: list[int] = []
+        for index, title in enumerate(titles):
+            journal = await journal_repo.save(
+                Journal(
+                    user_id="test-user-123",
+                    title=title,
+                    content=f"Trip notes for {title}",
+                    event_date_range=EventDateRange(
+                        start=datetime(2024, 8, index + 1, tzinfo=UTC),
+                        end=datetime(2024, 8, index + 1, tzinfo=UTC),
+                    ),
+                )
+            )
+            assert journal.id is not None
+            journal_ids.append(journal.id)
+            await async_connection.execute(
+                text("INSERT INTO journal_bushwalking_data (journal_id) VALUES (:id)"),
+                {"id": journal.id},
+            )
+
+        frequent_id = (
+            await async_connection.execute(
+                text("INSERT INTO contacts (first_name) VALUES (:name) RETURNING id"),
+                {"name": "Frequentflyer"},
+            )
+        ).scalar()
+        occasional_id = (
+            await async_connection.execute(
+                text("INSERT INTO contacts (first_name) VALUES (:name) RETURNING id"),
+                {"name": "Occasionalguest"},
+            )
+        ).scalar()
+
+        for journal_id in journal_ids:
+            await async_connection.execute(
+                text(
+                    "INSERT INTO journal_contact_relationships "
+                    "(journal_id, contact_id, relationship_type) "
+                    "VALUES (:journal_id, :contact_id, 'PARTICIPANT')"
+                ),
+                {"journal_id": journal_id, "contact_id": frequent_id},
+            )
+        for journal_id in journal_ids[:2]:
+            await async_connection.execute(
+                text(
+                    "INSERT INTO journal_contact_relationships "
+                    "(journal_id, contact_id, relationship_type) "
+                    "VALUES (:journal_id, :contact_id, 'INVITEE')"
+                ),
+                {"journal_id": journal_id, "contact_id": occasional_id},
+            )
+
+        response = await authenticated_client.post(
+            "/api/journals/export/outdoor-logbook",
+            json={"start_date": "2024-08-01", "end_date": "2024-08-31"},
+        )
+        assert response.status_code == 200
+
+        text_content = _extract_pdf_text(response.content)
+        assert "Participant Index" in text_content
+
+        # The indexes are the last sections, so everything from the participant
+        # heading onwards is index content — the contact on two entries appears
+        # in the entry bodies above it but never in the index itself. The
+        # heading is the *last* occurrence; the first is its contents row.
+        indexes = text_content[text_content.rindex("Participant Index") :]
+        assert "Frequentflyer" in indexes
+        assert "Occasionalguest" in text_content
+        assert "Occasionalguest" not in indexes
+
+        # Every internal link, in document order. The contents page holds one
+        # row per navigable section — summary, its single year, the three
+        # trips, then the two index sections — so its trip rows give the
+        # authoritative destination for each entry's anchor. The index links
+        # follow: the contact's three journals, then the single bushwalking
+        # section listing the same three.
+        destinations = _internal_link_destinations(response.content)
+        assert len(destinations) == 7 + 3 + 3
+
+        entry_destinations = destinations[2:5]
+        assert len(set(entry_destinations)) == len(titles)  # three distinct anchors
+        assert destinations[7:10] == entry_destinations
+        assert destinations[10:] == entry_destinations
+
+    async def test_export_activity_type_index_links_to_entries(
+        self,
+        authenticated_client,
+        seeded_outdoor_journals,
+    ) -> None:
+        """The activity-type index groups the seeded types and links each entry."""
+        response = await authenticated_client.post(
+            "/api/journals/export/outdoor-logbook",
+            json={},
+        )
+        assert response.status_code == 200
+
+        text_content = _extract_pdf_text(response.content)
+        assert "Activity Type Index" in text_content
+        index_section = text_content[text_content.rindex("Activity Type Index") :]
+        for label in ("Bushwalking", "Canyoning", "Caving"):
+            assert label in index_section
+
+        # Contents rows: summary, its single year, the three trips, then this
+        # index — followed by the index's own links, one per type section. Each
+        # seeded journal carries exactly one type, and the sections are
+        # type-sorted, so every section links to a different entry.
+        assert set(seeded_outdoor_journals) == {
+            "Blue Mountains Bushwalk",  # BUSHWALKING
+            "Claustral Canyon",  # CANYONING
+            "Jenolan Caves Trip",  # CAVING
+        }
+        destinations = _internal_link_destinations(response.content)
+        assert len(destinations) == 6 + 3
+
+        entry_destinations = destinations[2:5]
+        assert len(set(entry_destinations)) == 3
+        assert destinations[6:] == entry_destinations
 
     async def test_export_empty_result(
         self,
