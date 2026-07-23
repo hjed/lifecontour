@@ -12,6 +12,7 @@ from app.core.history.adapters.sql.field_history_repository import (
 )
 from app.core.history.models import FieldHistoryRepository
 from app.core.history.services import JournalHistoryService
+from app.core.journal.adapters.http.osm_tile_source import OsmTileSource
 from app.core.journal.adapters.sql.abseil_pitch_repository import (
     SqlAbseilPitchRepository,
 )
@@ -150,6 +151,7 @@ from app.core.journal.models.repositories import (
     SnorkellingDataRepository,
     TravelDataRepository,
 )
+from app.core.journal.models.tile_source import TileSource
 from app.core.journal.services.activity_template_service import ActivityTemplateService
 from app.core.journal.services.calendar_service import CalendarService
 from app.core.journal.services.daily_summary_eligibility import (
@@ -756,3 +758,19 @@ class JournalProvider(Provider):
     def logbook_pdf_renderer(self) -> LogbookPdfRenderer:
         """Provide a LogbookPdfRenderer instance."""
         return LogbookPdfRenderer()
+
+    @provide(scope=Scope.APP)
+    def logbook_tile_source(self, settings: Settings) -> TileSource:
+        """Provide the outdoor-logbook basemap tile source (ITER16-004).
+
+        APP scope so the on-disk cache and fetch throttle are shared across the
+        whole export batch and across requests, keeping tile fetching within
+        OSM's usage policy. Additive: not yet consumed by the PDF renderer
+        (wired in a later phase).
+        """
+        return OsmTileSource(
+            base_url=settings.logbook_tile_base_url,
+            user_agent=settings.logbook_tile_user_agent,
+            cache_dir=settings.logbook_tile_cache_dir,
+            tiles_per_second=settings.logbook_tile_throttle_per_second,
+        )
