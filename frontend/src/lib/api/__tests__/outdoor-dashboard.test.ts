@@ -48,6 +48,8 @@ function makeDashboardResponse(): OutdoorDashboardResponse {
         activity_totals: {
           last_30_days: { [JournalType.CANYONING]: 1 },
           last_365_days: { [JournalType.CANYONING]: 3 },
+          total_last_30_days: 1,
+          total_last_365_days: 3,
         },
         templates_done: {
           canyoning: [
@@ -58,6 +60,7 @@ function makeDashboardResponse(): OutdoorDashboardResponse {
             },
           ],
         },
+        templates_done_last_30_days: 1,
       },
     },
   };
@@ -93,6 +96,10 @@ describe('useOutdoorDashboard', () => {
     expect(attributes?.activity_totals.last_365_days).toEqual({
       [JournalType.CANYONING]: 3,
     });
+    // Server-computed distinct counts: the dashboard's headline numbers
+    // cannot be derived from the per-type mappings beside them.
+    expect(attributes?.activity_totals.total_last_30_days).toBe(1);
+    expect(attributes?.templates_done_last_30_days).toBe(1);
     expect(attributes?.checked_out_gear).toHaveLength(1);
     expect(attributes?.checked_out_gear[0]).toEqual({
       gear_item_id: 'gear-1',

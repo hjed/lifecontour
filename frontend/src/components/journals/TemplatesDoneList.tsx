@@ -13,6 +13,7 @@
 import Link from 'next/link';
 import type { Route } from 'next';
 import { BookTemplate } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import {
   Card,
   CardContent,
@@ -23,6 +24,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert } from '@/components/ui/alert';
 import { TYPE_LABELS } from '@/components/journals/JournalTypeBadges';
+import { WidgetEmptyState } from '@/components/journals/WidgetEmptyState';
 import { useOutdoorDashboard } from '@/lib/api/outdoor-dashboard';
 
 /** Where a template links to — the settings templates section. */
@@ -77,15 +79,15 @@ export function TemplatesDoneList() {
         {!isLoading && !error && (
           <div data-testid='templates-done-ready'>
             {templateTypes.length === 0 ? (
-              <p
-                className='text-muted-foreground py-4 text-sm'
+              <WidgetEmptyState
+                icon={BookTemplate}
+                message='No templates done yet — reference a template from an abseiling activity to see it here.'
                 data-testid='templates-done-empty-state'
-              >
-                No templates done yet — reference a template from an abseiling
-                activity to see it here.
-              </p>
+              />
             ) : (
-              <div className='space-y-6'>
+              // The card spans the grid, so cap its height and scroll
+              // internally rather than letting a long list dominate the page.
+              <div className='grid max-h-[300px] grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-6 overflow-y-auto overscroll-contain'>
                 {templateTypes.map(templateType => {
                   const headingId = `templates-done-heading-${templateType}`;
                   const label = templateTypeLabel(templateType);
@@ -95,12 +97,28 @@ export function TemplatesDoneList() {
                       className='space-y-2'
                       data-testid={`templates-done-group-${templateType}`}
                     >
-                      <h4
-                        id={headingId}
-                        className='text-foreground text-sm font-semibold'
-                      >
-                        {label}
-                      </h4>
+                      {/* The count sits beside the heading, not inside it, so
+                          the heading's accessible name stays just the type. */}
+                      <div className='flex items-center gap-2'>
+                        <h4
+                          id={headingId}
+                          className='text-foreground text-sm font-semibold'
+                        >
+                          {label}
+                        </h4>
+                        <Badge
+                          variant='secondary'
+                          className='rounded-full px-2 py-0 text-[11px] font-semibold'
+                          data-testid={`templates-done-group-count-${templateType}`}
+                          aria-label={`${templatesDone[templateType].length} ${
+                            templatesDone[templateType].length === 1
+                              ? 'template'
+                              : 'templates'
+                          }`}
+                        >
+                          {templatesDone[templateType].length}
+                        </Badge>
+                      </div>
                       <ul className='space-y-2' aria-labelledby={headingId}>
                         {templatesDone[templateType].map(template => (
                           <li

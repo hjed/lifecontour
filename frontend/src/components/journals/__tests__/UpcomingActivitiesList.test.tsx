@@ -45,8 +45,14 @@ function makeDashboardData(
       attributes: {
         upcoming_activities: upcoming,
         checked_out_gear: [],
-        activity_totals: { last_30_days: {}, last_365_days: {} },
+        activity_totals: {
+          last_30_days: {},
+          last_365_days: {},
+          total_last_30_days: 0,
+          total_last_365_days: 0,
+        },
         templates_done: {},
+        templates_done_last_30_days: 0,
       },
     },
   };

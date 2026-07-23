@@ -27,8 +27,14 @@ function makeDashboardData(
       attributes: {
         upcoming_activities: [],
         checked_out_gear: [],
-        activity_totals: { last_30_days: {}, last_365_days: {} },
+        activity_totals: {
+          last_30_days: {},
+          last_365_days: {},
+          total_last_30_days: 0,
+          total_last_365_days: 0,
+        },
         templates_done: templatesDone,
+        templates_done_last_30_days: 0,
       },
     },
   };
@@ -114,6 +120,17 @@ describe('TemplatesDoneList', () => {
 
     const cavingGroup = screen.getByTestId('templates-done-group-caving');
     expect(within(cavingGroup).getAllByRole('listitem')).toHaveLength(1);
+  });
+
+  it('shows how many templates each group holds', () => {
+    render(<TemplatesDoneList />);
+
+    expect(
+      screen.getByTestId('templates-done-group-count-canyoning')
+    ).toHaveTextContent('2');
+    expect(
+      screen.getByTestId('templates-done-group-count-caving')
+    ).toHaveTextContent('1');
   });
 
   it('links each template to the templates settings section', () => {

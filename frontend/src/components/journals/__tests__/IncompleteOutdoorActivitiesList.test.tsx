@@ -237,4 +237,75 @@ describe('IncompleteOutdoorActivitiesList', () => {
       'Failed to fetch data'
     );
   });
+
+  describe('preview truncation', () => {
+    function manyEntries(count: number) {
+      return Array.from({ length: count }, (_, index) =>
+        makeEntry({ id: String(index + 1), title: `Entry ${index + 1}` })
+      );
+    }
+
+    it('shows every entry without a toggle when the list is short', () => {
+      mockUseIncomplete.mockReturnValue({
+        data: { data: manyEntries(4) },
+        isLoading: false,
+        error: null,
+      });
+
+      render(<IncompleteOutdoorActivitiesList />, { wrapper: createWrapper() });
+
+      // Entry rows carry testids; the reason badges nest their own <li>s, so
+      // count the entries rather than every listitem on screen.
+      expect(
+        screen.getByTestId('incomplete-activity-item-4')
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByTestId('incomplete-show-all-toggle')
+      ).not.toBeInTheDocument();
+    });
+
+    it('previews the first four entries and offers to show the rest', () => {
+      mockUseIncomplete.mockReturnValue({
+        data: { data: manyEntries(7) },
+        isLoading: false,
+        error: null,
+      });
+
+      render(<IncompleteOutdoorActivitiesList />, { wrapper: createWrapper() });
+
+      expect(
+        screen.getByTestId('incomplete-activity-item-4')
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByTestId('incomplete-activity-item-5')
+      ).not.toBeInTheDocument();
+
+      const toggle = screen.getByTestId('incomplete-show-all-toggle');
+      expect(toggle).toHaveTextContent('Show all 7 incomplete');
+    });
+
+    it('expands to the full list and collapses again', () => {
+      mockUseIncomplete.mockReturnValue({
+        data: { data: manyEntries(7) },
+        isLoading: false,
+        error: null,
+      });
+
+      render(<IncompleteOutdoorActivitiesList />, { wrapper: createWrapper() });
+
+      fireEvent.click(screen.getByTestId('incomplete-show-all-toggle'));
+
+      expect(
+        screen.getByTestId('incomplete-activity-item-7')
+      ).toBeInTheDocument();
+      const toggle = screen.getByTestId('incomplete-show-all-toggle');
+      expect(toggle).toHaveTextContent('Show fewer');
+
+      fireEvent.click(toggle);
+
+      expect(
+        screen.queryByTestId('incomplete-activity-item-7')
+      ).not.toBeInTheDocument();
+    });
+  });
 });

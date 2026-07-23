@@ -3,7 +3,7 @@
  */
 
 import { render, screen, within } from '@testing-library/react';
-import { ActivityTotalsTable } from '../ActivityTotalsTable';
+import { ActivityTotalsChart } from '../ActivityTotalsChart';
 import { JournalType } from '@/types/journals';
 import * as dashboardApi from '@/lib/api/outdoor-dashboard';
 import type {
@@ -18,6 +18,18 @@ jest.mock('@/lib/api/outdoor-dashboard', () => ({
 
 const mockUseOutdoorDashboard = dashboardApi.useOutdoorDashboard as jest.Mock;
 
+function makeTotals(
+  overrides: Partial<OutdoorActivityTotals> = {}
+): OutdoorActivityTotals {
+  return {
+    last_30_days: {},
+    last_365_days: {},
+    total_last_30_days: 0,
+    total_last_365_days: 0,
+    ...overrides,
+  };
+}
+
 function makeDashboardData(
   totals: OutdoorActivityTotals
 ): OutdoorDashboardResponse {
@@ -30,19 +42,22 @@ function makeDashboardData(
         checked_out_gear: [],
         activity_totals: totals,
         templates_done: {},
+        templates_done_last_30_days: 0,
       },
     },
   };
 }
 
-describe('ActivityTotalsTable', () => {
+describe('ActivityTotalsChart', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockUseOutdoorDashboard.mockReturnValue({
-      data: makeDashboardData({
-        last_30_days: { [JournalType.CANYONING]: 1 },
-        last_365_days: { [JournalType.CANYONING]: 3 },
-      }),
+      data: makeDashboardData(
+        makeTotals({
+          last_30_days: { [JournalType.CANYONING]: 1 },
+          last_365_days: { [JournalType.CANYONING]: 3 },
+        })
+      ),
       isLoading: false,
       error: null,
     });
@@ -55,7 +70,7 @@ describe('ActivityTotalsTable', () => {
       error: null,
     });
 
-    render(<ActivityTotalsTable />);
+    render(<ActivityTotalsChart />);
 
     expect(screen.getByTestId('totals-loading')).toBeInTheDocument();
     expect(screen.queryByTestId('totals-ready')).not.toBeInTheDocument();
@@ -68,7 +83,7 @@ describe('ActivityTotalsTable', () => {
       error: new Error('Session expired'),
     });
 
-    render(<ActivityTotalsTable />);
+    render(<ActivityTotalsChart />);
 
     const alert = screen.getByTestId('totals-error');
     expect(alert).toHaveTextContent('Session expired');
@@ -77,36 +92,38 @@ describe('ActivityTotalsTable', () => {
 
   it('renders the empty state when both windows are empty', () => {
     mockUseOutdoorDashboard.mockReturnValue({
-      data: makeDashboardData({ last_30_days: {}, last_365_days: {} }),
+      data: makeDashboardData(makeTotals()),
       isLoading: false,
       error: null,
     });
 
-    render(<ActivityTotalsTable />);
+    render(<ActivityTotalsChart />);
 
     expect(screen.getByTestId('totals-ready')).toBeInTheDocument();
     expect(screen.getByTestId('totals-empty-state')).toHaveTextContent(
       /no outdoor activity recorded/i
     );
     expect(
-      screen.queryByTestId('activity-totals-table')
+      screen.queryByTestId('activity-totals-chart')
     ).not.toBeInTheDocument();
   });
 
   it('renders a row per type across the union of windows with 0 for missing counts', () => {
     mockUseOutdoorDashboard.mockReturnValue({
-      data: makeDashboardData({
-        last_30_days: { [JournalType.CANYONING]: 1 },
-        last_365_days: {
-          [JournalType.BUSHWALKING]: 4,
-          [JournalType.CANYONING]: 3,
-        },
-      }),
+      data: makeDashboardData(
+        makeTotals({
+          last_30_days: { [JournalType.CANYONING]: 1 },
+          last_365_days: {
+            [JournalType.BUSHWALKING]: 4,
+            [JournalType.CANYONING]: 3,
+          },
+        })
+      ),
       isLoading: false,
       error: null,
     });
 
-    render(<ActivityTotalsTable />);
+    render(<ActivityTotalsChart />);
 
     // Union row set: bushwalking appears only in the 365-day window
     const canyoningRow = screen.getByTestId('totals-row-canyoning');
@@ -126,29 +143,57 @@ describe('ActivityTotalsTable', () => {
     ).toHaveTextContent('4');
   });
 
-  it('labels rows with type labels and accessible table headers', () => {
+  it('scales both bars against the largest 365-day count', () => {
     mockUseOutdoorDashboard.mockReturnValue({
-      data: makeDashboardData({
-        last_30_days: { [JournalType.CANYONING]: 1 },
-        last_365_days: { [JournalType.CANYONING]: 3 },
-      }),
+      data: makeDashboardData(
+        makeTotals({
+          last_30_days: { [JournalType.CANYONING]: 5 },
+          last_365_days: {
+            [JournalType.BUSHWALKING]: 20,
+            [JournalType.CANYONING]: 10,
+          },
+        })
+      ),
       isLoading: false,
       error: null,
     });
 
-    render(<ActivityTotalsTable />);
+    render(<ActivityTotalsChart />);
+
+    // Max across the chart is bushwalking's 20, so canyoning's 10/5 are
+    // half/quarter width — the bars stay comparable between rows. Bar testids
+    // are suffixed per type so they're unambiguous without scoping.
+    expect(screen.getByTestId('totals-bar-365d-canyoning')).toHaveStyle({
+      width: '50%',
+    });
+    expect(screen.getByTestId('totals-bar-30d-canyoning')).toHaveStyle({
+      width: '25%',
+    });
+
+    expect(screen.getByTestId('totals-bar-365d-bushwalking')).toHaveStyle({
+      width: '100%',
+    });
+    expect(screen.getByTestId('totals-bar-30d-bushwalking')).toHaveStyle({
+      width: '0%',
+    });
+  });
+
+  it('names each row and states both counts for screen readers', () => {
+    render(<ActivityTotalsChart />);
+
+    const row = screen.getByTestId('totals-row-canyoning');
+    expect(row).toHaveTextContent('Canyoning');
+    // The bars are decorative, so the counts must be readable as text.
+    expect(row).toHaveTextContent(
+      /1 in the last 30 days, 3 in the last 365 days/i
+    );
+  });
+
+  it('exposes the rows as a labelled list', () => {
+    render(<ActivityTotalsChart />);
 
     expect(
-      screen.getByRole('columnheader', { name: 'Activity' })
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('columnheader', { name: 'Last 30 days' })
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('columnheader', { name: 'Last 365 days' })
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('rowheader', { name: 'Canyoning' })
+      screen.getByRole('list', { name: /outdoor activity counts by type/i })
     ).toBeInTheDocument();
   });
 });

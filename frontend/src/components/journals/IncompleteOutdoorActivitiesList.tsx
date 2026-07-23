@@ -5,6 +5,10 @@
  * important detail, with the matched reason(s) shown as badges, a link to the
  * journal to fix it, and a reversible whole-entry dismiss. A "Show dismissed"
  * switch reveals dismissed entries so they can be un-dismissed.
+ *
+ * The backlog can run long, so the card previews the first few entries and
+ * offers to expand. The truncation is purely client-side — the endpoint is not
+ * paginated, so expanding costs no extra fetch.
  */
 
 'use client';
@@ -12,7 +16,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import type { Route } from 'next';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, CheckCircle2 } from 'lucide-react';
 import {
   Card,
   CardContent,
@@ -27,6 +31,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { Alert } from '@/components/ui/alert';
 import { JournalTypeBadges } from '@/components/journals/JournalTypeBadges';
+import { WidgetEmptyState } from '@/components/journals/WidgetEmptyState';
 import {
   IncompletenessReason,
   useDismissIncompleteOutdoorActivity,
@@ -43,17 +48,24 @@ const REASON_LABELS: Record<IncompletenessReason, string> = {
   no_participants: 'No participants',
 };
 
+/** How many entries the card shows before offering to expand. */
+const PREVIEW_COUNT = 4;
+
 export function IncompleteOutdoorActivitiesList() {
   const [showDismissed, setShowDismissed] = useState(false);
+  const [showAll, setShowAll] = useState(false);
   const { data, isLoading, error } =
     useIncompleteOutdoorActivities(showDismissed);
   const dismissMutation = useDismissIncompleteOutdoorActivity();
   const undismissMutation = useUndismissIncompleteOutdoorActivity();
 
   const entries = data?.data ?? [];
+  const hasMore = entries.length > PREVIEW_COUNT;
+  const visibleEntries =
+    showAll || !hasMore ? entries : entries.slice(0, PREVIEW_COUNT);
 
   return (
-    <Card>
+    <Card className='flex flex-col'>
       <CardHeader>
         <div className='flex flex-wrap items-start justify-between gap-4'>
           <div className='space-y-1.5'>
@@ -75,7 +87,7 @@ export function IncompleteOutdoorActivitiesList() {
           </div>
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className='flex flex-1 flex-col'>
         {isLoading && (
           <div className='space-y-3' data-testid='incomplete-list-loading'>
             <Skeleton className='h-20 w-full' />
@@ -90,20 +102,22 @@ export function IncompleteOutdoorActivitiesList() {
         )}
 
         {!isLoading && !error && (
-          <div data-testid='incomplete-list-ready'>
+          <div
+            className='flex flex-1 flex-col'
+            data-testid='incomplete-list-ready'
+          >
             {entries.length === 0 ? (
-              <p
-                className='text-muted-foreground py-4 text-sm'
+              <WidgetEmptyState
+                icon={CheckCircle2}
+                message="No incomplete activities — you're all caught up."
                 data-testid='incomplete-empty-state'
-              >
-                No incomplete activities — you&apos;re all caught up.
-              </p>
+              />
             ) : (
               <ul
-                className='space-y-3'
+                className='flex-1 space-y-3'
                 aria-label='Incomplete outdoor activities'
               >
-                {entries.map(entry => {
+                {visibleEntries.map(entry => {
                   const { id, attributes } = entry;
                   const dismissed = attributes.dismissed;
                   return (
@@ -189,6 +203,21 @@ export function IncompleteOutdoorActivitiesList() {
                   );
                 })}
               </ul>
+            )}
+
+            {hasMore && (
+              <Button
+                variant='link'
+                size='sm'
+                className='text-muted-foreground mt-3 self-center'
+                onClick={() => setShowAll(current => !current)}
+                aria-expanded={showAll}
+                data-testid='incomplete-show-all-toggle'
+              >
+                {showAll
+                  ? 'Show fewer'
+                  : `Show all ${entries.length} incomplete`}
+              </Button>
             )}
           </div>
         )}
