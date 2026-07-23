@@ -76,14 +76,14 @@ class GeminiTitleSimilarityAssessor:
     def __init__(
         self,
         api_key: str,
-        model: str = "gemini-2.5-flash",
+        model: str = "gemini-3.5-flash-lite",
         timezone: str = DEFAULT_TIMEZONE,
     ) -> None:
         """Initialize with Gemini API credentials.
 
         Args:
             api_key: Google API key for Gemini access
-            model: Gemini model to use (default: gemini-2.5-flash)
+            model: Gemini model to use (default: gemini-3.5-flash-lite)
             timezone: IANA timezone used to render event datetimes in prompts
         """
         self._api_key = api_key
