@@ -46,6 +46,20 @@ For other OAuth2 providers, configure the following endpoints:
 - Use minimal required scopes for each provider
 
 
+### System Dependencies (shared python base image)
+
+`docker/python-base/Dockerfile` is the single source of the system packages every
+Python service inherits (`curl`, `gcc`/`g++`, `libpq-dev`, `postgresql-client`)
+plus one that is not obvious from the dependency list:
+
+- **`fonts-dejavu-core`** — the outdoor logbook PDF export renders a journal-type
+  icon glyph next to each type label. The PDF built-in fonts are WinAnsi-encoded
+  and draw those codepoints as empty boxes, so the renderer registers DejaVu Sans
+  (resolved from the standard font paths) for the glyph runs. If the font is
+  absent the export still succeeds — the glyphs are dropped and the text labels
+  render alone — so a deployment missing it degrades rather than fails. CI
+  installs the same package for the backend unit and integration jobs.
+
 ### Docker Compose Configuration
 
 #### Development (docker-compose.yml)

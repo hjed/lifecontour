@@ -9,11 +9,13 @@ from datetime import UTC, datetime
 
 import pytest
 import pytest_asyncio
+from core_shared.models.journals import JOURNAL_TYPE_GLYPHS, JournalType
 from pypdf import PdfReader
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+from tests.pdf_assertions import external_link_uris
 
 # ─── Helpers ─────────────────────────────────────────────────────────
 
@@ -350,7 +352,37 @@ class TestLogbookExportEndpoint:
         text_content = _extract_pdf_text(response.content)
         assert "Bushwalk With Album" in text_content
         assert "Photo Album:" in text_content
-        assert "https://immich.example.com/share/xyz" in text_content
+        assert "https://immich.example.com/share/xyz" in external_link_uris(
+            response.content
+        )
+
+    async def test_export_renders_type_glyphs_next_to_labels(
+        self,
+        authenticated_client,
+        seeded_outdoor_journals,
+    ) -> None:
+        """The exported PDF labels types with their icon glyph (spec 3.4).
+
+        Checked on an entry line and in the activity-type index — the two
+        surfaces the spec requires icons on — over the shared multi-type
+        fixture, so it exercises the real HTTP export path end to end.
+        """
+        response = await authenticated_client.post(
+            "/api/journals/export/outdoor-logbook",
+            json={},
+        )
+        assert response.status_code == 200
+
+        text_content = _extract_pdf_text(response.content)
+        canyoning = JOURNAL_TYPE_GLYPHS[JournalType.CANYONING]
+        bushwalking = JOURNAL_TYPE_GLYPHS[JournalType.BUSHWALKING]
+
+        assert f"{canyoning} Canyoning" in text_content
+        assert f"{bushwalking} Bushwalking" in text_content
+
+        index_text = text_content[text_content.rindex("Activity Type Index") :]
+        assert f"{canyoning} Canyoning" in index_text
+        assert f"{bushwalking} Bushwalking" in index_text
 
     async def test_export_includes_template_name_for_abseiling_trip(
         self,

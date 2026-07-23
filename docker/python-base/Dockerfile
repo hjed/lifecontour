@@ -15,13 +15,17 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install system dependencies (superset needed by backend + workers)
+# Install system dependencies (superset needed by backend + workers).
+# fonts-dejavu-core supplies the DejaVu Sans face the outdoor logbook PDF export
+# draws its journal-type icon glyphs with — the built-in PDF fonts are
+# WinAnsi-encoded and would render those codepoints as empty boxes.
 RUN apt-get update && apt-get install -y \
     curl \
     gcc \
     g++ \
     libpq-dev \
     postgresql-client \
+    fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 # Install UV for dependency management
