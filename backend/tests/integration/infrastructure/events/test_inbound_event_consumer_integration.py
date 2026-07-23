@@ -24,7 +24,7 @@ def mock_settings() -> MagicMock:
     """Create mock Settings for the consumer."""
     settings = MagicMock(spec=Settings)
     settings.gemini_api_key = ""
-    settings.gemini_model = "gemini-2.5-flash"
+    settings.gemini_model = "gemini-3.5-flash-lite"
     return settings
 
 

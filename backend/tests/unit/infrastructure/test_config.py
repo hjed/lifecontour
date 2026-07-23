@@ -4,12 +4,17 @@ from app.infrastructure.config import Settings
 
 
 class TestGeminiModels:
-    """AI summary generation defaults to the latest stable Flash model."""
+    """Gemini defaults are right-sized per task and off deprecated models."""
 
     def test_summary_model_defaults_to_latest_flash(self):
         settings = Settings(_env_file=None)  # pyright: ignore[reportCallIssue]
 
-        assert settings.gemini_summary_model == "gemini-3.5-flash"
+        assert settings.gemini_summary_model == "gemini-3.6-flash"
+
+    def test_similarity_model_defaults_to_flash_lite(self):
+        settings = Settings(_env_file=None)  # pyright: ignore[reportCallIssue]
+
+        assert settings.gemini_model == "gemini-3.5-flash-lite"
 
 
 class TestCorsAllowOrigins:
