@@ -53,7 +53,9 @@ class _RecordingHandler:
         self.requests.append(request)
         if self._raise_error is not None:
             raise self._raise_error
-        return httpx.Response(self._status_code, content=self._content)
+        # Bind the request so response.raise_for_status() raises a proper
+        # HTTPStatusError (not a RuntimeError) across httpx versions.
+        return httpx.Response(self._status_code, content=self._content, request=request)
 
 
 def _make_source(
@@ -148,6 +150,20 @@ class TestOsmTileSourceCache:
             await source.fetch_tile(_TILE)  # hit: must skip the throttle
 
         mock_sleep.assert_not_called()
+
+    async def test_cache_write_failure_still_returns_bytes(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A failed cache write (disk full, read-only) must not discard a tile
+        # we already fetched — return the bytes best-effort.
+        source = _make_source(tmp_path, _RecordingHandler())
+
+        def _boom(*_args: object, **_kwargs: object) -> None:
+            raise OSError("disk full")
+
+        monkeypatch.setattr(source, "_write_cache", _boom)
+
+        assert await source.fetch_tile(_TILE) == _TILE_BYTES
 
 
 class TestOsmTileSourceThrottle:

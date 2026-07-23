@@ -121,7 +121,17 @@ class OsmTileSource(TileSource):
 
             await self._throttle.wait()
             data = await self._fetch_from_network(tile)
-            self._write_cache(cache_path, data)
+            # Caching is best-effort: a full disk or read-only cache must not
+            # discard a tile we already fetched (that would needlessly fail the
+            # export). Log and return the bytes; the next fetch just re-fetches.
+            try:
+                self._write_cache(cache_path, data)
+            except OSError as e:
+                logger.warning(
+                    "Failed to cache tile; returning fetched bytes",
+                    path=str(cache_path),
+                    error=str(e),
+                )
             return data
 
     def _cache_path(self, tile: TileCoordinate) -> Path:
