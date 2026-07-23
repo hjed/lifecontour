@@ -1269,13 +1269,32 @@ class CheckedOutGearItemSchema(BaseModel):
 
 
 class OutdoorActivityTotalsSchema(BaseModel):
-    """Outdoor activity counts by journal type over the rolling windows."""
+    """Outdoor activity counts by journal type over the rolling windows.
+
+    The ``total_*`` fields count *journals*, so they are not the sum of the
+    matching mapping: a journal recording two independent subtypes appears in
+    two per-type counts but is one logged activity.
+    """
 
     last_30_days: dict[str, int] = Field(
         ..., description="Counts by journal type over the last 30 days"
     )
     last_365_days: dict[str, int] = Field(
         ..., description="Counts by journal type over the last 365 days"
+    )
+    total_last_30_days: int = Field(
+        ...,
+        description=(
+            "Distinct outdoor activities logged in the last 30 days "
+            "(not the sum of last_30_days)"
+        ),
+    )
+    total_last_365_days: int = Field(
+        ...,
+        description=(
+            "Distinct outdoor activities logged in the last 365 days "
+            "(not the sum of last_365_days)"
+        ),
     )
 
 
@@ -1318,6 +1337,13 @@ class OutdoorDashboardAttributes(BaseModel):
         description=(
             "Unique templates referenced by the user's abseiling activities, "
             "grouped by template type"
+        ),
+    )
+    templates_done_last_30_days: int = Field(
+        ...,
+        description=(
+            "Distinct templates done in the last 30 days. The templates_done "
+            "counts are all-time, so this cannot be derived from them."
         ),
     )
 

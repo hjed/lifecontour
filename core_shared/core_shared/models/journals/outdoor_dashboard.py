@@ -17,7 +17,8 @@ window/cap/grouping rules:
   buffer-date/event-range resolution itself happens in SQL (``COALESCE``),
   mirroring the Snipe-IT worker's check-in sweep.
 - **Templates done** — per-template done-counts over the abseiling-derived
-  journals referencing each template, grouped by template type.
+  journals referencing each template, grouped by template type, plus a count of
+  the distinct templates done inside the dashboard's recent window.
 """
 
 from __future__ import annotations
@@ -57,10 +58,18 @@ class OutdoorActivityTypeFacts:
 
 @dataclass
 class OutdoorActivityTotals:
-    """Outdoor activity counts by journal type over the two rolling windows."""
+    """Outdoor activity counts by journal type over the two rolling windows.
+
+    ``total_last_*`` count *journals*, not type-buckets: a journal recording two
+    genuinely independent subtypes contributes to two per-type counts but is
+    still one logged activity, so the totals cannot be recovered by summing the
+    per-type mappings.
+    """
 
     last_30_days: dict[str, int] = field(default_factory=dict)
     last_365_days: dict[str, int] = field(default_factory=dict)
+    total_last_30_days: int = 0
+    total_last_365_days: int = 0
 
 
 @dataclass
@@ -94,12 +103,18 @@ class CheckedOutGearItem:
 
 @dataclass
 class TemplateReferenceFacts:
-    """One abseiling-derived journal's reference to an activity template."""
+    """One abseiling-derived journal's reference to an activity template.
+
+    ``event_date_range`` is the referencing journal's own event range — when the
+    template was actually done — so the recent-templates window can be applied
+    without a second query.
+    """
 
     journal_id: int
     template_id: str
     template_name: str
     template_type: str
+    event_date_range: EventDateRange
 
 
 @dataclass
@@ -110,6 +125,20 @@ class TemplateDone:
     name: str
     template_type: str
     done_count: int
+
+
+@dataclass
+class TemplatesDoneSummary:
+    """The templates-done widget's grouping plus its recent-unique headline.
+
+    ``by_type`` is the all-time grouping shown in the widget;
+    ``recent_unique_count`` is how many *distinct* templates were done inside
+    the dashboard's recent window, which is the headline stat and cannot be
+    derived from ``by_type`` (whose counts are all-time).
+    """
+
+    by_type: dict[str, list[TemplateDone]] = field(default_factory=dict)
+    recent_unique_count: int = 0
 
 
 def is_currently_checked_out(facts: GearCheckoutFacts, now: datetime) -> bool:
@@ -185,6 +214,24 @@ def templates_done_by_type(
             )
         )
     return grouped
+
+
+def count_unique_templates_in_window(
+    references: Sequence[TemplateReferenceFacts], window: EventDateRange
+) -> int:
+    """How many distinct templates were done inside ``window``.
+
+    A template done several times in the window counts once. Membership uses
+    the same overlap predicate as the activity totals, so a multi-day trip
+    straddling a window boundary still counts.
+    """
+    return len(
+        {
+            reference.template_id
+            for reference in references
+            if reference.event_date_range.overlaps(window)
+        }
+    )
 
 
 def effective_outdoor_journal_types(

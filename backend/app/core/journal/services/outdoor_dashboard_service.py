@@ -11,11 +11,15 @@ timezone** (``UserSettingsRepository.get_timezone``, UTC fallback), matching
 midnight, not UTC's. Read-only — no unit of work, matching
 ``IncompleteOutdoorActivityService``.
 
-Also computes the checked-out-gear and templates-done widgets. Both compare
-instants (the resolved checkout window is timestamped), so unlike the
-windowed widgets they need no timezone anchoring; the determination and
+Also computes the checked-out-gear and templates-done widgets. Checked-out
+gear compares instants (the resolved checkout window is timestamped), so it
+needs no timezone anchoring. Templates-done groups templates all-time (also
+un-anchored), but its recent-unique count reuses the same user-timezone
+window anchoring as the activity totals, so the two dashboard headline
+numbers agree about where "the last 30 days" starts. The determination and
 grouping rules live in core_shared (``is_currently_checked_out`` /
-``checked_out_gear`` / ``templates_done_by_type``) so they stay pure.
+``checked_out_gear`` / ``templates_done_by_type`` /
+``count_unique_templates_in_window``) so they stay pure.
 """
 
 from __future__ import annotations
@@ -26,7 +30,9 @@ from typing import TYPE_CHECKING
 from core_shared.models.journals import (
     EventDateRange,
     OutdoorActivityTotals,
+    TemplatesDoneSummary,
     checked_out_gear,
+    count_unique_templates_in_window,
     effective_outdoor_journal_types,
     templates_done_by_type,
 )
@@ -38,7 +44,6 @@ if TYPE_CHECKING:
 
     from core_shared.models.journals import (
         CheckedOutGearItem,
-        TemplateDone,
         UpcomingOutdoorActivity,
     )
 
@@ -48,6 +53,7 @@ if TYPE_CHECKING:
 UPCOMING_DAYS_FORWARD = 30
 UPCOMING_CAP = 10
 TOTALS_WINDOW_DAYS = (30, 365)
+TEMPLATES_RECENT_DAYS = 30
 
 
 def _window(
@@ -111,6 +117,10 @@ class OutdoorDashboardService:
         journal is bucketed into every ``TOTALS_WINDOW_DAYS`` window its date
         range overlaps and counted once per effective journal type. Windows
         end on ``anchor`` (default: today in the user's timezone).
+
+        The per-window ``total_*`` counts are *distinct journals*, tracked
+        separately because a journal with two independent subtypes lands in two
+        per-type buckets while remaining a single logged activity.
         """
         tz = await self._user_timezone(user_id)
         anchor = anchor or datetime.datetime.now(tz).date()
@@ -125,11 +135,13 @@ class OutdoorDashboardService:
         )
 
         counts: dict[int, dict[str, int]] = {days: {} for days in TOTALS_WINDOW_DAYS}
+        journals: dict[int, set[int]] = {days: set() for days in TOTALS_WINDOW_DAYS}
         for entry in facts:
             journal_types = effective_outdoor_journal_types(entry.subtypes)
             for days, window in windows.items():
                 if not entry.event_date_range.overlaps(window):
                     continue
+                journals[days].add(entry.journal_id)
                 for journal_type in journal_types:
                     bucket = counts[days]
                     bucket[journal_type.value] = bucket.get(journal_type.value, 0) + 1
@@ -137,6 +149,8 @@ class OutdoorDashboardService:
         return OutdoorActivityTotals(
             last_30_days=dict(sorted(counts[30].items())),
             last_365_days=dict(sorted(counts[365].items())),
+            total_last_30_days=len(journals[30]),
+            total_last_365_days=len(journals[365]),
         )
 
     async def list_checked_out_gear(
@@ -155,7 +169,27 @@ class OutdoorDashboardService:
         )
         return checked_out_gear(facts, now)
 
-    async def templates_done(self, user_id: str) -> dict[str, list[TemplateDone]]:
-        """Unique templates done with per-template counts, grouped by type."""
+    async def templates_done(
+        self, user_id: str, anchor: datetime.date | None = None
+    ) -> TemplatesDoneSummary:
+        """Templates done: the all-time grouping plus the recent-unique count.
+
+        ``by_type`` carries per-template all-time done-counts grouped by
+        template type. ``recent_unique_count`` is how many distinct templates
+        were done in the last ``TEMPLATES_RECENT_DAYS`` days, over a window
+        ending on ``anchor`` (default: today in the user's timezone) — the same
+        anchoring the activity totals use, so the two headline numbers agree
+        about where "the last 30 days" starts.
+        """
+        tz = await self._user_timezone(user_id)
+        anchor = anchor or datetime.datetime.now(tz).date()
+        recent_window = _window(
+            anchor - datetime.timedelta(days=TEMPLATES_RECENT_DAYS), anchor, tz
+        )
         references = await self.dashboard_repo.list_template_references(user_id)
-        return templates_done_by_type(references)
+        return TemplatesDoneSummary(
+            by_type=templates_done_by_type(references),
+            recent_unique_count=count_unique_templates_in_window(
+                references, recent_window
+            ),
+        )

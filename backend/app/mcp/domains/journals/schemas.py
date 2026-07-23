@@ -757,10 +757,29 @@ class OutdoorDashboardMCPResponse(BaseModel):
     activity_totals_last_365_days: dict[str, int] = Field(
         description="Outdoor activity counts by journal type over the last 365 days"
     )
+    total_activities_last_30_days: int = Field(
+        description=(
+            "Distinct outdoor activities logged in the last 30 days. Not the sum "
+            "of activity_totals_last_30_days: a journal recording two independent "
+            "subtypes appears in two type buckets but is one activity."
+        )
+    )
+    total_activities_last_365_days: int = Field(
+        description=(
+            "Distinct outdoor activities logged in the last 365 days "
+            "(not the sum of activity_totals_last_365_days)"
+        )
+    )
     templates_done: dict[str, list[TemplateDoneMCPEntry]] = Field(
         description=(
             "Unique templates referenced by the user's abseiling activities, "
-            "grouped by template type"
+            "grouped by template type. The done-counts are all-time."
+        )
+    )
+    templates_done_last_30_days: int = Field(
+        description=(
+            "Distinct templates done in the last 30 days. The templates_done "
+            "counts are all-time, so this cannot be derived from them."
         )
     )
     summary: str = Field(description="AI-friendly summary")
@@ -770,19 +789,26 @@ def build_dashboard_summary(
     *,
     upcoming_activities: Sequence[UpcomingOutdoorActivityMCPEntry],
     checked_out_gear: Sequence[CheckedOutGearMCPEntry],
-    activity_totals_last_30_days: Mapping[str, int],
+    total_last_30_days: int,
     templates_done: Mapping[str, Sequence[TemplateDoneMCPEntry]],
+    templates_done_last_30_days: int,
 ) -> str:
-    """The dashboard summary line, counting across the four sections."""
+    """The dashboard summary line, counting across the four sections.
+
+    ``total_last_30_days`` and ``templates_done_last_30_days`` come from the
+    service's distinct counts — summing the per-type mappings here would
+    over-count multi-subtype journals.
+    """
     upcoming_count = len(upcoming_activities)
     gear_count = len(checked_out_gear)
-    recent_count = sum(activity_totals_last_30_days.values())
     template_count = sum(len(templates) for templates in templates_done.values())
     return (
         f"Dashboard: {upcoming_count} upcoming "
         f"activit{'y' if upcoming_count == 1 else 'ies'}, "
         f"{gear_count} gear item{'' if gear_count == 1 else 's'} checked out, "
-        f"{recent_count} outdoor activit{'y' if recent_count == 1 else 'ies'} "
+        f"{total_last_30_days} "
+        f"outdoor activit{'y' if total_last_30_days == 1 else 'ies'} "
         f"in the last 30 days, "
-        f"{template_count} unique template{'' if template_count == 1 else 's'} done."
+        f"{template_count} unique template{'' if template_count == 1 else 's'} done "
+        f"({templates_done_last_30_days} in the last 30 days)."
     )

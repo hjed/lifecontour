@@ -573,6 +573,11 @@ class TestTemplateReferences:
         assert reference.template_id == template_id
         assert reference.template_name == "Empress Falls"
         assert reference.template_type == "canyoning"
+        # The referencing journal's own event range rides along so the service
+        # can window "done recently" without a second query.
+        assert (
+            reference.event_date_range.start.date() == (now - timedelta(days=5)).date()
+        )
 
     async def test_service_groups_and_counts_templates_done(
         self,
@@ -587,7 +592,7 @@ class TestTemplateReferences:
             name="Sweet Dreams", template_type="climbing"
         )
         await seeder.create_abseiling_journal(
-            title="First run", start=now - timedelta(days=30), template_id=canyon
+            title="First run", start=now - timedelta(days=200), template_id=canyon
         )
         await seeder.create_abseiling_journal(
             title="Second run", start=now - timedelta(days=10), template_id=canyon
@@ -598,16 +603,22 @@ class TestTemplateReferences:
 
         result = await service.templates_done(USER_ID)
 
-        assert set(result) == {"canyoning", "climbing"}
-        assert [(entry.name, entry.done_count) for entry in result["canyoning"]] == [
-            ("Empress Falls", 2)
-        ]
-        assert [(entry.name, entry.done_count) for entry in result["climbing"]] == [
-            ("Sweet Dreams", 1)
-        ]
+        assert set(result.by_type) == {"canyoning", "climbing"}
+        assert [
+            (entry.name, entry.done_count) for entry in result.by_type["canyoning"]
+        ] == [("Empress Falls", 2)]
+        assert [
+            (entry.name, entry.done_count) for entry in result.by_type["climbing"]
+        ] == [("Sweet Dreams", 1)]
+        # The all-time grouping keeps the 200-day-old canyon run, but only the
+        # two templates done inside the 30-day window are "recent".
+        assert result.recent_unique_count == 2
 
-    async def test_service_returns_empty_mapping_without_references(
+    async def test_service_returns_empty_summary_without_references(
         self,
         service: OutdoorDashboardService,
     ) -> None:
-        assert await service.templates_done(USER_ID) == {}
+        result = await service.templates_done(USER_ID)
+
+        assert result.by_type == {}
+        assert result.recent_unique_count == 0
