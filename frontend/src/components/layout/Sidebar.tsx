@@ -7,10 +7,11 @@
  * icons, active state highlighting, mobile responsiveness, and global
  * state management via SidebarContext.
  *
- * Contact tags render as a nested tree with expand/collapse controls.
+ * Contact and journal tags each render as a nested tree with expand/collapse
+ * controls, scoped to their own list route.
  */
 
-import { useState, useCallback, Suspense } from 'react';
+import { useState, useCallback, Suspense, type ReactNode } from 'react';
 import Link from 'next/link';
 import type { Route } from 'next';
 import { usePathname, useSearchParams } from 'next/navigation';
@@ -38,7 +39,16 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useSidebar, useSidebarAvailable } from '@/contexts/SidebarContext';
 import { useTags } from '@/lib/api/contacts';
-import { buildTagTree, TagTreeNode } from '@/lib/tags/buildTagTree';
+import { useJournalTags } from '@/lib/api/journals';
+import {
+  buildTagTree,
+  contactTagView,
+  journalTagView,
+  type TagTreeAdapter,
+  type TagTreeNode,
+} from '@/lib/tags/buildTagTree';
+import type { TagFilterBasePath } from '@/hooks/useTagFilter';
+import type { JournalTag } from '@/types/journals';
 import { TagContextMenu } from '@/components/contacts/TagContextMenu';
 import { CreateTagDialog } from '@/components/contacts/CreateTagDialog';
 
@@ -49,11 +59,22 @@ interface NavigationItem {
   readonly disabled?: boolean;
 }
 
+/** Props a section's tag tree needs from the rendering sidebar shell. */
+interface TagTreeRenderProps {
+  readonly isActiveLink: (href: Route) => boolean;
+  readonly onNavigate?: () => void;
+}
+
 interface NavigationSection {
   readonly label: string;
   readonly icon: React.ComponentType<{ className?: string }>;
   readonly items: NavigationItem[];
-  readonly tagTree?: TagTreeNode[];
+  /**
+   * Renders the section's tag tree. A callback rather than a `TagTreeNode[]`
+   * because each namespace carries a different tag resource shape, and the
+   * shell has no business knowing which.
+   */
+  readonly renderTagTree?: (props: TagTreeRenderProps) => ReactNode;
   readonly defaultExpanded?: boolean;
 }
 
@@ -65,27 +86,53 @@ interface SidebarContentProps {
   readonly onNavigate?: () => void;
 }
 
+/** Matches a sidebar tag link, e.g. `/journals?tag=<id>`. */
+const TAG_LINK_PATTERN = /^(\/contacts|\/journals)\?tag=(.+)$/;
+
 /**
  * Determines if a given href matches the current pathname for active link highlighting.
  *
- * Special handling for the contacts root path to ensure exact matching.
- * When the contacts page has a `?tag=` param, we do NOT mark the plain
- * "All" link as active — the tag-specific item will be active instead.
+ * The tag-filterable list roots (`/contacts`, `/journals`) match exactly rather
+ * than by prefix: when a `?tag=` param is present the plain "All" link is NOT
+ * active — the tag-specific item is instead.
  */
 function isActiveLink(
   href: Route,
   pathname: string,
   searchParams: URLSearchParams
 ): boolean {
-  if (href === '/contacts') {
-    const isOnContacts = pathname === '/contacts' || pathname === '/contacts/';
+  if (href === '/contacts' || href === '/journals') {
+    const isOnList = pathname === href || pathname === `${href}/`;
     // If a tag filter is active, "All" should not be highlighted
-    return isOnContacts && !searchParams.has('tag');
+    return isOnList && !searchParams.has('tag');
   }
   if (href === '/integrations') {
     return pathname === '/integrations' || pathname === '/integrations/';
   }
   return pathname.startsWith(href);
+}
+
+/**
+ * Builds the active-link predicate shared by the context-backed and
+ * local-state sidebar variants, which differ only in where section expansion
+ * state lives.
+ */
+function useActiveLinkCheck(): (href: Route) => boolean {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  return useCallback(
+    (href: Route) => {
+      const tagLink = TAG_LINK_PATTERN.exec(href);
+      if (tagLink) {
+        const [, basePath, tagId] = tagLink;
+        const isOnList = pathname === basePath || pathname === `${basePath}/`;
+        return isOnList && searchParams.get('tag') === tagId;
+      }
+      return isActiveLink(href, pathname, searchParams);
+    },
+    [pathname, searchParams]
+  );
 }
 
 // Dynamic navigation configuration
@@ -95,20 +142,46 @@ function useNavigationSections(): NavigationSection[] {
     isLoading: tagsLoading,
     error: tagsError,
   } = useTags();
+  const {
+    data: journalTagsData,
+    isLoading: journalTagsLoading,
+    error: journalTagsError,
+  } = useJournalTags();
 
   const contactItems: NavigationItem[] = [
     { label: 'All', href: '/contacts' as Route },
     { label: 'Favourites', href: '/contacts/favourites' as Route, icon: Star },
   ];
 
-  let tagTree: TagTreeNode[] | undefined;
+  const journalItems: NavigationItem[] = [
+    { label: 'All Journals', href: '/journals' as Route },
+    {
+      label: 'Outdoor Logbook',
+      href: '/journals/outdoor-logbook' as Route,
+    },
+  ];
+
+  let contactTagTree: TagTreeNode[] | undefined;
 
   // Build tag tree from API data
   if (tagsData?.data && !tagsLoading && !tagsError) {
-    tagTree = buildTagTree(tagsData.data);
+    contactTagTree = buildTagTree(tagsData.data, contactTagView);
   } else if (tagsLoading) {
     // Show loading placeholder - no href to disable the link entirely
     contactItems.push({
+      label: 'Loading tags...',
+      disabled: true,
+    });
+  }
+
+  // Journal tags mirror the contact behaviour: a tree when loaded, a disabled
+  // placeholder while loading, and silent degradation on error.
+  let journalTagTree: TagTreeNode<JournalTag>[] | undefined;
+
+  if (journalTagsData?.data && !journalTagsLoading && !journalTagsError) {
+    journalTagTree = buildTagTree(journalTagsData.data, journalTagView);
+  } else if (journalTagsLoading) {
+    journalItems.push({
       label: 'Loading tags...',
       disabled: true,
     });
@@ -120,19 +193,27 @@ function useNavigationSections(): NavigationSection[] {
       icon: Users,
       defaultExpanded: true,
       items: contactItems,
-      tagTree,
+      renderTagTree: renderTagTreeSection(contactTagTree, {
+        view: contactTagView,
+        basePath: '/contacts',
+        testIdPrefix: '',
+        ariaLabel: 'Tags',
+        wrapItem: (tag, children) => (
+          <TagContextMenu tag={tag}>{children}</TagContextMenu>
+        ),
+      }),
     },
     {
       label: 'Journals',
       icon: BookOpen,
       defaultExpanded: false,
-      items: [
-        { label: 'All Journals', href: '/journals' as Route },
-        {
-          label: 'Outdoor Logbook',
-          href: '/journals/outdoor-logbook' as Route,
-        },
-      ],
+      items: journalItems,
+      renderTagTree: renderTagTreeSection(journalTagTree, {
+        view: journalTagView,
+        basePath: '/journals',
+        testIdPrefix: 'journal-',
+        ariaLabel: 'Journal tags',
+      }),
     },
     {
       label: 'Integrations',
@@ -144,95 +225,144 @@ function useNavigationSections(): NavigationSection[] {
 }
 
 /**
+ * Binds a built tree to its namespace's rendering options, or returns undefined
+ * when there is nothing to render.
+ */
+function renderTagTreeSection<T>(
+  tree: TagTreeNode<T>[] | undefined,
+  options: TagTreeOptions<T>
+): ((props: TagTreeRenderProps) => ReactNode) | undefined {
+  if (!tree || tree.length === 0) {
+    return undefined;
+  }
+
+  // Named rather than an arrow so it is not mistaken for an inline component
+  // definition — it is called during the section's render, not mounted.
+  return function renderBoundTagTree({
+    isActiveLink: checkActiveLink,
+    onNavigate,
+  }: TagTreeRenderProps) {
+    return (
+      <TagTreeNavigation
+        tree={tree}
+        options={options}
+        isActiveLink={checkActiveLink}
+        onNavigate={onNavigate}
+      />
+    );
+  };
+}
+
+/**
+ * Everything the tree renderer needs to know about a tag namespace: how to read
+ * a tag, where its links point, how its test ids are named, and any per-item
+ * wrapper (contacts wrap each item in a management context menu).
+ */
+interface TagTreeOptions<T> {
+  readonly view: TagTreeAdapter<T>;
+  readonly basePath: TagFilterBasePath;
+  /** Prefixed onto every test id so the two trees stay distinguishable. */
+  readonly testIdPrefix: string;
+  readonly ariaLabel: string;
+  readonly wrapItem?: (tag: T, children: ReactNode) => ReactNode;
+}
+
+/**
  * Recursive component that renders a tag tree node with expand/collapse.
  */
-function TagTreeItem({
+function TagTreeItem<T>({
   node,
   depth,
+  options,
   expandedTags,
   toggleTag,
   isActiveLink: checkActiveLink,
   onNavigate,
 }: {
-  readonly node: TagTreeNode;
+  readonly node: TagTreeNode<T>;
   readonly depth: number;
+  readonly options: TagTreeOptions<T>;
   readonly expandedTags: Record<string, boolean>;
   readonly toggleTag: (tagId: string) => void;
   readonly isActiveLink: (href: Route) => boolean;
   readonly onNavigate?: () => void;
 }) {
+  const { view, basePath, testIdPrefix, wrapItem } = options;
+  const { id: tagId, name: tagName } = view(node.tag);
   const hasChildren = node.children.length > 0;
-  const tagId = node.tag.id;
   const isExpanded = expandedTags[tagId] ?? false;
-  const href = `/contacts?tag=${tagId}` as Route;
+  const href = `${basePath}?tag=${tagId}` as Route;
   const isActive = checkActiveLink(href);
   const indentSizeRem = 0.75; // matches Tailwind ml-3 visually for nesting
+
+  const row = (
+    <div className='flex items-center'>
+      {/* Expand/collapse toggle for branches */}
+      {hasChildren ? (
+        <Button
+          variant='ghost'
+          size='sm'
+          className='h-6 w-6 shrink-0 p-0'
+          onClick={e => {
+            e.stopPropagation();
+            toggleTag(tagId);
+          }}
+          aria-expanded={isExpanded}
+          aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${tagName}`}
+          data-testid={`${testIdPrefix}tag-toggle-${tagId}`}
+        >
+          {isExpanded ? (
+            <ChevronDown className='h-3 w-3' aria-hidden='true' />
+          ) : (
+            <ChevronRight className='h-3 w-3' aria-hidden='true' />
+          )}
+        </Button>
+      ) : (
+        <span className='inline-block w-6 shrink-0' aria-hidden='true' />
+      )}
+
+      {/* Tag link */}
+      <Button
+        variant='ghost'
+        size='sm'
+        className={cn(
+          'h-auto min-w-0 flex-1 justify-start px-1 py-1.5 font-normal',
+          'hover:bg-accent hover:text-accent-foreground',
+          'focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2',
+          isActive && 'bg-accent text-accent-foreground font-medium'
+        )}
+        asChild
+      >
+        <Link
+          href={href}
+          onClick={onNavigate}
+          aria-current={isActive ? 'page' : undefined}
+          data-testid={`nav-link-${testIdPrefix}tag-${tagId}`}
+        >
+          <Tag className='mr-1.5 h-3 w-3 shrink-0' aria-hidden='true' />
+          <span className='truncate'>{tagName}</span>
+        </Link>
+      </Button>
+    </div>
+  );
 
   return (
     <li
       className='list-none'
       style={{ marginLeft: `${depth * indentSizeRem}rem` }}
-      data-testid={`tag-tree-item-${node.tag.id}`}
+      data-testid={`${testIdPrefix}tag-tree-item-${tagId}`}
     >
-      <TagContextMenu tag={node.tag}>
-        <div className='flex items-center'>
-          {/* Expand/collapse toggle for branches */}
-          {hasChildren ? (
-            <Button
-              variant='ghost'
-              size='sm'
-              className='h-6 w-6 shrink-0 p-0'
-              onClick={e => {
-                e.stopPropagation();
-                toggleTag(tagId);
-              }}
-              aria-expanded={isExpanded}
-              aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${node.tag.attributes.name}`}
-              data-testid={`tag-toggle-${node.tag.id}`}
-            >
-              {isExpanded ? (
-                <ChevronDown className='h-3 w-3' aria-hidden='true' />
-              ) : (
-                <ChevronRight className='h-3 w-3' aria-hidden='true' />
-              )}
-            </Button>
-          ) : (
-            <span className='inline-block w-6 shrink-0' aria-hidden='true' />
-          )}
-
-          {/* Tag link */}
-          <Button
-            variant='ghost'
-            size='sm'
-            className={cn(
-              'h-auto min-w-0 flex-1 justify-start px-1 py-1.5 font-normal',
-              'hover:bg-accent hover:text-accent-foreground',
-              'focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2',
-              isActive && 'bg-accent text-accent-foreground font-medium'
-            )}
-            asChild
-          >
-            <Link
-              href={href}
-              onClick={onNavigate}
-              aria-current={isActive ? 'page' : undefined}
-              data-testid={`nav-link-tag-${node.tag.id}`}
-            >
-              <Tag className='mr-1.5 h-3 w-3 shrink-0' aria-hidden='true' />
-              <span className='truncate'>{node.tag.attributes.name}</span>
-            </Link>
-          </Button>
-        </div>
-      </TagContextMenu>
+      {wrapItem ? wrapItem(node.tag, row) : row}
 
       {/* Children (recursive) */}
       {hasChildren && isExpanded && (
-        <ul aria-label={`${node.tag.attributes.name} child tags`}>
+        <ul aria-label={`${tagName} child tags`}>
           {node.children.map(child => (
             <TagTreeItem
-              key={child.tag.id}
+              key={view(child.tag).id}
               node={child}
               depth={depth + 1}
+              options={options}
               expandedTags={expandedTags}
               toggleTag={toggleTag}
               isActiveLink={checkActiveLink}
@@ -248,12 +378,14 @@ function TagTreeItem({
 /**
  * Renders the complete tag tree in the sidebar.
  */
-function TagTreeNavigation({
+function TagTreeNavigation<T>({
   tree,
+  options,
   isActiveLink: checkActiveLink,
   onNavigate,
 }: {
-  readonly tree: TagTreeNode[];
+  readonly tree: TagTreeNode<T>[];
+  readonly options: TagTreeOptions<T>;
   readonly isActiveLink: (href: Route) => boolean;
   readonly onNavigate?: () => void;
 }) {
@@ -271,13 +403,14 @@ function TagTreeNavigation({
   }
 
   return (
-    <div data-testid='tag-tree-container'>
-      <ul className='m-0 space-y-0.5 p-0' aria-label='Tags'>
+    <div data-testid={`${options.testIdPrefix}tag-tree-container`}>
+      <ul className='m-0 space-y-0.5 p-0' aria-label={options.ariaLabel}>
         {tree.map(node => (
           <TagTreeItem
-            key={node.tag.id}
+            key={options.view(node.tag).id}
             node={node}
             depth={0}
+            options={options}
             expandedTags={expandedTags}
             toggleTag={toggleTag}
             isActiveLink={checkActiveLink}
@@ -293,26 +426,9 @@ function TagTreeNavigation({
  * Sidebar content component with context support
  */
 function SidebarContentWithContext({ onNavigate }: SidebarContentProps) {
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
   const { state, toggleSection } = useSidebar();
   const navigationSections = useNavigationSections();
-
-  const checkActiveLink = useCallback(
-    (href: Route) => {
-      // For tag links (/contacts?tag=X), compare the tag param
-      if (typeof href === 'string' && href.startsWith('/contacts?tag=')) {
-        const hrefParams = new URLSearchParams(href.split('?')[1]);
-        const isOnContacts =
-          pathname === '/contacts' || pathname === '/contacts/';
-        return (
-          isOnContacts && searchParams.get('tag') === hrefParams.get('tag')
-        );
-      }
-      return isActiveLink(href, pathname, searchParams);
-    },
-    [pathname, searchParams]
-  );
+  const checkActiveLink = useActiveLinkCheck();
 
   return (
     <SidebarContentInner
@@ -329,9 +445,8 @@ function SidebarContentWithContext({ onNavigate }: SidebarContentProps) {
  * Sidebar content component with local state fallback
  */
 function SidebarContentWithLocalState({ onNavigate }: SidebarContentProps) {
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
   const navigationSections = useNavigationSections();
+  const checkActiveLink = useActiveLinkCheck();
   const [expandedSections, setExpandedSections] = useState<
     Record<string, boolean>
   >(
@@ -350,21 +465,6 @@ function SidebarContentWithLocalState({ onNavigate }: SidebarContentProps) {
       [sectionLabel]: !prev[sectionLabel],
     }));
   };
-
-  const checkActiveLink = useCallback(
-    (href: Route) => {
-      if (typeof href === 'string' && href.startsWith('/contacts?tag=')) {
-        const hrefParams = new URLSearchParams(href.split('?')[1]);
-        const isOnContacts =
-          pathname === '/contacts' || pathname === '/contacts/';
-        return (
-          isOnContacts && searchParams.get('tag') === hrefParams.get('tag')
-        );
-      }
-      return isActiveLink(href, pathname, searchParams);
-    },
-    [pathname, searchParams]
-  );
 
   return (
     <SidebarContentInner
@@ -535,13 +635,7 @@ function SidebarContentInner({
                   })}
 
                   {/* Nested tag tree */}
-                  {section.tagTree && section.tagTree.length > 0 && (
-                    <TagTreeNavigation
-                      tree={section.tagTree}
-                      isActiveLink={isActiveLink}
-                      onNavigate={onNavigate}
-                    />
-                  )}
+                  {section.renderTagTree?.({ isActiveLink, onNavigate })}
 
                   {/* Create Tag Button */}
                   {section.label === 'Contacts' && (
