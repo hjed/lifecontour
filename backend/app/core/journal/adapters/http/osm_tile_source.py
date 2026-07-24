@@ -114,8 +114,9 @@ class OsmTileSource(TileSource):
         cache_path = self._cache_path(tile)
 
         # Cache hits skip both the lock and the throttle — they are cheap and
-        # concurrency-safe (read-only).
-        cached = self._read_cache(cache_path)
+        # concurrency-safe (read-only). Disk I/O runs in a worker thread so a
+        # fully-cached export never blocks the event loop.
+        cached = await asyncio.to_thread(self._read_cache, cache_path)
         if cached is not None:
             return cached
 
@@ -126,7 +127,7 @@ class OsmTileSource(TileSource):
 
         async with self._lock:
             # Another coroutine may have fetched this tile while we waited.
-            cached = self._read_cache(cache_path)
+            cached = await asyncio.to_thread(self._read_cache, cache_path)
             if cached is not None:
                 return cached
 
@@ -136,7 +137,7 @@ class OsmTileSource(TileSource):
             # discard a tile we already fetched (that would needlessly fail the
             # export). Log and return the bytes; the next fetch just re-fetches.
             try:
-                self._write_cache(cache_path, data)
+                await asyncio.to_thread(self._write_cache, cache_path, data)
             except OSError as e:
                 logger.warning(
                     "Failed to cache tile; returning fetched bytes",
@@ -150,9 +151,24 @@ class OsmTileSource(TileSource):
 
     @staticmethod
     def _read_cache(cache_path: Path) -> bytes | None:
-        if cache_path.exists():
+        """Return cached bytes, or ``None`` if absent or unreadable.
+
+        Reading is best-effort in the same way writing is: a permissions
+        error, a truncated file, or the file being evicted between the
+        ``exists()`` check and the read is treated as a cache miss (re-fetch)
+        rather than failing the export.
+        """
+        try:
             return cache_path.read_bytes()
-        return None
+        except FileNotFoundError:
+            return None
+        except OSError as e:
+            logger.warning(
+                "Failed to read cached tile; treating as a miss",
+                path=str(cache_path),
+                error=str(e),
+            )
+            return None
 
     @staticmethod
     def _write_cache(cache_path: Path, data: bytes) -> None:

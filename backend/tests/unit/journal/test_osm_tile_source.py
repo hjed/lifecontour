@@ -141,6 +141,21 @@ class TestOsmTileSourceFetch:
 
         assert handler.requests[0].headers["user-agent"] == _USER_AGENT
 
+    async def test_base_url_path_prefix_is_preserved(self, tmp_path: Path) -> None:
+        # Swappability: a provider whose tiles live under a URL prefix must not
+        # have that prefix dropped when the z/x/y path is appended.
+        handler = _RecordingHandler()
+        source = _make_source(
+            tmp_path, handler, base_url="https://tiles.example/v1/outdoors"
+        )
+
+        await source.fetch_tile(_TILE)
+
+        assert (
+            str(handler.requests[0].url)
+            == "https://tiles.example/v1/outdoors/5/15/10.png"
+        )
+
 
 class TestOsmTileSourceCache:
     """On-disk cache dedups tiles across entries/zooms."""
@@ -185,6 +200,16 @@ class TestOsmTileSourceCache:
         monkeypatch.setattr(source, "_write_cache", _boom)
 
         assert await source.fetch_tile(_TILE) == _TILE_BYTES
+
+    async def test_unreadable_cache_falls_back_to_refetch(self, tmp_path: Path) -> None:
+        # An unreadable cache entry (here: a directory where the tile file
+        # should be, so read_bytes() raises OSError) is a miss, not an error.
+        handler = _RecordingHandler()
+        source = _make_source(tmp_path, handler)
+        (tmp_path / "5" / "15" / "10.png").mkdir(parents=True)
+
+        assert await source.fetch_tile(_TILE) == _TILE_BYTES
+        assert len(handler.requests) == 1
 
 
 class TestOsmTileSourceThrottle:
