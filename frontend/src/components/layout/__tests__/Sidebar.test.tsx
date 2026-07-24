@@ -22,6 +22,16 @@ jest.mock('@/lib/api/contacts', () => ({
   useMergeTag: jest.fn(() => ({ mutateAsync: jest.fn(), isPending: false })),
 }));
 
+// The sidebar also renders the journal tag tree; these tests are about contact
+// navigation, so journal tags stay empty. See Sidebar-journal-tags.test.tsx.
+jest.mock('@/lib/api/journals', () => ({
+  useJournalTags: jest.fn(() => ({
+    data: { data: [] },
+    isLoading: false,
+    error: null,
+  })),
+}));
+
 const mockUsePathname = usePathname as jest.MockedFunction<typeof usePathname>;
 const mockUseTags = useTags as jest.MockedFunction<typeof useTags>;
 
