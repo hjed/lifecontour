@@ -22,6 +22,7 @@ import asyncio
 import os
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -47,18 +48,25 @@ class _TileThrottle:
     not call this, so only real network requests are throttled.
     """
 
-    def __init__(self, tiles_per_second: float) -> None:
+    def __init__(
+        self,
+        tiles_per_second: float,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
         self._interval = 1.0 / tiles_per_second if tiles_per_second > 0 else 0.0
         self._last: float | None = None
+        # Injectable clock so the pacing can be tested deterministically
+        # without depending on real elapsed wall-clock time.
+        self._monotonic = monotonic
 
     async def wait(self) -> None:
         """Sleep if needed so the next fetch respects the minimum spacing."""
         if self._last is not None:
-            elapsed = time.monotonic() - self._last
+            elapsed = self._monotonic() - self._last
             remaining = self._interval - elapsed
             if remaining > 0:
                 await asyncio.sleep(remaining)
-        self._last = time.monotonic()
+        self._last = self._monotonic()
 
 
 class OsmTileSource(TileSource):
@@ -71,6 +79,8 @@ class OsmTileSource(TileSource):
         tiles_per_second: Fetch throttle target (≈2 per OSM policy).
         transport: Optional ``httpx`` transport, injected by tests to stub HTTP.
         timeout: Per-request timeout in seconds.
+        monotonic: Injectable monotonic clock, so throttle pacing can be tested
+            deterministically. Defaults to ``time.monotonic``.
     """
 
     def __init__(
@@ -82,11 +92,12 @@ class OsmTileSource(TileSource):
         tiles_per_second: float = 2.0,
         transport: httpx.AsyncBaseTransport | None = None,
         timeout: float = 30.0,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._user_agent = user_agent
         self._cache_dir = Path(cache_dir)
-        self._throttle = _TileThrottle(tiles_per_second)
+        self._throttle = _TileThrottle(tiles_per_second, monotonic)
         self._transport = transport
         self._timeout = timeout
         # Serialise network fetches so the throttle is honoured batch-wide even

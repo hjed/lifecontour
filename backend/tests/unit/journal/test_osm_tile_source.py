@@ -13,6 +13,8 @@ time passes.
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -64,6 +66,7 @@ def _make_source(
     *,
     tiles_per_second: float = 2.0,
     base_url: str = _BASE_URL,
+    monotonic: Callable[[], float] = time.monotonic,
 ) -> OsmTileSource:
     return OsmTileSource(
         base_url=base_url,
@@ -71,7 +74,25 @@ def _make_source(
         cache_dir=cache_dir,
         tiles_per_second=tiles_per_second,
         transport=httpx.MockTransport(handler),
+        monotonic=monotonic,
     )
+
+
+class _StepClock:
+    """Deterministic monotonic clock returning scripted values in order.
+
+    Repeats the final value if called more times than scripted, so the test
+    can't break if the throttle reads the clock an extra time.
+    """
+
+    def __init__(self, values: list[float]) -> None:
+        self._values = values
+        self._index = 0
+
+    def __call__(self) -> float:
+        value = self._values[min(self._index, len(self._values) - 1)]
+        self._index += 1
+        return value
 
 
 def _cached_tiles(cache_dir: Path) -> list[bytes]:
@@ -171,7 +192,11 @@ class TestOsmTileSourceThrottle:
 
     async def test_throttle_paces_successive_fetches(self, tmp_path: Path) -> None:
         handler = _RecordingHandler()
-        source = _make_source(tmp_path, handler, tiles_per_second=2.0)
+        # Deterministic clock (not real wall-clock, so a slow CI runner can't
+        # make this flaky): the two fetches read 100.0 then 100.1 — 0.1s apart,
+        # inside the 0.5s window — so the throttle must sleep for 0.4s.
+        clock = _StepClock([100.0, 100.1])
+        source = _make_source(tmp_path, handler, tiles_per_second=2.0, monotonic=clock)
         other_tile = TileCoordinate(z=5, x=16, y=10)
 
         with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
@@ -183,8 +208,8 @@ class TestOsmTileSourceThrottle:
         await_args = mock_sleep.await_args
         assert await_args is not None
         (delay,) = await_args.args
-        # 1 / 2 tiles per second = 0.5s minimum spacing.
-        assert 0 < delay <= 0.5
+        # 1 / 2 tiles per second = 0.5s spacing, minus the 0.1s already elapsed.
+        assert delay == pytest.approx(0.4)
 
 
 class TestOsmTileSourceFailure:
