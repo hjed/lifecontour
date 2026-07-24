@@ -276,3 +276,16 @@ class TestOsmTileSourceFailure:
             await source.fetch_tile(_TILE)
 
         assert handler.requests == []
+
+    async def test_hostless_base_url_rejected_without_network(
+        self, tmp_path: Path
+    ) -> None:
+        # A misconfigured tile server (no host) must fail fast and typed,
+        # rather than late as a DNS error or as an untyped httpx.InvalidURL.
+        handler = _RecordingHandler()
+        source = _make_source(tmp_path, handler, base_url="https://")
+
+        with pytest.raises(TileFetchError):
+            await source.fetch_tile(_TILE)
+
+        assert handler.requests == []

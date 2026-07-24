@@ -120,10 +120,14 @@ class OsmTileSource(TileSource):
         if cached is not None:
             return cached
 
-        # Guard against SSRF before any request is made.
-        scheme = urlparse(self._base_url).scheme
-        if scheme not in ("http", "https"):
-            raise TileFetchError(f"Invalid tile server URL scheme: {scheme!r}")
+        # Guard against SSRF and malformed URLs before any request is made, so
+        # a misconfigured tile server fails fast and typed rather than late
+        # (a DNS error) or untyped (httpx.InvalidURL is not a RequestError).
+        parsed = urlparse(self._base_url)
+        if parsed.scheme not in ("http", "https"):
+            raise TileFetchError(f"Invalid tile server URL scheme: {parsed.scheme!r}")
+        if not parsed.hostname:
+            raise TileFetchError(f"Tile server URL has no host: {self._base_url!r}")
 
         async with self._lock:
             # Another coroutine may have fetched this tile while we waited.
@@ -203,6 +207,11 @@ class OsmTileSource(TileSource):
         except httpx.RequestError as e:
             logger.warning("OSM tile request error", path=path, error=str(e))
             raise TileFetchError(f"Failed to fetch tile {path}: {e}") from e
+        except httpx.InvalidURL as e:
+            # InvalidURL derives from Exception, not RequestError, so it needs
+            # its own clause to stay inside the typed-failure contract.
+            logger.warning("Invalid tile URL", path=path, error=str(e))
+            raise TileFetchError(f"Invalid tile URL for {path}: {e}") from e
 
     def _build_client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(

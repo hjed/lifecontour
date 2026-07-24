@@ -1,5 +1,8 @@
 """Unit tests for application settings (app.infrastructure.config)."""
 
+import pytest
+from pydantic import ValidationError
+
 from app.infrastructure.config import Settings
 
 
@@ -60,3 +63,30 @@ class TestCorsAllowOrigins:
         )
 
         assert settings.cors_allow_origins == ["http://localhost:3000"]
+
+
+class TestLogbookTileThrottle:
+    """The basemap tile throttle must never be silently disabled.
+
+    ``_TileThrottle`` treats a non-positive rate as "no pacing", so a bad
+    ``LOGBOOK_TILE_THROTTLE_PER_SECOND`` would quietly violate OSM's
+    tile-usage policy. Settings rejects it at startup instead.
+    """
+
+    def test_defaults_to_two_tiles_per_second(self):
+        settings = Settings(_env_file=None)  # pyright: ignore[reportCallIssue]
+
+        assert settings.logbook_tile_throttle_per_second == 2.0
+
+    def test_accepts_a_positive_rate(self):
+        settings = Settings(logbook_tile_throttle_per_second=0.5)
+
+        assert settings.logbook_tile_throttle_per_second == 0.5
+
+    def test_rejects_zero(self):
+        with pytest.raises(ValidationError):
+            Settings(logbook_tile_throttle_per_second=0)
+
+    def test_rejects_a_negative_rate(self):
+        with pytest.raises(ValidationError):
+            Settings(logbook_tile_throttle_per_second=-1)

@@ -174,8 +174,11 @@ class Settings(BaseSettings):
     )
     logbook_tile_throttle_per_second: float = Field(
         default=2.0,
+        gt=0,
         description="Maximum basemap tiles fetched per second, pacing the "
-        "batch export to respect OSM's tile-usage policy.",
+        "batch export to respect OSM's tile-usage policy. Must be > 0 — a "
+        "zero/negative value would silently disable pacing, so it fails fast "
+        "at startup instead.",
     )
 
     # Session settings
