@@ -73,7 +73,11 @@ class TestLogbookTileThrottle:
     tile-usage policy. Settings rejects it at startup instead.
     """
 
-    def test_defaults_to_two_tiles_per_second(self):
+    def test_defaults_to_two_tiles_per_second(self, monkeypatch: pytest.MonkeyPatch):
+        # ``_env_file=None`` only disables the dotenv file — pydantic-settings
+        # still reads os.environ, so clear the var to assert the real default.
+        monkeypatch.delenv("LOGBOOK_TILE_THROTTLE_PER_SECOND", raising=False)
+
         settings = Settings(_env_file=None)  # pyright: ignore[reportCallIssue]
 
         assert settings.logbook_tile_throttle_per_second == 2.0
