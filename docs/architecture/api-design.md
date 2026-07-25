@@ -174,6 +174,34 @@ Conventions this surface pins down:
 - The matching MCP tool is `get_outdoor_dashboard` (documented in its
   docstring, per the MCP documentation convention).
 
+## Outdoor Logbook Basemap Tiles (Outbound)
+
+The outdoor-logbook PDF renders each activity's GPX track over a basemap. Basemap
+tiles are fetched through a **swappable tile-source port** (`TileSource` in
+`app/core/journal/models/tile_source.py`) so the concrete source can change without
+the renderer changing.
+
+The default adapter, `OsmTileSource`
+(`app/core/journal/adapters/http/osm_tile_source.py`), fetches **OpenStreetMap
+standard tiles** — the same source the in-app `GPXTrackMap.tsx` uses. Because PDF
+export is a **batch** operation that may render many tracks at once, the adapter is
+batch-safe per OSM's tile-usage policy:
+
+- **On-disk cache** keyed by `z/x/y`, so a tile shared across entries or zoom levels
+  is fetched only once (cache dir: `LOGBOOK_TILE_CACHE_DIR`).
+- **Throttle** pacing network fetches to ≈2 tiles/second
+  (`LOGBOOK_TILE_THROTTLE_PER_SECOND`); cache hits skip the throttle.
+- **Valid User-Agent** on every request (`LOGBOOK_TILE_USER_AGENT`), as OSM requires.
+- **Clean failure:** any HTTP/connection failure raises the typed `TileFetchError`
+  and leaves the cache untouched, so the renderer can fall back to a plain background
+  rather than failing the export.
+
+Swappability: a keyed topo provider can be substituted later by pointing
+`LOGBOOK_TILE_BASE_URL` at another `{z}/{x}/{y}` endpoint or providing an alternative
+`TileSource` implementation in the `JournalProvider` DI binding. The tile source is
+registered at **APP scope** so its cache and throttle are shared across the whole
+export batch and across requests.
+
 ## Authentication Guidelines
 
 ### Session-Based Authentication

@@ -5,11 +5,17 @@ Handles environment variables, defaults, and validation for all
 application settings including database, security, and external services.
 """
 
+import tempfile
 from functools import lru_cache
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Default on-disk cache location for outdoor-logbook basemap tiles. Resolved
+# once at import; overridable via LOGBOOK_TILE_CACHE_DIR.
+_DEFAULT_TILE_CACHE_DIR = str(Path(tempfile.gettempdir()) / "pms-logbook-tiles")
 
 
 def _origin_from_url(url: str) -> str:
@@ -146,6 +152,33 @@ class Settings(BaseSettings):
         description="Enable the POST /api/journals/review-items test endpoint. "
         "Disabled by default — set ENABLE_TEST_REVIEW_ITEMS=true "
         "only in test/CI environments for E2E review queue testing.",
+    )
+
+    # Outdoor-logbook PDF basemap-tile settings (ITER16-004)
+    logbook_tile_base_url: str = Field(
+        default="https://tile.openstreetmap.org",
+        description="Basemap tile server root for outdoor-logbook PDF GPX maps. "
+        "Defaults to OpenStreetMap standard tiles; swappable for a keyed topo "
+        "provider. Use the single-host endpoint (not the deprecated {s}. "
+        "subdomains) for server-side batch fetching.",
+    )
+    logbook_tile_user_agent: str = Field(
+        default="PersonalManagementSystem/1.0 (outdoor-logbook-pdf)",
+        description="User-Agent sent with every basemap tile request. OSM's "
+        "tile-usage policy requires a valid, identifying User-Agent.",
+    )
+    logbook_tile_cache_dir: str = Field(
+        default=_DEFAULT_TILE_CACHE_DIR,
+        description="On-disk cache directory for fetched basemap tiles "
+        "(deduplicates tiles shared across entries/zoom levels).",
+    )
+    logbook_tile_throttle_per_second: float = Field(
+        default=2.0,
+        gt=0,
+        description="Maximum basemap tiles fetched per second, pacing the "
+        "batch export to respect OSM's tile-usage policy. Must be > 0 — a "
+        "zero/negative value would silently disable pacing, so it fails fast "
+        "at startup instead.",
     )
 
     # Session settings
