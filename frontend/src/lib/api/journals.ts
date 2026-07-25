@@ -605,6 +605,7 @@ async function fetchJournalTags(): Promise<{ data: JournalTag[] }> {
       attributes: {
         name: string;
         color?: string | null;
+        description?: string | null;
         parent_id?: string | null;
       };
     }>;
@@ -615,6 +616,7 @@ async function fetchJournalTags(): Promise<{ data: JournalTag[] }> {
     id: resource.id,
     name: resource.attributes.name,
     color: resource.attributes.color,
+    description: resource.attributes.description ?? null,
     parent_id: resource.attributes.parent_id ?? null,
   }));
 
@@ -627,6 +629,50 @@ export interface JournalTagCreateAttributes {
   color?: string;
   description?: string;
   parent_id?: string;
+}
+
+/**
+ * Attributes accepted when updating a journal tag.
+ *
+ * Every field is optional — omitted attributes are left unchanged by the
+ * backend. An explicit `null` `parent_id` is the wire signal for "move this tag
+ * back to the root of the hierarchy".
+ */
+export interface JournalTagUpdateAttributes {
+  name?: string;
+  color?: string;
+  description?: string;
+  parent_id?: string | null;
+}
+
+// Update an existing journal tag and return the updated JSON:API resource.
+async function updateJournalTag(
+  id: string,
+  attributes: JournalTagUpdateAttributes
+): Promise<{ data: { id: string } }> {
+  const response = await fetch(`/api/journals/tags/${id}`, {
+    method: 'PATCH',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      data: {
+        type: 'journal-tags',
+        id,
+        attributes,
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.UPDATE_FAILED
+    );
+  }
+
+  return response.json();
 }
 
 // Create a new journal tag and return the created JSON:API resource.
@@ -1010,7 +1056,39 @@ export function useCreateJournalTag() {
       createJournalTag(attributes),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: journalTagKeys.lists() });
+      // The tag tree, the journals list and any open journal's tag editor all
+      // read the tag namespace; refresh the journal queries alongside it.
+      queryClient.invalidateQueries({ queryKey: journalKeys.all });
       toast.success('Tag created successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+/**
+ * Updates a journal tag's name, colour, description or parent.
+ *
+ * A rename or recolour changes the chips rendered on the journals list and on
+ * every open journal detail page, so both the tag namespace and the journal
+ * queries are invalidated.
+ */
+export function useUpdateJournalTag() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      id,
+      attributes,
+    }: {
+      id: string;
+      attributes: JournalTagUpdateAttributes;
+    }) => updateJournalTag(id, attributes),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: journalTagKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: journalKeys.all });
+      toast.success(SUCCESS_MESSAGES.TAG_UPDATED);
     },
     onError: (error: Error) => {
       toast.error(error.message);

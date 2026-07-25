@@ -30,6 +30,14 @@ jest.mock('@/lib/api/journals', () => ({
     isLoading: false,
     error: null,
   })),
+  useCreateJournalTag: jest.fn(() => ({
+    mutateAsync: jest.fn(),
+    isPending: false,
+  })),
+  useUpdateJournalTag: jest.fn(() => ({
+    mutateAsync: jest.fn(),
+    isPending: false,
+  })),
 }));
 
 const mockUsePathname = usePathname as jest.MockedFunction<typeof usePathname>;
