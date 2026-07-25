@@ -54,10 +54,26 @@ export function JournalTagManagementDialog({
       description: tag.description || '',
       parentId: tag.parent_id ?? null,
     }),
-    [tag.name, tag.color, tag.description, tag.parent_id]
+    [
+      // Keyed on the subject's id too, so a different tag with identical
+      // attributes still re-seeds the form rather than inheriting a draft.
+      tag.id,
+      tag.name,
+      tag.color,
+      tag.description,
+      tag.parent_id,
+    ]
   );
 
   const handleSubmit = async (values: TagFormValues) => {
+    // The service records a field as changed whenever the value it receives
+    // differs from what is stored, and `'' != None`. The form normalises an
+    // absent description to '', so sending it unconditionally would rewrite
+    // null to '' just for opening the dialog and saving — a phantom edit that
+    // ITER17-005 would turn into a phantom history entry. Send it only when the
+    // user actually changed it, which still allows clearing real text.
+    const descriptionChanged = values.description !== (tag.description ?? '');
+
     await updateTag({
       id: tag.id,
       attributes: {
@@ -67,7 +83,7 @@ export function JournalTagManagementDialog({
         // as malformed), so omit it and leave the stored value alone — sending
         // '' would 400 every edit of a colourless tag.
         ...(values.color ? { color: values.color } : {}),
-        description: values.description,
+        ...(descriptionChanged ? { description: values.description } : {}),
         parent_id: values.parentId,
       },
     });

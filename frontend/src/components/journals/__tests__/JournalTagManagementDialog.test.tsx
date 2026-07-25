@@ -83,12 +83,14 @@ describe('JournalTagManagementDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Save Changes' }));
 
     await waitFor(() => {
+      // `description` is absent because it was not edited — omitted attributes
+      // are left untouched by the API, and sending an unchanged value would
+      // register as a change against a null stored description.
       expect(mockUpdateTag).toHaveBeenCalledWith({
         id: CLIMBING,
         attributes: {
           name: 'Sport Climbing',
           color: '#3182CE',
-          description: 'Rock climbing entries',
           parent_id: OUTDOORS,
         },
       });
@@ -196,6 +198,77 @@ describe('JournalTagManagementDialog', () => {
         })
       );
     });
+  });
+
+  it('omits an untouched description rather than rewriting null to an empty string', async () => {
+    // The service treats '' as different from null, so sending the normalised
+    // empty description would record a change the user never made.
+    const undescribed: JournalTag = {
+      id: COOKING,
+      name: 'Cooking',
+      color: '#D69E2E',
+      parent_id: null,
+    };
+    (useJournalTags as jest.Mock).mockReturnValue({
+      data: { data: [undescribed] },
+      isLoading: false,
+      error: null,
+    });
+
+    const user = userEvent.setup();
+    renderDialog(undescribed);
+
+    const nameInput = screen.getByLabelText(/^Name/i);
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Baking');
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() => {
+      expect(mockUpdateTag).toHaveBeenCalled();
+    });
+    expect(mockUpdateTag.mock.calls[0][0].attributes).not.toHaveProperty(
+      'description'
+    );
+  });
+
+  it('still sends an emptied description when the user clears real text', async () => {
+    const user = userEvent.setup();
+    renderDialog(tagById(CLIMBING));
+
+    await user.clear(screen.getByLabelText(/Description/i));
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() => {
+      expect(mockUpdateTag).toHaveBeenCalledWith(
+        expect.objectContaining({
+          attributes: expect.objectContaining({ description: '' }),
+        })
+      );
+    });
+  });
+
+  it('re-seeds the form when the subject tag changes to one with identical attributes', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <JournalTagManagementDialog
+        open
+        onOpenChange={jest.fn()}
+        tag={tagById(CLIMBING)}
+      />
+    );
+
+    await user.clear(screen.getByLabelText(/^Name/i));
+    await user.type(screen.getByLabelText(/^Name/i), 'Half typed');
+
+    rerender(
+      <JournalTagManagementDialog
+        open
+        onOpenChange={jest.fn()}
+        tag={{ ...tagById(CLIMBING), id: BOULDERING }}
+      />
+    );
+
+    expect(screen.getByLabelText(/^Name/i)).toHaveValue('Climbing');
   });
 
   it('blocks the update when the name is cleared', async () => {
