@@ -282,6 +282,55 @@ describe('TagFormDialog', () => {
     );
   });
 
+  it('does not carry a chosen merge target across a close', async () => {
+    // Closing by any route must clear the merge target: a stale one leaves the
+    // Merge button live on the next open, pointing at a tag the user picked in
+    // an earlier session of the dialog.
+    const user = userEvent.setup();
+    const onMerge = jest.fn().mockResolvedValue(undefined);
+    const { rerenderWith } = renderDialog({
+      onMerge,
+      mergeOptions: PARENT_OPTIONS,
+    });
+
+    await user.click(screen.getByLabelText('Merge into'));
+    await user.click(await screen.findByRole('option', { name: 'Indoors' }));
+    expect(screen.getByRole('button', { name: 'Merge' })).toBeEnabled();
+
+    // Close via Save Changes rather than Cancel — this is the path that used to
+    // skip the reset.
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    rerenderWith({ open: false });
+    rerenderWith({ open: true });
+
+    expect(screen.getByRole('button', { name: 'Merge' })).toBeDisabled();
+    expect(onMerge).not.toHaveBeenCalled();
+  });
+
+  // The parent select has its own value space, so no tag id can shadow the "no
+  // parent" option however arbitrary the id is. Both plausible sentinel spellings
+  // are covered so the guarantee does not quietly depend on which one is used.
+  it.each(['none', 'root'])(
+    'keeps a tag whose id is %p selectable as a parent',
+    async id => {
+      const user = userEvent.setup();
+      const { onSubmit } = renderDialog({
+        parentOptions: [{ id, name: 'Sentinel Lookalike' }],
+        initialValues: { ...INITIAL, parentId: null },
+      });
+
+      await chooseOption(user, 'Parent Tag', 'Sentinel Lookalike');
+      await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+      await waitFor(() => {
+        expect(onSubmit).toHaveBeenCalledWith(
+          expect.objectContaining({ parentId: id })
+        );
+      });
+    }
+  );
+
   it('renders no delete or merge affordances when their callbacks are absent', () => {
     renderDialog();
 

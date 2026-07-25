@@ -17,7 +17,7 @@
 
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -61,8 +61,29 @@ import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 
-/** Sentinel for "no parent" — Radix Select cannot hold an empty-string value. */
-const ROOT_PARENT_VALUE = 'none';
+/**
+ * The parent select's own value space, kept disjoint from tag ids.
+ *
+ * Radix Select cannot hold an empty-string value, so "no parent" needs a
+ * sentinel — but a bare sentinel like `'none'` could collide with a real id in a
+ * namespace whose ids are arbitrary strings, silently making that tag
+ * unselectable as a parent. Prefixing every real id keeps the two disjoint
+ * whatever the id looks like.
+ */
+const ROOT_PARENT_VALUE = 'root';
+const PARENT_VALUE_PREFIX = 'tag:';
+
+function toParentValue(parentId: string | null): string {
+  return parentId === null
+    ? ROOT_PARENT_VALUE
+    : `${PARENT_VALUE_PREFIX}${parentId}`;
+}
+
+function fromParentValue(value: string): string | null {
+  return value === ROOT_PARENT_VALUE
+    ? null
+    : value.slice(PARENT_VALUE_PREFIX.length);
+}
 
 /** Both tag backends store a 7-character `#RRGGBB` colour. */
 const HEX_COLOUR_PATTERN = /^#[0-9a-fA-F]{6}$/;
@@ -159,7 +180,7 @@ function toInternalValues(values: TagFormValues): InternalFormValues {
     name: values.name,
     color: values.color,
     description: values.description,
-    parentId: values.parentId ?? ROOT_PARENT_VALUE,
+    parentId: toParentValue(values.parentId ?? null),
   };
 }
 
@@ -198,8 +219,30 @@ export function TagFormDialog({
     defaultValues: toInternalValues(initialValues),
   });
 
+  /**
+   * Clears the state that lives outside the form.
+   *
+   * A stale `mergeTargetId` is the dangerous one: it leaves the Merge button
+   * enabled on the next open, pointing at a target the user chose in an earlier
+   * session of the dialog.
+   */
+  const resetTransientState = useCallback(() => {
+    setMergeTargetId('');
+    setShowMergeConfirm(false);
+    setShowDeleteConfirm(false);
+  }, []);
+
+  /** The single close path, so no caller can skip the reset. */
+  const closeDialog = useCallback(() => {
+    resetTransientState();
+    onOpenChange(false);
+  }, [resetTransientState, onOpenChange]);
+
   // Re-seed the form when the dialog opens or the subject tag changes, so a
-  // dialog kept mounted between openings never shows a stale draft.
+  // dialog kept mounted between openings never shows a stale draft. The
+  // non-form state is not reset here — every close routes through
+  // `closeDialog`, and resetting it in an effect would mean calling setState
+  // synchronously during one.
   useEffect(() => {
     if (open) {
       form.reset(toInternalValues(initialValues));
@@ -212,10 +255,9 @@ export function TagFormDialog({
         name: values.name,
         color: values.color,
         description: values.description,
-        parentId:
-          values.parentId === ROOT_PARENT_VALUE ? null : values.parentId,
+        parentId: fromParentValue(values.parentId),
       });
-      onOpenChange(false);
+      closeDialog();
     } catch {
       // Errors surface as toasts from the adapter's mutation; keep the dialog
       // open so the user can correct the input and retry.
@@ -226,8 +268,7 @@ export function TagFormDialog({
     if (!onDelete) return;
     try {
       await onDelete();
-      setShowDeleteConfirm(false);
-      onOpenChange(false);
+      closeDialog();
     } catch {
       // Handled by the mutation's error toast.
     }
@@ -237,8 +278,7 @@ export function TagFormDialog({
     if (!onMerge || !mergeTargetId) return;
     try {
       await onMerge(mergeTargetId);
-      setShowMergeConfirm(false);
-      onOpenChange(false);
+      closeDialog();
     } catch {
       // Handled by the mutation's error toast.
     }
@@ -249,14 +289,7 @@ export function TagFormDialog({
   return (
     <Dialog
       open={open}
-      onOpenChange={newOpen => {
-        if (!newOpen) {
-          setMergeTargetId('');
-          setShowMergeConfirm(false);
-          setShowDeleteConfirm(false);
-        }
-        onOpenChange(newOpen);
-      }}
+      onOpenChange={newOpen => (newOpen ? onOpenChange(true) : closeDialog())}
     >
       <DialogContent className='max-h-[90vh] overflow-y-auto sm:max-w-[425px]'>
         <DialogHeader>
@@ -301,7 +334,10 @@ export function TagFormDialog({
                           None (Root Level)
                         </SelectItem>
                         {parentOptions.map(option => (
-                          <SelectItem key={option.id} value={option.id}>
+                          <SelectItem
+                            key={option.id}
+                            value={toParentValue(option.id)}
+                          >
                             {option.name}
                           </SelectItem>
                         ))}
@@ -393,11 +429,7 @@ export function TagFormDialog({
                   </AlertDialogContent>
                 </AlertDialog>
               ) : (
-                <Button
-                  type='button'
-                  variant='outline'
-                  onClick={() => onOpenChange(false)}
-                >
+                <Button type='button' variant='outline' onClick={closeDialog}>
                   Cancel
                 </Button>
               )}
