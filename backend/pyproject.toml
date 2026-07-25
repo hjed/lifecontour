@@ -51,6 +51,10 @@ dependencies = [
     "opentelemetry-instrumentation-logging>=0.62b1",
     "opentelemetry-instrumentation-redis>=0.62b1",
     "reportlab>=5.0.0",
+    # Declared explicitly because the outdoor-logbook GPX maps import PIL
+    # directly to composite basemap tiles. reportlab already requires it, so
+    # this pins an existing transitive dependency rather than adding one.
+    "pillow>=11.0.0",
     # Pin importlib-metadata below 8.0 to work around breaking change where
     # __getitem__ raises KeyError for missing metadata keys. aiofile 3.9.0
     # (transitive dep of fastmcp) uses metadata["Author"] which crashes.
