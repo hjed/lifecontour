@@ -23,6 +23,7 @@ from core_shared.models.journals import (
     OutdoorActivityData,
     OutdoorPlanningData,
 )
+from core_shared.models.route import Route
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -57,9 +58,26 @@ from app.core.journal.adapters.sql.outdoor_activity_data_repository import (
 from app.core.journal.adapters.sql.outdoor_planning_data_repository import (
     SqlOutdoorPlanningDataRepository,
 )
+from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 
 USER_ID = "test-user-123"
 OTHER_USER_ID = "test-user-456"
+
+# A short Blue Mountains track, used wherever a seeded route needs coordinates.
+GPX_TRACK_POINTS = [(-33.700, 150.300), (-33.705, 150.308), (-33.710, 150.315)]
+
+
+def gpx_document(points: list[tuple[float, float]] | None = None) -> str:
+    """Build a minimal valid GPX document for the given ``(lat, lon)`` points."""
+    trkpts = "".join(
+        f'<trkpt lat="{lat}" lon="{lon}"/>' for lat, lon in (points or GPX_TRACK_POINTS)
+    )
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<gpx version="1.1" creator="pms-tests" '
+        'xmlns="http://www.topografix.com/GPX/1/1">'
+        f"<trk><name>Seeded Track</name><trkseg>{trkpts}</trkseg></trk></gpx>"
+    )
 
 
 class Seeder:
@@ -70,6 +88,25 @@ class Seeder:
         self.journal_repo = SqlJournalRepository(connection)
         self.outdoor_activity_repo = SqlOutdoorActivityDataRepository(connection)
         self.relationship_repo = SqlJournalContactRelationshipRepository(connection)
+        self.route_repo = SqlRouteRepository(connection)
+
+    async def create_route(
+        self,
+        *,
+        journal_id: int,
+        name: str = "Seeded Track",
+        gpx_data: str | None = None,
+    ) -> UUID:
+        """A GPX route attached to a journal (drives the logbook PDF's maps)."""
+        route = await self.route_repo.save(
+            Route(
+                journal_id=journal_id,
+                name=name,
+                gpx_data=gpx_data if gpx_data is not None else gpx_document(),
+            )
+        )
+        assert route.id is not None
+        return route.id
 
     async def create_journal(
         self,
