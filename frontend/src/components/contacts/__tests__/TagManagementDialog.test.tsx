@@ -66,6 +66,24 @@ describe('TagManagementDialog', () => {
     );
   };
 
+  it('re-seeds the form when the subject tag changes to one with identical attributes', async () => {
+    // The dialog stays mounted, so the form is only re-seeded when
+    // `initialValues` changes identity. Keying that memo on attributes alone
+    // would leak a draft into a different tag's edit.
+    const user = userEvent.setup();
+    const { rerender } = renderComponent();
+
+    await user.clear(screen.getByLabelText(/Name/i));
+    await user.type(screen.getByLabelText(/Name/i), 'Half typed');
+
+    const twinTag: TagResource = { ...mockTag, id: '99' };
+    rerender(
+      <TagManagementDialog open onOpenChange={jest.fn()} tag={twinTag} />
+    );
+
+    expect(screen.getByLabelText(/Name/i)).toHaveValue('Friend');
+  });
+
   it('renders correctly with tag details', () => {
     renderComponent();
 

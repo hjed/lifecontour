@@ -59,6 +59,10 @@ export function TagManagementDialog({
         : null,
     }),
     [
+      // `tag.id` keys the memo on the *subject*, not just its attributes: two
+      // different tags with identical attributes must still re-seed the form,
+      // rather than relying on name uniqueness to make that case unreachable.
+      tag.id,
       tag.attributes.name,
       tag.attributes.color,
       tag.attributes.description,
