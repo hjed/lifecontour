@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { screen } from '@testing-library/react';
+import { fireEvent, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { Sidebar } from '../Sidebar';
@@ -21,6 +21,14 @@ jest.mock('@/lib/api/contacts', () => ({
 
 jest.mock('@/lib/api/journals', () => ({
   useJournalTags: jest.fn(),
+  useCreateJournalTag: jest.fn(() => ({
+    mutateAsync: jest.fn(),
+    isPending: false,
+  })),
+  useUpdateJournalTag: jest.fn(() => ({
+    mutateAsync: jest.fn(),
+    isPending: false,
+  })),
 }));
 
 jest.mock('next/navigation', () => ({
@@ -281,5 +289,91 @@ describe('Sidebar - Journal Tags', () => {
     expect(
       screen.getByTestId(`nav-link-journal-tag-${LEAF_ID}`)
     ).toHaveAttribute('href', `/journals?tag=${LEAF_ID}`);
+  });
+
+  describe('tag management', () => {
+    it('opens the journal create-tag dialog from the Journals section', async () => {
+      setJournalTags([journalTag(LEAF_ID, 'Climbing')]);
+
+      const user = userEvent.setup();
+      renderWithProviders(<Sidebar />);
+      await user.click(screen.getByRole('button', { name: /journals/i }));
+
+      await user.click(screen.getByTestId('journal-create-tag-button'));
+
+      expect(
+        await screen.findByRole('dialog', { name: 'Create Tag' })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText('Add a new tag to organise your journals.')
+      ).toBeInTheDocument();
+    });
+
+    it('offers the create-tag affordance even before any journal tag exists', async () => {
+      setJournalTags([]);
+
+      renderWithProviders(<Sidebar />);
+      await expandJournalsSection();
+
+      expect(
+        screen.queryByTestId('journal-tag-tree-container')
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByTestId('journal-create-tag-button')
+      ).toBeInTheDocument();
+    });
+
+    it('keeps each section create-tag dialog independent', async () => {
+      setJournalTags([journalTag(LEAF_ID, 'Climbing')]);
+
+      const user = userEvent.setup();
+      renderWithProviders(<Sidebar />);
+      await user.click(screen.getByRole('button', { name: /journals/i }));
+
+      expect(screen.getByTestId('create-tag-button')).toBeInTheDocument();
+
+      await user.click(screen.getByTestId('journal-create-tag-button'));
+
+      // The journals dialog opened; the contacts one stayed shut.
+      expect(
+        await screen.findByText('Add a new tag to organise your journals.')
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText('Add a new tag to organize your contacts.')
+      ).not.toBeInTheDocument();
+    });
+
+    it('describes each create-tag button by its own section', async () => {
+      // Both sections show a button named "Create Tag"; the description is what
+      // distinguishes them for assistive tech.
+      setJournalTags([journalTag(LEAF_ID, 'Climbing')]);
+
+      renderWithProviders(<Sidebar />);
+      await expandJournalsSection();
+
+      expect(screen.getByTestId('journal-create-tag-button')).toHaveAttribute(
+        'aria-describedby',
+        'section-journals-header'
+      );
+      expect(screen.getByTestId('create-tag-button')).toHaveAttribute(
+        'aria-describedby',
+        'section-contacts-header'
+      );
+    });
+
+    it('offers Edit Tag from the journal tag row context menu', async () => {
+      setJournalTags([journalTag(LEAF_ID, 'Climbing')]);
+
+      renderWithProviders(<Sidebar />);
+      await expandJournalsSection();
+
+      fireEvent.contextMenu(
+        screen.getByTestId(`nav-link-journal-tag-${LEAF_ID}`)
+      );
+
+      expect(
+        await screen.findByRole('menuitem', { name: /edit tag/i })
+      ).toBeInTheDocument();
+    });
   });
 });

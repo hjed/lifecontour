@@ -51,6 +51,8 @@ import type { TagFilterBasePath } from '@/hooks/useTagFilter';
 import type { JournalTag } from '@/types/journals';
 import { TagContextMenu } from '@/components/contacts/TagContextMenu';
 import { CreateTagDialog } from '@/components/contacts/CreateTagDialog';
+import { JournalTagContextMenu } from '@/components/journals/JournalTagContextMenu';
+import { JournalCreateTagDialog } from '@/components/journals/JournalCreateTagDialog';
 
 interface NavigationItem {
   readonly label: string;
@@ -75,7 +77,21 @@ interface NavigationSection {
    * shell has no business knowing which.
    */
   readonly renderTagTree?: (props: TagTreeRenderProps) => ReactNode;
+  /**
+   * Renders the section's create-tag dialog. Present only for sections whose
+   * namespace supports tag management; the button and its open state are owned
+   * by {@link CreateTagAffordance} so each section is independent.
+   */
+  readonly renderCreateTagDialog?: (props: CreateTagDialogProps) => ReactNode;
+  /** Test id of the section's create-tag button. */
+  readonly createTagTestId?: string;
   readonly defaultExpanded?: boolean;
+}
+
+/** Props the shell passes to a section's create-tag dialog. */
+interface CreateTagDialogProps {
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
 }
 
 interface SidebarProps {
@@ -202,6 +218,8 @@ function useNavigationSections(): NavigationSection[] {
           <TagContextMenu tag={tag}>{children}</TagContextMenu>
         ),
       }),
+      renderCreateTagDialog: props => <CreateTagDialog {...props} />,
+      createTagTestId: 'create-tag-button',
     },
     {
       label: 'Journals',
@@ -213,7 +231,12 @@ function useNavigationSections(): NavigationSection[] {
         basePath: '/journals',
         testIdPrefix: 'journal-',
         ariaLabel: 'Journal tags',
+        wrapItem: (tag, children) => (
+          <JournalTagContextMenu tag={tag}>{children}</JournalTagContextMenu>
+        ),
       }),
+      renderCreateTagDialog: props => <JournalCreateTagDialog {...props} />,
+      createTagTestId: 'journal-create-tag-button',
     },
     {
       label: 'Integrations',
@@ -506,8 +529,6 @@ function SidebarContentInner({
   readonly onNavigate?: () => void;
   readonly navigationSections: NavigationSection[];
 }) {
-  const [showCreateTagDialog, setShowCreateTagDialog] = useState(false);
-
   return (
     <ScrollArea className='h-full flex-1'>
       <nav
@@ -638,19 +659,12 @@ function SidebarContentInner({
                   {section.renderTagTree?.({ isActiveLink, onNavigate })}
 
                   {/* Create Tag Button */}
-                  {section.label === 'Contacts' && (
-                    <Button
-                      variant='ghost'
-                      size='sm'
-                      className={cn(
-                        'text-muted-foreground h-auto w-full justify-start px-2 py-1.5 font-normal',
-                        'hover:bg-accent hover:text-accent-foreground'
-                      )}
-                      onClick={() => setShowCreateTagDialog(true)}
-                    >
-                      <Plus className='mr-2 h-3 w-3' aria-hidden='true' />
-                      Create Tag
-                    </Button>
+                  {section.renderCreateTagDialog && (
+                    <CreateTagAffordance
+                      renderDialog={section.renderCreateTagDialog}
+                      testId={section.createTagTestId}
+                      describedBy={`section-${section.label.toLowerCase()}-header`}
+                    />
                   )}
                 </div>
               )}
@@ -658,11 +672,52 @@ function SidebarContentInner({
           );
         })}
       </nav>
-      <CreateTagDialog
-        open={showCreateTagDialog}
-        onOpenChange={setShowCreateTagDialog}
-      />
     </ScrollArea>
+  );
+}
+
+/**
+ * A section's "Create Tag" button and the dialog it opens.
+ *
+ * Owns its own open state so the two tag namespaces cannot open each other's
+ * dialog, and so the button renders even when the section has no tags yet.
+ */
+function CreateTagAffordance({
+  renderDialog,
+  testId,
+  describedBy,
+}: {
+  readonly renderDialog: (props: CreateTagDialogProps) => ReactNode;
+  readonly testId?: string;
+  /**
+   * Id of the section header. Both sections show a button named "Create Tag",
+   * so the description is what tells assistive tech which namespace this one
+   * acts on. It is deliberately not folded into the accessible name: that would
+   * both break WCAG 2.5.3's label-in-name rule and make the button collide with
+   * the section header in name-based queries.
+   */
+  readonly describedBy: string;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <Button
+        variant='ghost'
+        size='sm'
+        className={cn(
+          'text-muted-foreground h-auto w-full justify-start px-2 py-1.5 font-normal',
+          'hover:bg-accent hover:text-accent-foreground'
+        )}
+        onClick={() => setOpen(true)}
+        data-testid={testId}
+        aria-describedby={describedBy}
+      >
+        <Plus className='mr-2 h-3 w-3' aria-hidden='true' />
+        Create Tag
+      </Button>
+      {renderDialog({ open, onOpenChange: setOpen })}
+    </>
   );
 }
 

@@ -11,6 +11,7 @@ import {
   useSearchJournals,
   useJournalTags,
   useCreateJournalTag,
+  useUpdateJournalTag,
   useAddJournalTag,
   useRemoveJournalTag,
   journalTagKeys,
@@ -61,6 +62,7 @@ jest.mock('@/lib/constants', () => ({
     JOURNAL_CREATED: 'Journal created successfully',
     JOURNAL_UPDATED: 'Journal updated successfully',
     JOURNAL_DELETED: 'Journal deleted successfully',
+    TAG_UPDATED: 'Tag updated successfully',
   },
 }));
 
@@ -401,10 +403,41 @@ describe('Journals API', () => {
         id: '1',
         name: 'Tag 1',
         color: '#FF0000',
+        description: null,
         parent_id: null,
       });
       // Hierarchy is preserved so the editor can render the parent path
       expect(result.current.data?.data[1].parent_id).toBe('1');
+    });
+
+    it('should map the tag description so the edit dialog can show it', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: [
+            {
+              id: '1',
+              type: 'journal-tags',
+              attributes: {
+                name: 'Tag 1',
+                color: '#FF0000',
+                description: 'Outdoor entries',
+                parent_id: null,
+              },
+            },
+          ],
+        }),
+      } as Response);
+
+      const { result } = renderHook(() => useJournalTags(), {
+        wrapper: createWrapper,
+      });
+
+      await waitFor(() => {
+        expect(result.current.isSuccess).toBe(true);
+      });
+
+      expect(result.current.data?.data[0].description).toBe('Outdoor entries');
     });
   });
 
@@ -491,6 +524,166 @@ describe('Journals API', () => {
 
       expect(invalidateSpy).toHaveBeenCalledWith({
         queryKey: journalTagKeys.lists(),
+      });
+      // A new tag can appear in any open journal's tag editor, so the journal
+      // queries are refreshed alongside the tag list.
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: journalKeys.all,
+      });
+    });
+  });
+
+  describe('useUpdateJournalTag', () => {
+    const updatedTagResponse = {
+      data: {
+        id: 'tag-1',
+        type: 'journal-tags',
+        attributes: {
+          name: 'Bouldering',
+          color: '#38A169',
+          description: 'Indoor bouldering',
+          parent_id: 'parent-1',
+        },
+      },
+    };
+
+    it('should PATCH the journal-tags resource with the supplied attributes', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => updatedTagResponse,
+      } as Response);
+
+      const { result } = renderHook(() => useUpdateJournalTag(), {
+        wrapper: createWrapper,
+      });
+
+      await act(async () => {
+        await result.current.mutateAsync({
+          id: 'tag-1',
+          attributes: {
+            name: 'Bouldering',
+            color: '#38A169',
+            description: 'Indoor bouldering',
+            parent_id: 'parent-1',
+          },
+        });
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/journals/tags/tag-1',
+        expect.objectContaining({
+          method: 'PATCH',
+          body: JSON.stringify({
+            data: {
+              type: 'journal-tags',
+              id: 'tag-1',
+              attributes: {
+                name: 'Bouldering',
+                color: '#38A169',
+                description: 'Indoor bouldering',
+                parent_id: 'parent-1',
+              },
+            },
+          }),
+        })
+      );
+    });
+
+    it('should send an explicit null parent_id to move a tag to the root', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => updatedTagResponse,
+      } as Response);
+
+      const { result } = renderHook(() => useUpdateJournalTag(), {
+        wrapper: createWrapper,
+      });
+
+      await act(async () => {
+        await result.current.mutateAsync({
+          id: 'tag-1',
+          attributes: { name: 'Bouldering', parent_id: null },
+        });
+      });
+
+      const body = JSON.parse(
+        (mockFetch.mock.calls[0][1] as RequestInit).body as string
+      );
+      expect(body.data.attributes).toHaveProperty('parent_id', null);
+    });
+
+    it('should invalidate both the tag list and the journal queries on success', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => updatedTagResponse,
+      } as Response);
+
+      const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
+
+      const { result } = renderHook(() => useUpdateJournalTag(), {
+        wrapper: createWrapper,
+      });
+
+      await act(async () => {
+        await result.current.mutateAsync({
+          id: 'tag-1',
+          attributes: { name: 'Bouldering' },
+        });
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: journalTagKeys.lists(),
+      });
+      // A rename or recolour changes the chips rendered on the journals list
+      // and on any open journal detail page.
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: journalKeys.all,
+      });
+    });
+
+    it('should show a success toast on success', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => updatedTagResponse,
+      } as Response);
+
+      const { result } = renderHook(() => useUpdateJournalTag(), {
+        wrapper: createWrapper,
+      });
+
+      await act(async () => {
+        await result.current.mutateAsync({
+          id: 'tag-1',
+          attributes: { name: 'Bouldering' },
+        });
+      });
+
+      expect(toast.success).toHaveBeenCalledWith('Tag updated successfully');
+    });
+
+    it('should surface the API error to the user as a toast', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({
+          errors: [{ detail: 'Tag name already exists' }],
+        }),
+      } as Response);
+
+      const { result } = renderHook(() => useUpdateJournalTag(), {
+        wrapper: createWrapper,
+      });
+
+      await act(async () => {
+        await expect(
+          result.current.mutateAsync({
+            id: 'tag-1',
+            attributes: { name: 'Duplicate' },
+          })
+        ).rejects.toThrow('Tag name already exists');
+      });
+
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalledWith('Tag name already exists');
       });
     });
   });

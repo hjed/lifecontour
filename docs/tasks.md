@@ -295,7 +295,7 @@ Read these first when working on the active product-alignment streams:
 **Reference:** [Outdoor Logbook Improvements Product Specification](./product-specifications/outdoor-logbook-improvements-product-specification.md)
 
 ### [Iteration 17: Journal Tags Parity](./tasks/iteration-17-journal-tags-parity.md)
-**Status:** 🔵 PLANNED — PR-sized phases defined; ready to implement
+**Status:** 🟡 IN PROGRESS — ITER17-001, ITER17-002 and ITER17-003 complete; ITER17-004 Phases 1–2 complete (delete/merge UI remaining); ITER17-005 not started
 **Dependencies:** Iteration 4 (journal tag tables and endpoints), Iteration 4.6 (journal tag filtering + detail-view add/remove), Iteration 12 (unified event-driven history), Iteration 2.6 (contact tag management UX — the reference behaviour)
 **Goal:** Bring journal tag functionality to exact parity with contact tags across the UI, backend management operations, filtering, history, and MCP
 
