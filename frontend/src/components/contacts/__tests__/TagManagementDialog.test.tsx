@@ -136,4 +136,92 @@ describe('TagManagementDialog', () => {
     expect(await screen.findByText('Name is required')).toBeInTheDocument();
     expect(mockUpdateTag).not.toHaveBeenCalled();
   });
+
+  // The suite above mocks an empty tag list, which leaves the parent and merge
+  // dropdowns with nothing to render. These populate it so both selects are
+  // actually exercised.
+  describe('with other tags available', () => {
+    const otherTags: TagResource[] = [
+      mockTag,
+      {
+        type: 'tags',
+        id: '2',
+        attributes: {
+          name: 'Colleague',
+          created_at: '2023-01-01T00:00:00Z',
+          updated_at: '2023-01-01T00:00:00Z',
+        },
+      },
+    ];
+
+    beforeEach(() => {
+      (useTags as jest.Mock).mockReturnValue({
+        data: { data: otherTags },
+        isLoading: false,
+      });
+    });
+
+    it('excludes the edited tag from the parent options', async () => {
+      renderComponent();
+      const user = userEvent.setup();
+
+      await user.click(screen.getByLabelText('Parent Tag'));
+
+      expect(
+        await screen.findByRole('option', { name: 'Colleague' })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('option', { name: 'None (Root Level)' })
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole('option', { name: 'Friend' })
+      ).not.toBeInTheDocument();
+    });
+
+    it('re-parents the tag to the selected parent', async () => {
+      renderComponent();
+      const user = userEvent.setup();
+
+      await user.click(screen.getByLabelText('Parent Tag'));
+      await user.click(
+        await screen.findByRole('option', { name: 'Colleague' })
+      );
+      await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+      await waitFor(() => {
+        expect(mockUpdateTag).toHaveBeenCalledWith(
+          expect.objectContaining({
+            attributes: expect.objectContaining({ parent_id: 2 }),
+          })
+        );
+      });
+    });
+
+    it('merges into the selected target after confirmation', async () => {
+      const onOpenChange = jest.fn();
+      renderComponent({ onOpenChange });
+      const user = userEvent.setup();
+
+      const mergeButton = screen.getByRole('button', { name: 'Merge' });
+      expect(mergeButton).toBeDisabled();
+
+      await user.click(screen.getByLabelText('Merge into'));
+      await user.click(
+        await screen.findByRole('option', { name: 'Colleague' })
+      );
+      await user.click(screen.getByRole('button', { name: 'Merge' }));
+
+      await user.click(screen.getByRole('button', { name: 'Confirm Merge' }));
+
+      await waitFor(() => {
+        expect(mockMergeTag).toHaveBeenCalledWith({
+          sourceId: '1',
+          targetId: '2',
+        });
+      });
+      await waitFor(() => {
+        expect(onOpenChange).toHaveBeenCalledWith(false);
+      });
+    });
+  });
 });
