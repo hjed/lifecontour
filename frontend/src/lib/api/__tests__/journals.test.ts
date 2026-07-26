@@ -12,6 +12,8 @@ import {
   useJournalTags,
   useCreateJournalTag,
   useUpdateJournalTag,
+  useDeleteJournalTag,
+  useMergeJournalTag,
   useAddJournalTag,
   useRemoveJournalTag,
   journalTagKeys,
@@ -63,6 +65,7 @@ jest.mock('@/lib/constants', () => ({
     JOURNAL_UPDATED: 'Journal updated successfully',
     JOURNAL_DELETED: 'Journal deleted successfully',
     TAG_UPDATED: 'Tag updated successfully',
+    TAG_DELETED: 'Tag deleted successfully',
   },
 }));
 
@@ -881,6 +884,209 @@ describe('Journals API', () => {
 
       await waitFor(() => {
         expect(toast.error).toHaveBeenCalledWith('Assignment not found');
+      });
+    });
+  });
+
+  describe('useDeleteJournalTag', () => {
+    // The endpoint answers 204 No Content, so the fetcher must not try to read
+    // a body on the success path.
+    const noContentResponse = {
+      ok: true,
+      status: 204,
+      json: async () => {
+        throw new Error('204 responses carry no body');
+      },
+    } as unknown as Response;
+
+    it('should DELETE the journal tag resource', async () => {
+      mockFetch.mockResolvedValueOnce(noContentResponse);
+
+      const { result } = renderHook(() => useDeleteJournalTag(), {
+        wrapper: createWrapper,
+      });
+
+      await act(async () => {
+        await result.current.mutateAsync('tag-1');
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/journals/tags/tag-1',
+        // The session cookie is what authenticates the request; without it the
+        // endpoint 401s in production but every mocked test would still pass.
+        expect.objectContaining({
+          method: 'DELETE',
+          credentials: 'include',
+        })
+      );
+    });
+
+    it('should invalidate both the tag list and the journal queries on success', async () => {
+      mockFetch.mockResolvedValueOnce(noContentResponse);
+
+      const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
+
+      const { result } = renderHook(() => useDeleteJournalTag(), {
+        wrapper: createWrapper,
+      });
+
+      await act(async () => {
+        await result.current.mutateAsync('tag-1');
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: journalTagKeys.lists(),
+      });
+      // The deleted tag disappears from the sidebar tree, from the chips on the
+      // journals list and from any open journal's tag editor.
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: journalKeys.all,
+      });
+    });
+
+    it('should show a success toast on success', async () => {
+      mockFetch.mockResolvedValueOnce(noContentResponse);
+
+      const { result } = renderHook(() => useDeleteJournalTag(), {
+        wrapper: createWrapper,
+      });
+
+      await act(async () => {
+        await result.current.mutateAsync('tag-1');
+      });
+
+      expect(toast.success).toHaveBeenCalledWith('Tag deleted successfully');
+    });
+
+    it('should surface the API error to the user as a toast', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ errors: [{ detail: 'Tag not found' }] }),
+      } as Response);
+
+      const { result } = renderHook(() => useDeleteJournalTag(), {
+        wrapper: createWrapper,
+      });
+
+      await act(async () => {
+        await expect(result.current.mutateAsync('missing')).rejects.toThrow(
+          'Tag not found'
+        );
+      });
+
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalledWith('Tag not found');
+      });
+    });
+  });
+
+  describe('useMergeJournalTag', () => {
+    const noContentResponse = {
+      ok: true,
+      status: 204,
+      json: async () => {
+        throw new Error('204 responses carry no body');
+      },
+    } as unknown as Response;
+
+    it('should POST the target tag to the source tag merge endpoint', async () => {
+      mockFetch.mockResolvedValueOnce(noContentResponse);
+
+      const { result } = renderHook(() => useMergeJournalTag(), {
+        wrapper: createWrapper,
+      });
+
+      await act(async () => {
+        await result.current.mutateAsync({
+          sourceId: 'source-1',
+          targetId: 'target-1',
+        });
+      });
+
+      // The controller rejects any other resource type with a 400, so the
+      // envelope is part of the contract rather than decoration.
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/journals/tags/source-1/merge',
+        expect.objectContaining({
+          method: 'POST',
+          credentials: 'include',
+          body: JSON.stringify({
+            data: {
+              type: 'journal-tags',
+              attributes: { target_tag_id: 'target-1' },
+            },
+          }),
+        })
+      );
+    });
+
+    it('should invalidate both the tag list and the journal queries on success', async () => {
+      mockFetch.mockResolvedValueOnce(noContentResponse);
+
+      const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
+
+      const { result } = renderHook(() => useMergeJournalTag(), {
+        wrapper: createWrapper,
+      });
+
+      await act(async () => {
+        await result.current.mutateAsync({
+          sourceId: 'source-1',
+          targetId: 'target-1',
+        });
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: journalTagKeys.lists(),
+      });
+      // Journals tagged with the source now carry the target instead.
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: journalKeys.all,
+      });
+    });
+
+    it('should show a success toast on success', async () => {
+      mockFetch.mockResolvedValueOnce(noContentResponse);
+
+      const { result } = renderHook(() => useMergeJournalTag(), {
+        wrapper: createWrapper,
+      });
+
+      await act(async () => {
+        await result.current.mutateAsync({
+          sourceId: 'source-1',
+          targetId: 'target-1',
+        });
+      });
+
+      expect(toast.success).toHaveBeenCalledWith('Tag successfully merged');
+    });
+
+    it('should surface the API error to the user as a toast', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({
+          errors: [{ detail: 'Cannot merge a tag into its own descendant' }],
+        }),
+      } as Response);
+
+      const { result } = renderHook(() => useMergeJournalTag(), {
+        wrapper: createWrapper,
+      });
+
+      await act(async () => {
+        await expect(
+          result.current.mutateAsync({
+            sourceId: 'source-1',
+            targetId: 'child-1',
+          })
+        ).rejects.toThrow('Cannot merge a tag into its own descendant');
+      });
+
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalledWith(
+          'Cannot merge a tag into its own descendant'
+        );
       });
     });
   });

@@ -2,14 +2,19 @@
  * JournalTagManagementDialog — journal-domain adapter over the shared
  * {@link TagFormDialog} for editing an existing journal tag.
  *
- * Delete and merge are deliberately not wired up yet; the shared dialog hides
- * both sections when their callbacks are absent.
+ * Supplies the journal tag hooks and the candidate parent/merge lists; the
+ * shared dialog owns the form, validation and the destructive confirmations.
  */
 
 'use client';
 
 import { useMemo } from 'react';
-import { useJournalTags, useUpdateJournalTag } from '@/lib/api/journals';
+import {
+  useJournalTags,
+  useUpdateJournalTag,
+  useDeleteJournalTag,
+  useMergeJournalTag,
+} from '@/lib/api/journals';
 import {
   TagFormDialog,
   type TagFormOption,
@@ -34,10 +39,16 @@ export function JournalTagManagementDialog({
   const { data: allTagsData } = useJournalTags();
   const { mutateAsync: updateTag, isPending: isUpdating } =
     useUpdateJournalTag();
+  const { mutateAsync: deleteTag, isPending: isDeleting } =
+    useDeleteJournalTag();
+  const { mutateAsync: mergeTag, isPending: isMerging } = useMergeJournalTag();
 
-  // A tag cannot be re-parented under itself or anything below it — the backend
-  // rejects the cycle with a 400, so it is never offered as an option.
-  const parentOptions: TagFormOption[] = useMemo(() => {
+  // The tag's own subtree is off limits to both dropdowns, for the same reason:
+  // re-parenting a tag under its own descendant would make it its own ancestor,
+  // and merging it into one would leave the surviving hierarchy running through
+  // a tag that no longer exists. The backend rejects both with a 400, so
+  // neither is ever offered.
+  const candidateTags: TagFormOption[] = useMemo(() => {
     const allTags = allTagsData?.data ?? [];
     const excluded = collectDescendantIds(allTags, tag.id, journalTagView);
     return allTags
@@ -98,11 +109,16 @@ export function JournalTagManagementDialog({
       submitLabel='Save Changes'
       submittingLabel='Saving...'
       initialValues={initialValues}
-      parentOptions={parentOptions}
+      parentOptions={candidateTags}
       onSubmit={handleSubmit}
       isSubmitting={isUpdating}
       limits={JOURNAL_TAG_LIMITS}
       entityNounPlural='journals'
+      onDelete={() => deleteTag(tag.id)}
+      isDeleting={isDeleting}
+      onMerge={targetId => mergeTag({ sourceId: tag.id, targetId })}
+      isMerging={isMerging}
+      mergeOptions={candidateTags}
     />
   );
 }

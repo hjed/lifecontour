@@ -2,15 +2,28 @@
  * @jest-environment jsdom
  */
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { JournalTagContextMenu } from '../JournalTagContextMenu';
-import { useJournalTags, useUpdateJournalTag } from '@/lib/api/journals';
+import {
+  useJournalTags,
+  useUpdateJournalTag,
+  useDeleteJournalTag,
+  useMergeJournalTag,
+} from '@/lib/api/journals';
 import type { JournalTag } from '@/types/journals';
 
 jest.mock('@/lib/api/journals', () => ({
   useJournalTags: jest.fn(),
   useUpdateJournalTag: jest.fn(),
+  useDeleteJournalTag: jest.fn(),
+  useMergeJournalTag: jest.fn(),
 }));
 
 const TAG: JournalTag = {
@@ -42,6 +55,14 @@ describe('JournalTagContextMenu', () => {
       mutateAsync: jest.fn(),
       isPending: false,
     });
+    (useDeleteJournalTag as jest.Mock).mockReturnValue({
+      mutateAsync: jest.fn(),
+      isPending: false,
+    });
+    (useMergeJournalTag as jest.Mock).mockReturnValue({
+      mutateAsync: jest.fn(),
+      isPending: false,
+    });
   });
 
   it('offers Edit Tag when the tag row is right-clicked', async () => {
@@ -67,6 +88,27 @@ describe('JournalTagContextMenu', () => {
       await screen.findByRole('dialog', { name: 'Edit Tag' })
     ).toBeInTheDocument();
     expect(screen.getByLabelText(/^Name/i)).toHaveValue('Climbing');
+  });
+
+  it('reaches the destructive affordances through the menu', async () => {
+    // Delete and merge live inside the management dialog rather than on the
+    // menu itself, matching contacts — so the sidebar entry point is the only
+    // way a user gets to them.
+    const user = userEvent.setup();
+    renderMenu();
+
+    fireEvent.contextMenu(screen.getByRole('link', { name: 'Climbing' }));
+    await user.click(
+      await screen.findByRole('menuitem', { name: /edit tag/i })
+    );
+
+    const dialog = await screen.findByRole('dialog', { name: 'Edit Tag' });
+    expect(
+      within(dialog).getByRole('button', { name: 'Delete Tag' })
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole('button', { name: 'Merge' })
+    ).toBeInTheDocument();
   });
 
   it('keeps the dialog closed until the menu item is chosen', () => {

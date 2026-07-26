@@ -474,5 +474,161 @@ test.describe('Sidebar Tag Management', () => {
       await parentToggle.click();
       await expect(movedLink).toBeVisible();
     });
+
+    test('can delete a journal tag and it disappears from a journal that had it', async ({
+      authenticatedPage: page,
+      testCleanup,
+    }) => {
+      const dataManager = new TestDataManager(page);
+
+      const [tag] = await dataManager.createJournalTags([
+        { name: 'SidebarDeleteMe', color: '#FF0000' },
+      ]);
+      const journal = await dataManager.createJournal({
+        title: 'Sidebar Delete Subject',
+        content: 'Loses its tag when the tag is deleted.',
+        event_date_range: { start: relativeDate(-1), end: relativeDate(-1) },
+      });
+      await dataManager.assignTagsToJournal(journal.id, [tag.id]);
+      // The tag is deleted by the test itself; cleanup tolerates the 404.
+      testCleanup(async () => await dataManager.cleanup());
+
+      await page.goto('/journals');
+      await expect(page.getByTestId('journals-list-ready')).toBeVisible();
+
+      // Asserted before the sidebar is opened so the mobile Sheet cannot cover
+      // it. The chip must be here first, or the post-delete assertion below
+      // would pass against a journal that was never on screen.
+      const listChip = page
+        .getByTestId(`journal-${journal.id}`)
+        .getByTestId(`tag-${tag.name}`);
+      await expect(listChip).toBeVisible();
+
+      await ensureSidebarOpen(page, 'Journals');
+
+      const dialog = await openEditDialogForTag(page, tag.id);
+
+      await dialog.getByRole('button', { name: 'Delete Tag' }).click();
+
+      const confirmation = page.getByRole('alertdialog');
+      await expect(confirmation).toBeVisible();
+      await expect(confirmation).toContainText('Are you absolutely sure?');
+      await expect(confirmation).toContainText(
+        'remove it from all journals it is assigned to'
+      );
+
+      await Promise.all([
+        page.waitForResponse(
+          response =>
+            response.url().includes(`/api/journals/tags/${tag.id}`) &&
+            response.request().method() === 'DELETE'
+        ),
+        confirmation.getByRole('button', { name: 'Delete' }).click(),
+      ]);
+
+      await expect(dialog).toBeHidden();
+      await expect(page.getByText('Tag deleted successfully')).toBeVisible();
+
+      // The list behind the dialog refreshes in place, with no reload — this is
+      // the journal-query half of the invalidation. Counted rather than checked
+      // for visibility because the mobile Sheet may be over the list.
+      await expect(listChip).toHaveCount(0, { timeout: 15000 });
+
+      // The mobile Sheet can close over the dialog interaction.
+      await ensureSidebarOpen(page, 'Journals');
+      await expect(
+        journalSection(page).getByTestId(`nav-link-journal-tag-${tag.id}`)
+      ).toHaveCount(0, { timeout: 15000 });
+
+      // Deleting un-assigns rather than being refused, so the journal survives
+      // without the tag.
+      await page.goto(`/journals/${journal.id}`);
+      const tagsEditor = page.getByTestId('journal-tags-editor');
+      await expect(tagsEditor).toBeVisible();
+      await expect(tagsEditor.getByTestId(`tag-badge-${tag.id}`)).toHaveCount(
+        0,
+        { timeout: 10000 }
+      );
+    });
+
+    test('can merge a journal tag into another and the assignment moves', async ({
+      authenticatedPage: page,
+      testCleanup,
+    }) => {
+      const dataManager = new TestDataManager(page);
+
+      const [source, target] = await dataManager.createJournalTags([
+        { name: 'SidebarMergeSource', color: '#FF0000' },
+        { name: 'SidebarMergeTarget', color: '#00FF00' },
+      ]);
+      const journal = await dataManager.createJournal({
+        title: 'Sidebar Merge Subject',
+        content: 'Its tag assignment is repointed by the merge.',
+        event_date_range: { start: relativeDate(-1), end: relativeDate(-1) },
+      });
+      await dataManager.assignTagsToJournal(journal.id, [source.id]);
+      // The source tag is consumed by the merge; cleanup tolerates the 404.
+      testCleanup(async () => await dataManager.cleanup());
+
+      await page.goto('/journals');
+      await expect(page.getByTestId('journals-list-ready')).toBeVisible();
+
+      // Asserted before the sidebar is opened so the mobile Sheet cannot cover
+      // the list row.
+      const listRow = page.getByTestId(`journal-${journal.id}`);
+      await expect(listRow.getByTestId(`tag-${source.name}`)).toBeVisible();
+
+      await ensureSidebarOpen(page, 'Journals');
+
+      const dialog = await openEditDialogForTag(page, source.id);
+
+      await dialog.getByLabel('Merge into').click();
+      await page.getByRole('option', { name: target.name }).click();
+      await dialog.getByRole('button', { name: 'Merge', exact: true }).click();
+
+      const confirmation = page.getByRole('alertdialog');
+      await expect(confirmation).toBeVisible();
+      await expect(confirmation).toContainText(source.name);
+
+      await Promise.all([
+        page.waitForResponse(
+          response =>
+            response.url().includes(`/api/journals/tags/${source.id}/merge`) &&
+            response.request().method() === 'POST'
+        ),
+        confirmation.getByRole('button', { name: 'Confirm Merge' }).click(),
+      ]);
+
+      await expect(dialog).toBeHidden();
+      await expect(page.getByText('Tag successfully merged')).toBeVisible();
+
+      // The chip on the list row swaps to the target in place, with no reload —
+      // the journal-query half of the invalidation.
+      await expect(listRow.getByTestId(`tag-${source.name}`)).toHaveCount(0, {
+        timeout: 15000,
+      });
+      await expect(listRow.getByTestId(`tag-${target.name}`)).toHaveCount(1, {
+        timeout: 15000,
+      });
+
+      await ensureSidebarOpen(page, 'Journals');
+      await expect(
+        journalSection(page).getByTestId(`nav-link-journal-tag-${source.id}`)
+      ).toHaveCount(0, { timeout: 15000 });
+      await expect(
+        journalSection(page).getByTestId(`nav-link-journal-tag-${target.id}`)
+      ).toBeVisible();
+
+      // The journal tagged with the source now carries the target instead.
+      await page.goto(`/journals/${journal.id}`);
+      const tagsEditor = page.getByTestId('journal-tags-editor');
+      await expect(tagsEditor).toBeVisible();
+      await expect(
+        tagsEditor.getByTestId(`tag-badge-${target.id}`)
+      ).toBeVisible({ timeout: 10000 });
+      await expect(
+        tagsEditor.getByTestId(`tag-badge-${source.id}`)
+      ).toHaveCount(0);
+    });
   });
 });
