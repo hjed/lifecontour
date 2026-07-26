@@ -282,7 +282,7 @@ Read these first when working on the active product-alignment streams:
 - Hardening: name-based reconciliation fallback for email-less contacts; local-delete propagation to Google
 
 ### [Iteration 16: Outdoor Logbook Improvements](./tasks/iteration-16-outdoor-logbook-improvements.md)
-**Status:** 🔵 PLANNED — sub-iterations and PR-sized phases defined (20 phases); ready to implement
+**Status:** 🟢 COMPLETE — all 20 phases delivered across the four sub-iterations
 **Dependencies:** Iteration 9 (Outdoor Logbook), Iteration 10 (SnipeIT gear checkout), Iteration 11 (Immich album links), Iteration 12 (Activity History provenance)
 **Goal:** Add the review, surfacing, and reporting layer on top of the outdoor logbook — find incomplete activities, durable template references, an overview/dashboard page, and a polished PDF — with full UI and MCP parity
 

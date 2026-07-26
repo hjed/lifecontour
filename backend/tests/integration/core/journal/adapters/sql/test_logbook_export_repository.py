@@ -21,6 +21,7 @@ from app.core.journal.adapters.sql.logbook_export_repository import (
 from app.core.journal.models.repositories import (
     JournalRepository,
 )
+from tests.integration.journal.outdoor_activity_seeding import Seeder, gpx_document
 
 
 @pytest.fixture
@@ -521,3 +522,109 @@ async def test_get_logbook_entries_album_without_shared_link(
     assert len(entries) == 1
     assert "PHOTO_ALBUM" in entries[0].journal_types
     assert entries[0].album_shared_links == []
+
+
+@pytest.mark.asyncio
+async def test_get_logbook_entries_includes_route_gpx_data(
+    repo: SqlLogbookExportRepository,
+    journal_repo: JournalRepository,
+    async_connection: AsyncConnection,
+) -> None:
+    """Every route's GPX payload is loaded in a deterministic order.
+
+    ``created_at`` defaults to the transaction timestamp, so routes saved in one
+    request tie on it — as these two do. The order must still be repeatable
+    (name breaks the tie), or the same logbook would export differently each
+    time.
+    """
+    user_id = "user_route_gpx"
+    now = datetime.now(UTC)
+
+    journal = Journal(
+        user_id=user_id,
+        title="Bushwalk With Two Tracks",
+        content="Approach and exit recorded separately",
+        event_date_range=EventDateRange(start=now, end=now),
+    )
+    journal = await journal_repo.save(journal)
+    assert journal.id is not None
+
+    await async_connection.execute(
+        text("INSERT INTO journal_bushwalking_data (journal_id) VALUES (:id)"),
+        {"id": journal.id},
+    )
+    approach = gpx_document([(-33.700, 150.300), (-33.705, 150.308)])
+    exit_track = gpx_document([(-33.710, 150.315), (-33.715, 150.320)])
+    seeder = Seeder(async_connection)
+    await seeder.create_route(journal_id=journal.id, name="Approach", gpx_data=approach)
+    await seeder.create_route(journal_id=journal.id, name="Exit", gpx_data=exit_track)
+
+    entries = await repo.get_logbook_entries(user_id=user_id)
+    repeated = await repo.get_logbook_entries(user_id=user_id)
+
+    assert len(entries) == 1
+    assert entries[0].route_gpx_data == [approach, exit_track]
+    assert repeated[0].route_gpx_data == entries[0].route_gpx_data
+
+
+@pytest.mark.asyncio
+async def test_get_logbook_entries_has_empty_route_data_when_no_route(
+    repo: SqlLogbookExportRepository,
+    journal_repo: JournalRepository,
+    async_connection: AsyncConnection,
+) -> None:
+    """A journal with no route carries no GPX, so the PDF draws no map."""
+    user_id = "user_route_gpx_absent"
+    now = datetime.now(UTC)
+
+    journal = Journal(
+        user_id=user_id,
+        title="Bushwalk Without A Track",
+        content="",
+        event_date_range=EventDateRange(start=now, end=now),
+    )
+    journal = await journal_repo.save(journal)
+    assert journal.id is not None
+
+    await async_connection.execute(
+        text("INSERT INTO journal_bushwalking_data (journal_id) VALUES (:id)"),
+        {"id": journal.id},
+    )
+
+    entries = await repo.get_logbook_entries(user_id=user_id)
+
+    assert len(entries) == 1
+    assert entries[0].route_gpx_data == []
+
+
+@pytest.mark.asyncio
+async def test_get_logbook_entries_skips_routes_without_gpx(
+    repo: SqlLogbookExportRepository,
+    journal_repo: JournalRepository,
+    async_connection: AsyncConnection,
+) -> None:
+    """A named route with no GPX payload yet contributes nothing to draw."""
+    user_id = "user_route_gpx_null"
+    now = datetime.now(UTC)
+
+    journal = Journal(
+        user_id=user_id,
+        title="Bushwalk With A Planned Route",
+        content="",
+        event_date_range=EventDateRange(start=now, end=now),
+    )
+    journal = await journal_repo.save(journal)
+    assert journal.id is not None
+
+    await async_connection.execute(
+        text("INSERT INTO journal_bushwalking_data (journal_id) VALUES (:id)"),
+        {"id": journal.id},
+    )
+    await Seeder(async_connection).create_route(
+        journal_id=journal.id, name="To Be Recorded", gpx_data=""
+    )
+
+    entries = await repo.get_logbook_entries(user_id=user_id)
+
+    assert len(entries) == 1
+    assert entries[0].route_gpx_data == []

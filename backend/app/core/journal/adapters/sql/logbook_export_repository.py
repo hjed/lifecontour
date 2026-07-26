@@ -399,6 +399,40 @@ class SqlLogbookExportRepository(LogbookExportRepository):
             if shared_link_url not in links:
                 links.append(shared_link_url)
 
+        # GPX routes (ITER16-004 Phase 6), which the export renders as a basemap
+        # map image per entry. Batched over all journal ids like the album links
+        # above. ``routes`` is journal-owned (it has no user_id column of its own
+        # since the route→journal refactor), so the join re-asserts ownership
+        # rather than trusting the journal-id list alone. Routes whose GPX has not
+        # been uploaded yet are skipped: there is nothing to plot, so an entry's
+        # list is empty exactly when it has no drawable track.
+        #
+        # Ordering is oldest-first, then by name. The name tiebreak is load
+        # bearing: ``created_at`` defaults to the *transaction* timestamp, so two
+        # routes saved in one request carry the identical value, and falling
+        # through to the random ``uuid`` primary key would order them differently
+        # on every export.
+        routes_sql = """
+            SELECT r.journal_id AS journal_id,
+                   r.gpx_data AS gpx_data
+            FROM routes r
+            JOIN journals j ON j.id = r.journal_id
+            WHERE r.journal_id = ANY(:journal_ids)
+              AND j.user_id = :user_id
+            ORDER BY r.created_at, r.name, r.id
+        """
+        result = await self.connection.execute(
+            text(routes_sql),
+            {
+                "journal_ids": final_journal_ids,
+                "user_id": user_id,
+            },
+        )
+        route_gpx_data: dict[int, list[str]] = defaultdict(list)
+        for row in result.fetchall():
+            if row.gpx_data and row.gpx_data.strip():
+                route_gpx_data[row.journal_id].append(row.gpx_data)
+
         entries = []
         for row in final_journal_rows:
             # We instantiate domain models where possible but ignore strict validation if data is legacy/invalid.
@@ -516,6 +550,7 @@ class SqlLogbookExportRepository(LogbookExportRepository):
                 entry.gear_item_name = gear_item_names.get(gear["gear_item_id"])
 
             entry.album_shared_links = album_shared_links.get(row.id, [])
+            entry.route_gpx_data = route_gpx_data.get(row.id, [])
 
             entries.append(entry)
 

@@ -202,6 +202,61 @@ Swappability: a keyed topo provider can be substituted later by pointing
 registered at **APP scope** so its cache and throttle are shared across the whole
 export batch and across requests.
 
+### Composing the map image
+
+`GpxMapRenderer` (`app/core/journal/services/gpx_map_renderer.py`, also APP scope)
+turns an entry's GPX routes into the PNG the PDF embeds. Because tile fetching is
+asynchronous while `LogbookPdfRenderer` is synchronous, the images are composed
+first and handed to `render(data, map_images=…)` as a mapping keyed by journal id —
+an entry absent from that mapping simply gets no map:
+
+```python
+export_data = await data_service.get_logbook_data(...)
+map_images = await map_renderer.build_map_images(export_data.entries)
+pdf_bytes = renderer.render(export_data, map_images=map_images)
+```
+
+- **One map per entry.** All of an entry's routes are drawn on a single image whose
+  bounding box fits every track, plus padding. Child activities get their own maps.
+- **Bounded tile cost.** `utils/slippy_map.py` picks the closest zoom (capped at 17)
+  whose tile grid still contains the whole track, within **2×2 tiles**, so one map
+  costs at most **4** tile fetches however long the track is. There is deliberately
+  no separate per-export budget: with the ≈2 tiles/second throttle, a cold-cache
+  export costs roughly 2 s per mapped entry (≈100 s for 50 of them), and the
+  on-disk cache removes that cost for tiles shared between entries or repeat
+  exports.
+- **Attribution is drawn onto the image**, bottom-right, on a light plate so it
+  stays legible over dark map detail. It comes from the port's `attribution`
+  property, so swapping the provider swaps the credit.
+- **Degrade, never fail.** A tile that cannot be fetched, cannot be decoded, or
+  arrives at the wrong size discards the whole basemap and the track is plotted on
+  a plain background instead — half a basemap reads as a rendering bug, and a
+  wrongly-sized tile is worse than none: the grid is laid out on 256px offsets, so
+  a substituted provider's 512px retina tiles would leave the basemap misaligned
+  against the track drawn over it. Fetching stops at the first failure rather than
+  hammering a struggling tile server. A route whose GPX cannot be parsed is skipped,
+  as are individual non-finite coordinates (a `lat="nan"` parses happily and only
+  fails at the tile-index conversion, while `inf` fails inside gpxpy's own maths —
+  both as a bare `ValueError`); an entry whose every route fails simply has no map.
+
+Test stacks never fetch real tiles: `.env.test` points `LOGBOOK_TILE_BASE_URL` at a
+dead address, which fails fast with a connection error and takes the plain-background
+fallback. So an E2E run that exports a journal with a GPX route still succeeds without
+the suite becoming a live OpenStreetMap client. Backend unit and integration tests stub
+the `TileSource` outright and never reach the adapter at all.
+
+Known limitation: a track crossing the ±180° antimeridian yields a bounding box
+that spans the world, so the zoom clamps to its minimum and the map renders as a
+world view with the track drawn across it. It still exports — nothing fails — and
+the in-app Leaflet map has the same behaviour, so this is left as-is rather than
+special-cased.
+
+Ordering note: `SqlLogbookExportRepository` loads route GPX ordered by
+`created_at, name, id`. The name tiebreak is load bearing — `created_at` defaults to
+the *transaction* timestamp, so routes saved in one request tie on it, and falling
+through to the random `uuid` primary key would order them differently on every
+export.
+
 ## Authentication Guidelines
 
 ### Session-Based Authentication
