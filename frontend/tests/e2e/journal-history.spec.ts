@@ -40,6 +40,14 @@ async function waitForHistoryEntries(
   journalId: string,
   ...predicates: ((attrs: HistoryAttributes) => boolean)[]
 ): Promise<void> {
+  // With no predicates there is nothing to be unmatched, so the poll would pass on
+  // its first attempt and the caller would assert nothing at all. Fail loudly
+  // instead of silently going green.
+  expect(
+    predicates.length,
+    'waitForHistoryEntries needs at least one predicate'
+  ).toBeGreaterThan(0);
+
   await expect(async () => {
     const response = await request.get(`/api/journals/${journalId}/history`);
     expect(response.ok()).toBeTruthy();
