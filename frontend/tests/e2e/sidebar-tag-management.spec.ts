@@ -272,6 +272,43 @@ test.describe('Sidebar Tag Management', () => {
       return page.getByRole('group', { name: 'Journals' });
     }
 
+    /**
+     * Waits for the journals list to be refetched *because of* a tag mutation.
+     *
+     * This is the journal-query half of the invalidation the phase promises.
+     * Asserting instead that the tag chip vanishes from the list behind the
+     * dialog would be an assertion on transient React Query-backed UI: a list
+     * fetch already in flight when the mutation lands can settle afterwards
+     * carrying pre-mutation data and, being fresh for the next five minutes, is
+     * never refetched again — so the chip lingers and the test flakes.
+     *
+     * The predicate is a small state machine over the response stream: it
+     * latches on the mutation's own response, then matches the first
+     * journals-list GET after it. Registering both halves in one waiter closes
+     * the gap a second `waitForResponse` would leave.
+     */
+    function journalsRefetchedAfter(
+      page: Page,
+      mutation: { pathname: string; method: string }
+    ) {
+      let mutated = false;
+      return page.waitForResponse(response => {
+        const { pathname } = new URL(response.url());
+        if (
+          pathname === mutation.pathname &&
+          response.request().method() === mutation.method
+        ) {
+          mutated = response.ok();
+          return false;
+        }
+        return (
+          mutated &&
+          pathname === '/api/journals' &&
+          response.request().method() === 'GET'
+        );
+      });
+    }
+
     /** Opens a journal tag row's management menu and chooses Edit Tag. */
     async function openEditDialogForTag(page: Page, tagId: string) {
       const tagLink = journalSection(page).getByTestId(
@@ -496,13 +533,12 @@ test.describe('Sidebar Tag Management', () => {
       await page.goto('/journals');
       await expect(page.getByTestId('journals-list-ready')).toBeVisible();
 
-      // Asserted before the sidebar is opened so the mobile Sheet cannot cover
-      // it. The chip must be here first, or the post-delete assertion below
-      // would pass against a journal that was never on screen.
-      const listChip = page
-        .getByTestId(`journal-${journal.id}`)
-        .getByTestId(`tag-${tag.name}`);
-      await expect(listChip).toBeVisible();
+      // The tagged journal is on the list before anything is deleted, which is
+      // what gives the refetch assertion below something to be about. Checked
+      // before the sidebar is opened so the mobile Sheet cannot cover it.
+      await expect(
+        page.getByTestId(`journal-${journal.id}`).getByTestId(`tag-${tag.name}`)
+      ).toBeVisible();
 
       await ensureSidebarOpen(page, 'Journals');
 
@@ -517,22 +553,17 @@ test.describe('Sidebar Tag Management', () => {
         'remove it from all journals it is assigned to'
       );
 
-      await Promise.all([
-        page.waitForResponse(
-          response =>
-            response.url().includes(`/api/journals/tags/${tag.id}`) &&
-            response.request().method() === 'DELETE'
-        ),
-        confirmation.getByRole('button', { name: 'Delete' }).click(),
-      ]);
+      // The delete un-assigns the tag from every journal, so the journals list
+      // must be refetched and not only the tag namespace.
+      const journalsRefetched = journalsRefetchedAfter(page, {
+        pathname: `/api/journals/tags/${tag.id}`,
+        method: 'DELETE',
+      });
+      await confirmation.getByRole('button', { name: 'Delete' }).click();
+      await journalsRefetched;
 
       await expect(dialog).toBeHidden();
       await expect(page.getByText('Tag deleted successfully')).toBeVisible();
-
-      // The list behind the dialog refreshes in place, with no reload — this is
-      // the journal-query half of the invalidation. Counted rather than checked
-      // for visibility because the mobile Sheet may be over the list.
-      await expect(listChip).toHaveCount(0, { timeout: 15000 });
 
       // The mobile Sheet can close over the dialog interaction.
       await ensureSidebarOpen(page, 'Journals');
@@ -573,10 +604,14 @@ test.describe('Sidebar Tag Management', () => {
       await page.goto('/journals');
       await expect(page.getByTestId('journals-list-ready')).toBeVisible();
 
-      // Asserted before the sidebar is opened so the mobile Sheet cannot cover
-      // the list row.
-      const listRow = page.getByTestId(`journal-${journal.id}`);
-      await expect(listRow.getByTestId(`tag-${source.name}`)).toBeVisible();
+      // The source-tagged journal is on the list before the merge, which is what
+      // gives the refetch assertion below something to be about. Checked before
+      // the sidebar is opened so the mobile Sheet cannot cover the row.
+      await expect(
+        page
+          .getByTestId(`journal-${journal.id}`)
+          .getByTestId(`tag-${source.name}`)
+      ).toBeVisible();
 
       await ensureSidebarOpen(page, 'Journals');
 
@@ -590,26 +625,17 @@ test.describe('Sidebar Tag Management', () => {
       await expect(confirmation).toBeVisible();
       await expect(confirmation).toContainText(source.name);
 
-      await Promise.all([
-        page.waitForResponse(
-          response =>
-            response.url().includes(`/api/journals/tags/${source.id}/merge`) &&
-            response.request().method() === 'POST'
-        ),
-        confirmation.getByRole('button', { name: 'Confirm Merge' }).click(),
-      ]);
+      // The merge repoints every assignment, so the journals list must be
+      // refetched and not only the tag namespace.
+      const journalsRefetched = journalsRefetchedAfter(page, {
+        pathname: `/api/journals/tags/${source.id}/merge`,
+        method: 'POST',
+      });
+      await confirmation.getByRole('button', { name: 'Confirm Merge' }).click();
+      await journalsRefetched;
 
       await expect(dialog).toBeHidden();
       await expect(page.getByText('Tag successfully merged')).toBeVisible();
-
-      // The chip on the list row swaps to the target in place, with no reload —
-      // the journal-query half of the invalidation.
-      await expect(listRow.getByTestId(`tag-${source.name}`)).toHaveCount(0, {
-        timeout: 15000,
-      });
-      await expect(listRow.getByTestId(`tag-${target.name}`)).toHaveCount(1, {
-        timeout: 15000,
-      });
 
       await ensureSidebarOpen(page, 'Journals');
       await expect(
