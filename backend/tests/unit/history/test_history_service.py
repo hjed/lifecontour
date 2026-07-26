@@ -336,6 +336,73 @@ class TestGearItemUpdated:
         assert service.project_event(event) == []
 
 
+class TestJournalTags:
+    """Journal tag assignment/removal projects onto the journal itself.
+
+    Deliberately the same ``field_name="tags"`` shape as the contact tag rows
+    (``TestContactTags``) so the shared ActivityItem renders both identically.
+    """
+
+    def test_assigned_writes_tags_field_on_journal(
+        self, service: HistoryService
+    ) -> None:
+        event = _event(
+            "JournalTagAssigned",
+            {
+                "journal_id": 10,
+                "tag_id": "3f7c1f0e-0000-4000-8000-000000000001",
+                "tag_name": "Hiking",
+                "source": Provenance.UI.value,
+                "changed_by": "ui",
+            },
+        )
+
+        rows = service.project_event(event)
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("journal", 10, "tags", None, "Hiking")
+        ]
+
+    def test_removed_writes_tags_field_on_journal(
+        self, service: HistoryService
+    ) -> None:
+        event = _event(
+            "JournalTagRemoved",
+            {
+                "journal_id": 10,
+                "tag_id": "3f7c1f0e-0000-4000-8000-000000000001",
+                "tag_name": "Hiking",
+                "source": Provenance.UI.value,
+                "changed_by": "ui",
+            },
+        )
+
+        rows = service.project_event(event)
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("journal", 10, "tags", "Hiking", None)
+        ]
+
+    def test_missing_tag_name_projects_nothing(self, service: HistoryService) -> None:
+        """A payload without ``tag_name`` yields no row, and does not raise.
+
+        Raising would park the whole batch in the dead-letter queue and stall
+        history for every event behind it; emitting the row anyway would render as
+        "Changed Tags from null to null" in the feed.
+        """
+        event = _event(
+            "JournalTagAssigned",
+            {
+                "journal_id": 12,
+                "tag_id": "3f7c1f0e-0000-4000-8000-000000000003",
+                "source": Provenance.UI.value,
+                "changed_by": "ui",
+            },
+        )
+
+        assert service.project_event(event) == []
+
+
 # --------------------------------------------------------------------------- #
 # Contact event projection (ITER12-003 Phase 1).
 #

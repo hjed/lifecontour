@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from core_shared.models.history import Provenance
 from core_shared.models.journals import (
     JournalTagNotFoundError,
     JournalValidationError,
@@ -40,9 +41,20 @@ def hierarchy_service(mock_tag_repo):
 
 
 @pytest.fixture
-def tag_service(mock_tag_repo, hierarchy_service):
+def mock_event_publisher():
+    """Create a mock outbox event publisher."""
+    return AsyncMock()
+
+
+@pytest.fixture
+def tag_service(mock_tag_repo, hierarchy_service, mock_event_publisher):
     """Create a JournalTagService instance."""
-    return JournalTagService(mock_tag_repo, hierarchy_service)
+    return JournalTagService(mock_tag_repo, hierarchy_service, mock_event_publisher)
+
+
+def _published(mock_event_publisher):
+    """The events passed to ``publish``, in order."""
+    return [call.args[0] for call in mock_event_publisher.publish.await_args_list]
 
 
 class TestCreateTag:
@@ -623,12 +635,150 @@ class TestAssignAndRemoveTag:
     async def test_assign_tag(self, tag_service, mock_tag_repo, mock_transaction):
         """assign_tag delegates to the repo."""
         tag_id = uuid4()
+        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.assign_tag.return_value = True
+
         await tag_service.assign_tag(7, tag_id, transaction=mock_transaction)
+
         mock_tag_repo.assign_tag.assert_awaited_once_with(7, tag_id)
 
     @pytest.mark.asyncio
     async def test_remove_tag(self, tag_service, mock_tag_repo, mock_transaction):
         """remove_tag delegates to the repo."""
         tag_id = uuid4()
+        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.remove_tag.return_value = True
+
         await tag_service.remove_tag(7, tag_id, transaction=mock_transaction)
+
         mock_tag_repo.remove_tag.assert_awaited_once_with(7, tag_id)
+
+
+class TestAssignAndRemoveTagEvents:
+    """Tag assignment/removal publishes journal-scoped history events.
+
+    The events name the tag (``tag_name``) so the history projection needs no
+    join, and carry the caller's provenance so the activity feed can distinguish
+    a UI edit from an AI-agent one.
+    """
+
+    @pytest.mark.asyncio
+    async def test_assign_publishes_journal_tag_assigned(
+        self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
+    ):
+        tag_id = uuid4()
+        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.assign_tag.return_value = True
+
+        await tag_service.assign_tag(
+            7,
+            tag_id,
+            transaction=mock_transaction,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        (event,) = _published(mock_event_publisher)
+        assert event.event_type == "JournalTagAssigned"
+        assert event.aggregate_id == 7
+        assert event.event_data["tag_id"] == str(tag_id)
+        assert event.event_data["tag_name"] == "Hiking"
+        assert event.event_data["source"] == Provenance.UI.value
+        assert event.event_data["changed_by"] == "ui"
+        assert event.transaction is mock_transaction
+
+    @pytest.mark.asyncio
+    async def test_remove_publishes_journal_tag_removed(
+        self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
+    ):
+        tag_id = uuid4()
+        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.remove_tag.return_value = True
+
+        await tag_service.remove_tag(
+            7,
+            tag_id,
+            transaction=mock_transaction,
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+
+        (event,) = _published(mock_event_publisher)
+        assert event.event_type == "JournalTagRemoved"
+        assert event.event_data["tag_name"] == "Hiking"
+        assert event.event_data["source"] == Provenance.MCP.value
+        assert event.event_data["changed_by"] == "mcp"
+
+    @pytest.mark.asyncio
+    async def test_events_default_to_system_provenance(
+        self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
+    ):
+        tag_id = uuid4()
+        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.assign_tag.return_value = True
+
+        await tag_service.assign_tag(7, tag_id, transaction=mock_transaction)
+
+        (event,) = _published(mock_event_publisher)
+        assert event.event_data["source"] == Provenance.SYSTEM.value
+        assert event.event_data["changed_by"] == "system"
+
+    @pytest.mark.asyncio
+    async def test_assigning_an_already_assigned_tag_publishes_nothing(
+        self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
+    ):
+        """The junction insert is ON CONFLICT DO NOTHING, so a repeat is a no-op.
+
+        Publishing anyway would put an "Added Tags" entry in the feed for a change
+        that never happened — the activity-history spec forbids exactly that.
+        """
+        tag_id = uuid4()
+        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.assign_tag.return_value = False
+
+        await tag_service.assign_tag(7, tag_id, transaction=mock_transaction)
+
+        mock_event_publisher.publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_removing_an_unassigned_tag_publishes_nothing(
+        self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
+    ):
+        tag_id = uuid4()
+        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.remove_tag.return_value = False
+
+        await tag_service.remove_tag(7, tag_id, transaction=mock_transaction)
+
+        mock_event_publisher.publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_assigning_a_missing_tag_raises_and_publishes_nothing(
+        self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
+    ):
+        tag_id = uuid4()
+        mock_tag_repo.find_by_id.return_value = None
+
+        with pytest.raises(JournalTagNotFoundError):
+            await tag_service.assign_tag(7, tag_id, transaction=mock_transaction)
+
+        mock_tag_repo.assign_tag.assert_not_awaited()
+        mock_event_publisher.publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_removing_a_missing_tag_is_a_silent_no_op(
+        self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
+    ):
+        """Removal must not start raising for an unknown tag.
+
+        To the caller an unknown tag and an unassigned one are the same outcome,
+        and the DELETE endpoint has always answered both with a successful no-op —
+        so loading the tag for its event name must not change that.
+        """
+        tag_id = uuid4()
+        mock_tag_repo.find_by_id.return_value = None
+
+        await tag_service.remove_tag(7, tag_id, transaction=mock_transaction)
+
+        mock_tag_repo.remove_tag.assert_not_awaited()
+        mock_event_publisher.publish.assert_not_awaited()

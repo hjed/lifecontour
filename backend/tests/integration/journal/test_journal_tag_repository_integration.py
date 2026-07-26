@@ -592,6 +592,45 @@ class TestJournalTagRepositoryIntegration:
 
 
 @pytest.mark.integration
+class TestAssignmentChangeReporting:
+    """assign_tag / remove_tag report whether the junction table changed.
+
+    The tag service publishes ``JournalTagAssigned`` / ``JournalTagRemoved`` only
+    on a real change, so these booleans are what keeps the activity feed free of
+    entries for operations that changed nothing. Asserted against real SQL because
+    both answers come from Postgres (``RETURNING`` under ``DO NOTHING``, and
+    ``rowcount``) rather than from application logic.
+    """
+
+    async def test_assign_tag_reports_new_then_duplicate(
+        self, tag_repo, sample_journal_id
+    ):
+        tag = await tag_repo.save(JournalTag(name="assign-reporting"))
+
+        assert await tag_repo.assign_tag(sample_journal_id, tag.id) is True
+        assert await tag_repo.assign_tag(sample_journal_id, tag.id) is False
+
+        # The repeat must not have created a second row either.
+        assert len(await tag_repo.get_tags_for_journal(sample_journal_id)) == 1
+
+    async def test_remove_tag_reports_deleted_then_absent(
+        self, tag_repo, sample_journal_id
+    ):
+        tag = await tag_repo.save(JournalTag(name="remove-reporting"))
+        await tag_repo.assign_tag(sample_journal_id, tag.id)
+
+        assert await tag_repo.remove_tag(sample_journal_id, tag.id) is True
+        assert await tag_repo.remove_tag(sample_journal_id, tag.id) is False
+
+    async def test_remove_tag_reports_absent_when_never_assigned(
+        self, tag_repo, sample_journal_id
+    ):
+        tag = await tag_repo.save(JournalTag(name="never-assigned"))
+
+        assert await tag_repo.remove_tag(sample_journal_id, tag.id) is False
+
+
+@pytest.mark.integration
 class TestGetDescendantsForTags:
     """Recursive descendant lookup backing hierarchical journal tag filtering."""
 

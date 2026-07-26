@@ -5,11 +5,14 @@ Tests the POST /api/journals/tags endpoint for creating journal tags,
 tag assignment to journals, and filtering journals by tags.
 """
 
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
 import pytest
+import pytest_asyncio
+from sqlalchemy import text
 
 
 def create_journal_request_data(
@@ -920,6 +923,154 @@ class TestJournalTagAssignment:
         # Verify tag is removed
         tags = journal_json["data"]["attributes"]["tags"]
         assert len(tags) == 0
+
+
+@pytest.mark.integration
+class TestJournalTagAssignmentHistoryEvents:
+    """The relationship endpoints publish tag history events with UI provenance.
+
+    Asserted on the ``outbox_events`` rows the request wrote, which is where the
+    endpoint's responsibility ends — the relay and projection that turn them into
+    feed entries are covered by
+    ``tests/integration/infrastructure/events/test_journal_history_projection_e2e.py``.
+
+    Note the fixture substitutes a SAVEPOINT for the real commit, so these tests
+    show the event was written in the request's unit of work, not that it committed
+    before the response; the ``@transactional`` service is what ties the two
+    writes together.
+    """
+
+    @pytest_asyncio.fixture
+    async def subject(
+        self, integration_api_client, async_connection
+    ) -> tuple[dict[str, Any], str]:
+        """A journal and a uniquely-named tag, with the outbox cleared.
+
+        Clearing last means every test starts with only the events its own action
+        produces, so the assertions can be on exact counts.
+        """
+        tag = await create_tag(
+            integration_api_client, f"history-{uuid4().hex[:8]}", color="#FF0000"
+        )
+        journal_response = await integration_api_client.post(
+            "/api/journals",
+            json=create_journal_request_data(
+                title="Tag history subject", content="Carries the tag"
+            ),
+        )
+        assert journal_response.status_code == 201
+
+        await async_connection.execute(text("DELETE FROM outbox_events"))
+        return tag, journal_response.json()["data"]["id"]
+
+    @staticmethod
+    async def tag_events(async_connection) -> list[tuple[str, dict[str, Any]]]:
+        """(event_type, event_data) for every journal tag event in the outbox."""
+        result = await async_connection.execute(
+            text(
+                "SELECT event_type, event_data FROM outbox_events "
+                "WHERE event_type IN ('JournalTagAssigned', 'JournalTagRemoved') "
+                "ORDER BY id"
+            )
+        )
+        return [
+            (row[0], json.loads(row[1]) if isinstance(row[1], str) else row[1])
+            for row in result.fetchall()
+        ]
+
+    @staticmethod
+    async def assign(client, journal_id: str, tag_id: str):
+        return await client.post(
+            f"/api/journals/{journal_id}/relationships/tags",
+            json={"data": {"type": "journal-tag", "attributes": {"tag_id": tag_id}}},
+        )
+
+    async def test_assign_publishes_journal_tag_assigned_with_ui_provenance(
+        self, integration_api_client, async_connection, subject
+    ):
+        tag, journal_id = subject
+
+        response = await self.assign(integration_api_client, journal_id, tag["id"])
+        assert response.status_code == 200
+
+        events = await self.tag_events(async_connection)
+        assert len(events) == 1
+        event_type, data = events[0]
+        assert event_type == "JournalTagAssigned"
+        assert data["journal_id"] == int(journal_id)
+        assert data["tag_id"] == tag["id"]
+        assert data["tag_name"] == tag["attributes"]["name"]
+        assert data["source"] == "ui"
+        assert data["changed_by"] == "ui"
+
+    async def test_remove_publishes_journal_tag_removed_with_ui_provenance(
+        self, integration_api_client, async_connection, subject
+    ):
+        tag, journal_id = subject
+        await self.assign(integration_api_client, journal_id, tag["id"])
+        await async_connection.execute(text("DELETE FROM outbox_events"))
+
+        remove_response = await integration_api_client.delete(
+            f"/api/journals/{journal_id}/relationships/tags/{tag['id']}"
+        )
+        assert remove_response.status_code == 200
+
+        events = await self.tag_events(async_connection)
+        assert len(events) == 1
+        event_type, data = events[0]
+        assert event_type == "JournalTagRemoved"
+        assert data["journal_id"] == int(journal_id)
+        assert data["tag_id"] == tag["id"]
+        assert data["tag_name"] == tag["attributes"]["name"]
+        assert data["source"] == "ui"
+        assert data["changed_by"] == "ui"
+
+    async def test_reassigning_the_same_tag_publishes_nothing(
+        self, integration_api_client, async_connection, subject
+    ):
+        """A repeat POST is a no-op, so it must not add an "Added Tags" entry.
+
+        The endpoint answers 200 either way (assignment is idempotent), so the
+        outbox is the only place the difference is observable.
+        """
+        tag, journal_id = subject
+        await self.assign(integration_api_client, journal_id, tag["id"])
+        await async_connection.execute(text("DELETE FROM outbox_events"))
+
+        repeat = await self.assign(integration_api_client, journal_id, tag["id"])
+        assert repeat.status_code == 200
+
+        assert await self.tag_events(async_connection) == []
+
+    async def test_removing_an_unassigned_tag_publishes_nothing(
+        self, integration_api_client, async_connection, subject
+    ):
+        tag, journal_id = subject
+
+        remove_response = await integration_api_client.delete(
+            f"/api/journals/{journal_id}/relationships/tags/{tag['id']}"
+        )
+        assert remove_response.status_code == 200
+
+        assert await self.tag_events(async_connection) == []
+
+    async def test_removing_a_nonexistent_tag_stays_a_successful_no_op(
+        self, integration_api_client, async_connection, subject
+    ):
+        """An unknown tag id is indistinguishable from an unassigned one here.
+
+        Pinned because the service now loads the tag to name it in the event, and
+        raising for a missing row would have turned this long-standing 200 into a
+        404.
+        """
+        _, journal_id = subject
+
+        remove_response = await integration_api_client.delete(
+            f"/api/journals/{journal_id}/relationships/tags/{uuid4()}"
+        )
+        assert remove_response.status_code == 200
+
+        assert await self.tag_events(async_connection) == []
 
 
 @pytest.mark.integration

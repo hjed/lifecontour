@@ -15,6 +15,7 @@ to a user-facing E2E for ITER12-002 Phase 1 (which has no UI surface yet).
 from contextlib import asynccontextmanager
 from datetime import datetime
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 import pytest
 from core_shared.models import Route
@@ -37,9 +38,15 @@ from app.core.journal.adapters.sql.climbing_data_repository import (
     SqlClimbingDataRepository,
 )
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+from app.core.journal.adapters.sql.journal_tag_repository import SqlJournalTagRepository
 from app.core.journal.adapters.sql.mood_data_repository import SqlMoodDataRepository
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
+from app.core.journal.models.journal_tag import JournalTag
 from app.core.journal.services.journal_service import JournalService
+from app.core.journal.services.journal_tag_hierarchy_service import (
+    JournalTagHierarchyService,
+)
+from app.core.journal.services.journal_tag_service import JournalTagService
 from app.core.journal.services.journal_write_service import JournalWriteService
 from app.core.journal.services.route_service import RouteService
 from app.infrastructure.events.history_projection_consumer import (
@@ -68,18 +75,33 @@ def _make_journal(title: str = "Original title") -> Journal:
     )
 
 
+def _patched_projection_engine(async_connection: AsyncConnection):
+    """Patch the projection consumer's engine to yield the test connection.
+
+    Keeps the consumer's writes on the test ``async_connection`` so they share the
+    test savepoint and roll back at teardown.
+    """
+    mock_engine = MagicMock()
+
+    @asynccontextmanager
+    async def mock_begin():
+        yield async_connection
+
+    mock_engine.begin = mock_begin
+
+    return patch(
+        "app.infrastructure.events.history_projection_consumer.get_async_database_engine",
+        return_value=mock_engine,
+    )
+
+
 async def _relay_and_project(
     stream_client: StreamClient,
     stream_name: str,
     async_connection: AsyncConnection,
     consumer_name: str,
 ) -> None:
-    """Relay outbox events to the stream and run the projection consumer once.
-
-    Both the relay and the consumer operate on the test ``async_connection`` (the
-    consumer's engine is patched to yield it) so all writes share the test
-    savepoint and roll back at teardown.
-    """
+    """Relay outbox events to the stream and run the projection consumer once."""
     relay = OutboxRelay(
         stream_client=stream_client, stream_name=stream_name, batch_size=50
     )
@@ -93,19 +115,41 @@ async def _relay_and_project(
     )
     await stream_client.ensure_consumer_group(stream_name, GROUP_NAME)
 
-    mock_engine = MagicMock()
-
-    @asynccontextmanager
-    async def mock_begin():
-        yield async_connection
-
-    mock_engine.begin = mock_begin
-
-    with patch(
-        "app.infrastructure.events.history_projection_consumer.get_async_database_engine",
-        return_value=mock_engine,
-    ):
+    with _patched_projection_engine(async_connection):
         await consumer._process_batch()
+
+
+async def _replay_stream_through_projection(
+    stream_client: StreamClient,
+    stream_name: str,
+    async_connection: AsyncConnection,
+    redis_client: Redis,
+) -> None:
+    """Re-project every entry already on the stream, as a redelivery would.
+
+    Redis Streams are at-least-once: a consumer restart, or a pending message
+    reclaimed by ``XAUTOCLAIM``, hands the projection an event it has already
+    processed. Replaying the raw entries through ``_handle_event`` leaves the
+    ``event_id`` dedup index as the only thing preventing duplicate rows.
+    """
+    consumer = HistoryProjectionConsumer(
+        stream_client=stream_client,
+        stream_name=stream_name,
+        consumer_name="test-replay",
+        block_ms=100,
+    )
+
+    # redis-py types xrange's entries as optionally-None pairs; a stream that has
+    # been relayed to always yields real ones, so skip anything else rather than
+    # silently replaying a half-empty message.
+    entries = await redis_client.xrange(stream_name) or []
+    with _patched_projection_engine(async_connection):
+        for message_id, fields in entries:
+            if message_id is None or fields is None:
+                continue
+            await consumer._handle_event(
+                stream_client._parse_message(message_id, dict(fields))
+            )
 
 
 def _mock_write_service(
@@ -121,6 +165,7 @@ def _mock_write_service(
     repo_names = (
         "journal_service",
         "journal_contact_service",
+        "tag_service",
         "calendar_info_repo",
         "photo_album_data_repo",
         "mood_data_repo",
@@ -696,6 +741,191 @@ class TestJournalHistoryProjectionE2E:
         assert by_field["asset_count"].old_value == "3"
         assert by_field["asset_count"].new_value == "5"
         assert by_field["asset_count"].source == Provenance.IMMICH
+
+
+@pytest.mark.integration
+class TestJournalTagHistoryProjectionE2E:
+    """ITER17-005 Phase 1: journal tag assignment/removal reaches journal history.
+
+    Drives the real chain (``JournalTagService`` -> outbox -> relay -> projection)
+    with real repositories, so the assertions cover the SQL that decides whether an
+    event is published at all, not just the event construction.
+    """
+
+    async def _tag_service(self, conn: AsyncConnection) -> JournalTagService:
+        tag_repo = SqlJournalTagRepository(conn)
+        return JournalTagService(
+            tag_repo=tag_repo,
+            hierarchy_service=JournalTagHierarchyService(tag_repo=tag_repo),
+            event_publisher=OutboxEventPublisher(conn),
+        )
+
+    async def _journal_id(self, conn: AsyncConnection, title: str) -> int:
+        saved = await SqlJournalRepository(conn).save(_make_journal(title))
+        assert saved.id is not None
+        return saved.id
+
+    async def _tags_history(
+        self, conn: AsyncConnection, journal_id: int
+    ) -> list[tuple[str | None, str | None, Provenance, str | None]]:
+        """The journal's ``tags`` history rows, most recent first."""
+        entries = await SqlFieldHistoryRepository(conn).get_history_for_aggregate(
+            "journal", journal_id, limit=50, offset=0
+        )
+        return [
+            (e.old_value, e.new_value, e.source, e.changed_by)
+            for e in entries
+            if e.field_name == "tags"
+        ]
+
+    @pytest.mark.asyncio
+    async def test_assignment_and_removal_are_projected_with_ui_provenance(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        tag_service = await self._tag_service(async_connection)
+        journal_id = await self._journal_id(async_connection, "Tag history subject")
+        tag = await SqlJournalTagRepository(async_connection).save(
+            JournalTag(name=f"Hiking-{uuid4()}")
+        )
+        assert tag.id is not None
+
+        await tag_service.assign_tag(
+            journal_id,
+            tag.id,
+            async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+        await tag_service.remove_tag(
+            journal_id,
+            tag.id,
+            async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        await _relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-journal-tags-e2e"
+        )
+
+        # Most recent first: the removal, then the assignment.
+        assert await self._tags_history(async_connection, journal_id) == [
+            (tag.name, None, Provenance.UI, "ui"),
+            (None, tag.name, Provenance.UI, "ui"),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_replaying_the_stream_adds_no_duplicate_rows(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+        redis_client: Redis,
+    ) -> None:
+        """Projection is idempotent, keyed on the originating ``event_id``.
+
+        Redis Streams guarantee at-least-once delivery, so a consumer restart or a
+        reclaimed pending message re-runs the projection. Duplicated tag entries in
+        the feed would be as wrong as missing ones.
+        """
+        tag_service = await self._tag_service(async_connection)
+        journal_id = await self._journal_id(async_connection, "Replay subject")
+        tag = await SqlJournalTagRepository(async_connection).save(
+            JournalTag(name=f"Replay-{uuid4()}")
+        )
+        assert tag.id is not None
+
+        await tag_service.assign_tag(
+            journal_id, tag.id, async_connection, source=Provenance.UI, changed_by="ui"
+        )
+        await tag_service.remove_tag(
+            journal_id, tag.id, async_connection, source=Provenance.UI, changed_by="ui"
+        )
+        await _relay_and_project(
+            stream_client,
+            test_stream_name,
+            async_connection,
+            "test-journal-tags-replay",
+        )
+        after_first = await self._tags_history(async_connection, journal_id)
+        assert len(after_first) == 2
+
+        await _replay_stream_through_projection(
+            stream_client, test_stream_name, async_connection, redis_client
+        )
+
+        assert await self._tags_history(async_connection, journal_id) == after_first
+
+    @pytest.mark.asyncio
+    async def test_mcp_tag_replace_projects_mcp_provenance_and_no_spurious_rows(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        """The MCP composite path records its own provenance and nothing more.
+
+        Re-sending the identical tag list is the common shape of an MCP update that
+        edits some other field. The pre-event implementation removed and re-added
+        every tag, which would now write a bogus "Removed"/"Added" pair; the diff
+        must leave the feed untouched.
+        """
+        publisher = OutboxEventPublisher(async_connection)
+        tag_repo = SqlJournalTagRepository(async_connection)
+        journal_service = JournalService(
+            journal_repo=SqlJournalRepository(async_connection),
+            event_publisher=publisher,
+        )
+        created = await journal_service.create_journal(
+            _make_journal("MCP tag journal"),
+            async_connection,
+            changed_by="mcp",
+            source=Provenance.MCP,
+        )
+        assert created.id is not None
+        journal_id = created.id
+
+        tag_name = f"McpTag-{uuid4()}"
+        write_service = _mock_write_service(
+            publisher,
+            journal_service=journal_service,
+            tag_service=await self._tag_service(async_connection),
+            tag_repo=tag_repo,
+        )
+
+        await write_service.update_journal_composite(
+            created,
+            async_connection,
+            tags=[tag_name],
+            changed_by="mcp",
+            source=Provenance.MCP,
+        )
+        await _relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-mcp-tags-e2e"
+        )
+
+        assert await self._tags_history(async_connection, journal_id) == [
+            (None, tag_name, Provenance.MCP, "mcp")
+        ]
+
+        # Re-send the same list: nothing changed, so nothing new may be recorded.
+        await write_service.update_journal_composite(
+            created,
+            async_connection,
+            tags=[tag_name],
+            changed_by="mcp",
+            source=Provenance.MCP,
+        )
+        await _relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-mcp-tags-e2e"
+        )
+
+        assert await self._tags_history(async_connection, journal_id) == [
+            (None, tag_name, Provenance.MCP, "mcp")
+        ]
 
 
 @pytest.mark.integration

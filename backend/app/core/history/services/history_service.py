@@ -148,6 +148,40 @@ class HistoryService:
             )
         ]
 
+    def _project_journal_tag_assigned(
+        self, event: OutboxEvent, data: dict[str, Any]
+    ) -> list[FieldHistoryEntry]:
+        return self._journal_tag_rows(event, data, assigned=True)
+
+    def _project_journal_tag_removed(
+        self, event: OutboxEvent, data: dict[str, Any]
+    ) -> list[FieldHistoryEntry]:
+        return self._journal_tag_rows(event, data, assigned=False)
+
+    def _journal_tag_rows(
+        self, event: OutboxEvent, data: dict[str, Any], *, assigned: bool
+    ) -> list[FieldHistoryEntry]:
+        """One ``tags`` row on the journal, naming the tag that came or went.
+
+        A payload with no ``tag_name`` projects nothing rather than raising: the
+        row would render as "Changed Tags from null to null", and a raising handler
+        would dead-letter the whole batch and stall history for every event behind
+        it. No current producer omits the name.
+        """
+        tag_name = data.get("tag_name")
+        if tag_name is None:
+            return []
+        return [
+            self._row(
+                event,
+                data,
+                entity_id=data["journal_id"],
+                field_name="tags",
+                old_value=None if assigned else tag_name,
+                new_value=tag_name if assigned else None,
+            )
+        ]
+
     def _project_route_created(
         self, event: OutboxEvent, data: dict[str, Any]
     ) -> list[FieldHistoryEntry]:
@@ -556,6 +590,8 @@ _HANDLERS = {
     "JournalDeleted": HistoryService._project_journal_deleted,
     "JournalTypeAdded": HistoryService._project_journal_type_added,
     "JournalTypeRemoved": HistoryService._project_journal_type_removed,
+    "JournalTagAssigned": HistoryService._project_journal_tag_assigned,
+    "JournalTagRemoved": HistoryService._project_journal_tag_removed,
     "RouteCreated": HistoryService._project_route_created,
     "RouteUpdated": HistoryService._project_route_updated,
     "RouteDeleted": HistoryService._project_route_deleted,

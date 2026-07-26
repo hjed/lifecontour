@@ -15,6 +15,8 @@ from app.core.journal.models.events import (
     GearItemUpdated,
     JournalCreated,
     JournalDeleted,
+    JournalTagAssigned,
+    JournalTagRemoved,
     JournalTypeAdded,
     JournalTypeRemoved,
     JournalUpdated,
@@ -151,6 +153,79 @@ class TestJournalTypeRemoved:
         assert event.event_data["source"] == Provenance.MCP.value
         assert event.event_data["changed_by"] == "mcp"
         assert event.event_id.startswith("journal_type_removed_1_EVENT_")
+
+
+class TestJournalTagAssigned:
+    """JournalTagAssigned names the tag so history can read without a join."""
+
+    def test_create_event(self) -> None:
+        tag_id = uuid4()
+
+        event = JournalTagAssigned(
+            journal_id=7,
+            tag_id=tag_id,
+            tag_name="Hiking",
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        assert event.aggregate_id == 7
+        assert event.event_type == "JournalTagAssigned"
+        assert event.event_data["journal_id"] == 7
+        # Stringified: the payload round-trips through JSON/Redis to the projection.
+        assert event.event_data["tag_id"] == str(tag_id)
+        assert event.event_data["tag_name"] == "Hiking"
+        assert event.event_data["source"] == Provenance.UI.value
+        assert event.event_data["changed_by"] == "ui"
+        assert isinstance(event.occurred_at, datetime)
+        assert event.event_id.startswith(f"journal_tag_assigned_7_{tag_id}_")
+
+    def test_defaults_to_system_provenance(self) -> None:
+        event = JournalTagAssigned(journal_id=1, tag_id=uuid4(), tag_name="Work")
+
+        assert event.event_data["source"] == Provenance.SYSTEM.value
+        assert event.event_data["changed_by"] == "system"
+
+    def test_event_ids_differ_per_tag(self) -> None:
+        """Two tags assigned to one journal must not share an event_id.
+
+        The history dedup index is keyed on ``event_id`` (plus entity and field),
+        so a shared id would silently drop the second tag's row.
+        """
+        first = JournalTagAssigned(journal_id=1, tag_id=uuid4(), tag_name="a")
+        second = JournalTagAssigned(journal_id=1, tag_id=uuid4(), tag_name="b")
+
+        assert first.event_id != second.event_id
+
+
+class TestJournalTagRemoved:
+    """JournalTagRemoved mirrors the assignment event."""
+
+    def test_create_event(self) -> None:
+        tag_id = uuid4()
+
+        event = JournalTagRemoved(
+            journal_id=9,
+            tag_id=tag_id,
+            tag_name="Hiking",
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+
+        assert event.aggregate_id == 9
+        assert event.event_type == "JournalTagRemoved"
+        assert event.event_data["journal_id"] == 9
+        assert event.event_data["tag_id"] == str(tag_id)
+        assert event.event_data["tag_name"] == "Hiking"
+        assert event.event_data["source"] == Provenance.MCP.value
+        assert event.event_data["changed_by"] == "mcp"
+        assert event.event_id.startswith(f"journal_tag_removed_9_{tag_id}_")
+
+    def test_defaults_to_system_provenance(self) -> None:
+        event = JournalTagRemoved(journal_id=1, tag_id=uuid4(), tag_name="Work")
+
+        assert event.event_data["source"] == Provenance.SYSTEM.value
+        assert event.event_data["changed_by"] == "system"
 
 
 class TestRouteCreated:

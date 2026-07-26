@@ -298,23 +298,34 @@ class SqlJournalTagRepository(JournalTagRepository):
 
         return [_row_to_tag(row) for row in rows]
 
-    async def assign_tag(self, journal_id: int, tag_id: UUID) -> None:
-        """Assign a tag to a journal."""
+    async def assign_tag(self, journal_id: int, tag_id: UUID) -> bool:
+        """Assign a tag to a journal, reporting whether the row is new.
+
+        ``RETURNING`` yields no row when ``DO NOTHING`` suppresses the insert,
+        which is what makes the "did anything change" answer race-free.
+        """
         query = text(
             """
             INSERT INTO journal_tag_assignments (journal_id, tag_id)
             VALUES (:journal_id, :tag_id)
             ON CONFLICT (journal_id, tag_id) DO NOTHING
+            RETURNING journal_id
         """
         )
-        await self.conn.execute(query, {"journal_id": journal_id, "tag_id": tag_id})
+        result = await self.conn.execute(
+            query, {"journal_id": journal_id, "tag_id": tag_id}
+        )
+        return result.fetchone() is not None
 
-    async def remove_tag(self, journal_id: int, tag_id: UUID) -> None:
-        """Remove a tag from a journal."""
+    async def remove_tag(self, journal_id: int, tag_id: UUID) -> bool:
+        """Remove a tag from a journal, reporting whether a row was deleted."""
         query = text(
             """
             DELETE FROM journal_tag_assignments
             WHERE journal_id = :journal_id AND tag_id = :tag_id
         """
         )
-        await self.conn.execute(query, {"journal_id": journal_id, "tag_id": tag_id})
+        result = await self.conn.execute(
+            query, {"journal_id": journal_id, "tag_id": tag_id}
+        )
+        return result.rowcount > 0
