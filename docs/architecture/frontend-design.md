@@ -35,11 +35,27 @@ This document provides comprehensive frontend design patterns and component guid
 
 ### Tailwind Configuration Guidelines
 
-- Enable class-based dark mode (`darkMode: ['class']`)
-- Include all relevant file paths in content array
-- Extend theme with CSS custom properties for shadcn/ui
-- Add Australian-themed color palette when appropriate
-- Include `tailwindcss-animate` plugin for animations
+Tailwind v4 is configured **entirely from CSS**, in `frontend/src/app/globals.css`.
+There is no `tailwind.config.js`/`.cjs` — v4 only loads one via an explicit
+`@config` directive, and we deliberately do not use it (see #1186).
+
+- **Theme tokens**: define them in the `@theme inline` block. Token values are
+  self-contained colours (oklch) consumed as `var(--token)` — **never**
+  `hsl(var(--token))`, which is a v3 contract that compiles to an invalid colour
+  (see #1178). Light values live in `:root`, dark overrides in `.dark`.
+- **Plugins**: register with `@plugin '<pkg>';` (e.g. `@tailwindcss/typography`).
+  A v3 `plugins: [...]` array does nothing.
+- **Animations**: `animate-in` / `animate-out` and friends come from
+  `@import 'tw-animate-css';`. The v3-only `tailwindcss-animate` plugin is not
+  compatible with v4.
+- **Source detection**: automatic. There is no `content` array to maintain.
+- Prefer the semantic token classes (`bg-background`, `text-muted-foreground`,
+  `border-border`) over raw colours so light and dark both work.
+
+A missing `@import` or `@plugin` does **not** fail the build — the affected
+utilities just emit no CSS and the UI renders silently unstyled. Utilities the UI
+depends on are therefore asserted in
+`frontend/src/app/__tests__/globals-css.test.ts`; extend it when adding a plugin.
 
 ### Accessibility Guidelines
 

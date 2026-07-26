@@ -537,12 +537,14 @@ export class SidebarTestHelpers {
       this.page.viewportSize()?.width && this.page.viewportSize()!.width < 768;
     if (isMobile) {
       const hamburgerButton = this.page.getByTestId('mobile-nav-trigger');
-      // Click the hamburger if the mobile nav isn't already open
-      const isMobileSidebarVisible = await this.page
-        .locator('nav[role="navigation"]')
-        .last()
-        .isVisible();
-      if (!isMobileSidebarVisible) {
+      // Click the hamburger only if the Sheet isn't already open. Gate on the
+      // trigger's `aria-expanded`, which Radix flips synchronously, rather than
+      // on the nav's visibility: the Sheet slides in over 500ms, so a one-shot
+      // visibility check taken mid-animation reports "closed" for a Sheet that
+      // is already open, and clicking again would toggle it shut.
+      const isSheetOpen =
+        (await hamburgerButton.getAttribute('aria-expanded')) === 'true';
+      if (!isSheetOpen) {
         await hamburgerButton.click();
       }
 
@@ -612,7 +614,7 @@ export class SidebarTestHelpers {
     ]);
 
     // Explicitly assert we reached the expected page
-    await expect(this.page).toHaveURL(/.*\/contacts\/favourites/);
+    await expect(this.page).toHaveURL(/\/contacts\/favourites/);
   }
 
   /**
@@ -1217,7 +1219,7 @@ export async function verifyUrlMatches(
  * Reliable waiting strategies for E2E tests
  */
 export class ReliableWaiter {
-  constructor(private page: Page) {}
+  constructor(private readonly page: Page) {}
 
   /**
    * Wait for contact detail page to fully load with proper error handling
