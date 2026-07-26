@@ -39,6 +39,83 @@ async function ensureSidebarOpen(page: Page, section = 'Contacts') {
   await expect(sectionHeader).toHaveAttribute(ARIA_EXPANDED, 'true');
 }
 
+/**
+ * Waits for a list to be refetched *because of* a tag mutation.
+ *
+ * This is the list half of the invalidation a tag delete or merge promises.
+ * The tests pair it with an assertion on what the refetched list renders: the
+ * refetch proves the wiring fired, the rendered rows prove its result reached
+ * the screen. That second half used to be too flaky to assert — a list fetch
+ * already in flight when the mutation landed could settle afterwards carrying
+ * pre-mutation data and, being fresh for the next five minutes, was never
+ * refetched again. Mutations now cancel before they invalidate (#1203), so the
+ * stale response can no longer win.
+ *
+ * The predicate is a small state machine over the response stream: it latches
+ * on the mutation's own response, then matches the first list GET after it.
+ * Registering both halves in one waiter closes the gap a second
+ * `waitForResponse` would leave.
+ */
+function listRefetchedAfter(
+  page: Page,
+  mutation: { pathname: string; method: string },
+  listPathname: string
+) {
+  let mutated = false;
+  return page.waitForResponse(response => {
+    const { pathname } = new URL(response.url());
+    if (
+      pathname === mutation.pathname &&
+      response.request().method() === mutation.method
+    ) {
+      mutated = response.ok();
+      return false;
+    }
+    // A failed list GET is not a refresh — accepting one would let the test
+    // pass on a refetch that never reached the cache.
+    return (
+      mutated &&
+      pathname === listPathname &&
+      response.request().method() === 'GET' &&
+      response.ok()
+    );
+  });
+}
+
+/**
+ * The contact tag row in whichever copy of the sidebar is on screen.
+ *
+ * On mobile both the CSS-hidden desktop sidebar and the Sheet are in the DOM,
+ * so an unscoped test id matches twice. A role-based locator only matches what
+ * is in the accessibility tree, which is the visible copy.
+ */
+function contactTagLink(page: Page, tagId: string) {
+  return page
+    .getByRole('group', { name: 'Contacts' })
+    .getByTestId(`nav-link-tag-${tagId}`);
+}
+
+/** Opens a contact tag row's context menu and chooses Edit Tag. */
+async function openEditDialogForContactTag(page: Page, tagId: string) {
+  const tagLink = contactTagLink(page, tagId);
+  await expect(tagLink).toBeVisible({ timeout: 15000 });
+
+  // Retry the gesture: the click can be swallowed during hydration.
+  const editMenuItem = page.getByRole('menuitem', { name: 'Edit Tag' });
+  await expect(async () => {
+    await tagLink.click({ button: 'right' });
+    await expect(editMenuItem).toBeVisible({ timeout: 2000 });
+  }).toPass();
+
+  const dialog = page.getByRole('dialog', { name: 'Edit Tag' });
+  await expect(async () => {
+    await editMenuItem.click();
+    await expect(dialog).toBeVisible({ timeout: 2000 });
+  }).toPass();
+
+  return dialog;
+}
+
 test.describe('Sidebar Tag Management', () => {
   test('can create a new tag from the sidebar', async ({
     authenticatedPage: page,
@@ -139,56 +216,159 @@ test.describe('Sidebar Tag Management', () => {
     ).not.toBeVisible({ timeout: 10000 });
   });
 
-  test('can delete a tag from the edit dialog', async ({
+  test('can delete a tag from the edit dialog and it disappears from a contact that had it', async ({
     authenticatedPage: page,
     testCleanup,
   }) => {
     const dataManager = new TestDataManager(page);
     const tagName = `Tag-To-Delete-${Date.now()}`;
 
-    await dataManager.createTags([{ name: tagName }]);
+    const [tag] = await dataManager.createTags([
+      { name: tagName, color: '#FF0000' },
+    ]);
+    const [contact] = await dataManager.createContacts([
+      { firstName: 'TagDelete', lastName: 'Subject' },
+    ]);
+    await dataManager.assignTagsToContact(contact.id, [tag.id]);
+    // The tag is deleted by the test itself; cleanup tolerates the 404.
     testCleanup(async () => await dataManager.cleanup());
 
-    await page.goto('/contacts');
+    // Filtering by the tag makes the list deterministic: contacts are ordered by
+    // name and paged at 20, so an unfiltered list could put this contact on a
+    // later page and the "before" assertion would depend on the rest of the DB.
+    await page.goto(`/contacts?tag=${tag.id}`);
+
+    // The tagged contact is on the list before anything is deleted, which is
+    // what gives the refetch assertion below something to be about. Checked
+    // before the sidebar is opened so the mobile Sheet cannot cover the card.
+    await expect(
+      page.getByTestId(`contact-${contact.id}`).getByTestId(`tag-${tagName}`)
+    ).toBeVisible();
+
     await ensureSidebarOpen(page);
 
-    const tagLink = page.getByRole('link', { name: tagName, exact: true });
-    await expect(tagLink).toBeVisible();
+    const dialog = await openEditDialogForContactTag(page, tag.id);
 
-    // Right click and edit
-    const editMenuItem = page.getByRole('menuitem', { name: 'Edit Tag' });
-    await expect(async () => {
-      await tagLink.click({ button: 'right' });
-      await expect(editMenuItem).toBeVisible({ timeout: 2000 });
-    }).toPass();
-
-    const dialog = page.getByRole('dialog', { name: 'Edit Tag' });
-    await expect(async () => {
-      await editMenuItem.click();
-      await expect(dialog).toBeVisible({ timeout: 2000 });
-    }).toPass();
-
-    // Click delete
     await dialog.getByRole('button', { name: 'Delete Tag' }).click();
 
-    // Alert dialog should appear
-    const alertDialog = page.getByRole('alertdialog');
-    await expect(alertDialog).toBeVisible();
-    await expect(alertDialog).toContainText('Are you absolutely sure?');
+    const confirmation = page.getByRole('alertdialog');
+    await expect(confirmation).toBeVisible();
+    await expect(confirmation).toContainText('Are you absolutely sure?');
 
-    // Confirm delete
-    await alertDialog.getByRole('button', { name: 'Delete' }).click();
+    // The delete un-assigns the tag from every contact, so the contacts list
+    // must be refetched and not only the tag namespace — and it must happen off
+    // the back of the response, not behind a timer.
+    const contactsRefetched = listRefetchedAfter(
+      page,
+      { pathname: `/api/tags/${tag.id}`, method: 'DELETE' },
+      '/api/contacts'
+    );
+    await confirmation.getByRole('button', { name: 'Delete' }).click();
+    await contactsRefetched;
 
-    // Verify toast
+    await expect(dialog).toBeHidden();
     await expect(page.getByText('Tag deleted successfully')).toBeVisible();
 
-    // Re-open sidebar on mobile to verify tag removed
+    // The refetch above only proves a request went out; this proves its rows
+    // reached the screen, which is what #1203 makes assertable. Nothing carries
+    // the deleted tag any more, so the filtered list no longer lists the
+    // contact.
+    await expect(page.getByTestId(`contact-${contact.id}`)).toHaveCount(0, {
+      timeout: 15000,
+    });
+
+    // The mobile Sheet can close over the dialog interaction.
+    await ensureSidebarOpen(page);
+    await expect(contactTagLink(page, tag.id)).toHaveCount(0, {
+      timeout: 15000,
+    });
+
+    // Deleting un-assigns rather than being refused, so the contact survives
+    // without the tag.
+    await page.goto(`/contacts/${contact.id}`);
+    const tagsEditor = page.getByTestId('contact-tags-editor');
+    await expect(tagsEditor).toBeVisible();
+    await expect(tagsEditor.getByTestId(`tag-badge-${tag.id}`)).toHaveCount(0, {
+      timeout: 10000,
+    });
+  });
+
+  test('can merge a contact tag into another and the assignment moves', async ({
+    authenticatedPage: page,
+    testCleanup,
+  }) => {
+    const dataManager = new TestDataManager(page);
+    const stamp = Date.now();
+
+    const [source, target] = await dataManager.createTags([
+      { name: `MergeSource-${stamp}`, color: '#FF0000' },
+      { name: `MergeTarget-${stamp}`, color: '#00FF00' },
+    ]);
+    const [contact] = await dataManager.createContacts([
+      { firstName: 'TagMerge', lastName: 'Subject' },
+    ]);
+    await dataManager.assignTagsToContact(contact.id, [source.id]);
+    // The source tag is consumed by the merge; cleanup tolerates the 404.
+    testCleanup(async () => await dataManager.cleanup());
+
+    await page.goto(`/contacts?tag=${source.id}`);
+
+    // The source-tagged contact is on the list before the merge, which is what
+    // gives the refetch assertion below something to be about.
+    await expect(
+      page
+        .getByTestId(`contact-${contact.id}`)
+        .getByTestId(`tag-${source.name}`)
+    ).toBeVisible();
+
     await ensureSidebarOpen(page);
 
-    // Verify tag disappears from sidebar
-    await expect(
-      page.getByRole('link', { name: tagName, exact: true })
-    ).not.toBeVisible({ timeout: 10000 });
+    const dialog = await openEditDialogForContactTag(page, source.id);
+
+    await dialog.getByLabel('Merge into').click();
+    await page.getByRole('option', { name: target.name }).click();
+    await dialog.getByRole('button', { name: 'Merge', exact: true }).click();
+
+    const confirmation = page.getByRole('alertdialog');
+    await expect(confirmation).toBeVisible();
+    await expect(confirmation).toContainText(source.name);
+
+    // The merge repoints every assignment, so the contacts list must be
+    // refetched and not only the tag namespace.
+    const contactsRefetched = listRefetchedAfter(
+      page,
+      { pathname: `/api/tags/${source.id}/merge`, method: 'POST' },
+      '/api/contacts'
+    );
+    await confirmation.getByRole('button', { name: 'Confirm Merge' }).click();
+    await contactsRefetched;
+
+    await expect(dialog).toBeHidden();
+    await expect(page.getByText('Tag successfully merged')).toBeVisible();
+
+    // The refetch above only proves a request went out; this proves its rows
+    // reached the screen. The merge repointed the assignment to the target, so
+    // the source-filtered list no longer lists the contact.
+    await expect(page.getByTestId(`contact-${contact.id}`)).toHaveCount(0, {
+      timeout: 15000,
+    });
+
+    await ensureSidebarOpen(page);
+    await expect(contactTagLink(page, source.id)).toHaveCount(0, {
+      timeout: 15000,
+    });
+    await expect(contactTagLink(page, target.id)).toBeVisible();
+
+    // The contact tagged with the source now carries the target instead.
+    await page.goto(`/contacts/${contact.id}`);
+    const tagsEditor = page.getByTestId('contact-tags-editor');
+    await expect(tagsEditor).toBeVisible();
+    await expect(tagsEditor.getByTestId(`tag-badge-${target.id}`)).toBeVisible({
+      timeout: 10000,
+    });
+    await expect(tagsEditor.getByTestId(`tag-badge-${source.id}`)).toHaveCount(
+      0
+    );
   });
 
   test('create dialog validates required fields', async ({
@@ -279,46 +459,12 @@ test.describe('Sidebar Tag Management', () => {
       return page.getByRole('group', { name: 'Journals' });
     }
 
-    /**
-     * Waits for the journals list to be refetched *because of* a tag mutation.
-     *
-     * This is the journal-query half of the invalidation the phase promises.
-     * The tests pair it with an assertion on the chips the refetched list
-     * renders: the refetch proves the wiring fired, the chips prove its result
-     * reached the screen. That second half used to be too flaky to assert — a
-     * list fetch already in flight when the mutation landed could settle
-     * afterwards carrying pre-mutation data and, being fresh for the next five
-     * minutes, was never refetched again. Mutations now cancel before they
-     * invalidate (#1203), so the stale response can no longer win.
-     *
-     * The predicate is a small state machine over the response stream: it
-     * latches on the mutation's own response, then matches the first
-     * journals-list GET after it. Registering both halves in one waiter closes
-     * the gap a second `waitForResponse` would leave.
-     */
+    /** The journal-query half of the invalidation a tag mutation promises. */
     function journalsRefetchedAfter(
       page: Page,
       mutation: { pathname: string; method: string }
     ) {
-      let mutated = false;
-      return page.waitForResponse(response => {
-        const { pathname } = new URL(response.url());
-        if (
-          pathname === mutation.pathname &&
-          response.request().method() === mutation.method
-        ) {
-          mutated = response.ok();
-          return false;
-        }
-        // A failed list GET is not a refresh — accepting one would let the
-        // test pass on a refetch that never reached the cache.
-        return (
-          mutated &&
-          pathname === '/api/journals' &&
-          response.request().method() === 'GET' &&
-          response.ok()
-        );
-      });
+      return listRefetchedAfter(page, mutation, '/api/journals');
     }
 
     /** Opens a journal tag row's management menu and chooses Edit Tag. */

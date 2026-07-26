@@ -1254,32 +1254,30 @@ export function useUpdateTag() {
   });
 }
 
+/**
+ * Deletes a tag, which also un-assigns it from every contact.
+ *
+ * The tag namespace and the contact queries are both refreshed: the tag leaves
+ * the sidebar tree, and the chips on the contacts list and in any open
+ * contact's tag editor go with it.
+ *
+ * This neither splices the cache by hand nor delays the invalidation behind a
+ * timer — the write commits in the service layer before the response is sent,
+ * so there is no read-after-write race to wait out (#1204). The cancel that
+ * `invalidateAfterMutation` performs is what keeps an in-flight list fetch from
+ * settling afterwards with pre-mutation rows (#1203).
+ */
 export function useDeleteTag() {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: (id: string) => deleteTag(id),
-    onSuccess: (_, id) => {
-      // Optimistically remove the deleted tag from the cache
-      queryClient.setQueryData<TagListResponse | undefined>(
-        tagKeys.lists(),
-        old => {
-          if (!old?.data) return old;
-          return {
-            ...old,
-            data: old.data.filter(tag => tag.id !== id),
-          };
-        }
+    onSuccess: () => {
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: tagKeys.lists() },
+        { queryKey: contactKeys.all }
       );
-
-      // Delay invalidation to avoid backend transaction commit race conditions
-      setTimeout(() => {
-        void invalidateAfterMutation(
-          queryClient,
-          { queryKey: tagKeys.lists() },
-          { queryKey: contactKeys.all }
-        );
-      }, 300);
       toast.success(SUCCESS_MESSAGES.TAG_DELETED);
     },
     onError: (error: Error) => {
@@ -1311,6 +1309,13 @@ async function mergeTag(sourceId: string, targetId: string): Promise<void> {
   }
 }
 
+/**
+ * Merges a tag into another, deleting the source tag.
+ *
+ * Contacts tagged with the source end up tagged with the target, so the contact
+ * queries are refreshed alongside the tag namespace — immediately, and without
+ * a hand-written splice, for the same reasons as {@link useDeleteTag}.
+ */
 export function useMergeTag() {
   const queryClient = useQueryClient();
 
@@ -1322,27 +1327,12 @@ export function useMergeTag() {
       sourceId: string;
       targetId: string;
     }) => mergeTag(sourceId, targetId),
-    onSuccess: (_, { sourceId }) => {
-      // Optimistically remove the source tag from the cache
-      queryClient.setQueryData<TagListResponse | undefined>(
-        tagKeys.lists(),
-        old => {
-          if (!old?.data) return old;
-          return {
-            ...old,
-            data: old.data.filter(tag => tag.id !== sourceId),
-          };
-        }
+    onSuccess: () => {
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: tagKeys.lists() },
+        { queryKey: contactKeys.all }
       );
-
-      // Delay invalidation to avoid backend transaction commit race conditions
-      setTimeout(() => {
-        void invalidateAfterMutation(
-          queryClient,
-          { queryKey: tagKeys.lists() },
-          { queryKey: contactKeys.all }
-        );
-      }, 300);
       toast.success('Tag successfully merged');
     },
     onError: (error: Error) => {

@@ -1153,10 +1153,10 @@ export function useUpdateJournalTag() {
  * The tag namespace feeds the sidebar tree and the detail page's tag editor;
  * the journal queries feed the chips on the list and on any open journal.
  *
- * Unlike the contact equivalents this neither splices the cache by hand nor
- * delays the invalidation behind a timer: the write commits in the service
- * layer before the response is sent, so there is no read-after-write race to
- * wait out.
+ * This neither splices the cache by hand nor delays the invalidation behind a
+ * timer: the write commits in the service layer before the response is sent, so
+ * there is no read-after-write race to wait out. `useDeleteTag` / `useMergeTag`
+ * in `lib/api/contacts.ts` are the contact-side twins (#1204).
  */
 function refreshAfterJournalTagMutation(
   queryClient: ReturnType<typeof useQueryClient>
