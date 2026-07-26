@@ -239,6 +239,12 @@ pdf_bytes = renderer.render(export_data, map_images=map_images)
   fails at the tile-index conversion, while `inf` fails inside gpxpy's own maths —
   both as a bare `ValueError`); an entry whose every route fails simply has no map.
 
+Test stacks never fetch real tiles: `.env.test` points `LOGBOOK_TILE_BASE_URL` at a
+dead address, which fails fast with a connection error and takes the plain-background
+fallback. So an E2E run that exports a journal with a GPX route still succeeds without
+the suite becoming a live OpenStreetMap client. Backend unit and integration tests stub
+the `TileSource` outright and never reach the adapter at all.
+
 Known limitation: a track crossing the ±180° antimeridian yields a bounding box
 that spans the world, so the zoom clamps to its minimum and the map renders as a
 world view with the track drawn across it. It still exports — nothing fails — and
