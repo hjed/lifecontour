@@ -11,15 +11,20 @@ async function ensureSidebarOpen(page: Page, section = 'Contacts') {
     page.viewportSize()?.width && page.viewportSize()!.width < 768;
   if (isMobile) {
     const mobileTrigger = page.getByTestId('mobile-nav-trigger');
-    const isSidebarVisible = await page
-      .getByRole('heading', { name: 'Navigation' })
-      .isVisible();
-    if (!isSidebarVisible) {
+    // Gate on the trigger's `aria-expanded`, which Radix flips synchronously,
+    // rather than on the heading's visibility: the Sheet slides in over 500ms,
+    // so a one-shot visibility check taken mid-animation reports "closed" for a
+    // Sheet that is already open, and the resulting second click is swallowed by
+    // the open Sheet's overlay.
+    const isSheetOpen =
+      (await mobileTrigger.getAttribute('aria-expanded')) === 'true';
+    if (!isSheetOpen) {
       await mobileTrigger.click();
-      await expect(
-        page.getByRole('heading', { name: 'Navigation' })
-      ).toBeVisible();
     }
+    // Auto-retrying, so it waits out the slide-in either way.
+    await expect(
+      page.getByRole('heading', { name: 'Navigation' })
+    ).toBeVisible();
   }
 
   // Expand the requested section if collapsed
