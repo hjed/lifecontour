@@ -102,6 +102,68 @@ describe('ActivityItem', () => {
     expect(screen.getByText(/Removed Last Name: "Smith"/i)).toBeInTheDocument();
   });
 
+  // Journal tag assignment/removal history arrives as entity_type 'journal' with
+  // field_name 'tags' and the tag name in new_value/old_value. No component change
+  // was needed for it to render — these tests pin that contract so a future tweak
+  // to the entity-agnostic formatting cannot silently break the journal feed.
+  describe('journal tag entries', () => {
+    function journalTagActivity(
+      oldValue: string | null,
+      newValue: string | null,
+      overrides: Partial<HistoryResource['attributes']> = {}
+    ): HistoryResource {
+      return {
+        ...baseActivity,
+        type: 'journal_history',
+        attributes: {
+          ...baseActivity.attributes,
+          entity_type: 'journal',
+          entity_id: 42,
+          field_name: 'tags',
+          old_value: oldValue,
+          new_value: newValue,
+          ...overrides,
+        },
+      };
+    }
+
+    it('describes an assignment as an added tag', () => {
+      render(
+        <TooltipProvider>
+          <ActivityItem activity={journalTagActivity(null, 'Hiking')} />
+        </TooltipProvider>
+      );
+
+      expect(screen.getByText('Added Tags: "Hiking"')).toBeInTheDocument();
+      expect(screen.getByTestId('provenance-trigger-ui')).toBeInTheDocument();
+    });
+
+    it('describes a removal as a removed tag', () => {
+      render(
+        <TooltipProvider>
+          <ActivityItem activity={journalTagActivity('Hiking', null)} />
+        </TooltipProvider>
+      );
+
+      expect(screen.getByText('Removed Tags: "Hiking"')).toBeInTheDocument();
+    });
+
+    it('shows the AI-assistant provenance for an MCP tag change', () => {
+      render(
+        <TooltipProvider>
+          <ActivityItem
+            activity={journalTagActivity(null, 'Hiking', {
+              source: 'mcp',
+              changed_by: 'mcp',
+            })}
+          />
+        </TooltipProvider>
+      );
+
+      expect(screen.getByTestId('provenance-trigger-mcp')).toBeInTheDocument();
+    });
+  });
+
   it('applies custom className', () => {
     render(
       <TooltipProvider>
