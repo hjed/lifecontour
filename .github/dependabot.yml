@@ -62,7 +62,7 @@ updates:
     # published more recently than that. Keep this cooldown at least as long so PRs
     # aren't opened for packages CI can't install yet.
     cooldown:
-      default-days: 2
+      default-days: 3
     open-pull-requests-limit: 3
     assignees:
       - "hjed"
