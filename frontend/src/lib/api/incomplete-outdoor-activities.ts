@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import { EventDateRange, JournalType } from '@/types/journals';
 import { JsonApiErrorResponse } from '@/types/api';
 import { API_ENDPOINTS, ERROR_MESSAGES } from '@/lib/constants';
+import { invalidateAfterMutation } from './invalidate-after-mutation';
 
 // Reason enum values as serialized by the backend IncompletenessReason enum
 export type IncompletenessReason =
@@ -126,7 +127,7 @@ export function useDismissIncompleteOutdoorActivity() {
   const queryClient = useQueryClient();
 
   const invalidateLists = () =>
-    queryClient.invalidateQueries({
+    void invalidateAfterMutation(queryClient, {
       queryKey: incompleteOutdoorActivityKeys.lists(),
     });
 
@@ -193,7 +194,7 @@ export function useUndismissIncompleteOutdoorActivity() {
       toast.success('Activity restored to the incomplete review');
     },
     onSettled: () => {
-      queryClient.invalidateQueries({
+      void invalidateAfterMutation(queryClient, {
         queryKey: incompleteOutdoorActivityKeys.lists(),
       });
     },

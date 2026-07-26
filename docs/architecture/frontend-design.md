@@ -77,6 +77,33 @@ This document provides comprehensive frontend design patterns and component guid
 - Use React Hook Form with Zod validation for form state
 - Keep state as close to usage as possible for maintainability
 
+### Invalidating After a Mutation
+
+Mutation handlers must refresh the cache through
+`invalidateAfterMutation(queryClient, ...filters)`
+(`frontend/src/lib/api/invalidate-after-mutation.ts`) rather than calling
+`queryClient.invalidateQueries` directly.
+
+- **Why:** `invalidateQueries` only cancels an in-flight request when the query
+  *already has data*. A list loading for the first time — a fresh mount, or a new
+  query key from a filter change — keeps the request that started before the
+  mutation; when it settles, React Query caches its pre-mutation rows, clears
+  `isInvalidated` and stamps a fresh `dataUpdatedAt`, so the app-wide five-minute
+  `staleTime` suppresses any refetch and the user keeps seeing data they just
+  changed ([#1203](https://github.com/hjed/personal-management-system/issues/1203)).
+  The helper cancels first, which has no such guard.
+- **Pass every key set in one call** — `invalidateAfterMutation(queryClient, { queryKey: a }, { queryKey: b })`
+  — not one call per key. All the key sets must be cancelled before any of them
+  is invalidated, or the later ones stay exposed to the same race.
+- Optimistic handlers keep their existing `cancelQueries` in `onMutate`; their
+  `onSuccess`/`onSettled` still invalidates through the helper.
+- A filter asking for `refetchType: 'none'` cancels only the queries that
+  already hold data. Cancelling a first-load query nothing is going to refetch
+  would strand its observer on a spinner, so its request is allowed to land.
+- Call it fire-and-forget (`void invalidateAfterMutation(...)`) as the old
+  `invalidateQueries` calls were; `await` it only where the handler already
+  awaited the refresh.
+
 ### TypeScript Integration
 
 - Define interfaces for all component props

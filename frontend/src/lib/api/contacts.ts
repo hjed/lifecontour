@@ -37,6 +37,7 @@ import {
   ERROR_MESSAGES,
   SUCCESS_MESSAGES,
 } from '@/lib/constants';
+import { invalidateAfterMutation } from './invalidate-after-mutation';
 
 // Query Keys
 export const contactKeys = {
@@ -467,7 +468,7 @@ export function useCreateContact() {
   return useMutation({
     mutationFn: createContact,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: contactKeys.all });
+      void invalidateAfterMutation(queryClient, { queryKey: contactKeys.all });
       toast.success(SUCCESS_MESSAGES.CONTACT_CREATED);
     },
     onError: (error: Error) => {
@@ -484,7 +485,9 @@ export function useUpdateContact() {
       updateContact(id, data),
     onSuccess: (data, { id }) => {
       queryClient.setQueryData(contactKeys.detail(id), data);
-      queryClient.invalidateQueries({ queryKey: contactKeys.lists() });
+      void invalidateAfterMutation(queryClient, {
+        queryKey: contactKeys.lists(),
+      });
       toast.success(SUCCESS_MESSAGES.CONTACT_UPDATED);
     },
     onError: (error: Error) => {
@@ -499,7 +502,7 @@ export function useDeleteContact() {
   return useMutation({
     mutationFn: deleteContact,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: contactKeys.all });
+      void invalidateAfterMutation(queryClient, { queryKey: contactKeys.all });
       toast.success(SUCCESS_MESSAGES.CONTACT_DELETED);
     },
     onError: (error: Error) => {
@@ -515,10 +518,11 @@ export function useToggleContactFavourite() {
     mutationFn: toggleContactFavourite,
     onSuccess: data => {
       const contactId = data.data.id;
-      queryClient.invalidateQueries({
-        queryKey: contactKeys.detail(contactId),
-      });
-      queryClient.invalidateQueries({ queryKey: contactKeys.lists() });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: contactKeys.detail(contactId) },
+        { queryKey: contactKeys.lists() }
+      );
       const isFavourite = data.data.attributes.is_favourite;
       toast.success(
         isFavourite
@@ -594,17 +598,16 @@ export function useMergeContact() {
     onSuccess: (_data, { survivorId, sourceId }) => {
       // The merge deletes the source and consolidates the aggregate onto the
       // survivor, so refresh the full contacts cache plus both detail entries.
-      queryClient.invalidateQueries({ queryKey: contactKeys.all });
-      queryClient.invalidateQueries({
-        queryKey: contactKeys.detail(survivorId),
-      });
-      queryClient.invalidateQueries({
-        queryKey: contactKeys.detail(sourceId),
-      });
-      // The merge writes an audit row to field_history; refresh the activity
-      // feed (backed by historyKeys) so it surfaces without waiting for a
-      // natural refetch.
-      queryClient.invalidateQueries({ queryKey: historyKeys.all });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: contactKeys.all },
+        { queryKey: contactKeys.detail(survivorId) },
+        { queryKey: contactKeys.detail(sourceId) },
+        // The merge writes an audit row to field_history; refresh the activity
+        // feed (backed by historyKeys) so it surfaces without waiting for a
+        // natural refetch.
+        { queryKey: historyKeys.all }
+      );
       toast.success('Contacts merged successfully');
     },
     onError: (error: Error) => {
@@ -686,7 +689,9 @@ export function useUpdateContactField() {
       );
 
       // We still need to invalidate lists so search tables and sidebars reflect the updated field
-      queryClient.invalidateQueries({ queryKey: contactKeys.lists() });
+      void invalidateAfterMutation(queryClient, {
+        queryKey: contactKeys.lists(),
+      });
     },
     onError: (error: Error) => {
       // Don't show toast here - let the component handle it
@@ -929,10 +934,11 @@ export function useAddContactMethod() {
       method: ContactMethodAttributes;
     }) => addContactMethod(contactId, method),
     onSuccess: (_, { contactId }) => {
-      queryClient.invalidateQueries({
-        queryKey: contactKeys.detail(contactId),
-      });
-      queryClient.invalidateQueries({ queryKey: contactKeys.lists() });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: contactKeys.detail(contactId) },
+        { queryKey: contactKeys.lists() }
+      );
       toast.success('Contact method added successfully');
     },
     onError: (error: Error) => {
@@ -953,10 +959,11 @@ export function useDeleteContactMethod() {
       methodId: string;
     }) => deleteContactMethod(contactId, methodId),
     onSuccess: (_, { contactId }) => {
-      queryClient.invalidateQueries({
-        queryKey: contactKeys.detail(contactId),
-      });
-      queryClient.invalidateQueries({ queryKey: contactKeys.lists() });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: contactKeys.detail(contactId) },
+        { queryKey: contactKeys.lists() }
+      );
       toast.success('Contact method deleted successfully');
     },
     onError: (error: Error) => {
@@ -979,10 +986,11 @@ export function useAddContactAddress() {
       address: ContactAddressAttributes;
     }) => addContactAddress(contactId, address),
     onSuccess: (_, { contactId }) => {
-      queryClient.invalidateQueries({
-        queryKey: contactKeys.detail(contactId),
-      });
-      queryClient.invalidateQueries({ queryKey: contactKeys.lists() });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: contactKeys.detail(contactId) },
+        { queryKey: contactKeys.lists() }
+      );
       toast.success('Contact address added successfully');
     },
     onError: (error: Error) => {
@@ -1003,10 +1011,11 @@ export function useDeleteContactAddress() {
       addressId: string;
     }) => deleteContactAddress(contactId, addressId),
     onSuccess: (_, { contactId }) => {
-      queryClient.invalidateQueries({
-        queryKey: contactKeys.detail(contactId),
-      });
-      queryClient.invalidateQueries({ queryKey: contactKeys.lists() });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: contactKeys.detail(contactId) },
+        { queryKey: contactKeys.lists() }
+      );
       toast.success('Contact address deleted successfully');
     },
     onError: (error: Error) => {
@@ -1102,13 +1111,12 @@ export function useAssignContactTag() {
     mutationFn: ({ contactId, tagId }: { contactId: string; tagId: string }) =>
       assignTagToContact(contactId, tagId),
     onSuccess: (_, { contactId }) => {
-      queryClient.invalidateQueries({
-        queryKey: contactKeys.detail(contactId),
-      });
-      queryClient.invalidateQueries({
-        queryKey: contactKeys.tags(contactId),
-      });
-      queryClient.invalidateQueries({ queryKey: contactKeys.lists() });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: contactKeys.detail(contactId) },
+        { queryKey: contactKeys.tags(contactId) },
+        { queryKey: contactKeys.lists() }
+      );
       toast.success(SUCCESS_MESSAGES.TAG_ASSIGNED);
     },
     onError: (error: Error) => {
@@ -1155,13 +1163,12 @@ export function useRemoveContactTag() {
       toast.success(SUCCESS_MESSAGES.TAG_REMOVED);
     },
     onSettled: (_data, _error, { contactId }) => {
-      queryClient.invalidateQueries({
-        queryKey: contactKeys.detail(contactId),
-      });
-      queryClient.invalidateQueries({
-        queryKey: contactKeys.tags(contactId),
-      });
-      queryClient.invalidateQueries({ queryKey: contactKeys.lists() });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: contactKeys.detail(contactId) },
+        { queryKey: contactKeys.tags(contactId) },
+        { queryKey: contactKeys.lists() }
+      );
     },
   });
 }
@@ -1172,7 +1179,7 @@ export function useCreateTag() {
   return useMutation({
     mutationFn: (attributes: TagCreateAttributes) => createTag(attributes),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: tagKeys.lists() });
+      void invalidateAfterMutation(queryClient, { queryKey: tagKeys.lists() });
       toast.success(SUCCESS_MESSAGES.TAG_CREATED);
     },
     onError: (error: Error) => {
@@ -1238,7 +1245,7 @@ export function useUpdateTag() {
       attributes: Partial<TagCreateAttributes>;
     }) => updateTag(id, attributes),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: tagKeys.lists() });
+      void invalidateAfterMutation(queryClient, { queryKey: tagKeys.lists() });
       toast.success(SUCCESS_MESSAGES.TAG_UPDATED);
     },
     onError: (error: Error) => {
@@ -1267,8 +1274,11 @@ export function useDeleteTag() {
 
       // Delay invalidation to avoid backend transaction commit race conditions
       setTimeout(() => {
-        queryClient.invalidateQueries({ queryKey: tagKeys.lists() });
-        queryClient.invalidateQueries({ queryKey: contactKeys.all });
+        void invalidateAfterMutation(
+          queryClient,
+          { queryKey: tagKeys.lists() },
+          { queryKey: contactKeys.all }
+        );
       }, 300);
       toast.success(SUCCESS_MESSAGES.TAG_DELETED);
     },
@@ -1327,8 +1337,11 @@ export function useMergeTag() {
 
       // Delay invalidation to avoid backend transaction commit race conditions
       setTimeout(() => {
-        queryClient.invalidateQueries({ queryKey: tagKeys.lists() });
-        queryClient.invalidateQueries({ queryKey: contactKeys.all });
+        void invalidateAfterMutation(
+          queryClient,
+          { queryKey: tagKeys.lists() },
+          { queryKey: contactKeys.all }
+        );
       }, 300);
       toast.success('Tag successfully merged');
     },
@@ -1403,7 +1416,9 @@ export function useCreateCustomDateType() {
   return useMutation({
     mutationFn: createCustomDateType,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: customDateTypeKeys.all });
+      void invalidateAfterMutation(queryClient, {
+        queryKey: customDateTypeKeys.all,
+      });
     },
     onError: (error: Error) => {
       toast.error(error.message);
@@ -1439,7 +1454,7 @@ export function useRefreshContactSummary(contactId: string) {
   return useMutation({
     mutationFn: () => refreshContactSummary(contactId),
     onSuccess: () => {
-      queryClient.invalidateQueries({
+      void invalidateAfterMutation(queryClient, {
         queryKey: contactKeys.detail(contactId),
       });
       toast.success('Summary refresh requested');
