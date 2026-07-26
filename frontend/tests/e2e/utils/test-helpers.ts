@@ -614,7 +614,7 @@ export class SidebarTestHelpers {
     ]);
 
     // Explicitly assert we reached the expected page
-    await expect(this.page).toHaveURL(/.*\/contacts\/favourites/);
+    await expect(this.page).toHaveURL(/\/contacts\/favourites/);
   }
 
   /**
@@ -1219,7 +1219,7 @@ export async function verifyUrlMatches(
  * Reliable waiting strategies for E2E tests
  */
 export class ReliableWaiter {
-  constructor(private page: Page) {}
+  constructor(private readonly page: Page) {}
 
   /**
    * Wait for contact detail page to fully load with proper error handling
