@@ -1151,23 +1151,42 @@ export function useUpdateJournalTag() {
 }
 
 /**
- * Deletes a journal tag, which also un-assigns it from every journal.
+ * Refreshes everything a journal tag mutation can change.
  *
- * Unlike the contact equivalent this neither splices the cache by hand nor
- * delays the invalidation: the write commits in the service layer before the
- * response is sent, so there is no read-after-write race to wait out, and an
- * immediate invalidation keeps the deleted tag from lingering on screen.
+ * The tag namespace feeds the sidebar tree and the detail page's tag editor;
+ * the journal queries feed the chips on the list and on any open journal. Both
+ * are **cancelled before being invalidated**: a fetch that started before the
+ * mutation would otherwise settle after it, writing pre-mutation rows into the
+ * cache and marking them fresh — and with `staleTime` at five minutes for the
+ * journals list and ten for the tag list, nothing would refetch again for that
+ * long, leaving a deleted tag on screen.
+ *
+ * Unlike the contact equivalents this neither splices the cache by hand nor
+ * delays the invalidation behind a timer: the write commits in the service
+ * layer before the response is sent, so there is no read-after-write race to
+ * wait out.
+ */
+async function refreshAfterJournalTagMutation(
+  queryClient: ReturnType<typeof useQueryClient>
+): Promise<void> {
+  await Promise.all([
+    queryClient.cancelQueries({ queryKey: journalTagKeys.lists() }),
+    queryClient.cancelQueries({ queryKey: journalKeys.all }),
+  ]);
+  queryClient.invalidateQueries({ queryKey: journalTagKeys.lists() });
+  queryClient.invalidateQueries({ queryKey: journalKeys.all });
+}
+
+/**
+ * Deletes a journal tag, which also un-assigns it from every journal.
  */
 export function useDeleteJournalTag() {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: (id: string) => deleteJournalTag(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: journalTagKeys.lists() });
-      // The tag disappears from the sidebar tree, from the chips on the
-      // journals list and from any open journal's tag editor.
-      queryClient.invalidateQueries({ queryKey: journalKeys.all });
+    onSuccess: async () => {
+      await refreshAfterJournalTagMutation(queryClient);
       toast.success(SUCCESS_MESSAGES.TAG_DELETED);
     },
     onError: (error: Error) => {
@@ -1193,9 +1212,8 @@ export function useMergeJournalTag() {
       sourceId: string;
       targetId: string;
     }) => mergeJournalTag(sourceId, targetId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: journalTagKeys.lists() });
-      queryClient.invalidateQueries({ queryKey: journalKeys.all });
+    onSuccess: async () => {
+      await refreshAfterJournalTagMutation(queryClient);
       toast.success('Tag successfully merged');
     },
     onError: (error: Error) => {

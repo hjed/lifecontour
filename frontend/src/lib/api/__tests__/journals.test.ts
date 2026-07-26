@@ -944,6 +944,40 @@ describe('Journals API', () => {
       });
     });
 
+    it('should cancel in-flight fetches before invalidating them', async () => {
+      // A list fetch that started before the delete would otherwise settle
+      // after the invalidation, writing pre-delete rows into a cache that is
+      // then fresh for staleTime — leaving the deleted tag on screen.
+      mockFetch.mockResolvedValueOnce(noContentResponse);
+
+      const calls: string[] = [];
+      jest
+        .spyOn(queryClient, 'cancelQueries')
+        .mockImplementation(async filters => {
+          calls.push(`cancel:${JSON.stringify(filters?.queryKey)}`);
+        });
+      jest
+        .spyOn(queryClient, 'invalidateQueries')
+        .mockImplementation(async filters => {
+          calls.push(`invalidate:${JSON.stringify(filters?.queryKey)}`);
+        });
+
+      const { result } = renderHook(() => useDeleteJournalTag(), {
+        wrapper: createWrapper,
+      });
+
+      await act(async () => {
+        await result.current.mutateAsync('tag-1');
+      });
+
+      expect(calls).toEqual([
+        `cancel:${JSON.stringify(journalTagKeys.lists())}`,
+        `cancel:${JSON.stringify(journalKeys.all)}`,
+        `invalidate:${JSON.stringify(journalTagKeys.lists())}`,
+        `invalidate:${JSON.stringify(journalKeys.all)}`,
+      ]);
+    });
+
     it('should show a success toast on success', async () => {
       mockFetch.mockResolvedValueOnce(noContentResponse);
 

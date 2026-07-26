@@ -301,10 +301,13 @@ test.describe('Sidebar Tag Management', () => {
           mutated = response.ok();
           return false;
         }
+        // A failed list GET is not a refresh — accepting one would let the
+        // test pass on a refetch that never reached the cache.
         return (
           mutated &&
           pathname === '/api/journals' &&
-          response.request().method() === 'GET'
+          response.request().method() === 'GET' &&
+          response.ok()
         );
       });
     }
