@@ -762,7 +762,7 @@ jobs:
   # ==========================================================================
   # E2E TEST INFRASTRUCTURE
   # Pre-build Docker images once and cache Playwright browsers to avoid
-  # redundant work across the 3-browser matrix.
+  # redundant work across the 2-browser matrix.
   # ==========================================================================
 
   e2e-docker-build:
@@ -827,7 +827,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        browser: [chromium, firefox, "Mobile Chrome"]
+        # Desktop chromium was dropped to cut CI cost; Mobile Chrome still
+        # covers the chromium engine.
+        browser: [firefox, "Mobile Chrome"]
 
     steps:
       - name: Checkout code
@@ -883,7 +885,10 @@ jobs:
         working-directory: ./frontend
         run: |
           echo "📥 Cache miss — installing ALL Playwright browsers with OS deps..."
-          # Install all browsers so any matrix entry can populate the shared cache
+          # Install all browsers so any matrix entry can populate the shared cache.
+          # chromium is required by every matrix entry, not just the chromium-based
+          # ones: the 'setup' (OAuth) project declares no device, so it runs on
+          # Playwright's default browser — chromium.
           pnpm exec playwright install --with-deps chromium firefox
 
       - name: Install Playwright system deps only (cache hit)
@@ -891,6 +896,8 @@ jobs:
         working-directory: ./frontend
         run: |
           echo "✅ Cache hit — installing only OS-level dependencies..."
+          # Both branches include chromium: the 'setup' (OAuth) project runs on
+          # Playwright's default browser (chromium) regardless of matrix entry.
           if [ "${{ matrix.browser }}" = "firefox" ]; then
             pnpm exec playwright install-deps chromium firefox
           else

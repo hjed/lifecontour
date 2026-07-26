@@ -271,7 +271,7 @@ To avoid repetition, detailed guidelines are maintained in specialized documents
 ### Testing & Quality Assurance
 - **[Testing Strategy](docs/architecture/testing-strategy.md)**: Comprehensive guidelines for Worker Unit Tests, Backend Tests, Frontend Tests, Testing Organization (conftest usage), E2E fixtures, and Database Integration.
 - **[Code Quality Standards](docs/code-quality-standards.md)**: Strict rules for linting, formatting, type checking, Python Language Rules (ruff, mypy requirements) and pre-commit hooks. *Quality check failures must be fixed before task completion.*
-For e2e tests use Playwright best practices: avoid force:true, add typing delays for ProseMirror/contenteditable inputs, and validate on Chromium when Firefox is unsupported locally.
+For e2e tests use Playwright best practices: avoid force:true, add typing delays for ProseMirror/contenteditable inputs, and validate on Mobile Chrome when Firefox is unsupported locally. The E2E projects are `firefox` and `Mobile Chrome` — desktop `chromium` was removed to cut CI cost.
 
 ### Architecture & Design
 - **[Domain Architecture](docs/architecture/domain-architecture.md)**: Domain-driven design patterns, Domain Enum Patterns, Ports & Adapters implementation, business logic validation, and component structure.

@@ -295,7 +295,7 @@ test('manual cleanup example', async ({ authenticatedPage }) => {
 ### Setup Project Authentication
 
 - OAuth flow runs **once** via setup project, not per worker or per test
-- All 3 browser projects (chromium, firefox, Mobile Chrome) share the same auth state
+- Both browser projects (firefox, Mobile Chrome) share the same auth state
 - Significant performance improvement (~30-60 seconds saved per full suite run)
 - Real authentication state persisted to disk and loaded automatically
 

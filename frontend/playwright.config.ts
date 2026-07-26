@@ -87,23 +87,14 @@ export default defineConfig({
   },
 
   /* Configure projects for major browsers */
-  /* Only test browsers that are tested in CI: chromium, firefox, and Mobile Chrome */
+  /* Only test browsers that are tested in CI: firefox and Mobile Chrome */
   /* Note: Webkit (Safari) was removed due to known issues with OAuth redirects in test environments */
+  /* Note: desktop chromium was removed to cut CI cost — Mobile Chrome covers the chromium engine */
   projects: [
     // Setup project: performs OAuth once and saves storageState
     {
       name: 'setup',
       testMatch: /.*\.setup\.ts/,
-    },
-
-    {
-      name: 'chromium',
-      use: {
-        ...devices['Desktop Chrome'],
-        timezoneId: 'UTC',
-        storageState: AUTH_FILE,
-      },
-      dependencies: ['setup'],
     },
 
     {
