@@ -268,6 +268,11 @@ test.describe('Journal Activity History', () => {
     testCleanup,
   }) => {
     const dataManager = new TestDataManager(page);
+    // Registered before anything is created, not after: the manager cleans up
+    // whatever it has tracked so far, so an exception part-way through setup still
+    // removes the tag. Journal tags are a globally shared namespace, so a leaked
+    // one outlives this test and accumulates for every other worker.
+    testCleanup(async () => await dataManager.cleanup());
 
     const [tag] = await dataManager.createJournalTags([
       { name: 'HistoryTag', color: '#38A169' },
@@ -281,7 +286,6 @@ test.describe('Journal Activity History', () => {
       },
       types: ['note'],
     });
-    testCleanup(async () => await dataManager.cleanup());
 
     await page.goto(`/journals/${journal.id}`);
     const tagsEditor = page.getByTestId('journal-tags-editor');
