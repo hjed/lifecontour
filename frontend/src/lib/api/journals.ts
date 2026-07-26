@@ -1161,10 +1161,10 @@ export function useUpdateJournalTag() {
  * journals list and ten for the tag list, nothing would refetch again for that
  * long, leaving a deleted tag on screen.
  *
- * Unlike the contact equivalents this neither splices the cache by hand nor
- * delays the invalidation behind a timer: the write commits in the service
- * layer before the response is sent, so there is no read-after-write race to
- * wait out.
+ * This neither splices the cache by hand nor delays the invalidation behind a
+ * timer: the write commits in the service layer before the response is sent, so
+ * there is no read-after-write race to wait out. `refreshAfterTagMutation` in
+ * `lib/api/contacts.ts` is the contact-side twin.
  */
 async function refreshAfterJournalTagMutation(
   queryClient: ReturnType<typeof useQueryClient>

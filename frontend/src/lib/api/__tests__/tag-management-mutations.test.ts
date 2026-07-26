@@ -2,10 +2,16 @@
  * @jest-environment jsdom
  */
 
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React, { ReactNode } from 'react';
-import { contactKeys, tagKeys, useUpdateTag, useDeleteTag } from '../contacts';
+import {
+  contactKeys,
+  tagKeys,
+  useUpdateTag,
+  useDeleteTag,
+  useMergeTag,
+} from '../contacts';
 
 // Mock fetch
 globalThis.fetch = jest.fn();
@@ -52,6 +58,38 @@ const mockFetch = fetch as jest.MockedFunction<typeof fetch>;
 const { toast } = jest.requireMock('sonner') as {
   toast: { success: jest.Mock; error: jest.Mock };
 };
+
+interface CachedTagList {
+  data: { id: string; type: string; attributes: { name: string } }[];
+}
+
+/** A tag list in the cache, where `12` is the tag the tests act on. */
+function cachedTagList(): CachedTagList {
+  return {
+    data: [
+      { id: '12', type: 'tags', attributes: { name: 'Subject' } },
+      { id: '13', type: 'tags', attributes: { name: 'Bystander' } },
+    ],
+  };
+}
+
+function cachedTagIds(queryClient: QueryClient): string[] {
+  const cached = queryClient.getQueryData<CachedTagList>(tagKeys.lists());
+  return (cached?.data ?? []).map(tag => tag.id);
+}
+
+/** Enough of a jest spy to order its calls against another spy's. */
+interface CallOrdered {
+  mock: { invocationCallOrder: readonly number[] };
+}
+
+function firstCallOrder(spy: CallOrdered): number {
+  return Math.min(...spy.mock.invocationCallOrder);
+}
+
+function lastCallOrder(spy: CallOrdered): number {
+  return Math.max(...spy.mock.invocationCallOrder);
+}
 
 describe('Tag Management Mutation Hooks', () => {
   let queryClient: QueryClient;
@@ -271,31 +309,88 @@ describe('Tag Management Mutation Hooks', () => {
       });
     });
 
-    it('should invalidate tag and contact queries on success', async () => {
+    it('should invalidate tag and contact queries without waiting out a timer', async () => {
+      // Fake timers with nothing advanced: a mutation that deferred its
+      // invalidation would leave the callback queued and the spy untouched.
+      // The backend commits the delete before it responds, so there is no
+      // read-after-write race to wait out.
+      jest.useFakeTimers();
+
+      try {
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+        } as Response);
+
+        const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
+
+        const { result } = renderHook(() => useDeleteTag(), {
+          wrapper: createWrapper,
+        });
+
+        await act(async () => {
+          await result.current.mutateAsync('12');
+        });
+
+        expect(invalidateSpy).toHaveBeenCalledWith({
+          queryKey: tagKeys.lists(),
+        });
+        // The deleted tag disappears from the sidebar tree, from the chips on
+        // the contacts list and from any open contact's tag editor.
+        expect(invalidateSpy).toHaveBeenCalledWith({
+          queryKey: contactKeys.all,
+        });
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('should leave the cached tag list to the invalidation rather than splicing it', async () => {
+      queryClient.setQueryData(tagKeys.lists(), cachedTagList());
+
       mockFetch.mockResolvedValueOnce({
         ok: true,
       } as Response);
 
+      const { result } = renderHook(() => useDeleteTag(), {
+        wrapper: createWrapper,
+      });
+
+      await act(async () => {
+        await result.current.mutateAsync('12');
+      });
+
+      // Hand-removing the row duplicates what the refetch does and puts the
+      // hook in the business of maintaining a server-owned shape.
+      expect(cachedTagIds(queryClient)).toEqual(['12', '13']);
+      expect(queryClient.getQueryState(tagKeys.lists())?.isInvalidated).toBe(
+        true
+      );
+    });
+
+    it('should cancel the in-flight queries before invalidating them', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+      } as Response);
+
+      const cancelSpy = jest.spyOn(queryClient, 'cancelQueries');
       const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
 
       const { result } = renderHook(() => useDeleteTag(), {
         wrapper: createWrapper,
       });
 
-      await result.current.mutateAsync('12');
-
-      await waitFor(() => {
-        expect(invalidateSpy).toHaveBeenCalledWith(
-          expect.objectContaining({
-            queryKey: tagKeys.lists(),
-          })
-        );
-        expect(invalidateSpy).toHaveBeenCalledWith(
-          expect.objectContaining({
-            queryKey: contactKeys.all,
-          })
-        );
+      await act(async () => {
+        await result.current.mutateAsync('12');
       });
+
+      expect(cancelSpy).toHaveBeenCalledWith({ queryKey: tagKeys.lists() });
+      expect(cancelSpy).toHaveBeenCalledWith({ queryKey: contactKeys.all });
+      // Both lists carry a five-minute staleTime, so a fetch already in flight
+      // when the delete lands would otherwise settle *after* the invalidation
+      // with pre-delete rows and be fresh for the next five minutes.
+      expect(lastCallOrder(cancelSpy)).toBeLessThan(
+        firstCallOrder(invalidateSpy)
+      );
     });
 
     it('should show success toast on success', async () => {
@@ -329,6 +424,150 @@ describe('Tag Management Mutation Hooks', () => {
       await expect(result.current.mutateAsync('12')).rejects.toThrow(
         'Tag is still in use'
       );
+    });
+  });
+
+  describe('useMergeTag', () => {
+    it('should POST the target tag to the source tag merge endpoint', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+      } as Response);
+
+      const { result } = renderHook(() => useMergeTag(), {
+        wrapper: createWrapper,
+      });
+
+      await result.current.mutateAsync({ sourceId: '12', targetId: '13' });
+
+      // The source is the path parameter and the target travels in the body;
+      // the endpoint takes the target as a number, unlike the string ids the
+      // rest of the JSON:API surface uses.
+      expect(mockFetch).toHaveBeenCalledWith('/api/tags/12/merge', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          data: {
+            type: 'tags',
+            attributes: { target_tag_id: 13 },
+          },
+        }),
+      });
+    });
+
+    it('should invalidate tag and contact queries without waiting out a timer', async () => {
+      jest.useFakeTimers();
+
+      try {
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+        } as Response);
+
+        const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
+
+        const { result } = renderHook(() => useMergeTag(), {
+          wrapper: createWrapper,
+        });
+
+        await act(async () => {
+          await result.current.mutateAsync({ sourceId: '12', targetId: '13' });
+        });
+
+        expect(invalidateSpy).toHaveBeenCalledWith({
+          queryKey: tagKeys.lists(),
+        });
+        // Contacts tagged with the source now carry the target instead.
+        expect(invalidateSpy).toHaveBeenCalledWith({
+          queryKey: contactKeys.all,
+        });
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('should leave the cached tag list to the invalidation rather than splicing it', async () => {
+      queryClient.setQueryData(tagKeys.lists(), cachedTagList());
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+      } as Response);
+
+      const { result } = renderHook(() => useMergeTag(), {
+        wrapper: createWrapper,
+      });
+
+      await act(async () => {
+        await result.current.mutateAsync({ sourceId: '12', targetId: '13' });
+      });
+
+      expect(cachedTagIds(queryClient)).toEqual(['12', '13']);
+      expect(queryClient.getQueryState(tagKeys.lists())?.isInvalidated).toBe(
+        true
+      );
+    });
+
+    it('should cancel the in-flight queries before invalidating them', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+      } as Response);
+
+      const cancelSpy = jest.spyOn(queryClient, 'cancelQueries');
+      const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
+
+      const { result } = renderHook(() => useMergeTag(), {
+        wrapper: createWrapper,
+      });
+
+      await act(async () => {
+        await result.current.mutateAsync({ sourceId: '12', targetId: '13' });
+      });
+
+      expect(cancelSpy).toHaveBeenCalledWith({ queryKey: tagKeys.lists() });
+      expect(cancelSpy).toHaveBeenCalledWith({ queryKey: contactKeys.all });
+      expect(lastCallOrder(cancelSpy)).toBeLessThan(
+        firstCallOrder(invalidateSpy)
+      );
+    });
+
+    it('should show success toast on success', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+      } as Response);
+
+      const { result } = renderHook(() => useMergeTag(), {
+        wrapper: createWrapper,
+      });
+
+      await result.current.mutateAsync({ sourceId: '12', targetId: '13' });
+
+      await waitFor(() => {
+        expect(toast.success).toHaveBeenCalledWith('Tag successfully merged');
+      });
+    });
+
+    it('should handle API error', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({
+          errors: [{ detail: 'Cannot merge a tag into itself' }],
+        }),
+      } as Response);
+
+      const { result } = renderHook(() => useMergeTag(), {
+        wrapper: createWrapper,
+      });
+
+      await expect(
+        result.current.mutateAsync({ sourceId: '12', targetId: '12' })
+      ).rejects.toThrow('Cannot merge a tag into itself');
+
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalledWith(
+          'Cannot merge a tag into itself'
+        );
+      });
     });
   });
 });

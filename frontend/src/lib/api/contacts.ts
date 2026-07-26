@@ -1247,29 +1247,42 @@ export function useUpdateTag() {
   });
 }
 
+/**
+ * Refreshes everything a tag delete or merge changes.
+ *
+ * The tag namespace and the contact queries are both affected: the tag leaves
+ * the sidebar tree, and the chips on the contacts list and in any open
+ * contact's tag editor change with it.
+ *
+ * In-flight queries are cancelled first. Both lists carry a five-minute
+ * `staleTime`, so a fetch that started before the mutation but settles after
+ * the invalidation would write pre-mutation rows back into the cache and mark
+ * them fresh — nothing would refetch again for that long, leaving the removed
+ * tag on screen.
+ *
+ * This neither splices the cache by hand nor delays the invalidation behind a
+ * timer: the write commits in the service layer before the response is sent,
+ * so there is no read-after-write race to wait out. It mirrors
+ * `refreshAfterJournalTagMutation` in `lib/api/journals.ts`.
+ */
+async function refreshAfterTagMutation(
+  queryClient: ReturnType<typeof useQueryClient>
+): Promise<void> {
+  await Promise.all([
+    queryClient.cancelQueries({ queryKey: tagKeys.lists() }),
+    queryClient.cancelQueries({ queryKey: contactKeys.all }),
+  ]);
+  queryClient.invalidateQueries({ queryKey: tagKeys.lists() });
+  queryClient.invalidateQueries({ queryKey: contactKeys.all });
+}
+
 export function useDeleteTag() {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: (id: string) => deleteTag(id),
-    onSuccess: (_, id) => {
-      // Optimistically remove the deleted tag from the cache
-      queryClient.setQueryData<TagListResponse | undefined>(
-        tagKeys.lists(),
-        old => {
-          if (!old?.data) return old;
-          return {
-            ...old,
-            data: old.data.filter(tag => tag.id !== id),
-          };
-        }
-      );
-
-      // Delay invalidation to avoid backend transaction commit race conditions
-      setTimeout(() => {
-        queryClient.invalidateQueries({ queryKey: tagKeys.lists() });
-        queryClient.invalidateQueries({ queryKey: contactKeys.all });
-      }, 300);
+    onSuccess: async () => {
+      await refreshAfterTagMutation(queryClient);
       toast.success(SUCCESS_MESSAGES.TAG_DELETED);
     },
     onError: (error: Error) => {
@@ -1312,24 +1325,8 @@ export function useMergeTag() {
       sourceId: string;
       targetId: string;
     }) => mergeTag(sourceId, targetId),
-    onSuccess: (_, { sourceId }) => {
-      // Optimistically remove the source tag from the cache
-      queryClient.setQueryData<TagListResponse | undefined>(
-        tagKeys.lists(),
-        old => {
-          if (!old?.data) return old;
-          return {
-            ...old,
-            data: old.data.filter(tag => tag.id !== sourceId),
-          };
-        }
-      );
-
-      // Delay invalidation to avoid backend transaction commit race conditions
-      setTimeout(() => {
-        queryClient.invalidateQueries({ queryKey: tagKeys.lists() });
-        queryClient.invalidateQueries({ queryKey: contactKeys.all });
-      }, 300);
+    onSuccess: async () => {
+      await refreshAfterTagMutation(queryClient);
       toast.success('Tag successfully merged');
     },
     onError: (error: Error) => {
