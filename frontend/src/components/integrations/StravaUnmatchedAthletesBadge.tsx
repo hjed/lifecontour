@@ -19,6 +19,7 @@ import { Activity } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { useQueryClient } from '@tanstack/react-query';
 import { journalKeys } from '@/lib/api/journals';
+import { invalidateAfterMutation } from '@/lib/api/invalidate-after-mutation';
 
 interface StravaUnmatchedAthletesBadgeProps {
   readonly journalId: string;
@@ -53,13 +54,12 @@ export function StravaUnmatchedAthletesBadge({
         onSuccess: () => {
           setSelectedAthlete(null);
           // Invalidate the unmatched athletes list
-          queryClient.invalidateQueries({
-            queryKey: ['integrations', 'strava', 'unmatched', journalId],
-          });
-          // Invalidate journal details since a participant was likely added
-          queryClient.invalidateQueries({
-            queryKey: journalKeys.detail(journalId),
-          });
+          void invalidateAfterMutation(
+            queryClient,
+            { queryKey: ['integrations', 'strava', 'unmatched', journalId] },
+            // Invalidate journal details since a participant was likely added
+            { queryKey: journalKeys.detail(journalId) }
+          );
         },
       }
     );

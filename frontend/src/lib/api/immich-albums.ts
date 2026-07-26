@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { JsonApiErrorResponse } from '@/types/api';
 import { externalLinkKeys } from './external-links';
 import { journalKeys } from './journals';
+import { invalidateAfterMutation } from './invalidate-after-mutation';
 
 const SEARCH_PHOTOS_ENDPOINT = '/api/integrations/immich/search-photos';
 const CREATE_ALBUM_ENDPOINT = '/api/integrations/immich/create-album';
@@ -160,12 +161,11 @@ export function useCreateImmichAlbum() {
     mutationFn: (request: CreateImmichAlbumRequest) =>
       createImmichAlbum(request),
     onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({
-        queryKey: journalKeys.detail(variables.journalId),
-      });
-      queryClient.invalidateQueries({
-        queryKey: externalLinkKeys.journal(variables.journalId),
-      });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: journalKeys.detail(variables.journalId) },
+        { queryKey: externalLinkKeys.journal(variables.journalId) }
+      );
       toast.success('Album created successfully');
     },
     onError: (error: Error) => {

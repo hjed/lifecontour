@@ -20,6 +20,7 @@ import {
   ERROR_MESSAGES,
   SUCCESS_MESSAGES,
 } from '@/lib/constants';
+import { invalidateAfterMutation } from './invalidate-after-mutation';
 
 // Types for relationship types API
 export interface EnumValue {
@@ -219,12 +220,11 @@ export function useCreateContactRelationship() {
       data: ContactRelationshipFormData;
     }) => createContactRelationship(contactId, data),
     onSuccess: (_, { contactId }) => {
-      queryClient.invalidateQueries({
-        queryKey: relationshipKeys.list(contactId),
-      });
-      queryClient.invalidateQueries({
-        queryKey: ['contacts', 'detail', contactId],
-      });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: relationshipKeys.list(contactId) },
+        { queryKey: ['contacts', 'detail', contactId] }
+      );
       toast.success(SUCCESS_MESSAGES.CREATE_SUCCESS);
     },
     onError: (error: Error) => {
@@ -247,15 +247,12 @@ export function useUpdateContactRelationship() {
       data: ContactRelationshipFormData;
     }) => updateContactRelationship(contactId, relationshipId, data),
     onSuccess: (_, { contactId, relationshipId }) => {
-      queryClient.invalidateQueries({
-        queryKey: relationshipKeys.list(contactId),
-      });
-      queryClient.invalidateQueries({
-        queryKey: relationshipKeys.detail(contactId, relationshipId),
-      });
-      queryClient.invalidateQueries({
-        queryKey: ['contacts', 'detail', contactId],
-      });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: relationshipKeys.list(contactId) },
+        { queryKey: relationshipKeys.detail(contactId, relationshipId) },
+        { queryKey: ['contacts', 'detail', contactId] }
+      );
       toast.success(SUCCESS_MESSAGES.UPDATE_SUCCESS);
     },
     onError: (error: Error) => {
@@ -276,12 +273,11 @@ export function useDeleteContactRelationship() {
       relationshipId: string;
     }) => deleteContactRelationship(contactId, relationshipId),
     onSuccess: (_, { contactId }) => {
-      queryClient.invalidateQueries({
-        queryKey: relationshipKeys.list(contactId),
-      });
-      queryClient.invalidateQueries({
-        queryKey: ['contacts', 'detail', contactId],
-      });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: relationshipKeys.list(contactId) },
+        { queryKey: ['contacts', 'detail', contactId] }
+      );
       toast.success(SUCCESS_MESSAGES.DELETE_SUCCESS);
     },
     onError: (error: Error) => {

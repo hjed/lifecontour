@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 
 import type { JsonApiErrorResponse } from '@/types/api';
 import type { UserSettingsResponse } from '@/types/settings';
+import { invalidateAfterMutation } from './invalidate-after-mutation';
 
 const USER_SETTINGS_ENDPOINT = '/api/user-settings';
 
@@ -82,7 +83,9 @@ export function useUpdateTimezone() {
     mutationFn: updateTimezone,
     onSuccess: response => {
       cacheTimezone(response.data.attributes.timezone);
-      queryClient.invalidateQueries({ queryKey: userSettingsKeys.all });
+      void invalidateAfterMutation(queryClient, {
+        queryKey: userSettingsKeys.all,
+      });
       toast.success('Timezone saved');
     },
     onError: (error: Error) => {

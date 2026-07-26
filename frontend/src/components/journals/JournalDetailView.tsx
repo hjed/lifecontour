@@ -92,6 +92,7 @@ import {
 } from '@/lib/api/journals';
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
+import { invalidateAfterMutation } from '@/lib/api/invalidate-after-mutation';
 
 interface JournalDetailViewProps {
   readonly journal: Journal;
@@ -478,7 +479,7 @@ export function JournalDetailView({
       });
       // Re-parenting can affect both the new parent's and the previous parent's
       // children lists, so invalidate all journal detail queries.
-      queryClient.invalidateQueries({
+      void invalidateAfterMutation(queryClient, {
         queryKey: journalKeys.details(),
       });
     },
@@ -496,7 +497,7 @@ export function JournalDetailView({
       });
       // Re-parenting can affect both the new parent's and the previous parent's
       // children lists, so invalidate all journal detail queries.
-      queryClient.invalidateQueries({
+      void invalidateAfterMutation(queryClient, {
         queryKey: journalKeys.details(),
       });
     },

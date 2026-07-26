@@ -37,6 +37,7 @@ import {
   ERROR_MESSAGES,
   SUCCESS_MESSAGES,
 } from '@/lib/constants';
+import { invalidateAfterMutation } from './invalidate-after-mutation';
 
 // Query Keys
 export const journalKeys = {
@@ -1109,10 +1110,7 @@ export function useCreateJournalTag() {
     mutationFn: (attributes: JournalTagCreateAttributes) =>
       createJournalTag(attributes),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: journalTagKeys.lists() });
-      // The tag tree, the journals list and any open journal's tag editor all
-      // read the tag namespace; refresh the journal queries alongside it.
-      queryClient.invalidateQueries({ queryKey: journalKeys.all });
+      void refreshAfterJournalTagMutation(queryClient);
       toast.success('Tag created successfully');
     },
     onError: (error: Error) => {
@@ -1140,8 +1138,7 @@ export function useUpdateJournalTag() {
       attributes: JournalTagUpdateAttributes;
     }) => updateJournalTag(id, attributes),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: journalTagKeys.lists() });
-      queryClient.invalidateQueries({ queryKey: journalKeys.all });
+      void refreshAfterJournalTagMutation(queryClient);
       toast.success(SUCCESS_MESSAGES.TAG_UPDATED);
     },
     onError: (error: Error) => {
@@ -1154,27 +1151,21 @@ export function useUpdateJournalTag() {
  * Refreshes everything a journal tag mutation can change.
  *
  * The tag namespace feeds the sidebar tree and the detail page's tag editor;
- * the journal queries feed the chips on the list and on any open journal. Both
- * are **cancelled before being invalidated**: a fetch that started before the
- * mutation would otherwise settle after it, writing pre-mutation rows into the
- * cache and marking them fresh — and with `staleTime` at five minutes for the
- * journals list and ten for the tag list, nothing would refetch again for that
- * long, leaving a deleted tag on screen.
+ * the journal queries feed the chips on the list and on any open journal.
  *
  * This neither splices the cache by hand nor delays the invalidation behind a
  * timer: the write commits in the service layer before the response is sent, so
- * there is no read-after-write race to wait out. `refreshAfterTagMutation` in
- * `lib/api/contacts.ts` is the contact-side twin.
+ * there is no read-after-write race to wait out. `useDeleteTag` / `useMergeTag`
+ * in `lib/api/contacts.ts` are the contact-side twins (#1204).
  */
-async function refreshAfterJournalTagMutation(
+function refreshAfterJournalTagMutation(
   queryClient: ReturnType<typeof useQueryClient>
 ): Promise<void> {
-  await Promise.all([
-    queryClient.cancelQueries({ queryKey: journalTagKeys.lists() }),
-    queryClient.cancelQueries({ queryKey: journalKeys.all }),
-  ]);
-  queryClient.invalidateQueries({ queryKey: journalTagKeys.lists() });
-  queryClient.invalidateQueries({ queryKey: journalKeys.all });
+  return invalidateAfterMutation(
+    queryClient,
+    { queryKey: journalTagKeys.lists() },
+    { queryKey: journalKeys.all }
+  );
 }
 
 /**
@@ -1185,8 +1176,8 @@ export function useDeleteJournalTag() {
 
   return useMutation({
     mutationFn: (id: string) => deleteJournalTag(id),
-    onSuccess: async () => {
-      await refreshAfterJournalTagMutation(queryClient);
+    onSuccess: () => {
+      void refreshAfterJournalTagMutation(queryClient);
       toast.success(SUCCESS_MESSAGES.TAG_DELETED);
     },
     onError: (error: Error) => {
@@ -1212,8 +1203,8 @@ export function useMergeJournalTag() {
       sourceId: string;
       targetId: string;
     }) => mergeJournalTag(sourceId, targetId),
-    onSuccess: async () => {
-      await refreshAfterJournalTagMutation(queryClient);
+    onSuccess: () => {
+      void refreshAfterJournalTagMutation(queryClient);
       toast.success('Tag successfully merged');
     },
     onError: (error: Error) => {
@@ -1236,7 +1227,9 @@ export function useCreateCalendar() {
   return useMutation({
     mutationFn: createCalendar,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: calendarKeys.lists() });
+      void invalidateAfterMutation(queryClient, {
+        queryKey: calendarKeys.lists(),
+      });
       toast.success('Calendar created successfully');
     },
     onError: (error: Error) => {
@@ -1257,7 +1250,9 @@ export function useUpdateCalendar() {
       data: Partial<Omit<JournalCalendar, 'id'>>;
     }) => updateCalendar(id, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: calendarKeys.lists() });
+      void invalidateAfterMutation(queryClient, {
+        queryKey: calendarKeys.lists(),
+      });
       toast.success('Calendar updated successfully');
     },
     onError: (error: Error) => {
@@ -1272,7 +1267,9 @@ export function useDeleteCalendar() {
   return useMutation({
     mutationFn: deleteCalendar,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: calendarKeys.lists() });
+      void invalidateAfterMutation(queryClient, {
+        queryKey: calendarKeys.lists(),
+      });
       toast.success('Calendar deleted successfully');
     },
     onError: (error: Error) => {
@@ -1288,7 +1285,9 @@ export function useCreateJournal() {
     mutationFn: createJournal,
     onSuccess: () => {
       setTimeout(() => {
-        queryClient.invalidateQueries({ queryKey: journalKeys.all });
+        void invalidateAfterMutation(queryClient, {
+          queryKey: journalKeys.all,
+        });
       }, 150);
       toast.success(SUCCESS_MESSAGES.JOURNAL_CREATED);
     },
@@ -1311,8 +1310,11 @@ export function useUpdateJournal() {
     }) => updateJournal(id, data),
     onSuccess: (_, { id }) => {
       setTimeout(() => {
-        queryClient.invalidateQueries({ queryKey: journalKeys.detail(id) });
-        queryClient.invalidateQueries({ queryKey: journalKeys.lists() });
+        void invalidateAfterMutation(
+          queryClient,
+          { queryKey: journalKeys.detail(id) },
+          { queryKey: journalKeys.lists() }
+        );
       }, 150);
       toast.success(SUCCESS_MESSAGES.JOURNAL_UPDATED);
     },
@@ -1329,7 +1331,9 @@ export function useDeleteJournal() {
     mutationFn: deleteJournal,
     onSuccess: () => {
       setTimeout(() => {
-        queryClient.invalidateQueries({ queryKey: journalKeys.lists() });
+        void invalidateAfterMutation(queryClient, {
+          queryKey: journalKeys.lists(),
+        });
       }, 150);
       toast.success(SUCCESS_MESSAGES.JOURNAL_DELETED);
     },
@@ -1353,10 +1357,13 @@ export function useMergeJournal() {
       overrides?: MergeOverrides;
     }) => mergeJournal(targetId, sourceId, overrides),
     onSuccess: (_, { targetId, sourceId }) => {
-      queryClient.invalidateQueries({ queryKey: journalKeys.detail(targetId) });
-      queryClient.invalidateQueries({ queryKey: journalKeys.detail(sourceId) });
-      queryClient.invalidateQueries({ queryKey: journalKeys.lists() });
-      queryClient.invalidateQueries({ queryKey: reviewItemKeys.all });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: journalKeys.detail(targetId) },
+        { queryKey: journalKeys.detail(sourceId) },
+        { queryKey: journalKeys.lists() },
+        { queryKey: reviewItemKeys.all }
+      );
       toast.success('Journals merged successfully');
     },
     onError: (error: Error) => {
@@ -1380,10 +1387,11 @@ export function useUpdateJournalField() {
     }) => updateJournalField(journalId, fieldName, value),
     onSuccess: (data, variables) => {
       const journalId = variables.journalId;
-      queryClient.invalidateQueries({
-        queryKey: journalKeys.detail(journalId),
-      });
-      queryClient.invalidateQueries({ queryKey: journalKeys.lists() });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: journalKeys.detail(journalId) },
+        { queryKey: journalKeys.lists() }
+      );
     },
     onError: (error: Error) => {
       // Don't show toast here - let the component handle it
@@ -1406,10 +1414,11 @@ export function useAddJournalType() {
       typeData?: Record<string, unknown>;
     }) => addJournalType(journalId, journalType, typeData),
     onSuccess: (_, { journalId }) => {
-      queryClient.invalidateQueries({
-        queryKey: journalKeys.detail(journalId),
-      });
-      queryClient.invalidateQueries({ queryKey: journalKeys.lists() });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: journalKeys.detail(journalId) },
+        { queryKey: journalKeys.lists() }
+      );
       toast.success('Journal type added successfully');
     },
     onError: (error: Error) => {
@@ -1430,10 +1439,11 @@ export function useRemoveJournalType() {
       journalType: JournalType;
     }) => removeJournalType(journalId, journalType),
     onSuccess: (_, { journalId }) => {
-      queryClient.invalidateQueries({
-        queryKey: journalKeys.detail(journalId),
-      });
-      queryClient.invalidateQueries({ queryKey: journalKeys.lists() });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: journalKeys.detail(journalId) },
+        { queryKey: journalKeys.lists() }
+      );
       toast.success('Journal type removed successfully');
     },
     onError: (error: Error) => {
@@ -1456,10 +1466,11 @@ export function useUpdateTypeData() {
       typeData: Record<string, unknown>;
     }) => updateTypeData(journalId, journalType, typeData),
     onSuccess: (_, { journalId }) => {
-      queryClient.invalidateQueries({
-        queryKey: journalKeys.detail(journalId),
-      });
-      queryClient.invalidateQueries({ queryKey: journalKeys.lists() });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: journalKeys.detail(journalId) },
+        { queryKey: journalKeys.lists() }
+      );
       toast.success('Type data updated successfully');
     },
     onError: (error: Error) => {
@@ -1493,10 +1504,11 @@ export function useAddContactRelationship() {
         role
       ),
     onSuccess: (_, { journalId }) => {
-      queryClient.invalidateQueries({
-        queryKey: journalKeys.detail(journalId),
-      });
-      queryClient.invalidateQueries({ queryKey: journalKeys.lists() });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: journalKeys.detail(journalId) },
+        { queryKey: journalKeys.lists() }
+      );
       toast.success('Contact relationship added successfully');
     },
     onError: (error: Error) => {
@@ -1519,10 +1531,11 @@ export function useRemoveContactRelationship() {
       relationshipType: JournalContactRelationshipType;
     }) => removeContactRelationship(journalId, contactId, relationshipType),
     onSuccess: (_, { journalId }) => {
-      queryClient.invalidateQueries({
-        queryKey: journalKeys.detail(journalId),
-      });
-      queryClient.invalidateQueries({ queryKey: journalKeys.lists() });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: journalKeys.detail(journalId) },
+        { queryKey: journalKeys.lists() }
+      );
       toast.success('Contact relationship removed successfully');
     },
     onError: (error: Error) => {
@@ -1556,10 +1569,11 @@ export function useUpdateContactRelationship() {
         role
       ),
     onSuccess: (_, { journalId }) => {
-      queryClient.invalidateQueries({
-        queryKey: journalKeys.detail(journalId),
-      });
-      queryClient.invalidateQueries({ queryKey: journalKeys.lists() });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: journalKeys.detail(journalId) },
+        { queryKey: journalKeys.lists() }
+      );
       toast.success('Contact relationship updated successfully');
     },
     onError: (error: Error) => {
@@ -1575,10 +1589,11 @@ export function useAddJournalTag() {
     mutationFn: ({ journalId, tagId }: { journalId: string; tagId: string }) =>
       addJournalTag(journalId, tagId),
     onSuccess: (_, { journalId }) => {
-      queryClient.invalidateQueries({
-        queryKey: journalKeys.detail(journalId),
-      });
-      queryClient.invalidateQueries({ queryKey: journalKeys.lists() });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: journalKeys.detail(journalId) },
+        { queryKey: journalKeys.lists() }
+      );
       toast.success('Tag added successfully');
     },
     onError: (error: Error) => {
@@ -1594,10 +1609,11 @@ export function useRemoveJournalTag() {
     mutationFn: ({ journalId, tagId }: { journalId: string; tagId: string }) =>
       removeJournalTag(journalId, tagId),
     onSuccess: (_, { journalId }) => {
-      queryClient.invalidateQueries({
-        queryKey: journalKeys.detail(journalId),
-      });
-      queryClient.invalidateQueries({ queryKey: journalKeys.lists() });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: journalKeys.detail(journalId) },
+        { queryKey: journalKeys.lists() }
+      );
       toast.success('Tag removed successfully');
     },
     onError: (error: Error) => {
@@ -1785,7 +1801,9 @@ export function useCreateJournalSeries() {
   return useMutation({
     mutationFn: createJournalSeries,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: journalSeriesKeys.lists() });
+      void invalidateAfterMutation(queryClient, {
+        queryKey: journalSeriesKeys.lists(),
+      });
       toast.success('Series created successfully');
     },
     onError: (error: Error) => {
@@ -1800,8 +1818,11 @@ export function useDeleteJournalSeries() {
   return useMutation({
     mutationFn: deleteJournalSeries,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: journalSeriesKeys.all });
-      queryClient.invalidateQueries({ queryKey: journalKeys.details() });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: journalSeriesKeys.all },
+        { queryKey: journalKeys.details() }
+      );
       toast.success('Series deleted successfully');
     },
     onError: (error: Error) => {
@@ -1822,12 +1843,11 @@ export function useAddJournalToSeries() {
       seriesId: string;
     }) => addJournalToSeries(journalId, seriesId),
     onSuccess: (_, { journalId, seriesId }) => {
-      queryClient.invalidateQueries({
-        queryKey: journalKeys.detail(journalId),
-      });
-      queryClient.invalidateQueries({
-        queryKey: journalSeriesKeys.detail(seriesId),
-      });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: journalKeys.detail(journalId) },
+        { queryKey: journalSeriesKeys.detail(seriesId) }
+      );
       toast.success('Added to series');
     },
     onError: (error: Error) => {
@@ -1848,12 +1868,11 @@ export function useRemoveJournalFromSeries() {
       seriesId: string;
     }) => removeJournalFromSeries(journalId, seriesId),
     onSuccess: (_, { journalId, seriesId }) => {
-      queryClient.invalidateQueries({
-        queryKey: journalKeys.detail(journalId),
-      });
-      queryClient.invalidateQueries({
-        queryKey: journalSeriesKeys.detail(seriesId),
-      });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: journalKeys.detail(journalId) },
+        { queryKey: journalSeriesKeys.detail(seriesId) }
+      );
       toast.success('Removed from series');
     },
     onError: (error: Error) => {
@@ -1959,9 +1978,7 @@ export function useDismissReviewItem() {
     onMutate: async (id: string) => {
       await queryClient.cancelQueries({ queryKey: reviewItemKeys.lists() });
       const previousLists = queryClient.getQueriesData<ReviewItemsListResponse>(
-        {
-          queryKey: reviewItemKeys.lists(),
-        }
+        { queryKey: reviewItemKeys.lists() }
       );
       queryClient.setQueriesData<ReviewItemsListResponse>(
         { queryKey: reviewItemKeys.lists() },
@@ -1980,9 +1997,12 @@ export function useDismissReviewItem() {
       toast.success('Review item dismissed');
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: reviewItemKeys.all });
-      queryClient.invalidateQueries({ queryKey: journalKeys.lists() });
-      queryClient.invalidateQueries({ queryKey: journalKeys.details() });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: reviewItemKeys.all },
+        { queryKey: journalKeys.lists() },
+        { queryKey: journalKeys.details() }
+      );
     },
   });
 }
@@ -2018,9 +2038,12 @@ export function useAutoMergeReviewItems() {
     mutationFn: autoMergeReviewItems,
     onSuccess: data => {
       const { merged_count, errors } = data.data.attributes;
-      queryClient.invalidateQueries({ queryKey: reviewItemKeys.all });
-      queryClient.invalidateQueries({ queryKey: journalKeys.lists() });
-      queryClient.invalidateQueries({ queryKey: journalKeys.details() });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: reviewItemKeys.all },
+        { queryKey: journalKeys.lists() },
+        { queryKey: journalKeys.details() }
+      );
       if (merged_count > 0) {
         toast.success(
           `Auto-merged ${merged_count} journal${merged_count === 1 ? '' : 's'} successfully`

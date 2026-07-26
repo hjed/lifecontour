@@ -15,6 +15,7 @@ import {
 } from '@/types/routes';
 import { JsonApiErrorResponse } from '@/types/api';
 import { ERROR_MESSAGES, SUCCESS_MESSAGES } from '@/lib/constants';
+import { invalidateAfterMutation } from './invalidate-after-mutation';
 
 // Query Keys
 export const routeKeys = {
@@ -145,7 +146,7 @@ export function useCreateRoute() {
       silent?: boolean;
     }) => createRoute(journalId, data),
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({
+      void invalidateAfterMutation(queryClient, {
         queryKey: routeKeys.all(variables.journalId),
       });
       if (!variables.silent) {

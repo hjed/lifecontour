@@ -218,6 +218,74 @@ describe('DayGroupedJournalList', () => {
       expect(fetchPreviousPage).toHaveBeenCalled();
     });
 
+    it('does not fetch while the list is being refetched', () => {
+      // Regression (#1203): `fetchNextPage`/`fetchPreviousPage` default to
+      // `cancelRefetch: true`, so paginating during a post-mutation refetch
+      // cancels it — React Query reverts to the pre-mutation pages, appends the
+      // new one, and marks the result fresh. A deleted tag's chip then survives
+      // on the list for the whole staleTime. `isLoadingNext`/`isLoadingPrevious`
+      // do not cover this: neither is set during a plain refetch.
+      const fetchPreviousPage = jest.fn();
+      const { rerender } = render(
+        <DayGroupedJournalList
+          journals={journals}
+          collapseEmptyDays={false}
+          hasPreviousPage
+          fetchPreviousPage={fetchPreviousPage}
+        />
+      );
+      rerender(
+        <DayGroupedJournalList
+          journals={journals}
+          collapseEmptyDays={false}
+          hasPreviousPage
+          fetchPreviousPage={fetchPreviousPage}
+          isRefetching
+        />
+      );
+
+      intersect('journal-top-sentinel', true);
+
+      expect(fetchPreviousPage).not.toHaveBeenCalled();
+    });
+
+    it('fetches once the refetch settles while the sentinel is still intersecting', () => {
+      const fetchNextPage = jest.fn();
+      const { rerender } = render(
+        <DayGroupedJournalList
+          journals={journals}
+          collapseEmptyDays={false}
+          hasNextPage
+          fetchNextPage={fetchNextPage}
+        />
+      );
+      rerender(
+        <DayGroupedJournalList
+          journals={journals}
+          collapseEmptyDays={false}
+          hasNextPage
+          fetchNextPage={fetchNextPage}
+          isRefetching
+        />
+      );
+
+      intersect('journal-bottom-sentinel', true);
+      expect(fetchNextPage).not.toHaveBeenCalled();
+
+      // Pausing must not cost the fetch: the refetch settles and the sentinel
+      // is still in view, so pagination resumes rather than stalling.
+      rerender(
+        <DayGroupedJournalList
+          journals={journals}
+          collapseEmptyDays={false}
+          hasNextPage
+          fetchNextPage={fetchNextPage}
+        />
+      );
+
+      expect(fetchNextPage).toHaveBeenCalled();
+    });
+
     it('fetches only once per sentinel visit, not on every idle settle', () => {
       // Regression: on lists too short to push the sentinel out of view
       // (empty or heavily filtered lists), re-fetching every time loading
