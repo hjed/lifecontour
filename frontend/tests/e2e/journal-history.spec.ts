@@ -343,13 +343,24 @@ test.describe('Journal Activity History', () => {
       timeout: 10000,
     });
 
+    // Provenance is asserted on the tag rows themselves, not anywhere in the feed:
+    // a freshly-created journal always carries a `ui`-sourced `__created__` entry,
+    // so an unscoped `provenance-trigger-ui` would be visible even if the tag
+    // events had projected with the wrong source. Each row is also asserted to
+    // appear exactly once, which would catch a duplicated projection.
     const feed = page.getByTestId('activity-feed');
-    await expect(feed.getByText(`Added Tags: "${tag.name}"`)).toBeVisible({
-      timeout: 10000,
-    });
-    await expect(feed.getByText(`Removed Tags: "${tag.name}"`)).toBeVisible();
-    await expect(
-      feed.getByTestId('provenance-trigger-ui').first()
-    ).toBeVisible();
+    const tagRow = (description: string) =>
+      feed
+        .locator('[data-testid^="activity-item-"]')
+        .filter({ hasText: description });
+
+    for (const description of [
+      `Added Tags: "${tag.name}"`,
+      `Removed Tags: "${tag.name}"`,
+    ]) {
+      const row = tagRow(description);
+      await expect(row).toHaveCount(1, { timeout: 10000 });
+      await expect(row.getByTestId('provenance-trigger-ui')).toBeVisible();
+    }
   });
 });
