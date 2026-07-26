@@ -14,6 +14,7 @@ export interface DayGroupedJournalListProps {
   readonly journals: DisplayJournal[];
   readonly isLoadingNext?: boolean;
   readonly isLoadingPrevious?: boolean;
+  readonly isRefetching?: boolean;
   readonly hasNextPage?: boolean;
   readonly hasPreviousPage?: boolean;
   readonly fetchNextPage?: () => void;
@@ -30,6 +31,7 @@ export function DayGroupedJournalList({
   journals,
   isLoadingNext = false,
   isLoadingPrevious = false,
+  isRefetching = false,
   hasNextPage = false,
   hasPreviousPage = false,
   fetchNextPage,
@@ -123,11 +125,19 @@ export function DayGroupedJournalList({
   // in-flight fetch would otherwise never trigger its own fetch — pagination
   // would stall until the user scrolled away and back. Re-evaluating whenever
   // the loading flags settle closes that gap, bounded to one fetch per
-  // sentinel visit (see topFetchedThisVisitRef). Both directions wait for
-  // both flags: infinite queries run one fetch at a time, and firing the
-  // other direction mid-fetch would cancel the in-flight request.
+  // sentinel visit (see topFetchedThisVisitRef).
+  //
+  // All three flags gate both directions. Infinite queries run one fetch at a
+  // time and `fetchNextPage`/`fetchPreviousPage` default to
+  // `cancelRefetch: true`, so paginating mid-fetch cancels whatever is running.
+  // Cancelling a *refetch* is the damaging case: React Query reverts to the
+  // pages it held before the refetch, appends the new one and marks the result
+  // fresh — so a post-mutation refresh is silently thrown away and the list
+  // keeps rendering pre-mutation rows for the whole staleTime (#1203).
   useEffect(() => {
-    if (!topInView || isLoadingPrevious || isLoadingNext) return;
+    if (!topInView || isLoadingPrevious || isLoadingNext || isRefetching) {
+      return;
+    }
     if (topFetchedThisVisitRef.current) return;
     if (hasPreviousPage && fetchPreviousPage) {
       topFetchedThisVisitRef.current = true;
@@ -138,11 +148,14 @@ export function DayGroupedJournalList({
     hasPreviousPage,
     isLoadingPrevious,
     isLoadingNext,
+    isRefetching,
     fetchPreviousPage,
   ]);
 
   useEffect(() => {
-    if (!bottomInView || isLoadingPrevious || isLoadingNext) return;
+    if (!bottomInView || isLoadingPrevious || isLoadingNext || isRefetching) {
+      return;
+    }
     if (bottomFetchedThisVisitRef.current) return;
     if (hasNextPage && fetchNextPage) {
       bottomFetchedThisVisitRef.current = true;
@@ -153,6 +166,7 @@ export function DayGroupedJournalList({
     hasNextPage,
     isLoadingPrevious,
     isLoadingNext,
+    isRefetching,
     fetchNextPage,
   ]);
 

@@ -226,6 +226,7 @@ function JournalsPageContent() {
     hasPreviousPage,
     isFetchingNextPage,
     isFetchingPreviousPage,
+    isRefetching,
   } = useInfiniteJournals(effectiveFilters, {
     enabled: !shouldUseSearch,
     anchorDate,
@@ -614,6 +615,7 @@ function JournalsPageContent() {
                   isLoadingPrevious={
                     shouldUseSearch ? false : isFetchingPreviousPage
                   }
+                  isRefetching={shouldUseSearch ? false : isRefetching}
                   hasNextPage={shouldUseSearch ? false : hasNextPage}
                   hasPreviousPage={shouldUseSearch ? false : hasPreviousPage}
                   fetchNextPage={shouldUseSearch ? undefined : fetchNextPage}
