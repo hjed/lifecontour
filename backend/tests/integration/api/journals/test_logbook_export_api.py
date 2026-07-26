@@ -5,17 +5,24 @@ verifying PDF generation, filtering, and authentication requirements.
 """
 
 import io
+from collections.abc import Sequence
 from datetime import UTC, datetime
+from typing import cast
 
 import pytest
 import pytest_asyncio
 from core_shared.models.journals import JOURNAL_TYPE_GLYPHS, JournalType
+from PIL import Image
 from pypdf import PdfReader
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.journal.adapters.http.osm_tile_source import OsmTileSource
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
-from tests.pdf_assertions import external_link_uris
+from tests.integration.journal.outdoor_activity_seeding import Seeder
+from tests.pdf_assertions import embedded_image_bytes, external_link_uris
+
+_TILE_COLOUR = (255, 0, 0)
 
 # ─── Helpers ─────────────────────────────────────────────────────────
 
@@ -29,6 +36,13 @@ def _extract_pdf_text(pdf_bytes: bytes) -> str:
         if text_content:
             parts.append(text_content)
     return "\n".join(parts)
+
+
+def _image_colours(png_bytes: bytes) -> set[tuple[int, int, int]]:
+    """Return the distinct colours of an embedded PDF image."""
+    with Image.open(io.BytesIO(png_bytes)) as image:
+        pixels = cast("Sequence[tuple[int, int, int]]", image.convert("RGB").getdata())
+    return set(pixels)
 
 
 def _internal_link_destinations(pdf_bytes: bytes) -> list[tuple[int, str, str]]:
@@ -631,3 +645,60 @@ class TestLogbookExportEndpoint:
         text_content = _extract_pdf_text(pdf_bytes)
         assert "Outdoor Logbook" in text_content
         assert "0 journal entries" in text_content
+
+    async def test_export_includes_gpx_map_for_seeded_route(
+        self,
+        authenticated_client,
+        async_connection: AsyncConnection,
+        seeded_outdoor_journals,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A journal with a GPX route exports a real map image (spec 3.6).
+
+        ``OsmTileSource.fetch_tile`` is replaced with a flat-colour tile so the
+        wiring — controller → map renderer → PDF renderer — is exercised over
+        real HTTP without the suite ever reaching the live OSM tile servers.
+        """
+
+        async def _stub_tile(self, tile) -> bytes:  # noqa: ANN001
+            buffer = io.BytesIO()
+            Image.new("RGB", (256, 256), _TILE_COLOUR).save(buffer, format="PNG")
+            return buffer.getvalue()
+
+        monkeypatch.setattr(OsmTileSource, "fetch_tile", _stub_tile)
+
+        await Seeder(async_connection).create_route(
+            journal_id=seeded_outdoor_journals["Claustral Canyon"]
+        )
+
+        response = await authenticated_client.post(
+            "/api/journals/export/outdoor-logbook",
+            json={},
+        )
+
+        assert response.status_code == 200
+        images = embedded_image_bytes(response.content)
+        assert len(images) == 1
+        assert len(images[0]) > 0
+        assert _TILE_COLOUR in _image_colours(images[0])
+
+    async def test_export_has_no_map_when_no_journal_has_a_route(
+        self,
+        authenticated_client,
+        seeded_outdoor_journals,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Without a route nothing is drawn — and no tile is even requested."""
+
+        async def _forbidden_tile(self, tile) -> bytes:  # noqa: ANN001
+            raise AssertionError("no tile should be requested without a route")
+
+        monkeypatch.setattr(OsmTileSource, "fetch_tile", _forbidden_tile)
+
+        response = await authenticated_client.post(
+            "/api/journals/export/outdoor-logbook",
+            json={},
+        )
+
+        assert response.status_code == 200
+        assert embedded_image_bytes(response.content) == []

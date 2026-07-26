@@ -12,6 +12,7 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, field_validator
 
+from app.core.journal.services.gpx_map_renderer import GpxMapRenderer
 from app.core.journal.services.logbook_data_service import LogbookDataService
 from app.core.journal.services.logbook_pdf_renderer import LogbookPdfRenderer
 from app.infrastructure.auth.models import SessionUser
@@ -45,6 +46,7 @@ async def export_outdoor_logbook(
     request: LogbookExportRequest,
     user: FromDishka[SessionUser],
     data_service: FromDishka[LogbookDataService],
+    map_renderer: FromDishka[GpxMapRenderer],
     renderer: FromDishka[LogbookPdfRenderer],
 ) -> StreamingResponse:
     """Export outdoor logbook as a downloadable PDF.
@@ -68,8 +70,13 @@ async def export_outdoor_logbook(
         activity_types=request.activity_types,
     )
 
+    # Compose the GPX track maps before rendering: fetching basemap tiles is
+    # asynchronous while the PDF renderer is synchronous. Entries without a route
+    # produce no image and cost no tile fetch.
+    map_images = await map_renderer.build_map_images(export_data.entries)
+
     # Render PDF
-    pdf_bytes = renderer.render(export_data)
+    pdf_bytes = renderer.render(export_data, map_images=map_images)
 
     # Generate filename with timestamp
     timestamp = datetime.now(tz=UTC).strftime("%Y%m%d")
@@ -79,6 +86,7 @@ async def export_outdoor_logbook(
         "Outdoor logbook PDF export generated",
         user_id=user.id,
         entry_count=len(export_data.entries),
+        map_count=len(map_images),
         pdf_size_bytes=len(pdf_bytes),
     )
 

@@ -5,7 +5,9 @@ the full pipeline: repository -> data service -> PDF renderer.
 """
 
 import io
+from collections.abc import Sequence
 from datetime import UTC, datetime
+from typing import cast
 
 import pytest
 from core_shared.models.journals import (
@@ -17,7 +19,9 @@ from core_shared.models.journals import (
     LogbookSummaryCalculator,
     ParticipantIndexCalculator,
 )
+from PIL import Image
 from pypdf import PdfReader
+from reportlab.lib.units import mm
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -25,9 +29,26 @@ from app.core.journal.adapters.sql.journal_repository import SqlJournalRepositor
 from app.core.journal.adapters.sql.logbook_export_repository import (
     SqlLogbookExportRepository,
 )
+from app.core.journal.models.tile_source import (
+    TileCoordinate,
+    TileFetchError,
+    TileSource,
+)
+from app.core.journal.services.gpx_map_renderer import (
+    FALLBACK_BACKGROUND_COLOUR,
+    TRACK_COLOUR,
+    GpxMapRenderer,
+)
 from app.core.journal.services.logbook_data_service import LogbookDataService
 from app.core.journal.services.logbook_pdf_renderer import LogbookPdfRenderer
-from tests.pdf_assertions import external_link_uris
+from tests.integration.journal.outdoor_activity_seeding import Seeder
+from tests.pdf_assertions import (
+    embedded_image_bytes,
+    embedded_image_x_offsets,
+    external_link_uris,
+)
+
+_TILE_COLOUR = (255, 0, 0)
 
 # --- Fixtures ---
 
@@ -93,6 +114,39 @@ def _outline_tree(pdf_bytes: bytes) -> list[tuple[str, list[str]]]:
         else:
             nodes.append((str(item.title), []))
     return nodes
+
+
+class _StubTileSource(TileSource):
+    """Serves flat-colour tiles, or fails, without touching the live tile servers.
+
+    Every test in this module that renders a map uses this: the suite must never
+    make a real OSM request, and a flat colour makes "the basemap is there" and
+    "the plain-background fallback ran" distinguishable by pixel.
+    """
+
+    def __init__(self, *, error: Exception | None = None, tile_size: int = 256) -> None:
+        self.error = error
+        self.tile_size = tile_size
+
+    @property
+    def attribution(self) -> str:
+        return "© OpenStreetMap contributors"
+
+    async def fetch_tile(self, tile: TileCoordinate) -> bytes:
+        if self.error is not None:
+            raise self.error
+        buffer = io.BytesIO()
+        Image.new("RGB", (self.tile_size, self.tile_size), _TILE_COLOUR).save(
+            buffer, format="PNG"
+        )
+        return buffer.getvalue()
+
+
+def _image_colours(png_bytes: bytes) -> set[tuple[int, int, int]]:
+    """Return the distinct colours of an embedded PDF image."""
+    with Image.open(io.BytesIO(png_bytes)) as image:
+        pixels = cast("Sequence[tuple[int, int, int]]", image.convert("RGB").getdata())
+    return set(pixels)
 
 
 # --- Tests ---
@@ -534,3 +588,278 @@ async def test_pdf_document_outline_from_seeded_data(
     assert outline[1][1] == ["Kalang Falls Abseil"]
     assert outline[2][1] == []
     assert outline[3][1] == []
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_pdf_gpx_map_from_seeded_route(
+    journal_repo: SqlJournalRepository,
+    async_connection: AsyncConnection,
+    data_service: LogbookDataService,
+    renderer: LogbookPdfRenderer,
+) -> None:
+    """A seeded GPX route becomes a real map image in the exported PDF.
+
+    Runs the whole production path — repository → data service → map renderer →
+    PDF renderer — with only the tile source stubbed.
+    """
+    user_id = "user_pdf_gpx_map"
+
+    journal = await journal_repo.save(
+        Journal(
+            user_id=user_id,
+            title="Kanangra Track",
+            content="Recorded the whole walk",
+            event_date_range=EventDateRange(
+                start=datetime(2026, 3, 12, tzinfo=UTC),
+                end=datetime(2026, 3, 12, tzinfo=UTC),
+            ),
+        )
+    )
+    assert journal.id is not None
+    await async_connection.execute(
+        text("INSERT INTO journal_bushwalking_data (journal_id) VALUES (:id)"),
+        {"id": journal.id},
+    )
+    await Seeder(async_connection).create_route(journal_id=journal.id)
+
+    export_data = await data_service.get_logbook_data(user_id=user_id)
+    map_images = await GpxMapRenderer(_StubTileSource()).build_map_images(
+        export_data.entries
+    )
+    pdf_bytes = renderer.render(export_data, map_images=map_images)
+
+    images = embedded_image_bytes(pdf_bytes)
+    assert len(images) == 1
+    assert len(images[0]) > 0
+    colours = _image_colours(images[0])
+    assert _TILE_COLOUR in colours  # the basemap tiles
+    assert TRACK_COLOUR in colours  # the track drawn over them
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_pdf_gpx_map_falls_back_when_tiles_unavailable(
+    journal_repo: SqlJournalRepository,
+    async_connection: AsyncConnection,
+    data_service: LogbookDataService,
+    renderer: LogbookPdfRenderer,
+) -> None:
+    """An unreachable tile server still yields a map, on a plain background."""
+    user_id = "user_pdf_gpx_map_fallback"
+
+    journal = await journal_repo.save(
+        Journal(
+            user_id=user_id,
+            title="Kanangra Track Offline",
+            content="Exported while the tile server was unreachable",
+            event_date_range=EventDateRange(
+                start=datetime(2026, 3, 13, tzinfo=UTC),
+                end=datetime(2026, 3, 13, tzinfo=UTC),
+            ),
+        )
+    )
+    assert journal.id is not None
+    await async_connection.execute(
+        text("INSERT INTO journal_bushwalking_data (journal_id) VALUES (:id)"),
+        {"id": journal.id},
+    )
+    await Seeder(async_connection).create_route(journal_id=journal.id)
+
+    export_data = await data_service.get_logbook_data(user_id=user_id)
+    offline = _StubTileSource(error=TileFetchError("tile server unreachable"))
+    map_images = await GpxMapRenderer(offline).build_map_images(export_data.entries)
+    pdf_bytes = renderer.render(export_data, map_images=map_images)
+
+    images = embedded_image_bytes(pdf_bytes)
+    assert len(images) == 1
+    colours = _image_colours(images[0])
+    assert _TILE_COLOUR not in colours
+    assert FALLBACK_BACKGROUND_COLOUR in colours
+    assert TRACK_COLOUR in colours
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_pdf_has_no_map_without_a_route(
+    journal_repo: SqlJournalRepository,
+    async_connection: AsyncConnection,
+    data_service: LogbookDataService,
+    renderer: LogbookPdfRenderer,
+) -> None:
+    """An entry with no route contributes no image and fetches no tiles."""
+    user_id = "user_pdf_gpx_map_absent"
+
+    journal = await journal_repo.save(
+        Journal(
+            user_id=user_id,
+            title="Walk Without A Track",
+            content="No GPS that day",
+            event_date_range=EventDateRange(
+                start=datetime(2026, 3, 14, tzinfo=UTC),
+                end=datetime(2026, 3, 14, tzinfo=UTC),
+            ),
+        )
+    )
+    assert journal.id is not None
+    await async_connection.execute(
+        text("INSERT INTO journal_bushwalking_data (journal_id) VALUES (:id)"),
+        {"id": journal.id},
+    )
+
+    export_data = await data_service.get_logbook_data(user_id=user_id)
+    source = _StubTileSource(error=AssertionError("no tile should be requested"))
+    map_images = await GpxMapRenderer(source).build_map_images(export_data.entries)
+    pdf_bytes = renderer.render(export_data, map_images=map_images)
+
+    assert map_images == {}
+    assert embedded_image_bytes(pdf_bytes) == []
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_pdf_gpx_map_aligns_with_its_entry(
+    journal_repo: SqlJournalRepository,
+    async_connection: AsyncConnection,
+    data_service: LogbookDataService,
+    renderer: LogbookPdfRenderer,
+) -> None:
+    """The map lands at the child entry's indent through the real pipeline."""
+    user_id = "user_pdf_gpx_map_indent"
+
+    parent = await journal_repo.save(
+        Journal(
+            user_id=user_id,
+            title="Kanangra Weekend",
+            content="",
+            event_date_range=EventDateRange(
+                start=datetime(2026, 3, 12, tzinfo=UTC),
+                end=datetime(2026, 3, 12, tzinfo=UTC),
+            ),
+        )
+    )
+    assert parent.id is not None
+    child = await journal_repo.save(
+        Journal(
+            user_id=user_id,
+            title="Saturday Walk",
+            content="",
+            event_date_range=EventDateRange(
+                start=datetime(2026, 3, 12, tzinfo=UTC),
+                end=datetime(2026, 3, 12, tzinfo=UTC),
+            ),
+            parent_id=parent.id,
+        )
+    )
+    assert child.id is not None
+    for journal_id in (parent.id, child.id):
+        await async_connection.execute(
+            text("INSERT INTO journal_bushwalking_data (journal_id) VALUES (:id)"),
+            {"id": journal_id},
+        )
+    await Seeder(async_connection).create_route(journal_id=child.id)
+
+    export_data = await data_service.get_logbook_data(user_id=user_id)
+    map_images = await GpxMapRenderer(_StubTileSource()).build_map_images(
+        export_data.entries
+    )
+    pdf_bytes = renderer.render(export_data, map_images=map_images)
+
+    # A depth-1 entry indents 10mm beyond the 4mm body indent.
+    assert embedded_image_x_offsets(pdf_bytes) == [pytest.approx(14 * mm)]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_pdf_export_survives_a_route_with_invalid_coordinates(
+    journal_repo: SqlJournalRepository,
+    async_connection: AsyncConnection,
+    data_service: LogbookDataService,
+    renderer: LogbookPdfRenderer,
+) -> None:
+    """A stored route with NaN coordinates costs its map, not the export.
+
+    Such a route is valid GPX XML, so it is stored and loaded like any other —
+    only the projection rejects it.
+    """
+    user_id = "user_pdf_gpx_map_invalid_coords"
+
+    journal = await journal_repo.save(
+        Journal(
+            user_id=user_id,
+            title="Track With Corrupt Points",
+            content="",
+            event_date_range=EventDateRange(
+                start=datetime(2026, 3, 15, tzinfo=UTC),
+                end=datetime(2026, 3, 15, tzinfo=UTC),
+            ),
+        )
+    )
+    assert journal.id is not None
+    await async_connection.execute(
+        text("INSERT INTO journal_bushwalking_data (journal_id) VALUES (:id)"),
+        {"id": journal.id},
+    )
+    await Seeder(async_connection).create_route(
+        journal_id=journal.id,
+        gpx_data=(
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<gpx version="1.1" creator="pms-tests" '
+            'xmlns="http://www.topografix.com/GPX/1/1">'
+            '<trk><trkseg><trkpt lat="nan" lon="150.3"/>'
+            '<trkpt lat="nan" lon="150.31"/></trkseg></trk></gpx>'
+        ),
+    )
+
+    export_data = await data_service.get_logbook_data(user_id=user_id)
+    map_images = await GpxMapRenderer(_StubTileSource()).build_map_images(
+        export_data.entries
+    )
+    pdf_bytes = renderer.render(export_data, map_images=map_images)
+
+    assert map_images == {}
+    assert pdf_bytes[:5] == b"%PDF-"
+    assert embedded_image_bytes(pdf_bytes) == []
+    assert "Track With Corrupt Points" in _extract_pdf_text(pdf_bytes)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_pdf_gpx_map_falls_back_when_tiles_are_the_wrong_size(
+    journal_repo: SqlJournalRepository,
+    async_connection: AsyncConnection,
+    data_service: LogbookDataService,
+    renderer: LogbookPdfRenderer,
+) -> None:
+    """A provider serving wrongly-sized tiles degrades to a plain background."""
+    user_id = "user_pdf_gpx_map_wrong_tile_size"
+
+    journal = await journal_repo.save(
+        Journal(
+            user_id=user_id,
+            title="Track With Retina Tiles",
+            content="",
+            event_date_range=EventDateRange(
+                start=datetime(2026, 3, 16, tzinfo=UTC),
+                end=datetime(2026, 3, 16, tzinfo=UTC),
+            ),
+        )
+    )
+    assert journal.id is not None
+    await async_connection.execute(
+        text("INSERT INTO journal_bushwalking_data (journal_id) VALUES (:id)"),
+        {"id": journal.id},
+    )
+    await Seeder(async_connection).create_route(journal_id=journal.id)
+
+    export_data = await data_service.get_logbook_data(user_id=user_id)
+    oversized = _StubTileSource(tile_size=512)
+    map_images = await GpxMapRenderer(oversized).build_map_images(export_data.entries)
+    pdf_bytes = renderer.render(export_data, map_images=map_images)
+
+    images = embedded_image_bytes(pdf_bytes)
+    assert len(images) == 1
+    colours = _image_colours(images[0])
+    assert _TILE_COLOUR not in colours
+    assert FALLBACK_BACKGROUND_COLOUR in colours
+    assert TRACK_COLOUR in colours
