@@ -9,7 +9,7 @@ readme = "README.md"
 license = {text = "AGPL-3.0"}
 requires-python = ">=3.14"
 dependencies = [
-    "fastapi>=0.139.2",
+    "fastapi>=0.140.0",
     "uvicorn>=0.51.0",
     "pydantic>=2.13.4",
     "pydantic-settings>=2.14.2",
@@ -30,7 +30,7 @@ dependencies = [
     "opentelemetry-exporter-otlp>=1.41.1",
     "python-stdnum>=1.20",
     "pycountry>=23.12.11",
-    "meilisearch>=0.42.0",
+    "meilisearch>=0.43.0",
     "itsdangerous>=2.1.0",
     "fastmcp>=3.4.4",
     "dishka>=1.10.1",
@@ -40,7 +40,7 @@ dependencies = [
     "google-auth-httplib2>=0.4.0",
     "google-auth-oauthlib>=1.4.0",
     "cryptography>=49.0.0",
-    "aiohttp>=3.14.2",
+    "aiohttp>=3.14.3",
     "gpxpy>=1.6.0",
     # Cap below 2.8.0: that release deep-copies the GenerateContentConfig
     # (models.py: config.model_copy(deep=True)) at the top of generate_content,
@@ -74,7 +74,7 @@ dev = [
     "asyncpg>=0.29.0",  # for async PostgreSQL testing
     "ruff>=0.15.22",
     "mypy>=2.3.0",
-    "pre-commit>=4.6.0",
+    "pre-commit>=4.6.1",
     "types-authlib>=1.6.11.20260518",  # type stubs for authlib
     "respx>=0.23.1",  # for mocking httpx requests in tests
 ]
