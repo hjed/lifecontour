@@ -1,5 +1,9 @@
 @import 'tailwindcss';
 @import 'leaflet/dist/leaflet.css';
+/* Enter/exit animations (`animate-in`, `fade-in-0`, `slide-in-from-*`, ...) used
+   by the Radix-backed ui/ primitives. Tailwind v4's replacement for the v3-only
+   `tailwindcss-animate` plugin — pure CSS, no plugin system involved. */
+@import 'tw-animate-css';
 @plugin '@tailwindcss/typography';
 
 /* Dark mode variant - replaced @custom-variant for SonarQube compatibility */

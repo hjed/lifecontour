@@ -15,13 +15,17 @@ globalThis.ResizeObserver = jest.fn().mockImplementation(() => ({
   disconnect: jest.fn(),
 }));
 
-// Mock missing JSDOM functions required by Radix UI Select
-window.getSelection = jest.fn().mockReturnValue({
-  removeAllRanges: jest.fn(),
-});
-window.HTMLElement.prototype.scrollIntoView = jest.fn();
-window.HTMLElement.prototype.hasPointerCapture = jest.fn();
-window.HTMLElement.prototype.releasePointerCapture = jest.fn();
+// Mock missing JSDOM functions required by Radix UI Select. Guarded because a
+// few suites opt into the `node` environment (`@jest-environment node`) where
+// there is no `window` — see src/app/__tests__/globals-css.test.ts.
+if (typeof window !== 'undefined') {
+  window.getSelection = jest.fn().mockReturnValue({
+    removeAllRanges: jest.fn(),
+  });
+  window.HTMLElement.prototype.scrollIntoView = jest.fn();
+  window.HTMLElement.prototype.hasPointerCapture = jest.fn();
+  window.HTMLElement.prototype.releasePointerCapture = jest.fn();
+}
 
 // Empty replacing pointer event block
 
