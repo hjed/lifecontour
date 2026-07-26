@@ -27,15 +27,33 @@ from core_shared.models.journals import (
     OutdoorActivityData,
     ParticipantIndexEntry,
 )
+from PIL import Image
+from reportlab.lib.units import mm
 
 from app.core.journal.services.logbook_pdf_renderer import (
     LogbookPdfRenderer,
     glyph_font_name,
     resolve_glyph_font_path,
 )
-from tests.pdf_assertions import external_link_uris
+from tests.pdf_assertions import (
+    embedded_image_bytes,
+    embedded_image_x_offsets,
+    external_link_uris,
+)
 
 # ─── Fixture helpers ─────────────────────────────────────────────────
+
+
+def _map_png(size: tuple[int, int] = (256, 192)) -> bytes:
+    """Return PNG bytes standing in for a rendered GPX map image.
+
+    The renderer only embeds what it is handed, so composing a real basemap is
+    the map renderer's job (and its own tests'); here any decodable image will
+    do.
+    """
+    buffer = io.BytesIO()
+    Image.new("RGB", size, (200, 210, 220)).save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 def _make_date_range(year: int = 2024, month: int = 1, day: int = 15) -> EventDateRange:
@@ -805,6 +823,82 @@ class TestLogbookPdfRenderer:
         text = _extract_pdf_text(result)
         assert "Photo Album:" not in text
         assert external_link_uris(result) == []
+
+    # ── GPX track maps (spec 3.6) ──────────────────────────────
+
+    def test_map_image_flowable_rendered_when_supplied(self) -> None:
+        """A supplied map image is embedded as a real image in the PDF."""
+        entry = _make_entry(1, title="Trip With A Track")
+        data = LogbookExportData(
+            entries=[entry], yearly_summaries=[], participant_index=[]
+        )
+
+        result = self._renderer().render(data, map_images={1: _map_png()})
+
+        assert [len(image) > 0 for image in embedded_image_bytes(result)] == [True]
+
+    def test_no_embedded_image_when_no_maps_supplied(self) -> None:
+        """Without a map, the entry carries no image at all (spec §3.6).
+
+        The type icons are font glyphs rather than pictures, so the logbook PDF
+        has no other raster content and this count can be exact.
+        """
+        entry = _make_entry(1, title="Trip Without A Track")
+        data = LogbookExportData(
+            entries=[entry], yearly_summaries=[], participant_index=[]
+        )
+
+        result = self._renderer().render(data)
+
+        assert embedded_image_bytes(result) == []
+
+    def test_map_image_only_for_entries_with_a_map(self) -> None:
+        """Only the entry that has a map gets one."""
+        data = LogbookExportData(
+            entries=[_make_entry(1, title="Mapped"), _make_entry(2, title="Unmapped")],
+            yearly_summaries=[],
+            participant_index=[],
+        )
+
+        result = self._renderer().render(data, map_images={1: _map_png()})
+
+        assert len(embedded_image_bytes(result)) == 1
+
+    def test_child_entry_map_image_rendered(self) -> None:
+        """Maps reach child activities, not just root entries."""
+        child = _make_entry(2, title="Day Two", parent_id=1)
+        parent = _make_entry(1, title="Multi-Day Trip")
+        parent.children = [child]
+        data = LogbookExportData(
+            entries=[parent], yearly_summaries=[], participant_index=[]
+        )
+
+        result = self._renderer().render(data, map_images={2: _map_png()})
+
+        assert len(embedded_image_bytes(result)) == 1
+
+    def test_map_image_aligns_with_its_entry_indentation(self) -> None:
+        """The map lands at the entry's own indent, not centred on the page.
+
+        Asserting the drawn x-offset rather than mere presence: the map sits in
+        a wrapping ``Table``, whose ``hAlign`` defaults to ``CENTER``, so an
+        implicit default would silently centre it and no presence-only test
+        would notice.
+        """
+        child = _make_entry(2, title="Day Two", parent_id=1)
+        parent = _make_entry(1, title="Multi-Day Trip")
+        parent.children = [child]
+        data = LogbookExportData(
+            entries=[parent], yearly_summaries=[], participant_index=[]
+        )
+        renderer = self._renderer()
+
+        on_root = renderer.render(data, map_images={1: _map_png()})
+        on_child = renderer.render(data, map_images={2: _map_png()})
+
+        # Entry bodies are indented 4mm, and each depth adds a further 10mm.
+        assert embedded_image_x_offsets(on_root) == [pytest.approx(4 * mm)]
+        assert embedded_image_x_offsets(on_child) == [pytest.approx(14 * mm)]
 
     # ── Yearly summaries ───────────────────────────────────────
 

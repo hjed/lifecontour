@@ -28,8 +28,10 @@ installed the glyphs are dropped and the labels render alone.
 import io
 import os
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from types import MappingProxyType
 from typing import Final
 from xml.sax.saxutils import escape as xml_escape
 
@@ -53,6 +55,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFError, TTFont
 from reportlab.pdfgen.canvas import Canvas
 from reportlab.platypus import (
+    Image,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
@@ -181,6 +184,11 @@ class LogbookPdfRenderer:
     _PAGE_WIDTH, _PAGE_HEIGHT = A4
     _MARGIN = 2.0 * cm
 
+    # Bounding box a GPX map image is fitted into, leaving room for the deepest
+    # entry indent inside the printable width.
+    _MAP_MAX_WIDTH = 12.0 * cm
+    _MAP_MAX_HEIGHT = 9.0 * cm
+
     # Colours
     _ACCENT_HEX = "#2b6cb0"  # Blue-600 (also used inline for link glyphs)
     _HEADER_BG = colors.HexColor("#1a365d")  # Dark navy
@@ -266,8 +274,23 @@ class LogbookPdfRenderer:
             return label
         return f'<font name="{self._glyph_font_name}">{glyph}</font> {label}'
 
-    def render(self, data: LogbookExportData) -> bytes:
-        """Render the logbook data to PDF bytes."""
+    def render(
+        self,
+        data: LogbookExportData,
+        *,
+        map_images: Mapping[int, bytes] | None = None,
+    ) -> bytes:
+        """Render the logbook data to PDF bytes.
+
+        Args:
+            data: The assembled logbook contract.
+            map_images: PNG GPX map images keyed by journal id, as composed by
+                ``GpxMapRenderer``. Fetching basemap tiles is asynchronous while
+                this renderer is synchronous, so the images are built beforehand
+                and handed in; an entry absent from the mapping simply gets no
+                map. Passed down the recursion rather than stored on ``self``,
+                which is an APP-scoped singleton shared between requests.
+        """
         buffer = io.BytesIO()
         doc = SimpleDocTemplate(
             buffer,
@@ -300,7 +323,9 @@ class LogbookPdfRenderer:
         if data.entries:
             story.append(Spacer(1, 12 * mm))
             for entry in data.entries:
-                self._render_entry(story, entry, styles, depth=0)
+                self._render_entry(
+                    story, entry, styles, depth=0, map_images=map_images or {}
+                )
 
         # Indexes, each linking its journal names back to the entries.
         if data.participant_index:
@@ -627,6 +652,7 @@ class LogbookPdfRenderer:
         entry: LogbookEntryData,
         styles: dict[str, ParagraphStyle],
         depth: int = 0,
+        map_images: Mapping[int, bytes] = MappingProxyType({}),
     ) -> None:
         """Render a single journal entry with indentation for hierarchy."""
         indent = depth * 10 * mm
@@ -745,12 +771,53 @@ class LogbookPdfRenderer:
                 )
             )
 
+        # GPX track map over a basemap, when one was composed for this entry.
+        map_png = map_images.get(entry.id) if entry.id is not None else None
+        if map_png:
+            self._render_map_image(story, map_png, indent + 4 * mm)
+
         # Spacing between entries
         story.append(Spacer(1, 2 * mm))
 
         # Render children recursively
         for child in entry.children:
-            self._render_entry(story, child, styles, depth + 1)
+            self._render_entry(story, child, styles, depth + 1, map_images=map_images)
+
+    def _render_map_image(
+        self, story: list[object], map_png: bytes, indent: float
+    ) -> None:
+        """Embed a GPX map image, aligned with the entry's indentation.
+
+        ``kind="proportional"`` treats the size as a bounding box, so the map
+        keeps its aspect ratio however the track was shaped. The image is wrapped
+        in a padding-only table because an ``Image`` flowable has no left indent
+        of its own, and an un-indented map would break the hierarchy's alignment.
+
+        Both the image *and* its wrapping table are aligned left explicitly:
+        ``Table.hAlign`` defaults to ``CENTER``, so leaving it implicit would
+        make the indent depend on a default rather than on intent. The unit
+        tests assert the drawn x-offset, not merely that an image is present.
+        """
+        image = Image(
+            io.BytesIO(map_png),
+            width=self._MAP_MAX_WIDTH,
+            height=self._MAP_MAX_HEIGHT,
+            kind="proportional",
+        )
+        image.hAlign = "LEFT"
+        table = Table(
+            [[image]],
+            style=TableStyle(
+                [
+                    ("LEFTPADDING", (0, 0), (-1, -1), indent),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                    ("TOPPADDING", (0, 0), (-1, -1), 1 * mm),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                ]
+            ),
+        )
+        table.hAlign = "LEFT"
+        story.append(table)
 
     def _render_fitness_data(
         self,

@@ -79,6 +79,11 @@ class LogbookEntryData:
     # order the link store returns them. Empty when the entry has no album.
     album_shared_links: list[str] = field(default_factory=list)
 
+    # Raw GPX documents for the journal's routes, oldest first. The export
+    # renders them as a single basemap map image per entry; empty when the
+    # journal has no route, in which case no map is drawn.
+    route_gpx_data: list[str] = field(default_factory=list)
+
 
 @dataclass
 class LogbookYearlySummary:

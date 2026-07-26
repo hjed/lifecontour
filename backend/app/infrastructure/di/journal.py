@@ -169,6 +169,7 @@ from app.core.journal.services.daily_summary_repository import (
 )
 from app.core.journal.services.daily_summary_service import DailySummaryService
 from app.core.journal.services.gear_item_service import GearItemService
+from app.core.journal.services.gpx_map_renderer import GpxMapRenderer
 from app.core.journal.services.incomplete_outdoor_activity_service import (
     IncompleteOutdoorActivityService,
 )
@@ -773,8 +774,7 @@ class JournalProvider(Provider):
 
         APP scope so the on-disk cache and fetch throttle are shared across the
         whole export batch and across requests, keeping tile fetching within
-        OSM's usage policy. Additive: not yet consumed by the PDF renderer
-        (wired in a later phase).
+        OSM's usage policy.
         """
         return OsmTileSource(
             base_url=settings.logbook_tile_base_url,
@@ -782,3 +782,12 @@ class JournalProvider(Provider):
             cache_dir=settings.logbook_tile_cache_dir,
             tiles_per_second=settings.logbook_tile_throttle_per_second,
         )
+
+    @provide(scope=Scope.APP)
+    def gpx_map_renderer(self, tile_source: TileSource) -> GpxMapRenderer:
+        """Provide the outdoor-logbook GPX map-image renderer (ITER16-004).
+
+        APP scope like the tile source it wraps: it holds no per-request state,
+        and sharing it keeps the tile cache and throttle shared batch-wide.
+        """
+        return GpxMapRenderer(tile_source)
