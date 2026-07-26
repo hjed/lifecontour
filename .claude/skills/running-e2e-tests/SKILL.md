@@ -38,8 +38,8 @@ pnpm exec playwright test tests/e2e/contacts.spec.ts
 # Run a specific test by name
 pnpm exec playwright test -g "should create a new contact"
 
-# Run a specific browser only
-pnpm exec playwright test --project=chromium
+# Run a specific browser only (projects: firefox, "Mobile Chrome")
+pnpm exec playwright test --project=firefox
 
 # Run with UI mode for debugging
 pnpm exec playwright test --ui

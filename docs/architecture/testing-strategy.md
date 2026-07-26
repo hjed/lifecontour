@@ -298,7 +298,7 @@ Simply run `pnpm test:e2e` in `frontend/` or `python scripts/run_integration_tes
 
 ### Cross-Browser Reliability Patterns
 
-The E2E suite runs across Chromium, Firefox, and Mobile Chrome. Firefox is notably more sensitive to timing — it processes click events, DOM state changes, and navigations slightly slower than Chromium. The following patterns prevent Firefox-specific flakes.
+The E2E suite runs across Firefox and Mobile Chrome. Firefox is notably more sensitive to timing — it processes click events, DOM state changes, and navigations slightly slower than the chromium engine. The following patterns prevent Firefox-specific flakes.
 
 #### Use `expect.toPass()` for Action + Assertion Sequences
 

@@ -45,7 +45,7 @@ The plan you present with `ExitPlanMode` MUST include:
   - **Integration tests** — real Docker Postgres via `tests/integration/conftest.py` fixtures
     (`async_connection`, `clean_database`, `authenticated_client`); never custom DB providers.
   - **E2E tests** — Playwright, each test creating its own deterministic data (no conditional
-    logic, no skips, no multi-outcome assertions per CLAUDE.md). Validate on Chromium when
+    logic, no skips, no multi-outcome assertions per CLAUDE.md). Validate on Mobile Chrome when
     Firefox is unsupported locally; use typing delays for ProseMirror/contenteditable; avoid
     `force: true`.
   - A checklist mapping **every test the product spec requires** to a test in this plan, so the
