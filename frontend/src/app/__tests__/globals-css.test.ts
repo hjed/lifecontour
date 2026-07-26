@@ -85,6 +85,8 @@ function emitsRule(css: string, className: string): boolean {
   return new RegExp(`\\.${selector}[\\s,:.>{[]`).test(css);
 }
 
+const EMITS_A_RULE = 'emits a rule for %s';
+
 describe('globals.css', () => {
   let css: string;
 
@@ -93,7 +95,7 @@ describe('globals.css', () => {
   }, 60_000);
 
   describe('enter/exit animations', () => {
-    it.each(ANIMATION_UTILITIES)('emits a rule for %s', utility => {
+    it.each(ANIMATION_UTILITIES)(EMITS_A_RULE, utility => {
       expect(emitsRule(css, utility)).toBe(true);
     });
 
@@ -103,13 +105,13 @@ describe('globals.css', () => {
   });
 
   describe('typography plugin', () => {
-    it.each(TYPOGRAPHY_UTILITIES)('emits a rule for %s', utility => {
+    it.each(TYPOGRAPHY_UTILITIES)(EMITS_A_RULE, utility => {
       expect(emitsRule(css, utility)).toBe(true);
     });
   });
 
   describe('semantic theme tokens', () => {
-    it.each(TOKEN_UTILITIES)('emits a rule for %s', utility => {
+    it.each(TOKEN_UTILITIES)(EMITS_A_RULE, utility => {
       expect(emitsRule(css, utility)).toBe(true);
     });
   });
