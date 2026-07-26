@@ -25,6 +25,7 @@ import { ActivityTemplateResource } from '@/types/journals';
 import { getTemplates, deleteTemplate } from '@/lib/api/templates';
 import { CreateTemplateDialog } from '@/components/journals/type-editors/CreateTemplateDialog';
 import { toast } from 'sonner';
+import { invalidateAfterMutation } from '@/lib/api/invalidate-after-mutation';
 
 export function TemplateSettings() {
   const queryClient = useQueryClient();
@@ -37,7 +38,7 @@ export function TemplateSettings() {
     mutationFn: deleteTemplate,
     onSuccess: () => {
       toast.success('Template deleted successfully');
-      queryClient.invalidateQueries({ queryKey: ['templates'] });
+      void invalidateAfterMutation(queryClient, { queryKey: ['templates'] });
     },
     onError: () => {
       toast.error('Failed to delete template');

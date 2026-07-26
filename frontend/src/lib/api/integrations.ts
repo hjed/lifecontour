@@ -34,6 +34,7 @@ import {
   ImmichConflictResponse,
 } from '@/types/integrations';
 import { JsonApiErrorResponse } from '@/types/api';
+import { invalidateAfterMutation } from './invalidate-after-mutation';
 
 // Polling configuration constants
 const INITIAL_POLL_COUNT = 3;
@@ -156,14 +157,15 @@ export function useGenericSync(integrationId: string, capability: string) {
       triggerSync(integrationId, capability, syncType),
     onSuccess: data => {
       // Invalidate status and sync history queries
-      queryClient.invalidateQueries({
-        queryKey: integrationKeys.list(),
-      });
-      queryClient.invalidateQueries({ queryKey: integrationKeys.syncJobs() });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: integrationKeys.list() },
+        { queryKey: integrationKeys.syncJobs() }
+      );
 
       // Legacy fallback
       if (integrationId === 'google') {
-        queryClient.invalidateQueries({
+        void invalidateAfterMutation(queryClient, {
           queryKey: integrationKeys.googleContactsStatus(),
         });
       }
@@ -172,7 +174,7 @@ export function useGenericSync(integrationId: string, capability: string) {
 
       // Start polling for job status
       const jobId = data.data.id;
-      queryClient.invalidateQueries({
+      void invalidateAfterMutation(queryClient, {
         queryKey: integrationKeys.syncJob(jobId),
       });
     },
@@ -319,16 +321,17 @@ export function useGoogleSync() {
     mutationFn: triggerGoogleSync,
     onSuccess: data => {
       // Invalidate status and sync history queries
-      queryClient.invalidateQueries({
-        queryKey: integrationKeys.googleContactsStatus(),
-      });
-      queryClient.invalidateQueries({ queryKey: integrationKeys.syncJobs() });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: integrationKeys.googleContactsStatus() },
+        { queryKey: integrationKeys.syncJobs() }
+      );
 
       toast.success('Sync started successfully');
 
       // Start polling for job status
       const jobId = data.data.id;
-      queryClient.invalidateQueries({
+      void invalidateAfterMutation(queryClient, {
         queryKey: integrationKeys.syncJob(jobId),
       });
     },
@@ -361,16 +364,17 @@ export function useCalendarSync() {
     mutationFn: triggerCalendarSync,
     onSuccess: data => {
       // Invalidate status and sync history queries
-      queryClient.invalidateQueries({
-        queryKey: integrationKeys.googleContactsStatus(),
-      });
-      queryClient.invalidateQueries({ queryKey: integrationKeys.syncJobs() });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: integrationKeys.googleContactsStatus() },
+        { queryKey: integrationKeys.syncJobs() }
+      );
 
       toast.success('Calendar Sync started successfully');
 
       // Start polling for job status
       const jobId = data.data.id;
-      queryClient.invalidateQueries({
+      void invalidateAfterMutation(queryClient, {
         queryKey: integrationKeys.syncJob(jobId),
       });
     },
@@ -454,10 +458,11 @@ export function useCancelSyncJob() {
     mutationFn: cancelSyncJob,
     onSuccess: (_, jobId) => {
       // Invalidate job status and sync history
-      queryClient.invalidateQueries({
-        queryKey: integrationKeys.syncJob(jobId),
-      });
-      queryClient.invalidateQueries({ queryKey: integrationKeys.syncJobs() });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: integrationKeys.syncJob(jobId) },
+        { queryKey: integrationKeys.syncJobs() }
+      );
       toast.success('Sync job cancelled');
     },
     onError: (error: Error) => {
@@ -556,7 +561,7 @@ export function useGoogleOAuthCallback() {
     },
     onSuccess: (data: OAuthCallbackResponse) => {
       // Invalidate integration status to refresh connection state
-      queryClient.invalidateQueries({
+      void invalidateAfterMutation(queryClient, {
         queryKey: integrationKeys.googleContactsStatus(),
       });
 
@@ -595,12 +600,12 @@ export function useOAuthDisconnect(integrationId: string) {
     },
     onSuccess: (data: OAuthDisconnectResponse) => {
       // Invalidate integration list to refresh connection state
-      queryClient.invalidateQueries({
+      void invalidateAfterMutation(queryClient, {
         queryKey: integrationKeys.list(),
       });
       // Legacy cache invalidation
       if (integrationId === 'google') {
-        queryClient.invalidateQueries({
+        void invalidateAfterMutation(queryClient, {
           queryKey: integrationKeys.googleContactsStatus(),
         });
       }
@@ -633,7 +638,7 @@ export function useGoogleOAuthDisconnect() {
     },
     onSuccess: (data: OAuthDisconnectResponse) => {
       // Invalidate integration status to refresh connection state
-      queryClient.invalidateQueries({
+      void invalidateAfterMutation(queryClient, {
         queryKey: integrationKeys.googleContactsStatus(),
       });
 
@@ -706,7 +711,7 @@ export function useCreateStravaMapping() {
   return useMutation({
     mutationFn: createStravaMapping,
     onSuccess: () => {
-      queryClient.invalidateQueries({
+      void invalidateAfterMutation(queryClient, {
         queryKey: integrationKeys.stravaMappings(),
       });
       toast.success('Participant mapped successfully');
@@ -782,7 +787,7 @@ export function useDeleteStravaMapping() {
       toast.success('Mapping deleted successfully');
     },
     onSettled: () => {
-      queryClient.invalidateQueries({
+      void invalidateAfterMutation(queryClient, {
         queryKey: integrationKeys.stravaMappings(),
       });
     },
@@ -871,12 +876,11 @@ export function useSaveSnipeItSettings() {
   return useMutation({
     mutationFn: saveSnipeItSettings,
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [...integrationKeys.all, 'snipeit', 'settings'],
-      });
-      queryClient.invalidateQueries({
-        queryKey: integrationKeys.list(),
-      });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: [...integrationKeys.all, 'snipeit', 'settings'] },
+        { queryKey: integrationKeys.list() }
+      );
       toast.success('Snipe-IT settings saved successfully');
     },
     onError: (error: Error) => {
@@ -929,12 +933,11 @@ export function useSnipeItConnect() {
   return useMutation({
     mutationFn: connectSnipeIt,
     onSuccess: (data: SnipeItConnectResponse) => {
-      queryClient.invalidateQueries({
-        queryKey: integrationKeys.list(),
-      });
-      queryClient.invalidateQueries({
-        queryKey: [...integrationKeys.all, 'snipeit', 'settings'],
-      });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: integrationKeys.list() },
+        { queryKey: [...integrationKeys.all, 'snipeit', 'settings'] }
+      );
       toast.success(data.message);
     },
     onError: (error: Error) => {
@@ -949,12 +952,11 @@ export function useSnipeItDisconnect() {
   return useMutation({
     mutationFn: disconnectSnipeIt,
     onSuccess: (data: SnipeItDisconnectResponse) => {
-      queryClient.invalidateQueries({
-        queryKey: integrationKeys.list(),
-      });
-      queryClient.invalidateQueries({
-        queryKey: [...integrationKeys.all, 'snipeit', 'settings'],
-      });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: integrationKeys.list() },
+        { queryKey: [...integrationKeys.all, 'snipeit', 'settings'] }
+      );
       toast.success(data.message);
     },
     onError: (error: Error) => {
@@ -1058,7 +1060,7 @@ export function useImmichConnect() {
   return useMutation({
     mutationFn: connectImmich,
     onSuccess: (data: ImmichConnectResponse) => {
-      queryClient.invalidateQueries({
+      void invalidateAfterMutation(queryClient, {
         queryKey: integrationKeys.list(),
       });
       toast.success(data.message || 'Connected to Immich successfully');
@@ -1075,7 +1077,7 @@ export function useImmichDisconnect() {
   return useMutation({
     mutationFn: disconnectImmich,
     onSuccess: () => {
-      queryClient.invalidateQueries({
+      void invalidateAfterMutation(queryClient, {
         queryKey: integrationKeys.list(),
       });
       toast.success('Disconnected from Immich successfully');
@@ -1139,7 +1141,7 @@ export function useResolveImmichConflict() {
       request: ImmichConflictResolveRequest;
     }) => resolveImmichConflict(conflictId, request),
     onSuccess: () => {
-      queryClient.invalidateQueries({
+      void invalidateAfterMutation(queryClient, {
         queryKey: integrationKeys.immichConflicts(),
       });
       toast.success('Conflict resolved successfully');

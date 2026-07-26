@@ -283,11 +283,13 @@ test.describe('Sidebar Tag Management', () => {
      * Waits for the journals list to be refetched *because of* a tag mutation.
      *
      * This is the journal-query half of the invalidation the phase promises.
-     * Asserting instead that the tag chip vanishes from the list behind the
-     * dialog would be an assertion on transient React Query-backed UI: a list
-     * fetch already in flight when the mutation lands can settle afterwards
-     * carrying pre-mutation data and, being fresh for the next five minutes, is
-     * never refetched again — so the chip lingers and the test flakes.
+     * The tests pair it with an assertion on the chips the refetched list
+     * renders: the refetch proves the wiring fired, the chips prove its result
+     * reached the screen. That second half used to be too flaky to assert — a
+     * list fetch already in flight when the mutation landed could settle
+     * afterwards carrying pre-mutation data and, being fresh for the next five
+     * minutes, was never refetched again. Mutations now cancel before they
+     * invalidate (#1203), so the stale response can no longer win.
      *
      * The predicate is a small state machine over the response stream: it
      * latches on the mutation's own response, then matches the first
@@ -575,6 +577,12 @@ test.describe('Sidebar Tag Management', () => {
       await expect(dialog).toBeHidden();
       await expect(page.getByText('Tag deleted successfully')).toBeVisible();
 
+      // The refetch above only proves a request went out; this proves its rows
+      // reached the screen, which is what #1203 makes assertable.
+      await expect(
+        page.getByTestId(`journal-${journal.id}`).getByTestId(`tag-${tag.name}`)
+      ).toHaveCount(0, { timeout: 15000 });
+
       // The mobile Sheet can close over the dialog interaction.
       await ensureSidebarOpen(page, 'Journals');
       await expect(
@@ -646,6 +654,18 @@ test.describe('Sidebar Tag Management', () => {
 
       await expect(dialog).toBeHidden();
       await expect(page.getByText('Tag successfully merged')).toBeVisible();
+
+      // The refetch above only proves a request went out; this proves the
+      // repointed assignment reached the screen, which is what #1203 makes
+      // assertable.
+      const listedJournal = page.getByTestId(`journal-${journal.id}`);
+      await expect(listedJournal.getByTestId(`tag-${source.name}`)).toHaveCount(
+        0,
+        { timeout: 15000 }
+      );
+      await expect(
+        listedJournal.getByTestId(`tag-${target.name}`)
+      ).toBeVisible();
 
       await ensureSidebarOpen(page, 'Journals');
       await expect(

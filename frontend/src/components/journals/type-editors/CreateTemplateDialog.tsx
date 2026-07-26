@@ -41,6 +41,7 @@ import {
 } from '@/types/journals';
 import { createTemplate, updateTemplate } from '@/lib/api/templates';
 import { PitchEditor } from './PitchEditor';
+import { invalidateAfterMutation } from '@/lib/api/invalidate-after-mutation';
 
 const createTemplateSchema = z.object({
   name: z.string().min(1, 'Name is required'),
@@ -169,7 +170,7 @@ function CreateTemplateDialogContent({
           ? 'Template updated successfully'
           : 'Template created successfully'
       );
-      queryClient.invalidateQueries({ queryKey: ['templates'] });
+      void invalidateAfterMutation(queryClient, { queryKey: ['templates'] });
       onCreated(response.data);
       onClose();
     },

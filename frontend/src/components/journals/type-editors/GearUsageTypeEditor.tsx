@@ -40,6 +40,7 @@ import { useTypeEditorState } from './useTypeEditorState';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
+import { invalidateAfterMutation } from '@/lib/api/invalidate-after-mutation';
 
 interface GearUsageTypeEditorProps {
   readonly journalId?: string;
@@ -125,7 +126,7 @@ export function GearUsageTypeEditor({
           },
         },
       });
-      await queryClient.invalidateQueries({ queryKey: ['gear-items'] });
+      await invalidateAfterMutation(queryClient, { queryKey: ['gear-items'] });
       setEditData(prev => ({ ...prev, gear_item_id: newItem.id }));
       setCreateDialogOpen(false);
       setNewGearItemName('');

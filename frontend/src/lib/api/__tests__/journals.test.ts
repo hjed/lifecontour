@@ -970,12 +970,16 @@ describe('Journals API', () => {
         await result.current.mutateAsync('tag-1');
       });
 
-      expect(calls).toEqual([
-        `cancel:${JSON.stringify(journalTagKeys.lists())}`,
-        `cancel:${JSON.stringify(journalKeys.all)}`,
-        `invalidate:${JSON.stringify(journalTagKeys.lists())}`,
-        `invalidate:${JSON.stringify(journalKeys.all)}`,
-      ]);
+      // The refresh is fire-and-forget so the success toast is not held behind
+      // a refetch, hence waiting for the order rather than asserting it inline.
+      await waitFor(() => {
+        expect(calls).toEqual([
+          `cancel:${JSON.stringify(journalTagKeys.lists())}`,
+          `cancel:${JSON.stringify(journalKeys.all)}`,
+          `invalidate:${JSON.stringify(journalTagKeys.lists())}`,
+          `invalidate:${JSON.stringify(journalKeys.all)}`,
+        ]);
+      });
     });
 
     it('should show a success toast on success', async () => {
@@ -1596,6 +1600,100 @@ describe('Journals API', () => {
           expect.any(Object)
         );
       });
+    });
+  });
+});
+
+describe('journal list loading while a tag mutation resolves (#1203)', () => {
+  let queryClient: QueryClient;
+
+  const createWrapper = ({ children }: { children: ReactNode }) =>
+    React.createElement(QueryClientProvider, { client: queryClient }, children);
+
+  beforeEach(() => {
+    queryClient = new QueryClient({
+      defaultOptions: {
+        // The app-wide stale time: without it a stale response that lands after
+        // the invalidation would simply be refetched by the next render.
+        queries: { retry: false, staleTime: 5 * 60 * 1000 },
+        mutations: { retry: false },
+      },
+    });
+    jest.clearAllMocks();
+    mockFetch.mockReset();
+  });
+
+  it('shows the post-mutation list even when the pre-mutation fetch settles last', async () => {
+    const beforeUpdate = createMockJournalListResponse([
+      createMockJournal('journal-with-old-tag'),
+    ]);
+    const afterUpdate = createMockJournalListResponse([
+      createMockJournal('journal-with-new-tag'),
+    ]);
+
+    let resolveFirstList: (value: Response) => void = () => {};
+    let listRequests = 0;
+
+    mockFetch.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url === '/api/journals') {
+        listRequests += 1;
+        // The first list request is the one already in flight when the
+        // mutation resolves; it answers with pre-mutation rows, late.
+        if (listRequests === 1) {
+          return new Promise<Response>(resolve => {
+            resolveFirstList = resolve;
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => afterUpdate,
+        } as Response);
+      }
+
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          data: {
+            id: 'tag-1',
+            type: 'journal-tags',
+            attributes: { name: 'Bouldering' },
+          },
+        }),
+      } as Response);
+    });
+
+    const { result } = renderHook(
+      () => ({
+        list: useJournals(),
+        updateTag: useUpdateJournalTag(),
+      }),
+      { wrapper: createWrapper }
+    );
+
+    // The list is loading for the first time — it has no data yet, which is
+    // precisely the case React Query's own cancelRefetch does not cover.
+    await waitFor(() => expect(listRequests).toBe(1));
+    expect(result.current.list.data).toBeUndefined();
+
+    await act(async () => {
+      await result.current.updateTag.mutateAsync({
+        id: 'tag-1',
+        attributes: { name: 'Bouldering' },
+      });
+    });
+
+    // Only now does the pre-mutation request come back.
+    resolveFirstList({
+      ok: true,
+      json: async () => beforeUpdate,
+    } as Response);
+
+    await waitFor(() => {
+      expect(result.current.list.data?.data.map(j => j.id)).toEqual([
+        'journal-with-new-tag',
+      ]);
     });
   });
 });
