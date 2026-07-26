@@ -675,6 +675,60 @@ async function updateJournalTag(
   return response.json();
 }
 
+/**
+ * Delete a journal tag.
+ *
+ * The tag is removed from every journal it is assigned to rather than the
+ * request being refused, and the tag's children are re-parented to the root —
+ * the backend owns both, so there is nothing to reconcile here.
+ */
+async function deleteJournalTag(id: string): Promise<void> {
+  const response = await fetch(`/api/journals/tags/${id}`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.DELETE_FAILED
+    );
+  }
+}
+
+/**
+ * Merge one journal tag into another, deleting the source.
+ *
+ * The source is the path parameter and the target travels in the body, matching
+ * the endpoint's JSON:API shape. The resource type is part of the contract: the
+ * controller rejects anything other than `journal-tags` with a 400.
+ */
+async function mergeJournalTag(
+  sourceId: string,
+  targetId: string
+): Promise<void> {
+  const response = await fetch(`/api/journals/tags/${sourceId}/merge`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      data: {
+        type: 'journal-tags',
+        attributes: {
+          target_tag_id: targetId,
+        },
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(errorData.errors?.[0]?.detail || 'Failed to merge tag');
+  }
+}
+
 // Create a new journal tag and return the created JSON:API resource.
 async function createJournalTag(
   attributes: JournalTagCreateAttributes
@@ -1089,6 +1143,78 @@ export function useUpdateJournalTag() {
       queryClient.invalidateQueries({ queryKey: journalTagKeys.lists() });
       queryClient.invalidateQueries({ queryKey: journalKeys.all });
       toast.success(SUCCESS_MESSAGES.TAG_UPDATED);
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+/**
+ * Refreshes everything a journal tag mutation can change.
+ *
+ * The tag namespace feeds the sidebar tree and the detail page's tag editor;
+ * the journal queries feed the chips on the list and on any open journal. Both
+ * are **cancelled before being invalidated**: a fetch that started before the
+ * mutation would otherwise settle after it, writing pre-mutation rows into the
+ * cache and marking them fresh — and with `staleTime` at five minutes for the
+ * journals list and ten for the tag list, nothing would refetch again for that
+ * long, leaving a deleted tag on screen.
+ *
+ * Unlike the contact equivalents this neither splices the cache by hand nor
+ * delays the invalidation behind a timer: the write commits in the service
+ * layer before the response is sent, so there is no read-after-write race to
+ * wait out.
+ */
+async function refreshAfterJournalTagMutation(
+  queryClient: ReturnType<typeof useQueryClient>
+): Promise<void> {
+  await Promise.all([
+    queryClient.cancelQueries({ queryKey: journalTagKeys.lists() }),
+    queryClient.cancelQueries({ queryKey: journalKeys.all }),
+  ]);
+  queryClient.invalidateQueries({ queryKey: journalTagKeys.lists() });
+  queryClient.invalidateQueries({ queryKey: journalKeys.all });
+}
+
+/**
+ * Deletes a journal tag, which also un-assigns it from every journal.
+ */
+export function useDeleteJournalTag() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => deleteJournalTag(id),
+    onSuccess: async () => {
+      await refreshAfterJournalTagMutation(queryClient);
+      toast.success(SUCCESS_MESSAGES.TAG_DELETED);
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+/**
+ * Merges a journal tag into another, deleting the source tag.
+ *
+ * Journals tagged with the source end up tagged with the target, so the journal
+ * queries are invalidated alongside the tag namespace.
+ */
+export function useMergeJournalTag() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      sourceId,
+      targetId,
+    }: {
+      sourceId: string;
+      targetId: string;
+    }) => mergeJournalTag(sourceId, targetId),
+    onSuccess: async () => {
+      await refreshAfterJournalTagMutation(queryClient);
+      toast.success('Tag successfully merged');
     },
     onError: (error: Error) => {
       toast.error(error.message);

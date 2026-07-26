@@ -361,6 +361,52 @@ describe('TagFormDialog', () => {
     });
   });
 
+  it('keeps the dialog open when the delete fails', async () => {
+    // The mutation surfaces its own error toast; the dialog must survive so the
+    // user can retry rather than being dropped back to the sidebar wondering
+    // whether the tag went.
+    const user = userEvent.setup();
+    const onDelete = jest.fn().mockRejectedValue(new Error('Tag not found'));
+    const { onOpenChange } = renderDialog({ onDelete });
+
+    await user.click(screen.getByRole('button', { name: 'Delete Tag' }));
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => {
+      expect(onDelete).toHaveBeenCalledTimes(1);
+    });
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+    expect(
+      screen.getByRole('dialog', { name: 'Edit Tag' })
+    ).toBeInTheDocument();
+  });
+
+  it('keeps the dialog open when the merge fails', async () => {
+    const user = userEvent.setup();
+    const onMerge = jest
+      .fn()
+      .mockRejectedValue(
+        new Error('Cannot merge a tag into its own descendant')
+      );
+    const { onOpenChange } = renderDialog({
+      onMerge,
+      mergeOptions: PARENT_OPTIONS,
+    });
+
+    await user.click(screen.getByLabelText('Merge into'));
+    await user.click(await screen.findByRole('option', { name: 'Indoors' }));
+    await user.click(screen.getByRole('button', { name: 'Merge' }));
+    await user.click(screen.getByRole('button', { name: 'Confirm Merge' }));
+
+    await waitFor(() => {
+      expect(onMerge).toHaveBeenCalledTimes(1);
+    });
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+    expect(
+      screen.getByRole('dialog', { name: 'Edit Tag' })
+    ).toBeInTheDocument();
+  });
+
   it('merges into the selected target after confirmation when onMerge is supplied', async () => {
     const user = userEvent.setup();
     const onMerge = jest.fn().mockResolvedValue(undefined);

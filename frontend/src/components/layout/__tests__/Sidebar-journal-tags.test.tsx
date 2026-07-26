@@ -29,6 +29,16 @@ jest.mock('@/lib/api/journals', () => ({
     mutateAsync: jest.fn(),
     isPending: false,
   })),
+  // Every tag row mounts the management dialog, which reads both destructive
+  // mutations even before the user opens it.
+  useDeleteJournalTag: jest.fn(() => ({
+    mutateAsync: jest.fn(),
+    isPending: false,
+  })),
+  useMergeJournalTag: jest.fn(() => ({
+    mutateAsync: jest.fn(),
+    isPending: false,
+  })),
 }));
 
 jest.mock('next/navigation', () => ({
