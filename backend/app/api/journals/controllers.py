@@ -3647,8 +3647,11 @@ async def add_tag_to_journal(
     if not tag:
         raise JournalValidationError("tag_id", f"Tag not found: {tag_uuid}")
 
-    # Assign tag to journal as a committed unit of work
-    await journal_tag_service.assign_tag(journal_id, tag_uuid, connection)
+    # Assign tag to journal as a committed unit of work; the service publishes the
+    # JournalTagAssigned history event with this provenance in the same transaction.
+    await journal_tag_service.assign_tag(
+        journal_id, tag_uuid, connection, changed_by="ui", source=Provenance.UI
+    )
 
     # Get updated journal
     updated_journal = await journal_service.get_journal(journal_id)
@@ -3756,8 +3759,11 @@ async def remove_tag_from_journal(
     except ValueError as e:
         raise JournalValidationError("tag_id", INVALID_UUID_FORMAT_MSG) from e
 
-    # Remove tag from journal as a committed unit of work
-    await journal_tag_service.remove_tag(journal_id, tag_uuid, connection)
+    # Remove tag from journal as a committed unit of work; the service publishes the
+    # JournalTagRemoved history event with this provenance in the same transaction.
+    await journal_tag_service.remove_tag(
+        journal_id, tag_uuid, connection, changed_by="ui", source=Provenance.UI
+    )
 
     # Get updated journal
     updated_journal = await journal_service.get_journal(journal_id)

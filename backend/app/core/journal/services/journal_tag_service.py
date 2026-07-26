@@ -3,11 +3,16 @@
 Wraps journal tag create/delete and journal<->tag assignment in explicit units
 of work so each write commits before the HTTP response is sent (issue #945),
 keeping transaction ownership in the service layer rather than the controller.
+
+Assignment and removal also publish ``JournalTagAssigned`` / ``JournalTagRemoved``
+through the transactional outbox, in the same unit of work as the junction-table
+write, so the journal activity feed cannot drift from what actually happened.
 """
 
 from dataclasses import replace
 from uuid import UUID
 
+from core_shared.models.history import Provenance
 from core_shared.models.journals import (
     JournalTagNotFoundError,
     JournalValidationError,
@@ -15,11 +20,13 @@ from core_shared.models.journals import (
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.journal.models.events import JournalTagAssigned, JournalTagRemoved
 from app.core.journal.models.journal_tag import JournalTag
 from app.core.journal.models.repositories import JournalTagRepository
 from app.core.journal.services.journal_tag_hierarchy_service import (
     JournalTagHierarchyService,
 )
+from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.unit_of_work import transactional
 
 
@@ -30,9 +37,11 @@ class JournalTagService:
         self,
         tag_repo: JournalTagRepository,
         hierarchy_service: JournalTagHierarchyService,
+        event_publisher: OutboxEventPublisher,
     ) -> None:
         self.tag_repo = tag_repo
         self.hierarchy_service = hierarchy_service
+        self.event_publisher = event_publisher
 
     @transactional
     async def create_tag(
@@ -89,9 +98,7 @@ class JournalTagService:
             JournalValidationError: The name is taken, the colour is malformed,
                 or the parent would create a cycle.
         """
-        existing = await self.tag_repo.find_by_id(tag_id)
-        if existing is None:
-            raise JournalTagNotFoundError(str(tag_id))
+        existing = await self._require_tag(tag_id)
 
         changes: dict[str, object] = {}
 
@@ -161,9 +168,7 @@ class JournalTagService:
         Raises:
             JournalTagNotFoundError: No tag exists with this id.
         """
-        tag = await self.tag_repo.find_by_id(tag_id)
-        if not tag:
-            raise JournalTagNotFoundError(str(tag_id))
+        await self._require_tag(tag_id)
 
         await self.tag_repo.delete(tag_id)
 
@@ -202,9 +207,35 @@ class JournalTagService:
         journal_id: int,
         tag_id: UUID,
         transaction: AsyncConnection,
+        *,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
     ) -> None:
-        """Assign an existing tag to a journal as a committed unit of work."""
-        await self.tag_repo.assign_tag(journal_id, tag_id)
+        """Assign an existing tag to a journal as a committed unit of work.
+
+        Publishes ``JournalTagAssigned`` in the same unit of work, but only if the
+        assignment did not already exist: the insert is ``ON CONFLICT DO NOTHING``,
+        and an event for a no-op would put an "Added Tags" entry in the activity
+        feed for a change that never happened.
+
+        Raises:
+            JournalTagNotFoundError: No tag exists with this id.
+        """
+        tag = await self._require_tag(tag_id)
+
+        if not await self.tag_repo.assign_tag(journal_id, tag_id):
+            return
+
+        await self.event_publisher.publish(
+            JournalTagAssigned(
+                journal_id,
+                tag_id,
+                tag.name,
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
+            )
+        )
 
     @transactional
     async def remove_tag(
@@ -212,6 +243,45 @@ class JournalTagService:
         journal_id: int,
         tag_id: UUID,
         transaction: AsyncConnection,
+        *,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
     ) -> None:
-        """Remove a tag from a journal as a committed unit of work."""
-        await self.tag_repo.remove_tag(journal_id, tag_id)
+        """Remove a tag from a journal as a committed unit of work.
+
+        Publishes ``JournalTagRemoved`` only if an assignment was actually deleted,
+        for the same reason :meth:`assign_tag` guards its event.
+
+        A tag that does not exist is a no-op rather than an error: to the caller it
+        is indistinguishable from a tag that exists but was not assigned, which the
+        endpoint has always answered with a successful no-op.
+        """
+        tag = await self.tag_repo.find_by_id(tag_id)
+        if tag is None:
+            return
+
+        if not await self.tag_repo.remove_tag(journal_id, tag_id):
+            return
+
+        await self.event_publisher.publish(
+            JournalTagRemoved(
+                journal_id,
+                tag_id,
+                tag.name,
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
+            )
+        )
+
+    async def _require_tag(self, tag_id: UUID) -> JournalTag:
+        """Load the tag or raise, so the service owns the existence rule.
+
+        Assignment also needs the loaded tag's ``name`` for the history event:
+        reading it here rather than trusting the caller keeps the event consistent
+        with the row the assignment actually points at.
+        """
+        tag = await self.tag_repo.find_by_id(tag_id)
+        if tag is None:
+            raise JournalTagNotFoundError(str(tag_id))
+        return tag

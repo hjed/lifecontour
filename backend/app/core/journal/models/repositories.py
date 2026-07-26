@@ -1045,24 +1045,34 @@ class JournalTagRepository(ABC):
         pass
 
     @abstractmethod
-    async def assign_tag(self, journal_id: int, tag_id: UUID) -> None:
+    async def assign_tag(self, journal_id: int, tag_id: UUID) -> bool:
         """
         Assign a tag to a journal.
+
+        Assignment is idempotent, so the return value is how the caller learns
+        whether anything actually changed — the service publishes a history event
+        only when it did.
 
         Args:
             journal_id: The journal ID
             tag_id: The tag UUID to assign
+
+        Returns:
+            True if a new assignment was created, False if it already existed.
         """
         pass
 
     @abstractmethod
-    async def remove_tag(self, journal_id: int, tag_id: UUID) -> None:
+    async def remove_tag(self, journal_id: int, tag_id: UUID) -> bool:
         """
         Remove a tag from a journal.
 
         Args:
             journal_id: The journal ID
             tag_id: The tag UUID to remove
+
+        Returns:
+            True if an assignment was deleted, False if there was none.
         """
         pass
 

@@ -541,9 +541,14 @@ class JournalProvider(Provider):
         self,
         tag_repo: JournalTagRepository,
         hierarchy_service: JournalTagHierarchyService,
+        event_publisher: OutboxEventPublisher,
     ) -> JournalTagService:
         """Provide a JournalTagService instance."""
-        return JournalTagService(tag_repo=tag_repo, hierarchy_service=hierarchy_service)
+        return JournalTagService(
+            tag_repo=tag_repo,
+            hierarchy_service=hierarchy_service,
+            event_publisher=event_publisher,
+        )
 
     @provide(scope=Scope.REQUEST)
     def journal_series_service(
@@ -603,6 +608,7 @@ class JournalProvider(Provider):
         self,
         journal_service: JournalService,
         journal_contact_service: JournalContactService,
+        tag_service: JournalTagService,
         calendar_info_repo: CalendarInfoRepository,
         photo_album_data_repo: AlbumSyncReadRepository,
         mood_data_repo: MoodDataRepository,
@@ -634,6 +640,7 @@ class JournalProvider(Provider):
         return JournalWriteService(
             journal_service=journal_service,
             journal_contact_service=journal_contact_service,
+            tag_service=tag_service,
             calendar_info_repo=calendar_info_repo,
             photo_album_data_repo=photo_album_data_repo,
             mood_data_repo=mood_data_repo,

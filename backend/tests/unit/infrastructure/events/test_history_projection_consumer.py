@@ -10,6 +10,7 @@ are now part of the live subscription (the synchronous dual-write was removed).
 
 from unittest.mock import MagicMock
 
+from app.core.history.services.history_service import _HANDLERS
 from app.infrastructure.events.history_projection_consumer import (
     _CONTACT_HISTORY_EVENT_TYPES,
     _JOURNAL_HISTORY_EVENT_TYPES,
@@ -22,6 +23,9 @@ _JOURNAL_EVENT_TYPES = {
     "JournalDeleted",
     "JournalTypeAdded",
     "JournalTypeRemoved",
+    # ITER17-005 Phase 1: journal tag assignment/removal.
+    "JournalTagAssigned",
+    "JournalTagRemoved",
     "RouteCreated",
     "RouteUpdated",
     "RouteDeleted",
@@ -88,3 +92,16 @@ def test_event_type_constants_match_handled_sets() -> None:
     """The module constants match the full sets the projection handles."""
     assert set(_JOURNAL_HISTORY_EVENT_TYPES) == _JOURNAL_EVENT_TYPES
     assert set(_CONTACT_HISTORY_EVENT_TYPES) == _CONTACT_EVENT_TYPES
+
+
+def test_every_subscribed_event_type_has_a_projection_handler() -> None:
+    """A subscribed type with no handler would be consumed and silently dropped.
+
+    ``project_event`` returns an empty row list for an unknown event type, so the
+    consumer would acknowledge the event and write no history — a missing entry
+    with nothing in the logs. Pinning the two sides together turns that into a
+    test failure at the moment a new event type is added.
+    """
+    subscribed = set(_JOURNAL_HISTORY_EVENT_TYPES) | set(_CONTACT_HISTORY_EVENT_TYPES)
+
+    assert subscribed <= set(_HANDLERS)

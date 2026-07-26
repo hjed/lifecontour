@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from core_shared.models.history import Provenance
 from core_shared.models.journals import (
     EventDateRange,
     Journal,
@@ -43,12 +44,18 @@ def mock_transaction():
 
 
 @pytest.fixture
-def write_service(mock_journal_service, mock_journal_contact_service):
+def mock_tag_service():
+    return AsyncMock()
+
+
+@pytest.fixture
+def write_service(mock_journal_service, mock_journal_contact_service, mock_tag_service):
     """Build a JournalWriteService with all repos/services mocked."""
     repos = {name: AsyncMock() for name in _REPO_PARAM_NAMES}
     return JournalWriteService(
         journal_service=mock_journal_service,
         journal_contact_service=mock_journal_contact_service,
+        tag_service=mock_tag_service,
         event_publisher=AsyncMock(),
         **repos,
     )
@@ -293,9 +300,16 @@ class TestUpdateTypeData:
 
 
 class TestCreateJournalTags:
+    """Tag assignment routes through JournalTagService so events are published.
+
+    Find-or-create by name stays here (it is a write-service concern); the
+    junction write and its ``JournalTagAssigned`` event belong to the tag service,
+    so these tests assert the delegation and the provenance passed with it.
+    """
+
     @pytest.mark.asyncio
     async def test_finds_existing_tag_and_assigns_without_saving(
-        self, write_service, mock_journal_service, mock_transaction
+        self, write_service, mock_journal_service, mock_tag_service, mock_transaction
     ):
         """An existing tag (by name) is assigned, not re-created."""
         mock_journal_service.create_journal.return_value = _journal(journal_id=42)
@@ -307,11 +321,17 @@ class TestCreateJournalTags:
         )
 
         write_service.tag_repo.save.assert_not_awaited()
-        write_service.tag_repo.assign_tag.assert_awaited_once_with(42, existing_tag.id)
+        mock_tag_service.assign_tag.assert_awaited_once_with(
+            42,
+            existing_tag.id,
+            mock_transaction,
+            source=Provenance.SYSTEM,
+            changed_by="system",
+        )
 
     @pytest.mark.asyncio
     async def test_creates_missing_tag_then_assigns(
-        self, write_service, mock_journal_service, mock_transaction
+        self, write_service, mock_journal_service, mock_tag_service, mock_transaction
     ):
         """A tag name with no existing row is created (grey default) then assigned."""
         mock_journal_service.create_journal.return_value = _journal(journal_id=42)
@@ -327,11 +347,36 @@ class TestCreateJournalTags:
         saved = write_service.tag_repo.save.await_args.args[0]
         assert saved.name == "beta"
         assert saved.color == "#808080"
-        write_service.tag_repo.assign_tag.assert_awaited_once_with(42, created_tag.id)
+        assert mock_tag_service.assign_tag.await_args.args[:2] == (42, created_tag.id)
+
+    @pytest.mark.asyncio
+    async def test_passes_caller_provenance_through_to_the_tag_service(
+        self, write_service, mock_journal_service, mock_tag_service, mock_transaction
+    ):
+        """MCP-created journals must produce MCP-provenance tag history."""
+        mock_journal_service.create_journal.return_value = _journal(journal_id=42)
+        existing_tag = JournalTag(id=uuid4(), name="alpha", color="#123456")
+        write_service.tag_repo.find_by_name.return_value = existing_tag
+
+        await write_service.create_journal(
+            _journal(),
+            None,
+            None,
+            None,
+            mock_transaction,
+            tags=["alpha"],
+            changed_by="mcp",
+            source=Provenance.MCP,
+        )
+
+        assert mock_tag_service.assign_tag.await_args.kwargs == {
+            "source": Provenance.MCP,
+            "changed_by": "mcp",
+        }
 
     @pytest.mark.asyncio
     async def test_no_tags_means_no_tag_calls(
-        self, write_service, mock_journal_service, mock_transaction
+        self, write_service, mock_journal_service, mock_tag_service, mock_transaction
     ):
         """Default tags=None leaves the tag repo untouched (REST back-compat)."""
         mock_journal_service.create_journal.return_value = _journal(journal_id=42)
@@ -341,7 +386,7 @@ class TestCreateJournalTags:
         )
 
         write_service.tag_repo.find_by_name.assert_not_awaited()
-        write_service.tag_repo.assign_tag.assert_not_awaited()
+        mock_tag_service.assign_tag.assert_not_awaited()
 
 
 class TestCreateJournalGearUsage:
@@ -427,9 +472,9 @@ class TestUpdateJournalComposite:
 
     @pytest.mark.asyncio
     async def test_tags_replace_all(
-        self, write_service, mock_journal_service, mock_transaction
+        self, write_service, mock_journal_service, mock_tag_service, mock_transaction
     ):
-        """tags=[...] removes all existing tag assignments then re-applies."""
+        """tags=[...] drops the tags that left and assigns the ones that arrived."""
         mock_journal_service.update_journal.return_value = _journal(journal_id=9)
         existing = JournalTag(id=uuid4(), name="old", color="#111111")
         write_service.tag_repo.get_tags_for_journal.return_value = [existing]
@@ -440,12 +485,55 @@ class TestUpdateJournalComposite:
             _journal(journal_id=9), mock_transaction, tags=["new"]
         )
 
-        write_service.tag_repo.remove_tag.assert_awaited_once_with(9, existing.id)
-        write_service.tag_repo.assign_tag.assert_awaited_once_with(9, new_tag.id)
+        assert mock_tag_service.remove_tag.await_args.args[:2] == (9, existing.id)
+        assert mock_tag_service.assign_tag.await_args.args[:2] == (9, new_tag.id)
+
+    @pytest.mark.asyncio
+    async def test_unchanged_tag_is_neither_removed_nor_reassigned(
+        self, write_service, mock_journal_service, mock_tag_service, mock_transaction
+    ):
+        """Re-sending the same tag list must not touch the junction table.
+
+        The pre-event implementation removed every assignment and re-added it,
+        which would now write a bogus "Removed Tags"/"Added Tags" pair into the
+        activity feed for an update that changed nothing.
+        """
+        mock_journal_service.update_journal.return_value = _journal(journal_id=9)
+        kept = JournalTag(id=uuid4(), name="keep", color="#111111")
+        write_service.tag_repo.get_tags_for_journal.return_value = [kept]
+        write_service.tag_repo.find_by_name.return_value = kept
+
+        await write_service.update_journal_composite(
+            _journal(journal_id=9), mock_transaction, tags=["keep"]
+        )
+
+        mock_tag_service.remove_tag.assert_not_awaited()
+        mock_tag_service.assign_tag.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_tag_replace_matches_names_case_insensitively(
+        self, write_service, mock_journal_service, mock_tag_service, mock_transaction
+    ):
+        """Tag lookup is case-insensitive, so the diff must be too.
+
+        Otherwise re-sending "Keep" for a journal tagged "keep" would churn the
+        assignment and fabricate history.
+        """
+        mock_journal_service.update_journal.return_value = _journal(journal_id=9)
+        kept = JournalTag(id=uuid4(), name="keep", color="#111111")
+        write_service.tag_repo.get_tags_for_journal.return_value = [kept]
+        write_service.tag_repo.find_by_name.return_value = kept
+
+        await write_service.update_journal_composite(
+            _journal(journal_id=9), mock_transaction, tags=["KEEP"]
+        )
+
+        mock_tag_service.remove_tag.assert_not_awaited()
+        mock_tag_service.assign_tag.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_empty_tags_list_clears_all(
-        self, write_service, mock_journal_service, mock_transaction
+        self, write_service, mock_journal_service, mock_tag_service, mock_transaction
     ):
         """tags=[] clears all assignments and adds nothing (distinct from None)."""
         mock_journal_service.update_journal.return_value = _journal(journal_id=9)
@@ -456,8 +544,31 @@ class TestUpdateJournalComposite:
             _journal(journal_id=9), mock_transaction, tags=[]
         )
 
-        write_service.tag_repo.remove_tag.assert_awaited_once_with(9, existing.id)
-        write_service.tag_repo.assign_tag.assert_not_awaited()
+        assert mock_tag_service.remove_tag.await_args.args[:2] == (9, existing.id)
+        mock_tag_service.assign_tag.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_tag_replace_passes_caller_provenance(
+        self, write_service, mock_journal_service, mock_tag_service, mock_transaction
+    ):
+        """Both halves of the diff carry the caller's provenance."""
+        mock_journal_service.update_journal.return_value = _journal(journal_id=9)
+        existing = JournalTag(id=uuid4(), name="old", color="#111111")
+        write_service.tag_repo.get_tags_for_journal.return_value = [existing]
+        new_tag = JournalTag(id=uuid4(), name="new", color="#808080")
+        write_service.tag_repo.find_by_name.return_value = new_tag
+
+        await write_service.update_journal_composite(
+            _journal(journal_id=9),
+            mock_transaction,
+            tags=["new"],
+            changed_by="mcp",
+            source=Provenance.MCP,
+        )
+
+        expected = {"source": Provenance.MCP, "changed_by": "mcp"}
+        assert mock_tag_service.remove_tag.await_args.kwargs == expected
+        assert mock_tag_service.assign_tag.await_args.kwargs == expected
 
     @pytest.mark.asyncio
     async def test_relationships_replace_all(

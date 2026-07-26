@@ -66,6 +66,7 @@ from app.core.journal.models.repositories import (
 from app.core.journal.services import journal_type_data_helpers as helpers
 from app.core.journal.services.journal_contact_service import JournalContactService
 from app.core.journal.services.journal_service import JournalService
+from app.core.journal.services.journal_tag_service import JournalTagService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.unit_of_work import savepoint, transactional
 
@@ -291,6 +292,7 @@ class JournalWriteService:
         self,
         journal_service: JournalService,
         journal_contact_service: JournalContactService,
+        tag_service: JournalTagService,
         calendar_info_repo: CalendarInfoRepository,
         photo_album_data_repo: AlbumSyncReadRepository,
         mood_data_repo: MoodDataRepository,
@@ -320,6 +322,7 @@ class JournalWriteService:
     ) -> None:
         self.journal_service = journal_service
         self.journal_contact_service = journal_contact_service
+        self.tag_service = tag_service
         self.calendar_info_repo = calendar_info_repo
         self.photo_album_data_repo = photo_album_data_repo
         self.mood_data_repo = mood_data_repo
@@ -395,7 +398,9 @@ class JournalWriteService:
             )
 
         if tags:
-            await self._process_journal_tags(journal_id, tags, transaction)
+            await self._process_journal_tags(
+                journal_id, tags, transaction, changed_by=changed_by, source=source
+            )
 
         return created_journal
 
@@ -484,7 +489,9 @@ class JournalWriteService:
             )
 
         if tags is not None:
-            await self._replace_journal_tags(journal_id, tags, transaction)
+            await self._replace_journal_tags(
+                journal_id, tags, transaction, changed_by=changed_by, source=source
+            )
 
         return updated
 
@@ -1296,6 +1303,9 @@ class JournalWriteService:
         journal_id: int,
         tags: list[str],
         transaction: AsyncConnection,
+        *,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> None:
         """Find-or-create each tag by name and assign it to the journal.
 
@@ -1306,6 +1316,10 @@ class JournalWriteService:
         a failing tag still aborts the composite write. Tag lookup is
         case-insensitive (``tag_repo.find_by_name``); a missing tag is created
         with the default grey colour, mirroring the previous MCP tool behaviour.
+
+        The assignment itself goes through :class:`JournalTagService` so the
+        ``JournalTagAssigned`` history event is published from one place, whichever
+        path (REST relationship endpoint or MCP composite write) reached it.
         """
         for tag_name in tags:
             async with savepoint(transaction):
@@ -1315,7 +1329,13 @@ class JournalWriteService:
                         JournalTag(id=None, name=tag_name, color="#808080")
                     )
                 if tag.id is not None:
-                    await self.tag_repo.assign_tag(journal_id, tag.id)
+                    await self.tag_service.assign_tag(
+                        journal_id,
+                        tag.id,
+                        transaction,
+                        source=source,
+                        changed_by=changed_by,
+                    )
 
     # Tables whose presence marks a journal type, used to detect current types
     # for replace-all updates. Must cover every type that
@@ -1468,13 +1488,44 @@ class JournalWriteService:
         journal_id: int,
         tags: list[str],
         transaction: AsyncConnection,
+        *,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
     ) -> None:
-        """Remove all existing tag assignments, then find-or-create + assign ``tags``."""
-        existing = await self.tag_repo.get_tags_for_journal(journal_id)
-        for tag in existing:
-            if tag.id is not None:
-                await self.tag_repo.remove_tag(journal_id, tag.id)
-        await self._process_journal_tags(journal_id, tags, transaction)
+        """Make the journal's tags exactly ``tags``, touching only what changed.
+
+        Deliberately a diff rather than remove-all-then-re-add: assignment and
+        removal now publish history events, and re-sending an unchanged tag list
+        (the common case for an MCP update that edits some other field) would
+        otherwise write a bogus "Removed Tags"/"Added Tags" pair into the activity
+        feed for a change that never happened.
+
+        Names are folded with ``str.lower`` rather than ``str.casefold`` so the diff
+        agrees with ``tag_repo.find_by_name``, which matches on SQL ``LOWER()``.
+        ``casefold`` is more aggressive (``ß`` folds to ``ss``), so a name it
+        collapsed but ``LOWER()`` would not would be dropped from ``arriving`` and
+        silently never assigned.
+        """
+        desired = {name.lower() for name in tags}
+        existing = {
+            tag.name.lower(): tag
+            for tag in await self.tag_repo.get_tags_for_journal(journal_id)
+        }
+
+        for folded, tag in existing.items():
+            if tag.id is not None and folded not in desired:
+                await self.tag_service.remove_tag(
+                    journal_id,
+                    tag.id,
+                    transaction,
+                    source=source,
+                    changed_by=changed_by,
+                )
+
+        arriving = [name for name in tags if name.lower() not in existing]
+        await self._process_journal_tags(
+            journal_id, arriving, transaction, changed_by=changed_by, source=source
+        )
 
     async def _create_type_specific_data(
         self, journal_type: JournalType, journal_id: int

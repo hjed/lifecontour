@@ -166,6 +166,72 @@ class JournalTypeRemoved(DomainEvent):
 
 
 @dataclass(frozen=True)
+class JournalTagAssigned(DomainEvent):
+    """Event raised when a tag is assigned to a journal.
+
+    Journal-prefixed because the contact domain already publishes ``TagAssigned``
+    for its own namespace, and the history projection dispatches on the event-type
+    string alone. Carries ``tag_name`` so the projection needs no join, and
+    stringifies ``tag_id`` because the payload round-trips through JSON.
+    """
+
+    def __init__(
+        self,
+        journal_id: int,
+        tag_id: UUID,
+        tag_name: str,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
+        transaction: AsyncConnection | None = None,
+    ):
+        now = datetime.now(tz=UTC)
+        super().__init__(
+            event_id=f"journal_tag_assigned_{journal_id}_{tag_id}_{now.isoformat()}",
+            occurred_at=now,
+            aggregate_id=journal_id,
+            event_type="JournalTagAssigned",
+            event_data={
+                "journal_id": journal_id,
+                "tag_id": str(tag_id),
+                "tag_name": tag_name,
+                "source": source.value,
+                "changed_by": changed_by,
+            },
+            transaction=transaction,
+        )
+
+
+@dataclass(frozen=True)
+class JournalTagRemoved(DomainEvent):
+    """Event raised when a tag is removed from a journal."""
+
+    def __init__(
+        self,
+        journal_id: int,
+        tag_id: UUID,
+        tag_name: str,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
+        transaction: AsyncConnection | None = None,
+    ):
+        now = datetime.now(tz=UTC)
+        super().__init__(
+            event_id=f"journal_tag_removed_{journal_id}_{tag_id}_{now.isoformat()}",
+            occurred_at=now,
+            aggregate_id=journal_id,
+            event_type="JournalTagRemoved",
+            event_data={
+                "journal_id": journal_id,
+                "tag_id": str(tag_id),
+                "tag_name": tag_name,
+                "source": source.value,
+                "changed_by": changed_by,
+            },
+            transaction=transaction,
+        )
+
+
+@dataclass(frozen=True)
 class RouteCreated(DomainEvent):
     """Event raised when a route is created."""
 
