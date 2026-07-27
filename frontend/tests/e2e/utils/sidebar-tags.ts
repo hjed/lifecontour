@@ -65,18 +65,24 @@ export async function openEditDialogForTag(
   const tagLink = journalTagLink(page, tagId);
   await expect(tagLink).toBeVisible({ timeout: 15000 });
 
-  // Retry the gesture: the click can be swallowed during hydration.
+  // Retrying this gesture is safe: the right-click can be swallowed during
+  // hydration, and the tag link stays mounted either way, so a repeat just
+  // re-opens the same context menu.
   const editMenuItem = page.getByRole('menuitem', { name: 'Edit Tag' });
   await expect(async () => {
     await tagLink.click({ button: 'right' });
     await expect(editMenuItem).toBeVisible({ timeout: 2000 });
   }).toPass();
 
+  // Deliberately NOT retried. Choosing the item unmounts the context menu, so
+  // the gesture is not idempotent: if the dialog opened just past a short inner
+  // budget, a retry would click an item that no longer exists and burn the
+  // 20s action timeout on every attempt until the test itself timed out — a
+  // one-second hiccup turned into a hard failure. One click plus a web-first
+  // assertion on the global expect timeout is both simpler and more forgiving.
   const dialog = page.getByRole('dialog', { name: 'Edit Tag' });
-  await expect(async () => {
-    await editMenuItem.click();
-    await expect(dialog).toBeVisible({ timeout: 2000 });
-  }).toPass();
+  await editMenuItem.click();
+  await expect(dialog).toBeVisible();
 
   return dialog;
 }
