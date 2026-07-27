@@ -37,6 +37,7 @@ Read these first when working on the active product-alignment streams:
 - **[Outdoor Logbook Product Specification](./product-specifications/outdoor-logbook-product-specification.md)** - target product behaviour for the outdoor logbook expansion
 - **[Integration Architecture & Strava Product Specification](./product-specifications/integration-architecture-and-strava-product-specification.md)** - event bus migration and Strava integration
 - **[Activity History Product Specification](./product-specifications/activity-history-product-specification.md)** - unified, event-driven activity history across contacts and journals
+- **[Home Dashboard & Tasks Product Specification](./product-specifications/home-dashboard-and-tasks-product-specification.md)** - the journal-anchored Tasks entity and the home dashboard that replaces the placeholder home page
 
 ---
 
