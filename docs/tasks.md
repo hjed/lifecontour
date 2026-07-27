@@ -295,7 +295,7 @@ Read these first when working on the active product-alignment streams:
 **Reference:** [Outdoor Logbook Improvements Product Specification](./product-specifications/outdoor-logbook-improvements-product-specification.md)
 
 ### [Iteration 17: Journal Tags Parity](./tasks/iteration-17-journal-tags-parity.md)
-**Status:** 🟡 IN PROGRESS — ITER17-001, ITER17-002 and ITER17-003 complete; ITER17-004 Phases 1–2 complete (delete/merge UI remaining); ITER17-005 not started
+**Status:** 🟡 IN PROGRESS — ITER17-001, ITER17-002, ITER17-003 and ITER17-004 complete; ITER17-005 Phase 1 complete (tag assignment/removal history events), Phase 2 remaining (tag update/delete/merge events)
 **Dependencies:** Iteration 4 (journal tag tables and endpoints), Iteration 4.6 (journal tag filtering + detail-view add/remove), Iteration 12 (unified event-driven history), Iteration 2.6 (contact tag management UX — the reference behaviour)
 **Goal:** Bring journal tag functionality to exact parity with contact tags across the UI, backend management operations, filtering, history, and MCP
 
@@ -304,7 +304,7 @@ Read these first when working on the active product-alignment streams:
 - ITER17-002: Journal list tag filtering parity — multi-tag `tag_ids`, hierarchical descendant expansion, `/journals?tag=` deep link
 - ITER17-003: Journal detail tag editor matching `ContactTagsEditor` (searchable add, inline create with colour, colour-coded badges)
 - ITER17-004: Sidebar journal tag tree with context-menu management (create/edit/delete/merge dialogs)
-- ITER17-005: Journal tag history events feeding the journal activity feed
+- ITER17-005: Journal tag history events feeding the journal activity feed — Phase 1 (assignment/removal) shipped; Phase 2 (update/delete/merge, plus event-driven search re-indexing) remaining
 
 ---
 

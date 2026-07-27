@@ -18,27 +18,48 @@
  */
 
 import { test, expect } from './fixtures';
+import { TestDataManager } from './data-management';
 
-/** Poll the journal history API until an entry matching the predicate appears. */
-async function waitForHistoryEntry(
+type HistoryAttributes = {
+  field_name: string;
+  source: string;
+  old_value: string | null;
+  new_value: string | null;
+};
+
+/**
+ * Poll the journal history API until an entry matches EVERY predicate.
+ *
+ * Multiple predicates share one polling window on purpose: entries produced by a
+ * single user action almost always project in the same relay batch, so waiting
+ * for them separately would both re-fetch the same list and split the retry
+ * budget across independent timeouts.
+ */
+async function waitForHistoryEntries(
   request: import('@playwright/test').APIRequestContext,
   journalId: string,
-  matches: (attrs: {
-    field_name: string;
-    source: string;
-    new_value: string | null;
-  }) => boolean
+  ...predicates: ((attrs: HistoryAttributes) => boolean)[]
 ): Promise<void> {
+  // With no predicates there is nothing to be unmatched, so the poll would pass on
+  // its first attempt and the caller would assert nothing at all. Fail loudly
+  // instead of silently going green.
+  expect(
+    predicates.length,
+    'waitForHistoryEntries needs at least one predicate'
+  ).toBeGreaterThan(0);
+
   await expect(async () => {
     const response = await request.get(`/api/journals/${journalId}/history`);
     expect(response.ok()).toBeTruthy();
     const json = await response.json();
     expect(Array.isArray(json.data)).toBe(true);
-    const found = json.data.some(
-      (entry: { attributes: Parameters<typeof matches>[0] }) =>
-        matches(entry.attributes)
+    const entries = json.data.map(
+      (entry: { attributes: HistoryAttributes }) => entry.attributes
     );
-    expect(found).toBe(true);
+    const unmatched = predicates.filter(
+      matches => !entries.some((attrs: HistoryAttributes) => matches(attrs))
+    );
+    expect(unmatched).toHaveLength(0);
   }).toPass({ timeout: 30000 });
 }
 
@@ -82,7 +103,7 @@ test.describe('Journal Activity History', () => {
     expect(updateResponse.ok()).toBeTruthy();
 
     // History is projected asynchronously — wait for the title change to land.
-    await waitForHistoryEntry(
+    await waitForHistoryEntries(
       page.request,
       journal.id,
       attrs =>
@@ -155,7 +176,7 @@ test.describe('Journal Activity History', () => {
       );
       expect(patchResponse.ok()).toBeTruthy();
 
-      await waitForHistoryEntry(
+      await waitForHistoryEntries(
         page.request,
         journalId,
         attrs => attrs.field_name === 'content' && attrs.source === 'ui'
@@ -237,6 +258,117 @@ test.describe('Journal Activity History', () => {
         await stravaTrigger.hover();
         await expect(page.getByRole('tooltip')).toBeVisible({ timeout: 2000 });
       }).toPass({ timeout: 10000 });
+    }
+  });
+
+  /**
+   * ITER17-005 Phase 1: journal tag changes are domain events, so they reach the
+   * same feed as any other field change.
+   *
+   * The tag is created through `TestDataManager` and every assertion keys off its
+   * id and its UUID-suffixed name — the journal tag namespace is global and shared
+   * with parallel workers, so "a tag exists" would not be deterministic. The
+   * add/remove go through the real editor rather than the API so the test covers
+   * the path a user actually takes.
+   */
+  test('records tag assignment and removal in the journal activity feed', async ({
+    authenticatedPage: page,
+    testCleanup,
+  }) => {
+    const dataManager = new TestDataManager(page);
+    // Registered before anything is created, not after: the manager cleans up
+    // whatever it has tracked so far, so an exception part-way through setup still
+    // removes the tag. Journal tags are a globally shared namespace, so a leaked
+    // one outlives this test and accumulates for every other worker.
+    testCleanup(async () => await dataManager.cleanup());
+
+    const [tag] = await dataManager.createJournalTags([
+      { name: 'HistoryTag', color: '#38A169' },
+    ]);
+    const journal = await dataManager.createJournal({
+      title: 'Tag History Subject',
+      content: 'Its tag changes must appear in the activity feed.',
+      event_date_range: {
+        start: '2026-01-18T10:00:00Z',
+        end: '2026-01-18T10:30:00Z',
+      },
+      types: ['note'],
+    });
+
+    await page.goto(`/journals/${journal.id}`);
+    const tagsEditor = page.getByTestId('journal-tags-editor');
+    await expect(tagsEditor).toBeVisible();
+
+    // Assign the tag through the editor's search popover.
+    await tagsEditor.getByTestId('add-tag-button').click();
+    await page.getByTestId('tag-search-input').fill(tag.name);
+    await page.getByTestId(`tag-option-${tag.id}`).click();
+
+    const tagBadge = tagsEditor.getByTestId(`tag-badge-${tag.id}`);
+    await expect(tagBadge).toBeVisible({ timeout: 10000 });
+
+    // Remove it again via the badge's accessible remove control. Removal is not
+    // optimistic (the badge waits for the DELETE plus a refetch), so wait on the
+    // DELETE itself rather than retrying the click: a retry would need a
+    // conditional on the badge's transient visibility, and its second click would
+    // issue a second DELETE that only the removal's own no-op guard makes safe.
+    const removeButton = tagsEditor.getByRole('button', {
+      name: `Remove tag ${tag.name}`,
+    });
+    await expect(removeButton).toBeVisible();
+
+    const [removeResponse] = await Promise.all([
+      page.waitForResponse(
+        response =>
+          new URL(response.url()).pathname ===
+            `/api/journals/${journal.id}/relationships/tags/${tag.id}` &&
+          response.request().method() === 'DELETE'
+      ),
+      removeButton.click(),
+    ]);
+    expect(removeResponse.ok()).toBeTruthy();
+    await expect(tagBadge).toBeHidden({ timeout: 15000 });
+
+    // Both changes travel through the async projection before they are readable.
+    await waitForHistoryEntries(
+      page.request,
+      journal.id,
+      attrs =>
+        attrs.field_name === 'tags' &&
+        attrs.source === 'ui' &&
+        attrs.new_value === tag.name,
+      attrs =>
+        attrs.field_name === 'tags' &&
+        attrs.source === 'ui' &&
+        attrs.old_value === tag.name
+    );
+
+    // A fresh load renders both entries in the feed at the bottom of the page
+    // (the history query stays fresh for two minutes, so it will not refetch on
+    // its own after the projection lands).
+    await page.goto(`/journals/${journal.id}`);
+    await expect(page.getByRole('heading', { name: /Activity/i })).toBeVisible({
+      timeout: 10000,
+    });
+
+    // Provenance is asserted on the tag rows themselves, not anywhere in the feed:
+    // a freshly-created journal always carries a `ui`-sourced `__created__` entry,
+    // so an unscoped `provenance-trigger-ui` would be visible even if the tag
+    // events had projected with the wrong source. Each row is also asserted to
+    // appear exactly once, which would catch a duplicated projection.
+    const feed = page.getByTestId('activity-feed');
+    const tagRow = (description: string) =>
+      feed
+        .locator('[data-testid^="activity-item-"]')
+        .filter({ hasText: description });
+
+    for (const description of [
+      `Added Tags: "${tag.name}"`,
+      `Removed Tags: "${tag.name}"`,
+    ]) {
+      const row = tagRow(description);
+      await expect(row).toHaveCount(1, { timeout: 10000 });
+      await expect(row.getByTestId('provenance-trigger-ui')).toBeVisible();
     }
   });
 });
