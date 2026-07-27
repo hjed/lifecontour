@@ -4,13 +4,25 @@ test.describe('Calendar Management', () => {
   test('can create, edit and delete a calendar', async ({
     authenticatedPage: page,
   }) => {
+    // Each submit below is a single click followed by a web-first assertion that
+    // the dialog closed, rather than a click wrapped in `toPass`. Retrying the
+    // click is unsound here: the click always lands (the dialog was opened by a
+    // click and its fields filled, so the page is fully interactive), and once
+    // it has landed the button unmounts as the dialog closes. A retry loop with
+    // a short inner budget therefore turns a slow round-trip into a permanent
+    // failure — every later attempt waits out the action timeout on a button
+    // that no longer exists. The only thing worth waiting on is the API call, so
+    // let the global expect timeout cover it.
+    const dialog = page.getByRole('dialog');
+    const saveChanges = dialog.getByRole('button', { name: /save changes/i });
+
     // 1. Navigate to Settings page
     await page.goto('/settings');
     await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
 
     // 2. Open Create Calendar dialog
     await page.getByRole('button', { name: 'Add Calendar' }).click();
-    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(dialog).toBeVisible();
 
     // 3. Fill in calendar details
     const calendarName = `E2E Calendar ${Date.now()}`;
@@ -19,10 +31,8 @@ test.describe('Calendar Management', () => {
     await page.getByTestId('color-input').fill('#123456');
 
     // 4. Submit and wait for creation
-    await expect(async () => {
-      await page.getByRole('button', { name: /save changes/i }).click();
-      await expect(page.getByRole('dialog')).toBeHidden({ timeout: 2000 });
-    }).toPass();
+    await saveChanges.click();
+    await expect(dialog).toBeHidden();
 
     await expect(page.getByText(calendarName)).toBeVisible();
 
@@ -48,10 +58,8 @@ test.describe('Calendar Management', () => {
     await nameInput.fill(updatedName);
 
     // Submit and wait for update
-    await expect(async () => {
-      await page.getByRole('button', { name: /save changes/i }).click();
-      await expect(page.getByRole('dialog')).toBeHidden({ timeout: 2000 });
-    }).toPass();
+    await saveChanges.click();
+    await expect(dialog).toBeHidden();
 
     // Verify updated name appears
     await expect(page.getByText(updatedName)).toBeVisible();
@@ -68,10 +76,8 @@ test.describe('Calendar Management', () => {
       page.getByRole('heading', { name: 'Delete Calendar' })
     ).toBeVisible();
 
-    await expect(async () => {
-      await page.getByRole('button', { name: 'Delete' }).click();
-      await expect(page.getByRole('dialog')).toBeHidden({ timeout: 2000 });
-    }).toPass();
+    await dialog.getByRole('button', { name: 'Delete' }).click();
+    await expect(dialog).toBeHidden();
 
     // Verify it's gone
     await expect(page.getByText(updatedName)).toBeHidden();
