@@ -66,7 +66,12 @@ test.describe('Journal List Page', () => {
       const { page } = journalsWithData;
 
       await page.goto('/journals');
-      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
+      // The AuthGuard loading card is itself a <main>, so waiting on `main`
+      // resolves before the journals page has even mounted — and the list then
+      // scrolls itself to today once its data lands, swallowing any click made
+      // in that window. Every other test in this file waits on the list's own
+      // readiness signal; this one was the outlier.
+      await expect(page.getByTestId('journals-list-ready')).toBeVisible();
 
       const filterToggle = page.getByRole('button', { name: /filter/i });
       const filtersSection = page.locator('[data-testid="journal-filters"]');
@@ -753,87 +758,62 @@ test.describe('Journal List Page', () => {
       const filtersSection = page.locator('[data-testid="journal-filters"]');
       await expect(filtersSection.getByText(tags[0].name)).toBeVisible();
 
-      // Filter by Work tag (use the exact tag name returned from creation)
-      const workCheckbox = filtersSection.getByLabel(tags[0].name);
-
-      await expect(async () => {
-        const responsePromise = page.waitForResponse(
-          response =>
-            response.url().includes('/api/journals') &&
-            response.url().includes('tag_ids=') &&
-            response.status() === 200,
-          { timeout: 3000 }
-        );
-        if ((await workCheckbox.getAttribute('aria-checked')) !== 'true') {
-          await workCheckbox.click();
-        }
-        await responsePromise;
-      }).toPass({ timeout: 10000 });
-
-      // Verify only journals with Work tag are visible
       const workHeading = page.getByRole('heading', { name: /Work Meeting/i });
-
-      await expect(workHeading).toBeVisible({ timeout: 30000 });
-
+      const personalHeading = page.getByRole('heading', {
+        name: /Personal Note/i,
+      });
       const mixedHeading = page.getByRole('heading', {
         name: /Mixed Journal/i,
       });
 
+      // Each toggle below is a single click asserted through the UI rather than
+      // through `waitForResponse`. Clearing a filter restores the unfiltered
+      // React Query key that was already fetched on page load, so the list can
+      // come straight from cache and no request is guaranteed to be sent — a
+      // network wait there can only time out. Retrying the click is unsound for
+      // the same reason: once the checkbox has flipped, the retry skips the
+      // click and waits on a response that will never arrive.
+      //
+      // The negative assertion comes first after a filter is applied. The list
+      // still shows the previous, unfiltered results until the refetch lands,
+      // so asserting the expected-visible journals first would pass against
+      // stale content and prove nothing; the hidden assertion is the one that
+      // actually waits for the filtered result.
+
+      // Filter by Work tag (use the exact tag name returned from creation)
+      const workCheckbox = filtersSection.getByLabel(tags[0].name);
+      await expect(workCheckbox).toHaveAttribute('aria-checked', 'false');
+
+      await workCheckbox.click();
+      await expect(workCheckbox).toHaveAttribute('aria-checked', 'true');
+
+      // Verify only journals with Work tag are visible
+      await expect(personalHeading).toBeHidden({ timeout: 30000 });
+      await expect(workHeading).toBeVisible({ timeout: 30000 });
       await expect(mixedHeading).toBeVisible({ timeout: 30000 });
 
-      // Verify Personal Note is not visible
-      await expect(
-        page.getByRole('heading', { name: /Personal Note/i })
-      ).toBeHidden();
-
       // Uncheck Work tag
-      await expect(async () => {
-        const responsePromise = page.waitForResponse(
-          response =>
-            response.url().includes('/api/journals') &&
-            response.status() === 200,
-          { timeout: 3000 }
-        );
-        if ((await workCheckbox.getAttribute('aria-checked')) === 'true') {
-          await workCheckbox.click();
-        }
-        await responsePromise;
-      }).toPass({ timeout: 10000 });
+      await workCheckbox.click();
+      await expect(workCheckbox).toHaveAttribute('aria-checked', 'false');
 
-      // Wait for all journals to be visible again
-      await expect(
-        page.getByRole('heading', { name: /Personal Note/i })
-      ).toBeVisible();
+      // Wait for all journals to be visible again. Every list assertion in this
+      // test waits on the same thing — a filter change refetching — so they all
+      // carry the same budget rather than some falling back to the 15s default.
+      await expect(personalHeading).toBeVisible({ timeout: 30000 });
+      await expect(workHeading).toBeVisible({ timeout: 30000 });
+      await expect(mixedHeading).toBeVisible({ timeout: 30000 });
 
       // Filter by Personal tag (use the exact tag name returned from creation)
       const personalCheckbox = filtersSection.getByLabel(tags[1].name);
+      await expect(personalCheckbox).toHaveAttribute('aria-checked', 'false');
 
-      await expect(async () => {
-        const responsePromise = page.waitForResponse(
-          response =>
-            response.url().includes('/api/journals') &&
-            response.url().includes('tag_ids=') &&
-            response.status() === 200,
-          { timeout: 3000 }
-        );
-        if ((await personalCheckbox.getAttribute('aria-checked')) !== 'true') {
-          await personalCheckbox.click();
-        }
-        await responsePromise;
-      }).toPass({ timeout: 10000 });
+      await personalCheckbox.click();
+      await expect(personalCheckbox).toHaveAttribute('aria-checked', 'true');
 
       // Verify only journals with Personal tag are visible
-      await expect(
-        page.getByRole('heading', { name: /Personal Note/i })
-      ).toBeVisible();
-      await expect(
-        page.getByRole('heading', { name: /Mixed Journal/i })
-      ).toBeVisible();
-
-      // Verify Work Meeting is not visible
-      await expect(
-        page.getByRole('heading', { name: /Work Meeting/i })
-      ).toBeHidden();
+      await expect(workHeading).toBeHidden({ timeout: 30000 });
+      await expect(personalHeading).toBeVisible({ timeout: 30000 });
+      await expect(mixedHeading).toBeVisible({ timeout: 30000 });
     });
 
     test('should include child-tagged journals when filtering by a parent tag', async ({

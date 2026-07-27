@@ -41,8 +41,13 @@ test.describe('Logbook Export', () => {
 
     // Navigate to journals page
     await page.goto('/journals');
-    // Wait for journals page to be loaded by checking for the search input
-    await expect(page.locator('[data-testid="search-input"]')).toBeVisible({
+    // Wait for the journal list to settle, not just for the page chrome to
+    // render. The search input appears as soon as AuthGuard swaps its loading
+    // card for the page, but DayGroupedJournalList then scrolls the page to
+    // today (`scrollIntoView`) once its data arrives. Clicking in that window
+    // races the app's own scroll and the click is lost. `journals-list-ready`
+    // is the list's own signal that the initial scroll has finished.
+    await expect(page.getByTestId('journals-list-ready')).toBeVisible({
       timeout: 15000,
     });
 
@@ -114,13 +119,16 @@ test.describe('Logbook Export', () => {
       await dataManager.cleanup();
     });
 
-    // Navigate and open export dialog
+    // Navigate and open export dialog. Wait for the list's own readiness
+    // signal so the click cannot race its initial scroll — see the first test.
     await page.goto('/journals');
-    await expect(page.locator('[data-testid="search-input"]')).toBeVisible({
+    await expect(page.getByTestId('journals-list-ready')).toBeVisible({
       timeout: 15000,
     });
 
-    await page.locator('[data-testid="export-logbook"]').click();
+    const exportButton = page.locator('[data-testid="export-logbook"]');
+    await expect(exportButton).toBeVisible();
+    await exportButton.click();
     const dialog = page.locator('[data-testid="logbook-export-dialog"]');
     await expect(dialog).toBeVisible();
 
