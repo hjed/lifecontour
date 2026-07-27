@@ -731,6 +731,8 @@ async def update_journal_tag(
         description=attrs.description,
         parent_id=parent_id,
         set_parent_null=set_parent_null,
+        source=Provenance.UI,
+        changed_by="ui",
     )
 
     return JournalTagResponse(data=_journal_tag_resource(updated_tag, base_url))

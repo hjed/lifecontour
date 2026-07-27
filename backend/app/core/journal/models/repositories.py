@@ -983,6 +983,25 @@ class JournalTagRepository(ABC):
         pass
 
     @abstractmethod
+    async def get_journal_ids_for_tag(self, tag_id: UUID) -> list[int]:
+        """
+        List the journals currently assigned this tag.
+
+        The inverse of :meth:`get_tags_for_journal`. Tag-scoped writes publish
+        journal-scoped history events, so they need to know which journals a
+        change reaches — and for destructive writes they must ask *before* the
+        assignments cascade away.
+
+        Args:
+            tag_id: The tag whose journals to list
+
+        Returns:
+            The ids of every journal carrying the tag, ascending. Empty when the
+            tag is unassigned or does not exist.
+        """
+        pass
+
+    @abstractmethod
     async def get_all(self) -> list[JournalTag]:
         """
         Get all tags.

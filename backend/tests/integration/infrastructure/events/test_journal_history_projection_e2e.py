@@ -745,11 +745,12 @@ class TestJournalHistoryProjectionE2E:
 
 @pytest.mark.integration
 class TestJournalTagHistoryProjectionE2E:
-    """ITER17-005 Phase 1: journal tag assignment/removal reaches journal history.
+    """Journal tag assignment, removal and rename reach journal history.
 
     Drives the real chain (``JournalTagService`` -> outbox -> relay -> projection)
     with real repositories, so the assertions cover the SQL that decides whether an
-    event is published at all, not just the event construction.
+    event is published at all — and which journals it reaches — not just the event
+    construction.
     """
 
     async def _tag_service(self, conn: AsyncConnection) -> JournalTagService:
@@ -926,6 +927,105 @@ class TestJournalTagHistoryProjectionE2E:
         assert await self._tags_history(async_connection, journal_id) == [
             (None, tag_name, Provenance.MCP, "mcp")
         ]
+
+    @pytest.mark.asyncio
+    async def test_rename_is_projected_onto_every_journal_carrying_the_tag(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        """One tag write fans out to a history row on each tagged journal.
+
+        Two journals rather than one so the fan-out is observable, and a third
+        journal without the tag pins that the rename does not reach journals it
+        never touched.
+        """
+        tag_service = await self._tag_service(async_connection)
+        tagged_ids = [
+            await self._journal_id(async_connection, "Renamed subject 1"),
+            await self._journal_id(async_connection, "Renamed subject 2"),
+        ]
+        untagged_id = await self._journal_id(async_connection, "Untagged bystander")
+        old_name = f"Hiking-{uuid4()}"
+        tag = await SqlJournalTagRepository(async_connection).save(
+            JournalTag(name=old_name)
+        )
+        assert tag.id is not None
+        for journal_id in tagged_ids:
+            await tag_service.assign_tag(
+                journal_id,
+                tag.id,
+                async_connection,
+                source=Provenance.UI,
+                changed_by="ui",
+            )
+
+        new_name = f"Trekking-{uuid4()}"
+        await tag_service.update_tag(
+            tag.id,
+            async_connection,
+            name=new_name,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        await _relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-tag-rename-e2e"
+        )
+
+        for journal_id in tagged_ids:
+            # Most recent first: the rename, then the assignment that preceded it.
+            assert await self._tags_history(async_connection, journal_id) == [
+                (old_name, new_name, Provenance.UI, "ui"),
+                (None, old_name, Provenance.UI, "ui"),
+            ]
+        assert await self._tags_history(async_connection, untagged_id) == []
+
+    @pytest.mark.asyncio
+    async def test_replaying_a_rename_adds_no_duplicate_rows(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+        redis_client: Redis,
+    ) -> None:
+        """A redelivered rename must not double the entry in the feed.
+
+        The fan-out gives every journal its own ``event_id``, which is what lets
+        the dedup index key them independently on replay.
+        """
+        tag_service = await self._tag_service(async_connection)
+        journal_id = await self._journal_id(async_connection, "Rename replay subject")
+        old_name = f"ReplayRename-{uuid4()}"
+        tag = await SqlJournalTagRepository(async_connection).save(
+            JournalTag(name=old_name)
+        )
+        assert tag.id is not None
+        await tag_service.assign_tag(
+            journal_id, tag.id, async_connection, source=Provenance.UI, changed_by="ui"
+        )
+        await tag_service.update_tag(
+            tag.id,
+            async_connection,
+            name=f"ReplayRenamed-{uuid4()}",
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+        await _relay_and_project(
+            stream_client,
+            test_stream_name,
+            async_connection,
+            "test-tag-rename-replay",
+        )
+        after_first = await self._tags_history(async_connection, journal_id)
+        assert len(after_first) == 2
+
+        await _replay_stream_through_projection(
+            stream_client, test_stream_name, async_connection, redis_client
+        )
+
+        assert await self._tags_history(async_connection, journal_id) == after_first
 
 
 @pytest.mark.integration

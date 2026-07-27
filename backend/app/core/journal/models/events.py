@@ -232,6 +232,50 @@ class JournalTagRemoved(DomainEvent):
 
 
 @dataclass(frozen=True)
+class JournalTagRenamed(DomainEvent):
+    """Event raised when a tag carried by a journal is renamed.
+
+    Published once per journal that carries the tag rather than once per tag:
+    the journal is the aggregate whose activity feed the entry lands in, and a
+    tag-scoped event would have no integer ``aggregate_id`` to use — journal
+    tags are UUID-keyed. Carries both names so the projection can write a real
+    field change without a join, the same way the assignment events carry
+    ``tag_name``.
+
+    Only a *name* change publishes this. A tag's colour, description and parent
+    are invisible on a journal, so changing them alters nothing about it and
+    must not produce history.
+    """
+
+    def __init__(
+        self,
+        journal_id: int,
+        tag_id: UUID,
+        old_name: str,
+        new_name: str,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
+        transaction: AsyncConnection | None = None,
+    ):
+        now = datetime.now(tz=UTC)
+        super().__init__(
+            event_id=f"journal_tag_renamed_{journal_id}_{tag_id}_{now.isoformat()}",
+            occurred_at=now,
+            aggregate_id=journal_id,
+            event_type="JournalTagRenamed",
+            event_data={
+                "journal_id": journal_id,
+                "tag_id": str(tag_id),
+                "old_name": old_name,
+                "new_name": new_name,
+                "source": source.value,
+                "changed_by": changed_by,
+            },
+            transaction=transaction,
+        )
+
+
+@dataclass(frozen=True)
 class RouteCreated(DomainEvent):
     """Event raised when a route is created."""
 

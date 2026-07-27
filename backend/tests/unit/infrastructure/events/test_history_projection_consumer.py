@@ -23,9 +23,11 @@ _JOURNAL_EVENT_TYPES = {
     "JournalDeleted",
     "JournalTypeAdded",
     "JournalTypeRemoved",
-    # ITER17-005 Phase 1: journal tag assignment/removal.
+    # Journal tag assignment/removal.
     "JournalTagAssigned",
     "JournalTagRemoved",
+    # Journal tag rename, fanned out to every journal carrying the tag.
+    "JournalTagRenamed",
     "RouteCreated",
     "RouteUpdated",
     "RouteDeleted",

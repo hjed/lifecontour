@@ -1,43 +1,12 @@
 import { test, expect } from './fixtures';
 import type { Page } from '@playwright/test';
 import { TestDataManager } from './data-management';
-
-const ARIA_EXPANDED = 'aria-expanded';
-
-/**
- * Ensure the sidebar is visible and the given section is expanded.
- * On mobile viewports, this opens the hamburger Sheet first.
- */
-async function ensureSidebarOpen(page: Page, section = 'Contacts') {
-  const isMobile =
-    page.viewportSize()?.width && page.viewportSize()!.width < 768;
-  if (isMobile) {
-    const mobileTrigger = page.getByTestId('mobile-nav-trigger');
-    // Gate on the trigger's `aria-expanded`, which Radix flips synchronously,
-    // rather than on the heading's visibility: the Sheet slides in over 500ms,
-    // so a one-shot visibility check taken mid-animation reports "closed" for a
-    // Sheet that is already open, and the resulting second click is swallowed by
-    // the open Sheet's overlay.
-    const isSheetOpen =
-      (await mobileTrigger.getAttribute(ARIA_EXPANDED)) === 'true';
-    if (!isSheetOpen) {
-      await mobileTrigger.click();
-    }
-    // Auto-retrying, so it waits out the slide-in either way.
-    await expect(
-      page.getByRole('heading', { name: 'Navigation' })
-    ).toBeVisible();
-  }
-
-  // Expand the requested section if collapsed
-  const sectionHeader = page.getByRole('button', { name: section });
-  await expect(sectionHeader).toBeVisible();
-  const isExpanded = await sectionHeader.getAttribute(ARIA_EXPANDED);
-  if (isExpanded === 'false') {
-    await sectionHeader.click();
-  }
-  await expect(sectionHeader).toHaveAttribute(ARIA_EXPANDED, 'true');
-}
+import {
+  ensureSidebarOpen,
+  journalSection,
+  journalTagLink,
+  openEditDialogForTag,
+} from './utils/sidebar-tags';
 
 /**
  * Waits for a list to be refetched *because of* a tag mutation.
@@ -455,39 +424,12 @@ test.describe('Sidebar Tag Management', () => {
      * DOM, so an unscoped test id matches twice. A role-based locator only
      * matches what is in the accessibility tree, which is the visible copy.
      */
-    function journalSection(page: Page) {
-      return page.getByRole('group', { name: 'Journals' });
-    }
-
     /** The journal-query half of the invalidation a tag mutation promises. */
     function journalsRefetchedAfter(
       page: Page,
       mutation: { pathname: string; method: string }
     ) {
       return listRefetchedAfter(page, mutation, '/api/journals');
-    }
-
-    /** Opens a journal tag row's management menu and chooses Edit Tag. */
-    async function openEditDialogForTag(page: Page, tagId: string) {
-      const tagLink = journalSection(page).getByTestId(
-        `nav-link-journal-tag-${tagId}`
-      );
-      await expect(tagLink).toBeVisible({ timeout: 15000 });
-
-      // Retry the gesture: the click can be swallowed during hydration.
-      const editMenuItem = page.getByRole('menuitem', { name: 'Edit Tag' });
-      await expect(async () => {
-        await tagLink.click({ button: 'right' });
-        await expect(editMenuItem).toBeVisible({ timeout: 2000 });
-      }).toPass();
-
-      const dialog = page.getByRole('dialog', { name: 'Edit Tag' });
-      await expect(async () => {
-        await editMenuItem.click();
-        await expect(dialog).toBeVisible({ timeout: 2000 });
-      }).toPass();
-
-      return dialog;
     }
 
     test('can create a journal tag from the sidebar and assign it to a journal', async ({
@@ -602,9 +544,9 @@ test.describe('Sidebar Tag Management', () => {
       await expect(page.getByText('Tag updated successfully')).toBeVisible();
 
       await ensureSidebarOpen(page, 'Journals');
-      await expect(
-        journalSection(page).getByTestId(`nav-link-journal-tag-${tag.id}`)
-      ).toContainText(renamedTo, { timeout: 15000 });
+      await expect(journalTagLink(page, tag.id)).toContainText(renamedTo, {
+        timeout: 15000,
+      });
 
       // The rename reaches the journal that carries the tag.
       await page.goto(`/journals/${journal.id}`);
@@ -731,9 +673,9 @@ test.describe('Sidebar Tag Management', () => {
 
       // The mobile Sheet can close over the dialog interaction.
       await ensureSidebarOpen(page, 'Journals');
-      await expect(
-        journalSection(page).getByTestId(`nav-link-journal-tag-${tag.id}`)
-      ).toHaveCount(0, { timeout: 15000 });
+      await expect(journalTagLink(page, tag.id)).toHaveCount(0, {
+        timeout: 15000,
+      });
 
       // Deleting un-assigns rather than being refused, so the journal survives
       // without the tag.
@@ -814,12 +756,10 @@ test.describe('Sidebar Tag Management', () => {
       ).toBeVisible();
 
       await ensureSidebarOpen(page, 'Journals');
-      await expect(
-        journalSection(page).getByTestId(`nav-link-journal-tag-${source.id}`)
-      ).toHaveCount(0, { timeout: 15000 });
-      await expect(
-        journalSection(page).getByTestId(`nav-link-journal-tag-${target.id}`)
-      ).toBeVisible();
+      await expect(journalTagLink(page, source.id)).toHaveCount(0, {
+        timeout: 15000,
+      });
+      await expect(journalTagLink(page, target.id)).toBeVisible();
 
       // The journal tagged with the source now carries the target instead.
       await page.goto(`/journals/${journal.id}`);

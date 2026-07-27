@@ -5,11 +5,13 @@ Mirrors the contact `list_contact_tags` coverage in
 `test_contact_tools_integration.py` for the journal tag namespace.
 """
 
+import json
 from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_tag_repository import SqlJournalTagRepository
@@ -27,6 +29,32 @@ async def journal_tag_repo(
 ) -> SqlJournalTagRepository:
     """Create a journal tag repository bound to the test connection."""
     return SqlJournalTagRepository(async_connection)
+
+
+async def _create_journal(connection: AsyncConnection) -> int:
+    """Insert a journal for a tag to be assigned to, returning its id."""
+    now = datetime.now(UTC)
+    result = await connection.execute(
+        text(
+            """
+            INSERT INTO journals
+                (user_id, title, content,
+                 event_date_range_start, event_date_range_end)
+            VALUES (:user_id, :title, :content, :start, :end)
+            RETURNING id
+            """
+        ),
+        {
+            "user_id": "test-user-123",
+            "title": "MCP tag rename subject",
+            "content": "Carries the renamed tag",
+            "start": now,
+            "end": now,
+        },
+    )
+    row = result.fetchone()
+    assert row is not None
+    return int(row[0])
 
 
 async def call_list_journal_tags(
@@ -299,6 +327,45 @@ class TestUpdateJournalTagMCPTool:
         )
 
         assert "invalid tag uuid" in raw.lower()
+
+    @pytest.mark.asyncio
+    async def test_rename_publishes_a_rename_event_with_mcp_provenance(
+        self,
+        authenticated_lifespan_client,
+        journal_tag_repo,
+        async_connection,
+    ):
+        """An AI-agent rename must be attributable in the journal's feed.
+
+        The REST path is covered by ``TestJournalTagRenameHistoryEvents``; this
+        pins that the MCP tool carries its own provenance rather than falling
+        back to the service's ``system`` default.
+        """
+        tag = await journal_tag_repo.save(JournalTag(name="mcp-rename-source"))
+        journal_id = await _create_journal(async_connection)
+        await journal_tag_repo.assign_tag(journal_id, tag.id)
+        await async_connection.execute(text("DELETE FROM outbox_events"))
+
+        await call_update_journal_tag(
+            authenticated_lifespan_client,
+            {"tag_id": str(tag.id), "name": "mcp-rename-target"},
+        )
+
+        result = await async_connection.execute(
+            text(
+                "SELECT event_data FROM outbox_events "
+                "WHERE event_type = 'JournalTagRenamed' ORDER BY id"
+            )
+        )
+        rows = result.fetchall()
+        assert len(rows) == 1
+        data = json.loads(rows[0][0]) if isinstance(rows[0][0], str) else rows[0][0]
+        assert data["journal_id"] == journal_id
+        assert data["tag_id"] == str(tag.id)
+        assert data["old_name"] == "mcp-rename-source"
+        assert data["new_name"] == "mcp-rename-target"
+        assert data["source"] == "mcp"
+        assert data["changed_by"] == "mcp"
 
 
 @pytest.mark.integration

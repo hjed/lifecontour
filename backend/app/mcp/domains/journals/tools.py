@@ -5256,6 +5256,8 @@ async def update_journal_tag(
         description=description,
         parent_id=parent_uuid,
         set_parent_null=move_to_root,
+        source=Provenance.MCP,
+        changed_by="mcp",
     )
 
     response_data = JournalTagInfo(

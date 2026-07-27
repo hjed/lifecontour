@@ -19,6 +19,7 @@
 
 import { test, expect } from './fixtures';
 import { TestDataManager } from './data-management';
+import { ensureSidebarOpen, openEditDialogForTag } from './utils/sidebar-tags';
 
 type HistoryAttributes = {
   field_name: string;
@@ -370,5 +371,82 @@ test.describe('Journal Activity History', () => {
       await expect(row).toHaveCount(1, { timeout: 10000 });
       await expect(row.getByTestId('provenance-trigger-ui')).toBeVisible();
     }
+  });
+
+  test('records a tag rename in the journal activity feed', async ({
+    authenticatedPage: page,
+    testCleanup,
+  }) => {
+    const dataManager = new TestDataManager(page);
+    // Registered before anything is created — see the assignment test above.
+    testCleanup(async () => await dataManager.cleanup());
+
+    const [tag] = await dataManager.createJournalTags([
+      { name: 'RenameHistoryTag', color: '#38A169' },
+    ]);
+    const journal = await dataManager.createJournal({
+      title: 'Tag Rename History Subject',
+      content: 'The tag it carries is renamed out from under it.',
+      event_date_range: {
+        start: '2026-01-19T10:00:00Z',
+        end: '2026-01-19T10:30:00Z',
+      },
+      types: ['note'],
+    });
+    await dataManager.assignTagsToJournal(journal.id, [tag.id]);
+
+    // Unique so the assertions cannot match another worker's tag: the journal tag
+    // namespace is global and shared across parallel workers.
+    const renamedTo = `HistoryRenamed-${crypto.randomUUID().slice(0, 8)}`;
+
+    // Rename through the real sidebar management dialog rather than the API, so
+    // the test covers the provenance the endpoint attaches.
+    await page.goto('/journals');
+    await expect(page.getByTestId('journals-list-ready')).toBeVisible();
+    await ensureSidebarOpen(page, 'Journals');
+
+    const dialog = await openEditDialogForTag(page, tag.id);
+    const nameField = dialog.getByLabel('Name', { exact: true });
+    await expect(nameField).toHaveValue(tag.name);
+    await nameField.fill(renamedTo);
+
+    const [patchResponse] = await Promise.all([
+      page.waitForResponse(
+        response =>
+          new URL(response.url()).pathname === `/api/journals/tags/${tag.id}` &&
+          response.request().method() === 'PATCH'
+      ),
+      dialog.getByRole('button', { name: 'Save Changes' }).click(),
+    ]);
+    expect(patchResponse.ok()).toBeTruthy();
+    await expect(dialog).toBeHidden();
+
+    // The rename travels through the async projection before it is readable.
+    await waitForHistoryEntries(
+      page.request,
+      journal.id,
+      attrs =>
+        attrs.field_name === 'tags' &&
+        attrs.source === 'ui' &&
+        attrs.old_value === tag.name &&
+        attrs.new_value === renamedTo
+    );
+
+    // A fresh load renders the entry in the feed (the history query stays fresh
+    // for two minutes, so it will not refetch on its own after projection lands).
+    await page.goto(`/journals/${journal.id}`);
+    await expect(page.getByRole('heading', { name: /Activity/i })).toBeVisible({
+      timeout: 10000,
+    });
+
+    // Both names in one row is what distinguishes a rename from the add/remove
+    // pair a naive implementation would have produced. Scoped to the row and
+    // asserted exactly once, for the reasons the assignment test explains.
+    const renameRow = page
+      .getByTestId('activity-feed')
+      .locator('[data-testid^="activity-item-"]')
+      .filter({ hasText: `Changed Tags from "${tag.name}" to "${renamedTo}"` });
+    await expect(renameRow).toHaveCount(1, { timeout: 10000 });
+    await expect(renameRow.getByTestId('provenance-trigger-ui')).toBeVisible();
   });
 });
