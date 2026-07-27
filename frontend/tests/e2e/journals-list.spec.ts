@@ -796,10 +796,12 @@ test.describe('Journal List Page', () => {
       await workCheckbox.click();
       await expect(workCheckbox).toHaveAttribute('aria-checked', 'false');
 
-      // Wait for all journals to be visible again
+      // Wait for all journals to be visible again. Every list assertion in this
+      // test waits on the same thing — a filter change refetching — so they all
+      // carry the same budget rather than some falling back to the 15s default.
       await expect(personalHeading).toBeVisible({ timeout: 30000 });
-      await expect(workHeading).toBeVisible();
-      await expect(mixedHeading).toBeVisible();
+      await expect(workHeading).toBeVisible({ timeout: 30000 });
+      await expect(mixedHeading).toBeVisible({ timeout: 30000 });
 
       // Filter by Personal tag (use the exact tag name returned from creation)
       const personalCheckbox = filtersSection.getByLabel(tags[1].name);
