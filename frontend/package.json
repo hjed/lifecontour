@@ -92,7 +92,7 @@
     "@typescript-eslint/parser": "^8.64.0",
     "autoprefixer": "^10.5.4",
     "eslint": "^10.7.0",
-    "eslint-config-next": "^16.2.10",
+    "eslint-config-next": "^16.2.11",
     "eslint-plugin-jsx-a11y": "^6.10.2",
     "eslint-plugin-playwright": "^2.10.5",
     "eslint-plugin-react": "^7.37.5",
