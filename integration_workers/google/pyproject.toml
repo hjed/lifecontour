@@ -47,7 +47,7 @@ core_shared = { path = "../../core_shared", editable = true }
 dev = [
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
-    "ruff>=0.15.22",
+    "ruff>=0.16.0",
     "mypy>=2.3.0",
 ]
 
