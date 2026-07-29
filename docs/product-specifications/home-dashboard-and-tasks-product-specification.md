@@ -177,7 +177,15 @@ Rules:
 
 The creating journal is set once and never changes.
 
-The due journal may be **retargeted** to a different future journal at any time while the task is not done. This is how a user extends a deadline.
+The due journal may be **retargeted** to a different future journal at any time, in any status. This is how a user extends a deadline, and it is also how a lapsed or cancelled task is brought back.
+
+Retargeting always leaves the task **not done**:
+
+- a task that was already not done stays not done
+- a **cancelled** task is reopened — this is the reopening rule described under *Status and lifecycle*
+- a **done** task is likewise reopened, and the UI must say so before it happens, because reopening a completed task is rarely what the user meant by moving a date
+
+The new due journal must satisfy the future-dated invariant at the moment it is set, whatever the task's previous status.
 
 When a due journal is retargeted:
 
@@ -420,6 +428,8 @@ For **past days**, the inputs are augmented with:
 
 - tasks that were due in that day's journals, and how they resolved — done, cancelled, or left undone
 
+"How they resolved" means each task's status **at the moment the summary is generated**, not a reconstruction of what it was at the end of that day. The product does not replay field history to rebuild point-in-time status. The consequence is that a past-day summary regenerated after a lapsed task was finally completed will describe that task as done — which is the honest answer to "what became of this", and matches the status the user sees on the journal itself.
+
 The forward-looking material — upcoming contact dates and next-week tasks — belongs to the current day only. A summary of last Tuesday should describe last Tuesday, not what was coming up after it.
 
 ### Eligibility
@@ -433,7 +443,17 @@ The current eligibility rule requires two or more journals on the day. That rule
 
 Today's summary must reflect today. It is regenerated when it is read if it was not generated **today in the user's timezone** — a summary produced yesterday evening is stale by the morning and must not be served.
 
-Beyond that staleness rule, the existing caching behaviour is unchanged: a summary generated today is served from cache, concurrent generation is prevented, and journal changes continue to invalidate the day's summary.
+Beyond that staleness rule, the existing caching behaviour is unchanged: a summary generated today is served from cache, and concurrent generation is prevented.
+
+Invalidation must follow the summary's **inputs**, not only its journals. Now that tasks and contact dates feed the summary, a day's summary is invalidated by:
+
+- changes to that day's journals, as today
+- changes to the tasks that feed it — created, retargeted into or out of the window, status changed, or contact links changed
+- changes to important contact dates falling in the window, for the current day
+
+Without this, a summary generated earlier today could still be describing a task the user has already ticked off.
+
+Invalidation is **lazy**: it marks the cached summary stale, and the next read regenerates it. Ticking off four tasks in a row therefore costs one regeneration, not four. A summary is never regenerated underneath a user who is acting on the dashboard — the sections beneath it update in place, and the summary refreshes on the next load.
 
 Users can still explicitly request a regeneration.
 
