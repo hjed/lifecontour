@@ -148,7 +148,9 @@ The concurrent execution test uses timing assertions with generous thresholds:
 
 ```python
 # Allow more overhead for transaction management and connection setup
-assert total_time < 0.4, f"Syncs should run concurrently, not sequentially (took {total_time}s)"
+assert total_time < 0.4, (
+    f"Syncs should run concurrently, not sequentially (took {total_time}s)"
+)
 ```
 
 This accounts for:

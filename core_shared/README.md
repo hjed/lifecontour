@@ -36,7 +36,7 @@ sync_record = SyncMetadata(
     external_id="person/abc123",
     last_synced_at=datetime.utcnow(),
     version_hash="sha256_hash_of_data",
-    sync_status=SyncStatus.SUCCESS.value
+    sync_status=SyncStatus.SUCCESS.value,
 )
 ```
 
@@ -53,7 +53,7 @@ reference = ExternalReference(
     internal_entity_id=123,
     external_system="immich",
     external_entity_type="person",
-    external_entity_id="person_uuid_456"
+    external_entity_id="person_uuid_456",
 )
 ```
 
@@ -102,10 +102,7 @@ from core_shared import get_database_url, create_engine_from_env
 url = get_database_url()
 
 # Create engine with optimized settings
-engine = create_engine_from_env(
-    pool_size=5,
-    max_overflow=10
-)
+engine = create_engine_from_env(pool_size=5, max_overflow=10)
 ```
 
 ## Installation

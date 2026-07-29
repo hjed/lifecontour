@@ -5,12 +5,14 @@ repos:
   # Backend Python hooks
   - repo: local
     hooks:
-      # Run the formatter
+      # Run the formatter. Markdown is in the trigger pattern because ruff
+      # formats Python code blocks inside `.md` files (ruff >= 0.16), and CI
+      # runs `ruff format --check .` over them.
       - id: ruff-format-backend
         name: ruff format (backend)
         entry: uv run --directory backend ruff format .
         language: system
-        files: ^backend/.*\.py$
+        files: ^backend/.*\.(py|md)$
         pass_filenames: false
       # Run the linter
       - id: ruff-backend
@@ -38,7 +40,7 @@ repos:
         name: ruff format (core_shared)
         entry: uv run --directory core_shared ruff format .
         language: system
-        files: ^core_shared/.*\.py$
+        files: ^core_shared/.*\.(py|md)$
         pass_filenames: false
       # Run the linter
       - id: ruff-core-shared
@@ -98,7 +100,7 @@ repos:
         name: ruff format (google-worker)
         entry: uv run --directory integration_workers/google ruff format .
         language: system
-        files: ^integration_workers/google/.*\.py$
+        files: ^integration_workers/google/.*\.(py|md)$
         pass_filenames: false
       - id: ruff-google-worker
         name: ruff check (google-worker)
@@ -120,7 +122,7 @@ repos:
         name: ruff format (strava-worker)
         entry: uv run --directory integration_workers/strava ruff format .
         language: system
-        files: ^integration_workers/strava/.*\.py$
+        files: ^integration_workers/strava/.*\.(py|md)$
         pass_filenames: false
       - id: ruff-strava-worker
         name: ruff check (strava-worker)
@@ -142,7 +144,7 @@ repos:
         name: ruff format (snipeit-worker)
         entry: uv run --directory integration_workers/snipeit ruff format .
         language: system
-        files: ^integration_workers/snipeit/.*\.py$
+        files: ^integration_workers/snipeit/.*\.(py|md)$
         pass_filenames: false
       - id: ruff-snipeit-worker
         name: ruff check (snipeit-worker)
@@ -164,7 +166,7 @@ repos:
         name: ruff format (immich-worker)
         entry: uv run --directory integration_workers/immich ruff format .
         language: system
-        files: ^integration_workers/immich/.*\.py$
+        files: ^integration_workers/immich/.*\.(py|md)$
         pass_filenames: false
       - id: ruff-immich-worker
         name: ruff check (immich-worker)

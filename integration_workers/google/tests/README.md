@@ -118,6 +118,7 @@ worker-specific behaviour:
 from unittest.mock import AsyncMock, patch
 import pytest
 
+
 @pytest.mark.asyncio
 async def test_my_function():
     mock_client = AsyncMock()

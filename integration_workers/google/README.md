@@ -109,13 +109,13 @@ class GoogleWorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
         setup_calendar_webhook,
         periodic_sync_all_accounts,
     ]
-    on_startup = _on_startup        # build_worker_lifecycle(close_session_factory=True)
+    on_startup = _on_startup  # build_worker_lifecycle(close_session_factory=True)
     on_shutdown = _on_shutdown
     redis_settings = redis_settings_from_url(settings.redis_url)
     queue_name = ARQ_QUEUE_NAME
 
     # Documented overrides (everything else inherits the shared defaults):
-    job_timeout = 600               # 10 min — large accounts page slowly
+    job_timeout = 600  # 10 min — large accounts page slowly
     max_jobs = settings.max_concurrent_jobs
 
     cron_jobs = generate_cron_jobs(
@@ -209,12 +209,7 @@ Syncs contacts from Google to local database.
 
 **Example**:
 ```python
-await redis.enqueue_job(
-    "sync_google_contacts",
-    "user@example.com",
-    123,
-    "smart"
-)
+await redis.enqueue_job("sync_google_contacts", "user@example.com", 123, "smart")
 ```
 
 ### 2. `push_local_contacts_to_google`
