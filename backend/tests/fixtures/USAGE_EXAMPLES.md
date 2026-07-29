@@ -57,6 +57,7 @@ def sample_contact(self):
 # NEW WAY - Using shared fixtures
 from tests.fixtures.contact_fixtures import create_full_contact
 
+
 @pytest.fixture
 def sample_contact(self):
     """Create a sample contact for testing."""
@@ -75,28 +76,26 @@ from tests.fixtures.contact_fixtures import (
     create_full_contact,
 )
 
+
 def test_something():
     # Basic contact
     contact = create_basic_contact(first_name="Jane", last_name="Smith")
 
     # Contact with custom email
     contact = create_contact_with_email(
-        first_name="Bob",
-        email="bob.wilson@company.com"
+        first_name="Bob", email="bob.wilson@company.com"
     )
 
     # Contact with both email and phone
     contact = create_contact_with_methods(
-        first_name="Alice",
-        email="alice@example.com",
-        phone="+1-555-9999"
+        first_name="Alice", email="alice@example.com", phone="+1-555-9999"
     )
 
     # Full contact with all related entities
     contact = create_full_contact(
         first_name="David",
         tags=["client", "important"],
-        notes=["VIP customer", "Prefers email contact"]
+        notes=["VIP customer", "Prefers email contact"],
     )
 ```
 
@@ -144,6 +143,7 @@ def complex_contact(self):
     contact = Contact(...)
     # ... lots of setup code
     return contact
+
 
 # After - 1 line
 @pytest.fixture

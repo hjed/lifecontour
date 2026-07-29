@@ -92,15 +92,18 @@ class WorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
         sync_immich_album_batch,
         periodic_sync_all_immich_accounts,
         process_contact_event,
-        reconcile_in_progress_parents,   # shared fan-out reconciler (ITER14-003)
+        reconcile_in_progress_parents,  # shared fan-out reconciler (ITER14-003)
     ]
-    on_startup = _on_startup        # build_worker_lifecycle(close_session_factory=False,
-    on_shutdown = _on_shutdown      #                        log_consumer_errors=True)
+    # Both from build_worker_lifecycle(
+    #     close_session_factory=False, log_consumer_errors=True
+    # )
+    on_startup = _on_startup
+    on_shutdown = _on_shutdown
     redis_settings = redis_settings_from_url(settings.redis_url)
     queue_name = IMMICH_ARQ_QUEUE_NAME
 
     # Documented override (everything else inherits the shared defaults):
-    health_check_interval = 30      # see note below
+    health_check_interval = 30  # see note below
 
     cron_jobs = [
         *generate_cron_jobs(

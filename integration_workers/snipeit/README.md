@@ -94,13 +94,16 @@ class WorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
         sync_snipeit_maintenances,
         sync_snipeit_maintenance_batch,
     ]
-    on_startup = _on_startup        # build_worker_lifecycle(close_session_factory=False,
-    on_shutdown = _on_shutdown      #                        log_consumer_errors=True)
+    # Both from build_worker_lifecycle(
+    #     close_session_factory=False, log_consumer_errors=True
+    # )
+    on_startup = _on_startup
+    on_shutdown = _on_shutdown
     redis_settings = redis_settings_from_url(settings.redis_url)
     queue_name = SNIPEIT_ARQ_QUEUE_NAME
 
     # Documented override (everything else inherits the shared defaults):
-    health_check_interval = 30      # see note below
+    health_check_interval = 30  # see note below
 ```
 
 `job_timeout`, `keep_result`, and the retry backoff match the

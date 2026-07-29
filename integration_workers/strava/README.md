@@ -55,16 +55,16 @@ class StravaWorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
         sync_strava_activities,
         sync_strava_activity_batch,
         periodic_sync_all_strava_accounts,
-        reconcile_in_progress_parents,   # shared fan-out reconciler (ITER14-003)
+        reconcile_in_progress_parents,  # shared fan-out reconciler (ITER14-003)
     ]
-    on_startup = _on_startup        # build_worker_lifecycle(log_consumer_errors=True)
+    on_startup = _on_startup  # build_worker_lifecycle(log_consumer_errors=True)
     on_shutdown = _on_shutdown
     redis_settings = redis_settings_from_url(settings.redis_url)
     queue_name = STRAVA_ARQ_QUEUE_NAME
 
     # Documented overrides (everything else inherits the shared defaults):
-    max_tries = 20                  # many retries to span Strava's daily-limit reset
-    max_jobs = 5                    # cap concurrency below arq's default of 10
+    max_tries = 20  # many retries to span Strava's daily-limit reset
+    max_jobs = 5  # cap concurrency below arq's default of 10
 
     cron_jobs = [
         *generate_cron_jobs(
