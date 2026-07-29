@@ -32,6 +32,7 @@ These product specifications describe the target product behaviour that active i
 - **[Contacts Product Specification](./product-specifications/contacts-product-specification.md)** - target behaviour for contact organisation, sync, search, summaries, and MCP parity
 - **[Journals Product Specification](./product-specifications/journals-product-specification.md)** - target behaviour for journal sync, merge, hierarchy, list navigation, summaries, and MCP parity
 - **[Activity History Product Specification](./product-specifications/activity-history-product-specification.md)** - unified, event-driven field-level history across contacts and journals, with provenance and MCP parity
+- **[Home Dashboard & Tasks Product Specification](./product-specifications/home-dashboard-and-tasks-product-specification.md)** - target behaviour for the journal-anchored Tasks entity, the home dashboard, and the extended AI daily summary
 
 ### 📋 **[Domain Architecture](./architecture/domain-architecture.md)**
 Detailed domain-driven design, component architecture, and project structure including:
