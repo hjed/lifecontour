@@ -842,6 +842,11 @@ PATCH /api/journals/tags/{tag_id}
   leave it as it is
 - Validates name uniqueness (case-insensitive), hex colour format, and
   rejects a parent that would make the tag its own ancestor
+- Renaming a tag records an activity-history entry on every journal that
+  carries it ("Changed Tags from X to Y"), with the provenance of the caller.
+  Changing only the colour, description or parent records nothing: those are
+  attributes of the tag itself and are not visible on a journal, so they change
+  nothing about it. A rename rejected for a duplicate name records nothing
 - Returns: updated tag
 
 DELETE /api/journals/tags/{tag_id}

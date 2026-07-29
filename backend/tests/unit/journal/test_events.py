@@ -17,6 +17,7 @@ from app.core.journal.models.events import (
     JournalDeleted,
     JournalTagAssigned,
     JournalTagRemoved,
+    JournalTagRenamed,
     JournalTypeAdded,
     JournalTypeRemoved,
     JournalUpdated,
@@ -226,6 +227,63 @@ class TestJournalTagRemoved:
 
         assert event.event_data["source"] == Provenance.SYSTEM.value
         assert event.event_data["changed_by"] == "system"
+
+
+class TestJournalTagRenamed:
+    """JournalTagRenamed carries both names so history reads as a field change.
+
+    Renaming a tag is published once per journal carrying it — the journal is the
+    aggregate whose feed the entry lands in, and a tag-scoped event would have no
+    integer ``aggregate_id`` to use, journal tags being UUID-keyed.
+    """
+
+    def test_create_event(self) -> None:
+        tag_id = uuid4()
+
+        event = JournalTagRenamed(
+            journal_id=11,
+            tag_id=tag_id,
+            old_name="Hiking",
+            new_name="Trekking",
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        assert event.aggregate_id == 11
+        assert event.event_type == "JournalTagRenamed"
+        assert event.event_data["journal_id"] == 11
+        # Stringified: the payload round-trips through JSON/Redis to the projection.
+        assert event.event_data["tag_id"] == str(tag_id)
+        assert event.event_data["old_name"] == "Hiking"
+        assert event.event_data["new_name"] == "Trekking"
+        assert event.event_data["source"] == Provenance.UI.value
+        assert event.event_data["changed_by"] == "ui"
+        assert isinstance(event.occurred_at, datetime)
+        assert event.event_id.startswith(f"journal_tag_renamed_11_{tag_id}_")
+
+    def test_defaults_to_system_provenance(self) -> None:
+        event = JournalTagRenamed(
+            journal_id=1, tag_id=uuid4(), old_name="Work", new_name="Career"
+        )
+
+        assert event.event_data["source"] == Provenance.SYSTEM.value
+        assert event.event_data["changed_by"] == "system"
+
+    def test_event_ids_differ_per_journal(self) -> None:
+        """One rename fans out to every tagged journal with distinct event_ids.
+
+        The history dedup index is keyed on ``event_id`` (plus entity and field),
+        so a shared id would silently drop every journal's row but the first.
+        """
+        tag_id = uuid4()
+        first = JournalTagRenamed(
+            journal_id=1, tag_id=tag_id, old_name="a", new_name="b"
+        )
+        second = JournalTagRenamed(
+            journal_id=2, tag_id=tag_id, old_name="a", new_name="b"
+        )
+
+        assert first.event_id != second.event_id
 
 
 class TestRouteCreated:

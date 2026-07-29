@@ -1074,6 +1074,142 @@ class TestJournalTagAssignmentHistoryEvents:
 
 
 @pytest.mark.integration
+class TestJournalTagRenameHistoryEvents:
+    """PATCH publishes a rename event for every journal carrying the tag.
+
+    Asserted on the ``outbox_events`` rows the request wrote, matching
+    ``TestJournalTagAssignmentHistoryEvents``; the relay and projection that turn
+    them into feed entries are covered by
+    ``tests/integration/infrastructure/events/test_journal_history_projection_e2e.py``.
+    """
+
+    @pytest_asyncio.fixture
+    async def tag_on_two_journals(
+        self, integration_api_client, async_connection
+    ) -> tuple[dict[str, Any], list[int]]:
+        """A tag assigned to two journals, with the outbox cleared afterwards.
+
+        Two journals rather than one so the fan-out is observable: a single
+        journal would pass even if the service published exactly one event
+        regardless of how many journals carry the tag.
+        """
+        tag = await create_tag(
+            integration_api_client, f"rename-{uuid4().hex[:8]}", color="#FF0000"
+        )
+        journal_ids = []
+        for index in range(2):
+            journal_response = await integration_api_client.post(
+                "/api/journals",
+                json=create_journal_request_data(
+                    title=f"Rename subject {index}", content="Carries the tag"
+                ),
+            )
+            assert journal_response.status_code == 201
+            journal_id = journal_response.json()["data"]["id"]
+            journal_ids.append(int(journal_id))
+
+            assign = await integration_api_client.post(
+                f"/api/journals/{journal_id}/relationships/tags",
+                json={
+                    "data": {
+                        "type": "journal-tag",
+                        "attributes": {"tag_id": tag["id"]},
+                    }
+                },
+            )
+            assert assign.status_code == 200
+
+        await async_connection.execute(text("DELETE FROM outbox_events"))
+        return tag, journal_ids
+
+    @staticmethod
+    async def rename_events(async_connection) -> list[dict[str, Any]]:
+        """The ``event_data`` of every rename event in the outbox, in order."""
+        result = await async_connection.execute(
+            text(
+                "SELECT event_data FROM outbox_events "
+                "WHERE event_type = 'JournalTagRenamed' ORDER BY id"
+            )
+        )
+        return [
+            json.loads(row[0]) if isinstance(row[0], str) else row[0]
+            for row in result.fetchall()
+        ]
+
+    async def test_rename_publishes_one_event_per_journal_with_ui_provenance(
+        self, integration_api_client, async_connection, tag_on_two_journals
+    ):
+        tag, journal_ids = tag_on_two_journals
+        old_name = tag["attributes"]["name"]
+        new_name = f"{old_name}-renamed"
+
+        response = await patch_tag(integration_api_client, tag["id"], name=new_name)
+        assert response.status_code == 200
+
+        events = await self.rename_events(async_connection)
+        assert [event["journal_id"] for event in events] == journal_ids
+        for event in events:
+            assert event["tag_id"] == tag["id"]
+            assert event["old_name"] == old_name
+            assert event["new_name"] == new_name
+            assert event["source"] == "ui"
+            assert event["changed_by"] == "ui"
+
+    async def test_colour_only_change_publishes_nothing(
+        self, integration_api_client, async_connection, tag_on_two_journals
+    ):
+        """A recolour is invisible on a journal, so it must leave no history."""
+        tag, _ = tag_on_two_journals
+
+        response = await patch_tag(integration_api_client, tag["id"], color="#00FF00")
+        assert response.status_code == 200
+
+        assert await self.rename_events(async_connection) == []
+
+    async def test_resending_the_same_name_publishes_nothing(
+        self, integration_api_client, async_connection, tag_on_two_journals
+    ):
+        """The endpoint answers 200 either way, so the outbox is the only tell."""
+        tag, _ = tag_on_two_journals
+
+        response = await patch_tag(
+            integration_api_client, tag["id"], name=tag["attributes"]["name"]
+        )
+        assert response.status_code == 200
+
+        assert await self.rename_events(async_connection) == []
+
+    async def test_renaming_an_unassigned_tag_publishes_nothing(
+        self, integration_api_client, async_connection
+    ):
+        """No journal carries the tag, so no journal's feed changed."""
+        tag = await create_tag(integration_api_client, f"lonely-{uuid4().hex[:8]}")
+        await async_connection.execute(text("DELETE FROM outbox_events"))
+
+        response = await patch_tag(
+            integration_api_client, tag["id"], name=f"lonely-{uuid4().hex[:8]}"
+        )
+        assert response.status_code == 200
+
+        assert await self.rename_events(async_connection) == []
+
+    async def test_a_rejected_rename_publishes_nothing(
+        self, integration_api_client, async_connection, tag_on_two_journals
+    ):
+        """A duplicate name is refused, so it must not reach the activity feed."""
+        tag, _ = tag_on_two_journals
+        taken = await create_tag(integration_api_client, f"taken-{uuid4().hex[:8]}")
+        await async_connection.execute(text("DELETE FROM outbox_events"))
+
+        response = await patch_tag(
+            integration_api_client, tag["id"], name=taken["attributes"]["name"]
+        )
+        assert response.status_code == 400
+
+        assert await self.rename_events(async_connection) == []
+
+
+@pytest.mark.integration
 class TestJournalTagFiltering:
     """Tests for filtering journals by tags."""
 

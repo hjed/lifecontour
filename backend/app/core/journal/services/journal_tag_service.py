@@ -7,6 +7,8 @@ keeping transaction ownership in the service layer rather than the controller.
 Assignment and removal also publish ``JournalTagAssigned`` / ``JournalTagRemoved``
 through the transactional outbox, in the same unit of work as the junction-table
 write, so the journal activity feed cannot drift from what actually happened.
+Renaming a tag publishes ``JournalTagRenamed`` the same way, once per journal
+that carries it.
 """
 
 from dataclasses import replace
@@ -20,7 +22,11 @@ from core_shared.models.journals import (
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.journal.models.events import JournalTagAssigned, JournalTagRemoved
+from app.core.journal.models.events import (
+    JournalTagAssigned,
+    JournalTagRemoved,
+    JournalTagRenamed,
+)
 from app.core.journal.models.journal_tag import JournalTag
 from app.core.journal.models.repositories import JournalTagRepository
 from app.core.journal.services.journal_tag_hierarchy_service import (
@@ -77,12 +83,21 @@ class JournalTagService:
         description: str | None = None,
         parent_id: UUID | None = None,
         set_parent_null: bool = False,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
     ) -> JournalTag:
         """Update a journal tag, validating names, colour and hierarchy.
 
         Only the supplied fields change; omitting a field leaves it untouched.
         Clearing the parent requires the explicit ``set_parent_null`` flag,
         since a ``None`` ``parent_id`` is indistinguishable from "not supplied".
+
+        A **name** change also publishes ``JournalTagRenamed`` for every journal
+        carrying the tag, in the same unit of work as the write, so each
+        journal's activity feed records the change. Colour, description and
+        parent publish nothing: they are tag-namespace attributes that are
+        invisible on a journal, and the activity-history specification forbids
+        recording a change that did not alter the entity.
 
         Args:
             tag_id: The tag to update.
@@ -92,6 +107,8 @@ class JournalTagService:
             description: New description, if changing.
             parent_id: New parent tag, if changing.
             set_parent_null: Move the tag to the root, clearing its parent.
+            source: Provenance recorded against a rename.
+            changed_by: Actor recorded against a rename.
 
         Raises:
             JournalTagNotFoundError: The tag, or a supplied parent, does not exist.
@@ -135,7 +152,7 @@ class JournalTagService:
             raise JournalValidationError(field, str(e)) from e
 
         try:
-            return await self.tag_repo.save(updated)
+            saved = await self.tag_repo.save(updated)
         except IntegrityError as e:
             # A concurrent insert can take the name between the uniqueness
             # check above and this write; map it the same way create_tag does.
@@ -146,6 +163,51 @@ class JournalTagService:
                     "Tag names must be unique.",
                 ) from e
             raise
+
+        # After the write: the event names the saved row, and a write the
+        # constraint rejects therefore cannot reach the publish at all. The unit
+        # of work would roll an early outbox row back anyway, so this is belt to
+        # that braces rather than the only thing keeping the feed honest.
+        if "name" in changes:
+            await self._publish_rename(
+                tag_id,
+                old_name=existing.name,
+                new_name=saved.name,
+                transaction=transaction,
+                source=source,
+                changed_by=changed_by,
+            )
+
+        return saved
+
+    async def _publish_rename(
+        self,
+        tag_id: UUID,
+        *,
+        old_name: str,
+        new_name: str,
+        transaction: AsyncConnection,
+        source: Provenance,
+        changed_by: str,
+    ) -> None:
+        """Fan the rename out to every journal carrying the tag.
+
+        One event per journal rather than one carrying a list of journal ids:
+        ``DomainEvent.aggregate_id`` is an ``int`` journal id, and each journal's
+        feed is a separate entry the dedup index keys independently.
+        """
+        for journal_id in await self.tag_repo.get_journal_ids_for_tag(tag_id):
+            await self.event_publisher.publish(
+                JournalTagRenamed(
+                    journal_id,
+                    tag_id,
+                    old_name,
+                    new_name,
+                    source=source,
+                    changed_by=changed_by,
+                    transaction=transaction,
+                )
+            )
 
     @transactional
     async def delete_tag(

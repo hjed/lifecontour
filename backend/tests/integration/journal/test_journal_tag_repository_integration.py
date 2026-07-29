@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_tag_repository import SqlJournalTagRepository
@@ -15,6 +16,36 @@ from app.core.journal.models.journal_tag import JournalTag
 async def tag_repo(async_connection: AsyncConnection) -> SqlJournalTagRepository:
     """Create a tag repository instance."""
     return SqlJournalTagRepository(async_connection)
+
+
+async def _create_journal(connection: AsyncConnection, title: str) -> int:
+    """Insert a second journal alongside the shared ``sample_journal_id``.
+
+    Only the columns the assignment FK needs are populated: these tests are about
+    the junction table, not journal content.
+    """
+    now = datetime.now(UTC)
+    result = await connection.execute(
+        text(
+            """
+            INSERT INTO journals
+                (user_id, title, content,
+                 event_date_range_start, event_date_range_end)
+            VALUES (:user_id, :title, :content, :start, :end)
+            RETURNING id
+            """
+        ),
+        {
+            "user_id": "test-user-123",
+            "title": title,
+            "content": "Tag fan-out subject",
+            "start": now,
+            "end": now,
+        },
+    )
+    row = result.fetchone()
+    assert row is not None
+    return int(row[0])
 
 
 @pytest.mark.integration
@@ -628,6 +659,56 @@ class TestAssignmentChangeReporting:
         tag = await tag_repo.save(JournalTag(name="never-assigned"))
 
         assert await tag_repo.remove_tag(sample_journal_id, tag.id) is False
+
+
+@pytest.mark.integration
+class TestGetJournalIdsForTag:
+    """The reverse lookup that tag-scoped writes fan their events out over.
+
+    A rename publishes one journal-scoped event per journal carrying the tag, so
+    a query that under-reports would silently lose those journals' history
+    entries. Asserted against real assignment rows rather than a mock.
+    """
+
+    async def test_returns_every_journal_carrying_the_tag(
+        self, tag_repo, async_connection, sample_journal_id
+    ):
+        second_journal_id = await _create_journal(async_connection, "Second subject")
+        tag = await tag_repo.save(JournalTag(name="fan-out"))
+        await tag_repo.assign_tag(sample_journal_id, tag.id)
+        await tag_repo.assign_tag(second_journal_id, tag.id)
+
+        journal_ids = await tag_repo.get_journal_ids_for_tag(tag.id)
+
+        assert journal_ids == sorted([sample_journal_id, second_journal_id])
+
+    async def test_excludes_journals_carrying_a_different_tag(
+        self, tag_repo, async_connection, sample_journal_id
+    ):
+        other_journal_id = await _create_journal(async_connection, "Other subject")
+        tag = await tag_repo.save(JournalTag(name="wanted"))
+        other_tag = await tag_repo.save(JournalTag(name="unwanted"))
+        await tag_repo.assign_tag(sample_journal_id, tag.id)
+        await tag_repo.assign_tag(other_journal_id, other_tag.id)
+
+        assert await tag_repo.get_journal_ids_for_tag(tag.id) == [sample_journal_id]
+
+    async def test_returns_empty_for_an_unassigned_tag(self, tag_repo):
+        tag = await tag_repo.save(JournalTag(name="unassigned"))
+
+        assert await tag_repo.get_journal_ids_for_tag(tag.id) == []
+
+    async def test_returns_empty_for_an_unknown_tag(self, tag_repo):
+        """An unknown id is indistinguishable from an unassigned one here."""
+        assert await tag_repo.get_journal_ids_for_tag(uuid4()) == []
+
+    async def test_reflects_a_removed_assignment(self, tag_repo, sample_journal_id):
+        """Un-assigning must drop the journal, or a rename would over-report."""
+        tag = await tag_repo.save(JournalTag(name="transient"))
+        await tag_repo.assign_tag(sample_journal_id, tag.id)
+        await tag_repo.remove_tag(sample_journal_id, tag.id)
+
+        assert await tag_repo.get_journal_ids_for_tag(tag.id) == []
 
 
 @pytest.mark.integration

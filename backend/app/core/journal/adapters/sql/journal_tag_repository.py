@@ -298,6 +298,25 @@ class SqlJournalTagRepository(JournalTagRepository):
 
         return [_row_to_tag(row) for row in rows]
 
+    async def get_journal_ids_for_tag(self, tag_id: UUID) -> list[int]:
+        """List the journals currently assigned this tag, ascending.
+
+        Reads the junction table directly rather than joining ``journals``: an
+        assignment row cannot outlive its journal (the FK cascades), so the join
+        would only cost work to return the same ids.
+        """
+        query = text(
+            """
+            SELECT journal_id
+            FROM journal_tag_assignments
+            WHERE tag_id = :tag_id
+            ORDER BY journal_id
+        """
+        )
+        result = await self.conn.execute(query, {"tag_id": tag_id})
+
+        return [row.journal_id for row in result.fetchall()]
+
     async def assign_tag(self, journal_id: int, tag_id: UUID) -> bool:
         """Assign a tag to a journal, reporting whether the row is new.
 

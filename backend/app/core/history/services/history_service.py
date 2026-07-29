@@ -151,25 +151,51 @@ class HistoryService:
     def _project_journal_tag_assigned(
         self, event: OutboxEvent, data: dict[str, Any]
     ) -> list[FieldHistoryEntry]:
-        return self._journal_tag_rows(event, data, assigned=True)
+        return self._journal_tag_rows(
+            event, data, old_value=None, new_value=data.get("tag_name")
+        )
 
     def _project_journal_tag_removed(
         self, event: OutboxEvent, data: dict[str, Any]
     ) -> list[FieldHistoryEntry]:
-        return self._journal_tag_rows(event, data, assigned=False)
+        return self._journal_tag_rows(
+            event, data, old_value=data.get("tag_name"), new_value=None
+        )
+
+    def _project_journal_tag_renamed(
+        self, event: OutboxEvent, data: dict[str, Any]
+    ) -> list[FieldHistoryEntry]:
+        """The tag a journal carries changed label — a field change, not a swap.
+
+        Both names present is what makes the shared ``ActivityItem`` render
+        "Changed Tags from ... to ..." rather than an add or a remove, so half a
+        rename is checked for here: the shared helper's "nothing to name" guard
+        would let ``("Hiking", None)`` through as a removal that never happened.
+        """
+        old_name = data.get("old_name")
+        new_name = data.get("new_name")
+        if old_name is None or new_name is None:
+            return []
+        return self._journal_tag_rows(
+            event, data, old_value=old_name, new_value=new_name
+        )
 
     def _journal_tag_rows(
-        self, event: OutboxEvent, data: dict[str, Any], *, assigned: bool
+        self,
+        event: OutboxEvent,
+        data: dict[str, Any],
+        *,
+        old_value: str | None,
+        new_value: str | None,
     ) -> list[FieldHistoryEntry]:
-        """One ``tags`` row on the journal, naming the tag that came or went.
+        """One ``tags`` row on the journal, naming the tag the change concerns.
 
-        A payload with no ``tag_name`` projects nothing rather than raising: the
-        row would render as "Changed Tags from null to null", and a raising handler
-        would dead-letter the whole batch and stall history for every event behind
-        it. No current producer omits the name.
+        A payload that names no tag at all projects nothing rather than raising:
+        the row would render as "Changed Tags from null to null", and a raising
+        handler would dead-letter the whole batch and stall history for every
+        event behind it. No current producer omits the name.
         """
-        tag_name = data.get("tag_name")
-        if tag_name is None:
+        if old_value is None and new_value is None:
             return []
         return [
             self._row(
@@ -177,8 +203,8 @@ class HistoryService:
                 data,
                 entity_id=data["journal_id"],
                 field_name="tags",
-                old_value=None if assigned else tag_name,
-                new_value=tag_name if assigned else None,
+                old_value=old_value,
+                new_value=new_value,
             )
         ]
 
@@ -592,6 +618,7 @@ _HANDLERS = {
     "JournalTypeRemoved": HistoryService._project_journal_type_removed,
     "JournalTagAssigned": HistoryService._project_journal_tag_assigned,
     "JournalTagRemoved": HistoryService._project_journal_tag_removed,
+    "JournalTagRenamed": HistoryService._project_journal_tag_renamed,
     "RouteCreated": HistoryService._project_route_created,
     "RouteUpdated": HistoryService._project_route_updated,
     "RouteDeleted": HistoryService._project_route_deleted,

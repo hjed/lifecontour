@@ -162,6 +162,39 @@ describe('ActivityItem', () => {
 
       expect(screen.getByTestId('provenance-trigger-mcp')).toBeInTheDocument();
     });
+
+    // A tag rename arrives with BOTH values set, which is what makes the shared
+    // formatter describe it as a change rather than an add or a remove.
+    it('describes a rename as a change from the old name to the new one', () => {
+      render(
+        <TooltipProvider>
+          <ActivityItem activity={journalTagActivity('Hiking', 'Trekking')} />
+        </TooltipProvider>
+      );
+
+      expect(
+        screen.getByText('Changed Tags from "Hiking" to "Trekking"')
+      ).toBeInTheDocument();
+      expect(screen.getByTestId('provenance-trigger-ui')).toBeInTheDocument();
+    });
+
+    it('shows the AI-assistant provenance for an MCP tag rename', () => {
+      render(
+        <TooltipProvider>
+          <ActivityItem
+            activity={journalTagActivity('Hiking', 'Trekking', {
+              source: 'mcp',
+              changed_by: 'mcp',
+            })}
+          />
+        </TooltipProvider>
+      );
+
+      expect(
+        screen.getByText('Changed Tags from "Hiking" to "Trekking"')
+      ).toBeInTheDocument();
+      expect(screen.getByTestId('provenance-trigger-mcp')).toBeInTheDocument();
+    });
   });
 
   it('applies custom className', () => {

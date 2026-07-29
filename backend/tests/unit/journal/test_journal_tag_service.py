@@ -21,7 +21,11 @@ from app.core.journal.services.journal_tag_service import JournalTagService
 @pytest.fixture
 def mock_tag_repo():
     """Create a mock journal tag repository."""
-    return AsyncMock()
+    repo = AsyncMock()
+    # Renames fan out over this list, so it must be iterable by default. Left
+    # empty so a test that cares about the fan-out has to say so explicitly.
+    repo.get_journal_ids_for_tag.return_value = []
+    return repo
 
 
 @pytest.fixture
@@ -781,4 +785,194 @@ class TestAssignAndRemoveTagEvents:
         await tag_service.remove_tag(7, tag_id, transaction=mock_transaction)
 
         mock_tag_repo.remove_tag.assert_not_awaited()
+        mock_event_publisher.publish.assert_not_awaited()
+
+
+class TestRenameTagEvents:
+    """Renaming a tag publishes one event per journal that carries it.
+
+    A journal's own feed is where the change is visible, so the tag-scoped write
+    fans out to journal-scoped events. Only the *name* qualifies: colour,
+    description and parent are tag-namespace attributes that are invisible on a
+    journal, and the activity-history spec forbids recording a change that did
+    not alter the entity.
+    """
+
+    @pytest.mark.asyncio
+    async def test_rename_publishes_one_event_per_tagged_journal(
+        self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
+    ):
+        tag_id = uuid4()
+        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.find_by_name.return_value = None
+        mock_tag_repo.get_journal_ids_for_tag.return_value = [7, 9]
+        mock_tag_repo.save.side_effect = lambda tag: tag
+
+        await tag_service.update_tag(
+            tag_id,
+            transaction=mock_transaction,
+            name="Trekking",
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        first, second = _published(mock_event_publisher)
+        assert [e.event_type for e in (first, second)] == [
+            "JournalTagRenamed",
+            "JournalTagRenamed",
+        ]
+        assert [e.aggregate_id for e in (first, second)] == [7, 9]
+        for event in (first, second):
+            assert event.event_data["tag_id"] == str(tag_id)
+            assert event.event_data["old_name"] == "Hiking"
+            assert event.event_data["new_name"] == "Trekking"
+            assert event.event_data["source"] == Provenance.UI.value
+            assert event.event_data["changed_by"] == "ui"
+            assert event.transaction is mock_transaction
+
+    @pytest.mark.asyncio
+    async def test_rename_defaults_to_system_provenance(
+        self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
+    ):
+        tag_id = uuid4()
+        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.find_by_name.return_value = None
+        mock_tag_repo.get_journal_ids_for_tag.return_value = [7]
+        mock_tag_repo.save.side_effect = lambda tag: tag
+
+        await tag_service.update_tag(
+            tag_id, transaction=mock_transaction, name="Trekking"
+        )
+
+        (event,) = _published(mock_event_publisher)
+        assert event.event_data["source"] == Provenance.SYSTEM.value
+        assert event.event_data["changed_by"] == "system"
+
+    @pytest.mark.asyncio
+    async def test_rename_of_an_unassigned_tag_publishes_nothing(
+        self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
+    ):
+        """No journal carries the tag, so no journal changed."""
+        tag_id = uuid4()
+        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.find_by_name.return_value = None
+        mock_tag_repo.get_journal_ids_for_tag.return_value = []
+        mock_tag_repo.save.side_effect = lambda tag: tag
+
+        await tag_service.update_tag(
+            tag_id, transaction=mock_transaction, name="Trekking"
+        )
+
+        mock_event_publisher.publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("color", "#123456"),
+            ("description", "Outdoor entries"),
+        ],
+    )
+    async def test_non_name_changes_publish_nothing(
+        self,
+        tag_service,
+        mock_tag_repo,
+        mock_event_publisher,
+        mock_transaction,
+        field,
+        value,
+    ):
+        """Colour and description do not alter any journal, so no history."""
+        tag_id = uuid4()
+        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.get_journal_ids_for_tag.return_value = [7]
+        mock_tag_repo.save.side_effect = lambda tag: tag
+
+        await tag_service.update_tag(
+            tag_id, transaction=mock_transaction, **{field: value}
+        )
+
+        mock_event_publisher.publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_reparenting_publishes_nothing(
+        self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
+    ):
+        """A tag's position in the hierarchy is invisible on a journal."""
+        tag_id = uuid4()
+        parent_id = uuid4()
+        mock_tag_repo.find_by_id.side_effect = lambda requested: {
+            tag_id: JournalTag(id=tag_id, name="Hiking"),
+            parent_id: JournalTag(id=parent_id, name="Outdoors"),
+        }.get(requested)
+        mock_tag_repo.get_journal_ids_for_tag.return_value = [7]
+        mock_tag_repo.save.side_effect = lambda tag: tag
+
+        await tag_service.update_tag(
+            tag_id, transaction=mock_transaction, parent_id=parent_id
+        )
+
+        mock_event_publisher.publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_resending_the_same_name_publishes_nothing(
+        self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
+    ):
+        """update_tag returns early with no changes; nothing was renamed."""
+        tag_id = uuid4()
+        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.get_journal_ids_for_tag.return_value = [7]
+
+        await tag_service.update_tag(
+            tag_id, transaction=mock_transaction, name="Hiking"
+        )
+
+        mock_tag_repo.save.assert_not_awaited()
+        mock_event_publisher.publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_name_rejected_by_the_pre_check_publishes_nothing(
+        self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
+    ):
+        """A duplicate name aborts before the write, so nothing is published."""
+        tag_id = uuid4()
+        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.find_by_name.return_value = JournalTag(
+            id=uuid4(), name="Trekking"
+        )
+        mock_tag_repo.get_journal_ids_for_tag.return_value = [7]
+
+        with pytest.raises(JournalValidationError):
+            await tag_service.update_tag(
+                tag_id, transaction=mock_transaction, name="Trekking"
+            )
+
+        mock_tag_repo.save.assert_not_awaited()
+        mock_event_publisher.publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_write_rejected_by_the_constraint_publishes_nothing(
+        self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
+    ):
+        """The publish sits after the write, so a rejected write cannot reach it.
+
+        This is the case the ordering exists for: the uniqueness pre-check passes
+        and only the ``UPDATE`` fails, on a name a concurrent insert took in
+        between. Moving the publish above the save would emit an event here for a
+        rename that never happened — the transaction would roll the outbox row
+        back with it, but the ordering is what makes that a non-question.
+        """
+        tag_id = uuid4()
+        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.find_by_name.return_value = None
+        mock_tag_repo.get_journal_ids_for_tag.return_value = [7]
+        mock_tag_repo.save.side_effect = IntegrityError(
+            "uq_journal_tags_name", {}, Exception("dup")
+        )
+
+        with pytest.raises(JournalValidationError):
+            await tag_service.update_tag(
+                tag_id, transaction=mock_transaction, name="Trekking"
+            )
+
         mock_event_publisher.publish.assert_not_awaited()

@@ -402,6 +402,49 @@ class TestJournalTags:
 
         assert service.project_event(event) == []
 
+    def test_renamed_writes_an_old_to_new_tags_row(
+        self, service: HistoryService
+    ) -> None:
+        """A rename is a field change on the journal, not an add or a remove.
+
+        Both values present is what makes the shared ActivityItem render
+        "Changed Tags from ... to ..." rather than "Added"/"Removed".
+        """
+        event = _event(
+            "JournalTagRenamed",
+            {
+                "journal_id": 10,
+                "tag_id": "3f7c1f0e-0000-4000-8000-000000000002",
+                "old_name": "Hiking",
+                "new_name": "Trekking",
+                "source": Provenance.UI.value,
+                "changed_by": "ui",
+            },
+        )
+
+        rows = service.project_event(event)
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("journal", 10, "tags", "Hiking", "Trekking")
+        ]
+
+    @pytest.mark.parametrize("missing", ["old_name", "new_name"])
+    def test_rename_missing_a_name_projects_nothing(
+        self, service: HistoryService, missing: str
+    ) -> None:
+        """Half a rename is unrenderable, so it yields no row rather than raising."""
+        payload = {
+            "journal_id": 12,
+            "tag_id": "3f7c1f0e-0000-4000-8000-000000000004",
+            "old_name": "Hiking",
+            "new_name": "Trekking",
+            "source": Provenance.UI.value,
+            "changed_by": "ui",
+        }
+        del payload[missing]
+
+        assert service.project_event(_event("JournalTagRenamed", payload)) == []
+
 
 # --------------------------------------------------------------------------- #
 # Contact event projection (ITER12-003 Phase 1).
