@@ -220,7 +220,7 @@ A task may reference zero or more contacts through explicit structured links, in
 Contact links are used to:
 
 - show the contact on the task wherever it is displayed
-- surface the task on the contact's activity history
+- surface the task on the contact's activity history, as a read-only record alongside their journals and other activity
 - give the daily summary the ability to connect a task to a person
 
 Task-contact links do not carry a relationship type, a role, or an attendance status. They are a plain reference.
@@ -251,7 +251,7 @@ This follows from the no-accumulating-backlog principle: a searchable task corpu
 
 ### Where tasks appear
 
-Tasks appear in exactly two places.
+There are exactly two places where tasks are *worked with* — where the user reads them, actions them, and browses them as tasks.
 
 **On journals.** A journal's detail view shows the tasks it is linked to, grouped by the nature of the link:
 
@@ -263,7 +263,9 @@ Each entry shows the task text, its status, its linked contacts, and — for lap
 
 **On the dashboard.** As described below.
 
-There is deliberately no third place. No `/tasks` route, no global list, no filters-by-status browser.
+There is deliberately no third working surface. No `/tasks` route, no global list, no filters-by-status browser.
+
+A task does also appear as an entry in a linked contact's activity history, and its own changes appear in field history. Neither is a third working surface: both are read-only records of what happened, entries are not actionable from there, and neither can be filtered down to "everything still outstanding". The distinction that matters is between a record of the past, which tasks belong in like any other entity, and a place to go and work through tasks, of which there are only two.
 
 ## Journal Anchor Integrity
 
@@ -273,7 +275,9 @@ Because a task can never exist without both anchors, journal operations must res
 
 Deleting a journal that is the creating journal or the due journal of **any** task is **blocked**.
 
-The failure must be explanatory rather than opaque: it should name the tasks that block the deletion and link to them, so the user can cancel, delete, or retarget those tasks and then retry. This applies regardless of task status — a done task's link to the journal it was created in is part of the record.
+The failure must be explanatory rather than opaque: it should name each task that blocks the deletion and link to a journal where that task can be actioned. Because tasks have no route of their own, that link always targets a journal detail view — the task's due journal, or its creating journal when the due journal is the one being deleted. From there the user can cancel, delete, or retarget the task and then retry the deletion. This applies regardless of task status — a done task's link to the journal it was created in is part of the record.
+
+Over the API and MCP the same failure identifies the blocking tasks and the journals that surface them, so an agent can resolve them without going through the UI.
 
 Deleting a journal that is only an **intermediate** link is permitted. The intermediate link is removed and the task is unaffected.
 
