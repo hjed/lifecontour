@@ -187,10 +187,13 @@ class HistoryService:
         left it — so recording the swap there would claim a change that did not
         occur.
 
-        Both branches check the names they need, for the reason
-        ``_project_journal_tag_renamed`` explains: the shared helper's "nothing to
-        name" guard would let a swap missing its target name through as a removal
-        that never happened. An absent flag is read as neither branch rather than
+        Only the swap branch guards its names here. The removal branch needs no
+        guard of its own: with ``new_value=None`` the shared helper's "names
+        nothing" check already covers a missing ``source_tag_name``. The swap
+        branch is not covered by it, for the reason
+        ``_project_journal_tag_renamed`` explains — a swap missing its target name
+        would pass that check as ``(source, None)`` and render as a removal that
+        never happened. An absent flag is read as neither branch rather than
         defaulting to the swap on truthiness.
         """
         source_name = data.get("source_tag_name")
