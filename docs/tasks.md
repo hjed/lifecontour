@@ -307,6 +307,20 @@ Read these first when working on the active product-alignment streams:
 - ITER17-004: Sidebar journal tag tree with context-menu management (create/edit/delete/merge dialogs)
 - ITER17-005: Journal tag history events feeding the journal activity feed — Phase 1 (assignment/removal) shipped; Phase 2 (update/delete/merge, plus event-driven search re-indexing) remaining
 
+### [Iteration 18: Home Dashboard and Tasks](./tasks/iteration-18-home-dashboard-and-tasks.md)
+**Status:** 🔴 PLANNED — fully broken down: 5 sub-iterations, 61 phases (one PR each) with per-phase acceptance criteria and diff estimates calibrated against iteration 17's recorded actuals
+**Dependencies:** Iteration 4 (journal core, contact relationships, event date ranges), Iteration 7 (daily summaries, calendar sync, day-grouped browsing, merge), Iteration 12 (event-driven field history), Iteration 5 (Redis Streams event bus), Iteration 16 (composite read-only dashboard precedent)
+**Goal:** Introduce **Tasks** as a journal-anchored core entity and replace the placeholder home page with the daily-briefing **Home Dashboard**, with full MCP parity
+
+**Sub-Iterations:**
+- ITER18-001: Tasks core — entity and invariants (two journal anchors, existing future due journal), lifecycle, retargeting with automatic intermediate links, lapsed derivation, contacts on tasks, REST + MCP together, journal detail/list UI
+- ITER18-002: Journal anchor integrity — deletion of an anchoring journal blocked with an explanatory blocking-task error (REST + MCP), merge re-points and dedupes task links, a cancelled due journal lapses not-done tasks
+- ITER18-003: Task domain events, `field_history` projection, read-only task records on contact activity history, and the search indexer ignoring task events (no tasks index)
+- ITER18-004: The Home Dashboard — replaces the six placeholder cards with a one-round-trip singleton projection: AI summary headline, agenda (with tomorrow), tasks due in seven days with inline done, upcoming contact dates ranked by inferred importance
+- ITER18-005: Daily summary extension — agenda/tasks/dates as inputs, today always eligible, per-timezone staleness refresh, lazy input-driven invalidation
+
+**Reference:** [Home Dashboard & Tasks Product Specification](./product-specifications/home-dashboard-and-tasks-product-specification.md) · [Home Dashboard Wireframe](./design/home-dashboard-wireframe.md) (W1–W33, cited by the dashboard acceptance criteria)
+
 ---
 
 ## Current Status & Next Steps
