@@ -43,6 +43,11 @@ _SEARCH_EVENT_TYPES: list[str] = [
     "JournalCreated",
     "JournalUpdated",
     "JournalDeleted",
+    # Journal-tag events. The journal document carries `tag_ids`, so a tag change
+    # makes it stale. `JournalTagRenamed` is deliberately excluded — the document
+    # indexes tag ids and never tag names, so a rename changes nothing in it.
+    "JournalTagAssigned",
+    "JournalTagRemoved",
 ]
 
 # Journal event types that also trigger daily summary invalidation

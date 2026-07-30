@@ -22,6 +22,19 @@ from app.infrastructure.search.meilisearch_client import (
 
 logger = structlog.get_logger()
 
+# Journal tag events that change which tags a journal carries, and therefore make
+# its indexed ``tag_ids`` stale.
+#
+# ``JournalTagRenamed`` is deliberately absent: the journal document indexes tag
+# **ids** and never tag names, so a rename leaves every document byte-identical.
+# If tag names are ever added to the document, the rename has to join this set.
+_TAG_REINDEX_EVENT_TYPES = frozenset(
+    {
+        "JournalTagAssigned",
+        "JournalTagRemoved",
+    }
+)
+
 
 class JournalIndexingService:
     """Handles MeiliSearch indexing for journals based on domain events."""
@@ -86,6 +99,8 @@ class JournalIndexingService:
                 await self._index_journal_updated(journal_index_name, event)
             elif event.event_type == "JournalDeleted":
                 self._index_journal_deleted(journal_index_name, event)
+            elif event.event_type in _TAG_REINDEX_EVENT_TYPES:
+                await self._reindex_journal_for_tag_change(journal_index_name, event)
             else:
                 logger.debug(
                     "Skipping unsupported journal event type",
@@ -418,6 +433,54 @@ class JournalIndexingService:
             journal_id=journal_id,
             index_name=index_name,
             fields_updated=list(complete_data.keys()),
+        )
+
+    async def _reindex_journal_for_tag_change(
+        self, index_name: str, event: OutboxEvent
+    ) -> None:
+        """
+        Rebuild a journal's document after the tags it carries changed.
+
+        Differs from :meth:`_index_journal_updated` in two ways, both deliberate:
+
+        * The document keeps the row's own ``updated_at``. A tag change does not
+          touch ``journals.updated_at``, and ``updated_at`` is a sortable search
+          attribute, so copying the event time would sort search results by a
+          value no row holds.
+        * There is no fallback document. A tag event carries no title or user id
+          to build one from, and the expected reason for a missing journal is that
+          it was deleted between the tag write and the relay — in which case its
+          document has already been removed by ``JournalDeleted``. A fetch failure
+          for any other reason is indistinguishable here, because
+          ``_fetch_complete_journal_data`` reports both as ``None``.
+
+        Args:
+            index_name: Name of the search index
+            event: Journal tag event naming the affected journal
+        """
+        journal_id = event.event_data["journal_id"]
+
+        complete_data = await self._fetch_complete_journal_data(journal_id)
+
+        if not complete_data:
+            logger.warning(
+                "Skipping tag re-index: could not fetch journal data",
+                journal_id=journal_id,
+                event_id=event.event_id,
+                event_type=event.event_type,
+            )
+            return
+
+        index = self.client.index(index_name)
+        task = index.update_documents([complete_data])
+        self.client.wait_for_task(task.task_uid)
+
+        logger.debug(
+            "Journal re-indexed after tag change",
+            journal_id=journal_id,
+            event_type=event.event_type,
+            index_name=index_name,
+            tag_ids=complete_data.get("tag_ids"),
         )
 
     def _index_journal_deleted(self, index_name: str, event: OutboxEvent) -> None:

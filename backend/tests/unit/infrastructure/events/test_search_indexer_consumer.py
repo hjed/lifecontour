@@ -98,6 +98,27 @@ class TestSearchIndexerConsumerEventMatching:
     @pytest.mark.parametrize(
         "event_type",
         [
+            "JournalTagAssigned",
+            "JournalTagRemoved",
+        ],
+    )
+    def test_matches_journal_tag_events(
+        self, consumer: SearchIndexerConsumer, event_type: str
+    ) -> None:
+        """Verify journal tag events are matched.
+
+        The journal document carries ``tag_ids``, so a tag change makes it stale
+        until the journal is re-indexed. Without this subscription the events are
+        published and projected into history but never reach the indexer.
+        """
+        assert consumer._matches_event_type(event_type) is True
+
+    @pytest.mark.parametrize(
+        "event_type",
+        [
+            # Journal documents index tag ids and never tag names, so a rename
+            # leaves every document unchanged and must not be subscribed.
+            "JournalTagRenamed",
             # Integration sync events — processed by inbound consumer (Phase 3)
             "contact.created",
             "contact.updated",
@@ -227,6 +248,50 @@ class TestSearchIndexerConsumerHandleEvent:
         event = _make_stream_event(
             event_type="ContactCreated",
             event_data={"contact_id": 42},
+        )
+
+        with (
+            patch(
+                "app.infrastructure.events.search_indexer_consumer.get_async_database_engine",
+                return_value=mock_db_engine,
+            ),
+            patch(
+                "app.infrastructure.events.search_indexer_consumer.SearchIndexer",
+                return_value=mock_search_indexer,
+            ),
+            patch.object(
+                consumer,
+                "_invalidate_daily_summary",
+                new_callable=AsyncMock,
+            ) as mock_invalidate,
+        ):
+            await consumer._handle_event(event)
+
+        mock_search_indexer.process_event.assert_called_once()
+        mock_invalidate.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "event_type",
+        ["JournalTagAssigned", "JournalTagRemoved"],
+    )
+    async def test_handle_event_does_not_invalidate_for_journal_tag_events(
+        self,
+        consumer: SearchIndexerConsumer,
+        mock_db_engine: MagicMock,
+        mock_search_indexer: MagicMock,
+        event_type: str,
+    ) -> None:
+        """Journal tag events re-index but must not invalidate the daily summary.
+
+        The daily summary is assembled from journal content and never reads tags,
+        so invalidating on a tag change would discard a cached summary — and pay
+        to regenerate it — for a change that cannot alter it.
+        """
+        event = _make_stream_event(
+            event_type=event_type,
+            event_data={"journal_id": 1},
+            aggregate_id=1,
         )
 
         with (
