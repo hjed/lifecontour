@@ -48,6 +48,7 @@ _SEARCH_EVENT_TYPES: list[str] = [
     # indexes tag ids and never tag names, so a rename changes nothing in it.
     "JournalTagAssigned",
     "JournalTagRemoved",
+    "JournalTagDeleted",
 ]
 
 # Journal event types that also trigger daily summary invalidation

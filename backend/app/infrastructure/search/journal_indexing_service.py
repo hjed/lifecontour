@@ -32,6 +32,7 @@ _TAG_REINDEX_EVENT_TYPES = frozenset(
     {
         "JournalTagAssigned",
         "JournalTagRemoved",
+        "JournalTagDeleted",
     }
 )
 

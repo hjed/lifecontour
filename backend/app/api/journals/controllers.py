@@ -782,8 +782,14 @@ async def delete_journal_tag(
         ) from e
 
     # Delete as a committed unit of work. The service raises
-    # JournalTagNotFoundError (404) when the tag does not exist.
-    await journal_tag_service.delete_tag(tag_uuid, connection)
+    # JournalTagNotFoundError (404) when the tag does not exist, and publishes a
+    # JournalTagDeleted event for every journal that carried the tag.
+    await journal_tag_service.delete_tag(
+        tag_uuid,
+        connection,
+        source=Provenance.UI,
+        changed_by="ui",
+    )
 
     return None
 

@@ -24,6 +24,7 @@ from app.infrastructure.search.journal_indexing_service import JournalIndexingSe
 TAG_REINDEX_EVENT_TYPES = [
     "JournalTagAssigned",
     "JournalTagRemoved",
+    "JournalTagDeleted",
 ]
 
 ROW_UPDATED_AT = "2026-03-01T09:00:00+00:00"

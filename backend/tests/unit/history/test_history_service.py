@@ -445,6 +445,46 @@ class TestJournalTags:
 
         assert service.project_event(_event("JournalTagRenamed", payload)) == []
 
+    def test_deleted_writes_a_removal_row(self, service: HistoryService) -> None:
+        """Deleting a tag reads on each journal as the tag leaving it.
+
+        Deliberately the same row shape as ``JournalTagRemoved``: from the
+        journal's point of view the two are the same change, and the feed should
+        not ask the user to care which tag-namespace operation caused it.
+        """
+        event = _event(
+            "JournalTagDeleted",
+            {
+                "journal_id": 10,
+                "tag_id": "3f7c1f0e-0000-4000-8000-000000000005",
+                "tag_name": "Hiking",
+                "source": Provenance.UI.value,
+                "changed_by": "ui",
+            },
+        )
+
+        rows = service.project_event(event)
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("journal", 10, "tags", "Hiking", None)
+        ]
+
+    def test_delete_missing_tag_name_projects_nothing(
+        self, service: HistoryService
+    ) -> None:
+        """A payload naming no tag yields no row, for the same reason as assign."""
+        event = _event(
+            "JournalTagDeleted",
+            {
+                "journal_id": 12,
+                "tag_id": "3f7c1f0e-0000-4000-8000-000000000006",
+                "source": Provenance.UI.value,
+                "changed_by": "ui",
+            },
+        )
+
+        assert service.project_event(event) == []
+
 
 # --------------------------------------------------------------------------- #
 # Contact event projection (ITER12-003 Phase 1).

@@ -8,7 +8,8 @@ Assignment and removal also publish ``JournalTagAssigned`` / ``JournalTagRemoved
 through the transactional outbox, in the same unit of work as the junction-table
 write, so the journal activity feed cannot drift from what actually happened.
 Renaming a tag publishes ``JournalTagRenamed`` the same way, once per journal
-that carries it.
+that carries it, and deleting one publishes ``JournalTagDeleted`` once per
+journal that carried it.
 """
 
 from dataclasses import replace
@@ -24,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.models.events import (
     JournalTagAssigned,
+    JournalTagDeleted,
     JournalTagRemoved,
     JournalTagRenamed,
 )
@@ -214,6 +216,9 @@ class JournalTagService:
         self,
         tag_id: UUID,
         transaction: AsyncConnection,
+        *,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
     ) -> None:
         """Delete a journal tag, un-assigning it from every journal.
 
@@ -223,16 +228,41 @@ class JournalTagService:
         re-parented to NULL by ``journal_tags.parent_id``'s ``ON DELETE SET
         NULL``, so no explicit clean-up is needed here.
 
+        Every journal that carried the tag also gets a ``JournalTagDeleted``
+        event in the same unit of work, so the tag leaving is recorded in each
+        journal's activity feed rather than vanishing silently.
+
         Args:
             tag_id: The tag to delete.
             transaction: Request connection; the write commits before the response.
+            source: Provenance recorded against each journal's history entry.
+            changed_by: Actor recorded against each journal's history entry.
 
         Raises:
             JournalTagNotFoundError: No tag exists with this id.
         """
-        await self._require_tag(tag_id)
+        tag = await self._require_tag(tag_id)
+
+        # Read the carriers *before* the delete: the assignment rows go with the
+        # tag through the cascade, so afterwards there is nothing left to read.
+        journal_ids = await self.tag_repo.get_journal_ids_for_tag(tag_id)
 
         await self.tag_repo.delete(tag_id)
+
+        # Publish after the write, matching update_tag: the events name a write
+        # that completed. The unit of work would discard them with a failed
+        # delete either way, since the outbox shares this connection.
+        for journal_id in journal_ids:
+            await self.event_publisher.publish(
+                JournalTagDeleted(
+                    journal_id,
+                    tag_id,
+                    tag.name,
+                    source=source,
+                    changed_by=changed_by,
+                    transaction=transaction,
+                )
+            )
 
     @transactional
     async def merge_tag(

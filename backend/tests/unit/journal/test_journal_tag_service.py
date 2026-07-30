@@ -159,6 +159,99 @@ class TestDeleteTag:
         mock_tag_repo.delete.assert_not_awaited()
 
 
+class TestDeleteTagEvents:
+    """Deleting a tag publishes one event per journal that carried it.
+
+    The tag itself is not an aggregate with a feed — the journals that lose it
+    are, so a tag-scoped write fans out to journal-scoped events, exactly as a
+    rename does.
+    """
+
+    @pytest.mark.asyncio
+    async def test_delete_publishes_one_event_per_tagged_journal(
+        self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
+    ):
+        tag_id = uuid4()
+        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.get_journal_ids_for_tag.return_value = [7, 9]
+
+        await tag_service.delete_tag(
+            tag_id,
+            transaction=mock_transaction,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        first, second = _published(mock_event_publisher)
+        assert [e.event_type for e in (first, second)] == [
+            "JournalTagDeleted",
+            "JournalTagDeleted",
+        ]
+        assert [e.aggregate_id for e in (first, second)] == [7, 9]
+        for event in (first, second):
+            assert event.event_data["tag_id"] == str(tag_id)
+            assert event.event_data["tag_name"] == "Hiking"
+            assert event.event_data["source"] == Provenance.UI.value
+            assert event.event_data["changed_by"] == "ui"
+            assert event.transaction is mock_transaction
+
+    @pytest.mark.asyncio
+    async def test_delete_forwards_mcp_provenance(
+        self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
+    ):
+        """The caller's provenance reaches the event, rather than a hardcoded one."""
+        tag_id = uuid4()
+        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.get_journal_ids_for_tag.return_value = [7]
+
+        await tag_service.delete_tag(
+            tag_id,
+            transaction=mock_transaction,
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+
+        (event,) = _published(mock_event_publisher)
+        assert event.event_data["source"] == Provenance.MCP.value
+        assert event.event_data["changed_by"] == "mcp"
+
+    @pytest.mark.asyncio
+    async def test_delete_of_an_unassigned_tag_publishes_nothing(
+        self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
+    ):
+        """No journal carried the tag, so no journal changed."""
+        tag_id = uuid4()
+        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Spare")
+        mock_tag_repo.get_journal_ids_for_tag.return_value = []
+
+        await tag_service.delete_tag(tag_id, transaction=mock_transaction)
+
+        mock_event_publisher.publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_affected_journals_are_read_before_the_delete(
+        self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
+    ):
+        """The assignment rows cascade away, so the read cannot follow the delete.
+
+        Simulated by having ``delete`` empty the list the repository would return
+        afterwards: if the service asked for the journals after deleting the tag,
+        it would find none and publish nothing.
+        """
+        tag_id = uuid4()
+        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.get_journal_ids_for_tag.return_value = [7, 9]
+
+        async def _cascade(_tag_id):
+            mock_tag_repo.get_journal_ids_for_tag.return_value = []
+
+        mock_tag_repo.delete.side_effect = _cascade
+
+        await tag_service.delete_tag(tag_id, transaction=mock_transaction)
+
+        assert [e.aggregate_id for e in _published(mock_event_publisher)] == [7, 9]
+
+
 class TestUpdateTag:
     """Test the update_tag unit of work.
 

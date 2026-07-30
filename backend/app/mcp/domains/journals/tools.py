@@ -5300,7 +5300,12 @@ async def delete_journal_tag(
         raise JournalValidationError("tag_id", f"Invalid tag UUID: {tag_id}") from e
 
     # The service owns the unit of work; MCP tools never open transactions.
-    await tag_service.delete_tag(tag_id=tag_uuid, transaction=db_connection)
+    await tag_service.delete_tag(
+        tag_id=tag_uuid,
+        transaction=db_connection,
+        source=Provenance.MCP,
+        changed_by="mcp",
+    )
 
     class DeleteJournalTagResponse(BaseModel):
         status: str

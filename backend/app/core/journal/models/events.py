@@ -232,6 +232,47 @@ class JournalTagRemoved(DomainEvent):
 
 
 @dataclass(frozen=True)
+class JournalTagDeleted(DomainEvent):
+    """Event raised when a tag a journal carried was deleted outright.
+
+    Published once per journal that carried the tag, for the same reason
+    :class:`JournalTagRenamed` is: the journal is the aggregate whose activity
+    feed the entry lands in, and a tag-scoped event would have no integer
+    ``aggregate_id`` to use.
+
+    The payload matches :class:`JournalTagRemoved` deliberately. Deleting a tag
+    un-assigns it from every journal, so from a journal's point of view the two
+    are the same change and the feed should not ask the user to care which
+    tag-namespace operation caused it.
+    """
+
+    def __init__(
+        self,
+        journal_id: int,
+        tag_id: UUID,
+        tag_name: str,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
+        transaction: AsyncConnection | None = None,
+    ):
+        now = datetime.now(tz=UTC)
+        super().__init__(
+            event_id=f"journal_tag_deleted_{journal_id}_{tag_id}_{now.isoformat()}",
+            occurred_at=now,
+            aggregate_id=journal_id,
+            event_type="JournalTagDeleted",
+            event_data={
+                "journal_id": journal_id,
+                "tag_id": str(tag_id),
+                "tag_name": tag_name,
+                "source": source.value,
+                "changed_by": changed_by,
+            },
+            transaction=transaction,
+        )
+
+
+@dataclass(frozen=True)
 class JournalTagRenamed(DomainEvent):
     """Event raised when a tag carried by a journal is renamed.
 

@@ -100,6 +100,7 @@ class TestSearchIndexerConsumerEventMatching:
         [
             "JournalTagAssigned",
             "JournalTagRemoved",
+            "JournalTagDeleted",
         ],
     )
     def test_matches_journal_tag_events(
@@ -273,7 +274,7 @@ class TestSearchIndexerConsumerHandleEvent:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "event_type",
-        ["JournalTagAssigned", "JournalTagRemoved"],
+        ["JournalTagAssigned", "JournalTagRemoved", "JournalTagDeleted"],
     )
     async def test_handle_event_does_not_invalidate_for_journal_tag_events(
         self,

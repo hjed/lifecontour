@@ -1027,6 +1027,95 @@ class TestJournalTagHistoryProjectionE2E:
 
         assert await self._tags_history(async_connection, journal_id) == after_first
 
+    @pytest.mark.asyncio
+    async def test_delete_is_projected_onto_every_journal_carrying_the_tag(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        """Destroying a tag records it leaving each journal that carried it.
+
+        Two journals so the fan-out is observable, and a third without the tag to
+        pin that the delete does not reach journals it never touched. The rows are
+        written from ids read *before* the delete — afterwards the cascade has
+        taken the assignment rows with it.
+        """
+        tag_service = await self._tag_service(async_connection)
+        tagged_ids = [
+            await self._journal_id(async_connection, "Deleted subject 1"),
+            await self._journal_id(async_connection, "Deleted subject 2"),
+        ]
+        untagged_id = await self._journal_id(async_connection, "Untagged bystander")
+        tag_name = f"Doomed-{uuid4()}"
+        tag = await SqlJournalTagRepository(async_connection).save(
+            JournalTag(name=tag_name)
+        )
+        assert tag.id is not None
+        for journal_id in tagged_ids:
+            await tag_service.assign_tag(
+                journal_id,
+                tag.id,
+                async_connection,
+                source=Provenance.UI,
+                changed_by="ui",
+            )
+
+        await tag_service.delete_tag(
+            tag.id,
+            async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        await _relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-tag-delete-e2e"
+        )
+
+        for journal_id in tagged_ids:
+            # Most recent first: the delete, then the assignment that preceded it.
+            assert await self._tags_history(async_connection, journal_id) == [
+                (tag_name, None, Provenance.UI, "ui"),
+                (None, tag_name, Provenance.UI, "ui"),
+            ]
+        assert await self._tags_history(async_connection, untagged_id) == []
+
+    @pytest.mark.asyncio
+    async def test_replaying_a_delete_adds_no_duplicate_rows(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+        redis_client: Redis,
+    ) -> None:
+        """A redelivered delete must not double the entry in the feed."""
+        tag_service = await self._tag_service(async_connection)
+        journal_id = await self._journal_id(async_connection, "Delete replay subject")
+        tag = await SqlJournalTagRepository(async_connection).save(
+            JournalTag(name=f"ReplayDoomed-{uuid4()}")
+        )
+        assert tag.id is not None
+        await tag_service.assign_tag(
+            journal_id, tag.id, async_connection, source=Provenance.UI, changed_by="ui"
+        )
+        await tag_service.delete_tag(
+            tag.id, async_connection, source=Provenance.UI, changed_by="ui"
+        )
+        await _relay_and_project(
+            stream_client,
+            test_stream_name,
+            async_connection,
+            "test-tag-delete-replay",
+        )
+        after_first = await self._tags_history(async_connection, journal_id)
+        assert len(after_first) == 2
+
+        await _replay_stream_through_projection(
+            stream_client, test_stream_name, async_connection, redis_client
+        )
+
+        assert await self._tags_history(async_connection, journal_id) == after_first
+
 
 @pytest.mark.integration
 class TestMcpTypeDataHistoryProjectionE2E:

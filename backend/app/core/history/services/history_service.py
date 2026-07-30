@@ -162,6 +162,20 @@ class HistoryService:
             event, data, old_value=data.get("tag_name"), new_value=None
         )
 
+    def _project_journal_tag_deleted(
+        self, event: OutboxEvent, data: dict[str, Any]
+    ) -> list[FieldHistoryEntry]:
+        """The tag was destroyed, which reads on each journal as a removal.
+
+        Deliberately the same row shape as ``JournalTagRemoved``: deleting a tag
+        un-assigns it everywhere, so from the journal's point of view the two are
+        the same change and the feed should not ask the user to distinguish the
+        tag-namespace operation that caused it.
+        """
+        return self._journal_tag_rows(
+            event, data, old_value=data.get("tag_name"), new_value=None
+        )
+
     def _project_journal_tag_renamed(
         self, event: OutboxEvent, data: dict[str, Any]
     ) -> list[FieldHistoryEntry]:
@@ -619,6 +633,7 @@ _HANDLERS = {
     "JournalTagAssigned": HistoryService._project_journal_tag_assigned,
     "JournalTagRemoved": HistoryService._project_journal_tag_removed,
     "JournalTagRenamed": HistoryService._project_journal_tag_renamed,
+    "JournalTagDeleted": HistoryService._project_journal_tag_deleted,
     "RouteCreated": HistoryService._project_route_created,
     "RouteUpdated": HistoryService._project_route_updated,
     "RouteDeleted": HistoryService._project_route_deleted,

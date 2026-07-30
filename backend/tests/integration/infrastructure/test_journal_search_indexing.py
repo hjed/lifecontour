@@ -286,3 +286,31 @@ class TestJournalTagReindexing:
         )
 
         assert self._indexed_tag_ids(indexing_service, journal_id) == [str(kept_id)]
+
+    @pytest.mark.asyncio
+    async def test_delete_drops_the_tag_from_the_index(
+        self,
+        indexing_service: JournalIndexingService,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """Deleting a tag takes its id off every journal that carried it.
+
+        The tag row is gone, so a document still naming it would make tag-filtered
+        search return the journal under an id that no longer resolves to anything.
+        """
+        journal_id = await self._journal_id(async_connection)
+        kept_id = await self._tag_id(async_connection, "Kept")
+        doomed_id = await self._tag_id(async_connection, "Doomed")
+        repo = SqlJournalTagRepository(async_connection)
+        await repo.assign_tag(journal_id, kept_id)
+        await repo.assign_tag(journal_id, doomed_id)
+        await indexing_service.process_event(
+            self._tag_event("JournalTagAssigned", journal_id, kept_id)
+        )
+
+        await repo.delete(doomed_id)
+        await indexing_service.process_event(
+            self._tag_event("JournalTagDeleted", journal_id, doomed_id)
+        )
+
+        assert self._indexed_tag_ids(indexing_service, journal_id) == [str(kept_id)]
