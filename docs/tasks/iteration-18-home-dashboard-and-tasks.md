@@ -1,0 +1,2173 @@
+# Iteration 18: Home Dashboard and Tasks
+
+**Status:** 🔴 PLANNED — fully broken down: 5 iterations, **61 phases**, one PR each, with per-phase
+acceptance criteria and diff estimates calibrated against iteration 17's recorded actuals. Ready to start
+at ITER18-001 Phase 1.
+**Dependencies:** Iteration 4 (journal core, contact relationships, event date ranges), Iteration 7
+(daily summaries, calendar sync, day-grouped journal browsing, journal merge), Iteration 12 (unified
+event-driven field history), Iteration 5 (Redis Streams event bus, outbox relay, stream consumers),
+Iteration 16 (the outdoor logbook dashboard — the composite read-only projection precedent)
+**Goal:** Introduce **Tasks** as a journal-anchored core entity and replace the placeholder home page
+with the daily-briefing **Home Dashboard**, with full MCP parity, delivering the
+[Home Dashboard & Tasks Product Specification](../product-specifications/home-dashboard-and-tasks-product-specification.md).
+
+## Overview
+
+Two intertwined pieces of work. **Tasks** are a new core entity: short commitments anchored to exactly
+two journals — the journal the commitment arose in and the future journal where it matters. **The Home
+Dashboard** replaces `/`, which today is six static cards, with the user's daily briefing: the AI summary
+as the headline over three evidence sections (agenda, tasks due this week, upcoming contact dates).
+
+The two ship together because neither is complete alone: the dashboard is where tasks surface, and tasks
+are much of what makes the dashboard worth opening. The specification's *Delivery Notes* name the
+incoherent splits explicitly, and the iteration boundaries below are drawn to avoid every one of them.
+
+Almost all of the supporting machinery already exists — daily summaries, event journals with times and
+participants, contact important dates with precision, the domain-event outbox and its stream consumers,
+the shared field-history projection, and a precedent for a read-only composite dashboard endpoint. Tasks
+are the only genuinely new entity.
+
+### Key References
+
+- **Product specification:** [Home Dashboard & Tasks](../product-specifications/home-dashboard-and-tasks-product-specification.md)
+  — the behaviour contract for everything below.
+- **Wireframe:** [Home Dashboard Wireframe](../design/home-dashboard-wireframe.md) — the numbered
+  structural inventory (**W1**–**W33**) that the dashboard acceptance criteria are checked against, and
+  the durable [Claude Design link](https://claude.ai/design/p/488fbcbb-4dea-4005-ad0c-56b290e3055e?file=Home+Dashboard.dc.html).
+- **Related specifications:** [Journals](../product-specifications/journals-product-specification.md)
+  (daily summary, merge, cancellation stance), [Contacts](../product-specifications/contacts-product-specification.md)
+  (importance signals), [Activity History](../product-specifications/activity-history-product-specification.md)
+  (provenance).
+- **Architecture:** [Domain Architecture](../architecture/domain-architecture.md),
+  [API Design](../architecture/api-design.md) (including the *Outdoor Dashboard Endpoint* section — the
+  singleton-resource convention this work reuses),
+  [Database Design](../architecture/database-design.md#transaction-management--commit-timing),
+  [Frontend Design](../architecture/frontend-design.md),
+  [Integration Architecture](../architecture/integration-architecture.md#redis-stream-consumer-architecture)
+  (consumer group table).
+
+## Current Baseline (verified)
+
+Verified against the code at the time of writing, not assumed.
+
+### Tasks
+
+**Nothing exists.** No table, entity, service, endpoint, MCP tool, or frontend surface. There is no
+`tasks` string anywhere in the domain layer. Every part of the tasks model in ITER18-001 is new.
+
+### The home page
+
+- `frontend/src/app/page.tsx` renders six static `Card`s (Contacts, Journal, Calendar, Photos, AI
+  Integration, System Status) inside an `AuthGuard`. It fetches nothing.
+- Its Jest test `frontend/src/__tests__/app/page.test.tsx` asserts the heading, subtitle, layout classes
+  and all six cards, driven by the `homePageTestUtils.FEATURE_CARDS` fixture in
+  `frontend/src/test-utils/index.tsx`. **All three must be retired together** with the placeholder — the
+  fixture exists only for this page.
+- Chrome comes from `frontend/src/app/layout.tsx`: sticky `Header`, fixed `DesktopSidebar`, and
+  `main.md:pl-64 > .container.mx-auto.px-4.py-6` with a `Breadcrumb`. This matches the wireframe's frame
+  (**W1**) exactly, so the dashboard needs no chrome changes.
+- `Header.tsx` links `/` from the home icon. The sidebar (`Sidebar.tsx`, `navigationSections`) has
+  **no** entry for the home page.
+
+### Daily summaries
+
+- `DailySummaryService` (`backend/app/core/journal/services/daily_summary_service.py`) orchestrates
+  cache check → input assembly → eligibility → `GENERATING` marker (its own unit of work) → Gemini call
+  with no transaction held → persist. Timezone comes from `UserSettingsRepository` with
+  `DEFAULT_TIMEZONE` fallback (`app/core/settings/timezone_utils.py`).
+- Inputs are assembled by `DailySummaryInputAssembler` into `DailySummaryInput` (journals, journal
+  count, event count, contact names, mood values) — **journal-only today**.
+- `DailySummaryEligibilityChecker.DEFAULT_MIN_JOURNALS = 2`, applied to every day including today.
+- Cached in `journal_daily_summaries` (migration `0049`), unique on `(user_id, summary_date)`, with
+  `status` ∈ pending/generating/generated/failed/disabled and the four counters the wireframe's stat
+  footer (**W10**) displays. `JournalDailySummary.get_display_text()` returns text only when
+  `GENERATED`.
+- Surfaces: `GET /api/journals/daily-summary/{date}` and
+  `POST /api/journals/daily-summary/{date}/regenerate`
+  (`backend/app/api/journals/daily_summary_controller.py`); MCP `get_daily_summary`; frontend
+  `DailySummaryView` inside `DayGroupedJournalList`.
+- **Cache invalidation lives in the search consumer**: `SearchIndexerConsumer`
+  (`app/infrastructure/events/search_indexer_consumer.py`) invalidates summaries for
+  `_JOURNAL_INVALIDATION_EVENTS = {JournalCreated, JournalUpdated, JournalDeleted}`. There is **no**
+  staleness rule — a summary generated yesterday for today's date is served from cache today.
+
+### Journals
+
+- `Journal` (`core_shared/models/journals/entities.py`) carries `user_id`, `title`, `content`,
+  `event_date_range` (`EventDateRange` value object, start/end timestamps) and hierarchy fields. There is
+  **no status column on the journal itself**.
+- **Cancellation is per-event-type data**: `CalendarInfo.event_state` is an `EventState`
+  (`invited`/`tentative`/`confirmed`/`cancelled`). The frontend already derives
+  `isCancelled = type_data.event.event_state === EventState.CANCELLED` in `JournalListItem.tsx`, which
+  is the same signal the agenda (**W18**) and the cancelled-due-journal lapsed rule need.
+- All-day vs timed lives on `CalendarInfo` too (`is_all_day`, `start_time`, `end_time`, `location`,
+  `timezone`) — everything the agenda's ordering rules (**W12**, **W13**) require.
+- Delete: `JournalWriteService.delete_journal` (`@transactional`) → `JournalService.delete_journal`;
+  REST `DELETE /api/journals/{id}`; MCP `delete_journal`. **No blocking concept exists today.**
+- Merge: `JournalMergeService` (`journal_merge_service.py`) absorbs content, tags, contacts, type data,
+  routes and children, then deletes the source; REST `POST /api/journals/{id}/merge`; MCP
+  `merge_journals`. Any new task links must be added to its re-pointing set.
+- Day grouping in the list is **client-side** (`frontend/src/lib/journal-grouping.ts`,
+  `groupJournalsByDay`) over local time; server-side windows are computed in the user's timezone (see the
+  outdoor dashboard, below).
+
+### Contacts
+
+- Important dates: `contact_important_dates` (`app/infrastructure/contacts/contact_tables.py`) with
+  `date_type` ∈ `birthday`/`marriage_anniversary`/`work_anniversary`/`first_met`/`custom` (+
+  `custom_date_types`), and `precision` ∈ `full`/`day_month`/`year` (`DatePrecision`,
+  `core_shared/models/contacts/important_date_types.py`), constrained so `day_month` has no year and
+  `year` has no month/day.
+- The only read path is `ContactRepository.get_important_dates(contact_id)` — **there is no query for
+  "important dates occurring in a window"**, and recurrence is not resolved anywhere. Both are new work
+  in ITER18-004.
+- **Importance is a search-side concern today**: `CONTACTS_INDEX_SETTINGS`
+  (`app/infrastructure/search/meilisearch_client.py`) appends `is_favourite:desc`,
+  `journal_count_30d:desc`, `activity_count_30d:desc` after the six standard MeiliSearch rules — that
+  precedence order is pinned by `tests/unit/infrastructure/search/test_ranking_rules.py`. The values are
+  computed when indexing (`search_indexer.py`) and exposed to the frontend through
+  `meta.search_metadata` (`frontend/src/utils/searchUtils.ts`, `extractContactRankingSignals`). No SQL
+  path produces them, so the dashboard needs one.
+
+### Events, history and search
+
+- Publish path: services publish through `OutboxEventPublisher` inside their unit of work → `OutboxRelay`
+  (`outbox_relay.py`) publishes unrelayed rows to the `pms:domain-events` Redis stream → consumer groups.
+- Consumers (`docs/architecture/integration-architecture.md`): `search-indexer`,
+  `history-projection`, `summary-generator`, `inbound-processor`, `google-worker`, over the shared
+  `StreamConsumer` base with declarative `routes` / `event_type_patterns` and a `DeadLetterConsumerMixin`.
+  A consumer only sees the patterns it subscribes to, so **an unrecognised event type is ignored by
+  construction** — no change is needed to make the search indexer skip task events, only a test pinning
+  it.
+- History: `field_history` is entity-agnostic (`entity_type`, `entity_id`, `field_name`, `old_value`,
+  `new_value`, `changed_by`, `source`, `event_id`, `created_at`).
+  `HistoryService.project_event` (`app/core/history/services/history_service.py`) is a pure
+  event → rows mapping with a `_HANDLERS` dispatch table keyed on event type;
+  `HistoryProjectionConsumer` owns the idempotent writes (`ON CONFLICT DO NOTHING` on
+  `(event_id, entity_type, entity_id, field_name)`). Reads go through
+  `FieldHistoryRepository.get_history_for_aggregate(root_type, id, …)` with per-root-type aggregation
+  strategies (`"journal"`, `"contact"`), wrapped by thin read services
+  (`JournalHistoryService`, `ContactHistoryService`).
+
+### The composite-dashboard precedent
+
+`OutdoorDashboardService` (`app/core/journal/services/outdoor_dashboard_service.py`) +
+`SqlOutdoorDashboardRepository` + `GET /api/journals/outdoor-dashboard` +
+`OutdoorDashboardResource` (a **singleton JSON:API resource whose id is the user id**) + MCP
+`get_outdoor_dashboard` + `frontend/src/app/journals/outdoor-logbook/page.tsx` with one shared TanStack
+query (`frontend/src/lib/api/outdoor-dashboard.ts`) feeding independent widget components. It is
+read-only (no unit of work), takes no date parameters, and anchors every window on "today" in the user's
+configured timezone. ITER18-004 follows this shape.
+
+### Gap summary
+
+| Capability the specification requires | Today | Iteration |
+|---|---|---|
+| Tasks entity, invariants, lifecycle, journal anchoring, retargeting, lapsed | Nothing exists | ITER18-001 |
+| Tasks visible and actionable on journals; created from a journal | Nothing exists | ITER18-001 |
+| Tasks over MCP with identical invariants | Nothing exists | ITER18-001 |
+| Journal delete blocked by task anchors, with explanatory errors | Delete always succeeds | ITER18-002 |
+| Merge re-points task links; cancellation lapses not-done tasks | Merge re-points tags/contacts/children only | ITER18-002 |
+| Task domain events, field history, contact activity records | Nothing exists | ITER18-003 |
+| Tasks excluded from search without breaking the indexer | True by construction, untested | ITER18-003 |
+| Home dashboard with summary, agenda, tasks, upcoming dates | Six static placeholder cards | ITER18-004 |
+| Important dates occurring in the next seven days, recurrence resolved | No windowed/recurrence query | ITER18-004 |
+| Contact importance ranking outside search | MeiliSearch ranking rules only | ITER18-004 |
+| Home page in the primary navigation as the default view | Header icon link only | ITER18-004 |
+| Summary inputs extended with agenda, tasks and dates | Journal-only inputs | ITER18-005 |
+| Today always eligible for a summary | Two-journal threshold applies to today | ITER18-005 |
+| Today's summary regenerated when it was not generated today | No staleness rule | ITER18-005 |
+| Invalidation follows summary inputs, lazily | Journal events only | ITER18-005 |
+
+## Delivery Rules
+
+These apply to every iteration and every phase below.
+
+1. **Tests first.** Write the failing tests for the slice before implementing it. No exceptions.
+2. **Green main.** Do not merge a phase unless the relevant tests, linting and type checks pass.
+3. **Reviewable PRs.** Each phase is **one PR**, independently mergeable, of roughly **≤ 500 changed lines
+   including tests**. Estimates below are derived from the measured record in
+   *[Phase Sizing Calibration](#phase-sizing-calibration)*, not guessed. If an estimate grows past 500
+   mid-implementation, split the phase rather than raising an oversized PR — unless splitting would break
+   rule 9, in which case the overrun is recorded in the phase before work starts.
+4. **The specification is the acceptance bar; the wireframe is the acceptance bar for layout.** Where they
+   conflict, the specification wins and the divergence is recorded in
+   [the wireframe document](../design/home-dashboard-wireframe.md) *and* here.
+5. **MCP parity in the same phase.** A capability that lands in REST or the UI lands in MCP in the same
+   phase, never as a trailing task. MCP tools are controller-equivalent: they call `@transactional`
+   services and never open transactions themselves.
+6. **Transactions in the service layer.** Every write commits via `@transactional` or
+   `unit_of_work(connection)`; controllers and MCP tools open none. There is no commit backstop.
+7. **Reuse before rebuild.** Prefer extending existing components, services and helpers (the outdoor
+   dashboard projection shape, `EventDateRange` windowing, `HistoryService` dispatch, the shared history
+   feed, `TestDataManager`) over new parallel machinery. Where extraction would bloat a PR, duplicate and
+   record the consolidation as follow-up here.
+8. **No accumulating backlog.** Nothing in this iteration may introduce a `/tasks` route, a global task
+   list, or a task index. If a phase finds itself needing one, that is a design error, not a scope
+   increase.
+9. **Every phase is shippable.** No phase may rely on a later phase to restore behaviour it broke.
+10. **Record decisions and follow-ups here.** Divergences, deferrals and discoveries are appended to this
+    document as they happen, in the style of iteration 16 and 17.
+
+## Phase Completion Requirements
+
+Every phase must meet the same bar before merge:
+
+- `main` is green at the end of the phase.
+- Explicit **unit, integration and e2e** coverage. E2E may be deferred only for a phase with no
+  user-visible surface, and the deferral must be stated in the phase.
+- E2E is deterministic and fixture-driven: each test creates its own journals, tasks, contacts and dates.
+  No conditional logic on data state, no skipping on missing data, no multi-outcome assertions. Empty
+  states get their own tests, never an `if` branch inside a populated one.
+- Timezone-sensitive behaviour is tested across a day boundary, not only at midday. Date windows are
+  anchored with `UserSettingsRepository.get_timezone`, never UTC-today.
+- Linting, type checking and the narrowest reliable test targets for the slice pass.
+
+## Phase Sizing Calibration
+
+Every phase estimate below is calibrated against what previous iterations actually cost, because
+[iteration 17](./iteration-17-journal-tags-parity.md) recorded both numbers for every phase it shipped.
+Twelve of its thirteen shipped phases have a recorded actual, and **every one of those overran its
+estimate**:
+
+| Phase | Estimated | Actual (tracked diff) | Ratio | What drove it |
+|---|---:|---:|---:|---|
+| ITER17-001 P1 — description column + MCP listing | 350 | *not recorded* | — | the one shipped phase with no actual |
+| ITER17-001 P2 — tag update, REST + MCP | 500 | ~900 | 1.8× | MCP tools added in two domains; shipped as two commits |
+| ITER17-001 P3 — delete parity, REST + MCP | 400 | ~630 | 1.6× | same shape, smaller service change |
+| ITER17-001 P4 — tag merge, REST + MCP | 500 | ~1050 | 2.1× | repository SQL + validation + both domains' tools |
+| ITER17-002 P1 — backend multi-tag filtering | 450 | ~720 (190 prod + 530 test) | 1.6× | tests 2.8× production |
+| ITER17-002 P2 — frontend params + deep link | 350 | ~700 (200 prod + 500 test) | 2.0× | tests 2.5× production |
+| ITER17-003 P1 — shared tags editor extraction | 500 | ~1360 | 2.7× | extraction rewrote the existing contact call sites |
+| ITER17-003 P2 — detail view wiring + e2e | 300 | ~1250 gross / ~90 net | — | deletions and moves dominate; net was tiny — the one phase that came in *under* estimate on a net basis |
+| ITER17-004 P1 — sidebar tag tree | 450 | ~1000 (~260 prod, 70% tests) | 2.2× | test volume |
+| ITER17-004 P2 — create/edit dialogs | 450 | ~3150 across 24 files | **5.8×** | shared-dialog migration of *both* domains at once |
+| ITER17-004 P3 — delete/merge dialogs | 400 | ~711 (~130 prod, 81% tests) | 1.8× | test volume |
+| ITER17-005 P1 — assignment/removal events | 450 | ~1440 | 3.2× | 2 event types + projection + every publish path |
+| ITER17-005 **P2a** — tag rename events | 760 | ~1270 | 1.7× | 1 event type + projection; P2 as planned was estimated ~1200 before the 2a/2b split, and P2b (~700) has not shipped |
+
+**Two different ratios live in that table, and conflating them is the trap.** The *Ratio* column is
+estimate→actual (median **≈2.0×**) — useful for judging how optimistic an estimate is. It is **not** the
+production→tracked multiplier. Iteration 17 recorded the production/test split for six phases, and that
+multiplier is far larger:
+
+| Phase | Production | Tracked | Multiplier |
+|---|---:|---:|---:|
+| ITER17-002 P1 | ~190 | ~720 | 3.8× |
+| ITER17-002 P2 | ~200 | ~700 | 3.5× |
+| ITER17-004 P1 | ~260 | ~1000 | 3.8× |
+| ITER17-004 P2 | ~1040 | ~3150 | 3.0× |
+| ITER17-004 P3 | ~130 | ~711 | 5.5× |
+| ITER17-005 P2a | ~200 | ~1270 | 6.4× |
+
+Median **≈3.8×**. Tests, fixtures and helpers are 60–81% of every diff this repo produces. The sizing
+rules below follow from that record and apply to every phase in this document:
+
+1. **Estimate production lines, then multiply by 4** for the tracked total. A ≤500-line PR therefore means
+   **≤125 production lines**; ≤150 production lines lands near 600. Phase estimates below give both
+   numbers, computed at ×4.
+2. **Be honest about the achievable floor.** A phase shipping a service method + REST + MCP for one
+   capability has never landed under ~630 in this repo (ITER17-001 P3) and typically costs ~900. Such
+   phases are budgeted at **600–700 and flagged**, not written down to 500 and discovered later. The
+   500-line standard is met by pure-logic, single-surface and frontend-component phases; capability
+   triples sit above it and say so.
+3. **One capability per phase**, where a capability is one service method plus the surfaces that expose it.
+4. **Substantial validation gets its own phase.** Where a service method's own logic is the hard part
+   (task invariants, retarget semantics, recurrence resolution, importance ranking), it ships as a
+   service-plus-unit-tests phase *ahead* of the phase that exposes it. That phase is mergeable on its own:
+   tested domain logic with no caller yet, exactly as ITER17-001 Phase 1 shipped a column before a UI.
+5. **MCP parity stays in the same phase as its REST counterpart** (delivery rule 5) — never a phase later.
+   Narrow the capability instead. This is the constraint that drove ITER17-001's overruns, and the
+   response here is smaller slices, not deferred MCP.
+6. **At most two new domain event types per phase.** Iteration 17's own conclusion, recorded verbatim
+   there: *"a future phase adding an event type should budget ~600 test lines per type up front"* — borne
+   out by ITER17-005 P1 (2 types, ~1440) and P2a (1 type, ~1270). This is why ITER18-003 is nine phases,
+   not the three a naive reading would suggest.
+7. **Never touch two domains in one phase.** ITER17-004 P2's 5.8× came entirely from migrating contacts
+   and journals together. Phases here that read contact data (ITER18-004 Phases 7–9) do so through new
+   read paths; the only phase that extracts from an *existing* contact/search code path
+   (ITER18-004 Phase 8a) is isolated for exactly this reason.
+8. **Component extraction or migration: assume the higher end (5×+)** and count every existing call site
+   the change rewrites, not just the new component.
+9. **Every new e2e spec file is its own phase** — budget ~150–250 lines per spec plus the
+   `TestDataManager` helpers it needs, which are test infrastructure and count toward the diff.
+10. **Coherence beats size.** Where splitting a phase would ship a dead end named in the specification's
+    *Delivery Notes* (or break delivery rule 9), the phase stays whole and states its expected overrun in
+    advance.
+11. **Count test fixtures, factories and helpers; do not count generated output** (`ds-bundle/`, lockfiles,
+    migrations' autogenerated boilerplate).
+12. **Record the actual next to the estimate** when each phase lands, as iterations 16 and 17 did. That is
+    what made these tables possible, and the next iteration's estimates depend on it. Record the
+    production/test split too — six data points is a thin basis for a ×4 multiplier.
+
+**Programme size:** 61 phases — and therefore 61 PRs — across the five iterations
+(ITER18-001: 22, ITER18-002: 5, ITER18-003: 9, ITER18-004: 17, ITER18-005: 8). That count is the honest
+consequence of a 500-line PR standard over a new core entity plus a new page; the alternative is fewer,
+larger PRs that review badly. **Expected landing zone:** most phases 400–600 tracked lines, capability
+triples 600–700, and the flagged exceptions up to ~750.
+
+## Wireframe Conformance
+
+The dashboard's layout contract is [the wireframe](../design/home-dashboard-wireframe.md), whose elements
+are numbered **W1**–**W33**.
+
+- Every UI-bearing acceptance criterion below cites the `W` element(s) it satisfies.
+- The dashboard e2e suite must assert the **structural** wireframe facts, not screenshots: section order,
+  all-day-before-timed ordering, the five-item cap, the show-more label, the cancelled marker, the
+  collapsed-by-default tomorrow disclosure, and each declared state (**W33**).
+- Any deliberate divergence must be recorded in both documents with its reason. The eight already known
+  are listed under *Known gaps and divergences* in the wireframe document: gaps 1–4 and 8 are resolved by
+  ITER18-004, gap 5 (lapsed presentation) by ITER18-001, and gaps 6–7 are informational.
+- The wireframe is built from the real synced design system, so implementation uses the existing
+  `components/ui` primitives. If a new shared primitive is genuinely needed, it must also be added to
+  `frontend/.design-sync/` (entry, `componentSrcMap`, docs stub, preview) per `CLAUDE.md`.
+
+## Sequencing Strategy
+
+```text
+ITER18-001 (tasks core) ──┬── ITER18-002 (anchor integrity)
+                          ├── ITER18-003 (events + history)
+                          ├── ITER18-004 (home dashboard) ── ITER18-005 (summary extension)
+                          └──────────────────────────────────┘
+```
+
+Phase counts: ITER18-001 → 22, ITER18-002 → 5, ITER18-003 → 9, ITER18-004 → 17, ITER18-005 → 8.
+
+0. **A hard ordering constraint cuts across iterations 001 and 002.** ITER18-001 Phase 1 gives the task
+   anchors `ON DELETE RESTRICT` foreign keys, and ITER18-001 Phase 5 makes tasks creatable. From that
+   moment, both `DELETE /api/journals/{id}` **and** `POST /api/journals/{id}/merge` — which ends by
+   deleting the absorbed journal — raise a raw integrity error for any journal that anchors a task. Both
+   are shipped features, so **ITER18-002 Phases 1–3 must merge immediately after ITER18-001 Phase 5**,
+   before the rest of ITER18-001 proceeds. Treating anchor integrity as later clean-up breaks delivery
+   rule 9 for every phase in between.
+1. **ITER18-001 is otherwise the gate.** Everything else needs the entity, and it is the largest at 22
+   phases. Useful cross-iteration starts: ITER18-004 Phases 1–12 (endpoint, page shell, summary card,
+   agenda, occurrence resolution, importance signals, upcoming dates) and ITER18-005 Phases 1–2 need
+   **nothing** from ITER18-001, so they can run in parallel with it from day one. ITER18-004 Phase 5 does
+   need ITER18-001 Phase 3 (the shared date helper), and ITER18-005 Phase 3 needs ITER18-004 Phase 5.
+2. **ITER18-002 and ITER18-003 are independent of each other** and can run in parallel once 001 lands.
+   002 should not lag far behind 001: until it ships, deleting a journal can violate the model's core
+   invariant (the specification names this as an incoherent split), so 001's phase plan must either
+   include the delete guard or 002 must follow immediately.
+3. **ITER18-004 needs 001** for its tasks section, and nothing else. Its summary and agenda sections
+   depend only on what exists today, so its own phase split can front-load them.
+4. **ITER18-005 needs 001** (tasks as inputs) and is *better after* 004 (the always-eligible-today rule
+   is what keeps the dashboard headline from being blank on quiet days), but does not require it: the
+   journals view consumes the same summary.
+5. **ITER18-003 is not a prerequisite for anything user-visible**, but should not be deferred past 004 —
+   a dashboard that mutates task state with no history trail is a gap in the activity-history contract.
+
+## Iteration Breakdown
+
+> Each iteration below is **independently deliverable**: it leaves the application working, is useful on
+> its own, and does not depend on a later iteration to restore behaviour.
+>
+> **Phases are one PR each.** A phase must be independently mergeable — it breaks nothing on merge, ships
+> its own tests, and leaves `main` green. The specification's *coherence* requirements (a tasks section
+> needs its inline done action; a domain model needs journal display) bind at **iteration** granularity,
+> not phase granularity: an intermediate phase may leave a capability reachable only over MCP, or a
+> service method with no caller yet, provided nothing that previously worked is broken. Where a split
+> would ship a user-visible dead end, the phase stays whole (calibration rule 8).
+>
+> Estimates are given as **production lines → tracked total** per calibration rule 1. Record the actual
+> beside the estimate when each phase lands.
+
+### ITER18-001: Tasks Core — Model, Anchoring, Lifecycle, Journal UI, MCP
+
+**Objective:** Deliver the Tasks entity end to end: the model and its invariants, journal anchoring and
+retargeting, the three-state lifecycle, contact links, lapsed behaviour, the REST surface, the matching
+MCP tools, and the journal-facing UI that makes tasks creatable and actionable.
+
+**Independently deliverable because:** on its own it gives the user (and an agent) the whole capture →
+defer → complete → resurrect loop inside journals. It carries no dependency on the dashboard, and the
+specification's *Delivery Notes* forbid the alternative split (a domain model without journal display
+leaves tasks uncreatable and invisible).
+
+**Relevant documents:**
+
+- Specification §*Tasks* (product model, core invariants, creating a task, status and lifecycle, journal
+  links and retargeting, lapsed tasks, contacts on tasks, where tasks appear)
+- [Domain Architecture](../architecture/domain-architecture.md) (ports and adapters, domain enums),
+  [API Design](../architecture/api-design.md) (JSON:API + FastMCP patterns)
+- `creating-migrations` skill for migration naming; `writing-sql` skill before any query work
+- Reference implementations: `journal_contact_relationship_repository.py` (explicit structured links),
+  `JournalTagService` (validation-in-service, SQL-in-repository), `journal_tag_service` MCP tools (the
+  REST+MCP-per-phase pattern from iteration 17)
+
+**Acceptance Criteria:**
+
+- [ ] Migration creates the task tables: a task (owner, text, status, creating journal, due journal) plus
+      a link table for intermediate journals and one for contacts. Foreign keys express what the model
+      requires: both anchors `NOT NULL`; intermediate and contact links cascade on delete of the task;
+      the anchors do **not** cascade from the journal side (deletion is blocked in ITER18-002, so the
+      FK must not silently destroy tasks in the meantime — `ON DELETE RESTRICT` or equivalent).
+- [ ] Domain entity and status enum with exactly three values — not done (default), done, cancelled —
+      following the project's domain-enum pattern.
+- [ ] **Core invariants enforced in the service layer, identically for REST and MCP:** a task always has
+      both a creating and a due journal; neither can be absent at any point in its life; the due journal
+      must be an **existing** journal; the due journal's date must be in the future relative to today in
+      the **user's timezone** at the moment it is set; creating and due may be the same journal.
+- [ ] A journal's date for invariant purposes is the date of its `event_date_range.start` interpreted in
+      the user's timezone — the same date the journal list groups it under.
+- [ ] Invariant 4 is checked **only when the due journal is set**, never continuously. A task whose due
+      journal has moved into the past is lapsed, not invalid.
+- [ ] **No bare date picker and no implicit journal creation** on any surface, including MCP. Attempting
+      to set a due journal that does not exist, or that is not future-dated, returns a clear, actionable
+      error naming the constraint.
+- [ ] Creating a task takes its creating journal from the journal it is created *from* — never chosen
+      separately — plus text, a due journal, and optionally contacts.
+- [ ] Status transitions: done is reversible; cancelled is soft and reversible **only** by retargeting to
+      a new future journal (which returns the task to not done); marking done or cancelled requires no
+      journal and creates no journal link; text and contact links are editable in any status.
+- [ ] Hard delete exists but is the exception: the UI leads with cancel and treats delete as secondary,
+      matching the journals specification's stance.
+- [ ] **Retargeting:** the creating journal is immutable; the due journal may be retargeted at any time in
+      any status; the previous due journal is **automatically retained as an intermediate journal** (the
+      one automatic link in the model); retargeting always leaves the task not done; retargeting a
+      **done** task reopens it and the UI must confirm before it happens; the new due journal must satisfy
+      the future-dated invariant whatever the previous status.
+- [ ] **Intermediate links are otherwise explicit only** — nothing is inferred from where the user
+      happened to be when editing. They can be removed; the creating and due links cannot (the due link
+      can only be replaced).
+- [ ] **Lapsed** is derived, never stored: a not-done task whose due journal's date has passed, **or**
+      whose due journal is cancelled (`EventState.CANCELLED`). Lapsed tasks remain visible on every
+      journal they link to, clearly marked, with resurrect / cancel / done available inline. They are
+      never auto-cancelled and never auto-rolled-forward.
+- [ ] Contact links are plain references: no relationship type, role or attendance status; contacts are
+      never parsed out of the task text.
+- [ ] **REST surface** (JSON:API, following the journal controllers' conventions): create a task from a
+      journal; update text; set status; retarget the due journal; attach/detach an intermediate journal;
+      link/unlink a contact; read one task with its journals and contacts; list a journal's tasks **by
+      link role**; list not-done tasks due within a forward window (default seven days); delete.
+- [ ] **MCP tools shipped in the same phase as each REST capability**, covering the specification's list:
+      create, update text, set status, retarget, attach/detach journal, link/unlink contact, get one, list
+      by journal and role, list due within a forward window (default seven days). Every invariant and
+      error message applies identically, and each tool's documentation lives in its docstring/schema —
+      not in `mcp-setup.md`.
+- [ ] All writes commit via `@transactional` services; controllers and MCP tools open no transactions.
+- [ ] **Journal detail UI** shows the journal's tasks in three groups — **due** in this journal,
+      **created** in this journal, **mentioned** in this journal — each entry showing the task text, its
+      status, its linked contacts, and for lapsed tasks a clear lapsed marker plus inline resurrect,
+      cancel and done. Rows reuse the dashboard row idiom (**W22**, **W23**, **W24**, **W27**) so the two
+      surfaces read alike; the lapsed marker is journal-only and never appears on the dashboard
+      (wireframe gap 5).
+- [ ] **Create-from-journal UI**: task text plus a due-journal picker that favours recent and near-future
+      journals and supports search across future journals by title and date, without becoming a journal
+      browser. Optional contact selection. When the user has no future journals, the UI says so plainly
+      and offers to create one instead of showing an empty picker.
+- [ ] **Journal list** carries a lightweight indicator that a journal has tasks due in it, consistent with
+      its other list-level indicators.
+- [ ] No `/tasks` route, no global list, no status-filter browser, and no task in global search.
+
+**Required Test Coverage:**
+
+- **Unit:** every invariant, including the same-journal case and the "must be future when set, not
+  continuously" distinction; the day-boundary calculation in a non-UTC timezone; status transition
+  matrix (including cancelled → reopened only via retarget, and done → reopened on retarget); the
+  automatic previous-due → intermediate link; lapsed derivation for both causes (date passed, due journal
+  cancelled) and its non-application to done/cancelled tasks; MCP tool schemas.
+- **Integration:** real-database round trips for each endpoint and each MCP tool; FK behaviour (task
+  deletion cascades its links; a journal that anchors a task cannot be destroyed silently); the future-date
+  invariant evaluated across a day boundary for a non-UTC user; error payload shape for each rejected
+  invariant, over both REST and MCP.
+- **E2E:** create a task from a journal and see it on the journal; tick it done and see the status change;
+  retarget it to a later journal and see the previous journal retained as a mention; resurrect a lapsed
+  task from the journal it was due in; the no-future-journals message. Separate deterministic fixtures for
+  each; extend `TestDataManager` with task and future-journal helpers rather than reaching into the API
+  ad hoc.
+
+**Open decisions:**
+
+1. **Primary key type** — settled in **Phase 1**. Journals are integer-keyed; journal tags and activity
+   templates are UUID-keyed. UUID avoids exposing enumerable ids on a user-owned entity and matches the
+   newer tables; integer matches the journals the entity is most tightly coupled to.
+2. **Where the due-journal "future" boundary sits** for a multi-day journal whose range straddles today —
+   settled in **Phase 2**. The specification defines a journal's date as its start date, so a trip that
+   started yesterday and ends tomorrow is *past*. Confirm that reading before it becomes a validation rule.
+3. **Whether task text has a length bound**, and whether it is markdown or plain — settled in **Phase 1**
+   (the column) and enforced in **Phase 2** (the entity). "Short text" plus richer content belonging in a
+   journal argues for plain with a bound.
+4. **Whether MCP gets a delete tool** — settled in **Phase 7**. The specification's MCP list omits delete
+   while listing every other operation, but principle 1 (no meaningful UI-only behaviour) argues for
+   including it. Recommended: include `delete_task`, and record the addition here.
+
+#### Phase 1: Schema, Tables and Domain Entity
+
+**Prerequisites:** none.
+**Estimated diff:** ~110 production → **~440 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] Alembic migration (sequential naming per the `creating-migrations` skill) creates the task table
+      (owner, text, status, creating journal, due journal, timestamps) plus the intermediate-journal and
+      contact link tables.
+- [ ] Anchor FKs are `NOT NULL` and **do not cascade from the journal side** (`ON DELETE RESTRICT` or
+      equivalent). Link rows cascade from the task side; the contact-link FK is `ON DELETE CASCADE` from
+      the contact side, so deleting a contact drops its links without touching tasks.
+- [ ] Status is a `CHECK`-constrained column matching the three-value domain enum; text carries the length
+      bound from open decision 3.
+- [ ] Domain entity + status enum in `core_shared`, following the project's domain-enum pattern, with
+      construction-time validation of text and the presence of both anchors.
+- [ ] **Primary key type decided and justified here.** Note the constraint that forces it:
+      `DomainEvent.aggregate_id` is typed `int` (`core_shared/core_shared/stream_client.py`) and
+      `field_history.entity_id` is `Integer` (`app/infrastructure/contacts/contact_tables.py`), so a UUID
+      task id cannot be an event aggregate id or a history entity id without migrating a table shared with
+      contacts and journals. Iteration 17 hit the same wall and made journal-tag events journal-scoped.
+      Integer is therefore the default answer; choosing UUID means adding that migration to ITER18-003
+      Phase 6 and re-estimating it.
+
+**Required Test Coverage:** unit — entity validation and enum behaviour. Integration — migration applies
+cleanly; the anchor FK **refuses** a journal delete; contact deletion drops links only. No e2e (no surface
+— deferral stated).
+
+#### Phase 2: Task Repository
+
+**Prerequisites:** Phase 1.
+**Estimated diff:** ~110 production → **~440 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] Repository with save / find-by-id / delete plus intermediate-journal and contact link add/remove.
+      **Only these** — each later read (by journal role, forward window, list indicator) belongs to the
+      phase that consumes it, per calibration rule 3.
+- [ ] A single row-mapping helper rather than duplicated per-query mapping (the `_row_to_tag` lesson from
+      ITER17-001 Phase 1).
+- [ ] Link adds are idempotent at the repository level, so a retry cannot create a duplicate row.
+- [ ] All reads are **owner-scoped** at the repository boundary — no method can return another user's task.
+
+**Required Test Coverage:** integration — round-trip save/read/delete, link add/remove idempotency, link
+cascade on task delete, and owner scoping (another user's id returns nothing). No e2e.
+
+#### Phase 3: Journal-Date Resolution and the Future-Dated Rule
+
+**Prerequisites:** none (pure logic over existing journal data).
+**Estimated diff:** ~90 production → **~360 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] A helper resolving a journal's **date** as the date of `event_date_range.start` in the user's
+      timezone (`UserSettingsRepository.get_timezone`, `resolve_timezone`) — the same date the journal list
+      groups it under. Never UTC-today.
+- [ ] A predicate answering "is this journal future-dated relative to today in the user's timezone".
+- [ ] Open decision 2 settled here: a multi-day journal that started yesterday and ends tomorrow is
+      **past**, because a journal's date is its start date.
+- [ ] Reusable by ITER18-004's windowing rather than re-derived there.
+
+**Required Test Coverage:** unit — the boundary either side of local midnight for a non-UTC user; the
+multi-day straddling case; a journal starting exactly today; DST transition days. Integration — resolution
+against a real user-settings row and the UTC fallback when no timezone is set. No e2e.
+
+#### Phase 4: Creation Service and Core Invariants
+
+**Prerequisites:** Phases 2 and 3.
+**Estimated diff:** ~120 production → **~480 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] `TaskService.create_task` as a `@transactional` unit of work, taking creating journal, text, due
+      journal and optional contacts.
+- [ ] Invariants enforced here so every entry point inherits them: both anchors present; the due journal
+      **exists**; the due journal is future-dated per Phase 3; creating and due may be the same journal.
+- [ ] **Ownership is an invariant, not an assumption:** both journals must belong to the acting user, as
+      must any linked contact. A task can never span owners.
+- [ ] Distinct, actionable domain errors per violated invariant, mapped to the journal/task domain's
+      existing error-to-status conventions.
+- [ ] The future-date check happens **only** at set time; nothing re-validates it on read. This is what
+      makes a lapsed task reachable at all — see Phase 22's fixture recipe.
+
+**Required Test Coverage:** unit — each invariant including the same-journal case and each ownership
+violation. Integration — the service against real journals, including another user's journal as the due
+journal (rejected) and a contact owned by another user (rejected). No e2e.
+
+#### Phase 5: Create — REST and MCP
+
+**Prerequisites:** Phase 4.
+**Estimated diff:** ~150 production → **~600 tracked** (×4) — a capability triple, at the measured floor
+for service + REST + MCP (calibration rule 2)
+
+**Acceptance Criteria:**
+
+- [ ] `POST /api/journals/{journal_id}/tasks` (JSON:API) creates a task whose creating journal is the path
+      journal — never a body field.
+- [ ] MCP `create_task` in the same PR, taking creating journal, due journal, text and optional contacts,
+      with the same errors; documentation lives in the docstring/schema, not `mcp-setup.md`.
+- [ ] Both surfaces reject a non-existent, non-future or non-owned due journal with a message naming the
+      constraint, and neither offers a bare date nor creates a journal implicitly.
+- [ ] Controller and tool open no transactions; both call the `@transactional` service.
+- [ ] **This is the phase after which journal delete and merge can hit the anchor FK.** ITER18-002
+      Phases 1–3 must merge immediately after it — see the Sequencing Strategy.
+
+**Required Test Coverage:** unit — request/response schemas and the MCP tool schema. Integration — endpoint
+and tool against a real database, one test per rejected invariant on each surface, including cross-user
+attempts. E2E deferred to Phase 22.
+
+#### Phase 6: Status Lifecycle — Service, REST and MCP
+
+**Prerequisites:** Phase 5.
+**Estimated diff:** ~150 production → **~600 tracked** (×4) — capability triple
+
+**Acceptance Criteria:**
+
+- [ ] `TaskService.set_status` handles the full transition matrix: done is reversible to not done;
+      cancelled is reachable from any state; **cancelled → not done is rejected here**, because reopening
+      happens only by retargeting (Phase 7).
+- [ ] Marking done or cancelled requires no journal and creates no journal link.
+- [ ] `PATCH /api/tasks/{id}` (status) plus MCP `set_task_status` in the same PR, accepting the three values
+      and rejecting anything else.
+- [ ] Both surfaces 404 on another user's task.
+
+**Required Test Coverage:** unit — the transition matrix including every rejected transition. Integration —
+both surfaces against a real database, plus the cross-user 404. E2E deferred to Phase 22.
+
+#### Phase 7: Retargeting Semantics — Service
+
+**Prerequisites:** Phase 6.
+**Estimated diff:** ~130 production → **~520 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] `TaskService.retarget_due_journal` revalidates the future-dated and ownership rules at set time,
+      whatever the current status.
+- [ ] The **previous due journal is automatically retained as an intermediate journal** — the model's one
+      automatic link — without duplicating an existing intermediate link for the same journal.
+- [ ] Retargeting always leaves the task **not done**: not done stays not done; cancelled is reopened; done
+      is reopened.
+- [ ] Reopening a **done** task requires an explicit acknowledgement argument; without it the service
+      refuses with an error the UI and an agent can act on.
+- [ ] The creating journal is immutable — no code path can change it.
+
+**Required Test Coverage:** unit — each status's outcome, the automatic intermediate link and its
+de-duplication, the acknowledgement requirement, creating-journal immutability, future-date and ownership
+revalidation. Integration — retarget round-trip with real journals. No e2e.
+
+#### Phase 8: Retargeting — REST and MCP
+
+**Prerequisites:** Phase 7.
+**Estimated diff:** ~140 production → **~560 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] A retarget endpoint (`PATCH /api/tasks/{id}` due journal, or a dedicated sub-resource — state the
+      choice) and MCP `retarget_task` in the same PR, both carrying the reopen acknowledgement.
+- [ ] Both return the resulting task including its new intermediate link, so a caller sees the trail
+      without a second read.
+- [ ] Reopening a done task without acknowledgement returns a distinguishable error, not a generic
+      validation failure.
+
+**Required Test Coverage:** unit — schemas and tool schema. Integration — both surfaces, the
+unacknowledged-reopen rejection, and the intermediate link in the response. E2E deferred to Phase 22.
+
+#### Phase 9: Text Update and Delete — REST and MCP
+
+**Prerequisites:** Phase 5.
+**Estimated diff:** ~150 production → **~600 tracked** (×4) — capability triple
+
+**Acceptance Criteria:**
+
+- [ ] Text is editable in **any** status, through `PATCH /api/tasks/{id}` and MCP `update_task_text`.
+- [ ] Hard delete via `DELETE /api/tasks/{id}` and MCP `delete_task` (open decision 4), removing the task
+      and its link rows and nothing else.
+- [ ] Both docstrings make cancel the ordinary action and delete the exception, consistent with the
+      journals specification's stance.
+- [ ] Both surfaces 404 on another user's task.
+
+**Required Test Coverage:** unit — text validation bounds, schemas, tool schemas. Integration — edit in each
+status; delete removes link rows and leaves journals and contacts untouched; cross-user 404. E2E deferred to
+Phase 22.
+
+#### Phase 10: Intermediate Journal Links — REST and MCP
+
+**Prerequisites:** Phase 5.
+**Estimated diff:** ~150 production → **~600 tracked** (×4) — capability triple
+
+**Acceptance Criteria:**
+
+- [ ] Attach and detach an intermediate journal, over REST and MCP in the same PR.
+- [ ] Intermediate links are **explicit only** — no code path infers one from an edit — and attaching is
+      idempotent rather than duplicating.
+- [ ] The creating and due links cannot be detached through this surface; attempting it is a clear error.
+- [ ] Attaching a journal that is already the creating or due journal is rejected: it is already linked in
+      a stronger role.
+- [ ] The journal must belong to the acting user.
+
+**Required Test Coverage:** unit — role rules and idempotency. Integration — attach/detach round-trips and
+each rejection on both surfaces, including the cross-user journal. E2E deferred to Phase 22.
+
+#### Phase 11: Contact Links — REST and MCP
+
+**Prerequisites:** Phase 5.
+**Estimated diff:** ~150 production → **~600 tracked** (×4) — capability triple
+
+**Acceptance Criteria:**
+
+- [ ] Link and unlink a contact over REST and MCP in the same PR; linking is idempotent.
+- [ ] Links carry **no** relationship type, role or attendance status, and nothing parses contacts out of
+      the task text.
+- [ ] Contact links are editable in any status; the contact must belong to the acting user.
+- [ ] Deleting a contact removes its task links without touching the tasks — the FK direction fixed in
+      Phase 1, asserted here.
+
+**Required Test Coverage:** unit — schemas, tool schemas, idempotency. Integration — round-trips, contact
+deletion behaviour, cross-user rejection, both surfaces. E2E deferred to Phase 22.
+
+#### Phase 12: Read Model and Lapsed Derivation
+
+**Prerequisites:** Phases 3 and 10.
+**Estimated diff:** ~120 production → **~480 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] `lapsed` is **derived in the read model, never stored**: a not-done task whose due journal's date has
+      passed in the user's timezone (Phase 3's predicate), **or** whose due journal is cancelled
+      (`EventState.CANCELLED`).
+- [ ] The derivation reports **why** a task lapsed — date passed vs due journal cancelled — as structured
+      data, so surfaces can word it differently. ITER18-002 Phase 4 depends on this distinction; the UI
+      wording itself lives in Phase 16.
+- [ ] Done and cancelled tasks are never lapsed.
+- [ ] The read model carries the task with its journals by role and its contacts, in the shape both read
+      surfaces (Phase 13) and the dashboard (ITER18-004) consume.
+
+**Required Test Coverage:** unit — both lapse causes, across a day boundary in a non-UTC timezone, and
+non-application to done/cancelled tasks. Integration — derivation against a real cancelled event journal and
+a real past-dated journal. No e2e.
+
+#### Phase 13: Get and List-by-Journal — REST and MCP
+
+**Prerequisites:** Phase 12.
+**Estimated diff:** ~150 production → **~600 tracked** (×4) — capability triple
+
+**Acceptance Criteria:**
+
+- [ ] `GET /api/tasks/{id}` returns the task with its journals (by role) and contacts, including the lapsed
+      flag and reason; MCP `get_task` matches. Another user's task 404s on both.
+- [ ] `GET /api/journals/{id}/tasks` returns the journal's tasks **grouped by link role** — due here,
+      created here, mentioned here; MCP `list_journal_tasks` matches, with an optional role filter.
+- [ ] Nested journals and contacts are fetched in **one query per collection**, not per task — an N+1 here
+      is a correctness concern at journal scale.
+
+**Required Test Coverage:** unit — role grouping and serialisation. Integration — both surfaces against real
+journals including a cancelled event journal; the cross-user 404; a query-count assertion proving the nested
+collections do not N+1. E2E deferred to Phase 22.
+
+#### Phase 14: Upcoming-Window Listing — REST and MCP
+
+**Prerequisites:** Phase 12.
+**Estimated diff:** ~150 production → **~600 tracked** (×4) — capability triple
+
+**Acceptance Criteria:**
+
+- [ ] A listing of **not-done** tasks whose due journal falls between today and *N* days ahead inclusive,
+      default seven, ordered by due-journal date soonest first, anchored on today in the user's timezone.
+- [ ] Lapsed, done and cancelled tasks are excluded. **The only fixture that makes the lapsed exclusion
+      non-vacuous is a not-done task whose due journal is inside the window but `EventState.CANCELLED`** — a
+      date-passed lapse cannot fall inside a forward window by construction. That fixture is required.
+- [ ] MCP `list_upcoming_tasks` with the same default and semantics, in the same PR.
+- [ ] The response carries task text, due journal id/title/date and linked contacts, in one query per
+      collection. This is the query ITER18-004's tasks section consumes, so its shape is settled here.
+
+**Required Test Coverage:** unit — window arithmetic and ordering, including a task due exactly on the
+boundary day. Integration — both surfaces with tasks inside, outside, on the boundary, done, cancelled and
+cancelled-journal-lapsed; window anchoring for a non-UTC user near midnight; no N+1. E2E deferred to
+Phase 22.
+
+#### Phase 15: Frontend — Task API Client
+
+**Prerequisites:** Phase 13.
+**Estimated diff:** ~90 production → **~360 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] `frontend/src/lib/api/tasks.ts` + types: TanStack Query hooks for the read surfaces and mutations,
+      following the journals client's conventions (query-key factory, error handling, toasts).
+- [ ] **Every mutation routes through `frontend/src/lib/invalidate-after-mutation.ts`**, which cancels
+      in-flight queries before invalidating them. Iteration 17 spent two bug fixes establishing this
+      (issue #1203 and a `fetchNextPage` race) and routed all 77 mutation handlers through it; a new client
+      that reintroduces bare `invalidateQueries` reintroduces the flake.
+- [ ] Query keys are structured so a journal's task list and the dashboard's task section can be
+      invalidated independently.
+
+**Required Test Coverage:** unit — hook behaviour against a mocked client, and a test pinning that
+mutations cancel before invalidating, in that order.
+
+#### Phase 16: Frontend — Journal Task Display
+
+**Prerequisites:** Phase 15.
+**Estimated diff:** ~140 production → **~560 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] A `JournalTasksSection` component renders the three groups — due, created, mentioned — on the journal
+      detail view, showing each task's text, status and linked contacts.
+- [ ] Rows reuse the dashboard row idiom (**W22**, **W23**, **W27**) so the two surfaces read alike.
+- [ ] Lapsed tasks are clearly marked and the marker **states which reason applies**, in wording distinct
+      between date-passed and due-journal-cancelled (the data comes from Phase 12).
+- [ ] A journal with no tasks renders nothing rather than an empty container; an empty group is omitted.
+- [ ] Read-only in this phase: no action buttons yet, which breaks nothing that previously worked.
+
+**Required Test Coverage:** unit (RTL) — the three groups, both lapsed reasons, the no-tasks case, contact
+rendering, and accessible grouping labels. E2E deferred to Phase 22.
+
+#### Phase 17: Frontend — Inline Status Actions
+
+**Prerequisites:** Phases 6 and 16.
+**Estimated diff:** ~130 production → **~520 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] Inline done / return-to-not-done / cancel actions on each row (**W24** idiom), with optimistic update
+      and rollback on failure, routed through `invalidateAfterMutation`.
+- [ ] Cancel is presented as the ordinary action; delete, where offered, is visually secondary and
+      confirmed.
+- [ ] Actions are keyboard reachable and announce their result.
+
+**Required Test Coverage:** unit (RTL) — each action's happy path and failure rollback, keyboard operation,
+and cancel-before-invalidate ordering. E2E deferred to Phase 22.
+
+#### Phase 18: Frontend — Retarget and Resurrect Dialog
+
+**Prerequisites:** Phases 8 and 17.
+**Estimated diff:** ~140 production → **~560 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] A retarget dialog offering **future** journals, used both to extend a deadline and to resurrect a
+      lapsed or cancelled task.
+- [ ] Reopening a **done** task shows an explicit confirmation before it happens, and only then sends the
+      acknowledgement from Phase 7.
+- [ ] Lapsed rows expose resurrect, cancel and done inline, per the specification.
+- [ ] The dialog surfaces the service's rejection (a journal that is no longer future-dated) against the
+      field rather than as a toast-only failure.
+
+**Required Test Coverage:** unit (RTL) — resurrect from lapsed and from cancelled, the done-reopen
+confirmation gate, rejection rendering, and dialog focus management. E2E deferred to Phase 22.
+
+#### Phase 19: Frontend — Attach and Detach Mention Links
+
+**Prerequisites:** Phases 10 and 16.
+**Estimated diff:** ~110 production → **~440 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] From a journal, the user can **attach an existing task** to the journal they are viewing, creating an
+      intermediate ("mentioned") link — one of the two deliberate actions the specification names.
+- [ ] A mention link can be **removed** from the journal that carries it; creating and due links offer no
+      remove affordance.
+- [ ] The task picker for attaching is scoped and searchable rather than listing every task — there is no
+      global task list, and this affordance must not become one.
+
+**Required Test Coverage:** unit (RTL) — attach, detach, the absence of remove on anchor links, and that
+the picker is search-scoped rather than an unbounded list. E2E deferred to Phase 22.
+
+#### Phase 20: Frontend — Create a Task from a Journal
+
+**Prerequisites:** Phases 5 and 16.
+**Estimated diff:** ~160 production → **~640 tracked** (×4) — the due-journal picker is the bulk and does
+not split usefully from the form it lives in
+
+**Acceptance Criteria:**
+
+- [ ] A create-task affordance on the journal detail view, using `Form`/`FormField`/`FormMessage` with
+      react-hook-form and Zod per the project's form standard.
+- [ ] The creating journal is the journal being viewed and is never presented as a choice.
+- [ ] A due-journal picker listing recent and near-future journals first, with search across future
+      journals by title and date — a picker, not a journal browser. **No bare date picker anywhere.**
+- [ ] Optional contact selection.
+- [ ] With no future journals, the UI says so plainly and offers to create one instead of an empty picker.
+- [ ] Service validation errors (non-future journal, missing text) surface against the right field.
+
+**Required Test Coverage:** unit (RTL) — successful create, the empty-future-journals state, picker search
+and ordering, field-level error mapping, and keyboard/ARIA behaviour of the picker. E2E deferred to
+Phase 22.
+
+#### Phase 21: Journal List "Tasks Due" Indicator
+
+**Prerequisites:** Phase 12.
+**Estimated diff:** ~110 production → **~440 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] The journal list response carries a lightweight per-journal signal that tasks are **due** in it
+      (count or boolean — state the choice), computed in **one query for the whole page** rather than per
+      row.
+- [ ] `JournalListItem` renders the indicator consistently with its existing list-level indicators.
+- [ ] Journals with no tasks due render no indicator; done, cancelled and lapsed tasks do not light it up.
+
+**Required Test Coverage:** unit — indicator rendering rules. Integration — the list query emits the signal
+with one query for many journals (assert the query count) and excludes non-due and lapsed tasks. E2E in
+Phase 22.
+
+#### Phase 22: E2E — The Journal Task Surface
+
+**Prerequisites:** Phases 16–21.
+**Estimated diff:** ~160 production → **~640 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] `TestDataManager` gains deterministic helpers for tasks and for future / past / cancelled journals,
+      reused rather than ad-hoc API calls in specs.
+- [ ] **The lapsed fixture recipe is stated explicitly, because no API path produces a lapsed task
+      directly:** create a future journal, create the task against it, then either cancel that journal or
+      move its `event_date_range` into the past through the existing journal update endpoint — which
+      deliberately does not re-validate task invariants (Phase 4). The spec asserts that non-revalidation
+      so the recipe cannot silently stop working.
+- [ ] **Fixture dates account for the e2e user having no configured timezone**, so backend day boundaries
+      are UTC: a journal created at "today local noon" can read as tomorrow (or as future when a *past*
+      journal was intended). Build fixtures from explicit UTC offsets, not local wall-clock times.
+- [ ] Separate deterministic specs, each building its own fixtures: create a task and see it grouped as
+      *created* / *due*; tick it done; retarget it and see the previous journal appear as *mentioned*;
+      attach an existing task as a mention and detach it; resurrect a lapsed task; the no-future-journals
+      message; the journal list indicator.
+- [ ] No conditional logic on data state, no skips, no multi-outcome assertions.
+- [ ] Green on both e2e projects (`firefox`, `Mobile Chrome`).
+
+**Required Test Coverage:** this phase *is* the e2e coverage for ITER18-001; unit and integration coverage
+landed in Phases 1–21.
+
+### ITER18-002: Journal Anchor Integrity — Delete, Merge, Cancellation
+
+**Objective:** Make journal operations respect the two-anchor invariant: block deletion of an anchoring
+journal with an explanatory, actionable failure; re-point task links through merge; treat a cancelled due
+journal as lapsing its not-done tasks.
+
+**Independently deliverable because:** it changes only the behaviour of existing journal operations and
+is complete in itself. Without it, journal deletion can leave the model in a state the specification says
+is impossible, so it should follow ITER18-001 closely.
+
+**Relevant documents:**
+
+- Specification §*Journal Anchor Integrity* (deletion, merge, cancellation)
+- `JournalMergeService`, `JournalWriteService.delete_journal`, `EventState`
+- [API Design](../architecture/api-design.md) for error-response conventions
+
+**Acceptance Criteria:**
+
+- [ ] Deleting a journal that is the **creating** or **due** journal of **any** task is **blocked**,
+      regardless of task status — a done task's link to the journal it was created in is part of the
+      record.
+- [ ] The failure is **explanatory, not opaque**: it names each blocking task and, for each, links to a
+      journal where that task can be actioned — the task's due journal, or its creating journal when the
+      due journal is the one being deleted. Because tasks have no route of their own, the link always
+      targets a journal detail view.
+- [ ] The same failure is returned over **REST and MCP**, identifying the blocking tasks and the journals
+      that surface them, so an agent can resolve them without the UI.
+- [ ] Deleting a journal that is only an **intermediate** link succeeds; the link is removed and the task
+      is otherwise unaffected.
+- [ ] The journal delete UI surfaces the blocking tasks with working links, and continues to steer the
+      user toward cancelling rather than deleting.
+- [ ] **Merge is not blocked.** Task links pointing at the absorbed journal are re-pointed at the
+      surviving journal; a task can never end up linked twice to the same journal in the same role
+      (duplicate links collapse); a surviving journal that becomes both creating and due for a task is
+      permitted; merge never changes a task's status.
+- [ ] **Cancelling a journal** is permitted and does not change task links. A not-done task whose **due**
+      journal is cancelled is treated as lapsed — it leaves the dashboard and stays on its journals — and
+      the journal listing on the task makes clear the reason is cancellation rather than the passage of
+      time.
+- [ ] Not wireframe-bearing: the dashboard wireframe covers no journal-operation surface, and lapsed tasks
+      are deliberately absent from it (wireframe gap 5). The only new UI is the delete-failure explanation
+      on the journal detail view.
+
+**Required Test Coverage:**
+
+- **Unit:** blocking-task detection by role; the choice of which journal each blocking task links to;
+  merge link re-pointing and duplicate collapse, including the creating-equals-due outcome.
+- **Integration:** delete blocked with the full error payload over REST and MCP; delete permitted when
+  only intermediate links exist; merge re-points and dedupes against the real schema (a duplicate-key
+  violation must be impossible, and the test must fail if the dedupe step is removed); merge leaves status
+  untouched; cancelling a due journal lapses its not-done tasks and leaves done/cancelled ones alone.
+- **E2E:** attempting to delete a journal with a task due in it shows the explanatory dialog whose link
+  navigates to a journal where the task can be actioned; after cancelling or retargeting the task, the
+  delete succeeds.
+
+**Open decisions:**
+
+1. **HTTP status for the blocked delete** — settled in **Phase 1**. `409 Conflict` with a JSON:API error
+   listing the blockers is the natural fit, but check what the journal domain's existing error mapping
+   produces so the status is internally consistent (iteration 17 chose journal-domain consistency over
+   cross-domain parity).
+2. **Whether merge also collapses an intermediate link that duplicates a new anchor link** (a task whose
+   intermediate journal is absorbed into its own due journal) — settled in **Phase 2**. The
+   specification's "cannot be linked twice in the same role" leaves the cross-role case unstated;
+   recommended: drop the redundant intermediate link, since the stronger role already covers it.
+
+> **These phases are not optional follow-up work.** From the moment ITER18-001 Phase 5 makes tasks
+> creatable, the `ON DELETE RESTRICT` anchor FKs mean `DELETE /api/journals/{id}` **and**
+> `POST /api/journals/{id}/merge` (which ends by deleting the absorbed journal) raise a raw integrity
+> error for any journal anchoring a task. Both are shipped features. Phases 1–3 below must merge
+> **immediately after** ITER18-001 Phase 5, ahead of the rest of ITER18-001, or delivery rule 9 is broken
+> for the intervening phases.
+
+#### Phase 1: Blocking Detection and the Delete Guard
+
+**Prerequisites:** ITER18-001 Phase 5 (task creation exists). Deliberately **not** the read model — the
+action journal is the task's own due/creating id, which Phase 2 of ITER18-001 already provides.
+**Estimated diff:** ~120 production → **~480 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] A repository query returns, for a journal, every task anchored to it as **creating or due**, with the
+      journal each blocking task can be actioned from (its due journal, or its creating journal when the
+      due journal is the one being deleted) — one query, not one per task.
+- [ ] `JournalService.delete_journal` refuses when that set is non-empty, raising a domain error carrying
+      the blocking tasks and their action journals — **regardless of task status**, since a done task's
+      creating link is part of the record.
+- [ ] A journal linked **only** as an intermediate journal still deletes; its link rows go with it and the
+      tasks are otherwise unaffected.
+- [ ] The guard replaces the raw FK violation: no caller ever sees an unhandled `IntegrityError`.
+
+**Required Test Coverage:** unit — blocking detection by role and the action-journal choice, including the
+delete-the-due-journal case. Integration — blocked delete raises the domain error (not an `IntegrityError`)
+for not-done, done and cancelled tasks; intermediate-only delete succeeds; a task-free journal still
+deletes; one query for many tasks. No e2e (Phase 5).
+
+#### Phase 2: Delete Guard Surfaces — REST and MCP
+
+**Prerequisites:** Phase 1.
+**Estimated diff:** ~130 production → **~520 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] `DELETE /api/journals/{id}` returns the structured error (status per open decision 1), naming each
+      blocking task and its action journal.
+- [ ] MCP `delete_journal` returns the equivalent in the same PR, so an agent can resolve the blockage
+      without the UI.
+- [ ] The payload is explanatory prose **plus** machine-readable ids — not an opaque constraint message —
+      and the ids are enough to build a link without a further lookup.
+
+**Required Test Coverage:** unit — error-to-response mapping and payload schema. Integration — both
+surfaces with several blocking tasks, with a done-only blocker, and with intermediate-only links (succeeds).
+No e2e (Phase 5).
+
+#### Phase 3: Merge — Re-pointing and De-duplication
+
+**Prerequisites:** ITER18-001 Phase 5.
+**Estimated diff:** ~140 production → **~560 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] `JournalMergeService` re-points every task link from the absorbed journal to the survivor — creating,
+      due and intermediate — **before** it deletes the source, so the merge never trips the anchor FK.
+- [ ] A task can never end up linked twice to the same journal **in the same role**; duplicates are removed
+      **before** the update statement rather than relying on `ON CONFLICT`, which is unavailable on an
+      `UPDATE` (the ITER17-001 Phase 4 lesson).
+- [ ] A survivor that becomes both the creating and the due journal of a task is permitted and the task is
+      unaffected.
+- [ ] The cross-role redundancy in open decision 2 is handled as decided.
+- [ ] Merge **never** changes a task's status, and merge is never blocked by tasks — it stays usable for
+      calendar-sync workflows, as the specification requires.
+- [ ] The row work lives in the repository, not the service, matching the journal domain's SQL-free service
+      convention.
+
+**Required Test Coverage:** unit — re-pointing rules and the creating-equals-due outcome. Integration —
+merge with overlapping links raises no duplicate-key error **and the test fails if the de-duplication step
+is removed**; merging a journal that anchors a task succeeds end to end (the regression this phase exists to
+prevent); children/tags/contacts behaviour unchanged; status untouched. No e2e (Phase 5).
+
+#### Phase 4: Cancellation as a Lapse Reason
+
+**Prerequisites:** ITER18-001 Phase 12.
+**Estimated diff:** ~100 production → **~400 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] Cancelling a journal changes no task links.
+- [ ] A not-done task whose **due** journal is cancelled reads as lapsed with the cancellation reason
+      through every read surface — the behaviour derived in ITER18-001 Phase 12, pinned here end to end
+      against real journal cancellation rather than a constructed read model.
+- [ ] Cancelling a journal that is a task's **creating** journal changes nothing about the task.
+- [ ] Cancelling a journal that anchors a task is never blocked — cancellation is the escape hatch the
+      delete guard steers users toward.
+- [ ] The UI wording for the two lapse reasons ships in ITER18-001 Phase 16; this phase adds no frontend
+      code.
+
+**Required Test Coverage:** integration — cancel a due journal and observe the lapse with the cancellation
+reason through `get_task`, `list_journal_tasks` and the upcoming-window listing (where it must be excluded);
+done and cancelled tasks unaffected; cancelling a creating journal is inert; cancellation is never blocked.
+No unit work beyond what Phase 12 covers. No e2e (Phase 5).
+
+#### Phase 5: Frontend — Delete Failure Explanation and E2E
+
+**Prerequisites:** Phases 2–4.
+**Estimated diff:** ~150 production → **~600 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] The journal delete flow surfaces the blocking tasks: each named, each linking to the journal where it
+      can be actioned, with working navigation.
+- [ ] The dialog continues to steer toward cancelling the journal rather than deleting it.
+- [ ] A delete that succeeds is unchanged from today's behaviour.
+- [ ] E2E: deleting a journal with a task due in it shows the explanation; following the link reaches a
+      journal where the task can be actioned; after cancelling or retargeting the task, the delete succeeds;
+      merging a journal that anchors a task succeeds. Deterministic per-test fixtures, built with the
+      Phase 22 helpers and their UTC-boundary caveat.
+
+**Required Test Coverage:** unit (RTL) — the failure dialog rendered from the error payload, with one
+blocker and with several. E2E as above, on both e2e projects.
+
+### ITER18-003: Task Events, Field History, and Activity Records
+
+**Objective:** Make tasks full domain-event citizens: publish the specification's event set with
+provenance, project it into `field_history`, surface a linked contact's tasks in their activity history,
+and pin that the search indexer ignores task events.
+
+**Independently deliverable because:** it adds records and history to an entity that already works, with
+no change to task behaviour. Nothing else depends on it, but it should not lag ITER18-004.
+
+**Relevant documents:**
+
+- Specification §*Events and history*, §*Tasks and search*, §*Contacts on tasks*
+- [Activity History Product Specification](../product-specifications/activity-history-product-specification.md);
+  [Iteration 12](./iteration-12-activity-history.md) for the projection pattern
+- `HistoryService._HANDLERS`, `HistoryProjectionConsumer`, `SearchIndexerConsumer`,
+  `FieldHistoryRepository.get_history_for_aggregate`
+
+**Acceptance Criteria:**
+
+- [ ] Task writes publish domain events through the existing outbox publisher, **inside the same unit of
+      work** as the write, covering at minimum: task created, text updated, status changed, due journal
+      retargeted, journal linked/unlinked, contact linked/unlinked, task deleted.
+- [ ] Every event carries provenance (`source`) and actor (`changed_by`) consistent with the activity
+      history specification, so UI, MCP, system and integration origins are distinguishable.
+- [ ] `HistoryService` projects each task event into `field_history` rows under a task entity type, via
+      the existing pure-mapping dispatch table; `HistoryProjectionConsumer` writes them idempotently, so
+      stream redelivery produces no duplicates. Row timestamps come from `event.occurred_at`.
+- [ ] A task's change history is **readable**, with MCP parity, and rendered on the journal surface that
+      owns the task (tasks have no route of their own — see open decision 1).
+- [ ] A task appears in a linked contact's activity history as a **read-only record** alongside their
+      journals and other activity: not actionable from there, and not filterable down to "everything
+      outstanding". This is a record of the past, not a third working surface.
+- [ ] The search indexer **ignores** task events rather than failing on them: no tasks index is created,
+      no task is ever returned by global search, and a task event never dead-letters in the
+      `search-indexer` group.
+- [ ] Not wireframe-bearing: history and activity records are journal- and contact-page surfaces, absent
+      from the dashboard wireframe by design.
+
+**Required Test Coverage:**
+
+- **Unit:** the projection mapping for each event type, including the field names and marker fields used
+  for create/delete/status/retarget, and that an unknown event type projects to no rows.
+- **Integration:** publish → relay → projection end to end for each event type, asserting idempotency on
+  redelivery; the `search-indexer` group consumes a task event without indexing anything and without
+  dead-lettering; a contact's activity history includes the task entry with the right provenance; the
+  task history read surface (REST + MCP) returns entries in the expected order.
+- **E2E:** a task change made in the UI appears in the relevant activity feed with UI provenance; a task
+  linked to a contact appears on that contact's activity history and offers no action there.
+
+**Open decisions:**
+
+1. **Where task history is read from** — settled in **Phase 4**. Tasks have no route, so either (a) a
+   task-scoped read (`GET /api/tasks/{id}/history` + `get_task_history`, registering a `"task"`
+   aggregation strategy), rendered in an expandable row on the journal, or (b) folding task rows into the
+   due journal's existing feed. (a) keeps the aggregation model honest and matches the journal/contact
+   precedent; (b) adds no new surface.
+2. **Whether task events need typed payload models** in `core_shared/models/outbox_events.py` — settled in
+   **Phase 1**. The existing typed models cover integration-sync payloads (`contact.*`,
+   `journal_event.*`), while domain events like `JournalTagAssigned` are not in that dispatch map. Match
+   the domain-event convention unless a worker needs to consume task events.
+3. **Whether the contact-activity entry updates on task status change** or records only the link —
+   settled in **Phase 5**. The specification asks for "a read-only record alongside their journals", which
+   the simpler link-based entry satisfies.
+
+> **Why nine phases for "add some events".** Iteration 17 measured it: two event types plus their
+> projection cost ~1440 lines (ITER17-005 Phase 1) and *one* type plus projection cost ~1270
+> (Phase 2a), and it recorded the conclusion — *"a future phase adding an event type should budget ~600
+> test lines per type up front"*. Tasks need nine event types. Calibration rule 6 therefore caps this
+> iteration at two new types per phase, with the projection split from the publishing.
+
+#### Phase 1: Events — Task Created and Deleted
+
+**Prerequisites:** ITER18-001 Phase 9.
+**Estimated diff:** ~150 production → **~600 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] Domain event classes for task created and task deleted, following the journal/contact domain-event
+      conventions (`source` provenance, `changed_by`, `occurred_at`, aggregate id).
+- [ ] Each is published through `OutboxEventPublisher` **inside the same unit of work** as its write, so an
+      event never exists for a write that rolled back.
+- [ ] Provenance is threaded from the caller, so UI, MCP, system and integration origins are
+      distinguishable on every event.
+- [ ] Open decision 2 recorded here: whether task events need typed payload models in
+      `core_shared/models/outbox_events.py` (that dispatch map covers integration-sync payloads; domain
+      events like `JournalTagAssigned` are absent from it, which is the convention to match unless a worker
+      must consume task events).
+- [ ] The aggregate id is the task id, consistent with the integer decision taken in ITER18-001 Phase 1.
+
+**Required Test Coverage:** unit — event construction and payload shape for both types. Integration — each
+write leaves exactly one outbox row with the right type, provenance and payload; a rolled-back write leaves
+none. No e2e.
+
+#### Phase 2: Events — Text Updated and Status Changed
+
+**Prerequisites:** Phase 1, ITER18-001 Phase 6.
+**Estimated diff:** ~140 production → **~560 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] Event classes and publishing for text updated and status changed.
+- [ ] Status-change events carry old and new status in the `changed_fields` shape the history projection
+      expects — `[old, new]` after the JSON round trip through Redis.
+- [ ] Same-unit-of-work publishing and provenance threading as Phase 1.
+
+**Required Test Coverage:** unit — payload shape per type, including the positional `changed_fields` form.
+Integration — outbox rows per operation; rollback leaves none. No e2e.
+
+#### Phase 3: Events — Due Journal Retargeted
+
+**Prerequisites:** Phase 1, ITER18-001 Phase 8.
+**Estimated diff:** ~140 production → **~560 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] Event class and publishing for the due-journal retarget, carrying old and new due journal.
+- [ ] A retarget publishes **both** its retarget event and the automatic intermediate-link event (whose
+      class lands in Phase 4) in a deterministic order, so the projection can render the trail coherently.
+      Until Phase 4 lands, the auto-link is carried as part of the retarget payload rather than a second
+      event — state which shape is chosen.
+- [ ] A retarget that also reopens a done task makes the status change visible in the event stream, not
+      only in the task row.
+
+**Required Test Coverage:** unit — payload including the old/new pair and the reopen case. Integration —
+outbox rows and their ordering. No e2e.
+
+#### Phase 4: Events — Journal Linked and Unlinked
+
+**Prerequisites:** Phase 3, ITER18-001 Phase 10.
+**Estimated diff:** ~130 production → **~520 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] Event classes and publishing for intermediate journal linked and unlinked.
+- [ ] The automatic link created by a retarget publishes the same event type as a manual attach, with
+      provenance distinguishing system-derived from user-initiated.
+- [ ] Same-unit-of-work publishing and provenance threading.
+
+**Required Test Coverage:** unit — payloads and the provenance distinction. Integration — outbox rows for
+manual attach/detach and for the retarget-derived link. No e2e.
+
+#### Phase 5: Events — Contact Linked and Unlinked
+
+**Prerequisites:** Phase 1, ITER18-001 Phase 11.
+**Estimated diff:** ~130 production → **~520 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] Event classes and publishing for contact linked and unlinked.
+- [ ] Same-unit-of-work publishing and provenance threading.
+- [ ] With this phase the specification's full event set is published: created, text updated, status
+      changed, due journal retargeted, journal linked/unlinked, contact linked/unlinked, deleted.
+
+**Required Test Coverage:** unit — payloads. Integration — outbox rows per operation; a completeness test
+asserting every task write path publishes exactly one event. No e2e.
+
+#### Phase 6: History Projection — Lifecycle Events
+
+**Prerequisites:** Phases 1–2.
+**Estimated diff:** ~150 production → **~600 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] `HistoryService._HANDLERS` gains handlers for created, deleted, text updated and status changed,
+      mapping each to `field_history` rows under a task entity type, with marker field names consistent
+      with the journal and contact conventions.
+- [ ] `HistoryProjectionConsumer` subscribes to the task event patterns; writes stay idempotent
+      (`ON CONFLICT DO NOTHING` on `(event_id, entity_type, entity_id, field_name)`), so stream redelivery
+      is safe.
+- [ ] Row `created_at` comes from `event.occurred_at`, not projection time.
+- [ ] If ITER18-001 Phase 1 chose a UUID primary key, this phase also migrates `field_history.entity_id`
+      off `Integer` — a shared table — and its estimate rises accordingly. With the integer default, no
+      migration is needed.
+- [ ] The consumer table in `docs/architecture/integration-architecture.md` is updated.
+
+**Required Test Coverage:** unit — projected rows per event type and that an unknown type projects to none.
+Integration — publish → relay → projection per type, asserting idempotency on redelivery. No e2e.
+
+#### Phase 7: History Projection — Retarget and Link Events, and Search Isolation
+
+**Prerequisites:** Phases 3–6.
+**Estimated diff:** ~140 production → **~560 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] Handlers for retarget, journal linked/unlinked and contact linked/unlinked, producing rows that read
+      as a trail (which journal, in which role, when).
+- [ ] The **search indexer ignores task events**: no tasks index, no task document, no task event
+      dead-lettering in the `search-indexer` group, and global search never returns a task. This holds by
+      construction because the consumer only sees subscribed patterns — this phase **pins it with a test**
+      so a future pattern change cannot silently start indexing tasks.
+- [ ] With this phase every published task event has a projection; none is written and then unread.
+
+**Required Test Coverage:** unit — projected rows per event type. Integration — end-to-end projection per
+type with idempotency; the `search-indexer` group consumes a task event without indexing or dead-lettering.
+No e2e.
+
+#### Phase 8: Task History Read Surface — REST and MCP
+
+**Prerequisites:** Phase 7.
+**Estimated diff:** ~150 production → **~600 tracked** (×4) — capability triple
+
+**Acceptance Criteria:**
+
+- [ ] Open decision 1 settled and recorded. If (a): a `"task"` aggregation strategy is registered alongside
+      `"journal"` and `"contact"`, with a thin read service mirroring `JournalHistoryService`.
+- [ ] **The delete case is the decision's discriminator:** tasks are hard-deleted, so a task-scoped read
+      must resolve history by id **without requiring the task row to exist**, with ownership carried on the
+      history rows — otherwise the `TaskDeleted` projection is written to a surface that can never read it.
+- [ ] `GET /api/tasks/{id}/history` (paginated, most recent first) using the shared
+      `History{Attributes,Resource,ListResponse}` schemas, scoped to the authenticated user so history
+      cannot leak across users (the ITER12-002 lesson).
+- [ ] MCP `get_task_history` in the same PR, mirroring `get_journal_history`.
+- [ ] Provenance and actor are visible on every entry.
+
+**Required Test Coverage:** unit — schema conversion and pagination. Integration — a task with a mixed event
+history reads back in order on both surfaces; **a deleted task's history is still readable**; another user's
+task history 404s. E2E in Phase 9.
+
+#### Phase 9: Contact Activity Record and Frontend History
+
+**Prerequisites:** Phase 8, ITER18-001 Phase 16.
+**Estimated diff:** ~160 production → **~640 tracked** (×4) — the only phase touching the contacts surface,
+and deliberately read-only (calibration rule 7)
+
+**Acceptance Criteria:**
+
+- [ ] A linked contact's activity history includes their tasks as **read-only records** alongside journals
+      and other activity, per open decision 3.
+- [ ] Entries are **not actionable** from the contact page and cannot be filtered down to "everything still
+      outstanding" — a record of the past, not a third working surface.
+- [ ] A task's own change history renders on the journal surface that owns it, reusing the shared
+      history/activity feed components rather than a bespoke list.
+- [ ] E2E: a task change made in the UI appears in the relevant feed with UI provenance; a task linked to a
+      contact appears on that contact's history and offers no action there.
+
+**Required Test Coverage:** unit (RTL) — feed rendering of task entries, provenance labels, absence of
+actions. Integration — the contact history read includes task records with correct provenance. E2E as above,
+on both e2e projects.
+
+### ITER18-004: The Home Dashboard
+
+**Objective:** Replace the placeholder home page with the daily briefing in the wireframe: the AI summary
+as headline over agenda, tasks due this week, and upcoming contact dates, assembled server-side in one
+round trip and anchored on today in the user's timezone.
+
+**Independently deliverable because:** it is a self-contained new page over a new read-only projection.
+It needs ITER18-001 for its tasks section, and nothing later. Its own phasing must not ship a tasks
+section without the inline done action — the specification names that as an incoherent split.
+
+**Relevant documents:**
+
+- Specification §*The Home Dashboard* (purpose, composition, today's summary, agenda, tasks, upcoming
+  dates, contact importance, loading/freshness/errors, navigation)
+- **[Home Dashboard Wireframe](../design/home-dashboard-wireframe.md)** — W1–W33 and the seven known gaps
+- Precedent: `OutdoorDashboardService` / `SqlOutdoorDashboardRepository` /
+  `GET /api/journals/outdoor-dashboard` / `outdoor-logbook/page.tsx` /
+  `frontend/src/lib/api/outdoor-dashboard.ts`
+- [API Design — Outdoor Dashboard Endpoint](../architecture/api-design.md) for the singleton-resource
+  convention; `writing-sql` skill for the new windowed queries
+
+**Acceptance Criteria — page frame and summary:**
+
+- [ ] `/` renders the dashboard inside the existing chrome with no chrome changes (**W1**); the
+      placeholder cards, `frontend/src/__tests__/app/page.test.tsx` and the now-unused
+      `homePageTestUtils.FEATURE_CARDS` fixture are **all removed** in the same phase.
+- [ ] Page header: `h1` "Today" plus the localised full date and framing line (**W2**). The page takes no
+      date parameters — it is always about now, anchored server-side on the user's configured timezone.
+- [ ] The three evidence sections sit in an independent-height three-column grid on `lg`, stacking to one
+      column in the order Agenda → Tasks → Upcoming dates below it (**W3**), each a `section` with an
+      `sr-only` heading and labelled lists (**W4**).
+- [ ] The summary card shows the **same** daily summary entity the journals view shows for today —
+      distinguished visually from the evidence cards (**W5**) with its header label and a **Regenerate**
+      action (**W6**) — read-only, with no edit affordance.
+- [ ] All three summary states render per the wireframe: generated in full as prose (**W7**), generating
+      with its badge and placeholder line (**W8**), and unavailable as one quiet line that makes clear the
+      rest of the page still works (**W9**). Regeneration is user-requestable.
+- [ ] The key-stats footer (journals, events, contacts, average mood out of ten) renders in the generated
+      state only, from the counters the summary entity already carries (**W10**).
+
+**Acceptance Criteria — agenda:**
+
+- [ ] Card header and description per **W11**. Today's event journals are listed with **all-day items
+      pinned above timed items** (**W12**) and timed items in ascending start-time order (**W13**).
+- [ ] Each entry shows its title linking to the journal (**W14**), its time, its location where present
+      (**W13**), its tags (**W15**) and its participants where present (**W16**), with the type accent bar
+      (**W17**).
+- [ ] Cancelled events are shown **clearly marked** — struck through with a cancelled badge and muted
+      styling (**W18**) — or omitted; they must never appear as if they are still happening. The signal is
+      `CalendarInfo.event_state == CANCELLED`.
+- [ ] **Tomorrow** appears beneath today, collapsed by default, with its date label and event count
+      (**W19**), expanding **in place** into entries of the same form (**W20**).
+- [ ] When nothing is scheduled today, the agenda says so in a single line rather than rendering an empty
+      container — built in the idiom of **W29** (wireframe gap 1).
+
+**Acceptance Criteria — tasks:**
+
+- [ ] Card header and description per **W21**. The section shows **not-done tasks whose due journal falls
+      between today and seven days ahead, inclusive**, ordered by due-journal date soonest first
+      (**W22**), capped at **five**, with a show-more revealing the remainder of the seven-day window
+      (**W28**).
+- [ ] Each entry shows the task text (**W23**), a relative due chip (`Today`, `Tomorrow`, then a short
+      absolute form) (**W25**), the due journal's title as a link to it (**W26**), and any linked contacts
+      (**W27**).
+- [ ] Each entry offers **marking done inline** without leaving the dashboard (**W24**), and the section
+      updates in place afterwards.
+- [ ] Done, cancelled and **lapsed** tasks never appear — no overdue section, counter, badge or
+      notification anywhere on the page.
+- [ ] When the window is empty the section says so in one line, reading as a good outcome rather than an
+      error or omission (**W29**).
+
+**Acceptance Criteria — upcoming dates:**
+
+- [ ] Card header and description per **W30**. The section shows important contact dates falling in the
+      next **seven days**, matching the tasks window.
+- [ ] Recurring dates (birthdays, anniversaries) are **resolved to their occurrence within the window**,
+      respecting the stored precision: a `day_month` date still produces an occurrence, and a `full` date
+      can show an age or a count of years where meaningful (**W31**).
+- [ ] Each entry shows the contact (linking to them), the date type, the occurrence date and **how many
+      days away** it is (**W31**), ordered by date ascending then by **contact importance descending**.
+- [ ] The section is capped with a show-more revealing the rest of the window (**W32**); the cap value is
+      an open decision (wireframe gap 3).
+- [ ] When nothing falls in the window, the section says so in one line (**W29** idiom, wireframe gap 2).
+- [ ] **Contact importance is inferred, never configured**: favourite status, then recent journal count,
+      then recent activity count — the same signals and the **same order of precedence** the MeiliSearch
+      contact ranking rules use, so a contact who ranks highly in search ranks highly here. No new
+      user-facing importance field is introduced.
+
+**Acceptance Criteria — assembly, resilience and navigation:**
+
+- [ ] All four sections are retrievable **together in one round trip** as a read-only singleton resource
+      whose id is the user id, following the outdoor dashboard convention, with no date parameters and
+      every window anchored on today in the user's timezone.
+- [ ] Nothing on the page mutates data except the inline task action and the user-requested summary
+      regeneration (the wireframe's Regenerate control, **W6**, which persists even in the unavailable
+      state).
+- [ ] **Sections render independently:** a failed or missing summary must not prevent the agenda, tasks
+      and dates from displaying, and vice versa.
+- [ ] There is deliberately **no composite dashboard MCP tool** in this iteration. Agents compose the
+      equivalent view from the daily summary tool, journal browsing, the task listing tools from
+      ITER18-001, and the contacts tools. The tradeoff is recorded here as accepted, and no underlying
+      capability is UI-only.
+- [ ] The home page is reachable from the **primary navigation** and is the default view after sign-in —
+      a deliberate addition to the wireframe, which shows only the header link (wireframe gap 4).
+- [ ] Accessibility and responsiveness: labelled sections and lists (**W4**), keyboard-reachable inline
+      actions (**W24**), disclosure state exposed on the tomorrow toggle (**W19**), single-column stacking
+      below `lg` with no horizontal overflow (**W3**), and semantic colour classes so both themes work.
+
+**Required Test Coverage:**
+
+- **Unit:** section assembly and ordering rules (all-day before timed; time ascending; tasks soonest
+  first; dates ascending then importance descending, including the tie-break precedence); the five-item
+  cap and its show-more remainder; relative due-label derivation (today / tomorrow / absolute) at a day
+  boundary; recurrence resolution for each `DatePrecision`, including a 29 February birthday and a
+  window that crosses a year boundary; age/years derivation only where precision allows.
+- **Integration:** the endpoint returns all four sections in one call with the expected shape; windows are
+  anchored in the user's timezone (a test user in a non-UTC zone near midnight gets the *local* today);
+  cancelled events are marked; lapsed, done and cancelled tasks are absent while the same tasks are
+  present on their journals; a summary failure still returns the other three sections; the inline done
+  action commits and the next read reflects it.
+- **E2E (wireframe conformance):** with deterministic fixtures, the page renders the four sections in
+  wireframe order with their headings; all-day items precede timed ones; exactly five tasks show with the
+  show-more label naming the full count; ticking a task off removes it in place without navigation;
+  expanding Tomorrow reveals its entries; a cancelled event carries its marker; the summary's three states
+  (**W33**) and the three empty states each have their own test with their own fixtures — never a
+  conditional branch. Also assert the placeholder cards are gone and the nav entry works.
+
+**Open decisions:**
+
+1. **Endpoint placement and name** — settled in **Phase 1**. `GET /api/dashboard` (a new top-level
+   singleton) versus `GET /api/home-dashboard`; the outdoor precedent lives under `/api/journals/` because
+   it is journal-scoped, which this is not.
+2. **How the SQL side obtains the importance signals** — settled in **Phase 8**. Reuse the computation that
+   feeds the search index (`search_indexer._fetch_complete_contact_data`) by extracting it into a shared
+   read, or query the index itself. Extraction keeps the dashboard independent of MeiliSearch availability
+   and is the likely answer; either way the precedence order must be pinned by a test alongside
+   `test_ranking_rules.py`.
+3. **The upcoming-dates cap** (wireframe gap 3) — settled in **Phase 8** (payload) and **Phase 9** (UI).
+   Five matches the tasks section; the wireframe shows three rows and a show-more naming five.
+4. **Which date types count as "important dates" for the dashboard** — settled in **Phase 7**. All five
+   types, or only the recurring ones? `first_met` with `year` precision has no in-window occurrence.
+5. **Whether "tomorrow" expansion is server-provided or lazily fetched** — settled in **Phase 4**. One
+   round trip argues for including tomorrow in the payload; collapsed-by-default argues for lazy.
+
+#### Phase 1: Dashboard Endpoint Skeleton and Section Envelope
+
+**Prerequisites:** none.
+**Estimated diff:** ~130 production → **~520 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] A read-only `HomeDashboardService` (no unit of work) and a **singleton JSON:API resource whose id is
+      the user id**, following `OutdoorDashboardService` / `OutdoorDashboardResource` exactly.
+- [ ] The endpoint (name per open decision 1) takes **no date parameters** and anchors "today" in the
+      user's configured timezone via `UserSettingsRepository.get_timezone`, never UTC-today.
+- [ ] The payload declares all four sections from the outset, present but empty, so later phases fill a
+      stable contract rather than changing it.
+- [ ] **Per-section resilience is in the contract**: every section can independently report unavailable and
+      distinguishes *unavailable* from *empty*; a failure in one never fails the request. Asserted now,
+      before three sections depend on it.
+- [ ] DI wiring registered. No composite MCP dashboard tool is added; the deliberate omission and its
+      accepted tradeoff are recorded in the service docstring.
+
+**Required Test Coverage:** unit — assembly, per-section error isolation, empty-vs-unavailable, timezone
+anchoring. Integration — the four-section envelope in one call; an injected section failure still yields 200
+with the others. No e2e.
+
+#### Phase 2: Summary Section in the Payload
+
+**Prerequisites:** Phase 1.
+**Estimated diff:** ~100 production → **~400 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] The summary section returns today's existing daily summary — the **same** entity the journals view
+      shows — with its status and the four counters the stat footer renders (**W10** data).
+- [ ] A missing, failed or disabled summary renders as the section's unavailable state rather than an
+      error, per the Phase 1 contract.
+- [ ] Read-only: the payload exposes no mutation affordance; regeneration remains the existing endpoint.
+
+**Required Test Coverage:** unit — mapping each `SummaryStatus` to the section's state. Integration — the
+section against real summary rows in each status. No e2e.
+
+#### Phase 3: Page Shell — Retire the Placeholder, Add Navigation
+
+**Prerequisites:** Phase 1.
+**Estimated diff:** ~150 production → **~600 tracked** (×4) — net smaller than it looks: the placeholder
+deletions offset the new page (the ITER17-003 Phase 2 gross-vs-net lesson)
+
+**Acceptance Criteria:**
+
+- [ ] `frontend/src/app/page.tsx` renders the dashboard: `h1` "Today", the localised full date and framing
+      line (**W2**), inside the existing chrome unchanged (**W1**).
+- [ ] The three evidence sections sit in an independent-height three-column grid on `lg`, stacking to one
+      column in the order Agenda → Tasks → Upcoming dates below it (**W3**), each a `section` with an
+      `sr-only` heading and a labelled list container (**W4**) — rendered as empty-state cards until their
+      phases land.
+- [ ] The six placeholder cards, `frontend/src/__tests__/app/page.test.tsx` **and** the now-unused
+      `homePageTestUtils.FEATURE_CARDS` fixture in `frontend/src/test-utils/index.tsx` are all removed in
+      this PR; leaving the fixture behind would imply the placeholder still exists.
+- [ ] A primary-navigation entry for the dashboard (wireframe gap 4), and the home page is the default view
+      after sign-in.
+- [ ] One shared TanStack query feeds the page so concurrent section mounts dedupe into a single fetch,
+      following `frontend/src/lib/api/outdoor-dashboard.ts`.
+- [ ] No horizontal overflow at any breakpoint; semantic colour classes so both themes work.
+
+**Required Test Coverage:** unit (RTL) — header, section scaffolding and labelling, single-column stacking
+markers, nav entry active state, and that the removed fixture has no remaining importers. E2E in Phase 17.
+
+#### Phase 4: Summary Card
+
+**Prerequisites:** Phases 2 and 3.
+**Estimated diff:** ~150 production → **~600 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] The summary card renders visually distinguished from the evidence cards with its accent bar and
+      header label (**W5**, **W6**), including the **Regenerate** action wired to the existing regenerate
+      endpoint — which **persists in the unavailable state**, as the wireframe shows (**W9**).
+- [ ] All three states render per the wireframe: generated as full prose (**W7**), generating with badge
+      and placeholder line (**W8**), unavailable as one quiet line making clear the rest of the page works
+      (**W9**).
+- [ ] The key-stats footer — journals, events, contacts, average mood out of ten — renders **only** in the
+      generated state (**W10**).
+- [ ] The summary text is read-only; the only mutation on the whole page besides the inline task action is
+      this user-requested regeneration.
+- [ ] A summary failure degrades to **W9** while the other sections continue to render.
+
+**Required Test Coverage:** unit (RTL) — each of the three states, the stat footer's presence and absence,
+the regenerate action's happy and failure paths, its presence in the unavailable state, and that a summary
+error does not throw the page. E2E in Phase 17.
+
+#### Phase 5: Agenda — Today's Query and Ordering
+
+**Prerequisites:** Phase 1, ITER18-001 Phase 3 (the date helper).
+**Estimated diff:** ~150 production → **~600 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] A repository query returns today's event journals for the user with everything the section needs —
+      title, all-day flag, start/end times, location, tags, participants, `event_state` — in **one query**,
+      not one per journal.
+- [ ] The service orders them **all-day first, then timed ascending by start** (**W12**, **W13**), windowed
+      on the user's local day with the `EventDateRange` overlap semantics the outdoor dashboard uses.
+- [ ] The section reports empty distinctly from unavailable, so the UI can show one line.
+
+**Required Test Coverage:** unit — ordering with several all-day items, a multi-day journal overlapping
+today, and the empty case. Integration — the query against real journals with calendar info; day-boundary
+anchoring for a non-UTC user; a query-count assertion for the nested tags/participants. No e2e.
+
+#### Phase 6: Agenda — Cancelled Events and Tomorrow
+
+**Prerequisites:** Phase 5.
+**Estimated diff:** ~110 production → **~440 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] Cancelled events are returned **flagged** rather than filtered, so the UI can mark them (**W18**);
+      the payload must never present a cancelled event as active.
+- [ ] Tomorrow's entries are resolved per open decision 5, with the event count available for the collapsed
+      label (**W19**).
+- [ ] Open decision 5 is constrained by the one-round-trip criterion: **tomorrow ships inside the payload**
+      unless that criterion is amended in the same PR and the divergence recorded here. It is one extra
+      day of a small list, not a second page of data.
+
+**Required Test Coverage:** unit — cancelled flagging and the tomorrow count. Integration — a cancelled
+journal appears flagged, not omitted; tomorrow's window is the user's local tomorrow. No e2e.
+
+#### Phase 7: Agenda — Card
+
+**Prerequisites:** Phases 3 and 6.
+**Estimated diff:** ~150 production → **~600 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] Card header and description per **W11**; entries as bordered rows with the type accent bar (**W17**)
+      and hover affordance.
+- [ ] Each entry shows its title linking to the journal (**W14**), its time in `tabular-nums` with location
+      where present (**W13**), colour-coded tags (**W15**) and participants as an overlapping avatar stack
+      with overflow count (**W16**).
+- [ ] All-day entries render their uppercase marker instead of a time and appear above timed entries
+      (**W12**).
+- [ ] Cancelled entries render struck through, muted, with the cancelled badge (**W18**).
+- [ ] Nothing scheduled today renders a **single line**, not an empty container (wireframe gap 1, in the
+      **W29** idiom).
+
+**Required Test Coverage:** unit (RTL) — ordering as rendered, each entry element, the cancelled treatment,
+the empty line, and accessible list labelling. E2E in Phase 17.
+
+#### Phase 8: Tomorrow Disclosure
+
+**Prerequisites:** Phase 7.
+**Estimated diff:** ~120 production → **~480 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] A disclosure row beneath today's list: chevron direction by state, the date label, and the
+      right-aligned event count (**W19**), collapsed by default.
+- [ ] Expanding reveals tomorrow's entries **in place**, in exactly the form of **W12**–**W18** (**W20**) —
+      no navigation, no separate route.
+- [ ] Disclosure state is exposed to assistive technology (`aria-expanded` on the trigger, a controlled
+      region) and the toggle is keyboard operable.
+- [ ] Nothing scheduled tomorrow shows the row with a zero count and an empty line when expanded, rather
+      than hiding the control.
+
+**Required Test Coverage:** unit (RTL) — collapsed default, expand/collapse, chevron and `aria-expanded`
+state, count label, empty-tomorrow case. E2E in Phase 17, gating clicks on `aria-expanded` rather than
+visibility (the recorded Radix slide-in race).
+
+#### Phase 9: Important-Date Occurrence Resolution
+
+**Prerequisites:** none (pure logic).
+**Estimated diff:** ~150 production → **~600 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] A pure occurrence-resolution helper in `core_shared`: given a stored important date and a window,
+      return the occurrence within it, or nothing.
+- [ ] `DatePrecision` is respected: `day_month` still produces an occurrence; `full` produces one **and** a
+      derived age or count of years; `year` produces none (no month/day to place).
+- [ ] Open decision 4 settled: which `date_type` values participate.
+- [ ] Edge cases handled explicitly: 29 February in a non-leap year, a window crossing the year boundary, a
+      date whose occurrence is today, and a `full` date in the future (age would be negative).
+- [ ] Pure and I/O-free, so it is unit-testable and reusable by ITER18-005 Phase 6.
+
+**Required Test Coverage:** unit — each precision, each date type, both boundary edge cases, the leap-day
+rule, the future-dated `full` case, and the age/years derivation including a same-day occurrence. No
+integration or e2e (no I/O).
+
+#### Phase 10: Contact Importance Signals — Shared Read
+
+**Prerequisites:** none.
+**Estimated diff:** ~120 production → **~480 tracked** (×4) — isolated precisely because it rewrites an
+existing call site in the search domain (calibration rules 7 and 8)
+
+**Acceptance Criteria:**
+
+- [ ] The favourite / recent-journal-count / recent-activity-count computation that today lives inside
+      `search_indexer._fetch_complete_contact_data` is available as a **shared read** usable outside the
+      indexer, per open decision 2.
+- [ ] The indexer is refactored onto that shared read with **no behaviour change** — the existing search
+      ranking must produce identical documents, and the existing indexer tests must pass untouched.
+- [ ] The dashboard's use of it does not depend on MeiliSearch being available.
+- [ ] The precedence order (favourite → journal count → activity count) is expressed once and pinned by a
+      test that fails if it changes, mirroring `tests/unit/infrastructure/search/test_ranking_rules.py`.
+
+**Required Test Coverage:** unit — the shared read's ordering contract and the precedence test. Integration
+— the refactored indexer produces byte-identical documents for a fixture contact; the shared read works with
+MeiliSearch unavailable. No e2e.
+
+#### Phase 11: Upcoming Dates — Windowed Query, Ranking and MCP Tool
+
+**Prerequisites:** Phases 1, 9 and 10.
+**Estimated diff:** ~160 production → **~640 tracked** (×4) — capability triple
+
+**Acceptance Criteria:**
+
+- [ ] A windowed query returns candidate important dates for the next seven days in **one query**, resolved
+      through the Phase 9 helper.
+- [ ] Ordering is **date ascending, then contact importance descending**, using Phase 10's shared read.
+- [ ] **No** new user-configured importance field is introduced anywhere.
+- [ ] The section carries the full in-window count so the UI can label its show-more (**W32**), with the cap
+      resolved per open decision 3 and the *wireframe's own* depiction (three rows, "Show all 5") taken into
+      account.
+- [ ] **MCP parity:** an agent can retrieve the same windowed, ranked list — the specification says agents
+      compose the dashboard from "the contacts tools for upcoming dates", and no such tool exists today
+      (`list_contacts`, `search_contacts`, `get_contact`, `get_contact_relationships`, `list_contact_tags`
+      are the whole surface). A `list_upcoming_important_dates` tool ships in this PR, or delivery rule 5 is
+      knowingly broken and recorded as an exception here.
+- [ ] The section reports empty distinctly from unavailable.
+
+**Required Test Coverage:** unit — ordering including a same-day tie broken by each signal in turn, and cap
+plus remainder count. Integration — the query against real contacts and dates; window anchoring for a
+non-UTC user; a query-count assertion (no N+1); a contact with no importance signals; the MCP tool against a
+real database. No e2e.
+
+#### Phase 12: Upcoming Dates — Card
+
+**Prerequisites:** Phases 3 and 11.
+**Estimated diff:** ~150 production → **~600 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] Card header and description per **W30**; one row per occurrence with avatar, contact name linking to
+      the contact, type badge, full occurrence date, and the right-aligned **"in N days"** chip in
+      `tabular-nums` (**W31**).
+- [ ] The type badge carries the derived age or years where precision allows (`Birthday · turns 35`,
+      `Anniversary · 34 years`) and degrades to the bare type otherwise (**W31**).
+- [ ] Show-more reveals the rest of the window and names the full count (**W32**).
+- [ ] Nothing in the window renders a single line (wireframe gap 2, **W29** idiom).
+
+**Required Test Coverage:** unit (RTL) — row rendering for each precision; the "in N days" values including
+today, tomorrow and **a near-midnight non-UTC case**; cap and show-more behaviour; the empty line. E2E in
+Phase 17.
+
+#### Phase 13: Tasks Section — Backend Assembly
+
+**Prerequisites:** Phase 1 and ITER18-001 Phase 14.
+**Estimated diff:** ~110 production → **~440 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] The tasks section reuses ITER18-001 Phase 14's upcoming-window listing rather than a second query
+      implementation.
+- [ ] **Settled here:** the payload carries the **whole seven-day window** with its total count, and the
+      five-item cap is applied by the UI. Capping server-side would make the show-more a second request,
+      contradicting the one-round-trip criterion; the window is small by construction. If the window is
+      instead capped server-side, the show-more's second call is named and costed in Phase 14. The same
+      choice applies to upcoming dates (Phase 11) and is recorded once here.
+- [ ] Done, cancelled and **lapsed** tasks are absent — with the cancelled-due-journal fixture that makes
+      the lapsed exclusion non-vacuous — while the same tasks remain present on their journals, asserted
+      explicitly.
+- [ ] Each entry carries text, due-journal id/title, the relative-date material the chip needs (**W25**),
+      and linked contacts, with no per-row follow-up request.
+
+**Required Test Coverage:** unit — cap/remainder arithmetic, ordering, exclusion rules. Integration —
+payload against real tasks in every status plus a boundary-day task and a cancelled-due-journal task;
+window anchoring for a non-UTC user; no N+1. No e2e.
+
+#### Phase 14: Tasks Section — Card with Inline Done
+
+**Prerequisites:** Phases 3 and 13, ITER18-001 Phases 6 and 15.
+**Estimated diff:** ~170 production → **~680 tracked** (×4) — **deliberately over the standard**
+(calibration rule 10). The specification names "a dashboard tasks section without the inline done action" as
+an incoherent split, so the card and its action ship in one PR, as **two commits**: (A) the card,
+(B) the inline action and in-place update.
+
+**Acceptance Criteria:**
+
+- [ ] Card header and description per **W21**; up to five rows, soonest first, in the shared row idiom
+      (**W22**).
+- [ ] Each row shows the task text (**W23**), the relative due chip — `Today`, `Tomorrow`, then a short
+      absolute form (**W25**) — the "Due in *journal*" link (**W26**) and any linked contacts with names
+      (**W27**).
+- [ ] An inline **Done** button on every row (**W24**) marks the task done **without leaving the page**,
+      after which the section updates in place and the row disappears.
+- [ ] The mutation routes through `invalidateAfterMutation` (cancel before invalidate) — the discipline
+      iteration 17 established across all 77 mutation handlers after two flake fixes.
+- [ ] No overdue section, counter or badge appears anywhere on the page, and lapsed tasks never render here.
+- [ ] The summary card is **not** regenerated underneath the user when a task is ticked — the section
+      updates, the summary refreshes on next load (the contract ITER18-005 Phase 7 relies on).
+
+**Required Test Coverage:** unit (RTL) — row rendering; each relative-chip case **including a near-midnight
+non-UTC boundary**; the done action's optimistic update and rollback; cancel-before-invalidate ordering; and
+that ticking a task triggers no summary refetch. E2E in Phase 17.
+
+#### Phase 15: Tasks Section — Show More and Empty State
+
+**Prerequisites:** Phase 14.
+**Estimated diff:** ~90 production → **~360 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] Show-more reveals the remainder of the seven-day window from the already-fetched payload and names the
+      full count (**W28**).
+- [ ] The empty window renders the check icon and one line, reading as a good outcome rather than an error
+      (**W29**).
+- [ ] Revealing the remainder does not refetch and does not change the five-row default on next load.
+
+**Required Test Coverage:** unit (RTL) — show-more label and reveal, no refetch on expand, and the empty
+state. E2E in Phase 17.
+
+#### Phase 16: Section Resilience, Loading and Accessibility
+
+**Prerequisites:** Phases 4, 7, 12, 15.
+**Estimated diff:** ~130 production → **~520 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] Each section renders its own loading skeleton and its own unavailable state; one section failing never
+      blanks the others (the contract asserted server-side in Phase 1, proven here through the UI).
+      Neither state is depicted in the wireframe — see wireframe gap 8 — so both are built in the idiom of
+      **W9** and **W29**.
+- [ ] Nothing on the page mutates data except the inline task action and the user-requested summary
+      regeneration.
+- [ ] Keyboard traversal reaches every action in a sensible order; the sections' labelled headings and lists
+      survive the final layout (**W4**).
+- [ ] No horizontal overflow at mobile widths with long journal titles, long contact names and long tag
+      sets — the wide-content cases most likely to break the grid (**W3**).
+
+**Required Test Coverage:** unit (RTL) — per-section loading and error rendering with the other sections
+still present; **keyboard traversal order across all interactive elements**; section and list labelling after
+layout; long-content layout assertions. E2E in Phase 17 covers the mobile project.
+
+#### Phase 17: E2E — Dashboard Wireframe Conformance
+
+**Prerequisites:** Phases 3–16.
+**Estimated diff:** ~160 production → **~640 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] Deterministic fixture-driven specs asserting the **structural** wireframe facts: the four sections in
+      wireframe order with their headings; all-day entries above timed ones; a cancelled event carrying its
+      marker; exactly five task rows with a show-more naming the full count; the collapsed-by-default
+      tomorrow disclosure expanding in place; upcoming dates ascending with their "in N days" chips.
+- [ ] Ticking a task off removes it from the section **without navigation** and without the summary
+      changing.
+- [ ] Each declared state (**W33**) has its own test with its own fixtures: summary generated, generating and
+      unavailable; tasks populated and empty; and the agenda and upcoming-dates empty states.
+- [ ] The placeholder cards are gone and the navigation entry reaches the dashboard.
+- [ ] **Fixtures account for the e2e user having no configured timezone** (backend day boundaries are UTC),
+      so "today" and "tomorrow" fixtures are built from explicit UTC offsets — otherwise a local-noon
+      journal lands on the wrong dashboard day.
+- [ ] No conditional logic on data state, no skips, no multi-outcome assertions; green on both `firefox` and
+      `Mobile Chrome`.
+
+**Required Test Coverage:** this phase *is* the e2e coverage for ITER18-004; unit and integration coverage
+landed in Phases 1–16.
+
+### ITER18-005: Extending the Daily Summary
+
+**Objective:** Turn the daily summary from a retrospective note on the journals page into the dashboard's
+forward-looking headline: extended inputs, always eligible for today, never stale, and invalidated by its
+actual inputs.
+
+**Independently deliverable because:** it changes the summary in place, on both surfaces that already
+render it. It needs tasks to exist (ITER18-001) and is most valuable alongside ITER18-004, but the
+journals view consumes the same summary, so it stands alone.
+
+**Relevant documents:**
+
+- Specification §*Extending the Daily Summary* (extended inputs, eligibility, freshness, tone and
+  safety) and §*The daily summary over MCP*
+- `DailySummaryService`, `DailySummaryInputAssembler`, `DailySummaryEligibilityChecker`,
+  `DailySummaryPromptBuilder`, `journal_daily_summaries`, `SearchIndexerConsumer._JOURNAL_INVALIDATION_EVENTS`
+- [Journals Product Specification](../product-specifications/journals-product-specification.md)
+  §*AI Daily Summary and Key Stats* — the constraints that continue to apply
+
+**Acceptance Criteria:**
+
+- [ ] **Current-day inputs are augmented** with: the day's agenda (today's event journals with times,
+      locations and participants), tasks due between today and seven days ahead, and important contact
+      dates falling in the next seven days.
+- [ ] **Past-day inputs are augmented** with the tasks that were due in that day's journals and how they
+      resolved — where "resolved" is each task's status **at generation time**, not a point-in-time
+      reconstruction. Field history is never replayed to rebuild past status, and this consequence is
+      documented in the code: a past-day summary regenerated after a lapsed task was finally completed
+      describes it as done.
+- [ ] Forward-looking material (upcoming dates, next-week tasks) is **current-day only**; a past-day
+      summary describes that day.
+- [ ] **Eligibility:** today is **always** eligible regardless of journal count; past days keep the
+      existing two-journal threshold and continue to produce no summary below it.
+- [ ] **Freshness:** today's summary is regenerated on read if it was not generated **today in the user's
+      timezone**. Otherwise caching is unchanged — a summary generated today is served from cache, and
+      concurrent generation is still prevented.
+- [ ] **Invalidation follows inputs, not only journals:** a day's summary is invalidated by changes to that
+      day's journals (as today), by changes to the tasks feeding it (created, retargeted into or out of
+      the window, status changed, contact links changed), and — for the current day — by changes to
+      important contact dates falling in the window.
+- [ ] Invalidation is **lazy**: it marks the cached summary stale and the next read regenerates. Ticking
+      four tasks in a row costs one regeneration, not four, and a summary is never regenerated underneath
+      a user acting on the dashboard — the sections beneath update in place and the summary refreshes on
+      the next load.
+- [ ] Explicit user-requested regeneration continues to work.
+- [ ] **Tone and safety constraints are carried into the prompt**: short and practical; grounded only in
+      the journals, agenda, tasks and dates it was given; descriptive rather than speculative; never
+      inventing commitments; read-only; and it **must not restate the sections beneath it item by item** —
+      its value is in connecting them. The prompt-level instructions are assertable and are asserted
+      (ITER18-005 Phase 3); the model's adherence to them is not mechanically testable and is not claimed
+      to be.
+- [ ] **MCP** `get_daily_summary` picks up the extended inputs, the always-eligible-today rule and the
+      staleness refresh automatically, because they are properties of the summary rather than of the
+      requesting surface. No new tool is required; the docstring is updated where behaviour it describes
+      changes.
+- [ ] Wireframe-bearing only through the dashboard's summary card: the extension must not change the read
+      contract that **W7**, **W9** and **W10** consume, and the always-eligible rule is what keeps
+      **W7** from falling back to **W9** on a quiet day.
+
+**Required Test Coverage:**
+
+- **Unit:** eligibility (today with zero and one journal is eligible; a past day with one journal is not);
+  staleness across the user's timezone (a summary generated at 22:00 yesterday is stale at 07:00 today,
+  and one generated at 00:30 today is not); prompt construction includes each new input group for the
+  current day and **excludes** forward-looking material for past days; the event → invalidation mapping
+  for each new event type; mood/stat counters unchanged.
+- **Integration:** a stale today-summary is regenerated on read while a fresh one is served from cache;
+  four rapid task mutations produce one regeneration; a task retargeted out of the window invalidates the
+  day that lost it and the day that gained it; an important-date change invalidates only the current day;
+  MCP `get_daily_summary` reflects all of the above; concurrent generation is still prevented.
+- **E2E:** on a day with fewer than two journals but tasks due, the dashboard shows a summary rather than
+  the unavailable state; with AI unconfigured the unavailable line renders (**W9**) and the other three
+  sections still work; requesting a regeneration updates the card.
+
+**Open decisions:**
+
+1. **Where the staleness check belongs** — settled in **Phase 2**. Inside `DailySummaryService.generate`
+   (so every caller, including MCP, gets it) versus at the read boundary. The service is the likely answer,
+   given the specification frames it as a property of the summary.
+2. **How "stale" is represented** — settled in **Phase 2**. A new status value versus comparing
+   `generated_at` against today in the user's timezone versus a nullable `invalidated_at` column. The lazy
+   invalidation in Phase 6 pushes toward an explicit marker so an input change can mark a summary stale
+   without regenerating it.
+3. **Whether task and important-date invalidation stays in `SearchIndexerConsumer`** (where journal
+   invalidation lives today, incidentally) or moves to a consumer that owns summary freshness — settled in
+   **Phase 6**. Moving it is cleaner but touches existing behaviour.
+4. **Prompt budget** — settled across **Phases 3–5**. Adding agenda, tasks and dates grows the prompt;
+   decide whether any input group needs a cap, and record it so a busy day cannot silently drop material.
+
+#### Phase 1: Eligibility — Today Is Always Eligible
+
+**Prerequisites:** none.
+**Estimated diff:** ~110 production → **~440 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] Eligibility distinguishes **today** from a past day in the user's timezone: today is eligible
+      regardless of journal count; a past day keeps the existing two-or-more-journals threshold and still
+      produces no summary below it.
+- [ ] "Today" is resolved through the user's configured timezone, never UTC-today.
+- [ ] A day with zero journals still produces a summary attempt rather than a `DISABLED` row — the quiet-day
+      case the dashboard headline exists for.
+- [ ] Future dates keep whatever behaviour they have today; this phase does not change them.
+
+**Required Test Coverage:** unit — today with zero and one journal is eligible; a past day with one is not,
+with two is; the timezone boundary either side of local midnight. Integration — the service persists a
+generated (not disabled) summary for a journal-less today. No e2e (Phase 8).
+
+#### Phase 2: Freshness — Regenerate a Summary Not Generated Today
+
+**Prerequisites:** Phase 1.
+**Estimated diff:** ~130 production → **~520 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] Today's summary is regenerated on read when it was **not generated today in the user's timezone** — a
+      summary produced yesterday evening must not be served this morning.
+- [ ] The check lives where open decision 1 settles it, so REST **and** MCP inherit it without their own
+      logic.
+- [ ] Staleness representation per open decision 2, chosen so Phase 7 can mark a summary stale without
+      regenerating it (a migration here if a column is chosen).
+- [ ] Otherwise caching is unchanged: a summary generated today is served from cache, and the existing
+      concurrent-generation guard still prevents double generation.
+- [ ] Past-day summaries are **not** subject to the staleness rule — only today's must reflect today.
+
+**Required Test Coverage:** unit — a summary generated at 22:00 yesterday is stale at 07:00 today; one
+generated at 00:30 today is not; past days unaffected; the user's timezone is the one used. Integration —
+stale read regenerates while a fresh read serves cache; concurrent reads still generate once; MCP
+`get_daily_summary` inherits both. No e2e (Phase 8).
+
+#### Phase 3: Extended Inputs — Today's Agenda
+
+**Prerequisites:** Phase 1 and ITER18-004 Phase 5.
+**Estimated diff:** ~140 production → **~560 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] `DailySummaryInputAssembler` gathers the current day's agenda — today's event journals with times,
+      locations and participants — into `DailySummaryInput`, reusing ITER18-004 Phase 5's read rather than a
+      second query implementation.
+- [ ] `DailySummaryPromptBuilder` includes the agenda for the **current day only**; a past-day prompt is
+      unchanged by this phase.
+- [ ] Cancelled events are excluded or marked as cancelled in the prompt — never presented as something the
+      user is doing.
+- [ ] The prompt keeps the existing tone constraints and gains the explicit instruction not to restate the
+      dashboard sections item by item.
+- [ ] Prompt-size handling per open decision 4, with any cap stated rather than silently truncating.
+
+**Required Test Coverage:** unit — the prompt contains agenda material for today and none for a past day;
+cancelled-event handling; the no-events case adds nothing rather than an empty heading; the
+do-not-restate instruction is present. Integration — assembly against real journals. No e2e (Phase 8).
+
+#### Phase 4: Extended Inputs — Tasks Due in the Current Window
+
+**Prerequisites:** Phase 3 and ITER18-001 Phase 14.
+**Estimated diff:** ~120 production → **~480 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] Tasks due between today and seven days ahead are assembled into the current day's input and appear in
+      the prompt, reusing ITER18-001 Phase 14's listing.
+- [ ] Forward-looking task material appears for the **current day only**.
+- [ ] Lapsed tasks are not presented to the model as outstanding commitments.
+- [ ] Linked contacts travel with each task, so the model can connect a task to a person — the connective
+      work the specification says is the summary's whole value.
+
+**Required Test Coverage:** unit — window contents; exclusion of lapsed, done and cancelled; contacts
+present; no forward-looking material on a past-day prompt. Integration — assembly against real tasks in each
+status. No e2e (Phase 8).
+
+#### Phase 5: Extended Inputs — Past-Day Task Resolution
+
+**Prerequisites:** Phase 4.
+**Estimated diff:** ~110 production → **~440 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] For a **past day**, the tasks that were due in that day's journals are assembled with **how they
+      resolved** — each task's status **at the moment the summary is generated**, not a reconstruction.
+      Field history is never replayed.
+- [ ] That consequence is documented in the code and here: a past-day summary regenerated after a lapsed
+      task was finally completed describes it as done, which is the honest answer to "what became of this"
+      and matches what the user sees on the journal.
+- [ ] Past-day prompts carry no forward-looking material of any kind.
+
+**Required Test Coverage:** unit — resolution reflects current status for each of done, cancelled and still
+not-done; no forward-looking material. Integration — a past day whose task was completed after the fact
+reads as done. No e2e (Phase 8).
+
+#### Phase 6: Extended Inputs — Upcoming Contact Dates
+
+**Prerequisites:** Phase 3 and ITER18-004 Phase 9.
+**Estimated diff:** ~130 production → **~520 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] Important contact dates falling in the next seven days are assembled into the **current day's** input
+      and appear in the prompt, reusing ITER18-004 Phase 9's occurrence-resolution helper rather than
+      re-deriving recurrence.
+- [ ] Past-day prompts contain no upcoming-dates material at all.
+- [ ] Where precision allows, the derived age or years travels with the date so the model need not infer it.
+- [ ] The existing stat counters and mood average are unchanged by any of Phases 3–6.
+
+**Required Test Coverage:** unit — current-day inclusion, past-day exclusion, precision-dependent extras,
+the empty-window case adding nothing, and counters unchanged. Integration — assembly against real contacts
+and dates. No e2e (Phase 8).
+
+#### Phase 7: Input-Driven Lazy Invalidation
+
+**Prerequisites:** Phases 2, 4, 6 and ITER18-003 Phase 5.
+**Estimated diff:** ~150 production → **~600 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] Invalidation follows the summary's **inputs**: journal changes (as today), task changes (created,
+      retargeted into or out of the window, status changed, contact links changed) and — for the current
+      day — important-date changes in the window.
+- [ ] A retarget invalidates **both** the day that lost the task and the day that gained it.
+- [ ] Invalidation is **lazy**: it marks the cached summary stale and the next read regenerates. Four task
+      ticks in a row cost **one** regeneration, not four — asserted, not assumed.
+- [ ] A summary is never regenerated underneath a user acting on the dashboard; the sections update in place
+      and the summary refreshes on the next load (paired with ITER18-004 Phase 14's no-refetch criterion).
+- [ ] Explicit user-requested regeneration still works and bypasses the laziness.
+- [ ] **Important-date invalidation needs an event that does not exist today:** the contacts domain
+      publishes `ImportantDateAdded` and `ImportantDateDeleted` but no *updated* event, so editing a stored
+      birthday currently publishes nothing. Either add the missing event (and count its cost against
+      calibration rule 6) or record "an edited important date does not invalidate today's summary until the
+      next journal or task change" as an accepted limitation, in this document.
+- [ ] Placement per open decision 3, with the consumer table in
+      `docs/architecture/integration-architecture.md` updated if subscriptions change.
+
+**Required Test Coverage:** unit — the event → invalidated-day mapping for every event type, including the
+two-day retarget case. Integration — publish → relay → invalidation marks stale without regenerating; a
+subsequent read regenerates once; four rapid mutations produce one regeneration; an important-date change
+invalidates only the current day (or the recorded limitation is asserted); an explicit regenerate still
+forces one. No e2e (Phase 8).
+
+#### Phase 8: E2E — Summary on the Dashboard
+
+**Prerequisites:** Phases 1–7 and ITER18-004 Phase 17.
+**Estimated diff:** ~140 production → **~560 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] Deterministic specs: on a day with fewer than two journals but tasks due, the dashboard shows a
+      generated summary rather than the unavailable state (the always-eligible rule — **W7**, not **W9**).
+- [ ] With AI unconfigured the unavailable line renders (**W9**), the Regenerate control is still present,
+      and the agenda, tasks and dates sections still work.
+- [ ] Requesting a regeneration updates the card.
+- [ ] Ticking a task off does not change the summary text in place — the "never regenerated underneath the
+      user" contract, observable end to end.
+- [ ] Fixtures are per-test and deterministic, built with the UTC-boundary caveat from ITER18-001 Phase 22;
+      the AI response is stubbed through the existing override rather than calling a real model.
+
+**Required Test Coverage:** this phase *is* the e2e coverage for ITER18-005; unit and integration coverage
+landed in Phases 1–7.
+
+## Specification Coverage Map
+
+Every section of the product specification is claimed by at least one iteration; several are shared
+across iterations, as the rows below show. Nothing is unclaimed.
+
+| Specification section | Iteration |
+|---|---|
+| Tasks → Product model, Core invariants, Creating a task | ITER18-001 |
+| Tasks → Status and lifecycle, Journal links and retargeting | ITER18-001 |
+| Tasks → Lapsed tasks | ITER18-001 (derivation, journal display) · ITER18-002 (cancellation cause) · ITER18-004 (absence from the dashboard) |
+| Tasks → Contacts on tasks | ITER18-001 (links) · ITER18-003 (contact activity record) |
+| Tasks → Events and history | ITER18-003 |
+| Tasks → Tasks and search | ITER18-003 |
+| Tasks → Where tasks appear | ITER18-001 (journals) · ITER18-004 (dashboard) |
+| Journal Anchor Integrity → Deletion, Merge, Cancellation | ITER18-002 |
+| Home Dashboard → Purpose, Composition | ITER18-004 |
+| Home Dashboard → Today's summary | ITER18-004 (rendering) · ITER18-005 (content and freshness) |
+| Home Dashboard → Agenda, Tasks, Upcoming dates | ITER18-004 |
+| Home Dashboard → Contact importance for dashboard ranking | ITER18-004 |
+| Home Dashboard → Loading, freshness, and errors; Navigation | ITER18-004 |
+| Extending the Daily Summary → Extended inputs, Eligibility, Freshness, Tone and safety | ITER18-005 |
+| MCP → Tasks over MCP | ITER18-001 |
+| MCP → The dashboard over MCP (deliberate omission) | ITER18-004 |
+| MCP → The daily summary over MCP | ITER18-005 |
+| Success criteria 1, 6, 7 | ITER18-004 (+ ITER18-005 for 7) |
+| Success criteria 2, 3, 4, 5 | ITER18-001 (+ ITER18-002 for 4) |
+| Success criterion 8 | ITER18-001, ITER18-003, ITER18-005 (MCP parity per iteration) |
+
+## Out of Scope
+
+Restating the specification's exclusions, because each is a plausible-looking addition a phase might
+otherwise drift into: a global tasks list, `/tasks` route or task browser; task assignment or any
+multi-user notion; sub-tasks, hierarchy or dependencies; priorities, effort or scheduling; recurring
+tasks; reminders, notifications or push; tasks in global search; external task-system integrations;
+rich text, attachments or checklists inside a task; dashboard customisation, widget reordering or
+user-configurable layout; and editing the AI daily summary.
+
+Task events are designed so future integrations can consume task activity without new plumbing, which is
+why tasks are full domain-event citizens from the outset (ITER18-003).
+
+## Follow-ups and Decisions
+
+Appended as the work proceeds, in the style of iterations 16 and 17.
+
+- **Record the actual diff beside each phase's estimate as it lands**, in the
+  `**Estimated diff:** … · **Actual:** …` form iteration 17 used. The
+  [calibration table](#phase-sizing-calibration) exists only because iteration 17 did this, and the
+  estimates here are only as good as the record the next iteration inherits. If a phase overran, say what
+  drove it.
+- **Open decisions are now attached to the phase that settles them**, and each must be recorded as a
+  *Decisions taken* note on that phase when it lands — the iteration-16/17 convention.
+- **The ×4 multiplier means "≤500 lines" is only achievable for some phase shapes.** Pure-logic,
+  single-surface, small-frontend and assembly phases land at 360–520. Capability triples (service + REST +
+  MCP in one PR, as delivery rule 5 requires) land at 600–640 — the measured floor in this repo, not
+  padding. One phase is above even that and says so: **ITER18-004 Phase 14** (~680), where the tasks card
+  and its inline done action cannot ship apart without creating the dead end the specification warns
+  about; it is planned as one PR of two commits.
+- **If a phase's actual comes in materially under ~4× its production estimate, say so** — the multiplier
+  rests on six recorded data points and deserves to be corrected downward if the evidence supports it.
+- **Wireframe divergences** are tracked in
+  [the wireframe document](../design/home-dashboard-wireframe.md#known-gaps-and-divergences); gaps 1–4 are
+  resolved by ITER18-004's acceptance criteria above.
