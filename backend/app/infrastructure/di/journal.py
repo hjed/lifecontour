@@ -586,10 +586,13 @@ class JournalProvider(Provider):
         self,
         facts_repo: IncompleteOutdoorActivityRepository,
         dismissal_repo: OutdoorActivityDismissalRepository,
+        user_settings_repo: UserSettingsRepository,
     ) -> IncompleteOutdoorActivityService:
         """Provide an IncompleteOutdoorActivityService instance."""
         return IncompleteOutdoorActivityService(
-            facts_repo=facts_repo, dismissal_repo=dismissal_repo
+            facts_repo=facts_repo,
+            dismissal_repo=dismissal_repo,
+            user_settings_repo=user_settings_repo,
         )
 
     @provide(scope=Scope.REQUEST)

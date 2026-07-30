@@ -23,9 +23,16 @@ function noonOffsetDays(days: number): string {
   return d.toISOString();
 }
 
-/** Today at noon local time, so entries fall on a stable calendar date. */
-function todayNoon(): string {
-  return noonOffsetDays(0);
+/**
+ * A date the incomplete review always considers "already started".
+ *
+ * The review only covers activities that have started (end-of-today in the
+ * user's timezone), and the test user has no timezone configured, so the
+ * backend anchors on UTC today. Local noon can already be tomorrow in UTC, so
+ * review fixtures are dated a few days back to stay unambiguously in the past.
+ */
+function startedNoon(): string {
+  return noonOffsetDays(-3);
 }
 
 test.describe('Outdoor Logbook — incomplete activities review', () => {
@@ -46,7 +53,7 @@ test.describe('Outdoor Logbook — incomplete activities review', () => {
     const journal = await dataManager.createJournal({
       title: 'Incomplete Canyon Trip',
       content: 'A canyon trip missing its details',
-      event_date_range: { start: todayNoon(), end: todayNoon() },
+      event_date_range: { start: startedNoon(), end: startedNoon() },
       types: ['canyoning'],
     });
 
@@ -99,7 +106,7 @@ test.describe('Outdoor Logbook — incomplete activities review', () => {
     const journal = await dataManager.createJournal({
       title: 'Genuinely Solo Canyon',
       content: 'A solo canyon trip that is fine as-is',
-      event_date_range: { start: todayNoon(), end: todayNoon() },
+      event_date_range: { start: startedNoon(), end: startedNoon() },
       types: ['canyoning'],
     });
 
@@ -230,7 +237,7 @@ test.describe('Outdoor Logbook — incomplete activities review', () => {
     const journal = await dataManager.createJournal({
       title: 'Complete Solo Hike',
       content: 'A well-recorded solo bushwalk',
-      event_date_range: { start: todayNoon(), end: todayNoon() },
+      event_date_range: { start: startedNoon(), end: startedNoon() },
       types: ['bushwalking'],
       type_data: {
         bushwalking: { track_grading: 'Grade 3' },
@@ -252,6 +259,57 @@ test.describe('Outdoor Logbook — incomplete activities review', () => {
       page.getByTestId(`incomplete-activity-item-${journal.id}`)
     ).toBeHidden();
     await expect(page.getByTestId('incomplete-empty-state')).toBeVisible();
+  });
+
+  test('does not flag an activity that has not started yet', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const page = authenticatedPage;
+    const dataManager = new (await import('./data-management')).TestDataManager(
+      page
+    );
+    const contactTestHelpers = new ContactTestHelpers(page);
+
+    await dataManager.clearAllJournals();
+
+    // Two canyoning journals with identical (missing) detail; only the one
+    // that has already happened is a gap in the logbook. The other is a plan.
+    const pastCanyon = await dataManager.createJournal({
+      title: 'Last Week Canyon',
+      content: 'A canyon trip missing its details',
+      event_date_range: { start: startedNoon(), end: startedNoon() },
+      types: ['canyoning'],
+    });
+    const plannedCanyon = await dataManager.createJournal({
+      title: 'Next Week Canyon',
+      content: 'A canyon trip that has not happened yet',
+      event_date_range: { start: noonOffsetDays(7), end: noonOffsetDays(7) },
+      types: ['canyoning'],
+    });
+
+    testCleanup(async () => {
+      await dataManager.clearAllJournals();
+    });
+
+    await contactTestHelpers.navigateToAuthenticatedPage(
+      '/journals/outdoor-logbook'
+    );
+
+    await expect(page.getByTestId('incomplete-list-ready')).toBeVisible({
+      timeout: 15000,
+    });
+    await expect(
+      page.getByTestId(`incomplete-activity-item-${pastCanyon.id}`)
+    ).toBeVisible();
+    await expect(
+      page.getByTestId(`incomplete-activity-item-${plannedCanyon.id}`)
+    ).toBeHidden();
+
+    // The headline "needs attention" tile counts the started activity only.
+    await expect(
+      page.getByTestId('logbook-stat-incomplete').getByTestId('stat-value')
+    ).toHaveText('1');
   });
 });
 

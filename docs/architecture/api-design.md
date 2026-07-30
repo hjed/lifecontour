@@ -132,7 +132,7 @@ journal sub-resource projection keyed by journal id:
 
 | Verb + path | Purpose | Status |
 |---|---|---|
-| `GET /api/journals/incomplete-outdoor-activities` | List flagged journals with per-entry `reasons` (`no_attributes`, `missing_template`, `no_participants`), `subtypes`, `event_date_range`, and `dismissed`. `?include_dismissed=true` also returns dismissed journals (flagged `dismissed: true`) so the UI can offer un-dismiss; by default they are excluded | 200 |
+| `GET /api/journals/incomplete-outdoor-activities` | List flagged journals with per-entry `reasons` (`no_attributes`, `missing_template`, `no_participants`), `subtypes`, `event_date_range`, and `dismissed`. Only activities that have already started are listed (one beginning after end-of-today in the user's timezone is a plan, not a gap). `?include_dismissed=true` also returns dismissed journals (flagged `dismissed: true`) so the UI can offer un-dismiss; by default they are excluded | 200 |
 | `POST /api/journals/incomplete-outdoor-activities/{journal_id}/dismiss` | Dismiss a journal from the review (provenance recorded as `ui`) | 200; 404 unknown/not-owned |
 | `POST /api/journals/incomplete-outdoor-activities/{journal_id}/undismiss` | Restore a journal to the review | 200 (idempotent no-op with `was_dismissed: false` when never dismissed); 404 unknown/not-owned |
 

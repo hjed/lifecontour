@@ -4386,7 +4386,9 @@ async def list_incomplete_outdoor_activities(
     type-specific fields are all empty), ``missing_template`` (an
     abseiling-derived activity with no template reference), and
     ``no_participants`` (a non-bushwalking outdoor activity with no PARTICIPANT
-    contacts). Dismissed journals are excluded unless ``include_dismissed`` is
+    contacts). Only activities that have already started are listed — a journal
+    beginning after the end of today (in the user's timezone) is a plan, not a
+    gap. Dismissed journals are excluded unless ``include_dismissed`` is
     set (they then carry ``dismissed=true``, so they can be un-dismissed);
     entries are newest first.
     """
