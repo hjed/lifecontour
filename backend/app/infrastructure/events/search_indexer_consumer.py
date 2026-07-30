@@ -49,6 +49,7 @@ _SEARCH_EVENT_TYPES: list[str] = [
     "JournalTagAssigned",
     "JournalTagRemoved",
     "JournalTagDeleted",
+    "JournalTagMerged",
 ]
 
 # Journal event types that also trigger daily summary invalidation

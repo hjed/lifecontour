@@ -25,6 +25,7 @@ TAG_REINDEX_EVENT_TYPES = [
     "JournalTagAssigned",
     "JournalTagRemoved",
     "JournalTagDeleted",
+    "JournalTagMerged",
 ]
 
 ROW_UPDATED_AT = "2026-03-01T09:00:00+00:00"

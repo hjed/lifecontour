@@ -5370,6 +5370,8 @@ async def merge_journal_tag(
         source_id=source_uuid,
         target_id=target_uuid,
         transaction=db_connection,
+        source=Provenance.MCP,
+        changed_by="mcp",
     )
 
     class MergeJournalTagResponse(BaseModel):

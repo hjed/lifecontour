@@ -218,9 +218,16 @@ class TestJournalTagReindexing:
         index = indexing_service.client.index(get_index_name("journals"))
         return list(index.get_document(journal_id).tag_ids)
 
-    def _tag_event(
-        self, event_type: str, journal_id: int, tag_id: UUID, **extra: object
+    def _event(
+        self, event_type: str, journal_id: int, **payload: object
     ) -> OutboxEvent:
+        """An outbox event shaped like a published journal tag event.
+
+        Only ``journal_id`` decides what gets re-indexed — the document is
+        rebuilt from the database, not from the payload — but the rest is
+        supplied faithfully so the fixture cannot drift from what the service
+        actually publishes.
+        """
         now = datetime.now(UTC)
         return OutboxEvent(
             id=1,
@@ -229,15 +236,21 @@ class TestJournalTagReindexing:
             event_type=event_type,
             event_data={
                 "journal_id": journal_id,
-                "tag_id": str(tag_id),
-                "tag_name": "Reindexed",
                 "source": "ui",
                 "changed_by": "ui",
-                **extra,
+                **payload,
             },
             occurred_at=now,
             retry_count=0,
             created_at=now,
+        )
+
+    def _assignment_event(
+        self, event_type: str, journal_id: int, tag_id: UUID
+    ) -> OutboxEvent:
+        """An assign / remove / delete event, which all name a single tag."""
+        return self._event(
+            event_type, journal_id, tag_id=str(tag_id), tag_name="Reindexed"
         )
 
     @pytest.mark.asyncio
@@ -258,7 +271,7 @@ class TestJournalTagReindexing:
         await repo.assign_tag(journal_id, tag_id)
 
         await indexing_service.process_event(
-            self._tag_event("JournalTagAssigned", journal_id, tag_id)
+            self._assignment_event("JournalTagAssigned", journal_id, tag_id)
         )
 
         assert self._indexed_tag_ids(indexing_service, journal_id) == [str(tag_id)]
@@ -277,12 +290,12 @@ class TestJournalTagReindexing:
         await repo.assign_tag(journal_id, kept_id)
         await repo.assign_tag(journal_id, dropped_id)
         await indexing_service.process_event(
-            self._tag_event("JournalTagAssigned", journal_id, kept_id)
+            self._assignment_event("JournalTagAssigned", journal_id, kept_id)
         )
 
         await repo.remove_tag(journal_id, dropped_id)
         await indexing_service.process_event(
-            self._tag_event("JournalTagRemoved", journal_id, dropped_id)
+            self._assignment_event("JournalTagRemoved", journal_id, dropped_id)
         )
 
         assert self._indexed_tag_ids(indexing_service, journal_id) == [str(kept_id)]
@@ -305,12 +318,49 @@ class TestJournalTagReindexing:
         await repo.assign_tag(journal_id, kept_id)
         await repo.assign_tag(journal_id, doomed_id)
         await indexing_service.process_event(
-            self._tag_event("JournalTagAssigned", journal_id, kept_id)
+            self._assignment_event("JournalTagAssigned", journal_id, kept_id)
         )
 
         await repo.delete(doomed_id)
         await indexing_service.process_event(
-            self._tag_event("JournalTagDeleted", journal_id, doomed_id)
+            self._assignment_event("JournalTagDeleted", journal_id, doomed_id)
         )
 
         assert self._indexed_tag_ids(indexing_service, journal_id) == [str(kept_id)]
+
+    @pytest.mark.asyncio
+    async def test_merge_swaps_the_source_tag_for_the_target(
+        self,
+        indexing_service: JournalIndexingService,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """After a merge the document names the survivor, not the deleted source.
+
+        This is the staleness ITER17-001 Phase 4 recorded and deferred: without
+        it a merged journal's document kept pointing at a tag id that no longer
+        resolves to anything, so tag-filtered search returned stale results.
+        """
+        journal_id = await self._journal_id(async_connection)
+        source_id = await self._tag_id(async_connection, "MergeSource")
+        target_id = await self._tag_id(async_connection, "MergeTarget")
+        repo = SqlJournalTagRepository(async_connection)
+        await repo.assign_tag(journal_id, source_id)
+        await indexing_service.process_event(
+            self._assignment_event("JournalTagAssigned", journal_id, source_id)
+        )
+        assert self._indexed_tag_ids(indexing_service, journal_id) == [str(source_id)]
+
+        await repo.merge_into(source_id, target_id)
+        await indexing_service.process_event(
+            self._event(
+                "JournalTagMerged",
+                journal_id,
+                source_tag_id=str(source_id),
+                target_tag_id=str(target_id),
+                source_tag_name="MergeSource",
+                target_tag_name="MergeTarget",
+                already_had_target=False,
+            )
+        )
+
+        assert self._indexed_tag_ids(indexing_service, journal_id) == [str(target_id)]

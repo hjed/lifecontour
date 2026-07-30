@@ -36,6 +36,7 @@ _JOURNAL_HISTORY_EVENT_TYPES: list[str] = [
     "JournalTagRemoved",
     "JournalTagRenamed",
     "JournalTagDeleted",
+    "JournalTagMerged",
     "RouteCreated",
     "RouteUpdated",
     "RouteDeleted",

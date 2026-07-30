@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.journal.models.events import (
     JournalTagAssigned,
     JournalTagDeleted,
+    JournalTagMerged,
     JournalTagRemoved,
     JournalTagRenamed,
 )
@@ -270,6 +271,9 @@ class JournalTagService:
         source_id: UUID,
         target_id: UUID,
         transaction: AsyncConnection,
+        *,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
     ) -> None:
         """Merge the source tag into the target tag, deleting the source.
 
@@ -279,19 +283,51 @@ class JournalTagService:
         target, and the source tag is deleted. The row-level work lives in the
         repository so this layer holds no SQL.
 
+        Every journal that carried the source also gets a ``JournalTagMerged``
+        event in the same unit of work, carrying whether that journal already
+        held the target — for those the merge is only a removal, since nothing
+        new arrived.
+
         Args:
             source_id: The tag to merge away and delete.
             target_id: The surviving tag.
             transaction: Request connection; the write commits before the response.
+            source: Provenance recorded against each journal's history entry.
+            changed_by: Actor recorded against each journal's history entry.
 
         Raises:
             JournalTagNotFoundError: Either tag does not exist.
             JournalValidationError: The target is the source itself or one of
                 its descendants.
         """
-        await self.hierarchy_service.validate_merge_target(source_id, target_id)
+        source_tag, target_tag = await self.hierarchy_service.validate_merge_target(
+            source_id, target_id
+        )
+
+        # Read both carrier sets *before* the merge: it re-points the source's
+        # assignments onto the target and deletes the overlap first, so
+        # afterwards the source carries nobody and every journal looks as though
+        # it always held the target.
+        source_journal_ids = await self.tag_repo.get_journal_ids_for_tag(source_id)
+        already_had_target = set(await self.tag_repo.get_journal_ids_for_tag(target_id))
 
         await self.tag_repo.merge_into(source_id, target_id)
+
+        # Publish after the write, matching update_tag and delete_tag.
+        for journal_id in source_journal_ids:
+            await self.event_publisher.publish(
+                JournalTagMerged(
+                    journal_id,
+                    source_id,
+                    target_id,
+                    source_tag.name,
+                    target_tag.name,
+                    journal_id in already_had_target,
+                    source=source,
+                    changed_by=changed_by,
+                    transaction=transaction,
+                )
+            )
 
     @transactional
     async def assign_tag(

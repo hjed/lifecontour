@@ -176,6 +176,41 @@ class HistoryService:
             event, data, old_value=data.get("tag_name"), new_value=None
         )
 
+    def _project_journal_tag_merged(
+        self, event: OutboxEvent, data: dict[str, Any]
+    ) -> list[FieldHistoryEntry]:
+        """The tag was folded into another, which reads two ways per journal.
+
+        A journal that carried only the source swapped one tag for another, so
+        both names go on the row and ``ActivityItem`` renders it as a change. A
+        journal that already carried the target gained nothing — only the source
+        left it — so recording the swap there would claim a change that did not
+        occur.
+
+        Both branches check the names they need, for the reason
+        ``_project_journal_tag_renamed`` explains: the shared helper's "nothing to
+        name" guard would let a swap missing its target name through as a removal
+        that never happened. An absent flag is read as neither branch rather than
+        defaulting to the swap on truthiness.
+        """
+        source_name = data.get("source_tag_name")
+        already_had_target = data.get("already_had_target")
+
+        if already_had_target is True:
+            return self._journal_tag_rows(
+                event, data, old_value=source_name, new_value=None
+            )
+
+        if already_had_target is not False:
+            return []
+
+        target_name = data.get("target_tag_name")
+        if source_name is None or target_name is None:
+            return []
+        return self._journal_tag_rows(
+            event, data, old_value=source_name, new_value=target_name
+        )
+
     def _project_journal_tag_renamed(
         self, event: OutboxEvent, data: dict[str, Any]
     ) -> list[FieldHistoryEntry]:
@@ -634,6 +669,7 @@ _HANDLERS = {
     "JournalTagRemoved": HistoryService._project_journal_tag_removed,
     "JournalTagRenamed": HistoryService._project_journal_tag_renamed,
     "JournalTagDeleted": HistoryService._project_journal_tag_deleted,
+    "JournalTagMerged": HistoryService._project_journal_tag_merged,
     "RouteCreated": HistoryService._project_route_created,
     "RouteUpdated": HistoryService._project_route_updated,
     "RouteDeleted": HistoryService._project_route_deleted,

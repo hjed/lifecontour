@@ -74,12 +74,22 @@ class JournalTagHierarchyService:
 
         await self._check_circular_reference(parent_id, child_id)
 
-    async def validate_merge_target(self, source_id: UUID, target_id: UUID) -> None:
+    async def validate_merge_target(
+        self, source_id: UUID, target_id: UUID
+    ) -> tuple[JournalTag, JournalTag]:
         """Ensure ``source_id`` may legally be merged into ``target_id``.
+
+        Returns both tags because it has to load them to check they exist, and
+        the caller needs their names for the history events. Loading them in the
+        caller instead would either duplicate the queries or, if done first, turn
+        a merge of an unknown tag into itself from a 400 into a 404.
 
         Merging into a descendant of the source is rejected: the descendant's
         ancestry runs through the tag that is about to be deleted, so the
         surviving hierarchy would be nonsense.
+
+        Returns:
+            The source and target tags, in that order.
 
         Raises:
             JournalValidationError: The target is the source itself or one of
@@ -91,9 +101,11 @@ class JournalTagHierarchyService:
                 "target_tag_id", "A tag cannot be merged into itself"
             )
 
-        if await self.tag_repo.find_by_id(source_id) is None:
+        source = await self.tag_repo.find_by_id(source_id)
+        if source is None:
             raise JournalTagNotFoundError(str(source_id))
-        if await self.tag_repo.find_by_id(target_id) is None:
+        target = await self.tag_repo.find_by_id(target_id)
+        if target is None:
             raise JournalTagNotFoundError(str(target_id))
 
         # The target is a descendant of the source exactly when the source
@@ -109,6 +121,8 @@ class JournalTagHierarchyService:
                 "target_tag_id",
                 "Circular reference detected in tag hierarchy",
             )
+
+        return source, target
 
     async def get_all_descendants_bulk(self, tag_ids: list[UUID]) -> list[JournalTag]:
         """Get all descendant tags for multiple tags in a single query.

@@ -848,7 +848,15 @@ async def merge_journal_tag(
 
     # Merge as a committed unit of work. The service validates both tags exist
     # and that the target is not a descendant of the source.
-    await journal_tag_service.merge_tag(source_uuid, target_uuid, connection)
+    # The service publishes a JournalTagMerged event for every journal that
+    # carried the source tag.
+    await journal_tag_service.merge_tag(
+        source_uuid,
+        target_uuid,
+        connection,
+        source=Provenance.UI,
+        changed_by="ui",
+    )
 
     return None
 
