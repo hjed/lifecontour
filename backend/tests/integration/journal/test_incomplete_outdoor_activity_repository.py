@@ -6,7 +6,7 @@ against Docker PostgreSQL. Each test seeds its own journals via the
 repositories, so outcomes are deterministic.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -53,6 +53,10 @@ from app.core.journal.adapters.sql.snorkelling_data_repository import (
 from app.core.journal.services.incomplete_outdoor_activity_service import (
     IncompleteOutdoorActivityService,
 )
+from app.core.settings.adapters.sql.user_settings_repository import (
+    SqlUserSettingsRepository,
+)
+from app.core.settings.models import UserSettings
 from tests.integration.journal.outdoor_activity_seeding import (
     OTHER_USER_ID,
     USER_ID,
@@ -75,12 +79,22 @@ async def dismissal_repository(
 
 
 @pytest_asyncio.fixture
+async def user_settings_repository(
+    async_connection: AsyncConnection,
+) -> SqlUserSettingsRepository:
+    return SqlUserSettingsRepository(async_connection)
+
+
+@pytest_asyncio.fixture
 async def service(
     facts_repository: SqlIncompleteOutdoorActivityRepository,
     dismissal_repository: SqlOutdoorActivityDismissalRepository,
+    user_settings_repository: SqlUserSettingsRepository,
 ) -> IncompleteOutdoorActivityService:
     return IncompleteOutdoorActivityService(
-        facts_repo=facts_repository, dismissal_repo=dismissal_repository
+        facts_repo=facts_repository,
+        dismissal_repo=dismissal_repository,
+        user_settings_repo=user_settings_repository,
     )
 
 
@@ -282,3 +296,54 @@ class TestIncompleteProjection:
         await seeder.add_participant(journal_id)
 
         assert await service.list_incomplete(USER_ID) == []
+
+    async def test_future_activity_not_listed(
+        self,
+        seeder: Seeder,
+        service: IncompleteOutdoorActivityService,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """A trip that has not started yet is a plan, not a review item."""
+        now = datetime.now(UTC)
+        past_id = await seeder.create_outdoor_journal(
+            title="Kayak last week", start=now - timedelta(days=7)
+        )
+        future_id = await seeder.create_outdoor_journal(
+            title="Kayak next week", start=now + timedelta(days=7)
+        )
+        kayaking_repo = SqlKayakingDataRepository(async_connection)
+        await kayaking_repo.save(KayakingData(journal_id=past_id))
+        await kayaking_repo.save(KayakingData(journal_id=future_id))
+
+        result = await service.list_incomplete(USER_ID)
+        assert [entry.journal_id for entry in result] == [past_id]
+
+        with_dismissed = await service.list_incomplete(USER_ID, include_dismissed=True)
+        assert [entry.journal_id for entry in with_dismissed] == [past_id]
+
+    async def test_user_timezone_anchors_the_future_cutoff(
+        self,
+        seeder: Seeder,
+        service: IncompleteOutdoorActivityService,
+        user_settings_repository: SqlUserSettingsRepository,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """The cutoff is the user's end-of-day, not UTC's."""
+        await user_settings_repository.save(
+            UserSettings(user_id=USER_ID, timezone="Australia/Sydney")
+        )
+        # 2026-07-30 23:00 AEST — still the anchor day for this user.
+        today_id = await seeder.create_outdoor_journal(
+            title="Late paddle", start=datetime(2026, 7, 30, 13, tzinfo=UTC)
+        )
+        # 2026-07-31 00:30 AEST — already tomorrow for this user.
+        tomorrow_id = await seeder.create_outdoor_journal(
+            title="Midnight paddle", start=datetime(2026, 7, 30, 14, 30, tzinfo=UTC)
+        )
+        kayaking_repo = SqlKayakingDataRepository(async_connection)
+        await kayaking_repo.save(KayakingData(journal_id=today_id))
+        await kayaking_repo.save(KayakingData(journal_id=tomorrow_id))
+
+        result = await service.list_incomplete(USER_ID, anchor=date(2026, 7, 30))
+
+        assert [entry.journal_id for entry in result] == [today_id]

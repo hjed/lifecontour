@@ -23,6 +23,7 @@ def make_facts(
     journal_id: int,
     *,
     start: datetime.datetime | None = None,
+    end: datetime.datetime | None = None,
     incomplete: bool = True,
 ) -> OutdoorActivityFacts:
     """Facts for a kayaking journal; incomplete = empty kayaking row."""
@@ -30,7 +31,7 @@ def make_facts(
     return OutdoorActivityFacts(
         journal_id=journal_id,
         title=f"Journal {journal_id}",
-        event_date_range=EventDateRange(start=event_start, end=event_start),
+        event_date_range=EventDateRange(start=event_start, end=end or event_start),
         kayaking_data=KayakingData(
             journal_id=journal_id,
             water_type=None if incomplete else "river",
@@ -52,11 +53,22 @@ def mock_dismissal_repo() -> AsyncMock:
 
 
 @pytest.fixture
+def mock_user_settings_repo() -> AsyncMock:
+    repo = AsyncMock()
+    repo.get_timezone.return_value = "UTC"
+    return repo
+
+
+@pytest.fixture
 def service(
-    mock_facts_repo: AsyncMock, mock_dismissal_repo: AsyncMock
+    mock_facts_repo: AsyncMock,
+    mock_dismissal_repo: AsyncMock,
+    mock_user_settings_repo: AsyncMock,
 ) -> IncompleteOutdoorActivityService:
     return IncompleteOutdoorActivityService(
-        facts_repo=mock_facts_repo, dismissal_repo=mock_dismissal_repo
+        facts_repo=mock_facts_repo,
+        dismissal_repo=mock_dismissal_repo,
+        user_settings_repo=mock_user_settings_repo,
     )
 
 
@@ -230,3 +242,127 @@ class TestListIncomplete:
             IncompletenessReason.NO_ATTRIBUTES,
             IncompletenessReason.NO_PARTICIPANTS,
         ]
+
+
+class TestExcludesFutureActivities:
+    """Activities that have not started yet are plans, not a review backlog."""
+
+    ANCHOR = datetime.date(2026, 7, 30)
+
+    @pytest.mark.asyncio
+    async def test_excludes_activity_starting_after_today(
+        self,
+        service: IncompleteOutdoorActivityService,
+        mock_facts_repo: AsyncMock,
+    ) -> None:
+        mock_facts_repo.list_outdoor_activity_facts.return_value = [
+            make_facts(
+                10, start=datetime.datetime(2026, 7, 29, 9, tzinfo=datetime.UTC)
+            ),
+            make_facts(11, start=datetime.datetime(2026, 7, 31, tzinfo=datetime.UTC)),
+        ]
+
+        result = await service.list_incomplete(USER_ID, anchor=self.ANCHOR)
+
+        assert [entry.journal_id for entry in result] == [10]
+
+    @pytest.mark.asyncio
+    async def test_includes_activity_starting_today(
+        self,
+        service: IncompleteOutdoorActivityService,
+        mock_facts_repo: AsyncMock,
+    ) -> None:
+        """Right up to the final microsecond of the anchor day."""
+        mock_facts_repo.list_outdoor_activity_facts.return_value = [
+            make_facts(
+                10,
+                start=datetime.datetime(
+                    2026, 7, 30, 23, 59, 59, 999999, tzinfo=datetime.UTC
+                ),
+            )
+        ]
+
+        result = await service.list_incomplete(USER_ID, anchor=self.ANCHOR)
+
+        assert [entry.journal_id for entry in result] == [10]
+
+    @pytest.mark.asyncio
+    async def test_includes_in_progress_multi_day_activity(
+        self,
+        service: IncompleteOutdoorActivityService,
+        mock_facts_repo: AsyncMock,
+    ) -> None:
+        """A trip underway has started, so it is still worth reviewing."""
+        mock_facts_repo.list_outdoor_activity_facts.return_value = [
+            make_facts(
+                10,
+                start=datetime.datetime(2026, 7, 28, 7, tzinfo=datetime.UTC),
+                end=datetime.datetime(2026, 8, 2, 17, tzinfo=datetime.UTC),
+            )
+        ]
+
+        result = await service.list_incomplete(USER_ID, anchor=self.ANCHOR)
+
+        assert [entry.journal_id for entry in result] == [10]
+
+    @pytest.mark.asyncio
+    async def test_include_dismissed_also_excludes_future_activities(
+        self,
+        service: IncompleteOutdoorActivityService,
+        mock_facts_repo: AsyncMock,
+        mock_dismissal_repo: AsyncMock,
+    ) -> None:
+        mock_facts_repo.list_outdoor_activity_facts.return_value = [
+            make_facts(
+                10, start=datetime.datetime(2026, 7, 29, 9, tzinfo=datetime.UTC)
+            ),
+            make_facts(11, start=datetime.datetime(2026, 8, 5, tzinfo=datetime.UTC)),
+        ]
+        mock_dismissal_repo.list_dismissed_journal_ids.return_value = {10, 11}
+
+        result = await service.list_incomplete(
+            USER_ID, include_dismissed=True, anchor=self.ANCHOR
+        )
+
+        assert [entry.journal_id for entry in result] == [10]
+
+    @pytest.mark.asyncio
+    async def test_cutoff_lands_on_the_users_midnight_not_utcs(
+        self,
+        service: IncompleteOutdoorActivityService,
+        mock_facts_repo: AsyncMock,
+        mock_user_settings_repo: AsyncMock,
+    ) -> None:
+        """For an AEST (UTC+10) user, the anchor day ends at 14:00 UTC."""
+        mock_user_settings_repo.get_timezone.return_value = "Australia/Sydney"
+        mock_facts_repo.list_outdoor_activity_facts.return_value = [
+            # 2026-07-30 23:00 AEST — still the anchor day for this user
+            make_facts(
+                10, start=datetime.datetime(2026, 7, 30, 13, tzinfo=datetime.UTC)
+            ),
+            # 2026-07-31 00:30 AEST — already tomorrow for this user
+            make_facts(
+                11, start=datetime.datetime(2026, 7, 30, 14, 30, tzinfo=datetime.UTC)
+            ),
+        ]
+
+        result = await service.list_incomplete(USER_ID, anchor=self.ANCHOR)
+
+        assert [entry.journal_id for entry in result] == [10]
+        mock_user_settings_repo.get_timezone.assert_awaited_once_with(USER_ID)
+
+    @pytest.mark.asyncio
+    async def test_defaults_the_anchor_to_today(
+        self,
+        service: IncompleteOutdoorActivityService,
+        mock_facts_repo: AsyncMock,
+    ) -> None:
+        now = datetime.datetime.now(datetime.UTC)
+        mock_facts_repo.list_outdoor_activity_facts.return_value = [
+            make_facts(10, start=now - datetime.timedelta(days=1)),
+            make_facts(11, start=now + datetime.timedelta(days=2)),
+        ]
+
+        result = await service.list_incomplete(USER_ID)
+
+        assert [entry.journal_id for entry in result] == [10]

@@ -1582,7 +1582,9 @@ async def list_incomplete_outdoor_activities(
 
     An advisory, unpaginated projection over the user's outdoor journals:
     each entry names the rule(s) it matches (no_attributes, missing_template,
-    no_participants). Dismissed journals are excluded unless
+    no_participants). Only activities that have already started are reviewed —
+    a journal beginning after the end of today (in the user's timezone) is a
+    plan, not a gap. Dismissed journals are excluded unless
     ``include_dismissed`` is set, in which case they are returned flagged
     ``dismissed: true`` (so the UI can offer un-dismiss).
     """

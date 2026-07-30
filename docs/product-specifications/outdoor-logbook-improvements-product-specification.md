@@ -95,10 +95,18 @@ as a **dedicated route** within the journals experience (a new page with its own
 Journals — not a calendar/list view-mode toggle). It is **not** part of the existing generic
 review-items queue; it is its own outdoor-specific surface.
 
+### Scope: activities that have already started
+
+Only activities that have **already started** are reviewed. A journal whose event range begins
+after the end of **today** — measured in the user's configured timezone, like the rest of the
+overview page — is a **plan**, not a gap in the logbook: its attributes and participants are
+expected to be missing until the trip happens. An activity **already underway** (a multi-day trip
+that started earlier and has not finished) has started, so it is still reviewed.
+
 ### Incompleteness rules
 
-An outdoor activity journal is **incomplete** if it matches **any** of the following rules. Each
-matched rule is shown as a distinct reason on the entry.
+An outdoor activity journal that has started is **incomplete** if it matches **any** of the
+following rules. Each matched rule is shown as a distinct reason on the entry.
 
 1. **No attributes set** — the journal has an outdoor activity subtype (BUSHWALKING, ABSEILING_TRIP,
    CANYONING, CLIMBING, KAYAKING, CROSS_COUNTRY_SKIING, CAVING, CANOEING) but the **subtype's own
@@ -133,7 +141,8 @@ matched rule is shown as a distinct reason on the entry.
   solo trip with no participants, or an activity that legitimately has minimal attributes). A
   dismissed entry no longer appears in the incomplete review regardless of which rules it matches.
   Dismissal is reversible (the user can un-dismiss), and is recorded against the journal.
-- Scope: only the user's own outdoor activity journals are considered.
+- Scope: only the user's own outdoor activity journals that have already started are considered.
+  A planned activity enters the review by itself once its start date arrives.
 
 ---
 

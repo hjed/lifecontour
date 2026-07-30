@@ -5,7 +5,7 @@ Exercises the list / dismiss / undismiss endpoints end-to-end via the
 repositories (savepoint-isolated), so outcomes are deterministic.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
@@ -137,6 +137,32 @@ async def test_list_include_dismissed_returns_dismissed_entries_flagged(
     assert [entry["id"] for entry in data] == [str(dismissed_id), str(live_id)]
     assert data[0]["attributes"]["dismissed"] is True
     assert data[1]["attributes"]["dismissed"] is False
+
+
+async def test_list_excludes_activities_that_have_not_started(
+    authenticated_client,
+    seeder: Seeder,
+) -> None:
+    """Planned trips are not a review backlog, dismissed view included."""
+    now = datetime.now(UTC)
+    past_id = await seeder.create_incomplete_canyoning_journal(
+        title="Past canyon", start=now - timedelta(days=3)
+    )
+    await seeder.create_incomplete_canyoning_journal(
+        title="Future canyon", start=now + timedelta(days=10)
+    )
+
+    response = await authenticated_client.get(LIST_URL)
+
+    assert response.status_code == 200
+    assert [entry["id"] for entry in response.json()["data"]] == [str(past_id)]
+
+    with_dismissed = await authenticated_client.get(
+        LIST_URL, params={"include_dismissed": "true"}
+    )
+
+    assert with_dismissed.status_code == 200
+    assert [entry["id"] for entry in with_dismissed.json()["data"]] == [str(past_id)]
 
 
 async def test_dismiss_removes_entry_and_records_ui_provenance(

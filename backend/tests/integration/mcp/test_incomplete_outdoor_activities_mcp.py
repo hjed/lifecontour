@@ -6,6 +6,7 @@ server. Journals are seeded through the real repositories on the shared savepoin
 connection, so the MCP app under test sees them and outcomes are deterministic.
 """
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -145,6 +146,30 @@ async def test_list_incomplete_include_dismissed_via_mcp(
     entry = listing["activities"][0]
     assert entry["journal_id"] == journal_id
     assert entry["dismissed"] is True
+
+
+async def test_list_incomplete_via_mcp_excludes_future_activities(
+    authenticated_lifespan_client,
+    seeder: Seeder,
+) -> None:
+    """The MCP listing matches the REST endpoint: started activities only."""
+    now = datetime.now(UTC)
+    past_id = await seeder.create_incomplete_canyoning_journal(
+        title="Past canyon", start=now - timedelta(days=3)
+    )
+    await seeder.create_incomplete_canyoning_journal(
+        title="Future canyon", start=now + timedelta(days=10)
+    )
+
+    async with authenticated_lifespan_client() as client:
+        session_id = await initialize_mcp_session(client)
+        payload = await _call_tool(
+            client, session_id, "list_incomplete_outdoor_activities", {}
+        )
+
+    assert "error" not in payload, payload
+    assert payload["total_count"] == 1
+    assert [entry["journal_id"] for entry in payload["activities"]] == [past_id]
 
 
 async def test_dismiss_via_mcp_records_mcp_provenance_and_removes_entry(
