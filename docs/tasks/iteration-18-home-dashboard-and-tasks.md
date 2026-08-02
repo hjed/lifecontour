@@ -1,8 +1,9 @@
 # Iteration 18: Home Dashboard and Tasks
 
-**Status:** 🔴 PLANNED — fully broken down: 5 iterations, **61 phases**, one PR each, with per-phase
-acceptance criteria and diff estimates calibrated against iteration 17's recorded actuals. Ready to start
-at ITER18-001 Phase 1.
+**Status:** 🟡 IN PROGRESS — fully broken down: 5 iterations, **61 phases**, one PR each, with per-phase
+acceptance criteria and diff estimates calibrated against iteration 17's recorded actuals.
+**ITER18-001 Phase 1 complete** (task tables + domain entity); next is ITER18-001 Phase 2 (task
+repository).
 **Dependencies:** Iteration 4 (journal core, contact relationships, event date ranges), Iteration 7
 (daily summaries, calendar sync, day-grouped journal browsing, journal merge), Iteration 12 (unified
 event-driven field history), Iteration 5 (Redis Streams event bus, outbox relay, stream consumers),
@@ -52,8 +53,14 @@ Verified against the code at the time of writing, not assumed.
 
 ### Tasks
 
-**Nothing exists.** No table, entity, service, endpoint, MCP tool, or frontend surface. There is no
-`tasks` string anywhere in the domain layer. Every part of the tasks model in ITER18-001 is new.
+**Nothing existed** at the time of writing — no table, entity, service, endpoint, MCP tool, or frontend
+surface, and no `tasks` string anywhere in the domain layer. Every part of the tasks model in ITER18-001
+is new.
+
+**Since ITER18-001 Phase 1:** the `tasks`, `task_intermediate_journals` and `task_contacts` tables exist
+(migration `0105`), as do the `Task` entity and `TaskStatus` enum in
+`core_shared/core_shared/models/tasks/`. There is still no repository, service, endpoint, MCP tool or
+frontend surface.
 
 ### The home page
 
@@ -478,47 +485,92 @@ leaves tasks uncreatable and invisible).
 
 **Open decisions:**
 
-1. **Primary key type** — settled in **Phase 1**. Journals are integer-keyed; journal tags and activity
-   templates are UUID-keyed. UUID avoids exposing enumerable ids on a user-owned entity and matches the
-   newer tables; integer matches the journals the entity is most tightly coupled to.
+1. ~~**Primary key type**~~ — ✅ **settled in Phase 1: `Integer` serial.** See *Decisions taken (Phase 1)*.
 2. **Where the due-journal "future" boundary sits** for a multi-day journal whose range straddles today —
    settled in **Phase 2**. The specification defines a journal's date as its start date, so a trip that
    started yesterday and ends tomorrow is *past*. Confirm that reading before it becomes a validation rule.
-3. **Whether task text has a length bound**, and whether it is markdown or plain — settled in **Phase 1**
-   (the column) and enforced in **Phase 2** (the entity). "Short text" plus richer content belonging in a
-   journal argues for plain with a bound.
+3. ~~**Whether task text has a length bound**, and whether it is markdown or plain~~ — ✅ **settled in
+   Phase 1: plain text, `TEXT`, no length bound.** See *Decisions taken (Phase 1)*.
 4. **Whether MCP gets a delete tool** — settled in **Phase 7**. The specification's MCP list omits delete
    while listing every other operation, but principle 1 (no meaningful UI-only behaviour) argues for
    including it. Recommended: include `delete_task`, and record the addition here.
 
-#### Phase 1: Schema, Tables and Domain Entity
+#### Phase 1: Schema, Tables and Domain Entity ✅ COMPLETE
 
 **Prerequisites:** none.
-**Estimated diff:** ~110 production → **~440 tracked** (×4)
+**Estimated diff:** ~110 production → **~440 tracked** (×4) · **Actual:** ~290 production →
+**~1270 tracked** (migration 145, `core_shared` tasks package 145; 873 lines of tests; ~110 lines of
+docs). The production overrun is the migration itself — three tables with eight foreign keys and their
+indexes came to 145 lines against an estimate that assumed one table. The test multiplier held.
 
 **Acceptance Criteria:**
 
-- [ ] Alembic migration (sequential naming per the `creating-migrations` skill) creates the task table
+- [x] Alembic migration (sequential naming per the `creating-migrations` skill) creates the task table
       (owner, text, status, creating journal, due journal, timestamps) plus the intermediate-journal and
-      contact link tables.
-- [ ] Anchor FKs are `NOT NULL` and **do not cascade from the journal side** (`ON DELETE RESTRICT` or
+      contact link tables. — `0105_create_tasks_tables.py` creates `tasks`,
+      `task_intermediate_journals` and `task_contacts`; `alembic heads` reports `0105 (head)`.
+- [x] Anchor FKs are `NOT NULL` and **do not cascade from the journal side** (`ON DELETE RESTRICT` or
       equivalent). Link rows cascade from the task side; the contact-link FK is `ON DELETE CASCADE` from
-      the contact side, so deleting a contact drops its links without touching tasks.
-- [ ] Status is a `CHECK`-constrained column matching the three-value domain enum; text carries the length
-      bound from open decision 3.
-- [ ] Domain entity + status enum in `core_shared`, following the project's domain-enum pattern, with
-      construction-time validation of text and the presence of both anchors.
-- [ ] **Primary key type decided and justified here.** Note the constraint that forces it:
-      `DomainEvent.aggregate_id` is typed `int` (`core_shared/core_shared/stream_client.py`) and
-      `field_history.entity_id` is `Integer` (`app/infrastructure/contacts/contact_tables.py`), so a UUID
-      task id cannot be an event aggregate id or a history entity id without migrating a table shared with
-      contacts and journals. Iteration 17 hit the same wall and made journal-tag events journal-scoped.
-      Integer is therefore the default answer; choosing UUID means adding that migration to ITER18-003
-      Phase 6 and re-estimating it.
+      the contact side, so deleting a contact drops its links without touching tasks. — both anchors
+      `ON DELETE RESTRICT`; both link tables cascade from `task_id`; `task_contacts.contact_id` and
+      `task_intermediate_journals.journal_id` cascade from their own side. All four directions are
+      asserted against real Postgres.
+- [x] Status is a `CHECK`-constrained column matching the three-value domain enum; text carries the length
+      bound from open decision 3. — `ck_tasks_status CHECK (status IN ('not_done', 'done', 'cancelled'))`,
+      default `'not_done'`; `text` is unbounded `TEXT` per the decision below.
+- [x] Domain entity + status enum in `core_shared`, following the project's domain-enum pattern, with
+      construction-time validation of text and the presence of both anchors. —
+      `core_shared/core_shared/models/tasks/` (`entities.Task`, `task_status.TaskStatus`,
+      `exceptions.TaskValidationError`).
+- [x] **Primary key type decided and justified here.** — `Integer` serial; see *Decisions taken* below.
+
+**Decisions taken (Phase 1):**
+
+- **Open decision 1 — primary key is `Integer` serial.** The specification makes tasks full domain-event
+  citizens whose events project into field history, and `DomainEvent.aggregate_id` is typed `int`
+  (`core_shared/core_shared/stream_client.py`) while `field_history.entity_id` is `Integer`
+  (`app/infrastructure/contacts/contact_tables.py`). A UUID task id could not be an event aggregate id or
+  a history entity id without migrating a table shared with contacts and journals — the wall iteration 17
+  hit. Integer also matches the `journals.id` and `contacts.id` every task FK points at. **ITER18-003
+  Phase 6 needs no extra migration and no re-estimate.** The accepted cost is enumerable ids in URLs,
+  which owner-scoped reads (Phase 2) mitigate.
+- **Open decision 3 — task text is plain text in an unbounded `TEXT` column.** Not markdown. The entity
+  validates non-empty (after strip) and nothing else. A bound was deliberately declined rather than
+  forgotten; it can be added later as a `CHECK` without a column type change. "Short text" therefore
+  remains a product convention expressed by the UI, not a database constraint.
+- **No SQLAlchemy `Table` object for the task tables.** The journal domain — the domain tasks are
+  anchored to — defines none; only contacts and the event infrastructure do. The migration is the
+  schema's source of truth and repositories use raw SQL (Phase 2). This also avoids colliding with the
+  existing `app/infrastructure/tasks/` package, which holds ARQ background jobs, not domain tasks.
+- **The intermediate link table is named `task_intermediate_journals`**, not a generic
+  `task_journal_links`: the creating and due anchors are *columns* on `tasks`, so the link table holds
+  intermediate links only and the name says so.
+- **Entity carries no link collections.** Intermediate-journal and contact links are separate repository
+  methods in Phase 2 (calibration rule 3), so `Task` holds only its own columns.
 
 **Required Test Coverage:** unit — entity validation and enum behaviour. Integration — migration applies
 cleanly; the anchor FK **refuses** a journal delete; contact deletion drops links only. No e2e (no surface
 — deferral stated).
+
+- **Unit (24 tests):** `backend/tests/unit/tasks/test_task_entity.py` — valid construction, default
+  status, empty/whitespace owner and text rejected, unbounded text accepted, both anchors mandatory and
+  positive, **creating == due accepted** (invariant 6), non-enum status rejected, error field/status-code
+  shape. `backend/tests/unit/tasks/test_task_status_enum.py` — exactly three members, their stored
+  values, `str()`, round-trip from string, invalid value raises.
+- **Integration (13 tests):** `backend/tests/integration/tasks/test_tasks_migration.py` — `0104 → 0105`
+  creates all three tables with the expected columns, downgrade drops them, re-upgrade recreates them;
+  the status CHECK accepts every `TaskStatus` and rejects anything else; the column defaults to
+  `not_done`. `backend/tests/integration/tasks/test_task_tables_constraints.py` — deleting the creating
+  anchor is refused; deleting the due anchor is refused; deleting an intermediate-only journal drops the
+  link and spares the task; deleting a task cascades its links while sparing journals and contacts;
+  deleting a contact drops its task links only; both anchors are `NOT NULL`; creating and due may be the
+  same journal; duplicate intermediate and contact links violate the composite primary keys (the basis
+  of Phase 2's idempotent link adds).
+- **E2E:** none — deferral taken as stated. Phase 1 ships no user-visible surface; e2e coverage for
+  ITER18-001 lands in Phase 22.
+- **Docs:** `docs/architecture/database-design.md` gained a *Tasks — journal-anchored commitments
+  (ITER18-001)* section covering the three tables, the FK-direction table, the status CHECK and the
+  integer-PK justification.
 
 #### Phase 2: Task Repository
 

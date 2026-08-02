@@ -17,6 +17,9 @@ from sqlalchemy import text
 from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from tests.integration.migration_helpers import columns as _columns
+from tests.integration.migration_helpers import table_exists as _table_exists
+
 _TABLE = "outdoor_activity_dismissals"
 _EXPECTED_COLUMNS = {
     "id",
@@ -26,46 +29,6 @@ _EXPECTED_COLUMNS = {
     "created_at",
     "updated_at",
 }
-
-
-async def _table_exists(engine_url: str, table: str) -> bool:
-    engine = create_async_engine(engine_url)
-    try:
-        async with engine.connect() as conn:
-            found = (
-                await conn.execute(
-                    text(
-                        """
-                        SELECT 1 FROM information_schema.tables
-                        WHERE table_name = :table
-                        """
-                    ),
-                    {"table": table},
-                )
-            ).scalar()
-            return found is not None
-    finally:
-        await engine.dispose()
-
-
-async def _columns(engine_url: str, table: str) -> set[str]:
-    engine = create_async_engine(engine_url)
-    try:
-        async with engine.connect() as conn:
-            rows = (
-                await conn.execute(
-                    text(
-                        """
-                        SELECT column_name FROM information_schema.columns
-                        WHERE table_name = :table
-                        """
-                    ),
-                    {"table": table},
-                )
-            ).fetchall()
-            return {str(row.column_name) for row in rows}
-    finally:
-        await engine.dispose()
 
 
 async def _has_unique_on_user_journal(engine_url: str, table: str) -> bool:

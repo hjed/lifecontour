@@ -111,6 +111,26 @@ See [Journal System Specification](../journal-system-specification.md) for compr
   - Integration conflict resolution
   - Route tracking and reuse
 
+#### Tasks Domain
+See [Home Dashboard & Tasks Specification](../product-specifications/home-dashboard-and-tasks-product-specification.md#tasks)
+for the behaviour contract. A task is a short plain-text commitment anchored to exactly two journals —
+the *creating* journal where it arose and the *due* journal where it matters.
+- **Entities**: `Task` (`core_shared/core_shared/models/tasks/entities.py`)
+- **Domain Enums**: `TaskStatus` — not done (default), done, cancelled
+  (`core_shared/core_shared/models/tasks/task_status.py`)
+- **Business Rules**:
+  - Both journal anchors are mandatory and can never be absent at any point in a task's life; the
+    entity validates their presence, and the schema enforces it (see
+    [Database Design](database-design.md))
+  - The creating and due journals may be the same journal
+  - Validation is split by what each layer can know: the entity checks the owner, the text and the
+    presence of both anchors; whether the due journal exists, is owned by the acting user and is
+    future-dated **at the moment it is set** needs journal data and the user's timezone, so it is
+    enforced in the service layer where REST and MCP both inherit it
+  - *Lapsed* is derived, never stored — a not-done task whose due journal has passed or been cancelled
+- **Ports and Domain Services**: not yet — `TaskRepository` lands in ITER18-001 Phase 2 and
+  `TaskService` in Phase 4
+
 #### Photos Domain
 - **Entities**: Photo, ImmichPerson, PersonMatch
 - **Value Objects**: ConfidenceScore, MatchMethod
