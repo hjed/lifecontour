@@ -1,11 +1,13 @@
 """Unit tests for JournalMergeService."""
 
 from datetime import datetime
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from core_shared.models.journals import (
     EventDateRange,
+    FitnessMergeMode,
     Journal,
 )
 
@@ -223,6 +225,34 @@ class TestJournalMergeService:
         assert params["target_id"] == 1
 
     @pytest.mark.asyncio
+    async def test_merge_journals_accepts_lowercase_type_data_override_keys(
+        self, merge_service, mock_journal_repo, mock_transaction
+    ):
+        """The read API returns lowercase type keys and the merge panel echoes them back."""
+        target = create_test_journal(id=1, title="Target Title")
+        source = create_test_journal(id=2, title="Source Title")
+
+        mock_journal_repo.find_by_id.side_effect = lambda j_id: (
+            target if j_id == 1 else source
+        )
+        mock_journal_repo.save.return_value = target
+
+        mock_transaction.execute.side_effect = _mock_type_data_execute
+
+        overrides = {"type_data": {"mood_rating": {"mood_value": 8}}}
+
+        await merge_service.merge_journals(1, 2, mock_transaction, overrides=overrides)
+
+        update_calls = [
+            call
+            for call in mock_transaction.execute.call_args_list
+            if "UPDATE journal_mood_data" in str(call[0][0])
+        ]
+
+        assert len(update_calls) == 1
+        assert update_calls[0][0][1]["mood_value"] == 8
+
+    @pytest.mark.asyncio
     async def test_merge_allday_target_with_timed_source_clears_times(
         self, merge_service, mock_journal_repo, mock_transaction
     ):
@@ -390,6 +420,316 @@ class TestJournalMergeService:
         assert "status = 'resolved'" in query_text
         assert params["target_id"] == 1
         assert params["source_id"] == 2
+
+
+TARGET_ID = 1
+SOURCE_ID = 2
+
+_FITNESS_COLUMNS = (
+    "heart_rate_avg",
+    "heart_rate_max",
+    "distance",
+    "elevation_gain",
+    "elevation_loss",
+    "duration",
+    "calories",
+    "strava_activity_id",
+)
+
+
+def _fitness_row(journal_id: int, **values):
+    """Build a mock ``journal_fitness_data`` row with every column present."""
+    row = MagicMock()
+    row._mapping = {
+        "journal_id": journal_id,
+        **{col: values.get(col) for col in _FITNESS_COLUMNS},
+        "created_at": datetime(2024, 1, 1),
+        "updated_at": datetime(2024, 1, 1),
+    }
+    return row
+
+
+def _fitness_execute(
+    target_values: dict[str, Any] | None, source_values: dict[str, Any] | None
+):
+    """Mock ``execute`` serving fitness rows for the target and source journals.
+
+    ``None`` stands for "this journal has no fitness row". Every other type
+    table reports no row, so the merge only exercises the fitness path.
+    """
+
+    def _execute(query, params=None):
+        q_str = str(query)
+        mock_res = MagicMock()
+        mock_res.fetchall.return_value = []
+        mock_res.fetchone.return_value = None
+
+        if "journal_fitness_data" in q_str and q_str.strip().startswith("SELECT"):
+            params = params or {}
+            if params.get("target_id") == TARGET_ID and target_values is not None:
+                mock_res.fetchone.return_value = _fitness_row(
+                    TARGET_ID, **target_values
+                )
+            elif params.get("source_id") == SOURCE_ID and source_values is not None:
+                mock_res.fetchone.return_value = _fitness_row(
+                    SOURCE_ID, **source_values
+                )
+        return mock_res
+
+    return _execute
+
+
+def _fitness_update_params(mock_transaction) -> dict[str, Any]:
+    """Return the params of the single ``UPDATE journal_fitness_data`` call."""
+    update_calls = [
+        call
+        for call in mock_transaction.execute.call_args_list
+        if "UPDATE journal_fitness_data" in str(call[0][0])
+    ]
+    assert len(update_calls) == 1, (
+        f"expected exactly one fitness update, got {len(update_calls)}"
+    )
+    params: dict[str, Any] = update_calls[0][0][1]
+    return params
+
+
+class TestAdditiveFitnessMerge:
+    """Additive mode treats two fitness rows as two parts of one outing."""
+
+    @pytest.fixture
+    def merged_journals(self, mock_journal_repo):
+        target = create_test_journal(id=TARGET_ID, title="Ride")
+        source = create_test_journal(id=SOURCE_ID, title="Ride")
+        mock_journal_repo.find_by_id.side_effect = lambda j_id: (
+            target if j_id == TARGET_ID else source
+        )
+        mock_journal_repo.save.return_value = target
+        return target, source
+
+    @pytest.mark.asyncio
+    async def test_sums_distance_duration_elevation_and_calories(
+        self, merge_service, merged_journals, mock_transaction
+    ):
+        mock_transaction.execute.side_effect = _fitness_execute(
+            {
+                "distance": 5000,
+                "duration": 1800,
+                "elevation_gain": 50,
+                "elevation_loss": 40,
+                "calories": 300,
+            },
+            {
+                "distance": 3000,
+                "duration": 1200,
+                "elevation_gain": 30,
+                "elevation_loss": 25,
+                "calories": 200,
+            },
+        )
+
+        await merge_service.merge_journals(
+            TARGET_ID,
+            SOURCE_ID,
+            mock_transaction,
+            fitness_merge_mode=FitnessMergeMode.ADDITIVE,
+        )
+
+        params = _fitness_update_params(mock_transaction)
+        assert params["distance"] == 8000
+        assert params["duration"] == 3000
+        assert params["elevation_gain"] == 80
+        assert params["elevation_loss"] == 65
+        assert params["calories"] == 500
+
+    @pytest.mark.asyncio
+    async def test_heart_rate_takes_max_and_duration_weighted_average(
+        self, merge_service, merged_journals, mock_transaction
+    ):
+        mock_transaction.execute.side_effect = _fitness_execute(
+            {"heart_rate_avg": 140, "heart_rate_max": 175, "duration": 1800},
+            {"heart_rate_avg": 160, "heart_rate_max": 185, "duration": 1200},
+        )
+
+        await merge_service.merge_journals(
+            TARGET_ID,
+            SOURCE_ID,
+            mock_transaction,
+            fitness_merge_mode=FitnessMergeMode.ADDITIVE,
+        )
+
+        params = _fitness_update_params(mock_transaction)
+        # (140 * 1800 + 160 * 1200) / 3000 = 148
+        assert params["heart_rate_avg"] == 148
+        assert params["heart_rate_max"] == 185
+
+    @pytest.mark.asyncio
+    async def test_heart_rate_average_falls_back_to_plain_mean(
+        self, merge_service, merged_journals, mock_transaction
+    ):
+        """Without durations there is nothing to weight by, so weight equally."""
+        mock_transaction.execute.side_effect = _fitness_execute(
+            {"heart_rate_avg": 140},
+            {"heart_rate_avg": 162},
+        )
+
+        await merge_service.merge_journals(
+            TARGET_ID,
+            SOURCE_ID,
+            mock_transaction,
+            fitness_merge_mode=FitnessMergeMode.ADDITIVE,
+        )
+
+        params = _fitness_update_params(mock_transaction)
+        assert params["heart_rate_avg"] == 151  # (140 + 162) / 2
+
+    @pytest.mark.asyncio
+    async def test_missing_values_are_absent_not_zero(
+        self, merge_service, merged_journals, mock_transaction
+    ):
+        """A null on one side yields the other side's value, never a null-as-zero sum."""
+        mock_transaction.execute.side_effect = _fitness_execute(
+            {"distance": None, "calories": 300},
+            {"distance": 3000, "calories": None},
+        )
+
+        await merge_service.merge_journals(
+            TARGET_ID,
+            SOURCE_ID,
+            mock_transaction,
+            fitness_merge_mode=FitnessMergeMode.ADDITIVE,
+        )
+
+        params = _fitness_update_params(mock_transaction)
+        assert params["distance"] == 3000
+        # The target already holds the only calorie count, so nothing to write.
+        assert params.get("calories", 300) == 300
+
+    @pytest.mark.asyncio
+    async def test_explicit_override_beats_the_computed_sum(
+        self, merge_service, merged_journals, mock_transaction
+    ):
+        mock_transaction.execute.side_effect = _fitness_execute(
+            {"distance": 5000},
+            {"distance": 3000},
+        )
+
+        await merge_service.merge_journals(
+            TARGET_ID,
+            SOURCE_ID,
+            mock_transaction,
+            overrides={"type_data": {"FITNESS": {"distance": 7500}}},
+            fitness_merge_mode=FitnessMergeMode.ADDITIVE,
+        )
+
+        params = _fitness_update_params(mock_transaction)
+        assert params["distance"] == 7500
+
+    @pytest.mark.asyncio
+    async def test_target_keeps_its_own_strava_activity_id(
+        self, merge_service, merged_journals, mock_transaction
+    ):
+        """The source's id survives as a sync_metadata link, not in the column."""
+        mock_transaction.execute.side_effect = _fitness_execute(
+            {"distance": 5000, "strava_activity_id": "111"},
+            {"distance": 3000, "strava_activity_id": "222"},
+        )
+
+        await merge_service.merge_journals(
+            TARGET_ID,
+            SOURCE_ID,
+            mock_transaction,
+            fitness_merge_mode=FitnessMergeMode.ADDITIVE,
+        )
+
+        params = _fitness_update_params(mock_transaction)
+        assert params.get("strava_activity_id", "111") == "111"
+
+    @pytest.mark.asyncio
+    async def test_source_strava_id_fills_an_empty_target(
+        self, merge_service, merged_journals, mock_transaction
+    ):
+        mock_transaction.execute.side_effect = _fitness_execute(
+            {"distance": 5000, "strava_activity_id": None},
+            {"distance": 3000, "strava_activity_id": "222"},
+        )
+
+        await merge_service.merge_journals(
+            TARGET_ID,
+            SOURCE_ID,
+            mock_transaction,
+            fitness_merge_mode=FitnessMergeMode.ADDITIVE,
+        )
+
+        params = _fitness_update_params(mock_transaction)
+        assert params["strava_activity_id"] == "222"
+
+    @pytest.mark.asyncio
+    async def test_replace_mode_keeps_the_targets_metrics(
+        self, merge_service, merged_journals, mock_transaction
+    ):
+        """The default mode is unchanged: the target's numbers stand."""
+        mock_transaction.execute.side_effect = _fitness_execute(
+            {"distance": 5000, "calories": None},
+            {"distance": 3000, "calories": 200},
+        )
+
+        await merge_service.merge_journals(TARGET_ID, SOURCE_ID, mock_transaction)
+
+        params = _fitness_update_params(mock_transaction)
+        assert params.get("distance", 5000) == 5000
+        # Gaps are still filled from the source.
+        assert params["calories"] == 200
+
+    @pytest.mark.asyncio
+    async def test_additive_mode_leaves_other_type_data_alone(
+        self, merge_service, mock_journal_repo, mock_transaction
+    ):
+        """Mood values are descriptive, not additive — they keep conflict semantics."""
+        target = create_test_journal(id=TARGET_ID, title="Ride")
+        source = create_test_journal(id=SOURCE_ID, title="Ride")
+        mock_journal_repo.find_by_id.side_effect = lambda j_id: (
+            target if j_id == TARGET_ID else source
+        )
+        mock_journal_repo.save.return_value = target
+        mock_transaction.execute.side_effect = _mock_type_data_execute
+
+        await merge_service.merge_journals(
+            TARGET_ID,
+            SOURCE_ID,
+            mock_transaction,
+            fitness_merge_mode=FitnessMergeMode.ADDITIVE,
+        )
+
+        update_calls = [
+            call
+            for call in mock_transaction.execute.call_args_list
+            if "UPDATE journal_mood_data" in str(call[0][0])
+        ]
+        # Target mood 5 wins over source mood 8; nothing is summed to 13.
+        assert update_calls == []
+
+    @pytest.mark.asyncio
+    async def test_source_only_fitness_data_transfers_in_additive_mode(
+        self, merge_service, merged_journals, mock_transaction
+    ):
+        """With no target row there is nothing to add to — the row moves across."""
+        mock_transaction.execute.side_effect = _fitness_execute(
+            None, {"distance": 3000}
+        )
+
+        await merge_service.merge_journals(
+            TARGET_ID,
+            SOURCE_ID,
+            mock_transaction,
+            fitness_merge_mode=FitnessMergeMode.ADDITIVE,
+        )
+
+        move_calls = [
+            call
+            for call in mock_transaction.execute.call_args_list
+            if "UPDATE journal_fitness_data SET journal_id" in str(call[0][0])
+        ]
+        assert len(move_calls) == 1
 
 
 class TestHasBaseConflicts:

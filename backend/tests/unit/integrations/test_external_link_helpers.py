@@ -203,7 +203,6 @@ class TestBuildJournalExternalLinks:
     def test_no_links(self) -> None:
         """Journal with no external data produces empty list."""
         links = build_journal_external_links(
-            strava_activity_id=None,
             external_event_links=[],
         )
         assert links == []
@@ -211,7 +210,7 @@ class TestBuildJournalExternalLinks:
     def test_strava_only(self) -> None:
         """Journal with only Strava activity ID produces single Strava link."""
         links = build_journal_external_links(
-            strava_activity_id="12345678",
+            strava_activity_ids=["12345678"],
             external_event_links=[],
         )
         assert len(links) == 1
@@ -219,10 +218,29 @@ class TestBuildJournalExternalLinks:
         assert links[0].external_id == "12345678"
         assert links[0].url == "https://www.strava.com/activities/12345678"
 
+    def test_one_link_per_strava_activity(self) -> None:
+        """An additively merged journal shows every activity it absorbed."""
+        links = build_journal_external_links(
+            strava_activity_ids=["111", "222"],
+            external_event_links=[],
+        )
+        assert [link.external_id for link in links] == ["111", "222"]
+        assert [link.url for link in links] == [
+            "https://www.strava.com/activities/111",
+            "https://www.strava.com/activities/222",
+        ]
+
+    def test_repeated_and_blank_strava_ids_are_ignored(self) -> None:
+        """The same activity named twice is one link, and blanks are not links."""
+        links = build_journal_external_links(
+            strava_activity_ids=["111", " 111 ", "", "   "],
+            external_event_links=[],
+        )
+        assert [link.external_id for link in links] == ["111"]
+
     def test_google_calendar_only(self) -> None:
         """Journal with only Google Calendar link produces single link."""
         links = build_journal_external_links(
-            strava_activity_id=None,
             external_event_links=[
                 {"external_event_id": "evt123", "calendar_id": "cal-uuid"}
             ],
@@ -236,7 +254,6 @@ class TestBuildJournalExternalLinks:
     def test_google_calendar_missing_event_id(self) -> None:
         """External event link without event ID shows icon without URL."""
         links = build_journal_external_links(
-            strava_activity_id=None,
             external_event_links=[
                 {"external_event_id": None, "calendar_id": "cal-uuid"}
             ],
@@ -249,7 +266,7 @@ class TestBuildJournalExternalLinks:
     def test_both_strava_and_google(self) -> None:
         """Journal with both Strava and Google Calendar produces both links."""
         links = build_journal_external_links(
-            strava_activity_id="99999",
+            strava_activity_ids=["99999"],
             external_event_links=[
                 {"external_event_id": "evt456", "calendar_id": "cal-uuid"}
             ],
@@ -261,7 +278,6 @@ class TestBuildJournalExternalLinks:
     def test_multiple_google_calendar_links(self) -> None:
         """Journal linked to multiple calendars produces multiple Google links."""
         links = build_journal_external_links(
-            strava_activity_id=None,
             external_event_links=[
                 {"external_event_id": "evt1", "calendar_id": "cal-1"},
                 {"external_event_id": "evt2", "calendar_id": "cal-2"},
@@ -277,7 +293,6 @@ class TestBuildJournalExternalLinksImmich:
     def test_album_link_only(self) -> None:
         """Album with no shared link produces a single immich_album link."""
         links = build_journal_external_links(
-            strava_activity_id=None,
             external_event_links=[],
             immich_album_links=[{"album_id": "album-uuid", "shared_link_url": None}],
             immich_server_url="https://immich.example.com",
@@ -291,7 +306,6 @@ class TestBuildJournalExternalLinksImmich:
     def test_album_with_shared_link(self) -> None:
         """Album with a shared link produces both immich_album and immich_shared."""
         links = build_journal_external_links(
-            strava_activity_id=None,
             external_event_links=[],
             immich_album_links=[
                 {
@@ -314,7 +328,6 @@ class TestBuildJournalExternalLinksImmich:
     def test_album_link_without_server_url_has_no_url(self) -> None:
         """Without a server URL the album link is icon-only (url None)."""
         links = build_journal_external_links(
-            strava_activity_id=None,
             external_event_links=[],
             immich_album_links=[{"album_id": "album-uuid", "shared_link_url": None}],
             immich_server_url=None,
@@ -326,7 +339,7 @@ class TestBuildJournalExternalLinksImmich:
     def test_album_alongside_strava(self) -> None:
         """Immich album link is aggregated with other source links."""
         links = build_journal_external_links(
-            strava_activity_id="12345678",
+            strava_activity_ids=["12345678"],
             external_event_links=[],
             immich_album_links=[{"album_id": "album-uuid", "shared_link_url": None}],
             immich_server_url="https://immich.example.com",
@@ -337,7 +350,6 @@ class TestBuildJournalExternalLinksImmich:
     def test_no_immich_links_when_omitted(self) -> None:
         """Omitting immich params keeps backward-compatible behaviour."""
         links = build_journal_external_links(
-            strava_activity_id=None,
             external_event_links=[],
         )
         assert links == []

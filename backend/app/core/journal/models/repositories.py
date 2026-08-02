@@ -415,6 +415,22 @@ class JournalRepository(ABC):
         """
         pass
 
+    @abstractmethod
+    async def get_strava_activity_ids(self, journal_id: int) -> list[str]:
+        """
+        Get every Strava activity id linked to a journal.
+
+        A journal carries more than one after an additive fitness merge, where
+        two activities making up a single outing both stay linked.
+
+        Args:
+            journal_id: The journal ID
+
+        Returns:
+            Strava activity ids, oldest link first, without duplicates
+        """
+        pass
+
 
 class CalendarRepository(ABC):
     """

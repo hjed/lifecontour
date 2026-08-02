@@ -1886,7 +1886,6 @@ async def create_review_item(
 async def get_journal_external_links(
     journal_id: int,
     journal_service: FromDishka[JournalService],
-    fitness_data_repo: FromDishka[FitnessDataRepository],
     journal_repo: FromDishka[JournalRepository],
     immich_token_service: FromDishka[ImmichTokenService],
     user: FromDishka[SessionUser],
@@ -1901,11 +1900,9 @@ async def get_journal_external_links(
     if not journal or journal.user_id != user.id:
         raise JournalNotFoundError(journal_id)
 
-    # Fetch fitness data for Strava link
-    strava_activity_id: str | None = None
-    fitness_data = await fitness_data_repo.find_by_journal_id(journal_id)
-    if fitness_data and fitness_data.strava_activity_id:
-        strava_activity_id = fitness_data.strava_activity_id
+    # Fetch every Strava activity linked to the journal (an additively merged
+    # journal carries more than one)
+    strava_activity_ids = await journal_repo.get_strava_activity_ids(journal_id)
 
     # Fetch external event links for Google Calendar links
     external_event_links = await journal_repo.get_external_event_links(journal_id)
@@ -1918,7 +1915,7 @@ async def get_journal_external_links(
     immich_server_url = await immich_token_service.get_server_url(user.id)
 
     links = build_journal_external_links(
-        strava_activity_id=strava_activity_id,
+        strava_activity_ids=strava_activity_ids,
         external_event_links=external_event_links,
         snipeit_links=snipeit_links,
         immich_album_links=immich_album_links,
@@ -2706,6 +2703,7 @@ async def merge_journal(
         source_id=source_id,
         transaction=connection,
         overrides=overrides_dict,
+        fitness_merge_mode=merge_request.data.attributes.fitness_merge_mode,
     )
 
     # Get enriched target journal to return

@@ -1039,6 +1039,42 @@ class SqlJournalRepository(JournalRepository):
 
         return snipeit_links
 
+    async def get_strava_activity_ids(self, journal_id: int) -> list[str]:
+        """Get every Strava activity linked to a journal, oldest link first.
+
+        A journal usually has one, but an additive fitness merge leaves it with
+        several: two activities making up one outing both stay linked to the
+        survivor. Only one of them fits in ``journal_fitness_data``, so the
+        canonical ``sync_metadata`` link store is the source of truth here, with
+        the fitness column folded in for activities imported before sync
+        metadata was recorded for them.
+        """
+        result = await self.conn.execute(
+            text(
+                """
+                SELECT external_id, created_at
+                FROM sync_metadata
+                WHERE integration_source = 'strava'
+                  AND internal_entity_type = 'journal'
+                  AND internal_id = :journal_id
+                UNION
+                SELECT strava_activity_id, created_at
+                FROM journal_fitness_data
+                WHERE journal_id = :journal_id
+                  AND strava_activity_id IS NOT NULL
+                ORDER BY created_at, external_id
+                """
+            ),
+            {"journal_id": journal_id},
+        )
+        # UNION already drops the duplicate when both stores name the same
+        # activity with the same timestamp; dedupe again for differing ones.
+        activity_ids: list[str] = []
+        for row in result:
+            if row[0] not in activity_ids:
+                activity_ids.append(row[0])
+        return activity_ids
+
     async def get_immich_album_links(self, journal_id: int) -> list[dict[str, Any]]:
         """Get Immich album links for a journal.
 

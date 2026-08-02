@@ -985,3 +985,94 @@ class TestOutboxEventStructure:
         assert "version_hash" in journal_data
         assert isinstance(journal_data["version_hash"], str)
         assert len(journal_data["version_hash"]) == 64  # SHA-256 hex length
+
+
+def _lookup_session(
+    mock_session: MagicMock, *, sync_metadata: int | None, fitness: int | None
+) -> MagicMock:
+    """Answer the journal-lookup queries from the two link stores separately.
+
+    ``sync_metadata`` is the canonical store and may hold several activities per
+    journal; ``journal_fitness_data`` holds at most one and is the legacy
+    fallback. Each argument is the journal id that store knows about, or None.
+    """
+
+    async def execute(query: Any, params: Any = None) -> MagicMock:
+        result = MagicMock()
+        query_text = str(query)
+        if "sync_metadata" in query_text:
+            journal_id = sync_metadata
+        elif "journal_fitness_data" in query_text:
+            journal_id = fitness
+        else:
+            journal_id = None
+        result.fetchone.return_value = (
+            MagicMock(journal_id=journal_id) if journal_id is not None else None
+        )
+        return result
+
+    mock_session.execute = AsyncMock(side_effect=execute)
+    return mock_session
+
+
+class TestJournalLookupForImportedActivity:
+    """Which store tells the worker an activity has already been imported.
+
+    After an additive merge a journal carries several Strava activities, but
+    ``journal_fitness_data`` only has room for one id. The lookups therefore key
+    on ``sync_metadata`` — otherwise the merged-away activity looks unknown and
+    the next sync re-imports it as a duplicate journal.
+    """
+
+    @pytest.mark.asyncio()
+    async def test_resolves_an_activity_linked_only_via_sync_metadata(
+        self,
+        sync_service: StravaSyncService,
+        mock_session: MagicMock,
+    ) -> None:
+        session = _lookup_session(mock_session, sync_metadata=42, fitness=None)
+
+        journal_id = await sync_service._find_existing_journal_id("222", session)
+
+        assert journal_id == 42
+
+    @pytest.mark.asyncio()
+    async def test_falls_back_to_the_fitness_column(
+        self,
+        sync_service: StravaSyncService,
+        mock_session: MagicMock,
+    ) -> None:
+        """Activities imported before sync metadata existed still resolve."""
+        session = _lookup_session(mock_session, sync_metadata=None, fitness=7)
+
+        journal_id = await sync_service._find_existing_journal_id("111", session)
+
+        assert journal_id == 7
+
+    @pytest.mark.asyncio()
+    async def test_returns_none_when_neither_store_knows_the_activity(
+        self,
+        sync_service: StravaSyncService,
+        mock_session: MagicMock,
+    ) -> None:
+        session = _lookup_session(mock_session, sync_metadata=None, fitness=None)
+
+        journal_id = await sync_service._find_existing_journal_id("999", session)
+
+        assert journal_id is None
+
+    @pytest.mark.asyncio()
+    async def test_delete_cancels_the_journal_found_via_sync_metadata(
+        self,
+        sync_service: StravaSyncService,
+        mock_session: MagicMock,
+        mock_session_factory: MagicMock,
+    ) -> None:
+        """A merged-away activity deleted on Strava still cancels its journal."""
+        session = _lookup_session(mock_session, sync_metadata=42, fitness=None)
+
+        event = await sync_service.handle_delete(activity_id=222, session=session)
+
+        assert event is not None
+        assert event.event_type == "journal_event.cancelled"
+        assert event.event_data["existing_journal_id"] == 42

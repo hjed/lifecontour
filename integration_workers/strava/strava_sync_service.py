@@ -384,26 +384,18 @@ class StravaSyncService:
         """
         strava_id = str(activity_id)
 
-        # Find the journal linked to this Strava activity
-        result = await session.execute(
-            text("""
-                SELECT journal_id
-                FROM journal_fitness_data
-                WHERE strava_activity_id = :strava_id
-                LIMIT 1
-            """),
-            {"strava_id": strava_id},
-        )
-        row = result.fetchone()
+        # Find the journal linked to this Strava activity. Goes through the same
+        # lookup as import dedup so an activity that only survives as a
+        # sync_metadata link — the second half of an additively merged outing —
+        # is still cancelled rather than silently ignored.
+        journal_id = await self._find_existing_journal_id(strava_id, session)
 
-        if row is None:
+        if journal_id is None:
             logger.info(
                 "Deleted Strava activity not found in database, skipping",
                 strava_activity_id=activity_id,
             )
             return None
-
-        journal_id = row.journal_id
 
         event = OutboxEvent.create_journal_sync_event(
             journal_data={"user_id": self._user_id},
@@ -430,8 +422,15 @@ class StravaSyncService:
     ) -> int | None:
         """Find journal ID for an already-imported Strava activity.
 
-        Uses the ``strava_activity_id`` column in ``journal_fitness_data``
-        for deduplication.
+        ``sync_metadata`` is the canonical link store and the only one that can
+        hold more than one activity per journal, which is what an additive
+        fitness merge produces: two activities making up one outing both stay
+        linked to the surviving journal. ``journal_fitness_data`` has a single
+        ``strava_activity_id`` column, so consulting it alone would make the
+        merged-away activity look unimported and re-create it as a duplicate.
+
+        It remains the fallback for activities imported before sync metadata was
+        recorded for them.
 
         Args:
             strava_activity_id: Strava activity ID string.
@@ -440,6 +439,23 @@ class StravaSyncService:
         Returns:
             Journal ID if the activity exists, None otherwise.
         """
+        result = await session.execute(
+            text("""
+                SELECT internal_id AS journal_id
+                FROM sync_metadata
+                WHERE integration_source = 'strava'
+                  AND internal_entity_type = 'journal'
+                  AND external_id = :strava_id
+                  AND internal_id IS NOT NULL
+                LIMIT 1
+            """),
+            {"strava_id": strava_activity_id},
+        )
+        row = result.fetchone()
+        if row is not None:
+            journal_id: int = row.journal_id
+            return journal_id
+
         result = await session.execute(
             text("""
                 SELECT journal_id

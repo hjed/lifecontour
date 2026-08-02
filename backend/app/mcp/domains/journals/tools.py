@@ -487,34 +487,31 @@ async def _fetch_types_for_journal(
 
 async def _fetch_journal_external_links(
     journal_id: int,
-    fitness_data_repo: SqlFitnessDataRepository,
     db_connection: AsyncConnection,
     user_id: str,
 ) -> list[ExternalLinkInfo]:
     """Fetch external system links for a journal.
 
-    Fetches Strava links from fitness_data and Google Calendar links
-    from journal_external_event_links, then builds ExternalLinkInfo objects
-    using the shared helper.
+    Fetches Strava activity links, Google Calendar links from
+    journal_external_event_links, and Snipe-IT / Immich links, then builds
+    ExternalLinkInfo objects using the shared helper.
 
     Args:
         journal_id: The journal ID to fetch links for
-        fitness_data_repo: Repository for fitness data (Strava link)
-        db_connection: Database connection for external event link queries
+        db_connection: Database connection for the link queries
         user_id: The user ID to filter Snipe-IT sync metadata links
 
     Returns:
         List of ExternalLinkInfo objects for the journal.
     """
-    # Fetch Strava activity ID from fitness data
-    strava_activity_id: str | None = None
-    fitness_data = await fitness_data_repo.find_by_journal_id(journal_id)
-    if fitness_data and fitness_data.strava_activity_id:
-        strava_activity_id = fitness_data.strava_activity_id
-
     from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 
     journal_repo = SqlJournalRepository(db_connection)
+
+    # Every Strava activity linked to the journal — an additively merged
+    # journal carries more than one.
+    strava_activity_ids = await journal_repo.get_strava_activity_ids(journal_id)
+
     snipeit_links = await journal_repo.get_snipeit_links(journal_id, user_id)
 
     # Fetch Immich album links and the user's Immich server URL (reusing the
@@ -548,7 +545,7 @@ async def _fetch_journal_external_links(
     ]
 
     return build_journal_external_links(
-        strava_activity_id=strava_activity_id,
+        strava_activity_ids=strava_activity_ids,
         external_event_links=external_event_links,
         snipeit_links=snipeit_links,
         immich_album_links=immich_album_links,
@@ -2763,7 +2760,7 @@ async def get_journal(
 
     # Fetch external links (Strava and Google Calendar)
     external_links = await _fetch_journal_external_links(
-        journal_id, repos.fitness_data_repo, db_connection, user_id
+        journal_id, db_connection, user_id
     )
 
     # Convert to AI-friendly response
@@ -3857,10 +3854,12 @@ async def merge_journals(
             description=(
                 "JSON string with merge parameters. Required key: "
                 '"source_journal_id" (int) — the journal to absorb and delete. '
-                'Optional key: "overrides" (object) — explicit conflict resolution '
+                'Optional keys: "overrides" (object) — explicit conflict resolution '
                 'with keys: "title" (str), "content" (str), '
                 '"event_date_range" ({start, end}), '
-                '"type_data" ({TYPE: {field: value}})'
+                '"type_data" ({TYPE: {field: value}}); '
+                '"fitness_merge_mode" ("replace" | "additive") — how to combine '
+                'fitness data, defaulting to "replace"'
             )
         ),
     ],
@@ -3875,11 +3874,20 @@ async def merge_journals(
     deleted. Use 'overrides' to resolve conflicts explicitly (title,
     content, date range, or type-specific data).
 
+    When both journals hold fitness data, 'fitness_merge_mode' decides how to
+    reconcile it. The default 'replace' keeps the target's metrics and drops
+    the source's integration links — the right choice for a duplicate or a
+    re-import. Pass 'additive' when the two journals are two parts of one
+    outing (a ride split by a stopped recording, an activity logged on two
+    devices): distance, duration, elevation and calories sum, heart rates
+    combine, and both journals' Strava activities stay linked to the survivor.
+
     Call get_merge_candidates first to find suitable merge targets.
 
     Args:
         target_journal_id: ID of the journal to keep
-        merge_data: JSON string containing source_journal_id and optional overrides
+        merge_data: JSON string containing source_journal_id, optional overrides
+            and optional fitness_merge_mode
 
     Returns:
         JSON string containing the merged target journal with all combined data
@@ -3904,6 +3912,7 @@ async def merge_journals(
         source_id=merge_request.source_journal_id,
         transaction=db_connection,
         overrides=merge_request.overrides,
+        fitness_merge_mode=merge_request.fitness_merge_mode,
     )
 
     # Fetch enriched target

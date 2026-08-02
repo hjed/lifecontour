@@ -53,6 +53,20 @@ async def _link_immich_album(
     )
 
 
+async def _link_strava_activity(async_connection, journal_id, activity_id):
+    """Seed a Strava activity link for a journal in the canonical link store."""
+    await async_connection.execute(
+        text(
+            "INSERT INTO sync_metadata "
+            "(internal_id, integration_source, external_id, last_synced_at, "
+            "version_hash, sync_status, internal_entity_type, external_entity_type) "
+            "VALUES (:journal_id, 'strava', :activity_id, now(), "
+            "'hash-1', 'success', 'journal', 'activity')"
+        ),
+        {"journal_id": journal_id, "activity_id": activity_id},
+    )
+
+
 @pytest.mark.integration
 @pytest.mark.usefixtures("clean_database")
 class TestJournalExternalLinks:
@@ -130,6 +144,52 @@ class TestJournalExternalLinks:
         assert link["attributes"]["source"] == "strava"
         assert link["attributes"]["external_id"] == "12345678"
         assert link["attributes"]["url"] == "https://www.strava.com/activities/12345678"
+
+    async def test_returns_every_strava_activity_linked_to_the_journal(
+        self, integration_api_client, async_connection
+    ):
+        """An additively merged journal shows a link per Strava activity.
+
+        Only one activity id fits in ``journal_fitness_data``; the rest live in
+        ``sync_metadata``, and all of them belong on the journal.
+        """
+        journal_id = await self._create_journal(integration_api_client)
+
+        await integration_api_client.post(
+            f"/api/journals/{journal_id}/types",
+            json={
+                "data": {
+                    "type": "journal-types",
+                    "attributes": {"journal_type": "fitness"},
+                }
+            },
+        )
+        await async_connection.execute(
+            text(
+                "UPDATE journal_fitness_data SET strava_activity_id = :strava_id "
+                "WHERE journal_id = :journal_id"
+            ),
+            {"strava_id": "111", "journal_id": journal_id},
+        )
+        for activity_id in ("111", "222"):
+            await _link_strava_activity(async_connection, journal_id, activity_id)
+
+        response = await integration_api_client.get(
+            f"/api/journals/{journal_id}/external-links"
+        )
+
+        assert response.status_code == 200
+        strava_links = [
+            link["attributes"]
+            for link in response.json()["data"]
+            if link["attributes"]["source"] == "strava"
+        ]
+        # The activity named by both stores is listed once, not twice.
+        assert sorted(link["external_id"] for link in strava_links) == ["111", "222"]
+        assert sorted(link["url"] for link in strava_links) == [
+            "https://www.strava.com/activities/111",
+            "https://www.strava.com/activities/222",
+        ]
 
     async def test_returns_google_calendar_link_from_external_event_link(
         self, integration_api_client, async_connection

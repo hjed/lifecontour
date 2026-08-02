@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from core_shared.models.journals import FitnessMergeMode
 from pydantic import BaseModel, Field
 
 # Field description constants
@@ -459,6 +460,17 @@ class MergeJournalMCPRequest(BaseModel):
             "Optional explicit conflict resolution overrides. Supported keys: "
             "'title' (str), 'content' (str), 'event_date_range' ({start, end}), "
             "'type_data' ({TYPE: {field: value}})"
+        ),
+    )
+    fitness_merge_mode: FitnessMergeMode = Field(
+        default=FitnessMergeMode.REPLACE,
+        description=(
+            "How to reconcile fitness data when both journals have it. "
+            "'replace' (default) keeps the target's metrics and drops the "
+            "source's integration links — right for a duplicate or re-import. "
+            "'additive' sums distance, duration, elevation and calories, "
+            "combines heart rates, and keeps both journals' Strava activities "
+            "linked — right when the two journals are two parts of one outing."
         ),
     )
 

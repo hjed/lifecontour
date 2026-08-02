@@ -1,5 +1,7 @@
 """Integration tests for the journal merge endpoint."""
 
+from typing import Any
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -753,3 +755,133 @@ async def test_merge_preserves_null_when_neither_participant_set(
     status, role = await _get_participant(async_connection, target_id, contact_id)
     assert status is None
     assert role is None
+
+
+async def _create_fitness_journal(
+    client: AsyncClient, title: str, day: str, fitness: dict[str, Any]
+) -> int:
+    """Create a FITNESS journal via the API and return its id."""
+    res = await client.post(
+        "/api/journals",
+        json={
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": title,
+                    "content": f"{title} content",
+                    "event_date_range": {
+                        "start": f"2024-01-{day}T00:00:00Z",
+                        "end": f"2024-01-{day}T01:00:00Z",
+                    },
+                    "types": ["FITNESS"],
+                    "type_data": {"FITNESS": fitness},
+                },
+            }
+        },
+    )
+    assert res.status_code == 201, res.text
+    return int(res.json()["data"]["id"])
+
+
+async def _fitness_after_merge(
+    client: AsyncClient, target_id: int, source_id: int, **attributes: Any
+) -> dict[str, Any]:
+    """Merge, then return the target's fitness type data."""
+    res = await client.post(
+        f"/api/journals/{target_id}/merge",
+        json={
+            "data": {
+                "type": "journal-merge",
+                "attributes": {"source_journal_id": source_id, **attributes},
+            }
+        },
+    )
+    assert res.status_code == 200, res.text
+
+    detail = await client.get(f"/api/journals/{target_id}")
+    assert detail.status_code == 200, detail.text
+    fitness: dict[str, Any] = detail.json()["data"]["attributes"]["type_data"][
+        "fitness"
+    ]
+    return fitness
+
+
+@pytest.mark.integration
+async def test_merge_endpoint_additive_mode_sums_fitness_metrics(
+    authenticated_client: AsyncClient,
+    async_connection: AsyncConnection,
+    clean_database: None,
+) -> None:
+    """Two halves of one ride add up when the caller asks for an additive merge."""
+    target_id = await _create_fitness_journal(
+        authenticated_client,
+        "Ride part 1",
+        "01",
+        {"distance": 5000, "duration": 1800, "elevation_gain": 50, "calories": 300},
+    )
+    source_id = await _create_fitness_journal(
+        authenticated_client,
+        "Ride part 2",
+        "02",
+        {"distance": 3000, "duration": 1200, "elevation_gain": 30, "calories": 200},
+    )
+
+    fitness = await _fitness_after_merge(
+        authenticated_client, target_id, source_id, fitness_merge_mode="additive"
+    )
+
+    assert fitness["distance"] == 8000
+    assert fitness["duration"] == 3000
+    assert fitness["elevation_gain"] == 80
+    assert fitness["calories"] == 500
+
+
+@pytest.mark.integration
+async def test_merge_endpoint_defaults_to_replacing_fitness_metrics(
+    authenticated_client: AsyncClient,
+    async_connection: AsyncConnection,
+    clean_database: None,
+) -> None:
+    """Omitting the mode keeps the pre-existing behaviour: the target's numbers stand."""
+    target_id = await _create_fitness_journal(
+        authenticated_client, "Ride", "01", {"distance": 5000, "duration": 1800}
+    )
+    source_id = await _create_fitness_journal(
+        authenticated_client,
+        "Ride re-import",
+        "02",
+        {"distance": 3000, "duration": 1200, "calories": 200},
+    )
+
+    fitness = await _fitness_after_merge(authenticated_client, target_id, source_id)
+
+    assert fitness["distance"] == 5000
+    assert fitness["duration"] == 1800
+    assert fitness["calories"] == 200  # gaps still fill from the source
+
+
+@pytest.mark.integration
+async def test_merge_endpoint_rejects_an_unknown_fitness_merge_mode(
+    authenticated_client: AsyncClient,
+    async_connection: AsyncConnection,
+    clean_database: None,
+) -> None:
+    """An unrecognised mode is a request error, not a silent fallback."""
+    target_id = await _create_journal(authenticated_client, "Target", "01")
+    source_id = await _create_journal(authenticated_client, "Source", "02")
+
+    res = await authenticated_client.post(
+        f"/api/journals/{target_id}/merge",
+        json={
+            "data": {
+                "type": "journal-merge",
+                "attributes": {
+                    "source_journal_id": source_id,
+                    "fitness_merge_mode": "sum-everything",
+                },
+            }
+        },
+    )
+
+    assert res.status_code == 400, res.text
+    assert res.json()["errors"][0]["source"]["pointer"].endswith("fitness_merge_mode")
