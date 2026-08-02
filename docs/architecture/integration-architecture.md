@@ -228,6 +228,18 @@ dual-write has been removed: every writer now persists the canonical link (plus
   read/write moved here too, via `SyncMetadataRepository.update_reference_data`).
 - `SyncMetadataRepository.upsert_contact_link` (manual Immich linking) and
   `repoint_contact_links` (contact merge) operate on `sync_metadata` only.
+- `SyncMetadataRepository.repoint_journal_links` does the same for journal merge.
+  The table has no `ON DELETE CASCADE`, so a merge must move or remove the
+  deleted source's rows rather than leave orphans that still look resolvable.
+  Links for a service the target lacks always carry over; on a same-service
+  collision the mode decides. An **additive fitness merge** re-points the
+  source's row too, so one journal ends up linked to **several** Strava
+  activities — the unique key is `(integration_source, external_id)`, not
+  `internal_id`, so many rows may share one journal. Any other merge keeps the
+  target's link and deletes the source's, as contact merge does. This is why
+  the Strava worker resolves journals through `sync_metadata` rather than
+  `journal_fitness_data.strava_activity_id`, which holds only one id: see
+  [Strava Integration → Fitness merge modes](../journal-system-specification.md#strava-integration).
 - The Immich worker's name-match auto-link and merge-cleanup unlink write/delete only
   `sync_metadata`.
 - `AlbumSyncReadRepository.upsert_link` is the single writer of the album

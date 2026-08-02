@@ -574,9 +574,44 @@ journal_jogging_data table:
 **Merge Behavior:**
 1. When Strava activity matches existing journal (by date range + activity type)
 2. System prompts user for confirmation
-3. User chooses which data to keep for each field (Strava vs manual)
+3. User chooses how the two journals' fitness data is reconciled — see
+   **Fitness merge modes** below — and, when keeping one value per field, which
+   value to keep
 4. Generic merge function handles conflict resolution
-5. Strava reference maintained after merge
+5. Strava references maintained after merge — every activity linked to either
+   journal stays linked to the survivor when the activities are combined
+
+**Fitness merge modes:**
+
+A journal records a bout of activity, so two fitness journals can be two
+readings of one thing or two parts of one outing. The merge panel asks which,
+whenever both journals carry fitness data, and the merge API takes the answer
+as `fitness_merge_mode` (`replace` by default, so existing callers are
+unaffected; the panel pre-selects `additive`).
+
+| Mode | Meaning | Metrics | Links |
+|---|---|---|---|
+| `replace` | Duplicate or re-import: one set of numbers is simply right | Target's values stand; the source only fills gaps, per-field overrides still win | The source's Strava link is dropped |
+| `additive` | Two parts of one outing (a stopped-and-restarted recording, two devices) | `distance`, `duration`, `elevation_gain`, `elevation_loss` and `calories` sum; `heart_rate_max` takes the higher; `heart_rate_avg` is a duration-weighted mean | Every Strava activity from both journals stays linked |
+
+A missing value means "not recorded", never zero: where only one journal has a
+number, that number is the result. Explicit per-field overrides always win over
+the computed values. Additive combination applies to `journal_fitness_data`
+only — the descendant type tables hold descriptive fields, not quantities, and
+keep the conflict semantics. Routes transfer additively regardless, so both GPX
+tracks survive either way.
+
+Because `journal_fitness_data` has a single `strava_activity_id` column, a
+journal's additional activities are held in the canonical `sync_metadata` link
+store. The worker's import de-duplication and delete handling resolve journals
+through that store, so a merged-away activity is neither re-imported as a
+duplicate nor missed when it is deleted on Strava, and the journal's external
+links list shows one entry per activity.
+
+> **Known limitation:** `journal_external_event_links` is keyed
+> `(journal_id, calendar_id)` and every Strava activity shares one synthetic
+> calendar, so only one Strava row can exist there per journal. That table is
+> not the link of record for this read-only integration; `sync_metadata` is.
 
 **Sync Direction:**
 - One-way: Strava → Journal (read-only)
