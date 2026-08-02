@@ -11,6 +11,11 @@ acting user does not own is treated exactly like one that does not exist:
 ``find_by_id`` returns ``None`` and every other method raises
 ``TaskNotFoundError``.
 
+``TaskNotFoundError`` is the *only* way a missing task is reported. An
+implementation that checks ownership separately from the statement it guards
+must hold that check against a concurrent delete, so a raw foreign-key
+violation can never reach the caller in its place.
+
 The repository is responsible only for persistence and for task ownership. The
 specification's remaining invariants — the due journal must exist, belong to the
 acting user, and be future-dated *at the moment it is set* — need journal data

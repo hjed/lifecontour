@@ -365,6 +365,88 @@ class TestDelete:
 
 
 @pytest.mark.integration
+class TestVanishedTask:
+    """A task that is gone reports as not found, never as a database error.
+
+    The port promises ``TaskNotFoundError`` for a task the caller cannot reach,
+    and the link methods check ownership in a statement of their own. If that
+    check did not hold against the task disappearing, the guarded statement
+    would surface a raw foreign-key violation from the link insert, or a bare
+    ``False``/``[]`` from the remove and list — three different answers to one
+    question.
+
+    A genuinely *concurrent* delete cannot be staged here: the integration
+    fixture holds a single savepoint-bound transaction, so a second connection
+    could not even see the task, let alone race it. These tests pin the
+    serialised form of the same case; the concurrent form is held off by the
+    ``FOR KEY SHARE`` the ownership check takes.
+    """
+
+    async def test_every_link_method_reports_a_deleted_task_as_not_found(
+        self,
+        task_repository: SqlTaskRepository,
+        journal_repository: SqlJournalRepository,
+        async_connection: AsyncConnection,
+        saved_task: Task,
+    ):
+        """No link method leaks an IntegrityError once the task is gone."""
+        assert saved_task.id is not None
+        task_id = saved_task.id
+        journal_id = await create_journal(journal_repository, title="Mentioned here")
+        contact_id = await create_contact(async_connection)
+        await task_repository.delete(task_id, USER_ID)
+
+        with pytest.raises(TaskNotFoundError):
+            await task_repository.add_intermediate_journal(task_id, journal_id, USER_ID)
+        with pytest.raises(TaskNotFoundError):
+            await task_repository.remove_intermediate_journal(
+                task_id, journal_id, USER_ID
+            )
+        with pytest.raises(TaskNotFoundError):
+            await task_repository.list_intermediate_journal_ids(task_id, USER_ID)
+        with pytest.raises(TaskNotFoundError):
+            await task_repository.add_contact(task_id, contact_id, USER_ID)
+        with pytest.raises(TaskNotFoundError):
+            await task_repository.remove_contact(task_id, contact_id, USER_ID)
+        with pytest.raises(TaskNotFoundError):
+            await task_repository.list_contact_ids(task_id, USER_ID)
+
+    async def test_ownership_check_locks_the_task_against_deletion(
+        self, task_repository: SqlTaskRepository, async_connection: AsyncConnection
+    ):
+        """The guard takes a row lock, which is what holds the window shut.
+
+        Asserted through the row's ``xmax``: PostgreSQL stamps it with the
+        locking transaction's id when a row is locked, and leaves it zero
+        otherwise. Locking is the mechanism, so a test that only re-checked the
+        returned value would pass just as well with the lock removed.
+        """
+        journal_repository = SqlJournalRepository(async_connection)
+        journal_id = await create_journal(journal_repository, title="Anchor")
+        task = await task_repository.save(
+            Task(
+                user_id=USER_ID,
+                text="locked while linking",
+                creating_journal_id=journal_id,
+                due_journal_id=journal_id,
+            )
+        )
+        assert task.id is not None
+        read_xmax = text("SELECT xmax::text::bigint FROM tasks WHERE id = :task_id")
+
+        unlocked = (
+            await async_connection.execute(read_xmax, {"task_id": task.id})
+        ).scalar_one()
+        await task_repository.list_contact_ids(task.id, USER_ID)
+        locked = (
+            await async_connection.execute(read_xmax, {"task_id": task.id})
+        ).scalar_one()
+
+        assert unlocked == 0
+        assert locked != 0
+
+
+@pytest.mark.integration
 class TestIntermediateJournalLinks:
     """Journals where the task was discussed, revisited, or previously due."""
 

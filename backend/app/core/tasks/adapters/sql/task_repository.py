@@ -226,8 +226,23 @@ class SqlTaskRepository(TaskRepository):
         owner scoping enters every link operation. It runs before the statement
         it guards, which is what lets those statements report "already linked"
         with a plain ``False``.
+
+        ``FOR KEY SHARE`` closes the window between this check and the statement
+        it guards. Without it a concurrent transaction could delete the task in
+        between, and the guarded statement would surface a raw foreign-key
+        violation — or a bare ``False``/``[]`` — instead of the
+        ``TaskNotFoundError`` the port promises. `FOR KEY SHARE` is the weakest
+        lock that blocks a delete: a concurrent update of the task's text or
+        status is still free to proceed, and it is the same lock the link
+        insert's own foreign-key check takes on the parent row anyway.
         """
-        query = text("SELECT 1 FROM tasks WHERE id = :task_id AND user_id = :user_id")
+        query = text(
+            """
+            SELECT 1 FROM tasks
+            WHERE id = :task_id AND user_id = :user_id
+            FOR KEY SHARE
+            """
+        )
         result = await self.conn.execute(
             query, {"task_id": task_id, "user_id": user_id}
         )

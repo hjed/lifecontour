@@ -666,6 +666,22 @@ not ×4**, and the port counted as a first-class production artefact rather than
 - **The repository enforces persistence and task ownership only.** Whether the due journal exists,
   belongs to the acting user and is future-dated *at the moment it is set* needs journal data and the
   user's timezone; those remain Phases 3 and 4, unchanged and not partially anticipated here.
+- **The ownership guard takes `FOR KEY SHARE`** — added in review. Checking ownership in a statement
+  of its own leaves a window: a concurrent transaction could delete the task between the check and
+  the statement it guards, and the caller would then get a raw foreign-key violation from the link
+  insert, or a bare `False`/`[]` from the remove and list — three different answers to the one
+  question the port answers with `TaskNotFoundError`. `FOR KEY SHARE` is the weakest lock that blocks
+  a delete, so a concurrent update of the task's text or status still proceeds, and it is the same
+  lock the link insert's own foreign-key check takes on the parent row anyway. The single-statement
+  alternative (`INSERT … SELECT … FROM tasks WHERE …`) was rejected: it cannot distinguish "not your
+  task" from "already linked" without `ON CONFLICT DO UPDATE … RETURNING (xmax = 0)`, which trades a
+  one-word lock hint for an obscure idiom and a dead tuple on every retry.
+- **A genuinely concurrent test is not possible under the integration fixture**, and this is stated
+  rather than papered over: the fixture holds a single savepoint-bound transaction, so a second
+  connection could not even see the task, let alone race it. What is tested is the serialised form
+  (every link method reports a deleted task as `TaskNotFoundError`, never an `IntegrityError`) plus
+  the lock itself, asserted through the row's `xmax` — which PostgreSQL stamps with the locking
+  transaction's id. That second test was mutation-checked: removing `FOR KEY SHARE` makes it fail.
 
 **Required Test Coverage:** integration — round-trip save/read/delete, link add/remove idempotency, link
 cascade on task delete, and owner scoping (another user's id returns nothing). No e2e.
@@ -674,7 +690,7 @@ cascade on task delete, and owner scoping (another user's id returns nothing). N
   attribute; the stored status string becomes the `TaskStatus` enum (parametrised over all three);
   creating == due survives mapping; an unknown status raises rather than producing a bad entity; a row
   carrying exactly the declared columns maps cleanly.
-- **Integration (23 tests):** `backend/tests/integration/tasks/test_task_repository_integration.py` —
+- **Integration (25 tests):** `backend/tests/integration/tasks/test_task_repository_integration.py` —
   *save/find:* id and timestamps assigned, default `not_done`, full field round-trip with the status
   enum, creating == due, update of text and status preserving `created_at`, unknown id returns `None`.
   *Owner scoping (5):* `find_by_id` cannot see another user's task; `save` cannot re-own it; `delete`
@@ -683,6 +699,9 @@ cascade on task delete, and owner scoping (another user's id returns nothing). N
   journals and contacts. *Links:* add returns `True`, a repeat returns `False` with the row count still
   1, remove returns `True` then `False`, list returns every link — each asserted for both link tables.
   *DI:* `TaskRepository` resolves through a real Dishka request scope to a `SqlTaskRepository`.
+  *Vanished task (2, added in review):* every link method reports a deleted task as
+  `TaskNotFoundError` rather than leaking an `IntegrityError`, and the ownership guard takes a row
+  lock — asserted through the row's `xmax`, and mutation-checked by removing the lock.
 - **E2E:** none — deferral taken as stated. Phase 2 ships no controller, MCP tool or frontend surface;
   e2e coverage for ITER18-001 lands in Phase 22. The iteration-level coverage the specification attaches
   to later phases (invariants, the timezone day boundary, the status matrix, lapsed derivation, MCP

@@ -136,8 +136,10 @@ the *creating* journal where it arose and the *due* journal where it matters.
   method takes the acting user's id and every statement filters on it, so a task belonging to
   somebody else is indistinguishable from one that never existed: `find_by_id` returns `None` and
   every other method raises `TaskNotFoundError`. The link tables carry no `user_id` of their own, so
-  link operations reach the owner through the task they belong to. The repository is responsible for
-  persistence and task ownership only; every other invariant is the service layer's.
+  link operations reach the owner through the task they belong to, and that check takes
+  `FOR KEY SHARE` so a concurrent delete cannot turn the promised `TaskNotFoundError` into a raw
+  foreign-key violation. The repository is responsible for persistence and task ownership only; every
+  other invariant is the service layer's.
 
 #### Photos Domain
 - **Entities**: Photo, ImmichPerson, PersonMatch
