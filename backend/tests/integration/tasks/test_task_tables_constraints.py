@@ -29,13 +29,6 @@ from app.core.journal.adapters.sql.journal_repository import SqlJournalRepositor
 USER_ID = "test-user-123"
 
 
-@pytest_asyncio.fixture
-async def journal_repository(
-    async_connection: AsyncConnection,
-) -> SqlJournalRepository:
-    return SqlJournalRepository(async_connection)
-
-
 async def _create_journal(
     journal_repository: SqlJournalRepository,
     *,
@@ -131,6 +124,35 @@ async def _count(conn: AsyncConnection, sql: str, params: dict[str, int]) -> int
     return int((await conn.execute(text(sql), params)).scalar_one())
 
 
+@pytest_asyncio.fixture
+async def journal_repository(
+    async_connection: AsyncConnection,
+) -> SqlJournalRepository:
+    return SqlJournalRepository(async_connection)
+
+
+@pytest_asyncio.fixture
+async def anchors(journal_repository: SqlJournalRepository) -> tuple[int, int]:
+    """A creating journal and a future due journal, as ``(creating, due)``."""
+    creating_id = await _create_journal(journal_repository, title="Where it arose")
+    due_id = await _create_journal(
+        journal_repository, title="Where it matters", days_offset=7
+    )
+    return creating_id, due_id
+
+
+@pytest_asyncio.fixture
+async def anchored_task(
+    async_connection: AsyncConnection, anchors: tuple[int, int]
+) -> tuple[int, int, int]:
+    """A task with both anchors, as ``(task_id, creating_id, due_id)``."""
+    creating_id, due_id = anchors
+    task_id = await _create_task(
+        async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+    )
+    return task_id, creating_id, due_id
+
+
 @pytest.mark.integration
 class TestAnchorJournalDeletionIsRefused:
     """A journal that anchors a task cannot be destroyed silently."""
@@ -138,15 +160,9 @@ class TestAnchorJournalDeletionIsRefused:
     async def test_deleting_the_creating_journal_is_refused(
         self,
         async_connection: AsyncConnection,
-        journal_repository: SqlJournalRepository,
+        anchored_task: tuple[int, int, int],
     ) -> None:
-        creating_id = await _create_journal(journal_repository, title="Where it arose")
-        due_id = await _create_journal(
-            journal_repository, title="Where it matters", days_offset=7
-        )
-        await _create_task(
-            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
-        )
+        _, creating_id, _ = anchored_task
 
         with pytest.raises(IntegrityError):
             await async_connection.execute(
@@ -156,15 +172,9 @@ class TestAnchorJournalDeletionIsRefused:
     async def test_deleting_the_due_journal_is_refused(
         self,
         async_connection: AsyncConnection,
-        journal_repository: SqlJournalRepository,
+        anchored_task: tuple[int, int, int],
     ) -> None:
-        creating_id = await _create_journal(journal_repository, title="Where it arose")
-        due_id = await _create_journal(
-            journal_repository, title="Where it matters", days_offset=7
-        )
-        await _create_task(
-            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
-        )
+        _, _, due_id = anchored_task
 
         with pytest.raises(IntegrityError):
             await async_connection.execute(
@@ -180,16 +190,11 @@ class TestIntermediateJournalDeletionIsPermitted:
         self,
         async_connection: AsyncConnection,
         journal_repository: SqlJournalRepository,
+        anchored_task: tuple[int, int, int],
     ) -> None:
-        creating_id = await _create_journal(journal_repository, title="Where it arose")
-        due_id = await _create_journal(
-            journal_repository, title="Where it matters", days_offset=7
-        )
+        task_id, _, _ = anchored_task
         mentioned_id = await _create_journal(
             journal_repository, title="Where it came up again"
-        )
-        task_id = await _create_task(
-            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
         )
         await _link_intermediate_journal(
             async_connection, task_id=task_id, journal_id=mentioned_id
@@ -225,18 +230,13 @@ class TestTaskDeletionCascadesItsLinks:
         self,
         async_connection: AsyncConnection,
         journal_repository: SqlJournalRepository,
+        anchored_task: tuple[int, int, int],
     ) -> None:
-        creating_id = await _create_journal(journal_repository, title="Where it arose")
-        due_id = await _create_journal(
-            journal_repository, title="Where it matters", days_offset=7
-        )
+        task_id, creating_id, due_id = anchored_task
         mentioned_id = await _create_journal(
             journal_repository, title="Where it came up again"
         )
         contact_id = await _create_contact(async_connection)
-        task_id = await _create_task(
-            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
-        )
         await _link_intermediate_journal(
             async_connection, task_id=task_id, journal_id=mentioned_id
         )
@@ -287,16 +287,10 @@ class TestContactDeletionDropsLinksOnly:
     async def test_deleting_a_contact_drops_its_task_links_only(
         self,
         async_connection: AsyncConnection,
-        journal_repository: SqlJournalRepository,
+        anchored_task: tuple[int, int, int],
     ) -> None:
-        creating_id = await _create_journal(journal_repository, title="Where it arose")
-        due_id = await _create_journal(
-            journal_repository, title="Where it matters", days_offset=7
-        )
+        task_id, _, _ = anchored_task
         contact_id = await _create_contact(async_connection)
-        task_id = await _create_task(
-            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
-        )
         await _link_contact(async_connection, task_id=task_id, contact_id=contact_id)
 
         await async_connection.execute(
@@ -328,11 +322,9 @@ class TestAnchorsAreMandatory:
     async def test_a_task_cannot_be_inserted_without_a_creating_journal(
         self,
         async_connection: AsyncConnection,
-        journal_repository: SqlJournalRepository,
+        anchors: tuple[int, int],
     ) -> None:
-        due_id = await _create_journal(
-            journal_repository, title="Where it matters", days_offset=7
-        )
+        _, due_id = anchors
 
         with pytest.raises(IntegrityError):
             await async_connection.execute(
@@ -350,9 +342,9 @@ class TestAnchorsAreMandatory:
     async def test_a_task_cannot_be_inserted_without_a_due_journal(
         self,
         async_connection: AsyncConnection,
-        journal_repository: SqlJournalRepository,
+        anchors: tuple[int, int],
     ) -> None:
-        creating_id = await _create_journal(journal_repository, title="Where it arose")
+        creating_id, _ = anchors
 
         with pytest.raises(IntegrityError):
             await async_connection.execute(
@@ -401,16 +393,11 @@ class TestLinkTablesRejectDuplicates:
         self,
         async_connection: AsyncConnection,
         journal_repository: SqlJournalRepository,
+        anchored_task: tuple[int, int, int],
     ) -> None:
-        creating_id = await _create_journal(journal_repository, title="Where it arose")
-        due_id = await _create_journal(
-            journal_repository, title="Where it matters", days_offset=7
-        )
+        task_id, _, _ = anchored_task
         mentioned_id = await _create_journal(
             journal_repository, title="Where it came up again"
-        )
-        task_id = await _create_task(
-            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
         )
         await _link_intermediate_journal(
             async_connection, task_id=task_id, journal_id=mentioned_id
@@ -424,16 +411,10 @@ class TestLinkTablesRejectDuplicates:
     async def test_duplicate_contact_link_is_rejected(
         self,
         async_connection: AsyncConnection,
-        journal_repository: SqlJournalRepository,
+        anchored_task: tuple[int, int, int],
     ) -> None:
-        creating_id = await _create_journal(journal_repository, title="Where it arose")
-        due_id = await _create_journal(
-            journal_repository, title="Where it matters", days_offset=7
-        )
+        task_id, _, _ = anchored_task
         contact_id = await _create_contact(async_connection)
-        task_id = await _create_task(
-            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
-        )
         await _link_contact(async_connection, task_id=task_id, contact_id=contact_id)
 
         with pytest.raises(IntegrityError):

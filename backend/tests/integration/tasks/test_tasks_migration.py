@@ -21,6 +21,9 @@ from sqlalchemy.engine import URL
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from tests.integration.migration_helpers import columns as _columns
+from tests.integration.migration_helpers import table_exists as _table_exists
+
 _TASKS_TABLE = "tasks"
 _INTERMEDIATE_TABLE = "task_intermediate_journals"
 _CONTACTS_TABLE = "task_contacts"
@@ -37,46 +40,6 @@ _EXPECTED_TASK_COLUMNS = {
 }
 _EXPECTED_INTERMEDIATE_COLUMNS = {"task_id", "journal_id", "created_at"}
 _EXPECTED_CONTACT_COLUMNS = {"task_id", "contact_id", "created_at"}
-
-
-async def _table_exists(engine_url: str, table: str) -> bool:
-    engine = create_async_engine(engine_url)
-    try:
-        async with engine.connect() as conn:
-            found = (
-                await conn.execute(
-                    text(
-                        """
-                        SELECT 1 FROM information_schema.tables
-                        WHERE table_name = :table
-                        """
-                    ),
-                    {"table": table},
-                )
-            ).scalar()
-            return found is not None
-    finally:
-        await engine.dispose()
-
-
-async def _columns(engine_url: str, table: str) -> set[str]:
-    engine = create_async_engine(engine_url)
-    try:
-        async with engine.connect() as conn:
-            rows = (
-                await conn.execute(
-                    text(
-                        """
-                        SELECT column_name FROM information_schema.columns
-                        WHERE table_name = :table
-                        """
-                    ),
-                    {"table": table},
-                )
-            ).fetchall()
-            return {str(row.column_name) for row in rows}
-    finally:
-        await engine.dispose()
 
 
 async def _seed_journal(engine_url: str) -> int:
