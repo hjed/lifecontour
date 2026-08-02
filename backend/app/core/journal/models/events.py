@@ -232,6 +232,98 @@ class JournalTagRemoved(DomainEvent):
 
 
 @dataclass(frozen=True)
+class JournalTagDeleted(DomainEvent):
+    """Event raised when a tag a journal carried was deleted outright.
+
+    Published once per journal that carried the tag, for the same reason
+    :class:`JournalTagRenamed` is: the journal is the aggregate whose activity
+    feed the entry lands in, and a tag-scoped event would have no integer
+    ``aggregate_id`` to use.
+
+    The payload matches :class:`JournalTagRemoved` deliberately. Deleting a tag
+    un-assigns it from every journal, so from a journal's point of view the two
+    are the same change and the feed should not ask the user to care which
+    tag-namespace operation caused it.
+    """
+
+    def __init__(
+        self,
+        journal_id: int,
+        tag_id: UUID,
+        tag_name: str,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
+        transaction: AsyncConnection | None = None,
+    ):
+        now = datetime.now(tz=UTC)
+        super().__init__(
+            event_id=f"journal_tag_deleted_{journal_id}_{tag_id}_{now.isoformat()}",
+            occurred_at=now,
+            aggregate_id=journal_id,
+            event_type="JournalTagDeleted",
+            event_data={
+                "journal_id": journal_id,
+                "tag_id": str(tag_id),
+                "tag_name": tag_name,
+                "source": source.value,
+                "changed_by": changed_by,
+            },
+            transaction=transaction,
+        )
+
+
+@dataclass(frozen=True)
+class JournalTagMerged(DomainEvent):
+    """Event raised when a tag a journal carried was merged into another.
+
+    Published once per journal that carried the **source** tag, matching the
+    other tag fan-out events. On most journals the merge swaps the source for the
+    target; on a journal that already carried the target nothing arrives and only
+    the source leaves. ``already_had_target`` records which of the two happened,
+    so the projection can describe it without querying the assignment table after
+    the fact — by then the merge has already re-pointed the rows.
+
+    The ``event_id`` names **both** tags: two different sources folded into one
+    target on the same journal would otherwise collide under the history dedup
+    index, and the second merge's row would be silently dropped.
+    """
+
+    def __init__(
+        self,
+        journal_id: int,
+        source_tag_id: UUID,
+        target_tag_id: UUID,
+        source_tag_name: str,
+        target_tag_name: str,
+        already_had_target: bool,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
+        transaction: AsyncConnection | None = None,
+    ):
+        now = datetime.now(tz=UTC)
+        super().__init__(
+            event_id=(
+                f"journal_tag_merged_{journal_id}_{source_tag_id}_"
+                f"{target_tag_id}_{now.isoformat()}"
+            ),
+            occurred_at=now,
+            aggregate_id=journal_id,
+            event_type="JournalTagMerged",
+            event_data={
+                "journal_id": journal_id,
+                "source_tag_id": str(source_tag_id),
+                "target_tag_id": str(target_tag_id),
+                "source_tag_name": source_tag_name,
+                "target_tag_name": target_tag_name,
+                "already_had_target": already_had_target,
+                "source": source.value,
+                "changed_by": changed_by,
+            },
+            transaction=transaction,
+        )
+
+
+@dataclass(frozen=True)
 class JournalTagRenamed(DomainEvent):
     """Event raised when a tag carried by a journal is renamed.
 

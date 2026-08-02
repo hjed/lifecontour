@@ -159,6 +159,99 @@ class TestDeleteTag:
         mock_tag_repo.delete.assert_not_awaited()
 
 
+class TestDeleteTagEvents:
+    """Deleting a tag publishes one event per journal that carried it.
+
+    The tag itself is not an aggregate with a feed — the journals that lose it
+    are, so a tag-scoped write fans out to journal-scoped events, exactly as a
+    rename does.
+    """
+
+    @pytest.mark.asyncio
+    async def test_delete_publishes_one_event_per_tagged_journal(
+        self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
+    ):
+        tag_id = uuid4()
+        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.get_journal_ids_for_tag.return_value = [7, 9]
+
+        await tag_service.delete_tag(
+            tag_id,
+            transaction=mock_transaction,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        first, second = _published(mock_event_publisher)
+        assert [e.event_type for e in (first, second)] == [
+            "JournalTagDeleted",
+            "JournalTagDeleted",
+        ]
+        assert [e.aggregate_id for e in (first, second)] == [7, 9]
+        for event in (first, second):
+            assert event.event_data["tag_id"] == str(tag_id)
+            assert event.event_data["tag_name"] == "Hiking"
+            assert event.event_data["source"] == Provenance.UI.value
+            assert event.event_data["changed_by"] == "ui"
+            assert event.transaction is mock_transaction
+
+    @pytest.mark.asyncio
+    async def test_delete_forwards_mcp_provenance(
+        self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
+    ):
+        """The caller's provenance reaches the event, rather than a hardcoded one."""
+        tag_id = uuid4()
+        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.get_journal_ids_for_tag.return_value = [7]
+
+        await tag_service.delete_tag(
+            tag_id,
+            transaction=mock_transaction,
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+
+        (event,) = _published(mock_event_publisher)
+        assert event.event_data["source"] == Provenance.MCP.value
+        assert event.event_data["changed_by"] == "mcp"
+
+    @pytest.mark.asyncio
+    async def test_delete_of_an_unassigned_tag_publishes_nothing(
+        self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
+    ):
+        """No journal carried the tag, so no journal changed."""
+        tag_id = uuid4()
+        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Spare")
+        mock_tag_repo.get_journal_ids_for_tag.return_value = []
+
+        await tag_service.delete_tag(tag_id, transaction=mock_transaction)
+
+        mock_event_publisher.publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_affected_journals_are_read_before_the_delete(
+        self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
+    ):
+        """The assignment rows cascade away, so the read cannot follow the delete.
+
+        Simulated by having ``delete`` empty the list the repository would return
+        afterwards: if the service asked for the journals after deleting the tag,
+        it would find none and publish nothing.
+        """
+        tag_id = uuid4()
+        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.get_journal_ids_for_tag.return_value = [7, 9]
+
+        async def _cascade(_tag_id):
+            mock_tag_repo.get_journal_ids_for_tag.return_value = []
+
+        mock_tag_repo.delete.side_effect = _cascade
+
+        await tag_service.delete_tag(tag_id, transaction=mock_transaction)
+
+        assert [e.aggregate_id for e in _published(mock_event_publisher)] == [7, 9]
+
+
 class TestUpdateTag:
     """Test the update_tag unit of work.
 
@@ -630,6 +723,226 @@ class TestMergeTag:
         assert "circular reference" in exc_info.value.message.lower()
         assert "descendant" not in exc_info.value.message.lower()
         mock_tag_repo.merge_into.assert_not_awaited()
+
+
+class TestMergeTagEvents:
+    """Merging a tag publishes one event per journal carrying the source.
+
+    Most journals swap the source for the target. A journal that already carried
+    the target only loses the source, and ``already_had_target`` is what tells
+    the projection which of the two happened without a second query.
+    """
+
+    @staticmethod
+    def _wire(mock_tag_repo, source: JournalTag, target: JournalTag) -> None:
+        by_id = {source.id: source, target.id: target}
+
+        async def find_by_id(tag_id):
+            return by_id.get(tag_id)
+
+        mock_tag_repo.find_by_id.side_effect = find_by_id
+
+    @staticmethod
+    def _carriers(mock_tag_repo, *, source_id, target_id, source_on, target_on) -> None:
+        """Answer ``get_journal_ids_for_tag`` per tag, as the real repo would."""
+
+        async def carriers(tag_id):
+            if tag_id == source_id:
+                return list(source_on)
+            if tag_id == target_id:
+                return list(target_on)
+            return []
+
+        mock_tag_repo.get_journal_ids_for_tag.side_effect = carriers
+
+    @pytest.mark.asyncio
+    async def test_merge_publishes_one_event_per_source_journal(
+        self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
+    ):
+        source_id, target_id = uuid4(), uuid4()
+        self._wire(
+            mock_tag_repo,
+            JournalTag(id=source_id, name="Hiking"),
+            JournalTag(id=target_id, name="Bushwalking"),
+        )
+        self._carriers(
+            mock_tag_repo,
+            source_id=source_id,
+            target_id=target_id,
+            source_on=[7, 9],
+            target_on=[],
+        )
+
+        await tag_service.merge_tag(
+            source_id,
+            target_id,
+            transaction=mock_transaction,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        first, second = _published(mock_event_publisher)
+        assert [e.event_type for e in (first, second)] == [
+            "JournalTagMerged",
+            "JournalTagMerged",
+        ]
+        assert [e.aggregate_id for e in (first, second)] == [7, 9]
+        for event in (first, second):
+            assert event.event_data["source_tag_id"] == str(source_id)
+            assert event.event_data["target_tag_id"] == str(target_id)
+            assert event.event_data["source_tag_name"] == "Hiking"
+            assert event.event_data["target_tag_name"] == "Bushwalking"
+            assert event.event_data["already_had_target"] is False
+            assert event.event_data["source"] == Provenance.UI.value
+            assert event.event_data["changed_by"] == "ui"
+            assert event.transaction is mock_transaction
+
+    @pytest.mark.asyncio
+    async def test_a_journal_already_carrying_the_target_is_flagged(
+        self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
+    ):
+        """One call must flag each journal independently.
+
+        Journal 9 already holds the target, so the merge only takes the source
+        away from it; journal 7 genuinely swaps one tag for the other.
+        """
+        source_id, target_id = uuid4(), uuid4()
+        self._wire(
+            mock_tag_repo,
+            JournalTag(id=source_id, name="Hiking"),
+            JournalTag(id=target_id, name="Bushwalking"),
+        )
+        self._carriers(
+            mock_tag_repo,
+            source_id=source_id,
+            target_id=target_id,
+            source_on=[7, 9],
+            target_on=[9],
+        )
+
+        await tag_service.merge_tag(source_id, target_id, transaction=mock_transaction)
+
+        flags = {
+            event.aggregate_id: event.event_data["already_had_target"]
+            for event in _published(mock_event_publisher)
+        }
+        assert flags == {7: False, 9: True}
+
+    @pytest.mark.asyncio
+    async def test_merge_forwards_mcp_provenance(
+        self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
+    ):
+        """The caller's provenance reaches the event, not a hardcoded one."""
+        source_id, target_id = uuid4(), uuid4()
+        self._wire(
+            mock_tag_repo,
+            JournalTag(id=source_id, name="Hiking"),
+            JournalTag(id=target_id, name="Bushwalking"),
+        )
+        self._carriers(
+            mock_tag_repo,
+            source_id=source_id,
+            target_id=target_id,
+            source_on=[7],
+            target_on=[],
+        )
+
+        await tag_service.merge_tag(
+            source_id,
+            target_id,
+            transaction=mock_transaction,
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+
+        (event,) = _published(mock_event_publisher)
+        assert event.event_data["source"] == Provenance.MCP.value
+        assert event.event_data["changed_by"] == "mcp"
+
+    @pytest.mark.asyncio
+    async def test_merging_an_unassigned_source_publishes_nothing(
+        self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
+    ):
+        """No journal carried the source, so no journal changed."""
+        source_id, target_id = uuid4(), uuid4()
+        self._wire(
+            mock_tag_repo,
+            JournalTag(id=source_id, name="Hiking"),
+            JournalTag(id=target_id, name="Bushwalking"),
+        )
+        self._carriers(
+            mock_tag_repo,
+            source_id=source_id,
+            target_id=target_id,
+            source_on=[],
+            target_on=[7],
+        )
+
+        await tag_service.merge_tag(source_id, target_id, transaction=mock_transaction)
+
+        mock_event_publisher.publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_rejected_merge_publishes_nothing(
+        self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
+    ):
+        """Merging a tag into itself is refused, so it leaves no history."""
+        source_id = uuid4()
+        self._wire(
+            mock_tag_repo,
+            JournalTag(id=source_id, name="Hiking"),
+            JournalTag(id=source_id, name="Hiking"),
+        )
+
+        with pytest.raises(JournalValidationError):
+            await tag_service.merge_tag(
+                source_id, source_id, transaction=mock_transaction
+            )
+
+        mock_event_publisher.publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_carriers_are_read_before_the_merge(
+        self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
+    ):
+        """``merge_into`` re-points and de-duplicates the rows the flags come from.
+
+        Simulated by having it answer as the post-merge database would: the
+        source carries nobody and the target carries everyone. Reading after the
+        merge would publish nothing and flag nothing.
+        """
+        source_id, target_id = uuid4(), uuid4()
+        self._wire(
+            mock_tag_repo,
+            JournalTag(id=source_id, name="Hiking"),
+            JournalTag(id=target_id, name="Bushwalking"),
+        )
+        self._carriers(
+            mock_tag_repo,
+            source_id=source_id,
+            target_id=target_id,
+            source_on=[7, 9],
+            target_on=[9],
+        )
+
+        async def _merged(_source_id, _target_id):
+            self._carriers(
+                mock_tag_repo,
+                source_id=source_id,
+                target_id=target_id,
+                source_on=[],
+                target_on=[7, 9],
+            )
+
+        mock_tag_repo.merge_into.side_effect = _merged
+
+        await tag_service.merge_tag(source_id, target_id, transaction=mock_transaction)
+
+        flags = {
+            event.aggregate_id: event.event_data["already_had_target"]
+            for event in _published(mock_event_publisher)
+        }
+        assert flags == {7: False, 9: True}
 
 
 class TestAssignAndRemoveTag:

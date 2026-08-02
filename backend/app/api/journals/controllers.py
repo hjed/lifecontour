@@ -782,8 +782,14 @@ async def delete_journal_tag(
         ) from e
 
     # Delete as a committed unit of work. The service raises
-    # JournalTagNotFoundError (404) when the tag does not exist.
-    await journal_tag_service.delete_tag(tag_uuid, connection)
+    # JournalTagNotFoundError (404) when the tag does not exist, and publishes a
+    # JournalTagDeleted event for every journal that carried the tag.
+    await journal_tag_service.delete_tag(
+        tag_uuid,
+        connection,
+        source=Provenance.UI,
+        changed_by="ui",
+    )
 
     return None
 
@@ -842,7 +848,15 @@ async def merge_journal_tag(
 
     # Merge as a committed unit of work. The service validates both tags exist
     # and that the target is not a descendant of the source.
-    await journal_tag_service.merge_tag(source_uuid, target_uuid, connection)
+    # The service publishes a JournalTagMerged event for every journal that
+    # carried the source tag.
+    await journal_tag_service.merge_tag(
+        source_uuid,
+        target_uuid,
+        connection,
+        source=Provenance.UI,
+        changed_by="ui",
+    )
 
     return None
 

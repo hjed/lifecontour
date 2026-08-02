@@ -855,6 +855,12 @@ DELETE /api/journals/tags/{tag_id}
   is assigned to, and those journals are otherwise untouched
 - Child tags of the deleted tag are re-parented to the root of the hierarchy
   rather than being deleted
+- Records an activity-history entry on every journal that carried the tag
+  ("Removed Tags: X"), with the provenance of the caller — from a journal's
+  point of view the tag left it, which is the same change a plain un-assign
+  makes. A delete rejected with a 404 records nothing
+- Those journals are re-indexed for search, so a tag-filtered search stops
+  returning them under the deleted tag
 - Returns: 204 No Content, 400 if the tag id is not a well-formed UUID, or
   404 if no such tag exists
 
@@ -867,6 +873,13 @@ POST /api/journals/tags/{tag_id}/merge
   to the root of the hierarchy
 - A tag cannot be merged into itself, nor into one of its own descendants —
   the surviving hierarchy would run through a tag that no longer exists
+- Records an activity-history entry on every journal that carried the source,
+  with the provenance of the caller. A journal that carried only the source
+  reads as a swap ("Changed Tags from source to target"); one that already
+  carried the target reads as a removal ("Removed Tags: source"), because
+  nothing arrived on it. A rejected merge records nothing
+- Those journals are re-indexed for search, so a tag-filtered search finds them
+  under the surviving tag rather than the deleted one
 - Returns: 204 No Content, 400 if either id is not a well-formed UUID, the
   resource type is not "journal-tags", or the merge is rejected as a self- or
   descendant-merge; 404 if either tag does not exist

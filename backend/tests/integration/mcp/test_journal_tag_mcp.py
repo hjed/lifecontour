@@ -445,6 +445,43 @@ class TestDeleteJournalTagMCPTool:
         assert str(tag_id) in payload["message"]
 
     @pytest.mark.asyncio
+    async def test_delete_publishes_a_delete_event_with_mcp_provenance(
+        self,
+        authenticated_lifespan_client,
+        journal_tag_repo,
+        async_connection,
+    ):
+        """An AI-agent delete must be attributable in each journal's feed.
+
+        The REST path is covered by ``TestJournalTagDeleteHistoryEvents``; this
+        pins that the MCP tool carries its own provenance rather than falling
+        back to the service's ``system`` default.
+        """
+        tag = await journal_tag_repo.save(JournalTag(name="mcp-delete-subject"))
+        journal_id = await _create_journal(async_connection)
+        await journal_tag_repo.assign_tag(journal_id, tag.id)
+        await async_connection.execute(text("DELETE FROM outbox_events"))
+
+        await call_delete_journal_tag(
+            authenticated_lifespan_client, {"tag_id": str(tag.id)}
+        )
+
+        result = await async_connection.execute(
+            text(
+                "SELECT event_data FROM outbox_events "
+                "WHERE event_type = 'JournalTagDeleted' ORDER BY id"
+            )
+        )
+        rows = result.fetchall()
+        assert len(rows) == 1
+        data = json.loads(rows[0][0]) if isinstance(rows[0][0], str) else rows[0][0]
+        assert data["journal_id"] == journal_id
+        assert data["tag_id"] == str(tag.id)
+        assert data["tag_name"] == "mcp-delete-subject"
+        assert data["source"] == "mcp"
+        assert data["changed_by"] == "mcp"
+
+    @pytest.mark.asyncio
     async def test_delete_journal_tag_invalid_uuid_errors(
         self,
         authenticated_lifespan_client,
@@ -598,6 +635,48 @@ class TestMergeJournalTagMCPTool:
         payload = extract_mcp_json_payload(raw)
         assert payload["error"] == "Not found"
         assert await journal_tag_repo.find_by_id(target.id) is not None
+
+    @pytest.mark.asyncio
+    async def test_merge_publishes_a_merge_event_with_mcp_provenance(
+        self,
+        authenticated_lifespan_client,
+        journal_tag_repo,
+        async_connection,
+    ):
+        """An AI-agent merge must be attributable in each journal's feed.
+
+        The REST path is covered by ``TestJournalTagMergeHistoryEvents``; this
+        pins that the MCP tool carries its own provenance rather than falling
+        back to the service's ``system`` default.
+        """
+        source = await journal_tag_repo.save(JournalTag(name="mcp-merge-source"))
+        target = await journal_tag_repo.save(JournalTag(name="mcp-merge-target"))
+        journal_id = await _create_journal(async_connection)
+        await journal_tag_repo.assign_tag(journal_id, source.id)
+        await async_connection.execute(text("DELETE FROM outbox_events"))
+
+        await call_merge_journal_tag(
+            authenticated_lifespan_client,
+            {"source_tag_id": str(source.id), "target_tag_id": str(target.id)},
+        )
+
+        result = await async_connection.execute(
+            text(
+                "SELECT event_data FROM outbox_events "
+                "WHERE event_type = 'JournalTagMerged' ORDER BY id"
+            )
+        )
+        rows = result.fetchall()
+        assert len(rows) == 1
+        data = json.loads(rows[0][0]) if isinstance(rows[0][0], str) else rows[0][0]
+        assert data["journal_id"] == journal_id
+        assert data["source_tag_id"] == str(source.id)
+        assert data["target_tag_id"] == str(target.id)
+        assert data["source_tag_name"] == "mcp-merge-source"
+        assert data["target_tag_name"] == "mcp-merge-target"
+        assert data["already_had_target"] is False
+        assert data["source"] == "mcp"
+        assert data["changed_by"] == "mcp"
 
     @pytest.mark.asyncio
     async def test_merge_journal_tag_invalid_uuid_errors(

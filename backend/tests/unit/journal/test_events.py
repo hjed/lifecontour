@@ -16,6 +16,8 @@ from app.core.journal.models.events import (
     JournalCreated,
     JournalDeleted,
     JournalTagAssigned,
+    JournalTagDeleted,
+    JournalTagMerged,
     JournalTagRemoved,
     JournalTagRenamed,
     JournalTypeAdded,
@@ -281,6 +283,178 @@ class TestJournalTagRenamed:
         )
         second = JournalTagRenamed(
             journal_id=2, tag_id=tag_id, old_name="a", new_name="b"
+        )
+
+        assert first.event_id != second.event_id
+
+
+class TestJournalTagDeleted:
+    """JournalTagDeleted records the tag leaving each journal that carried it.
+
+    Deleting a tag un-assigns it everywhere, so from each journal's point of view
+    the tag was removed. The payload therefore matches ``JournalTagRemoved`` —
+    only the operation that caused it differs.
+    """
+
+    def test_create_event(self) -> None:
+        tag_id = uuid4()
+
+        event = JournalTagDeleted(
+            journal_id=11,
+            tag_id=tag_id,
+            tag_name="Hiking",
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        assert event.aggregate_id == 11
+        assert event.event_type == "JournalTagDeleted"
+        assert event.event_data["journal_id"] == 11
+        # Stringified: the payload round-trips through JSON/Redis to the projection.
+        assert event.event_data["tag_id"] == str(tag_id)
+        assert event.event_data["tag_name"] == "Hiking"
+        assert event.event_data["source"] == Provenance.UI.value
+        assert event.event_data["changed_by"] == "ui"
+        assert isinstance(event.occurred_at, datetime)
+        assert event.event_id.startswith(f"journal_tag_deleted_11_{tag_id}_")
+
+    def test_defaults_to_system_provenance(self) -> None:
+        event = JournalTagDeleted(journal_id=1, tag_id=uuid4(), tag_name="Work")
+
+        assert event.event_data["source"] == Provenance.SYSTEM.value
+        assert event.event_data["changed_by"] == "system"
+
+    def test_event_ids_differ_per_journal(self) -> None:
+        """One delete fans out to every tagged journal with distinct event_ids.
+
+        The history dedup index is keyed on ``event_id`` (plus entity and field),
+        so a shared id would silently drop every journal's row but the first.
+        """
+        tag_id = uuid4()
+        first = JournalTagDeleted(journal_id=1, tag_id=tag_id, tag_name="Hiking")
+        second = JournalTagDeleted(journal_id=2, tag_id=tag_id, tag_name="Hiking")
+
+        assert first.event_id != second.event_id
+
+
+class TestJournalTagMerged:
+    """JournalTagMerged carries both tags and whether the journal already had
+    the target.
+
+    A merge swaps the source for the target on most journals, but on a journal
+    that already carried the target the net effect is only that the source left.
+    The flag is what lets the projection tell those apart without a query.
+    """
+
+    def test_create_event(self) -> None:
+        source_id = uuid4()
+        target_id = uuid4()
+
+        event = JournalTagMerged(
+            journal_id=11,
+            source_tag_id=source_id,
+            target_tag_id=target_id,
+            source_tag_name="Hiking",
+            target_tag_name="Trekking",
+            already_had_target=False,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        assert event.aggregate_id == 11
+        assert event.event_type == "JournalTagMerged"
+        assert event.event_data["journal_id"] == 11
+        # Stringified: the payload round-trips through JSON/Redis to the projection.
+        assert event.event_data["source_tag_id"] == str(source_id)
+        assert event.event_data["target_tag_id"] == str(target_id)
+        assert event.event_data["source_tag_name"] == "Hiking"
+        assert event.event_data["target_tag_name"] == "Trekking"
+        assert event.event_data["already_had_target"] is False
+        assert event.event_data["source"] == Provenance.UI.value
+        assert event.event_data["changed_by"] == "ui"
+        assert isinstance(event.occurred_at, datetime)
+        assert event.event_id.startswith(
+            f"journal_tag_merged_11_{source_id}_{target_id}_"
+        )
+
+    def test_already_had_target_is_a_real_bool(self) -> None:
+        """The projection branches on this, so it must survive as a bool.
+
+        A truthy stand-in (``"false"``, ``1``) would make the projection read the
+        wrong branch after the JSON round trip.
+        """
+        event = JournalTagMerged(
+            journal_id=1,
+            source_tag_id=uuid4(),
+            target_tag_id=uuid4(),
+            source_tag_name="Hiking",
+            target_tag_name="Trekking",
+            already_had_target=True,
+        )
+
+        assert event.event_data["already_had_target"] is True
+
+    def test_defaults_to_system_provenance(self) -> None:
+        event = JournalTagMerged(
+            journal_id=1,
+            source_tag_id=uuid4(),
+            target_tag_id=uuid4(),
+            source_tag_name="Work",
+            target_tag_name="Career",
+            already_had_target=False,
+        )
+
+        assert event.event_data["source"] == Provenance.SYSTEM.value
+        assert event.event_data["changed_by"] == "system"
+
+    def test_event_ids_differ_per_journal(self) -> None:
+        """One merge fans out to every source-tagged journal with distinct ids.
+
+        The history dedup index is keyed on ``event_id`` (plus entity and field),
+        so a shared id would silently drop every journal's row but the first.
+        """
+        source_id, target_id = uuid4(), uuid4()
+        first = JournalTagMerged(
+            journal_id=1,
+            source_tag_id=source_id,
+            target_tag_id=target_id,
+            source_tag_name="a",
+            target_tag_name="b",
+            already_had_target=False,
+        )
+        second = JournalTagMerged(
+            journal_id=2,
+            source_tag_id=source_id,
+            target_tag_id=target_id,
+            source_tag_name="a",
+            target_tag_name="b",
+            already_had_target=False,
+        )
+
+        assert first.event_id != second.event_id
+
+    def test_event_ids_differ_per_source_merged_into_one_target(self) -> None:
+        """Two sources folded into one target on one journal keep separate rows.
+
+        Naming only the target in the id would collide the second merge with the
+        first for the same journal and field, and the dedup index would drop it.
+        """
+        target_id = uuid4()
+        first = JournalTagMerged(
+            journal_id=1,
+            source_tag_id=uuid4(),
+            target_tag_id=target_id,
+            source_tag_name="a",
+            target_tag_name="c",
+            already_had_target=False,
+        )
+        second = JournalTagMerged(
+            journal_id=1,
+            source_tag_id=uuid4(),
+            target_tag_id=target_id,
+            source_tag_name="b",
+            target_tag_name="c",
+            already_had_target=False,
         )
 
         assert first.event_id != second.event_id

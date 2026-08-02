@@ -36,6 +36,20 @@ def _event(
     )
 
 
+def _merge_payload(*, already_had_target: bool = False) -> dict[str, Any]:
+    """A ``JournalTagMerged`` payload as the service publishes it."""
+    return {
+        "journal_id": 10,
+        "source_tag_id": "3f7c1f0e-0000-4000-8000-000000000007",
+        "target_tag_id": "3f7c1f0e-0000-4000-8000-000000000008",
+        "source_tag_name": "Hiking",
+        "target_tag_name": "Bushwalking",
+        "already_had_target": already_had_target,
+        "source": Provenance.UI.value,
+        "changed_by": "ui",
+    }
+
+
 @pytest.fixture
 def service() -> HistoryService:
     return HistoryService()
@@ -444,6 +458,112 @@ class TestJournalTags:
         del payload[missing]
 
         assert service.project_event(_event("JournalTagRenamed", payload)) == []
+
+    def test_deleted_writes_a_removal_row(self, service: HistoryService) -> None:
+        """Deleting a tag reads on each journal as the tag leaving it.
+
+        Deliberately the same row shape as ``JournalTagRemoved``: from the
+        journal's point of view the two are the same change, and the feed should
+        not ask the user to care which tag-namespace operation caused it.
+        """
+        event = _event(
+            "JournalTagDeleted",
+            {
+                "journal_id": 10,
+                "tag_id": "3f7c1f0e-0000-4000-8000-000000000005",
+                "tag_name": "Hiking",
+                "source": Provenance.UI.value,
+                "changed_by": "ui",
+            },
+        )
+
+        rows = service.project_event(event)
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("journal", 10, "tags", "Hiking", None)
+        ]
+
+    def test_delete_missing_tag_name_projects_nothing(
+        self, service: HistoryService
+    ) -> None:
+        """A payload naming no tag yields no row, for the same reason as assign."""
+        event = _event(
+            "JournalTagDeleted",
+            {
+                "journal_id": 12,
+                "tag_id": "3f7c1f0e-0000-4000-8000-000000000006",
+                "source": Provenance.UI.value,
+                "changed_by": "ui",
+            },
+        )
+
+        assert service.project_event(event) == []
+
+    def test_merge_writes_a_source_to_target_swap(
+        self, service: HistoryService
+    ) -> None:
+        """A journal that carried only the source swapped one tag for another.
+
+        Both values present is what makes the shared ActivityItem render
+        "Changed Tags from ... to ...", which is what actually happened.
+        """
+        rows = service.project_event(_event("JournalTagMerged", _merge_payload()))
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("journal", 10, "tags", "Hiking", "Bushwalking")
+        ]
+
+    def test_merge_onto_a_journal_already_carrying_the_target_is_a_removal(
+        self, service: HistoryService
+    ) -> None:
+        """Nothing arrived on this journal — the source simply left it.
+
+        Rendering the swap here would claim the journal gained a tag it already
+        had, which the activity-history spec forbids: history must not record a
+        change that did not occur.
+        """
+        rows = service.project_event(
+            _event("JournalTagMerged", _merge_payload(already_had_target=True))
+        )
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("journal", 10, "tags", "Hiking", None)
+        ]
+
+    @pytest.mark.parametrize(
+        ("already_had_target", "missing"),
+        [
+            (False, "source_tag_name"),
+            (False, "target_tag_name"),
+            (True, "source_tag_name"),
+        ],
+    )
+    def test_merge_missing_a_name_it_needs_projects_nothing(
+        self, service: HistoryService, already_had_target: bool, missing: str
+    ) -> None:
+        """Half a merge is unrenderable, so it yields no row rather than raising.
+
+        The swap branch needs both names: without the guard a missing target name
+        would fall through the shared helper as ``("Hiking", None)`` and render as
+        a removal that never happened.
+        """
+        payload = _merge_payload(already_had_target=already_had_target)
+        del payload[missing]
+
+        assert service.project_event(_event("JournalTagMerged", payload)) == []
+
+    def test_merge_without_the_flag_projects_nothing(
+        self, service: HistoryService
+    ) -> None:
+        """An absent flag must not silently pick a branch.
+
+        Truthiness would default a malformed payload to the swap, claiming the
+        journal gained the target when the producer never said so.
+        """
+        payload = _merge_payload()
+        del payload["already_had_target"]
+
+        assert service.project_event(_event("JournalTagMerged", payload)) == []
 
 
 # --------------------------------------------------------------------------- #

@@ -28,6 +28,10 @@ _JOURNAL_EVENT_TYPES = {
     "JournalTagRemoved",
     # Journal tag rename, fanned out to every journal carrying the tag.
     "JournalTagRenamed",
+    # Journal tag delete, likewise fanned out to every journal that carried it.
+    "JournalTagDeleted",
+    # Journal tag merge, fanned out to every journal carrying the source.
+    "JournalTagMerged",
     "RouteCreated",
     "RouteUpdated",
     "RouteDeleted",

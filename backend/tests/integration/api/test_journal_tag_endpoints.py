@@ -1210,6 +1210,235 @@ class TestJournalTagRenameHistoryEvents:
 
 
 @pytest.mark.integration
+class TestJournalTagDeleteHistoryEvents:
+    """DELETE publishes a delete event for every journal that carried the tag.
+
+    Asserted on the ``outbox_events`` rows the request wrote, matching
+    ``TestJournalTagRenameHistoryEvents``; the relay and projection that turn them
+    into feed entries are covered by
+    ``tests/integration/infrastructure/events/test_journal_history_projection_e2e.py``.
+    """
+
+    @pytest_asyncio.fixture
+    async def tag_on_two_journals(
+        self, integration_api_client, async_connection
+    ) -> tuple[dict[str, Any], list[int]]:
+        """A tag assigned to two journals, with the outbox cleared afterwards.
+
+        Two journals rather than one so the fan-out is observable: a single
+        journal would pass even if the service published exactly one event
+        regardless of how many journals carry the tag.
+        """
+        tag = await create_tag(
+            integration_api_client, f"deleted-{uuid4().hex[:8]}", color="#FF0000"
+        )
+        journal_ids = []
+        for index in range(2):
+            journal_response = await integration_api_client.post(
+                "/api/journals",
+                json=create_journal_request_data(
+                    title=f"Delete subject {index}", content="Carries the tag"
+                ),
+            )
+            assert journal_response.status_code == 201
+            journal_id = journal_response.json()["data"]["id"]
+            journal_ids.append(int(journal_id))
+
+            assign = await integration_api_client.post(
+                f"/api/journals/{journal_id}/relationships/tags",
+                json={
+                    "data": {
+                        "type": "journal-tag",
+                        "attributes": {"tag_id": tag["id"]},
+                    }
+                },
+            )
+            assert assign.status_code == 200
+
+        await async_connection.execute(text("DELETE FROM outbox_events"))
+        return tag, journal_ids
+
+    @staticmethod
+    async def delete_events(async_connection) -> list[dict[str, Any]]:
+        """The ``event_data`` of every delete event in the outbox, in order."""
+        result = await async_connection.execute(
+            text(
+                "SELECT event_data FROM outbox_events "
+                "WHERE event_type = 'JournalTagDeleted' ORDER BY id"
+            )
+        )
+        return [
+            json.loads(row[0]) if isinstance(row[0], str) else row[0]
+            for row in result.fetchall()
+        ]
+
+    async def test_delete_publishes_one_event_per_journal_with_ui_provenance(
+        self, integration_api_client, async_connection, tag_on_two_journals
+    ):
+        tag, journal_ids = tag_on_two_journals
+
+        response = await integration_api_client.delete(
+            f"/api/journals/tags/{tag['id']}"
+        )
+        assert response.status_code == 204
+
+        events = await self.delete_events(async_connection)
+        assert [event["journal_id"] for event in events] == journal_ids
+        for event in events:
+            assert event["tag_id"] == tag["id"]
+            assert event["tag_name"] == tag["attributes"]["name"]
+            assert event["source"] == "ui"
+            assert event["changed_by"] == "ui"
+
+    async def test_deleting_an_unassigned_tag_publishes_nothing(
+        self, integration_api_client, async_connection
+    ):
+        """No journal carried the tag, so no journal's feed changed."""
+        tag = await create_tag(integration_api_client, f"lonely-{uuid4().hex[:8]}")
+        await async_connection.execute(text("DELETE FROM outbox_events"))
+
+        response = await integration_api_client.delete(
+            f"/api/journals/tags/{tag['id']}"
+        )
+        assert response.status_code == 204
+
+        assert await self.delete_events(async_connection) == []
+
+    async def test_a_rejected_delete_publishes_nothing(
+        self, integration_api_client, async_connection
+    ):
+        """An unknown tag id is a 404, so nothing may reach the activity feed."""
+        await async_connection.execute(text("DELETE FROM outbox_events"))
+
+        response = await integration_api_client.delete(f"/api/journals/tags/{uuid4()}")
+        assert response.status_code == 404
+
+        assert await self.delete_events(async_connection) == []
+
+
+@pytest.mark.integration
+class TestJournalTagMergeHistoryEvents:
+    """Merge publishes an event for every journal carrying the source tag.
+
+    Asserted on the ``outbox_events`` rows the request wrote, matching
+    ``TestJournalTagDeleteHistoryEvents``.
+    """
+
+    @staticmethod
+    async def _journal_carrying(
+        integration_api_client, title: str, *tag_ids: str
+    ) -> int:
+        """Create a journal and assign it every supplied tag."""
+        journal_response = await integration_api_client.post(
+            "/api/journals",
+            json=create_journal_request_data(title=title, content="Carries tags"),
+        )
+        assert journal_response.status_code == 201
+        journal_id = journal_response.json()["data"]["id"]
+
+        for tag_id in tag_ids:
+            assign = await integration_api_client.post(
+                f"/api/journals/{journal_id}/relationships/tags",
+                json={
+                    "data": {
+                        "type": "journal-tag",
+                        "attributes": {"tag_id": tag_id},
+                    }
+                },
+            )
+            assert assign.status_code == 200
+
+        return int(journal_id)
+
+    @staticmethod
+    async def merge_events(async_connection) -> list[dict[str, Any]]:
+        """The ``event_data`` of every merge event in the outbox, in order."""
+        result = await async_connection.execute(
+            text(
+                "SELECT event_data FROM outbox_events "
+                "WHERE event_type = 'JournalTagMerged' ORDER BY id"
+            )
+        )
+        return [
+            json.loads(row[0]) if isinstance(row[0], str) else row[0]
+            for row in result.fetchall()
+        ]
+
+    async def test_merge_publishes_per_journal_events_with_ui_provenance(
+        self, integration_api_client, async_connection
+    ):
+        """Each journal is flagged independently in a single merge.
+
+        The journal that already carried the target only loses the source, so its
+        event says so; the source-only journal genuinely swaps one tag for the
+        other.
+        """
+        source = await create_tag(
+            integration_api_client, f"merge-src-{uuid4().hex[:8]}", color="#FF0000"
+        )
+        target = await create_tag(
+            integration_api_client, f"merge-tgt-{uuid4().hex[:8]}", color="#00FF00"
+        )
+        source_only = await self._journal_carrying(
+            integration_api_client, "Source only", source["id"]
+        )
+        both = await self._journal_carrying(
+            integration_api_client, "Both tags", source["id"], target["id"]
+        )
+        await async_connection.execute(text("DELETE FROM outbox_events"))
+
+        response = await merge_tag(integration_api_client, source["id"], target["id"])
+        assert response.status_code == 204
+
+        events = await self.merge_events(async_connection)
+        by_journal = {event["journal_id"]: event for event in events}
+        assert set(by_journal) == {source_only, both}
+        assert by_journal[source_only]["already_had_target"] is False
+        assert by_journal[both]["already_had_target"] is True
+        for event in events:
+            assert event["source_tag_id"] == source["id"]
+            assert event["target_tag_id"] == target["id"]
+            assert event["source_tag_name"] == source["attributes"]["name"]
+            assert event["target_tag_name"] == target["attributes"]["name"]
+            assert event["source"] == "ui"
+            assert event["changed_by"] == "ui"
+
+    async def test_merging_an_unassigned_source_publishes_nothing(
+        self, integration_api_client, async_connection
+    ):
+        """No journal carried the source, so no journal's feed changed."""
+        source = await create_tag(integration_api_client, f"lonely-{uuid4().hex[:8]}")
+        target = await create_tag(integration_api_client, f"target-{uuid4().hex[:8]}")
+        await self._journal_carrying(
+            integration_api_client, "Target only", target["id"]
+        )
+        await async_connection.execute(text("DELETE FROM outbox_events"))
+
+        response = await merge_tag(integration_api_client, source["id"], target["id"])
+        assert response.status_code == 204
+
+        assert await self.merge_events(async_connection) == []
+
+    async def test_a_rejected_merge_publishes_nothing(
+        self, integration_api_client, async_connection
+    ):
+        """Merging a tag into its own descendant is refused, so it leaves no history."""
+        parent = await create_tag(integration_api_client, f"parent-{uuid4().hex[:8]}")
+        child = await create_tag(
+            integration_api_client, f"child-{uuid4().hex[:8]}", parent_id=parent["id"]
+        )
+        await self._journal_carrying(
+            integration_api_client, "Parent tagged", parent["id"]
+        )
+        await async_connection.execute(text("DELETE FROM outbox_events"))
+
+        response = await merge_tag(integration_api_client, parent["id"], child["id"])
+        assert response.status_code == 400
+
+        assert await self.merge_events(async_connection) == []
+
+
+@pytest.mark.integration
 class TestJournalTagFiltering:
     """Tests for filtering journals by tags."""
 

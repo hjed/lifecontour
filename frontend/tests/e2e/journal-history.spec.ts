@@ -449,4 +449,85 @@ test.describe('Journal Activity History', () => {
     await expect(renameRow).toHaveCount(1, { timeout: 10000 });
     await expect(renameRow.getByTestId('provenance-trigger-ui')).toBeVisible();
   });
+
+  test('records a tag deletion in the journal activity feed', async ({
+    authenticatedPage: page,
+    testCleanup,
+  }) => {
+    const dataManager = new TestDataManager(page);
+    // Registered before anything is created — see the assignment test above. The
+    // tag is destroyed by the test itself; cleanup tolerates the resulting 404.
+    testCleanup(async () => await dataManager.cleanup());
+
+    // Unique so the feed assertions cannot match another worker's tag: the
+    // journal tag namespace is global and shared across parallel workers.
+    const tagName = `DeleteHistoryTag-${crypto.randomUUID().slice(0, 8)}`;
+    const [tag] = await dataManager.createJournalTags([
+      { name: tagName, color: '#E53E3E' },
+    ]);
+    const journal = await dataManager.createJournal({
+      title: 'Tag Delete History Subject',
+      content: 'The tag it carries is destroyed out from under it.',
+      event_date_range: {
+        start: '2026-01-20T10:00:00Z',
+        end: '2026-01-20T10:30:00Z',
+      },
+      types: ['note'],
+    });
+    await dataManager.assignTagsToJournal(journal.id, [tag.id]);
+
+    // Delete through the real sidebar management dialog rather than the API, so
+    // the test covers the provenance the endpoint attaches.
+    await page.goto('/journals');
+    await expect(page.getByTestId('journals-list-ready')).toBeVisible();
+    await ensureSidebarOpen(page, 'Journals');
+
+    const dialog = await openEditDialogForTag(page, tag.id);
+    await dialog.getByRole('button', { name: 'Delete Tag' }).click();
+
+    const confirmation = page.getByRole('alertdialog');
+    await expect(confirmation).toBeVisible();
+    await expect(confirmation).toContainText('Are you absolutely sure?');
+
+    const [deleteResponse] = await Promise.all([
+      page.waitForResponse(
+        response =>
+          new URL(response.url()).pathname === `/api/journals/tags/${tag.id}` &&
+          response.request().method() === 'DELETE'
+      ),
+      confirmation.getByRole('button', { name: 'Delete' }).click(),
+    ]);
+    expect(deleteResponse.ok()).toBeTruthy();
+    await expect(dialog).toBeHidden();
+
+    // The delete travels through the async projection before it is readable.
+    await waitForHistoryEntries(
+      page.request,
+      journal.id,
+      attrs =>
+        attrs.field_name === 'tags' &&
+        attrs.source === 'ui' &&
+        attrs.old_value === tag.name &&
+        attrs.new_value === null
+    );
+
+    // A fresh load renders the entry in the feed (the history query stays fresh
+    // for two minutes and would not refetch on its own after projection lands).
+    await page.goto(`/journals/${journal.id}`);
+    await expect(page.getByRole('heading', { name: /Activity/i })).toBeVisible({
+      timeout: 10000,
+    });
+
+    // Scoped to the row and asserted exactly once, for the reasons the
+    // assignment test explains: the journal's own `__created__` entry is also
+    // `ui`-sourced, and a duplicated projection would show up as a second row.
+    // The row reads as a removal because that is what the delete did to *this*
+    // journal — the tag-namespace operation behind it is not the user's concern.
+    const deleteRow = page
+      .getByTestId('activity-feed')
+      .locator('[data-testid^="activity-item-"]')
+      .filter({ hasText: `Removed Tags: "${tag.name}"` });
+    await expect(deleteRow).toHaveCount(1, { timeout: 10000 });
+    await expect(deleteRow.getByTestId('provenance-trigger-ui')).toBeVisible();
+  });
 });
