@@ -166,6 +166,7 @@ function buildCombinedMetrics(
   const distance = sumMetric(target.distance, source.distance);
   const duration = sumMetric(target.duration, source.duration);
   const elevationGain = sumMetric(target.elevation_gain, source.elevation_gain);
+  const elevationLoss = sumMetric(target.elevation_loss, source.elevation_loss);
   const calories = sumMetric(target.calories, source.calories);
   const averageHeartRate = combineAverageHeartRate(target, source);
   const maxHeartRate = maxMetric(target.heart_rate_max, source.heart_rate_max);
@@ -182,6 +183,13 @@ function buildCombinedMetrics(
           key: 'elevation_gain',
           label: 'Elevation Gain',
           value: `${elevationGain} m`,
+        }
+      : null,
+    elevationLoss !== undefined
+      ? {
+          key: 'elevation_loss',
+          label: 'Elevation Loss',
+          value: `${elevationLoss} m`,
         }
       : null,
     calories !== undefined

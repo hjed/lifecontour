@@ -345,6 +345,37 @@ describe('MergeResolutionDialog', () => {
       expect(preview).toHaveTextContent('500'); // 300 + 200 calories
     });
 
+    it('previews every metric the merge will combine', () => {
+      // A preview that omits a summed field would understate the result the
+      // user is being asked to confirm.
+      renderDialog(
+        makeFitnessJournal('1', {
+          distance: 5000,
+          duration: 1800,
+          elevation_gain: 50,
+          elevation_loss: 40,
+          calories: 300,
+          heart_rate_avg: 140,
+          heart_rate_max: 175,
+        }),
+        makeFitnessJournal('2', {
+          distance: 3000,
+          duration: 1200,
+          elevation_gain: 30,
+          elevation_loss: 25,
+          calories: 200,
+          heart_rate_avg: 160,
+          heart_rate_max: 185,
+        })
+      );
+
+      const preview = screen.getByTestId('fitness-combined-preview');
+      expect(preview).toHaveTextContent('Elevation Gain80 m');
+      expect(preview).toHaveTextContent('Elevation Loss65 m');
+      expect(preview).toHaveTextContent('148 bpm'); // duration-weighted
+      expect(preview).toHaveTextContent('185 bpm'); // the higher max
+    });
+
     it('hides the per-field fitness conflicts while combining', () => {
       renderDialog(targetRide(), sourceRide());
 

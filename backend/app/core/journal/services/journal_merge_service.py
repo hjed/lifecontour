@@ -28,6 +28,9 @@ logger = structlog.get_logger(__name__)
 
 FITNESS_TABLE = "journal_fitness_data"
 
+STRAVA_SOURCE = "strava"
+STRAVA_ACTIVITY_ENTITY_TYPE = "activity"
+
 # Metrics that describe a quantity of activity, so two rows' values add up.
 _FITNESS_SUMMED_COLUMNS = (
     "distance",
@@ -465,22 +468,73 @@ class JournalMergeService:
         resolves. An additive merge keeps a same-service collision as two links
         (both Strava activities stay reachable); a replace merge drops the
         source's, as contact merge does.
+
+        A Strava activity id can also reach a journal without a sync row behind
+        it — typed into the fitness editor by hand — so both journals'
+        ``journal_fitness_data`` ids are folded in: the target's so a replace
+        merge recognises the source's Strava link as the rival it is, the
+        source's so an additive merge does not lose it when the source's
+        fitness row is deleted further down.
         """
+        is_additive = fitness_merge_mode is FitnessMergeMode.ADDITIVE
         sync_metadata_repo = SyncMetadataRepository(transaction)
+
+        target_activity_id = await self._fitness_strava_activity_id(
+            target_id, transaction
+        )
+        source_activity_id = await self._fitness_strava_activity_id(
+            source_id, transaction
+        )
+
         collisions = await sync_metadata_repo.repoint_journal_links(
             source_id,
             target_id,
             transaction,
-            keep_colliding_source_links=fitness_merge_mode is FitnessMergeMode.ADDITIVE,
+            keep_colliding_source_links=is_additive,
+            extra_target_links=(
+                {STRAVA_SOURCE: target_activity_id} if target_activity_id else None
+            ),
         )
+
+        if (
+            is_additive
+            and source_activity_id
+            and source_activity_id != target_activity_id
+        ):
+            await sync_metadata_repo.link_journal_if_unlinked(
+                target_id,
+                STRAVA_SOURCE,
+                source_activity_id,
+                STRAVA_ACTIVITY_ENTITY_TYPE,
+                transaction,
+            )
+
         if collisions:
             logger.info(
                 "Merge reconciled same-service integration links",
                 target_id=target_id,
                 source_id=source_id,
-                kept_both=fitness_merge_mode is FitnessMergeMode.ADDITIVE,
+                kept_both=is_additive,
                 collisions=[collision.as_dict() for collision in collisions],
             )
+
+    @staticmethod
+    async def _fitness_strava_activity_id(
+        journal_id: int, transaction: AsyncConnection
+    ) -> str | None:
+        """The Strava activity named by a journal's fitness row, if any."""
+        result = await transaction.execute(
+            text(
+                f"SELECT strava_activity_id FROM {FITNESS_TABLE} "
+                "WHERE journal_id = :journal_id"
+            ),
+            {"journal_id": journal_id},
+        )
+        row = result.fetchone()
+        if row is None:
+            return None
+        activity_id: str | None = row.strava_activity_id
+        return activity_id
 
     async def _merge_type_data(
         self,

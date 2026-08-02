@@ -271,6 +271,95 @@ class TestFitnessMergeModes:
         ]
 
     @pytest.mark.asyncio
+    async def test_replace_merge_drops_the_source_link_against_a_hand_typed_id(
+        self,
+        merge_service,
+        journal_repo,
+        fitness_repo,
+        sync_metadata_repo,
+        clean_database: AsyncConnection,
+    ):
+        """A Strava id typed into the fitness editor still counts as the target's link.
+
+        It has no ``sync_metadata`` row behind it, so without folding the
+        fitness column in, the source's Strava link looks like a service the
+        target does not use and gets carried over — leaving the survivor linked
+        to both activities in the mode meant to keep one.
+        """
+        target_id = await self._create_journal(journal_repo, "Ride")
+        source_id = await self._create_journal(journal_repo, "Ride re-import")
+
+        # The target's link exists only as a hand-entered id.
+        await fitness_repo.save(
+            FitnessData(journal_id=target_id, distance=5000, strava_activity_id="111")
+        )
+        await fitness_repo.save(
+            FitnessData(journal_id=source_id, distance=3000, strava_activity_id="222")
+        )
+        await self._link_strava_activity(sync_metadata_repo, source_id, "222")
+
+        await merge_service.merge_journals(target_id, source_id, clean_database)
+
+        assert await self._strava_links(clean_database, target_id) == []
+        assert await self._strava_links(clean_database, source_id) == []
+
+    @pytest.mark.asyncio
+    async def test_additive_merge_keeps_a_hand_typed_source_activity_linked(
+        self,
+        merge_service,
+        journal_repo,
+        fitness_repo,
+        sync_metadata_repo,
+        clean_database: AsyncConnection,
+    ):
+        """The source's fitness row is deleted by the merge, so its id must move.
+
+        With no sync row behind a hand-entered id and the survivor keeping its
+        own, the source's activity would otherwise vanish entirely.
+        """
+        target_id = await self._create_journal(journal_repo, "Ride part 1")
+        source_id = await self._create_journal(journal_repo, "Ride part 2")
+
+        await fitness_repo.save(
+            FitnessData(journal_id=target_id, distance=5000, strava_activity_id="111")
+        )
+        await fitness_repo.save(
+            FitnessData(journal_id=source_id, distance=3000, strava_activity_id="222")
+        )
+        await self._link_strava_activity(sync_metadata_repo, target_id, "111")
+
+        await merge_service.merge_journals(
+            target_id,
+            source_id,
+            clean_database,
+            fitness_merge_mode=FitnessMergeMode.ADDITIVE,
+        )
+
+        assert await self._strava_links(clean_database, target_id) == ["111", "222"]
+
+    @pytest.mark.asyncio
+    async def test_merge_does_not_treat_the_same_activity_as_a_collision(
+        self,
+        merge_service,
+        journal_repo,
+        fitness_repo,
+        sync_metadata_repo,
+        clean_database: AsyncConnection,
+    ):
+        """Both journals naming one activity leaves it linked, in either mode."""
+        target_id = await self._create_journal(journal_repo, "Ride")
+        source_id = await self._create_journal(journal_repo, "Ride duplicate")
+
+        await fitness_repo.save(
+            FitnessData(journal_id=target_id, distance=5000, strava_activity_id="111")
+        )
+        await self._link_strava_activity(sync_metadata_repo, source_id, "111")
+
+        await merge_service.merge_journals(target_id, source_id, clean_database)
+
+        assert await self._strava_links(clean_database, target_id) == ["111"]
+
+    @pytest.mark.asyncio
     async def test_additive_merge_moves_a_source_only_fitness_row(
         self,
         merge_service,

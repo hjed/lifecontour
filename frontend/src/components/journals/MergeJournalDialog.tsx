@@ -192,6 +192,12 @@ export function MergeJournalDialog({
 
       {resolutionOpen && (
         <MergeResolutionDialog
+          // Keyed on the pair so a different merge starts from the defaults
+          // rather than inheriting the previous pair's resolutions. Doing this
+          // with an effect instead would fight React Query: a background
+          // refetch changes the journal object identity without changing which
+          // journals these are, and would reset the user's choices mid-dialog.
+          key={`${targetJournalId}:${selectedJournal?.id ?? ''}`}
           open={resolutionOpen}
           onOpenChange={handleResolutionOpenChange}
           targetJournal={targetJournalRes?.data || null}
