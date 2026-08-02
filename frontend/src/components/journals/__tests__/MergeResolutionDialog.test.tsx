@@ -419,6 +419,45 @@ describe('MergeResolutionDialog', () => {
       );
     });
 
+    it('honours a caller that pre-selects keeping one value per field', async () => {
+      // A duplicate-review surface has already judged the two journals to be
+      // the same activity, so confirming a match must not add them together.
+      const user = userEvent.setup();
+      render(
+        <MergeResolutionDialog
+          targetJournal={targetRide()}
+          sourceJournal={sourceRide()}
+          open={true}
+          isPending={false}
+          defaultFitnessMergeMode='replace'
+          onOpenChange={mockOnOpenChange}
+          onResolve={mockOnResolve}
+        />
+      );
+
+      expect(screen.getByTestId('radio-fitness-replace')).toBeChecked();
+      expect(
+        screen.queryByTestId('fitness-combined-preview')
+      ).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: /merge/i }));
+
+      expect(mockOnResolve).toHaveBeenCalledWith(expect.anything(), 'replace');
+    });
+
+    it('weights the average heart rate by a recorded zero duration', () => {
+      // A zero-length part contributes its heart rate but no weight — and two
+      // zero-length parts must not divide by zero.
+      renderDialog(
+        makeFitnessJournal('1', { heart_rate_avg: 100, duration: 0 }),
+        makeFitnessJournal('2', { heart_rate_avg: 160, duration: 1200 })
+      );
+
+      expect(screen.getByTestId('fitness-combined-preview')).toHaveTextContent(
+        '160 bpm'
+      );
+    });
+
     it('says both Strava activities stay linked', () => {
       renderDialog(targetRide(), sourceRide());
 

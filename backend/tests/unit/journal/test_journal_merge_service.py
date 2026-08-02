@@ -583,6 +583,46 @@ class TestAdditiveFitnessMerge:
         assert params["heart_rate_avg"] == 151  # (140 + 162) / 2
 
     @pytest.mark.asyncio
+    async def test_a_recorded_zero_duration_still_weights_the_average(
+        self, merge_service, merged_journals, mock_transaction
+    ):
+        """A zero-length part contributes its heart rate but no weight."""
+        mock_transaction.execute.side_effect = _fitness_execute(
+            {"heart_rate_avg": 100, "duration": 0},
+            {"heart_rate_avg": 160, "duration": 1200},
+        )
+
+        await merge_service.merge_journals(
+            TARGET_ID,
+            SOURCE_ID,
+            mock_transaction,
+            fitness_merge_mode=FitnessMergeMode.ADDITIVE,
+        )
+
+        params = _fitness_update_params(mock_transaction)
+        assert params["heart_rate_avg"] == 160
+
+    @pytest.mark.asyncio
+    async def test_two_zero_durations_fall_back_to_equal_weights(
+        self, merge_service, merged_journals, mock_transaction
+    ):
+        """Weighting by zero everywhere would divide by zero."""
+        mock_transaction.execute.side_effect = _fitness_execute(
+            {"heart_rate_avg": 140, "duration": 0},
+            {"heart_rate_avg": 162, "duration": 0},
+        )
+
+        await merge_service.merge_journals(
+            TARGET_ID,
+            SOURCE_ID,
+            mock_transaction,
+            fitness_merge_mode=FitnessMergeMode.ADDITIVE,
+        )
+
+        params = _fitness_update_params(mock_transaction)
+        assert params["heart_rate_avg"] == 151
+
+    @pytest.mark.asyncio
     async def test_missing_values_are_absent_not_zero(
         self, merge_service, merged_journals, mock_transaction
     ):

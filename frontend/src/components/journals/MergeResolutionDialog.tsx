@@ -27,6 +27,8 @@ interface MergeResolutionDialogProps {
   readonly open: boolean;
   readonly isPending: boolean;
   readonly onOpenChange: (open: boolean) => void;
+  /** Which fitness merge mode to pre-select; see `MergeJournalDialog`. */
+  readonly defaultFitnessMergeMode?: FitnessMergeMode;
   readonly onResolve: (
     overrides: MergeOverrides,
     fitnessMergeMode: FitnessMergeMode
@@ -142,9 +144,18 @@ function combineAverageHeartRate(
   if (parts.length === 0) return undefined;
   if (parts.length === 1) return parts[0].rate;
 
-  const weights = parts.every(part => part.duration)
-    ? parts.map(part => part.duration as number)
-    : parts.map(() => 1);
+  // A duration that was never recorded gives nothing to weight by, and parts
+  // that are all zero-length would divide by zero — either way, weigh them
+  // equally. A recorded zero alongside a real duration is a genuine weight.
+  const durations = parts.map(part => part.duration);
+  const weights =
+    durations.some(duration => duration === null || duration === undefined) ||
+    durations.reduce(
+      (total: number, duration) => total + (duration ?? 0),
+      0
+    ) === 0
+      ? parts.map(() => 1)
+      : durations.map(duration => duration ?? 0);
   const totalWeight = weights.reduce((a, b) => a + b, 0);
   const weightedSum = parts.reduce(
     (total, part, index) => total + part.rate * weights[index],
@@ -301,14 +312,16 @@ export function MergeResolutionDialog({
   open,
   isPending,
   onOpenChange,
+  defaultFitnessMergeMode = 'additive',
   onResolve,
 }: MergeResolutionDialogProps) {
   const [conflicts, setConflicts] = useState<Conflict[] | null>(null);
   const [resolutions, setResolutions] = useState<
     Record<string, FieldResolution>
   >({});
-  const [fitnessMergeMode, setFitnessMergeMode] =
-    useState<FitnessMergeMode>('additive');
+  const [fitnessMergeMode, setFitnessMergeMode] = useState<FitnessMergeMode>(
+    defaultFitnessMergeMode
+  );
 
   const targetFitness = getFitnessData(targetJournal);
   const sourceFitness = getFitnessData(sourceJournal);

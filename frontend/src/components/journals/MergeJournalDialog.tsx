@@ -27,6 +27,13 @@ interface MergeJournalDialogProps {
   readonly sourceJournalId?: string;
   readonly open?: boolean;
   readonly onOpenChange?: (open: boolean) => void;
+  /**
+   * Which way to lean when both journals carry fitness data. Picking two
+   * journals by hand says they are different activities, so combining is the
+   * default; a duplicate-review surface has already judged them to be the same
+   * thing and should pass `'replace'`. The user can still change it either way.
+   */
+  readonly defaultFitnessMergeMode?: FitnessMergeMode;
 }
 
 export function MergeJournalDialog({
@@ -34,6 +41,7 @@ export function MergeJournalDialog({
   sourceJournalId,
   open: externalOpen,
   onOpenChange: externalOnOpenChange,
+  defaultFitnessMergeMode = 'additive',
 }: MergeJournalDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const open = externalOpen === undefined ? internalOpen : externalOpen;
@@ -203,6 +211,7 @@ export function MergeJournalDialog({
           targetJournal={targetJournalRes?.data || null}
           sourceJournal={sourceJournalRes?.data || null}
           isPending={mergeJournalData.isPending}
+          defaultFitnessMergeMode={defaultFitnessMergeMode}
           onResolve={handleMerge}
         />
       )}

@@ -645,11 +645,18 @@ class JournalMergeService:
         if len(recorded) == 1:
             return recorded[0][0]
 
-        if all(duration for _, duration in recorded):
-            weights = [duration for _, duration in recorded if duration is not None]
-        else:
-            # Nothing to weight by — treat the two parts as equally long.
+        durations = [duration for _, duration in recorded]
+        if (
+            any(duration is None for duration in durations)
+            or sum(duration or 0 for duration in durations) == 0
+        ):
+            # Nothing to weight by — a duration was never recorded, or every
+            # part is zero-length — so treat the parts as equally long. A
+            # recorded zero is a real weight and only lands here when it is the
+            # only one, which would otherwise divide by zero.
             weights = [1] * len(recorded)
+        else:
+            weights = [duration or 0 for duration in durations]
 
         total_weight = sum(weights)
         weighted_sum = sum(
