@@ -337,7 +337,11 @@ timezone, so they live in the service layer where REST and MCP both inherit them
 | both link tables' `task_id` | `tasks.id` | `CASCADE` | Deleting a task takes its links with it. |
 
 The link tables' **composite primary keys** are what make link adds idempotent at the repository
-level — a retry cannot create a duplicate row.
+level — a retry cannot create a duplicate row. `SqlTaskRepository` cashes that in with
+`INSERT … ON CONFLICT (task_id, <linked id>) DO NOTHING RETURNING task_id`, so a repeated add is a
+no-op that reports "no change" rather than an integrity error. The link tables carry no `user_id` of
+their own, so every link operation first proves the task belongs to the acting user; owner scoping
+therefore holds across the link tables as well as `tasks` itself.
 
 `ck_tasks_status CHECK (status IN ('not_done', 'done', 'cancelled'))` mirrors the three-value
 `TaskStatus` domain enum (`core_shared.models.tasks.TaskStatus`) exactly; a migration test asserts

@@ -2,8 +2,8 @@
 
 **Status:** 🟡 IN PROGRESS — fully broken down: 5 iterations, **61 phases**, one PR each, with per-phase
 acceptance criteria and diff estimates calibrated against iteration 17's recorded actuals.
-**ITER18-001 Phase 1 complete** (task tables + domain entity); next is ITER18-001 Phase 2 (task
-repository).
+**ITER18-001 Phases 1–2 complete** (task tables + domain entity; task repository); next is
+ITER18-001 Phase 3 (journal-date resolution and the future-dated rule).
 **Dependencies:** Iteration 4 (journal core, contact relationships, event date ranges), Iteration 7
 (daily summaries, calendar sync, day-grouped journal browsing, journal merge), Iteration 12 (unified
 event-driven field history), Iteration 5 (Redis Streams event bus, outbox relay, stream consumers),
@@ -59,8 +59,14 @@ is new.
 
 **Since ITER18-001 Phase 1:** the `tasks`, `task_intermediate_journals` and `task_contacts` tables exist
 (migration `0105`), as do the `Task` entity and `TaskStatus` enum in
-`core_shared/core_shared/models/tasks/`. There is still no repository, service, endpoint, MCP tool or
-frontend surface.
+`core_shared/core_shared/models/tasks/`.
+
+**Since ITER18-001 Phase 2:** the persistence layer exists — the `TaskRepository` port
+(`backend/app/core/tasks/models/repositories.py`), its `SqlTaskRepository` adapter, and `TaskProvider`
+registered in both the application and integration-test containers. It covers save / find-by-id /
+delete plus intermediate-journal and contact link add, remove and list, all owner-scoped, with
+idempotent link adds. There is still no service, endpoint, MCP tool or frontend surface, and no
+invariant enforcement beyond task ownership.
 
 ### The home page
 
@@ -306,6 +312,12 @@ rules below follow from that record and apply to every phase in this document:
 12. **Record the actual next to the estimate** when each phase lands, as iterations 16 and 17 did. That is
     what made these tables possible, and the next iteration's estimates depend on it. Record the
     production/test split too — six data points is a thin basis for a ×4 multiplier.
+13. **A phase introducing a port + adapter pair is ×6, not ×4** — added after ITER18-001 Phase 2 came in
+    at 1270 against a 440 estimate (2.9×) *and* against a 800-line pre-recorded overrun. Two costs the
+    ×4 rule misses: a port ABC costs roughly as much as its adapter in a codebase that documents every
+    abstract method (191 vs 288 lines there), and **owner scoping multiplies test volume**, because
+    proving a second user cannot reach the first's data needs its own seeded foreign rows per method
+    group. Count the port as a first-class production artefact, not a header file.
 
 **Programme size:** 61 phases — and therefore 61 PRs — across the five iterations
 (ITER18-001: 22, ITER18-002: 5, ITER18-003: 9, ITER18-004: 17, ITER18-005: 8). That count is the honest
@@ -487,8 +499,12 @@ leaves tasks uncreatable and invisible).
 
 1. ~~**Primary key type**~~ — ✅ **settled in Phase 1: `Integer` serial.** See *Decisions taken (Phase 1)*.
 2. **Where the due-journal "future" boundary sits** for a multi-day journal whose range straddles today —
-   settled in **Phase 2**. The specification defines a journal's date as its start date, so a trip that
-   started yesterday and ends tomorrow is *past*. Confirm that reading before it becomes a validation rule.
+   settled in **Phase 3**, not Phase 2 as this entry originally said. Phase 2 turned out to hold no date
+   logic at all: it is pure persistence, and the journal-date resolution the decision is about is exactly
+   what Phase 3 exists for (its acceptance criteria already claim the decision). The pointer is corrected
+   here rather than the decision being forced into a phase that cannot make it. The specification defines
+   a journal's date as its start date, so a trip that started yesterday and ends tomorrow is *past*;
+   confirm that reading in Phase 3 before it becomes a validation rule.
 3. ~~**Whether task text has a length bound**, and whether it is markdown or plain~~ — ✅ **settled in
    Phase 1: plain text, `TEXT`, no length bound.** See *Decisions taken (Phase 1)*.
 4. **Whether MCP gets a delete tool** — settled in **Phase 7**. The specification's MCP list omits delete
@@ -572,23 +588,112 @@ cleanly; the anchor FK **refuses** a journal delete; contact deletion drops link
   (ITER18-001)* section covering the three tables, the FK-direction table, the status CHECK and the
   integer-PK justification.
 
-#### Phase 2: Task Repository
+#### Phase 2: Task Repository ✅ COMPLETE
 
 **Prerequisites:** Phase 1.
-**Estimated diff:** ~110 production → **~440 tracked** (×4)
+**Estimated diff:** ~110 production → **~440 tracked** (×4) · **Overrun recorded before work started
+(delivery rule 3): ~380 production → ~800 tracked** · **Actual:** ~530 production → **~1270 tracked**
+(1271 insertions, 47 deletions across 18 files: 533 production, ~756 tests and fixtures, ~29 docs).
+
+The original figure assumed a repository class alone; the phase ships a port ABC (191), the SQL
+adapter (288), a `TaskNotFoundError`, a Dishka provider and two container registrations. Rule 3
+prefers splitting an oversized PR, and the natural split was **2a** (port + save/find/delete + row
+mapper + DI) and **2b** (link add/remove). It was declined: the deliverable is *one class plus its
+port*, so 2b would reopen and rewrite 2a's interface file — churn rather than reviewability.
+
+**The advance estimate undershot too, and that is the finding worth carrying forward.** 1270 against
+440 is **2.9×** — the same ratio Phase 1 hit, not the 1.9× predicted. Two things the ×4 rule does not
+capture drove it: **a port ABC costs roughly as much as its adapter** in a codebase that documents
+every abstract method (191 vs 288 here), and **owner scoping multiplies test volume** — five of the
+23 integration tests exist only to prove a second user cannot reach the first's data, and each needs
+its own seeded foreign rows. **A phase introducing a port + adapter pair should be estimated at ×6,
+not ×4**, and the port counted as a first-class production artefact rather than a header file.
 
 **Acceptance Criteria:**
 
-- [ ] Repository with save / find-by-id / delete plus intermediate-journal and contact link add/remove.
+- [x] Repository with save / find-by-id / delete plus intermediate-journal and contact link add/remove.
       **Only these** — each later read (by journal role, forward window, list indicator) belongs to the
-      phase that consumes it, per calibration rule 3.
-- [ ] A single row-mapping helper rather than duplicated per-query mapping (the `_row_to_tag` lesson from
-      ITER17-001 Phase 1).
-- [ ] Link adds are idempotent at the repository level, so a retry cannot create a duplicate row.
-- [ ] All reads are **owner-scoped** at the repository boundary — no method can return another user's task.
+      phase that consumes it, per calibration rule 3. — `TaskRepository`
+      (`backend/app/core/tasks/models/repositories.py`) and `SqlTaskRepository`
+      (`backend/app/core/tasks/adapters/sql/task_repository.py`). No read starting from a journal, a
+      date or a link role was added; see *Decisions taken* on the two link listings that were.
+- [x] A single row-mapping helper rather than duplicated per-query mapping (the `_row_to_tag` lesson from
+      ITER17-001 Phase 1). — one `_TASK_COLUMN_NAMES` tuple, one `_TASK_COLUMNS` string interpolated
+      into every query, one `_row_to_task`. A unit test asserts a row carrying exactly the declared
+      columns maps cleanly, so the list and the mapper cannot drift.
+- [x] Link adds are idempotent at the repository level, so a retry cannot create a duplicate row. —
+      `INSERT … ON CONFLICT (task_id, <linked id>) DO NOTHING RETURNING task_id` over the composite
+      primary keys; the `RETURNING` clause is what lets the method report whether a row was created.
+      Asserted for both link tables by adding twice and counting rows.
+- [x] All reads are **owner-scoped** at the repository boundary — no method can return another user's
+      task. — every method takes `user_id` and every statement filters on it. The link tables carry no
+      `user_id`, so link operations reach the owner through `_require_task_owned` first. Asserted
+      against a **real second user's rows** rather than an absent id, because a query that dropped its
+      filter would still return nothing for an id that never existed.
+
+**Decisions taken (Phase 2):**
+
+- **Owner scoping is written into the port, not left to the adapter.** `TaskRepository` documents it
+  as part of the contract: a task the acting user does not own is treated exactly like one that does
+  not exist. This is also `writing-sql` skill rule 2.
+- **`TaskNotFoundError` (404) added to `core_shared.models.tasks`.** `save`'s update path and `delete`
+  raise it when the owner-scoped statement matches no row, mirroring `SqlJournalRepository` and
+  `JournalNotFoundError`. A missing row and another user's row are deliberately indistinguishable, and
+  the message says nothing about ownership.
+- **Link add/remove return `bool`; `find_by_id` returns `None`; everything else raises.** The `bool` is
+  the idempotency signal ("was there a change"), and because `_require_task_owned` runs first it can
+  never quietly mean "not your task". `find_by_id` is the lookup, so absence is its natural result;
+  every other method operates on a task the caller claims to own, so absence is an error.
+- **Two link listings were added beyond the AC's literal method list** —
+  `list_intermediate_journal_ids` and `list_contact_ids`. The three reads the AC defers all start from
+  a journal, a date or a link role; these read a task's **own** links. Without them the integration
+  tests would have to assert link state with raw SQL, bypassing the very repository boundary the
+  owner-scoping criterion exists to prove. Phase 12's read model builds on them.
+- **DI registration lands here, in both containers.** `TaskProvider`
+  (`backend/app/infrastructure/di/tasks.py`) is registered in `app/infrastructure/di/container.py`
+  **and** in the integration-test container in `tests/integration/conftest.py`, so the two cannot
+  drift and Phase 5's controllers inherit a working wiring. An integration test resolves
+  `TaskRepository` through a real Dishka request scope; without it a typo in the provider would stay
+  hidden until Phase 5.
+- **Phase 1's seeding helpers were lifted into `tests/integration/tasks/task_seeding.py`** and
+  `test_task_tables_constraints.py` now imports them (delivery rule 7). The module also carries the
+  `OTHER_USER_ID` the owner-scoping tests need.
+- **`updated_at` advancing is not asserted across an insert/update pair.** PostgreSQL's `now()` is
+  transaction-scoped and the integration fixture holds one transaction open, so both statements stamp
+  the same instant; a `>` assertion would fail and a `>=` one would prove nothing. The update test
+  asserts instead that `created_at` survives, that the returned `updated_at` matches what the
+  statement actually wrote, and that a re-read sees the new text and status.
+- **The repository enforces persistence and task ownership only.** Whether the due journal exists,
+  belongs to the acting user and is future-dated *at the moment it is set* needs journal data and the
+  user's timezone; those remain Phases 3 and 4, unchanged and not partially anticipated here.
 
 **Required Test Coverage:** integration — round-trip save/read/delete, link add/remove idempotency, link
 cascade on task delete, and owner scoping (another user's id returns nothing). No e2e.
+
+- **Unit (5 tests):** `backend/tests/unit/tasks/test_task_row_mapping.py` — the mapper populates every
+  attribute; the stored status string becomes the `TaskStatus` enum (parametrised over all three);
+  creating == due survives mapping; an unknown status raises rather than producing a bad entity; a row
+  carrying exactly the declared columns maps cleanly.
+- **Integration (23 tests):** `backend/tests/integration/tasks/test_task_repository_integration.py` —
+  *save/find:* id and timestamps assigned, default `not_done`, full field round-trip with the status
+  enum, creating == due, update of text and status preserving `created_at`, unknown id returns `None`.
+  *Owner scoping (5):* `find_by_id` cannot see another user's task; `save` cannot re-own it; `delete`
+  cannot remove it; all three intermediate-journal methods and all three contact methods raise for it.
+  *Delete:* removes the task, raises for an unknown id, cascades both link tables while sparing the
+  journals and contacts. *Links:* add returns `True`, a repeat returns `False` with the row count still
+  1, remove returns `True` then `False`, list returns every link — each asserted for both link tables.
+  *DI:* `TaskRepository` resolves through a real Dishka request scope to a `SqlTaskRepository`.
+- **E2E:** none — deferral taken as stated. Phase 2 ships no controller, MCP tool or frontend surface;
+  e2e coverage for ITER18-001 lands in Phase 22. The iteration-level coverage the specification attaches
+  to later phases (invariants, the timezone day boundary, the status matrix, lapsed derivation, MCP
+  schemas, REST/MCP error payloads) is **not** claimed by this phase.
+- **Docs:** `docs/architecture/domain-architecture.md` — the Tasks domain's *Ports* and *Repository
+  contract* entries. `docs/architecture/database-design.md` — how the composite primary keys become
+  `ON CONFLICT DO NOTHING`, and that owner scoping reaches the link tables through the task.
+- **Gates run locally:** `ruff format --check`, `ruff check` and `mypy` clean for both `backend`
+  (841 source files) and `core_shared` (125); the full `tests/unit/` suite, `tests/integration/tasks/`
+  (36 tests — 13 from Phase 1, 23 new) and `tests/integration/api/` (which exercises the test-container
+  change) all pass.
 
 #### Phase 3: Journal-Date Resolution and the Future-Dated Rule
 
