@@ -28,6 +28,24 @@ from app.core.journal.adapters.sql.journal_repository import SqlJournalRepositor
 
 USER_ID = "test-user-123"
 
+# Statements are built once at module level so that a ``pytest.raises`` block
+# wraps only the execution under test, never the construction of its SQL.
+_DELETE_JOURNAL = text("DELETE FROM journals WHERE id = :id")
+_DELETE_TASK = text("DELETE FROM tasks WHERE id = :id")
+_DELETE_CONTACT = text("DELETE FROM contacts WHERE id = :id")
+_INSERT_TASK_WITHOUT_CREATING_JOURNAL = text(
+    """
+    INSERT INTO tasks (user_id, text, creating_journal_id, due_journal_id)
+    VALUES (:user_id, 'Orphan', NULL, :due_id)
+    """
+)
+_INSERT_TASK_WITHOUT_DUE_JOURNAL = text(
+    """
+    INSERT INTO tasks (user_id, text, creating_journal_id, due_journal_id)
+    VALUES (:user_id, 'Orphan', :creating_id, NULL)
+    """
+)
+
 
 async def _create_journal(
     journal_repository: SqlJournalRepository,
@@ -165,9 +183,7 @@ class TestAnchorJournalDeletionIsRefused:
         _, creating_id, _ = anchored_task
 
         with pytest.raises(IntegrityError) as exc_info:
-            await async_connection.execute(
-                text("DELETE FROM journals WHERE id = :id"), {"id": creating_id}
-            )
+            await async_connection.execute(_DELETE_JOURNAL, {"id": creating_id})
 
         # Name the constraint: both anchors point at journals, so a bare
         # IntegrityError would not prove the *creating* anchor is what refused.
@@ -181,9 +197,7 @@ class TestAnchorJournalDeletionIsRefused:
         _, _, due_id = anchored_task
 
         with pytest.raises(IntegrityError) as exc_info:
-            await async_connection.execute(
-                text("DELETE FROM journals WHERE id = :id"), {"id": due_id}
-            )
+            await async_connection.execute(_DELETE_JOURNAL, {"id": due_id})
 
         assert "tasks_due_journal_id_fkey" in str(exc_info.value)
 
@@ -206,9 +220,7 @@ class TestIntermediateJournalDeletionIsPermitted:
             async_connection, task_id=task_id, journal_id=mentioned_id
         )
 
-        await async_connection.execute(
-            text("DELETE FROM journals WHERE id = :id"), {"id": mentioned_id}
-        )
+        await async_connection.execute(_DELETE_JOURNAL, {"id": mentioned_id})
 
         assert (
             await _count(
@@ -248,9 +260,7 @@ class TestTaskDeletionCascadesItsLinks:
         )
         await _link_contact(async_connection, task_id=task_id, contact_id=contact_id)
 
-        await async_connection.execute(
-            text("DELETE FROM tasks WHERE id = :id"), {"id": task_id}
-        )
+        await async_connection.execute(_DELETE_TASK, {"id": task_id})
 
         assert (
             await _count(
@@ -299,9 +309,7 @@ class TestContactDeletionDropsLinksOnly:
         contact_id = await _create_contact(async_connection)
         await _link_contact(async_connection, task_id=task_id, contact_id=contact_id)
 
-        await async_connection.execute(
-            text("DELETE FROM contacts WHERE id = :id"), {"id": contact_id}
-        )
+        await async_connection.execute(_DELETE_CONTACT, {"id": contact_id})
 
         assert (
             await _count(
@@ -334,14 +342,7 @@ class TestAnchorsAreMandatory:
 
         with pytest.raises(IntegrityError) as exc_info:
             await async_connection.execute(
-                text(
-                    """
-                    INSERT INTO tasks (
-                        user_id, text, creating_journal_id, due_journal_id
-                    )
-                    VALUES (:user_id, 'Orphan', NULL, :due_id)
-                    """
-                ),
+                _INSERT_TASK_WITHOUT_CREATING_JOURNAL,
                 {"user_id": USER_ID, "due_id": due_id},
             )
 
@@ -356,14 +357,7 @@ class TestAnchorsAreMandatory:
 
         with pytest.raises(IntegrityError) as exc_info:
             await async_connection.execute(
-                text(
-                    """
-                    INSERT INTO tasks (
-                        user_id, text, creating_journal_id, due_journal_id
-                    )
-                    VALUES (:user_id, 'Orphan', :creating_id, NULL)
-                    """
-                ),
+                _INSERT_TASK_WITHOUT_DUE_JOURNAL,
                 {"user_id": USER_ID, "creating_id": creating_id},
             )
 
