@@ -600,6 +600,16 @@ export interface MergeOverrides {
   event_date_range?: { start: string; end: string } | null;
   type_data?: Record<string, Record<string, unknown>> | null;
 }
+
+/**
+ * How the two journals' fitness data is reconciled by a merge.
+ *
+ * `replace` treats them as rival descriptions of one activity: the target's
+ * numbers stand and the source's Strava link is dropped. `additive` treats them
+ * as two parts of one outing: distance, duration, elevation and calories sum,
+ * heart rates combine, and both Strava activities stay linked.
+ */
+export type FitnessMergeMode = 'replace' | 'additive';
 export interface JournalFilters {
   search?: string;
   types?: JournalType[];

@@ -15,7 +15,11 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { JournalSearchCombobox } from './JournalSearchCombobox';
 import { useMergeJournal, useJournal } from '@/lib/api/journals';
-import { JournalResource, MergeOverrides } from '@/types/journals';
+import {
+  FitnessMergeMode,
+  JournalResource,
+  MergeOverrides,
+} from '@/types/journals';
 import { MergeResolutionDialog } from './MergeResolutionDialog';
 
 interface MergeJournalDialogProps {
@@ -94,7 +98,10 @@ export function MergeJournalDialog({
     setResolutionOpen(true);
   };
 
-  const handleMerge = async (overrides: MergeOverrides) => {
+  const handleMerge = async (
+    overrides: MergeOverrides,
+    fitnessMergeMode: FitnessMergeMode
+  ) => {
     if (!selectedJournal) return;
 
     try {
@@ -102,6 +109,7 @@ export function MergeJournalDialog({
         targetId: targetJournalId,
         sourceId: selectedJournal.id,
         overrides,
+        fitnessMergeMode,
       });
       setResolutionOpen(false);
       setSelectedJournal(null);

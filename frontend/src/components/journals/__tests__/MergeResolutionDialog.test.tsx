@@ -103,13 +103,16 @@ describe('MergeResolutionDialog', () => {
       screen.getByRole('button', { name: /resolve and merge/i })
     );
 
-    expect(mockOnResolve).toHaveBeenCalledWith({
-      title: 'Source Title',
-      content: 'Target Content',
-      type_data: {
-        MOOD_RATING: { mood_value: 5 },
+    expect(mockOnResolve).toHaveBeenCalledWith(
+      {
+        title: 'Source Title',
+        content: 'Target Content',
+        type_data: {
+          MOOD_RATING: { mood_value: 5 },
+        },
       },
-    });
+      'replace'
+    );
   });
 
   it('renders No Conflicts message if there are no conflicts', () => {
@@ -269,11 +272,134 @@ describe('MergeResolutionDialog', () => {
         screen.getByRole('button', { name: /resolve and merge/i })
       );
 
-      expect(mockOnResolve).toHaveBeenCalledWith({
-        type_data: {
-          EVENT: { calendar_id: SOURCE_CAL_ID },
+      expect(mockOnResolve).toHaveBeenCalledWith(
+        {
+          type_data: {
+            EVENT: { calendar_id: SOURCE_CAL_ID },
+          },
         },
+        'replace'
+      );
+    });
+  });
+
+  describe('fitness merge mode', () => {
+    const makeFitnessJournal = (id: string, fitness: Record<string, unknown>) =>
+      ({
+        id,
+        type: 'journals',
+        attributes: {
+          title: 'Same Title',
+          content: 'Same Content',
+          event_date_range: undefined,
+          created_at: '',
+          updated_at: '',
+          is_archived: false,
+          journal_date: '',
+          type_data: { fitness },
+        },
+        relationships: {},
+      }) as unknown as JournalResource;
+
+    const renderDialog = (target: JournalResource, source: JournalResource) =>
+      render(
+        <MergeResolutionDialog
+          targetJournal={target}
+          sourceJournal={source}
+          open={true}
+          isPending={false}
+          onOpenChange={mockOnOpenChange}
+          onResolve={mockOnResolve}
+        />
+      );
+
+    const targetRide = () =>
+      makeFitnessJournal('1', {
+        distance: 5000,
+        duration: 1800,
+        calories: 300,
+        strava_activity_id: '111',
       });
+
+    const sourceRide = () =>
+      makeFitnessJournal('2', {
+        distance: 3000,
+        duration: 1200,
+        calories: 200,
+        strava_activity_id: '222',
+      });
+
+    it('offers to combine the two activities and picks that by default', () => {
+      renderDialog(targetRide(), sourceRide());
+
+      expect(screen.getByTestId('radio-fitness-additive')).toBeChecked();
+      expect(screen.getByTestId('radio-fitness-replace')).not.toBeChecked();
+    });
+
+    it('previews the combined totals', () => {
+      renderDialog(targetRide(), sourceRide());
+
+      const preview = screen.getByTestId('fitness-combined-preview');
+      expect(preview).toHaveTextContent('8.00 km'); // 5000m + 3000m
+      expect(preview).toHaveTextContent('50:00'); // 1800s + 1200s
+      expect(preview).toHaveTextContent('500'); // 300 + 200 calories
+    });
+
+    it('hides the per-field fitness conflicts while combining', () => {
+      renderDialog(targetRide(), sourceRide());
+
+      expect(
+        screen.queryByTestId('radio-target-type_data.fitness.distance')
+      ).not.toBeInTheDocument();
+    });
+
+    it('submits the additive mode without per-field fitness overrides', async () => {
+      const user = userEvent.setup();
+      renderDialog(targetRide(), sourceRide());
+
+      await user.click(screen.getByRole('button', { name: /merge/i }));
+
+      expect(mockOnResolve).toHaveBeenCalledWith({}, 'additive');
+    });
+
+    it('restores the per-field choices when combining is turned off', async () => {
+      const user = userEvent.setup();
+      renderDialog(targetRide(), sourceRide());
+
+      await user.click(screen.getByTestId('radio-fitness-replace'));
+
+      const distanceRadio = screen.getByTestId(
+        'radio-target-type_data.fitness.distance'
+      );
+      expect(distanceRadio).toBeChecked();
+
+      await user.click(
+        screen.getByTestId('radio-source-type_data.fitness.distance')
+      );
+      await user.click(screen.getByRole('button', { name: /merge/i }));
+
+      expect(mockOnResolve).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type_data: expect.objectContaining({
+            fitness: expect.objectContaining({ distance: 3000 }),
+          }),
+        }),
+        'replace'
+      );
+    });
+
+    it('says both Strava activities stay linked', () => {
+      renderDialog(targetRide(), sourceRide());
+
+      expect(screen.getByText(/both strava activities/i)).toBeInTheDocument();
+    });
+
+    it('is not offered when only one journal has fitness data', () => {
+      renderDialog(targetRide(), mockSource);
+
+      expect(
+        screen.queryByTestId('radio-fitness-additive')
+      ).not.toBeInTheDocument();
     });
   });
 });

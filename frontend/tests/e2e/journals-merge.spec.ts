@@ -311,4 +311,129 @@ test.describe('Journal Merge Workflow', () => {
     // We can verify that the new mood value is shown on the page if it has a way to display it
     // Wait for page to reflect that it's merged or simply let it pass
   });
+
+  test('should combine two fitness activities into one merged journal', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    /**
+     * Two halves of one ride — a recording stopped and restarted — merged with
+     * the panel's default "Combine both activities" mode: the metrics add up
+     * rather than one set replacing the other.
+     *
+     * Keeping both Strava links is covered by the backend integration tests
+     * instead: the second link lives in `sync_metadata`, which the journals
+     * REST API this test builds its data through cannot seed.
+     */
+    const page = authenticatedPage;
+    const dataManager = new TestDataManager(page);
+
+    const uniqueSuffix = Date.now().toString();
+    const sourceTitle = `Ride Part 2_${uniqueSuffix}`;
+    const targetTitle = `Ride Part 1_${uniqueSuffix}`;
+
+    const journals = await dataManager.createJournals([
+      {
+        title: sourceTitle,
+        exactTitle: true,
+        content: 'Second half of the ride',
+        event_date_range: { start: todayISO, end: todayISO },
+        types: ['fitness'],
+        type_data: {
+          fitness: {
+            distance: 3000,
+            duration: 1200,
+            elevation_gain: 30,
+            calories: 200,
+          },
+        },
+      },
+      {
+        title: targetTitle,
+        exactTitle: true,
+        content: 'First half of the ride',
+        event_date_range: { start: todayISO, end: todayISO },
+        types: ['fitness'],
+        type_data: {
+          fitness: {
+            distance: 5000,
+            duration: 1800,
+            elevation_gain: 50,
+            calories: 300,
+          },
+        },
+      },
+    ]);
+
+    testCleanup(async () => {
+      await dataManager.cleanup();
+    });
+
+    const target = journals[1];
+
+    await page.goto(`/journals/${target.id}`);
+    await expect(page.locator('main, [role="main"]').first()).toBeVisible();
+
+    const openMergeBtn = page.getByRole('button', { name: /merge journal/i });
+    await expect(openMergeBtn).toBeVisible();
+    await openMergeBtn.click();
+
+    const dialog = page
+      .getByRole('dialog')
+      .filter({ hasText: 'Merge Another Journal' });
+    await expect(dialog).toBeVisible();
+
+    await expect(async () => {
+      await selectJournalInCombobox(dialog, sourceTitle);
+      await expect(dialog.getByText(`Selected to merge:`)).toBeVisible({
+        timeout: 2000,
+      });
+    }).toPass({ timeout: 20000 });
+
+    const nextBtn = dialog.getByRole('button', { name: /next/i });
+    await expect(nextBtn).toBeEnabled();
+    await nextBtn.click();
+
+    const resolutionDialog = page
+      .getByRole('dialog')
+      .filter({ hasText: 'Resolve Merge Conflicts' });
+    await expect(resolutionDialog).toBeVisible();
+
+    // Combining is the offered default, and the preview shows the totals
+    await expect(
+      resolutionDialog.getByTestId('radio-fitness-additive')
+    ).toBeChecked();
+    const preview = resolutionDialog.getByTestId('fitness-combined-preview');
+    await expect(preview).toContainText('8.00 km');
+    await expect(preview).toContainText('50:00');
+
+    // The per-field fitness rows are replaced by the combination
+    await expect(
+      resolutionDialog.getByTestId('radio-target-type_data.fitness.distance')
+    ).toBeHidden();
+
+    const confirmMergeBtn = resolutionDialog.getByRole('button', {
+      name: /resolve and merge/i,
+    });
+    await expect(confirmMergeBtn).toBeEnabled();
+
+    const mergeResponsePromise = page.waitForResponse(
+      response =>
+        response.url().includes(`/api/journals/${target.id}/merge`) &&
+        response.request().method() === 'POST'
+    );
+    await confirmMergeBtn.click();
+    const mergeResponse = await mergeResponsePromise;
+    expect(mergeResponse.status()).toBe(200);
+    await expect(resolutionDialog).toBeHidden();
+
+    // The merged journal carries the summed metrics
+    const detail = await page.request.get(`/api/journals/${target.id}`);
+    expect(detail.status()).toBe(200);
+    const fitness = (await detail.json()).data.attributes.type_data.fitness;
+    expect(fitness.distance).toBe(8000);
+    expect(fitness.duration).toBe(3000);
+    expect(fitness.elevation_gain).toBe(80);
+    expect(fitness.calories).toBe(500);
+  });
 });

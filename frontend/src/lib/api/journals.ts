@@ -23,6 +23,7 @@ import {
   JournalTag,
   JournalSeries,
   JournalCalendar,
+  FitnessMergeMode,
   MergeOverrides,
   ReviewItemsListResponse,
   AttendeeStatus,
@@ -276,13 +277,15 @@ async function deleteJournal(id: string): Promise<void> {
 async function mergeJournal(
   targetId: string,
   sourceId: string,
-  overrides?: MergeOverrides
+  overrides?: MergeOverrides,
+  fitnessMergeMode?: FitnessMergeMode
 ): Promise<JournalResponse> {
   const requestData = {
     type: 'journal-merge' as const,
     attributes: {
       source_journal_id: Number(sourceId),
       ...(overrides ? { overrides } : {}),
+      ...(fitnessMergeMode ? { fitness_merge_mode: fitnessMergeMode } : {}),
     },
   };
 
@@ -1351,11 +1354,13 @@ export function useMergeJournal() {
       targetId,
       sourceId,
       overrides,
+      fitnessMergeMode,
     }: {
       targetId: string;
       sourceId: string;
       overrides?: MergeOverrides;
-    }) => mergeJournal(targetId, sourceId, overrides),
+      fitnessMergeMode?: FitnessMergeMode;
+    }) => mergeJournal(targetId, sourceId, overrides, fitnessMergeMode),
     onSuccess: (_, { targetId, sourceId }) => {
       void invalidateAfterMutation(
         queryClient,
