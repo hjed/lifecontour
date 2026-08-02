@@ -304,6 +304,59 @@ The rule lives in `core_shared.models.journals.outdoor_dashboard.is_currently_ch
 unit-tested); `SqlOutdoorDashboardRepository.list_gear_checkout_facts` resolves the window bounds in
 SQL and applies only a cheap already-ended bound (`resolved check-in > now`).
 
+#### Tasks — journal-anchored commitments (ITER18-001)
+
+A task is a short plain-text commitment anchored to exactly **two** journals: the *creating*
+journal where it arose, and the *due* journal where it matters. See the
+[Home Dashboard & Tasks specification](../product-specifications/home-dashboard-and-tasks-product-specification.md#tasks).
+Introduced by migration `0105` (create/drop round-trip).
+
+- `tasks` — `id` (serial pk), `user_id` (varchar 50), `text` (TEXT), `status` (varchar 20, default
+  `'not_done'`), `creating_journal_id` / `due_journal_id` (int, FK → `journals.id`), `created_at` /
+  `updated_at`. Indexed by `user_id` and by each anchor.
+- `task_intermediate_journals` — `task_id` (FK → `tasks.id`), `journal_id` (FK → `journals.id`),
+  `created_at`; `PRIMARY KEY (task_id, journal_id)`, indexed by `journal_id`. Journals where the
+  task was discussed, revisited, or previously due.
+- `task_contacts` — `task_id` (FK → `tasks.id`), `contact_id` (FK → `contacts.id`), `created_at`;
+  `PRIMARY KEY (task_id, contact_id)`, indexed by `contact_id`. A **plain reference** — no
+  relationship type, role or attendance status, unlike `journal_contact_relationships`.
+
+**Both anchors are `NOT NULL`.** This is core invariants 1–3 expressed in the schema: a task can
+never exist with only one anchor at any point in its life. Nothing forbids the two columns holding
+the same journal (invariant 6). The remaining invariants — the due journal must exist, be owned by
+the acting user, and be future-dated *at the moment it is set* — need journal data and the user's
+timezone, so they live in the service layer where REST and MCP both inherit them.
+
+**Foreign-key directions carry the *Journal Anchor Integrity* rules:**
+
+| From | To | Action | Why |
+|---|---|---|---|
+| `tasks.creating_journal_id` / `due_journal_id` | `journals.id` | **`RESTRICT`** | Deleting a journal that anchors a task is *blocked*, not cascaded. The explanatory failure that names the blocking tasks arrives with ITER18-002; until then the database refuses on its own rather than silently destroying tasks. |
+| `task_intermediate_journals.journal_id` | `journals.id` | `CASCADE` | Deleting a journal that is only an intermediate link is permitted; the link goes and the task is unaffected. |
+| `task_contacts.contact_id` | `contacts.id` | `CASCADE` | Deleting a contact drops its task links without touching tasks. |
+| both link tables' `task_id` | `tasks.id` | `CASCADE` | Deleting a task takes its links with it. |
+
+The link tables' **composite primary keys** are what make link adds idempotent at the repository
+level — a retry cannot create a duplicate row.
+
+`ck_tasks_status CHECK (status IN ('not_done', 'done', 'cancelled'))` mirrors the three-value
+`TaskStatus` domain enum (`core_shared.models.tasks.TaskStatus`) exactly; a migration test asserts
+every enum member is accepted and nothing else is, so the column and the enum cannot drift apart.
+There is deliberately no in-progress, blocked or deferred state — deferring a task is expressed by
+retargeting it onto a later journal.
+
+**Primary key is `Integer`, not UUID**, despite the newer journal-tag and activity-template tables
+being UUID-keyed. The specification makes tasks full domain-event citizens whose events project
+into field history, and `DomainEvent.aggregate_id` is typed `int`
+(`core_shared/core_shared/stream_client.py`) while `field_history.entity_id` is `Integer`
+(`app/infrastructure/contacts/contact_tables.py`) — a UUID task id could not be an event aggregate
+id or a history entity id without migrating a table shared with contacts and journals. Integer also
+matches the `journals.id` and `contacts.id` every task foreign key points at.
+
+Following the journal domain's convention, these tables have **no SQLAlchemy `Table` object**: the
+migration is the schema's source of truth and repositories use raw SQL. (Note the unrelated
+`app/infrastructure/tasks/` package, which holds ARQ background jobs, not domain tasks.)
+
 ### Photo Integration (Iteration 4)
 ```sql
 -- To be implemented when Immich integration is added
