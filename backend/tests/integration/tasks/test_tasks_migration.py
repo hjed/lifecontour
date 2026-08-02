@@ -143,8 +143,10 @@ class TestTasksMigration:
         for status in TaskStatus:
             await _insert_task_with_status(url, journal_id, status.value)
 
-        with pytest.raises(IntegrityError):
+        with pytest.raises(IntegrityError) as exc_info:
             await _insert_task_with_status(url, journal_id, "in_progress")
+
+        assert "ck_tasks_status" in str(exc_info.value)
 
     async def test_status_defaults_to_not_done(
         self,

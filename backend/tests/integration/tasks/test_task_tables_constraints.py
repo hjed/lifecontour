@@ -164,10 +164,14 @@ class TestAnchorJournalDeletionIsRefused:
     ) -> None:
         _, creating_id, _ = anchored_task
 
-        with pytest.raises(IntegrityError):
+        with pytest.raises(IntegrityError) as exc_info:
             await async_connection.execute(
                 text("DELETE FROM journals WHERE id = :id"), {"id": creating_id}
             )
+
+        # Name the constraint: both anchors point at journals, so a bare
+        # IntegrityError would not prove the *creating* anchor is what refused.
+        assert "tasks_creating_journal_id_fkey" in str(exc_info.value)
 
     async def test_deleting_the_due_journal_is_refused(
         self,
@@ -176,10 +180,12 @@ class TestAnchorJournalDeletionIsRefused:
     ) -> None:
         _, _, due_id = anchored_task
 
-        with pytest.raises(IntegrityError):
+        with pytest.raises(IntegrityError) as exc_info:
             await async_connection.execute(
                 text("DELETE FROM journals WHERE id = :id"), {"id": due_id}
             )
+
+        assert "tasks_due_journal_id_fkey" in str(exc_info.value)
 
 
 @pytest.mark.integration
@@ -326,7 +332,7 @@ class TestAnchorsAreMandatory:
     ) -> None:
         _, due_id = anchors
 
-        with pytest.raises(IntegrityError):
+        with pytest.raises(IntegrityError) as exc_info:
             await async_connection.execute(
                 text(
                     """
@@ -339,6 +345,8 @@ class TestAnchorsAreMandatory:
                 {"user_id": USER_ID, "due_id": due_id},
             )
 
+        assert 'null value in column "creating_journal_id"' in str(exc_info.value)
+
     async def test_a_task_cannot_be_inserted_without_a_due_journal(
         self,
         async_connection: AsyncConnection,
@@ -346,7 +354,7 @@ class TestAnchorsAreMandatory:
     ) -> None:
         creating_id, _ = anchors
 
-        with pytest.raises(IntegrityError):
+        with pytest.raises(IntegrityError) as exc_info:
             await async_connection.execute(
                 text(
                     """
@@ -358,6 +366,8 @@ class TestAnchorsAreMandatory:
                 ),
                 {"user_id": USER_ID, "creating_id": creating_id},
             )
+
+        assert 'null value in column "due_journal_id"' in str(exc_info.value)
 
     async def test_creating_and_due_may_be_the_same_journal(
         self,
@@ -403,10 +413,12 @@ class TestLinkTablesRejectDuplicates:
             async_connection, task_id=task_id, journal_id=mentioned_id
         )
 
-        with pytest.raises(IntegrityError):
+        with pytest.raises(IntegrityError) as exc_info:
             await _link_intermediate_journal(
                 async_connection, task_id=task_id, journal_id=mentioned_id
             )
+
+        assert "task_intermediate_journals_pkey" in str(exc_info.value)
 
     async def test_duplicate_contact_link_is_rejected(
         self,
@@ -417,7 +429,9 @@ class TestLinkTablesRejectDuplicates:
         contact_id = await _create_contact(async_connection)
         await _link_contact(async_connection, task_id=task_id, contact_id=contact_id)
 
-        with pytest.raises(IntegrityError):
+        with pytest.raises(IntegrityError) as exc_info:
             await _link_contact(
                 async_connection, task_id=task_id, contact_id=contact_id
             )
+
+        assert "task_contacts_pkey" in str(exc_info.value)
