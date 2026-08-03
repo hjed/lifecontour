@@ -421,6 +421,7 @@ async def _authenticated_client_context(
     from app.infrastructure.di.integrations import IntegrationProvider
     from app.infrastructure.di.journal import JournalProvider
     from app.infrastructure.di.settings import SettingsProvider
+    from app.infrastructure.di.tasks import TaskProvider
     from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
     from app.infrastructure.search.search_service import SearchService
     from app.main import create_app
@@ -482,6 +483,7 @@ async def _authenticated_client_context(
         TestAuthProvider(),
         ContactProvider(),
         JournalProvider(),
+        TaskProvider(),
         IntegrationProvider(),
         SettingsProvider(),
         FastapiProvider(),

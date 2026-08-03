@@ -128,8 +128,18 @@ the *creating* journal where it arose and the *due* journal where it matters.
     future-dated **at the moment it is set** needs journal data and the user's timezone, so it is
     enforced in the service layer where REST and MCP both inherit it
   - *Lapsed* is derived, never stored — a not-done task whose due journal has passed or been cancelled
-- **Ports and Domain Services**: not yet — `TaskRepository` lands in ITER18-001 Phase 2 and
-  `TaskService` in Phase 4
+- **Ports**: `TaskRepository` (`backend/app/core/tasks/models/repositories.py`), implemented by
+  `SqlTaskRepository` (`backend/app/core/tasks/adapters/sql/task_repository.py`) and provided at
+  request scope by `TaskProvider` (`backend/app/infrastructure/di/tasks.py`)
+- **Domain Services**: not yet — `TaskService` lands in ITER18-001 Phase 4
+- **Repository contract**: **owner scoping is part of the port, not an implementation detail.** Every
+  method takes the acting user's id and every statement filters on it, so a task belonging to
+  somebody else is indistinguishable from one that never existed: `find_by_id` returns `None` and
+  every other method raises `TaskNotFoundError`. The link tables carry no `user_id` of their own, so
+  link operations reach the owner through the task they belong to, and that check takes
+  `FOR KEY SHARE` so a concurrent delete cannot turn the promised `TaskNotFoundError` into a raw
+  foreign-key violation. The repository is responsible for persistence and task ownership only; every
+  other invariant is the service layer's.
 
 #### Photos Domain
 - **Entities**: Photo, ImmichPerson, PersonMatch

@@ -15,18 +15,17 @@ Each expected violation gets its own test: a failed statement poisons the
 surrounding transaction, so the test must end there and let the fixture roll back.
 """
 
-from datetime import UTC, datetime, timedelta
-
 import pytest
 import pytest_asyncio
-from core_shared.models.journals import EventDateRange, Journal
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
-
-USER_ID = "test-user-123"
+from tests.integration.tasks.task_seeding import USER_ID
+from tests.integration.tasks.task_seeding import count as _count
+from tests.integration.tasks.task_seeding import create_contact as _create_contact
+from tests.integration.tasks.task_seeding import create_journal as _create_journal
 
 # Statements are built once at module level so that a ``pytest.raises`` block
 # wraps only the execution under test, never the construction of its SQL.
@@ -45,39 +44,6 @@ _INSERT_TASK_WITHOUT_DUE_JOURNAL = text(
     VALUES (:user_id, 'Orphan', :creating_id, NULL)
     """
 )
-
-
-async def _create_journal(
-    journal_repository: SqlJournalRepository,
-    *,
-    title: str = "Anchor Journal",
-    days_offset: int = 0,
-) -> int:
-    """Create a journal and return its id."""
-    start = datetime.now(UTC) + timedelta(days=days_offset)
-    journal = await journal_repository.save(
-        Journal(
-            user_id=USER_ID,
-            title=title,
-            content="content",
-            event_date_range=EventDateRange(
-                start=start, end=start + timedelta(hours=1)
-            ),
-        )
-    )
-    assert journal.id is not None
-    return journal.id
-
-
-async def _create_contact(conn: AsyncConnection, *, first_name: str = "Sarah") -> int:
-    """Create a contact and return its id."""
-    contact_id = (
-        await conn.execute(
-            text("INSERT INTO contacts (first_name) VALUES (:first_name) RETURNING id"),
-            {"first_name": first_name},
-        )
-    ).scalar_one()
-    return int(contact_id)
 
 
 async def _create_task(
@@ -136,10 +102,6 @@ async def _link_contact(
         ),
         {"task_id": task_id, "contact_id": contact_id},
     )
-
-
-async def _count(conn: AsyncConnection, sql: str, params: dict[str, int]) -> int:
-    return int((await conn.execute(text(sql), params)).scalar_one())
 
 
 @pytest_asyncio.fixture
