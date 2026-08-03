@@ -8,7 +8,11 @@ the JSON API specification.
 from datetime import date, datetime, time
 from typing import Any
 
-from core_shared.models.journals import IncompletenessReason, OutdoorActivitySubtype
+from core_shared.models.journals import (
+    FitnessMergeMode,
+    IncompletenessReason,
+    OutdoorActivitySubtype,
+)
 from pydantic import BaseModel, Field, StrictStr, model_validator
 
 from app.api.common.schemas import (
@@ -1065,6 +1069,17 @@ class MergeJournalAttributes(BaseModel):
     )
     overrides: MergeOverrides | None = Field(
         default=None, description="Explicit conflict resolution overrides"
+    )
+    fitness_merge_mode: FitnessMergeMode = Field(
+        default=FitnessMergeMode.REPLACE,
+        description=(
+            "How to reconcile the two journals' fitness data. 'replace' (the "
+            "default) treats them as rival descriptions of one activity: the "
+            "target's values stand and the source's integration links are "
+            "dropped. 'additive' treats them as two parts of one outing: "
+            "distance, duration, elevation and calories sum, heart rates "
+            "combine, and both journals' Strava activities stay linked."
+        ),
     )
 
 

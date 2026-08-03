@@ -1,5 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import type { JournalResource, MergeOverrides } from '@/types/journals';
+import type {
+  FitnessData,
+  FitnessMergeMode,
+  JournalResource,
+  MergeOverrides,
+} from '@/types/journals';
 import {
   Dialog,
   DialogContent,
@@ -14,6 +19,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { formatDistance, formatDuration } from './ActivityStats';
 
 interface MergeResolutionDialogProps {
   readonly targetJournal: JournalResource | null;
@@ -21,7 +27,12 @@ interface MergeResolutionDialogProps {
   readonly open: boolean;
   readonly isPending: boolean;
   readonly onOpenChange: (open: boolean) => void;
-  readonly onResolve: (overrides: MergeOverrides) => void;
+  /** Which fitness merge mode to pre-select; see `MergeJournalDialog`. */
+  readonly defaultFitnessMergeMode?: FitnessMergeMode;
+  readonly onResolve: (
+    overrides: MergeOverrides,
+    fitnessMergeMode: FitnessMergeMode
+  ) => void;
 }
 
 interface Conflict {
@@ -74,18 +85,253 @@ export interface FieldResolution {
   customValue?: string;
 }
 
+/**
+ * The read API keys `type_data` by the lowercase journal type; hand-built
+ * payloads and older fixtures use the enum name. Accept either.
+ */
+const FITNESS_TYPE_KEYS = ['fitness', 'FITNESS'] as const;
+
+function getFitnessData(journal: JournalResource | null): FitnessData | null {
+  const typeData = journal?.attributes?.type_data;
+  if (!typeData) return null;
+  for (const key of FITNESS_TYPE_KEYS) {
+    const data = (typeData as Record<string, unknown>)[key];
+    if (data) return data as FitnessData;
+  }
+  return null;
+}
+
+function isFitnessConflict(fieldId: string): boolean {
+  return FITNESS_TYPE_KEYS.some(key => fieldId.startsWith(`type_data.${key}.`));
+}
+
+function sumMetric(
+  first: number | null | undefined,
+  second: number | null | undefined
+): number | undefined {
+  const values = [first, second].filter(
+    (value): value is number => typeof value === 'number'
+  );
+  return values.length > 0 ? values.reduce((a, b) => a + b, 0) : undefined;
+}
+
+function maxMetric(
+  first: number | null | undefined,
+  second: number | null | undefined
+): number | undefined {
+  const values = [first, second].filter(
+    (value): value is number => typeof value === 'number'
+  );
+  return values.length > 0 ? Math.max(...values) : undefined;
+}
+
+/**
+ * Average two heart rates, weighted by how long each part lasted. Mirrors the
+ * backend's rule so the preview matches what the merge will actually store.
+ */
+function combineAverageHeartRate(
+  target: FitnessData,
+  source: FitnessData
+): number | undefined {
+  const parts = [
+    { rate: target.heart_rate_avg, duration: target.duration },
+    { rate: source.heart_rate_avg, duration: source.duration },
+  ].filter(
+    (part): part is { rate: number; duration: number | null | undefined } =>
+      typeof part.rate === 'number'
+  );
+
+  if (parts.length === 0) return undefined;
+  if (parts.length === 1) return parts[0].rate;
+
+  // A duration that was never recorded gives nothing to weight by, and parts
+  // that are all zero-length would divide by zero — either way, weigh them
+  // equally. A recorded zero alongside a real duration is a genuine weight.
+  const durations = parts.map(part => part.duration);
+  const weights =
+    durations.some(duration => duration === null || duration === undefined) ||
+    durations.reduce(
+      (total: number, duration) => total + (duration ?? 0),
+      0
+    ) === 0
+      ? parts.map(() => 1)
+      : durations.map(duration => duration ?? 0);
+  const totalWeight = weights.reduce((a, b) => a + b, 0);
+  const weightedSum = parts.reduce(
+    (total, part, index) => total + part.rate * weights[index],
+    0
+  );
+  return Math.round(weightedSum / totalWeight);
+}
+
+interface CombinedMetric {
+  key: string;
+  label: string;
+  value: string;
+}
+
+function buildCombinedMetrics(
+  target: FitnessData,
+  source: FitnessData
+): CombinedMetric[] {
+  const distance = sumMetric(target.distance, source.distance);
+  const duration = sumMetric(target.duration, source.duration);
+  const elevationGain = sumMetric(target.elevation_gain, source.elevation_gain);
+  const elevationLoss = sumMetric(target.elevation_loss, source.elevation_loss);
+  const calories = sumMetric(target.calories, source.calories);
+  const averageHeartRate = combineAverageHeartRate(target, source);
+  const maxHeartRate = maxMetric(target.heart_rate_max, source.heart_rate_max);
+
+  return [
+    distance !== undefined
+      ? { key: 'distance', label: 'Distance', value: formatDistance(distance) }
+      : null,
+    duration !== undefined
+      ? { key: 'duration', label: 'Duration', value: formatDuration(duration) }
+      : null,
+    elevationGain !== undefined
+      ? {
+          key: 'elevation_gain',
+          label: 'Elevation Gain',
+          value: `${elevationGain} m`,
+        }
+      : null,
+    elevationLoss !== undefined
+      ? {
+          key: 'elevation_loss',
+          label: 'Elevation Loss',
+          value: `${elevationLoss} m`,
+        }
+      : null,
+    calories !== undefined
+      ? { key: 'calories', label: 'Calories', value: `${calories} kcal` }
+      : null,
+    averageHeartRate !== undefined
+      ? {
+          key: 'heart_rate_avg',
+          label: 'Avg Heart Rate',
+          value: `${averageHeartRate} bpm`,
+        }
+      : null,
+    maxHeartRate !== undefined
+      ? {
+          key: 'heart_rate_max',
+          label: 'Max Heart Rate',
+          value: `${maxHeartRate} bpm`,
+        }
+      : null,
+  ].filter((metric): metric is CombinedMetric => metric !== null);
+}
+
+interface FitnessMergeModeSectionProps {
+  readonly mode: FitnessMergeMode;
+  readonly onModeChange: (mode: FitnessMergeMode) => void;
+  readonly targetFitness: FitnessData;
+  readonly sourceFitness: FitnessData;
+}
+
+/**
+ * Chooses between adding the two activities together and picking one value per
+ * field, and previews what adding them together would produce.
+ */
+function FitnessMergeModeSection({
+  mode,
+  onModeChange,
+  targetFitness,
+  sourceFitness,
+}: FitnessMergeModeSectionProps) {
+  const combinedMetrics = buildCombinedMetrics(targetFitness, sourceFitness);
+
+  return (
+    <div className='space-y-3 rounded-md border p-4'>
+      <h4 className='text-sm font-medium'>Fitness Activity</h4>
+      <RadioGroup
+        value={mode}
+        onValueChange={(value: string) =>
+          onModeChange(value as FitnessMergeMode)
+        }
+        className='space-y-2 text-sm'
+      >
+        <div className='flex items-start space-x-2'>
+          <RadioGroupItem
+            value='additive'
+            id='fitness-additive'
+            data-testid='radio-fitness-additive'
+            className='mt-1'
+          />
+          <div className='grid gap-1.5 leading-none'>
+            <Label htmlFor='fitness-additive' className='font-semibold'>
+              Combine both activities
+            </Label>
+            <p className='text-muted-foreground'>
+              Two parts of one outing. Distances, durations, elevation and
+              calories are added together, and both Strava activities stay
+              linked to the merged journal.
+            </p>
+          </div>
+        </div>
+        <div className='flex items-start space-x-2'>
+          <RadioGroupItem
+            value='replace'
+            id='fitness-replace'
+            data-testid='radio-fitness-replace'
+            className='mt-1'
+          />
+          <div className='grid gap-1.5 leading-none'>
+            <Label htmlFor='fitness-replace' className='font-semibold'>
+              Keep one value per field
+            </Label>
+            <p className='text-muted-foreground'>
+              The same activity recorded twice. Choose field by field below;
+              only the surviving activity stays linked.
+            </p>
+          </div>
+        </div>
+      </RadioGroup>
+
+      {mode === 'additive' && combinedMetrics.length > 0 && (
+        <div
+          className='bg-muted grid grid-cols-2 gap-2 rounded-md p-3 text-sm'
+          data-testid='fitness-combined-preview'
+        >
+          {combinedMetrics.map(metric => (
+            <div key={metric.key} className='flex justify-between gap-2'>
+              <span className='text-muted-foreground'>{metric.label}</span>
+              <span className='font-medium'>{metric.value}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function MergeResolutionDialog({
   targetJournal,
   sourceJournal,
   open,
   isPending,
   onOpenChange,
+  defaultFitnessMergeMode = 'additive',
   onResolve,
 }: MergeResolutionDialogProps) {
   const [conflicts, setConflicts] = useState<Conflict[] | null>(null);
   const [resolutions, setResolutions] = useState<
     Record<string, FieldResolution>
   >({});
+  const [fitnessMergeMode, setFitnessMergeMode] = useState<FitnessMergeMode>(
+    defaultFitnessMergeMode
+  );
+
+  const targetFitness = getFitnessData(targetJournal);
+  const sourceFitness = getFitnessData(sourceJournal);
+  // Only two fitness journals can be added together, so that is the only case
+  // where the choice means anything.
+  const canCombineFitness = targetFitness !== null && sourceFitness !== null;
+  const effectiveFitnessMergeMode: FitnessMergeMode = canCombineFitness
+    ? fitnessMergeMode
+    : 'replace';
+  const isCombiningFitness = effectiveFitnessMergeMode === 'additive';
 
   useEffect(() => {
     if (!targetJournal || !sourceJournal) {
@@ -198,6 +444,13 @@ export function MergeResolutionDialog({
     );
   }, [targetJournal, sourceJournal]);
 
+  // Combining the activities replaces the per-field fitness choices wholesale,
+  // so those rows are hidden — but kept in state, so turning combining back off
+  // restores whatever the user had already picked.
+  const visibleConflicts = (conflicts ?? []).filter(
+    conflict => !(isCombiningFitness && isFitnessConflict(conflict.fieldId))
+  );
+
   const handleResolutionChange = (
     fieldId: string,
     choice: 'target' | 'source' | 'custom'
@@ -219,7 +472,7 @@ export function MergeResolutionDialog({
     if (!conflicts) return;
     const overrides: MergeOverrides = {};
 
-    conflicts.forEach(conflict => {
+    visibleConflicts.forEach(conflict => {
       const res = resolutions[conflict.fieldId];
       if (!res) return;
 
@@ -247,7 +500,7 @@ export function MergeResolutionDialog({
       }
     });
 
-    onResolve(overrides);
+    onResolve(overrides, effectiveFitnessMergeMode);
   };
 
   const renderConflictValue = (val: unknown, display?: string) => {
@@ -280,7 +533,7 @@ export function MergeResolutionDialog({
     );
   }
 
-  if (conflicts.length === 0) {
+  if (visibleConflicts.length === 0 && !canCombineFitness) {
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className='sm:max-w-md'>
@@ -324,7 +577,16 @@ export function MergeResolutionDialog({
 
         <ScrollArea className='my-4 flex-1 overflow-y-auto pr-4'>
           <div className='space-y-6'>
-            {conflicts.map(conflict => {
+            {canCombineFitness && targetFitness && sourceFitness && (
+              <FitnessMergeModeSection
+                mode={fitnessMergeMode}
+                onModeChange={setFitnessMergeMode}
+                targetFitness={targetFitness}
+                sourceFitness={sourceFitness}
+              />
+            )}
+
+            {visibleConflicts.map(conflict => {
               const res = resolutions[conflict.fieldId];
               return (
                 <div

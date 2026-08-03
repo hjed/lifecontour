@@ -182,7 +182,7 @@ def build_immich_album_url(server_url: str | None, album_id: str | None) -> str 
 
 def build_journal_external_links(
     *,
-    strava_activity_id: str | None,
+    strava_activity_ids: list[str] | None = None,
     external_event_links: list[dict[str, Any]],
     snipeit_links: list[dict[str, Any]] | None = None,
     immich_album_links: list[dict[str, Any]] | None = None,
@@ -190,11 +190,13 @@ def build_journal_external_links(
 ) -> list[ExternalLinkInfo]:
     """Build a list of external links for a journal.
 
-    Aggregates links from Strava fitness data, Google Calendar
+    Aggregates links from Strava activities, Google Calendar
     external event links, and Snipe-IT sync metadata.
 
     Args:
-        strava_activity_id: Strava activity ID from fitness_data, or None.
+        strava_activity_ids: Every Strava activity linked to the journal. A
+            journal carries more than one after an additive fitness merge,
+            where two activities making up a single outing both stay linked.
         external_event_links: List of dicts with 'external_event_id' and
             'calendar_id' keys from JournalExternalEventLink records.
         snipeit_links: List of dicts with 'integration_source', 'external_id',
@@ -209,14 +211,19 @@ def build_journal_external_links(
     """
     links: list[ExternalLinkInfo] = []
 
-    # Strava link from fitness data
-    if strava_activity_id and strava_activity_id.strip():
+    # One link per Strava activity the journal is linked to
+    seen_activity_ids: set[str] = set()
+    for strava_activity_id in strava_activity_ids or []:
+        activity_id = (strava_activity_id or "").strip()
+        if not activity_id or activity_id in seen_activity_ids:
+            continue
+        seen_activity_ids.add(activity_id)
         links.append(
             ExternalLinkInfo(
                 source="strava",
-                url=build_strava_activity_url(strava_activity_id),
-                external_id=strava_activity_id.strip(),
-                unique_key=strava_activity_id.strip(),
+                url=build_strava_activity_url(activity_id),
+                external_id=activity_id,
+                unique_key=activity_id,
             )
         )
 

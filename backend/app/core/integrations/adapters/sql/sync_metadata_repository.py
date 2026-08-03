@@ -7,6 +7,7 @@ This repository implements production-grade resilience patterns:
 3. Atomic upsert operations
 """
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 
@@ -456,6 +457,203 @@ class SyncMetadataRepository:
                 )
 
         return collisions
+
+    async def repoint_journal_links(
+        self,
+        source_id: int,
+        target_id: int,
+        transaction: AsyncConnection,
+        *,
+        keep_colliding_source_links: bool = False,
+        extra_target_links: Mapping[str, str] | None = None,
+    ) -> list[IntegrationLinkCollision]:
+        """Re-point a source journal's external links onto the target on merge.
+
+        The journal counterpart of :meth:`repoint_contact_links`, and the same
+        motivation: ``sync_metadata`` has no ``ON DELETE CASCADE``, so a merge
+        that deletes the source must move or remove its link rows or leave
+        resolvable-looking orphans behind.
+
+        Links for a service the target has no link for are always re-pointed,
+        as is a link to the very record the target is already linked to — that
+        is the same record arriving from the source, not a rival. The modes
+        differ only when the source and target name *different* records of the
+        same service:
+
+        - ``keep_colliding_source_links=False`` (default): the target's link is
+          kept and the source's row deleted, and the collision is returned so
+          the caller can log or reconcile it.
+        - ``keep_colliding_source_links=True``: the source's row is re-pointed
+          too, so the target ends up linked to **both** remote records. This is
+          what an additive fitness merge needs — two Strava activities making up
+          one outing both stay linked. ``sync_metadata`` is unique on
+          ``(integration_source, external_id)``, not on ``internal_id``, so
+          several rows may share one journal.
+
+        Args:
+            source_id: The journal being absorbed (and then deleted).
+            target_id: The surviving journal that keeps its id.
+            transaction: The merge transaction's connection.
+            keep_colliding_source_links: Keep both links on a same-service
+                collision instead of dropping the source's.
+            extra_target_links: Links the target holds outside ``sync_metadata``,
+                as ``{integration_source: external_id}``. A Strava activity id
+                typed into the fitness editor by hand lands in
+                ``journal_fitness_data`` with no sync row behind it, and without
+                it here a `replace` merge would mistake the source's Strava link
+                for a different service and carry it over — leaving the survivor
+                linked to both activities in the mode meant to drop one.
+
+        Returns:
+            One ``IntegrationLinkCollision`` per same-service collision, whether
+            or not the colliding link was kept.
+        """
+        target_result = await transaction.execute(
+            text(
+                """
+                SELECT integration_source AS external_system,
+                       external_id AS external_entity_id
+                FROM sync_metadata
+                WHERE internal_entity_type = 'journal'
+                  AND internal_id = :target_id
+                """
+            ),
+            {"target_id": target_id},
+        )
+        target_external_id_by_system = {
+            **{
+                system: external_id
+                for system, external_id in (extra_target_links or {}).items()
+                if external_id
+            },
+            # A real sync row wins over a hand-typed id for the same service:
+            # it is the one the integration workers actually maintain.
+            **{
+                row.external_system: row.external_entity_id
+                for row in target_result.fetchall()
+            },
+        }
+
+        source_result = await transaction.execute(
+            text(
+                """
+                SELECT integration_source AS external_system,
+                       external_entity_type,
+                       external_id AS external_entity_id
+                FROM sync_metadata
+                WHERE internal_entity_type = 'journal'
+                  AND internal_id = :source_id
+                """
+            ),
+            {"source_id": source_id},
+        )
+        source_links = source_result.fetchall()
+
+        collisions: list[IntegrationLinkCollision] = []
+        for link in source_links:
+            target_external_id = target_external_id_by_system.get(link.external_system)
+            # Both journals pointing at the same remote record is not a
+            # collision — there is nothing to choose between.
+            is_collision = (
+                target_external_id is not None
+                and target_external_id != link.external_entity_id
+            )
+            link_params = {
+                "source_id": source_id,
+                "target_id": target_id,
+                "integration_source": link.external_system,
+                "external_id": link.external_entity_id,
+            }
+
+            if is_collision:
+                collisions.append(
+                    IntegrationLinkCollision(
+                        external_system=link.external_system,
+                        external_entity_type=link.external_entity_type or "activity",
+                        source_external_id=link.external_entity_id,
+                        survivor_external_id=target_external_id or "",
+                    )
+                )
+
+            if not is_collision or keep_colliding_source_links:
+                await transaction.execute(
+                    text(
+                        """
+                        UPDATE sync_metadata
+                        SET internal_id = :target_id, updated_at = now()
+                        WHERE internal_entity_type = 'journal'
+                          AND internal_id = :source_id
+                          AND integration_source = :integration_source
+                          AND external_id = :external_id
+                        """
+                    ),
+                    link_params,
+                )
+            else:
+                await transaction.execute(
+                    text(
+                        """
+                        DELETE FROM sync_metadata
+                        WHERE internal_entity_type = 'journal'
+                          AND internal_id = :source_id
+                          AND integration_source = :integration_source
+                          AND external_id = :external_id
+                        """
+                    ),
+                    link_params,
+                )
+
+        return collisions
+
+    async def link_journal_if_unlinked(
+        self,
+        journal_id: int,
+        integration_source: str,
+        external_id: str,
+        external_entity_type: str,
+        transaction: AsyncConnection,
+    ) -> bool:
+        """Record a link for an external record that has none yet.
+
+        Used by an additive merge to preserve a link the source journal held
+        only outside ``sync_metadata`` — a Strava activity id typed into the
+        fitness editor by hand. The source's ``journal_fitness_data`` row is
+        deleted by the merge and the survivor keeps its own id, so without this
+        the hand-entered activity would simply vanish.
+
+        Does nothing when the record is already linked, so a real sync row —
+        with the ``version_hash`` the workers maintain — is never clobbered by
+        the empty hash used here.
+
+        Returns:
+            True when a link was created.
+        """
+        now = datetime.now(UTC)
+        result = await transaction.execute(
+            text("""
+                INSERT INTO sync_metadata
+                    (internal_id, integration_source, external_id, last_synced_at,
+                     version_hash, sync_status, retry_count,
+                     internal_entity_type, external_entity_type,
+                     created_at, updated_at)
+                VALUES
+                    (:journal_id, :integration_source, :external_id, :now,
+                     '', :sync_status, 0,
+                     'journal', :external_entity_type,
+                     :now, :now)
+                ON CONFLICT (integration_source, external_id) DO NOTHING
+                RETURNING id
+            """),
+            {
+                "journal_id": journal_id,
+                "integration_source": integration_source,
+                "external_id": external_id,
+                "external_entity_type": external_entity_type,
+                "sync_status": SyncStatus.PENDING.value,
+                "now": now,
+            },
+        )
+        return result.fetchone() is not None
 
     def should_sync(
         self, existing_metadata: SyncMetadata | None, new_version_hash: str

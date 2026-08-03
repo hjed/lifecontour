@@ -97,6 +97,9 @@ export function ReviewSuggestions({
         <MergeJournalDialog
           sourceJournalId={journalId}
           targetJournalId={selectedCandidateId}
+          // A suggested match is a possible duplicate, not two parts of one
+          // outing — accepting it should not sum the two activities.
+          defaultFitnessMergeMode='replace'
           open={mergeDialogOpen}
           onOpenChange={open => {
             setMergeDialogOpen(open);

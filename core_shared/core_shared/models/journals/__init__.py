@@ -107,6 +107,7 @@ from .exceptions import (
     TravelTransportationValidationError,
 )
 from .fitness_data import FitnessData
+from .fitness_merge_mode import FitnessMergeMode
 from .gear_item import GearItem
 from .gear_maintenance_data import GearMaintenanceData
 from .gear_usage_data import GearUsageData
@@ -218,6 +219,7 @@ __all__ = [
     "CalendarInfo",
     "event_date_in_timezone",
     "FitnessData",
+    "FitnessMergeMode",
     "MoodData",
     "PlanData",
     "PlanDocument",

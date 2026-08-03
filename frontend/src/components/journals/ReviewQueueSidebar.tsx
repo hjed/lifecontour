@@ -196,6 +196,10 @@ export function ReviewQueueSidebar({
           <MergeJournalDialog
             sourceJournalId={selectedSourceId}
             targetJournalId={selectedCandidateId}
+            // The queue only ever flags journals as being the *same* thing
+            // (external_link_match, duplicate_journal, needs_review), so
+            // confirming a match must not add the two activities together.
+            defaultFitnessMergeMode='replace'
             open={mergeDialogOpen}
             onOpenChange={open => {
               setMergeDialogOpen(open);

@@ -4,6 +4,7 @@ from typing import Any
 
 import structlog
 from core_shared.models.journals import (
+    FitnessMergeMode,
     Journal,
     JournalNotFoundError,
 )
@@ -11,6 +12,9 @@ from core_shared.models.journals.exceptions import JournalMergeConflictError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.integrations.adapters.sql.sync_metadata_repository import (
+    SyncMetadataRepository,
+)
 from app.core.journal.adapters.sql.journal_repository import _JOURNAL_TYPE_TABLE_MAP
 from app.core.journal.models.events import (
     JournalDeleted,
@@ -21,6 +25,20 @@ from app.infrastructure.events.outbox_event_publisher import OutboxEventPublishe
 from app.infrastructure.unit_of_work import transactional
 
 logger = structlog.get_logger(__name__)
+
+FITNESS_TABLE = "journal_fitness_data"
+
+STRAVA_SOURCE = "strava"
+STRAVA_ACTIVITY_ENTITY_TYPE = "activity"
+
+# Metrics that describe a quantity of activity, so two rows' values add up.
+_FITNESS_SUMMED_COLUMNS = (
+    "distance",
+    "duration",
+    "elevation_gain",
+    "elevation_loss",
+    "calories",
+)
 
 
 class JournalMergeService:
@@ -66,11 +84,17 @@ class JournalMergeService:
         source_id: int,
         transaction: AsyncConnection,
         overrides: dict[str, Any] | None = None,
+        fitness_merge_mode: FitnessMergeMode = FitnessMergeMode.REPLACE,
     ) -> Journal:
         """
         Merge source_id journal into target_id journal.
         Returns the merged target journal.
         Deletes the source journal.
+
+        ``fitness_merge_mode`` decides what happens when both journals carry
+        fitness data. The default treats them as rival descriptions of one
+        activity; ``ADDITIVE`` treats them as two parts of one outing, summing
+        the metrics and keeping both journals' integration links.
         """
         if target_id == source_id:
             raise JournalMergeConflictError("Cannot merge a journal into itself")
@@ -125,7 +149,12 @@ class JournalMergeService:
         # 6. Move External Links (deduplicate)
         await self._move_external_links(target_id, source_id, transaction)
 
-        # 7. Type Data Scalable merge
+        # 7. Re-point integration links in the canonical link store
+        await self._repoint_integration_links(
+            target_id, source_id, fitness_merge_mode, transaction
+        )
+
+        # 8. Type Data Scalable merge
         await self._merge_type_data(
             target_id,
             source_id,
@@ -133,15 +162,16 @@ class JournalMergeService:
             source,
             overrides,
             changed_fields,
+            fitness_merge_mode,
             transaction,
         )
 
-        # 8. Resolve related Review Items
+        # 9. Resolve related Review Items
         await self._resolve_review_items(
             target_id, source_id, target.user_id, transaction
         )
 
-        # 9. Publish Events & Cleanup Source
+        # 10. Publish Events & Cleanup Source
         await self._publish_events_and_cleanup(
             target_id, source_id, source, changed_fields, transaction
         )
@@ -424,6 +454,88 @@ class JournalMergeService:
             {"target_id": target_id, "source_id": source_id},
         )
 
+    async def _repoint_integration_links(
+        self,
+        target_id: int,
+        source_id: int,
+        fitness_merge_mode: FitnessMergeMode,
+        transaction: AsyncConnection,
+    ) -> None:
+        """Move the source's canonical integration links onto the target.
+
+        ``sync_metadata`` has no ``ON DELETE CASCADE``, so without this the
+        deleted source leaves link rows pointing at an id that no longer
+        resolves. An additive merge keeps a same-service collision as two links
+        (both Strava activities stay reachable); a replace merge drops the
+        source's, as contact merge does.
+
+        A Strava activity id can also reach a journal without a sync row behind
+        it — typed into the fitness editor by hand — so both journals'
+        ``journal_fitness_data`` ids are folded in: the target's so a replace
+        merge recognises the source's Strava link as the rival it is, the
+        source's so an additive merge does not lose it when the source's
+        fitness row is deleted further down.
+        """
+        is_additive = fitness_merge_mode is FitnessMergeMode.ADDITIVE
+        sync_metadata_repo = SyncMetadataRepository(transaction)
+
+        target_activity_id = await self._fitness_strava_activity_id(
+            target_id, transaction
+        )
+        source_activity_id = await self._fitness_strava_activity_id(
+            source_id, transaction
+        )
+
+        collisions = await sync_metadata_repo.repoint_journal_links(
+            source_id,
+            target_id,
+            transaction,
+            keep_colliding_source_links=is_additive,
+            extra_target_links=(
+                {STRAVA_SOURCE: target_activity_id} if target_activity_id else None
+            ),
+        )
+
+        if (
+            is_additive
+            and source_activity_id
+            and source_activity_id != target_activity_id
+        ):
+            await sync_metadata_repo.link_journal_if_unlinked(
+                target_id,
+                STRAVA_SOURCE,
+                source_activity_id,
+                STRAVA_ACTIVITY_ENTITY_TYPE,
+                transaction,
+            )
+
+        if collisions:
+            logger.info(
+                "Merge reconciled same-service integration links",
+                target_id=target_id,
+                source_id=source_id,
+                kept_both=is_additive,
+                collisions=[collision.as_dict() for collision in collisions],
+            )
+
+    @staticmethod
+    async def _fitness_strava_activity_id(
+        journal_id: int, transaction: AsyncConnection
+    ) -> str | None:
+        """The Strava activity named by a journal's fitness row, if any."""
+        result = await transaction.execute(
+            text(
+                f"SELECT strava_activity_id FROM {FITNESS_TABLE} "
+                "WHERE journal_id = :journal_id"
+            ),
+            {"journal_id": journal_id},
+        )
+        row = result.fetchone()
+        if row is None:
+            return None
+        activity_id: str | None = row.strava_activity_id
+        return activity_id
+
     async def _merge_type_data(
         self,
         target_id: int,
@@ -432,6 +544,7 @@ class JournalMergeService:
         source: Journal,
         overrides: dict[str, Any],
         changed_fields: dict[str, Any],
+        fitness_merge_mode: FitnessMergeMode,
         transaction: AsyncConnection,
     ) -> None:
         table_names = set(_JOURNAL_TYPE_TABLE_MAP.values())
@@ -465,8 +578,91 @@ class JournalMergeService:
                     source,
                     overrides,
                     changed_fields,
+                    fitness_merge_mode,
                     transaction,
                 )
+
+    @staticmethod
+    def _combine_fitness_metrics(target_dict: Any, source_dict: Any) -> dict[str, Any]:
+        """Combine two fitness rows as two parts of one outing.
+
+        Quantities of activity sum, the peak heart rate is the higher of the
+        two, and the average heart rate is weighted by how long each part
+        lasted (an even split when either duration is missing, since there is
+        nothing to weight by).
+
+        A missing value means "not recorded", never zero: where only one side
+        has a number, that number is the answer, and where neither does the
+        column is left out entirely so the caller writes nothing.
+
+        Columns absent from the returned mapping — ``strava_activity_id``, the
+        timestamps — keep the ordinary merge behaviour. The source's Strava id
+        is not lost by that: it carries over as a ``sync_metadata`` link.
+        """
+        combined: dict[str, Any] = {}
+
+        for col in _FITNESS_SUMMED_COLUMNS:
+            values = [
+                value
+                for value in (target_dict.get(col), source_dict.get(col))
+                if value is not None
+            ]
+            if values:
+                combined[col] = sum(values)
+
+        max_heart_rates = [
+            value
+            for value in (
+                target_dict.get("heart_rate_max"),
+                source_dict.get("heart_rate_max"),
+            )
+            if value is not None
+        ]
+        if max_heart_rates:
+            combined["heart_rate_max"] = max(max_heart_rates)
+
+        average = JournalMergeService._combine_average_heart_rate(
+            target_dict, source_dict
+        )
+        if average is not None:
+            combined["heart_rate_avg"] = average
+
+        return combined
+
+    @staticmethod
+    def _combine_average_heart_rate(target_dict: Any, source_dict: Any) -> int | None:
+        """Average two heart rates, weighted by each part's duration."""
+        parts = [
+            (target_dict.get("heart_rate_avg"), target_dict.get("duration")),
+            (source_dict.get("heart_rate_avg"), source_dict.get("duration")),
+        ]
+        recorded: list[tuple[int, int | None]] = [
+            (rate, duration) for rate, duration in parts if rate is not None
+        ]
+
+        if not recorded:
+            return None
+        if len(recorded) == 1:
+            return recorded[0][0]
+
+        durations = [duration for _, duration in recorded]
+        if (
+            any(duration is None for duration in durations)
+            or sum(duration or 0 for duration in durations) == 0
+        ):
+            # Nothing to weight by — a duration was never recorded, or every
+            # part is zero-length — so treat the parts as equally long. A
+            # recorded zero is a real weight and only lands here when it is the
+            # only one, which would otherwise divide by zero.
+            weights = [1] * len(recorded)
+        else:
+            weights = [duration or 0 for duration in durations]
+
+        total_weight = sum(weights)
+        weighted_sum = sum(
+            rate * weight for (rate, _), weight in zip(recorded, weights, strict=True)
+        )
+        return round(weighted_sum / total_weight)
 
     async def _transfer_new_type_data(
         self,
@@ -495,6 +691,7 @@ class JournalMergeService:
         source: Journal,
         overrides: dict[str, Any],
         changed_fields: dict[str, Any],
+        fitness_merge_mode: FitnessMergeMode,
         transaction: AsyncConnection,
     ) -> None:
         source_dict = source_row._mapping
@@ -502,15 +699,23 @@ class JournalMergeService:
         updates = []
         update_params: dict[str, Any] = {"target_id": target_id}
 
-        type_enum_names = [
-            k
-            for k, v in _JOURNAL_TYPE_TABLE_MAP.items()
-            if v == table_name and k.isupper()
-        ]
+        # Both casings of a type key map to the same table ("FITNESS" and
+        # "fitness"), and callers legitimately use either: the enum name in
+        # hand-written payloads, the lowercase enum value the read API returns
+        # and the merge panel echoes back. Accept both rather than dropping
+        # half the overrides on the floor.
+        type_keys = [k for k, v in _JOURNAL_TYPE_TABLE_MAP.items() if v == table_name]
         type_overrides = {}
         type_data_overrides = overrides.get("type_data") or {}
-        for tenum in type_enum_names:
-            type_overrides.update(type_data_overrides.get(tenum, {}))
+        for type_key in type_keys:
+            type_overrides.update(type_data_overrides.get(type_key, {}))
+
+        combined = (
+            self._combine_fitness_metrics(target_dict, source_dict)
+            if table_name == FITNESS_TABLE
+            and fitness_merge_mode is FitnessMergeMode.ADDITIVE
+            else {}
+        )
 
         for col in source_dict.keys():
             if col in ("id", "journal_id"):
@@ -520,6 +725,12 @@ class JournalMergeService:
                 if type_overrides[col] != target_dict[col]:
                     updates.append(f"{col} = :{col}")
                     update_params[col] = type_overrides[col]
+                continue
+
+            if col in combined:
+                if combined[col] != target_dict[col]:
+                    updates.append(f"{col} = :{col}")
+                    update_params[col] = combined[col]
                 continue
 
             s_val = source_dict[col]

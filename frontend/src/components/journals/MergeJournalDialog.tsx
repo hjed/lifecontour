@@ -15,7 +15,11 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { JournalSearchCombobox } from './JournalSearchCombobox';
 import { useMergeJournal, useJournal } from '@/lib/api/journals';
-import { JournalResource, MergeOverrides } from '@/types/journals';
+import {
+  FitnessMergeMode,
+  JournalResource,
+  MergeOverrides,
+} from '@/types/journals';
 import { MergeResolutionDialog } from './MergeResolutionDialog';
 
 interface MergeJournalDialogProps {
@@ -23,6 +27,13 @@ interface MergeJournalDialogProps {
   readonly sourceJournalId?: string;
   readonly open?: boolean;
   readonly onOpenChange?: (open: boolean) => void;
+  /**
+   * Which way to lean when both journals carry fitness data. Picking two
+   * journals by hand says they are different activities, so combining is the
+   * default; a duplicate-review surface has already judged them to be the same
+   * thing and should pass `'replace'`. The user can still change it either way.
+   */
+  readonly defaultFitnessMergeMode?: FitnessMergeMode;
 }
 
 export function MergeJournalDialog({
@@ -30,6 +41,7 @@ export function MergeJournalDialog({
   sourceJournalId,
   open: externalOpen,
   onOpenChange: externalOnOpenChange,
+  defaultFitnessMergeMode = 'additive',
 }: MergeJournalDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const open = externalOpen === undefined ? internalOpen : externalOpen;
@@ -94,7 +106,10 @@ export function MergeJournalDialog({
     setResolutionOpen(true);
   };
 
-  const handleMerge = async (overrides: MergeOverrides) => {
+  const handleMerge = async (
+    overrides: MergeOverrides,
+    fitnessMergeMode: FitnessMergeMode
+  ) => {
     if (!selectedJournal) return;
 
     try {
@@ -102,6 +117,7 @@ export function MergeJournalDialog({
         targetId: targetJournalId,
         sourceId: selectedJournal.id,
         overrides,
+        fitnessMergeMode,
       });
       setResolutionOpen(false);
       setSelectedJournal(null);
@@ -184,11 +200,18 @@ export function MergeJournalDialog({
 
       {resolutionOpen && (
         <MergeResolutionDialog
+          // Keyed on the pair so a different merge starts from the defaults
+          // rather than inheriting the previous pair's resolutions. Doing this
+          // with an effect instead would fight React Query: a background
+          // refetch changes the journal object identity without changing which
+          // journals these are, and would reset the user's choices mid-dialog.
+          key={`${targetJournalId}:${selectedJournal?.id ?? ''}`}
           open={resolutionOpen}
           onOpenChange={handleResolutionOpenChange}
           targetJournal={targetJournalRes?.data || null}
           sourceJournal={sourceJournalRes?.data || null}
           isPending={mergeJournalData.isPending}
+          defaultFitnessMergeMode={defaultFitnessMergeMode}
           onResolve={handleMerge}
         />
       )}
