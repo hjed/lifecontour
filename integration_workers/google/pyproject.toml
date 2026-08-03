@@ -37,7 +37,7 @@ dependencies = [
     "cryptography>=49.0.0",
 
     # Redis client (compatible with ARQ)
-    "redis[hiredis]>=8.0.1",
+    "redis[hiredis]>=8.1.0",
 ]
 
 [tool.uv.sources]
