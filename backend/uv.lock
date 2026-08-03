@@ -423,7 +423,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.1.1" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=1.4.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=7.1.0" },
-    { name = "redis", specifier = ">=8.0.1" },
+    { name = "redis", specifier = ">=8.1.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.16.1" },
     { name = "sqlalchemy", specifier = ">=2.0.51" },
     { name = "structlog", specifier = ">=26.1.0" },
@@ -619,7 +619,7 @@ wheels = [
 
 [[package]]
 name = "fastapi"
-version = "0.140.0"
+version = "0.141.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "annotated-doc" },
@@ -628,26 +628,26 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "typing-inspection" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0d/fb/fd7671137d9fa3df1d93a2f5111eb982709201724b29f211e4beb2d58688/fastapi-0.140.0.tar.gz", hash = "sha256:f338951b82fd74ca8f843163aec43ea1a1ce84d515415a50fa98fa25572a5544", size = 420968, upload-time = "2026-07-24T21:16:41.187Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8a/02/91e3416a8fdd715abb903a952a6bec7cdd8d14eed55d415fc8595524c319/fastapi-0.141.1.tar.gz", hash = "sha256:e8822fc40db1e1858054d7a949a888695bc9bdce70139178e33bd2871a453ca1", size = 425799, upload-time = "2026-07-29T17:18:05.568Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/eb/76/6d9e25ad88da9d3ff744bcdbec4736e38c2288611d43f673a5d9bfa27c07/fastapi-0.140.0-py3-none-any.whl", hash = "sha256:e951c0a0d9540bf5d9a2a9e078fd415da2ab7e312d435139e7d9e2e7fe9f0b23", size = 130863, upload-time = "2026-07-24T21:16:42.89Z" },
+    { url = "https://files.pythonhosted.org/packages/cb/03/10388a42375ee7e4ac9b94eb2c5c569c8b5795e377e701c9ac3ad63de890/fastapi-0.141.1-py3-none-any.whl", hash = "sha256:bfb91aa2d334c61cb35ba9a116fc123b3d3df31640b801cf57a7a78ec3f603b3", size = 131954, upload-time = "2026-07-29T17:18:04.364Z" },
 ]
 
 [[package]]
 name = "fastmcp"
-version = "3.4.4"
+version = "3.4.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "fastmcp-slim", extra = ["client", "server"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9c/f7/5188565d1b93ad611cbd80bf473e7ad669d1f3b689c4bedcd304e1ec3472/fastmcp-3.4.4.tar.gz", hash = "sha256:378202e26ec15b23819d9a1c0d1b0ebda096bc712720532010a0b82a45c2b1df", size = 28796458, upload-time = "2026-07-09T00:32:41.352Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/23/14/c1ffb91b7d1fece86c81e1f9df5474f30fd97e4cdaa398814bbbeee88568/fastmcp-3.4.5.tar.gz", hash = "sha256:a95f2bc876bef42e8b50f7872f24f3f2fe3b1d37408c734e8b9d9e03014b72d3", size = 28800521, upload-time = "2026-07-27T19:20:01.231Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5f/67/3cef84ba38a23dca1e1e776bfda8a35ab3c7a6c94a8ca81d0715de6dd3c5/fastmcp-3.4.4-py3-none-any.whl", hash = "sha256:f86f208713212260068cf55c32936839eee856fefc7808e18a032f31eb0f718e", size = 8019, upload-time = "2026-07-09T00:32:39.411Z" },
+    { url = "https://files.pythonhosted.org/packages/c6/4f/73450a436c963c0382d15a882fc5d08f15aadc329194df1b54495a7c8383/fastmcp-3.4.5-py3-none-any.whl", hash = "sha256:5d3d438eb2917e63e6faf53e8cb8fe26d887ec3232f848093a4eecad7fa34861", size = 8017, upload-time = "2026-07-27T19:19:57.942Z" },
 ]
 
 [[package]]
 name = "fastmcp-slim"
-version = "3.4.4"
+version = "3.4.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "platformdirs" },
@@ -657,9 +657,9 @@ dependencies = [
     { name = "rich" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/45/79/f35661c6a1d76dfbe17a079f912d96fffcfdd40fad5a9144bb9e7dfb1fdf/fastmcp_slim-3.4.4.tar.gz", hash = "sha256:dcaa3e0be2127d7eacdce592c2ef0039204923dc0ec396454615cb4a3275b078", size = 590203, upload-time = "2026-07-09T00:32:20.531Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/81/1d/f3e271fbcd01ce01a4cf623b336d8e1305c192aa5d5e8e0223b7167462e9/fastmcp_slim-3.4.5.tar.gz", hash = "sha256:5badc3bceee61f61297eeb9494f499325f3ce1cafabf4611b31f6c3e9d7dff59", size = 591622, upload-time = "2026-07-27T19:15:19.455Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/16/91/321e0b2e9ed70d0628b17ddaec76fc7b09f3e1d5d290f70bf101a2890142/fastmcp_slim-3.4.4-py3-none-any.whl", hash = "sha256:9d3a6327b9ee835188eb7323fc3b5d4cd061631b48da8ece56794bb538972505", size = 765158, upload-time = "2026-07-09T00:32:19.11Z" },
+    { url = "https://files.pythonhosted.org/packages/43/3b/16d8aa8224094519f30b078138e725b8a731bf0a13f1f850e58b5f9b3cc4/fastmcp_slim-3.4.5-py3-none-any.whl", hash = "sha256:bc31217827c4999812543c83ee95ed9a47f3ed1e3fd0bd4f64371e375b748eca", size = 766478, upload-time = "2026-07-27T19:15:18.015Z" },
 ]
 
 [package.optional-dependencies]
@@ -1637,8 +1637,8 @@ requires-dist = [
     { name = "core-shared", editable = "../core_shared" },
     { name = "cryptography", specifier = ">=49.0.0" },
     { name = "dishka", specifier = ">=1.10.1" },
-    { name = "fastapi", specifier = ">=0.140.0" },
-    { name = "fastmcp", specifier = ">=3.4.4" },
+    { name = "fastapi", specifier = ">=0.141.1" },
+    { name = "fastmcp", specifier = ">=3.4.5" },
     { name = "google-api-python-client", specifier = ">=2.198.0" },
     { name = "google-auth-httplib2", specifier = ">=0.4.0" },
     { name = "google-auth-oauthlib", specifier = ">=1.4.0" },
@@ -1676,7 +1676,7 @@ requires-dist = [
     { name = "sqlalchemy", specifier = ">=2.0.51" },
     { name = "structlog", specifier = ">=26.1.0" },
     { name = "types-authlib", marker = "extra == 'dev'", specifier = ">=1.7.2.20260724" },
-    { name = "uvicorn", specifier = ">=0.51.0" },
+    { name = "uvicorn", specifier = ">=0.52.0" },
 ]
 provides-extras = ["dev"]
 
@@ -2143,11 +2143,11 @@ wheels = [
 
 [[package]]
 name = "redis"
-version = "8.0.1"
+version = "8.1.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/cc/c3/928b290c2c0ca99ab96eea5b4ff8f30be8112b075301a7d3ba214a3c8c12/redis-8.0.1.tar.gz", hash = "sha256:afc5a7a2f5a084f5b1880dec548dd45be17db7e43c82a30d84f952aefb05cfb0", size = 5114170, upload-time = "2026-06-23T14:52:37.728Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a8/99/604f0b666d4c616d891cf77ebb9db6bb21601344c051aebf1b72b9ff915f/redis-8.1.0.tar.gz", hash = "sha256:6e1a19beef9225c83efd689c7e6b7da2d5215b1f42cd13b7fc3714d0a09c7b25", size = 5254356, upload-time = "2026-07-30T08:51:00.269Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fd/0a/c2345ebf1ebe70840ce3f6c6ee612f8fa749cfbd1b03069c53bf0c62aaad/redis-8.0.1-py3-none-any.whl", hash = "sha256:47daa35a058c23468d6437f17a8c76882cb316b838ef763036af99b96cedd743", size = 502406, upload-time = "2026-06-23T14:52:36.137Z" },
+    { url = "https://files.pythonhosted.org/packages/66/9d/c5731f6e3608663d4d3656fd8d3aecee8b509c3082818f5a13eae925baea/redis-8.1.0-py3-none-any.whl", hash = "sha256:a4fe1aac3d3b3cc791d4b3d5931c5a956045dc951ee74d1c913ee3ac4d2ee9fb", size = 560618, upload-time = "2026-07-30T08:50:58.497Z" },
 ]
 
 [[package]]
@@ -2457,15 +2457,15 @@ wheels = [
 
 [[package]]
 name = "uvicorn"
-version = "0.51.0"
+version = "0.52.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
     { name = "h11" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a2/65/b7c6c443ccc58678c91e1e973bbe2a878591538655d6e1d47f24ba1c51f3/uvicorn-0.51.0.tar.gz", hash = "sha256:f6f4b69b657c312f516dd2d268ab9ae6f254b11e4bac504f37b2ab58b24dd0b0", size = 94412, upload-time = "2026-07-08T10:59:05.962Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/05/c8/2d307868453a4bca6e64fa3581d122ae0748a0869c53f159339def179c7c/uvicorn-0.52.0.tar.gz", hash = "sha256:ca8876ad6c1983f394157c168b39d52f6dd56dabf5602fa0982751cffc2293ae", size = 97504, upload-time = "2026-07-29T08:45:34.065Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/45/ec/dbb7e5a6b91f86bfb9eb7d2988a2730907b6a729875b949c7f022e8b88fa/uvicorn-0.51.0-py3-none-any.whl", hash = "sha256:5d38af6cd620f2ae3849fb44fd4879e0890aa1febe8d47eb355fb45d93fe6a5b", size = 73219, upload-time = "2026-07-08T10:59:04.44Z" },
+    { url = "https://files.pythonhosted.org/packages/39/e6/b5c0630ace9757232aec07112be8146b812787db52141ff9d50674aa7634/uvicorn-0.52.0-py3-none-any.whl", hash = "sha256:3d887809810b89ed33501bcf0a9aba469b06ecd608158efce04bd6b48d8c9b08", size = 79058, upload-time = "2026-07-29T08:45:32.492Z" },
 ]
 
 [[package]]
