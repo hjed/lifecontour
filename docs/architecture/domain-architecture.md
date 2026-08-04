@@ -374,11 +374,13 @@ The journal domain has **two separate review stores** that must not be conflated
 
 ### Journal date resolution (user-local)
 
-A journal's **date** is the local date of its `event_date_range.start` in the acting user's timezone —
-the same date the journal list groups it under, and the date the tasks model judges its future-dated
-invariant against. A multi-day journal is dated by the day it *starts*: a trip that began yesterday and
-runs until tomorrow is **past**, however much of it is still ahead. "Today" is likewise the user's local
-date, resolved through `UserSettingsRepository.get_timezone` + `resolve_timezone`, **never** UTC-today.
+A journal's **date** is the local date of its `event_date_range.start` in the acting user's **configured**
+timezone, and it is the date the tasks model judges its future-dated invariant against. It is *intended*
+to be the date the journal list groups it under; that equality does not hold unconditionally today, and
+the gap is described below. A multi-day journal is dated by the day it *starts*: a trip that began
+yesterday and runs until tomorrow is **past**, however much of it is still ahead. "Today" is likewise the
+user's local date, resolved through `UserSettingsRepository.get_timezone` + `resolve_timezone`,
+**never** UTC-today.
 
 `backend/app/core/journal/services/journal_date_resolver.py` holds this in two layers:
 
