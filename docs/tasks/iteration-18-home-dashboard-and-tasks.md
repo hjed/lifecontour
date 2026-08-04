@@ -2,8 +2,8 @@
 
 **Status:** 🟡 IN PROGRESS — fully broken down: 5 iterations, **61 phases**, one PR each, with per-phase
 acceptance criteria and diff estimates calibrated against iteration 17's recorded actuals.
-**ITER18-001 Phases 1–2 complete** (task tables + domain entity; task repository); next is
-ITER18-001 Phase 3 (journal-date resolution and the future-dated rule).
+**ITER18-001 Phases 1–3 complete** (task tables + domain entity; task repository; journal-date resolution
+and the future-dated rule); next is ITER18-001 Phase 4 (creation service and core invariants).
 **Dependencies:** Iteration 4 (journal core, contact relationships, event date ranges), Iteration 7
 (daily summaries, calendar sync, day-grouped journal browsing, journal merge), Iteration 12 (unified
 event-driven field history), Iteration 5 (Redis Streams event bus, outbox relay, stream consumers),
@@ -318,6 +318,15 @@ rules below follow from that record and apply to every phase in this document:
     abstract method (191 vs 288 lines there), and **owner scoping multiplies test volume**, because
     proving a second user cannot reach the first's data needs its own seeded foreign rows per method
     group. Count the port as a first-class production artefact, not a header file.
+14. **A *rule-defining* phase is ×6 too** — added after ITER18-001 Phase 3 came in at 814 against a 360
+    estimate (2.3×) with **no** port, adapter or owner scoping, so rule 13's stated cause cannot explain
+    it. The common factor is narrower than "ports": when a phase's deliverable is a *decision* rather than
+    a capability — which local date, is it future-dated, does this recur in the window — it is only
+    meaningful at its boundaries, and every boundary is a test carrying the arithmetic that makes it
+    readable. 123 production lines bought 28 tests there. **Apply ×6 whenever a phase's acceptance
+    criteria read as a matrix**; ×4 remains right for phases that wire an existing rule to a new surface.
+    ITER18-004 Phase 9 (important-date occurrence resolution) and Phase 10 (contact importance signals)
+    are the next two this catches — both are estimated at ×4 today.
 
 **Programme size:** 61 phases — and therefore 61 PRs — across the five iterations
 (ITER18-001: 22, ITER18-002: 5, ITER18-003: 9, ITER18-004: 17, ITER18-005: 8). That count is the honest
@@ -498,13 +507,14 @@ leaves tasks uncreatable and invisible).
 **Open decisions:**
 
 1. ~~**Primary key type**~~ — ✅ **settled in Phase 1: `Integer` serial.** See *Decisions taken (Phase 1)*.
-2. **Where the due-journal "future" boundary sits** for a multi-day journal whose range straddles today —
-   settled in **Phase 3**, not Phase 2 as this entry originally said. Phase 2 turned out to hold no date
-   logic at all: it is pure persistence, and the journal-date resolution the decision is about is exactly
-   what Phase 3 exists for (its acceptance criteria already claim the decision). The pointer is corrected
-   here rather than the decision being forced into a phase that cannot make it. The specification defines
-   a journal's date as its start date, so a trip that started yesterday and ends tomorrow is *past*;
-   confirm that reading in Phase 3 before it becomes a validation rule.
+2. ~~**Where the due-journal "future" boundary sits** for a multi-day journal whose range straddles
+   today~~ — ✅ **settled in Phase 3: the journal's date is its start date, so a trip that started
+   yesterday and ends tomorrow is *past*** and cannot be a due journal. Confirmed against the
+   specification's own definition ("the date of the start of its event date range") before it became a
+   validation rule, and pinned by a test plus its mirror so the rule cannot later be "fixed" into
+   consulting `end`. Phase 3 also settled the adjacent question the entry did not ask: the boundary is
+   **strict** — a journal starting later *today* is not future-dated either. See *Decisions taken
+   (Phase 3)*.
 3. ~~**Whether task text has a length bound**, and whether it is markdown or plain~~ — ✅ **settled in
    Phase 1: plain text, `TEXT`, no length bound.** See *Decisions taken (Phase 1)*.
 4. **Whether MCP gets a delete tool** — settled in **Phase 7**. The specification's MCP list omits delete
@@ -714,24 +724,155 @@ cascade on task delete, and owner scoping (another user's id returns nothing). N
   (36 tests — 13 from Phase 1, 23 new) and `tests/integration/api/` (which exercises the test-container
   change) all pass.
 
-#### Phase 3: Journal-Date Resolution and the Future-Dated Rule
+#### Phase 3: Journal-Date Resolution and the Future-Dated Rule ✅ COMPLETE
 
 **Prerequisites:** none (pure logic over existing journal data).
-**Estimated diff:** ~90 production → **~360 tracked** (×4)
+**Estimated diff:** ~90 production → **~360 tracked** (×4) · **Overrun recorded before work started
+(delivery rule 3): ~120 production → ~480–550 tracked.** Two things the original figure missed. The
+fourth acceptance criterion ("reusable by ITER18-004's windowing rather than re-derived there") is only
+met if this phase ships the local-day **window** builder as well as the date resolver — otherwise
+ITER18-004 Phase 5 copies `OutdoorDashboardService._window` for a third time, which is exactly what the
+criterion exists to prevent. And the required coverage names **DST transition days** in the plural over
+four distinct behaviours (date resolution, today anchoring, the predicate, the window), which is a test
+matrix rather than a test. · **Actual:** ~123 production → **~814 tracked** (814 insertions, 23 deletions
+across 6 files: 123 production — 115 in the new module, 8 in the DI provider — 479 tests, 212 docs).
+
+**The pre-recorded overrun undershot as well, and the reason is the one worth carrying forward.** 814
+against 360 is **2.3×** on the estimate, but against *production* it is **6.6×**. Calibration rule 13
+introduced ×6 after Phase 2 and attributed it to *port + adapter pairs*.
+That attribution is too narrow: this phase has no port, no adapter and no owner scoping, and still came in
+at ×6. **The real driver is how much of the deliverable is a rule that has to be pinned case by case.**
+This phase's entire product is a decision (which local date, is it future) that only means anything at the
+boundaries, so every boundary — two timezone directions, local midnight either side, two DST transitions,
+a multi-day journal and its mirror — is a test, and each test carries the instant arithmetic that makes it
+readable. 123 production lines bought 28 tests. **Suggested amendment to rule 13:** apply ×6 to
+*rule-defining* phases as well as port+adapter ones — anything whose acceptance criteria read as a matrix
+rather than a capability. ×4 remains right for phases that mostly wire an existing rule to a new surface.
 
 **Acceptance Criteria:**
 
-- [ ] A helper resolving a journal's **date** as the date of `event_date_range.start` in the user's
+- [x] A helper resolving a journal's **date** as the date of `event_date_range.start` in the user's
       timezone (`UserSettingsRepository.get_timezone`, `resolve_timezone`) — the same date the journal list
-      groups it under. Never UTC-today.
-- [ ] A predicate answering "is this journal future-dated relative to today in the user's timezone".
-- [ ] Open decision 2 settled here: a multi-day journal that started yesterday and ends tomorrow is
-      **past**, because a journal's date is its start date.
-- [ ] Reusable by ITER18-004's windowing rather than re-derived there.
+      groups it under. Never UTC-today. — `journal_date(journal, tz)` over `local_date(moment, tz)` in
+      `backend/app/core/journal/services/journal_date_resolver.py`; the timezone comes from
+      `JournalDateResolver.timezone_for`, which is `resolve_timezone(await get_timezone(user_id))`.
+      Asserted against a real `user_settings` row, and against the UTC fallback when there is none.
+      **Partial on one clause, deliberately:** "the same date the journal list groups it under" holds by
+      *rule* but not unconditionally in fact — see *Divergence recorded (Phase 3)* below.
+- [x] A predicate answering "is this journal future-dated relative to today in the user's timezone". —
+      `is_future_dated(journal, tz, now=None)`, plus the resolver method of the same name. **Strictly
+      after today**: a journal starting later the same local day is *not* future-dated, per specification
+      invariant 4 ("in the future relative to today"). Recorded as a decision below because it is the one
+      reading of the invariant that has a product consequence.
+- [x] Open decision 2 settled here: a multi-day journal that started yesterday and ends tomorrow is
+      **past**, because a journal's date is its start date. — Settled as written and pinned by
+      `test_a_multi_day_journal_that_started_yesterday_and_ends_tomorrow_is_past`, with
+      `test_a_multi_day_journal_starting_tomorrow_is_future_dated` as its mirror so the rule cannot be
+      "fixed" into consulting `end`. The open-decision entry above is struck through.
+- [x] Reusable by ITER18-004's windowing rather than re-derived there. — `local_day_window(day, tz)`
+      returns the user's local day as an `EventDateRange`, which is the shape ITER18-004 Phase 5's overlap
+      query needs; that phase's prerequisite line now names the module. The pure functions take a
+      `ZoneInfo` rather than a `user_id` so a batch caller resolves the timezone once.
+
+**Divergence recorded (Phase 3) — the journal list groups by the *browser's* timezone:**
+
+The acceptance criterion defines a journal's date as its start "in the user's timezone — **the same date
+the journal list groups it under**", and treats those as one thing. They are not, and the phase found it
+rather than assuming it. `groupJournalsByDay` (`frontend/src/lib/journal-grouping.ts`) buckets a journal
+with `format(parseISO(start), 'yyyy-MM-dd')`, and `date-fns` `format` renders in the **browser's** local
+timezone. The backend has no access to that, and the project's standing rule is that date windows are
+anchored with `UserSettingsRepository.get_timezone` — so this phase implements the configured-timezone
+reading, which is the one the specification's invariant is written in ("relative to today in the user's
+timezone").
+
+The two agree whenever the browser's timezone matches the configured one, which is the ordinary case. They
+disagree when the user is travelling, or has set a timezone that is not their device's. The visible
+consequence is narrow and worth stating exactly: a journal can be listed under one day while the tasks
+invariant judges it by another, so a due journal that looks like tomorrow in the list can be rejected as
+not future-dated (or the reverse). Nothing is corrupted by this — the rule is applied consistently
+server-side — but the message the user sees would name a date their screen disagrees with.
+
+Deliberately **not** fixed here: aligning them means either sending the configured timezone to the client
+and grouping with it, or rendering the grouping server-side — a frontend change in a backend-only phase,
+touching a shipped list this phase has no other reason to open. **Follow-ups recorded:** ITER18-004 Phase 3
+(the page shell) is the natural place to make the configured timezone available client-side, and Phase 20
+(create-a-task's due-journal picker) is the first surface where a user would *see* the disagreement,
+because it shows future journals and their dates while the server decides which of them are eligible. Both
+are named here so neither inherits the assumption that the two dates already agree.
+
+**Decisions taken (Phase 3):**
+
+- **The module lives in the journal domain, not tasks and not settings.** A journal's date is journal
+  knowledge. `app/core/settings/timezone_utils.py` is a **leaf** imported by journal, contacts and
+  integrations; importing `Journal` into settings would couple that leaf to a domain and affect every
+  existing importer. The tasks domain is the wrong direction for the other consumer: ITER18-004 Phase 5's
+  agenda is a journal read with nothing to do with tasks, and the iteration's own sequencing says 004
+  needs 001 "for its tasks section, **and nothing else**". Cross-domain imports of this shape are already
+  precedented (`contact_merge_service.py` imports `app.core.journal.models.repositories`).
+- **Pure functions over `ZoneInfo`, with a thin async wrapper — and no `resolve_date(user_id, journal)`.**
+  The obvious convenience method is exactly the one that produces an N+1: Phase 12's lapsed derivation
+  evaluates every due journal in a list, and a per-journal `get_timezone` would be a settings read per
+  row. `timezone_for` is public so the batch path is the natural one.
+- **`now: datetime | None`, not the dashboards' `anchor: date | None`.** The behaviour under test *is* the
+  instant → local-date derivation, which a `date` anchor bypasses entirely; there is no `freezegun` or
+  `time-machine` in this repo, so an injectable anchor is the only way to test a day boundary. The two
+  conventions compose rather than compete: ITER18-004 keeps `anchor: date | None` on its service methods
+  and obtains that date from `await resolver.today(user_id)`.
+- **Day boundaries are built from the date, with `datetime.combine(day, time.min/max, tz)`.** The
+  alternative idiom — `compute_search_window` (`album_creation_service.py`) zeroing the time components of
+  an instant inside the day with `replace` — was checked against real `zoneinfo` rather than assumed
+  broken, and it is **not** wrong on transition days: `ZoneInfo` resolves each end's offset from its own
+  local wall time, so both forms give the same 23- or 25-hour day. Building from the date is preferred for
+  a smaller reason: the result does not depend on which instant you happened to start from, `fold`
+  included, and it is the idiom `OutdoorDashboardService._window` already uses. Recorded because the
+  opposite is a plausible-sounding claim that a reviewer would otherwise have to re-derive.
+- **Existing timezone call sites were deliberately not migrated.** `OutdoorDashboardService._window` /
+  `._user_timezone` and `compute_search_window` should collapse onto this module. Doing it here would
+  rewrite two shipped features inside a phase whose own deliverable has no caller yet — the ITER17-003 P1
+  mistake (an extraction that rewrote its call sites came in at 2.7×). **Follow-up recorded:** migrate
+  them when ITER18-004 Phase 5 lands, which is the first phase with a reason to touch that code.
+- **The Dishka test needs `InfrastructureProvider`.** Dishka validates the whole graph at container
+  construction, and `JournalProvider`'s other factories need `Settings`. It is not a dependency of the
+  resolver; the test says so, so nobody later mistakes it for one.
 
 **Required Test Coverage:** unit — the boundary either side of local midnight for a non-UTC user; the
 multi-day straddling case; a journal starting exactly today; DST transition days. Integration — resolution
 against a real user-settings row and the UTC fallback when no timezone is set. No e2e.
+
+- **Unit (23 tests):** `backend/tests/unit/journal/test_journal_date_resolver.py`. *Journal date (7):*
+  `journal_date` is `local_date` of the start; a four-day journal is dated by its first day; either side
+  of Sydney local midnight (13:00Z → the 30th, 14:30Z → the 31st); New York 01:00Z resolves to the
+  previous UTC date; a naive start is read as UTC; both 2026 Sydney transitions — spring forward
+  (4 Oct, +10→+11) and fall back (5 Apr, +11→+10) — where the pre-transition offset would give the
+  neighbouring date. *Today (3):* local date not UTC date, in both directions; defaulting to the real
+  clock. *Future-dated (7):* tomorrow, today, yesterday; the multi-day straddling case and its mirror; the
+  boundary is the user's midnight, not UTC's (a UTC reading answers it the other way); a transition day
+  compared by local date. *Window (2):* midnight to the final microsecond in the user's timezone; a
+  spring-forward day is 23 hours — asserted on the **UTC-converted** endpoints, because subtracting two
+  aware datetimes that share a `tzinfo` is naive arithmetic in Python and would report a flat 24.
+  *Resolver wiring (4):* reads the setting, falls back to UTC on an unknown name, and applies the user's
+  timezone in `today` and `is_future_dated`.
+- **Integration (5 tests):** `backend/tests/integration/journal/test_journal_date_resolver.py` —
+  resolution against a real `user_settings` row (Sydney), asserting the stored instant's UTC date is the
+  30th while the resolved date is the 31st, and that the start survives the `TIMESTAMPTZ` round trip as an
+  aware instant; the UTC fallback for a user with no settings row; the UTC fallback for a stored name the
+  tz database does not know (the column has no `CHECK`, so it can hold one); future-dating decided on the
+  user's local day where a UTC reading disagrees; and the resolver resolving through a real Dishka request
+  scope. Journals are seeded at **fixed instants**, not offsets from `now()` — a test that asserts a date
+  cannot be anchored on a moving one, which is why `tests/integration/tasks/task_seeding.create_journal`
+  (a `days_offset` helper) was not reused.
+- **E2E:** none — deferral taken as the phase states. Phase 3 ships no controller, MCP tool or frontend
+  surface; e2e coverage for ITER18-001 lands in Phase 22.
+- **Docs:** `docs/architecture/domain-architecture.md` gained a *Journal date resolution (user-local)*
+  section (the rule, the pure/async split and its N+1 rationale, the `combine`-not-`replace` boundary
+  rule, the placement argument and the standing duplication to collapse); `JournalDateResolver` was added
+  to the Journal Domain's services; the Tasks Domain's *Domain Services* line now says the date semantics
+  live in the journal domain and that `TaskService` consumes rather than re-derives them.
+- **Gates run locally:** `ruff format --check` and `ruff check` clean for `backend` and `core_shared`;
+  `mypy` clean over 839 backend source files and `core_shared`; the full `tests/unit/` suite; and
+  `tests/integration/journal/` plus `tests/integration/tasks/` (the latter covering the `JournalProvider`
+  change). No frontend or e2e gates — the phase changes no frontend file and ships no user-visible
+  surface.
 
 #### Phase 4: Creation Service and Core Invariants
 
@@ -1753,7 +1894,10 @@ error does not throw the page. E2E in Phase 17.
 
 #### Phase 5: Agenda — Today's Query and Ordering
 
-**Prerequisites:** Phase 1, ITER18-001 Phase 3 (the date helper).
+**Prerequisites:** Phase 1, ITER18-001 Phase 3 (the date helper —
+`backend/app/core/journal/services/journal_date_resolver.py`; use `local_day_window` for the day window
+and `JournalDateResolver.today` for the anchor, and migrate `OutdoorDashboardService._window` onto it
+while you are here, per Phase 3's recorded follow-up).
 **Estimated diff:** ~150 production → **~600 tracked** (×4)
 
 **Acceptance Criteria:**

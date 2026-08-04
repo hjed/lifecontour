@@ -174,6 +174,7 @@ from app.core.journal.services.incomplete_outdoor_activity_service import (
     IncompleteOutdoorActivityService,
 )
 from app.core.journal.services.journal_contact_service import JournalContactService
+from app.core.journal.services.journal_date_resolver import JournalDateResolver
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_series_service import JournalSeriesService
 from app.core.journal.services.journal_service import JournalService
@@ -605,6 +606,13 @@ class JournalProvider(Provider):
         return OutdoorDashboardService(
             dashboard_repo=dashboard_repo, user_settings_repo=user_settings_repo
         )
+
+    @provide(scope=Scope.REQUEST)
+    def journal_date_resolver(
+        self, user_settings_repo: UserSettingsRepository
+    ) -> JournalDateResolver:
+        """Provide a JournalDateResolver instance."""
+        return JournalDateResolver(user_settings_repo=user_settings_repo)
 
     @provide(scope=Scope.REQUEST)
     def journal_write_service(

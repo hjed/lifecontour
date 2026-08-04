@@ -1,0 +1,277 @@
+"""Unit tests for journal date resolution and the future-dated rule.
+
+A journal's *date* is the local date of its ``event_date_range.start`` in the
+acting user's timezone — the same date the journal list groups it under, and the
+date the tasks model's future-dated invariant is judged against. Every case here
+is a case where a UTC reading would give a different answer, because a rule that
+only holds at midday is not a rule.
+
+The instants are fixed rather than relative to ``now`` so the day boundaries and
+the two Sydney daylight-saving transitions of 2026 are exercised deterministically:
+
+- **2026-10-04** — clocks go forward (AEST +10 → AEDT +11), a 23-hour local day.
+- **2026-04-05** — clocks go back (AEDT +11 → AEST +10), a 25-hour local day.
+"""
+
+import datetime
+from unittest.mock import AsyncMock
+from zoneinfo import ZoneInfo
+
+import pytest
+from core_shared.models.journals import EventDateRange, Journal
+
+from app.core.journal.services.journal_date_resolver import (
+    JournalDateResolver,
+    is_future_dated,
+    journal_date,
+    local_date,
+    local_day_window,
+    today_in,
+)
+
+USER_ID = "test-user-123"
+
+SYDNEY = ZoneInfo("Australia/Sydney")
+NEW_YORK = ZoneInfo("America/New_York")
+UTC_ZONE = ZoneInfo("UTC")
+
+
+def utc(
+    year: int,
+    month: int,
+    day: int,
+    hour: int = 0,
+    minute: int = 0,
+) -> datetime.datetime:
+    """A UTC instant, the way the database hands journal timestamps back."""
+    return datetime.datetime(year, month, day, hour, minute, tzinfo=datetime.UTC)
+
+
+def make_journal(
+    start: datetime.datetime, end: datetime.datetime | None = None
+) -> Journal:
+    """A journal spanning ``start`` to ``end`` (default: an instantaneous range)."""
+    return Journal(
+        user_id=USER_ID,
+        title="A journal",
+        content="content",
+        event_date_range=EventDateRange(start=start, end=end or start),
+    )
+
+
+@pytest.mark.unit
+class TestJournalDate:
+    """A journal's date is its start, read in the user's timezone."""
+
+    def test_journal_date_is_the_local_date_of_the_start(self) -> None:
+        """``journal_date`` is ``local_date`` applied to the range's start."""
+        start = utc(2026, 7, 30, 14, 30)
+        assert journal_date(make_journal(start), SYDNEY) == local_date(start, SYDNEY)
+
+    def test_uses_the_start_of_the_range_not_the_end(self) -> None:
+        """A four-day journal is dated by its first day, not its last."""
+        journal = make_journal(utc(2026, 8, 1, 2), utc(2026, 8, 4, 2))
+
+        assert journal_date(journal, UTC_ZONE) == datetime.date(2026, 8, 1)
+
+    def test_resolves_either_side_of_the_users_local_midnight(self) -> None:
+        """23:00 and 00:30 Sydney fall on different dates, both inside 30 July UTC."""
+        before_midnight = make_journal(utc(2026, 7, 30, 13, 0))  # 23:00 AEST 30 Jul
+        after_midnight = make_journal(utc(2026, 7, 30, 14, 30))  # 00:30 AEST 31 Jul
+
+        assert journal_date(before_midnight, SYDNEY) == datetime.date(2026, 7, 30)
+        assert journal_date(after_midnight, SYDNEY) == datetime.date(2026, 7, 31)
+
+    def test_west_of_utc_resolves_to_the_previous_utc_date(self) -> None:
+        """01:00 UTC is still the previous evening in New York."""
+        journal = make_journal(utc(2026, 7, 30, 1, 0))  # 21:00 EDT 29 Jul
+
+        assert journal_date(journal, NEW_YORK) == datetime.date(2026, 7, 29)
+
+    def test_a_naive_start_is_treated_as_utc(self) -> None:
+        """Naive timestamps are UTC, matching ``to_user_tz``'s documented convention."""
+        naive = datetime.datetime(2026, 7, 30, 14, 30)  # noqa: DTZ001 — deliberate
+
+        assert local_date(naive, SYDNEY) == datetime.date(2026, 7, 31)
+
+    def test_resolves_across_a_spring_forward_transition(self) -> None:
+        """After the 4 Oct jump to +11, 13:30 UTC is already the 5th in Sydney."""
+        journal = make_journal(utc(2026, 10, 4, 13, 30))  # 00:30 AEDT 5 Oct
+
+        assert journal_date(journal, SYDNEY) == datetime.date(2026, 10, 5)
+
+    def test_resolves_across_a_fall_back_transition(self) -> None:
+        """After the 5 Apr return to +10, 13:30 UTC is still the 5th in Sydney."""
+        journal = make_journal(utc(2026, 4, 5, 13, 30))  # 23:30 AEST 5 Apr
+
+        assert journal_date(journal, SYDNEY) == datetime.date(2026, 4, 5)
+
+
+@pytest.mark.unit
+class TestTodayIn:
+    """ "Today" is the user's local date, never UTC's."""
+
+    def test_today_is_the_local_date_not_the_utc_date(self) -> None:
+        """00:30 Sydney on the 31st, while UTC is still on the 30th."""
+        assert today_in(SYDNEY, now=utc(2026, 7, 30, 14, 30)) == datetime.date(
+            2026, 7, 31
+        )
+
+    def test_today_west_of_utc_lags_the_utc_date(self) -> None:
+        """21:00 New York on the 29th, while UTC has already reached the 30th."""
+        assert today_in(NEW_YORK, now=utc(2026, 7, 30, 1, 0)) == datetime.date(
+            2026, 7, 29
+        )
+
+    def test_defaults_to_the_current_instant(self) -> None:
+        """Omitting ``now`` anchors on the real clock, in the given timezone."""
+        assert today_in(SYDNEY) == datetime.datetime.now(SYDNEY).date()
+
+
+@pytest.mark.unit
+class TestIsFutureDated:
+    """Strictly after today, judged on the user's local calendar."""
+
+    NOW = utc(2026, 7, 30, 3, 0)  # 03:00 UTC on 30 July — today is the 30th in UTC
+
+    def test_a_journal_starting_tomorrow_is_future_dated(self) -> None:
+        journal = make_journal(utc(2026, 7, 31, 2))
+
+        assert is_future_dated(journal, UTC_ZONE, now=self.NOW) is True
+
+    def test_a_journal_starting_today_is_not_future_dated(self) -> None:
+        """Today is not the future.
+
+        Specification invariant 4 requires the due journal's date to be *in the
+        future relative to today*, so a journal later the same day — even one
+        starting at 23:00 — cannot hold a task.
+        """
+        journal = make_journal(utc(2026, 7, 30, 23))
+
+        assert is_future_dated(journal, UTC_ZONE, now=self.NOW) is False
+
+    def test_a_journal_starting_yesterday_is_not_future_dated(self) -> None:
+        journal = make_journal(utc(2026, 7, 29, 2))
+
+        assert is_future_dated(journal, UTC_ZONE, now=self.NOW) is False
+
+    def test_a_multi_day_journal_that_started_yesterday_and_ends_tomorrow_is_past(
+        self,
+    ) -> None:
+        """Open decision 2: a journal's date is its **start** date.
+
+        A trip that began yesterday and runs until tomorrow is therefore past,
+        and cannot be a due journal, however much of it is still ahead.
+        """
+        journal = make_journal(utc(2026, 7, 29, 2), utc(2026, 7, 31, 2))
+
+        assert is_future_dated(journal, UTC_ZONE, now=self.NOW) is False
+
+    def test_a_multi_day_journal_starting_tomorrow_is_future_dated(self) -> None:
+        """The mirror of the straddling case — the end date never decides it."""
+        journal = make_journal(utc(2026, 7, 31, 2), utc(2026, 8, 2, 2))
+
+        assert is_future_dated(journal, UTC_ZONE, now=self.NOW) is True
+
+    def test_the_boundary_is_the_users_midnight_not_utcs(self) -> None:
+        """A Sydney user just past midnight: their "today" is already the 31st.
+
+        A UTC reading would call the first journal future-dated, because 30 July
+        18:00 UTC is still "today" there. It is not: in Sydney both instants fall
+        on the 31st.
+        """
+        now = utc(2026, 7, 30, 14, 30)  # 00:30 AEST 31 Jul
+        same_local_day = make_journal(utc(2026, 7, 30, 20))  # 06:00 AEST 31 Jul
+        next_local_day = make_journal(utc(2026, 7, 31, 20))  # 06:00 AEST 1 Aug
+
+        assert is_future_dated(same_local_day, SYDNEY, now=now) is False
+        assert is_future_dated(next_local_day, SYDNEY, now=now) is True
+
+    def test_a_dst_transition_day_is_compared_by_local_date(self) -> None:
+        """On the 23-hour day the comparison still runs on local dates."""
+        now = utc(2026, 10, 3, 20)  # 07:00 AEDT 4 Oct — today is the 4th
+        late_on_the_same_day = make_journal(utc(2026, 10, 4, 12))  # 23:00 AEDT 4 Oct
+        just_after_midnight = make_journal(utc(2026, 10, 4, 13, 30))  # 00:30 5 Oct
+
+        assert is_future_dated(late_on_the_same_day, SYDNEY, now=now) is False
+        assert is_future_dated(just_after_midnight, SYDNEY, now=now) is True
+
+
+@pytest.mark.unit
+class TestLocalDayWindow:
+    """The user's local day as an instant range, for windowed journal queries."""
+
+    def test_spans_midnight_to_the_final_microsecond_in_the_users_timezone(
+        self,
+    ) -> None:
+        window = local_day_window(datetime.date(2026, 7, 30), SYDNEY)
+
+        assert window.start.astimezone(datetime.UTC) == utc(2026, 7, 29, 14, 0)
+        assert window.end.astimezone(datetime.UTC) == datetime.datetime(
+            2026, 7, 30, 13, 59, 59, 999999, tzinfo=datetime.UTC
+        )
+
+    def test_a_spring_forward_day_is_twenty_three_hours_long(self) -> None:
+        """The 4 Oct window opens at +10 and closes at +11, so it is an hour short.
+
+        The endpoints are compared **after** conversion to UTC: subtracting two
+        aware datetimes that share a ``tzinfo`` is naive arithmetic in Python and
+        would report a full 24 hours regardless.
+        """
+        window = local_day_window(datetime.date(2026, 10, 4), SYDNEY)
+        start_utc = window.start.astimezone(datetime.UTC)
+        end_utc = window.end.astimezone(datetime.UTC)
+
+        assert start_utc == utc(2026, 10, 3, 14, 0)
+        assert end_utc == datetime.datetime(
+            2026, 10, 4, 12, 59, 59, 999999, tzinfo=datetime.UTC
+        )
+        assert end_utc - start_utc == datetime.timedelta(hours=23) - datetime.timedelta(
+            microseconds=1
+        )
+
+
+@pytest.mark.unit
+class TestJournalDateResolver:
+    """The async wrapper: it supplies the timezone and nothing else."""
+
+    @pytest.fixture
+    def mock_user_settings_repo(self) -> AsyncMock:
+        repo = AsyncMock()
+        repo.get_timezone.return_value = "Australia/Sydney"
+        return repo
+
+    @pytest.fixture
+    def resolver(self, mock_user_settings_repo: AsyncMock) -> JournalDateResolver:
+        return JournalDateResolver(user_settings_repo=mock_user_settings_repo)
+
+    async def test_timezone_for_reads_the_users_setting(
+        self, resolver: JournalDateResolver, mock_user_settings_repo: AsyncMock
+    ) -> None:
+        assert (await resolver.timezone_for(USER_ID)).key == "Australia/Sydney"
+        mock_user_settings_repo.get_timezone.assert_awaited_once_with(USER_ID)
+
+    async def test_an_unknown_timezone_name_falls_back_to_utc(
+        self, resolver: JournalDateResolver, mock_user_settings_repo: AsyncMock
+    ) -> None:
+        """A stored value the tz database does not know must not break a read."""
+        mock_user_settings_repo.get_timezone.return_value = "Not/A_Zone"
+
+        assert (await resolver.timezone_for(USER_ID)).key == "UTC"
+
+    async def test_today_uses_the_users_timezone(
+        self, resolver: JournalDateResolver
+    ) -> None:
+        today = await resolver.today(USER_ID, now=utc(2026, 7, 30, 14, 30))
+
+        assert today == datetime.date(2026, 7, 31)
+
+    async def test_is_future_dated_uses_the_users_timezone(
+        self, resolver: JournalDateResolver
+    ) -> None:
+        now = utc(2026, 7, 30, 14, 30)  # 00:30 AEST 31 Jul
+        same_local_day = make_journal(utc(2026, 7, 30, 20))
+        next_local_day = make_journal(utc(2026, 7, 31, 20))
+
+        assert await resolver.is_future_dated(USER_ID, same_local_day, now=now) is False
+        assert await resolver.is_future_dated(USER_ID, next_local_day, now=now) is True
