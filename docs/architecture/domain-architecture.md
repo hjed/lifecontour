@@ -102,7 +102,8 @@ domain/
 See [Journal System Specification](../journal-system-specification.md) for comprehensive domain design including:
 - **Entities**: Journal (base), 15 journal types with type-specific data tables
 - **Value Objects**: DateRange, Route, TypeDependencies
-- **Domain Services**: JournalService, TypeManagementService, MergeService
+- **Domain Services**: JournalService, TypeManagementService, MergeService, JournalDateResolver
+  (see *[Journal date resolution (user-local)](#journal-date-resolution-user-local)*)
 - **Ports**: JournalRepository, RouteRepository, IntegrationWorkerInterface
 - **Business Rules**:
   - Type system with automatic dependency resolution
@@ -131,7 +132,11 @@ the *creating* journal where it arose and the *due* journal where it matters.
 - **Ports**: `TaskRepository` (`backend/app/core/tasks/models/repositories.py`), implemented by
   `SqlTaskRepository` (`backend/app/core/tasks/adapters/sql/task_repository.py`) and provided at
   request scope by `TaskProvider` (`backend/app/infrastructure/di/tasks.py`)
-- **Domain Services**: not yet — `TaskService` lands in ITER18-001 Phase 4
+- **Domain Services**: not yet — `TaskService` lands in ITER18-001 Phase 4. The date semantics the
+  future-dated invariant is judged against are **not** the tasks domain's: they live in
+  `JournalDateResolver` (journal domain — see
+  *[Journal date resolution (user-local)](#journal-date-resolution-user-local)*), which `TaskService`
+  consumes rather than re-derives
 - **Repository contract**: **owner scoping is part of the port, not an implementation detail.** Every
   method takes the acting user's id and every statement filters on it, so a task belonging to
   somebody else is indistinguishable from one that never existed: `find_by_id` returns `None` and
@@ -366,6 +371,48 @@ The journal domain has **two separate review stores** that must not be conflated
   `@transactional`, following the standard service-layer transaction pattern. This store is
   deliberately **not** the merge queue — dismissing an incomplete-review entry has nothing to do with
   merge candidates.
+
+### Journal date resolution (user-local)
+
+A journal's **date** is the local date of its `event_date_range.start` in the acting user's **configured**
+timezone, and it is the date the tasks model judges its future-dated invariant against. It is *intended*
+to be the date the journal list groups it under; that equality does not hold unconditionally today, and
+the gap is described below. A multi-day journal is dated by the day it *starts*: a trip that began
+yesterday and runs until tomorrow is **past**, however much of it is still ahead. "Today" is likewise the
+user's local date, resolved through `UserSettingsRepository.get_timezone` + `resolve_timezone`,
+**never** UTC-today.
+
+`backend/app/core/journal/services/journal_date_resolver.py` holds this in two layers:
+
+- **Pure functions** taking a `ZoneInfo` — `local_date`, `journal_date`, `today_in`, `is_future_dated`
+  (strictly after today: a journal starting later the same local day is not future-dated) and
+  `local_day_window` (a local day as an instant range, for windowed journal queries).
+- **`JournalDateResolver`**, a read-only async wrapper that supplies the timezone from
+  `UserSettingsRepository`. A caller resolving many journals should take `timezone_for` **once** and use
+  the pure functions, rather than paying a settings read per journal.
+
+**The journal list does not currently use this timezone.** `groupJournalsByDay`
+(`frontend/src/lib/journal-grouping.ts`) buckets journals with `format(parseISO(start), 'yyyy-MM-dd')`,
+which renders in the **browser's** timezone. The two agree whenever the browser matches the configured
+timezone, and disagree when the user is travelling or has configured a different one — so a journal can be
+listed under one day while a server-side rule judges it by another. The configured timezone is the correct
+anchor for server-side rules (it is the one the specifications are written in, and the server cannot see
+the browser's); aligning the list is a frontend change, recorded as a follow-up in ITER18-001 Phase 3.
+
+`now` is injectable throughout so day boundaries are testable either side of local midnight. Services
+that expose an `anchor: date | None` parameter (the outdoor dashboard, and the home dashboard to come)
+keep that signature and obtain the anchor from `JournalDateResolver.today`.
+
+Day boundaries are built from the **date** with `datetime.combine(day, time.min/max, tz)`, not by zeroing
+the components of some instant that falls inside the day. `ZoneInfo` resolves each end's offset from its
+own local wall time either way — so a day whose clocks change is the 23 or 25 hours it really is — but
+building from the date keeps the result independent of which instant you started from, `fold` included.
+
+It lives in the journal domain, not settings or tasks: `app/core/settings` must stay a leaf that any
+domain can import, and the home dashboard's agenda reads journals rather than tasks. **Standing
+duplication to collapse:** `OutdoorDashboardService._window` / `._user_timezone` and
+`compute_search_window` (`app/core/integrations/immich/album_creation_service.py`) predate this module
+and should be migrated onto it; that migration was deliberately kept out of the phase that introduced it.
 
 ### Incomplete Outdoor Activities Review (read projection)
 
