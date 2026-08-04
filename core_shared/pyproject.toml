@@ -16,7 +16,7 @@ dependencies = [
     "pydantic-settings>=2.14.2",
     "structlog>=26.1.0",
     "prometheus-client>=0.26.0",
-    "redis>=8.0.1",
+    "redis>=8.1.0",
     "opentelemetry-api>=1.44.0",
     "opentelemetry-sdk>=1.41.0",
     "opentelemetry-instrumentation-fastapi>=0.42b0",
@@ -121,5 +121,5 @@ dev = [
 ]
 
 [tool.uv]
-override-dependencies = ["redis>=8.0.1"]
+override-dependencies = ["redis>=8.1.0"]
 
